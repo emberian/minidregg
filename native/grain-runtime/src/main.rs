@@ -89,6 +89,10 @@ struct ToolTask {
     allowed_publications: Vec<PublicationGrant>,
     #[serde(default)]
     allowed_reads: Vec<resource_tools::AllowedResourceRead>,
+    /// Controller-private workspace initialized for this tool's subject and
+    /// custody key. Its named references are hints; Mini admits each use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resource_workspace: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     allowed_birth_families: Vec<resource_tools::AllowedBirthFamily>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -429,6 +433,12 @@ struct Journal {
     #[serde(default)]
     born_resources: Vec<BornResourceRecord>,
     #[serde(default)]
+    workspace_proposals: Vec<WorkspaceProposal>,
+    #[serde(default)]
+    workspace_attempt: Option<WorkspaceAttempt>,
+    #[serde(default)]
+    workspace_birth: Option<WorkspaceBirth>,
+    #[serde(default)]
     reconciliation_log: Vec<Value>,
     #[serde(default)]
     hermes_session: Option<HermesSession>,
@@ -459,6 +469,45 @@ struct Pending {
     uncertain: bool,
     #[serde(default)]
     publication: Option<PublicationPending>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceProposal {
+    id: u64,
+    request_sha256: String,
+    intent_sha256: String,
+    submitted: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceAttempt {
+    operation_id: u64,
+    proposal_id: u64,
+    intent_sha256: String,
+    attempt: PathBuf,
+    /// A retained marker exists before the first possible native submit.
+    /// A definite outcome is kept until the delegated tool purse settles.
+    #[serde(default)]
+    definite: bool,
+    #[serde(default)]
+    no_submit: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceBirth {
+    operation_id: u64,
+    name: String,
+    storage: String,
+    predicate_path: PathBuf,
+    predicate_sha256: String,
+    attempt: PathBuf,
+    #[serde(default)]
+    no_submit: bool,
+    #[serde(default)]
+    definite: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -1527,6 +1576,83 @@ struct HermesSession {
 }
 
 impl Journal {
+    fn validate_workspace(&self, config: &Config) -> Result<()> {
+        if self.workspace_proposals.len() > 64 {
+            return Err("workspace proposal retention bound exceeded".into());
+        }
+        if self.workspace_proposals.is_empty()
+            && self.workspace_attempt.is_none()
+            && self.workspace_birth.is_none()
+        {
+            return Ok(());
+        }
+        let tool = config
+            .tool_task
+            .as_ref()
+            .ok_or("workspace records have no ToolTask")?;
+        let root = validate_resource_workspace(config, tool)?;
+        let mut ids = std::collections::HashSet::new();
+        for proposal in &self.workspace_proposals {
+            if proposal.id >= self.next_operation_id
+                || !ids.insert(proposal.id)
+                || sha256_bytes(&bounded_regular_file(
+                    &config
+                        .state_dir
+                        .join(format!("workspace-proposal-{:016}.json", proposal.id)),
+                    32_768,
+                )?)? != proposal.request_sha256
+                || sha256_bytes(&bounded_regular_file(
+                    &root
+                        .join("proposals")
+                        .join(proposal.id.to_string())
+                        .join("intent.json"),
+                    262_144,
+                )?)? != proposal.intent_sha256
+            {
+                return Err("workspace proposal differs from retained source".into());
+            }
+        }
+        if let Some(pending) = &self.workspace_attempt {
+            if pending.operation_id >= self.next_operation_id
+                || pending.attempt != root.join("attempts").join(pending.operation_id.to_string())
+                || !self.workspace_proposals.iter().any(|proposal| {
+                    proposal.id == pending.proposal_id
+                        && proposal.submitted
+                        && proposal.intent_sha256 == pending.intent_sha256
+                })
+                || (pending.no_submit && pending.attempt.exists())
+            {
+                return Err("workspace attempt differs from submitted proposal".into());
+            }
+        }
+        if self.workspace_attempt.is_some() && self.workspace_birth.is_some() {
+            return Err("workspace cannot retain two concurrent native effects".into());
+        }
+        if let Some(birth) = &self.workspace_birth {
+            if birth.operation_id >= self.next_operation_id
+                || birth.name.is_empty()
+                || birth.name.len() > 64
+                || !birth
+                    .name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                || !matches!(birth.storage.as_str(), "content" | "declared")
+                || birth.predicate_path
+                    != config.state_dir.join(format!(
+                        "workspace-birth-{:016}.predicate.json",
+                        birth.operation_id
+                    ))
+                || sha256_bytes(&bounded_regular_file(&birth.predicate_path, 32_768)?)?
+                    != birth.predicate_sha256
+                || birth.attempt != root.join("attempts").join(format!("create-{}", birth.name))
+                || (birth.no_submit && birth.attempt.exists())
+            {
+                return Err("workspace birth marker differs from retained request".into());
+            }
+        }
+        Ok(())
+    }
+
     fn validate_application_api(&self, state_dir: &Path) -> Result<()> {
         if self.application_api_history.len() > 16 {
             return Err("application API history exceeds retention bound".into());
@@ -1768,6 +1894,9 @@ impl Journal {
             birth_operation: None,
             birth_pending: None,
             born_resources: Vec::new(),
+            workspace_proposals: Vec::new(),
+            workspace_attempt: None,
+            workspace_birth: None,
             reconciliation_log: Vec::new(),
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
@@ -2465,6 +2594,9 @@ fn validate(c: &Config) -> Result<()> {
         }
     }
     if let Some(t) = &c.tool_task {
+        if t.resource_workspace.is_some() {
+            validate_resource_workspace(c, t)?;
+        }
         if t.task == c.task {
             return Err("toolTask must be a distinct Mini resource".into());
         }
@@ -2756,6 +2888,50 @@ fn validate(c: &Config) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn validate_resource_workspace(c: &Config, tool: &ToolTask) -> Result<PathBuf> {
+    let root = tool
+        .resource_workspace
+        .as_ref()
+        .ok_or("toolTask resourceWorkspace is not configured")?;
+    if !root.is_absolute() || root.parent() != Some(c.state_dir.as_path()) {
+        return Err("resourceWorkspace must be a direct child of controller stateDir".into());
+    }
+    let uid = unsafe { libc::geteuid() };
+    for dir in [
+        root.clone(),
+        root.join("refs"),
+        root.join("attempts"),
+        root.join("sources"),
+        root.join("proposals"),
+    ] {
+        let meta = fs::symlink_metadata(&dir)
+            .map_err(|e| format!("resourceWorkspace directory {}: {e}", dir.display()))?;
+        if !meta.file_type().is_dir() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
+            return Err(
+                "resourceWorkspace directories must be owner-private real directories".into(),
+            );
+        }
+    }
+    let config_path = root.join("workspace.json");
+    let meta =
+        fs::symlink_metadata(&config_path).map_err(|e| format!("resourceWorkspace config: {e}"))?;
+    if !meta.file_type().is_file() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
+        return Err("resourceWorkspace config must be an owner-private regular file".into());
+    }
+    let record: Value = serde_json::from_slice(&bounded_regular_file(&config_path, 65_536)?)
+        .map_err(|e| format!("resourceWorkspace config JSON: {e}"))?;
+    if record["type"] != "minidregg-participant-workspace-v1"
+        || record["subject"].as_str() != Some(tool.subject.as_str())
+        || record["host"].as_str().map(Path::new) != Some(c.host.as_path())
+        || record["config"].as_str().map(Path::new) != Some(c.host_config.as_path())
+        || record["key"].as_str().map(Path::new) != Some(tool.custody_key.as_path())
+        || record["socket"].as_str().map(Path::new) != c.host_socket.as_deref()
+    {
+        return Err("resourceWorkspace custody differs from delegated ToolTask pins".into());
+    }
+    Ok(root.clone())
 }
 
 const PHASE_IDLE: u8 = 0;
@@ -6309,6 +6485,7 @@ impl Runtime {
             j.validate_birth_registry()?;
             j.validate_application_api(&config.state_dir)?;
             j.validate_foreground(&config.state_dir)?;
+            j.validate_workspace(&config)?;
             j
         } else {
             let j = Journal::fresh(binding);
@@ -7022,6 +7199,12 @@ impl Runtime {
     ) -> std::result::Result<(), custody_gate::CustodyError> {
         let mut command = Command::new(program);
         command.args(args);
+        unsafe {
+            command.pre_exec(|| {
+                libc::umask(0o077);
+                Ok(())
+            });
+        }
         let output = self
             .custody_gate
             .run_capture(&self.cancelled, &mut command)?;
@@ -7059,6 +7242,12 @@ impl Runtime {
         })
     }
     fn supervised_json_command(&self, mut command: Command) -> Result<Value> {
+        unsafe {
+            command.pre_exec(|| {
+                libc::umask(0o077);
+                Ok(())
+            });
+        }
         let output = self
             .custody_gate
             .run_capture(&self.cancelled, &mut command)
@@ -10382,6 +10571,779 @@ impl Runtime {
         }
     }
 
+    fn workspace_root(&self) -> Result<PathBuf> {
+        let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+        validate_resource_workspace(&self.config, tool)
+    }
+
+    fn workspace_proposal_paths(&self, id: u64) -> Result<(PathBuf, PathBuf)> {
+        let dir = self
+            .workspace_root()?
+            .join("proposals")
+            .join(id.to_string());
+        Ok((dir.join("intent.json"), dir.join("proposal.json")))
+    }
+
+    fn workspace_readonly(&mut self, action: &str, arguments: &Value) -> Result<Value> {
+        let root = self.workspace_root()?;
+        let mut command = Command::new(&self.config.mini);
+        command
+            .arg("workspace")
+            .arg("--action")
+            .arg(action)
+            .arg("--dir")
+            .arg(root);
+        if action == "list" {
+            if arguments != &json!({}) && !arguments.is_null() {
+                return Err("workspace list takes no arguments".into());
+            }
+        } else {
+            let object = arguments
+                .as_object()
+                .ok_or("workspace read requires a name")?;
+            if object.len() != 1 {
+                return Err("workspace read requires exactly one name".into());
+            }
+            let name = object
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("workspace name absent")?;
+            if name.is_empty()
+                || name.len() > 64
+                || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            {
+                return Err("workspace name is not bounded ASCII".into());
+            }
+            command.arg("--name").arg(name);
+        }
+        let mut value = self.supervised_json_command(command)?;
+        if action == "list" {
+            let refs = value
+                .get("references")
+                .and_then(Value::as_array)
+                .ok_or("workspace list has no references")?;
+            if refs.len() > 256 {
+                return Err("workspace list exceeds 256 references".into());
+            }
+            let mut names = Vec::with_capacity(refs.len());
+            for reference in refs {
+                let name = reference
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or("workspace reference name absent")?;
+                let kind = reference
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .ok_or("workspace reference kind absent")?;
+                names.push(json!({"name":name,"kind":kind}));
+            }
+            value = json!({"type":"mini-grain-workspace-catalog-v1","references":names,
+                "authority":"discovery-only; current Mini admission required"});
+        }
+        if serde_json::to_vec(&value).map_err(|e| e.to_string())?.len() > 1_048_576 {
+            return Err("workspace response exceeds 1 MiB".into());
+        }
+        Ok(value)
+    }
+
+    fn workspace_propose(&mut self, arguments: &Value) -> Result<Value> {
+        if self.journal.workspace_attempt.is_some() || self.journal.workspace_proposals.len() >= 64
+        {
+            return Err("workspace has an unresolved effect or 64 retained proposals".into());
+        }
+        let object = arguments
+            .as_object()
+            .ok_or("workspace proposal arguments must be an object")?;
+        if object.len() != 1 {
+            return Err("workspace proposal requires only request".into());
+        }
+        let request = object
+            .get("request")
+            .ok_or("workspace proposal request absent")?;
+        if request.get("type").and_then(Value::as_str) != Some("minidregg-workspace-proposal-v1")
+            || !matches!(
+                request.get("action").and_then(Value::as_str),
+                Some("invoke" | "install-policy")
+            )
+        {
+            return Err("workspace proposal has unsupported typed action".into());
+        }
+        let bytes = serde_json::to_vec(request).map_err(|e| e.to_string())?;
+        if bytes.len() > 32_768 {
+            return Err("workspace proposal exceeds 32 KiB".into());
+        }
+        let id = self.next_id()?;
+        let request_path = self
+            .config
+            .state_dir
+            .join(format!("workspace-proposal-{id:016}.json"));
+        write_new(&request_path, &bytes)?;
+        let root = self.workspace_root()?;
+        let command = {
+            let mut command = Command::new(&self.config.mini);
+            command
+                .arg("workspace")
+                .arg("--action")
+                .arg("propose")
+                .arg("--dir")
+                .arg(&root)
+                .arg("--request")
+                .arg(&request_path)
+                .arg("--proposal-id")
+                .arg(id.to_string());
+            command
+        };
+        let result = self.supervised_json_command(command)?;
+        if result["type"] != "minidregg-workspace-proposal-result-v1"
+            || result["proposalId"].as_str() != Some(id.to_string().as_str())
+            || result["intentSha256"].as_str().is_none()
+        {
+            return Err("workspace source proposal result has wrong identity".into());
+        }
+        let (intent_path, proposal_path) = self.workspace_proposal_paths(id)?;
+        let intent_sha256 = sha256_bytes(&bounded_regular_file(&intent_path, 262_144)?)?;
+        let summary: Value = serde_json::from_slice(&bounded_regular_file(&proposal_path, 65_536)?)
+            .map_err(|e| format!("workspace proposal summary: {e}"))?;
+        if summary["intentSha256"].as_str() != Some(intent_sha256.as_str()) {
+            return Err("workspace proposal summary differs from source-owned intent".into());
+        }
+        self.journal.workspace_proposals.push(WorkspaceProposal {
+            id,
+            request_sha256: sha256_bytes(&bytes)?,
+            intent_sha256: intent_sha256.clone(),
+            submitted: false,
+        });
+        self.save()?;
+        Ok(
+            json!({"proposalId":id.to_string(),"intentSha256":intent_sha256,
+            "type":"minidregg-workspace-proposal-result-v1",
+            "authority":"proposal-only; Mini checks current law on submit"}),
+        )
+    }
+
+    fn workspace_submit(&mut self, arguments: &Value) -> Result<Value> {
+        let object = arguments
+            .as_object()
+            .ok_or("workspace submit arguments must be an object")?;
+        if object.len() != 1 {
+            return Err("workspace submit requires only proposalId".into());
+        }
+        let selected = object
+            .get("proposalId")
+            .and_then(Value::as_str)
+            .ok_or("workspace proposalId absent")?;
+        decimal(selected, "workspace proposalId")?;
+        let proposal_id = selected
+            .parse::<u64>()
+            .map_err(|_| "workspace proposalId exceeds u64")?;
+        let proposal = self
+            .journal
+            .workspace_proposals
+            .iter()
+            .find(|proposal| proposal.id == proposal_id && !proposal.submitted)
+            .ok_or("workspace proposal is absent or already submitted")?
+            .clone();
+        if self.journal.workspace_attempt.is_some() {
+            return Err("workspace effect requires exact recovery before another submit".into());
+        }
+        let root = self.workspace_root()?;
+        let (intent_path, summary_path) = self.workspace_proposal_paths(proposal_id)?;
+        let request_path = self
+            .config
+            .state_dir
+            .join(format!("workspace-proposal-{proposal_id:016}.json"));
+        if sha256_bytes(&bounded_regular_file(&request_path, 32_768)?)? != proposal.request_sha256
+            || sha256_bytes(&bounded_regular_file(&intent_path, 262_144)?)?
+                != proposal.intent_sha256
+        {
+            return Err("workspace retained proposal changed before submission".into());
+        }
+        let summary: Value = serde_json::from_slice(&bounded_regular_file(&summary_path, 65_536)?)
+            .map_err(|e| format!("workspace proposal summary: {e}"))?;
+        if summary["intentSha256"].as_str() != Some(proposal.intent_sha256.as_str()) {
+            return Err("workspace source summary changed before submission".into());
+        }
+        let operation_id = self.next_id()?;
+        let attempt = root.join("attempts").join(operation_id.to_string());
+        if attempt.exists() {
+            return Err("workspace operation attempt path is already claimed".into());
+        }
+        root.to_str().ok_or("workspace path UTF-8")?;
+        intent_path.to_str().ok_or("workspace intent path UTF-8")?;
+        attempt.to_str().ok_or("workspace attempt path UTF-8")?;
+        let tool = self
+            .config
+            .tool_task
+            .as_ref()
+            .ok_or("toolTask absent")?
+            .clone();
+        let authority = self.tool()?;
+        let status = self
+            .query_as(&authority)?
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("delegated tool status absent")?
+            .to_owned();
+        if status == "0" {
+            self.check_not_cancelled()?;
+            self.transition_as(
+                &authority,
+                json!({"type":"attach","soft":false}),
+                "tool attach",
+                "workspace delegated attach",
+                vec![],
+            )?;
+        } else if status != "1" {
+            return Err("workspace delegated tool needs signed idle/attached state".into());
+        }
+        self.check_not_cancelled()?;
+        self.mark_hold(true, &tool.reserve, &tool.charge)?;
+        self.transition_as(
+            &authority,
+            json!({"type":"reserve","amount":tool.reserve}),
+            "tool reserve",
+            "workspace typed submission reserve",
+            vec![],
+        )?;
+        self.check_not_cancelled()?;
+        self.journal
+            .workspace_proposals
+            .iter_mut()
+            .find(|saved| saved.id == proposal_id)
+            .ok_or("workspace proposal disappeared")?
+            .submitted = true;
+        self.journal.workspace_attempt = Some(WorkspaceAttempt {
+            operation_id,
+            proposal_id,
+            intent_sha256: proposal.intent_sha256,
+            attempt: attempt.clone(),
+            definite: false,
+            no_submit: false,
+        });
+        self.save()?;
+        let args = [
+            "workspace",
+            "--action",
+            "submit",
+            "--dir",
+            root.to_str().ok_or("workspace path UTF-8")?,
+            "--intent",
+            intent_path.to_str().ok_or("workspace intent path UTF-8")?,
+            "--attempt",
+            attempt.to_str().ok_or("workspace attempt path UTF-8")?,
+        ];
+        match self.work_output(&self.config.mini, &args) {
+            Ok(()) => self.workspace_recover_operation(operation_id, false),
+            Err(custody_gate::CustodyError::BeforeSpawn) => {
+                self.journal
+                    .workspace_attempt
+                    .as_mut()
+                    .ok_or("workspace attempt disappeared")?
+                    .no_submit = true;
+                self.save()?;
+                self.workspace_recover_operation(operation_id, false)
+            }
+            Err(error) => {
+                // A direct source-inspected refusal is definite even though
+                // the CLI exits nonzero. Otherwise the child may have sent
+                // the exact call before losing its reply.
+                match self.workspace_recover_operation(operation_id, false) {
+                    Ok(result) => Ok(result),
+                    Err(_) => Err(format!("workspace native outcome unknown: {error}; recover operation {operation_id} by exact lookup")),
+                }
+            }
+        }
+    }
+
+    fn workspace_recover_operation(&mut self, operation_id: u64, lookup: bool) -> Result<Value> {
+        let root = self.workspace_root()?;
+        let pending = self
+            .journal
+            .workspace_attempt
+            .as_ref()
+            .filter(|attempt| attempt.operation_id == operation_id)
+            .ok_or("no retained workspace attempt for operation ID")?
+            .clone();
+        if pending.attempt != root.join("attempts").join(operation_id.to_string()) {
+            return Err("workspace attempt path differs from its controller operation ID".into());
+        }
+        let (intent_path, _) = self.workspace_proposal_paths(pending.proposal_id)?;
+        if sha256_bytes(&bounded_regular_file(&intent_path, 262_144)?)? != pending.intent_sha256 {
+            return Err("workspace operation source changed after reservation".into());
+        }
+        let mut outcome: Option<Value> = None;
+        if !pending.no_submit {
+            let attempt_meta = fs::symlink_metadata(&pending.attempt)
+                .map_err(|e| format!("workspace retained attempt: {e}"))?;
+            if !attempt_meta.file_type().is_dir()
+                || attempt_meta.uid() != unsafe { libc::geteuid() }
+                || attempt_meta.mode() & 0o077 != 0
+            {
+                return Err(
+                    "workspace retained attempt must be an owner-private real directory".into(),
+                );
+            }
+            let copied = pending.attempt.join("intent.json");
+            if sha256_bytes(&bounded_regular_file(&copied, 262_144)?)? != pending.intent_sha256 {
+                return Err("workspace retained attempt intent differs from proposal".into());
+            }
+            let copied_config = bounded_regular_file(&pending.attempt.join("config.json"), 65_536)?;
+            let pinned_config = bounded_regular_file(&self.config.host_config, 65_536)?;
+            if copied_config != pinned_config {
+                return Err("workspace retained attempt Host config differs from pin".into());
+            }
+            let native_outcome = pending.attempt.join("outcome.json");
+            if native_outcome.is_file() {
+                bounded_regular_file(&pending.attempt.join("call.bin"), 4_194_304)?;
+                bounded_regular_file(&pending.attempt.join("outcome.bin"), 4_194_304)?;
+                let direct: Value =
+                    serde_json::from_slice(&bounded_regular_file(&native_outcome, 131_072)?)
+                        .map_err(|e| format!("workspace native outcome JSON: {e}"))?;
+                if matches!(direct["type"].as_str(), Some("confirmed" | "refused")) {
+                    outcome = Some(direct);
+                }
+            }
+            if outcome.is_none() && lookup {
+                if !pending.attempt.join("call.bin").is_file() {
+                    return Err("workspace submission has no retained call; physical child audit is required before release".into());
+                }
+                let command = {
+                    let mut command = Command::new(&self.config.mini);
+                    command
+                        .arg("workspace")
+                        .arg("--action")
+                        .arg("recover")
+                        .arg("--dir")
+                        .arg(&root)
+                        .arg("--attempt")
+                        .arg(&pending.attempt);
+                    command
+                };
+                let result = self.supervised_json_command(command)?;
+                if result["type"] == "confirmed" {
+                    outcome = Some(result);
+                } else {
+                    return Err("workspace exact lookup did not confirm the original call; effect remains uncertain".into());
+                }
+            }
+            if outcome.is_none() {
+                return Err(
+                    "workspace submission has no definite native result; exact lookup is required"
+                        .into(),
+                );
+            }
+        }
+        self.journal
+            .workspace_attempt
+            .as_mut()
+            .ok_or("workspace attempt disappeared")?
+            .definite = true;
+        self.save()?;
+        let authority = self.tool()?;
+        let charge = if pending.no_submit {
+            "0".to_owned()
+        } else {
+            self.config
+                .tool_task
+                .as_ref()
+                .ok_or("toolTask absent")?
+                .charge
+                .clone()
+        };
+        if self.journal.tool_hold.is_some() {
+            self.transition_as(
+                &authority,
+                json!({"type":"settle","charge":charge}),
+                "tool settle",
+                "workspace typed operation settlement",
+                vec![],
+            )?;
+        }
+        let state = self.query_as(&authority)?;
+        match state.pointer("/grain/status").and_then(Value::as_str) {
+            Some("1") => self.transition_as(
+                &authority,
+                json!({"type":"disconnect"}),
+                "tool disconnect",
+                "workspace operation complete",
+                vec![],
+            )?,
+            Some("0" | "6") => {}
+            _ => return Err("workspace settlement lacks signed terminal tool status".into()),
+        }
+        let terminal = self.query_as(&authority)?;
+        if terminal.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            || !matches!(
+                terminal.pointer("/grain/status").and_then(Value::as_str),
+                Some("0" | "6")
+            )
+        {
+            return Err("workspace tool remains reserved after settlement".into());
+        }
+        self.journal.workspace_attempt = None;
+        self.save()?;
+        Ok(
+            json!({"operationId":operation_id.to_string(), "proposalId":pending.proposal_id.to_string(),
+            "outcome":outcome.unwrap_or_else(|| json!({"type":"not-submitted"})),
+            "toolCharge":charge,"historical":true}),
+        )
+    }
+
+    fn workspace_recover(&mut self, arguments: &Value) -> Result<Value> {
+        let object = arguments
+            .as_object()
+            .ok_or("workspace recover arguments must be an object")?;
+        if object.len() != 1 {
+            return Err("workspace recover requires only operationId".into());
+        }
+        let id = object
+            .get("operationId")
+            .and_then(Value::as_str)
+            .ok_or("workspace operationId absent")?;
+        decimal(id, "workspace operationId")?;
+        let id = id.parse::<u64>().map_err(|_| "operationId exceeds u64")?;
+        if self
+            .journal
+            .workspace_birth
+            .as_ref()
+            .is_some_and(|birth| birth.operation_id == id)
+        {
+            self.workspace_recover_birth(id, true)
+        } else {
+            self.workspace_recover_operation(id, true)
+        }
+    }
+
+    fn workspace_create(&mut self, arguments: &Value) -> Result<Value> {
+        let object = arguments
+            .as_object()
+            .ok_or("workspace create arguments must be an object")?;
+        if object.len() != 3 {
+            return Err("workspace create requires name, storage and predicate".into());
+        }
+        let name = object
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or("workspace birth name absent")?;
+        if name.is_empty()
+            || name.len() > 64
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err("workspace birth name is invalid".into());
+        }
+        let storage = object
+            .get("storage")
+            .and_then(Value::as_str)
+            .ok_or("workspace storage absent")?;
+        if !matches!(storage, "content" | "declared") {
+            return Err("workspace storage is unsupported".into());
+        }
+        let predicate = object
+            .get("predicate")
+            .ok_or("workspace predicate absent")?;
+        if !predicate.is_object() {
+            return Err("workspace predicate must be an object".into());
+        }
+        let predicate_bytes = serde_json::to_vec(predicate).map_err(|e| e.to_string())?;
+        if predicate_bytes.len() > 32_768 {
+            return Err("workspace predicate exceeds 32 KiB".into());
+        }
+        let root = self.workspace_root()?;
+        let config: Value =
+            serde_json::from_slice(&bounded_regular_file(&root.join("workspace.json"), 65_536)?)
+                .map_err(|e| format!("workspace birth config: {e}"))?;
+        if config["birthContext"].as_str().is_none() || config["namespaceRoot"].as_str().is_none() {
+            return Err("workspace has no operator-pinned birth namespace and context".into());
+        }
+        if root.join("refs").join(format!("{name}.json")).exists()
+            || root
+                .join("attempts")
+                .join(format!("create-{name}"))
+                .exists()
+            || self.journal.workspace_birth.is_some()
+            || self.journal.workspace_attempt.is_some()
+        {
+            return Err("workspace birth name or native effect is already retained".into());
+        }
+        let operation_id = self.next_id()?;
+        let predicate_path = self
+            .config
+            .state_dir
+            .join(format!("workspace-birth-{operation_id:016}.predicate.json"));
+        write_new(&predicate_path, &predicate_bytes)?;
+        root.to_str().ok_or("workspace path UTF-8")?;
+        predicate_path.to_str().ok_or("predicate path UTF-8")?;
+        let tool = self
+            .config
+            .tool_task
+            .as_ref()
+            .ok_or("toolTask absent")?
+            .clone();
+        let authority = self.tool()?;
+        let status = self
+            .query_as(&authority)?
+            .pointer("/grain/status")
+            .and_then(Value::as_str)
+            .ok_or("workspace birth tool status absent")?
+            .to_owned();
+        if status == "0" {
+            self.check_not_cancelled()?;
+            self.transition_as(
+                &authority,
+                json!({"type":"attach","soft":false}),
+                "tool attach",
+                "workspace birth attach",
+                vec![],
+            )?;
+        } else if status != "1" {
+            return Err("workspace birth tool is not idle".into());
+        }
+        self.check_not_cancelled()?;
+        self.mark_hold(true, &tool.reserve, &tool.charge)?;
+        self.transition_as(
+            &authority,
+            json!({"type":"reserve","amount":tool.reserve}),
+            "tool reserve",
+            "workspace birth reserve",
+            vec![],
+        )?;
+        self.check_not_cancelled()?;
+        self.journal.workspace_birth = Some(WorkspaceBirth {
+            operation_id,
+            name: name.to_owned(),
+            storage: storage.to_owned(),
+            predicate_path: predicate_path.clone(),
+            predicate_sha256: sha256_bytes(&predicate_bytes)?,
+            attempt: root.join("attempts").join(format!("create-{name}")),
+            no_submit: false,
+            definite: false,
+        });
+        self.save()?;
+        let args = [
+            "workspace",
+            "--action",
+            "create",
+            "--dir",
+            root.to_str().ok_or("workspace path UTF-8")?,
+            "--name",
+            name,
+            "--storage",
+            storage,
+            "--predicate",
+            predicate_path.to_str().ok_or("predicate path UTF-8")?,
+        ];
+        match self.work_output(&self.config.mini,&args) {
+            Ok(()) => self.workspace_recover_birth(operation_id,false),
+            Err(custody_gate::CustodyError::BeforeSpawn) => {
+                self.journal.workspace_birth.as_mut().ok_or("workspace birth marker absent")?.no_submit=true;
+                self.save()?;
+                self.workspace_recover_birth(operation_id,false)
+            }
+            Err(error) => match self.workspace_recover_birth(operation_id,false) {
+                Ok(value) => Ok(value),
+                Err(_) => Err(format!("workspace birth outcome unknown: {error}; exact recovery of operation {operation_id} required")),
+            },
+        }
+    }
+
+    fn workspace_recover_birth(&mut self, operation_id: u64, lookup: bool) -> Result<Value> {
+        let root = self.workspace_root()?;
+        let birth = self
+            .journal
+            .workspace_birth
+            .as_ref()
+            .filter(|birth| birth.operation_id == operation_id)
+            .ok_or("no retained workspace birth for operation ID")?
+            .clone();
+        if birth.attempt != root.join("attempts").join(format!("create-{}", birth.name))
+            || sha256_bytes(&bounded_regular_file(&birth.predicate_path, 32_768)?)?
+                != birth.predicate_sha256
+        {
+            return Err("workspace birth request changed after reservation".into());
+        }
+        let mut outcome: Option<Value> = None;
+        if !birth.no_submit {
+            let meta = fs::symlink_metadata(&birth.attempt)
+                .map_err(|e| format!("workspace birth attempt: {e}"))?;
+            if !meta.file_type().is_dir()
+                || meta.uid() != unsafe { libc::geteuid() }
+                || meta.mode() & 0o077 != 0
+            {
+                return Err(
+                    "workspace birth attempt is not an owner-private real directory".into(),
+                );
+            }
+            if bounded_regular_file(&birth.attempt.join("config.json"), 65_536)?
+                != bounded_regular_file(&self.config.host_config, 65_536)?
+            {
+                return Err("workspace birth retained Host config differs from pin".into());
+            }
+            let source_path = root
+                .join("sources")
+                .join(format!("create-{}.json", birth.name));
+            let author_dir = root
+                .join("sources")
+                .join(format!("create-{}.current", birth.name));
+            let source: Value =
+                serde_json::from_slice(&bounded_regular_file(&source_path, 262_144)?)
+                    .map_err(|e| format!("workspace birth source: {e}"))?;
+            let predicate: Value =
+                serde_json::from_slice(&bounded_regular_file(&birth.predicate_path, 32_768)?)
+                    .map_err(|e| format!("workspace retained predicate: {e}"))?;
+            let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
+            if source["subject"].as_str() != Some(tool.subject.as_str())
+                || source.pointer("/birth/resources/0/predicate") != Some(&predicate)
+                || source
+                    .pointer("/birth/resources/0/storage")
+                    .and_then(Value::as_str)
+                    != Some(birth.storage.as_str())
+            {
+                return Err("workspace birth source differs from retained typed request".into());
+            }
+            if bounded_regular_file(&author_dir.join("source.json"), 262_144)?
+                != bounded_regular_file(&source_path, 262_144)?
+                || bounded_regular_file(&birth.attempt.join("intent-source.bin"), 4_194_304)?
+                    != bounded_regular_file(&author_dir.join("intent.bin"), 4_194_304)?
+            {
+                return Err(
+                    "workspace birth exact binary attempt differs from current source author"
+                        .into(),
+                );
+            }
+            bounded_regular_file(&birth.attempt.join("call.bin"), 4_194_304)?;
+            if birth.attempt.join("outcome.json").is_file() {
+                let direct: Value = serde_json::from_slice(&bounded_regular_file(
+                    &birth.attempt.join("outcome.json"),
+                    131_072,
+                )?)
+                .map_err(|e| format!("workspace birth outcome: {e}"))?;
+                if matches!(direct["type"].as_str(), Some("confirmed" | "refused")) {
+                    outcome = Some(direct);
+                }
+            }
+            if outcome.is_none() && lookup {
+                let mut command = Command::new(&self.config.mini);
+                command
+                    .arg("workspace")
+                    .arg("--action")
+                    .arg("recover")
+                    .arg("--dir")
+                    .arg(&root)
+                    .arg("--attempt")
+                    .arg(&birth.attempt);
+                let historical = self.supervised_json_command(command)?;
+                if historical["type"] != "confirmed" {
+                    return Err("workspace birth exact lookup has no accepted receipt".into());
+                }
+                outcome = Some(historical);
+            }
+            if outcome.is_none() {
+                return Err("workspace birth has no definite native outcome".into());
+            }
+        }
+        let outcome_type = outcome.as_ref().and_then(|value| value["type"].as_str());
+        let mut reference = None;
+        if outcome_type == Some("confirmed") {
+            // The CLI's reentry is lookup-only once this exact call exists.
+            // This completes a reference when the native birth succeeded but
+            // its first process died before writing the local reference.
+            let ref_path = root.join("refs").join(format!("{}.json", birth.name));
+            if !ref_path.is_file() {
+                let mut command = Command::new(&self.config.mini);
+                command
+                    .arg("workspace")
+                    .arg("--action")
+                    .arg("create")
+                    .arg("--dir")
+                    .arg(&root)
+                    .arg("--name")
+                    .arg(&birth.name)
+                    .arg("--storage")
+                    .arg(&birth.storage)
+                    .arg("--predicate")
+                    .arg(&birth.predicate_path);
+                self.supervised_json_command(command)?;
+            }
+            let result: Value = serde_json::from_slice(&bounded_regular_file(&ref_path, 65_536)?)
+                .map_err(|e| format!("workspace birth reference: {e}"))?;
+            if result["name"].as_str() != Some(birth.name.as_str())
+                || result
+                    .pointer("/provenance/birthReceipt/type")
+                    .and_then(Value::as_str)
+                    != Some("confirmed")
+                || ["transactionId", "eventId", "acceptedCount", "imageBoundary"]
+                    .iter()
+                    .any(|field| {
+                        result
+                            .pointer(&format!("/provenance/birthReceipt/{field}"))
+                            .and_then(Value::as_str)
+                            != outcome
+                                .as_ref()
+                                .and_then(|value| value.get(*field))
+                                .and_then(Value::as_str)
+                    })
+            {
+                return Err("workspace birth reference lacks exact accepted provenance".into());
+            }
+            reference = Some(json!({"name":birth.name,"kind":result["kind"],
+                "authority":"reference-only; current Mini admission required"}));
+        }
+        self.journal
+            .workspace_birth
+            .as_mut()
+            .ok_or("workspace birth marker absent")?
+            .definite = true;
+        self.save()?;
+        let authority = self.tool()?;
+        let charge = if birth.no_submit {
+            "0".to_owned()
+        } else {
+            self.config
+                .tool_task
+                .as_ref()
+                .ok_or("toolTask absent")?
+                .charge
+                .clone()
+        };
+        if self.journal.tool_hold.is_some() {
+            self.transition_as(
+                &authority,
+                json!({"type":"settle","charge":charge}),
+                "tool settle",
+                "workspace birth settlement",
+                vec![],
+            )?;
+        }
+        let status = self.query_as(&authority)?;
+        match status.pointer("/grain/status").and_then(Value::as_str) {
+            Some("1") => self.transition_as(
+                &authority,
+                json!({"type":"disconnect"}),
+                "tool disconnect",
+                "workspace birth complete",
+                vec![],
+            )?,
+            Some("0" | "6") => {}
+            _ => return Err("workspace birth has no signed settled tool status".into()),
+        }
+        let terminal = self.query_as(&authority)?;
+        if terminal.pointer("/grain/reserved").and_then(Value::as_str) != Some("0")
+            || !matches!(
+                terminal.pointer("/grain/status").and_then(Value::as_str),
+                Some("0" | "6")
+            )
+        {
+            return Err("workspace birth tool remains reserved".into());
+        }
+        self.journal.workspace_birth = None;
+        self.save()?;
+        Ok(
+            json!({"operationId":operation_id.to_string(),"name":birth.name,
+            "outcome":outcome.unwrap_or_else(||json!({"type":"not-submitted"})),
+            "reference":reference,"toolCharge":charge,"historical":true}),
+        )
+    }
+
     fn tool_call(&mut self, name: &str, arguments: &Value) -> Result<Value> {
         if self.cancelled.load(Ordering::SeqCst)
             || self.journal.connection == Connection::Fenced
@@ -10397,7 +11359,12 @@ impl Runtime {
         {
             return Err("Hermes task is not running under this controller".into());
         }
-        if self.journal.tool_pending.is_some()
+        if name == "mini_workspace_recover" {
+            return self.workspace_recover(arguments);
+        }
+        if self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some()
+            || self.journal.tool_pending.is_some()
             || self.journal.tool_hold.is_some()
             || self.journal.birth_operation.is_some()
             || self.journal.birth_pending.is_some()
@@ -10408,6 +11375,12 @@ impl Runtime {
         }
         let authority = self.tool()?;
         match name {
+            "mini_workspace_list" => self.workspace_readonly("list", arguments),
+            "mini_workspace_describe" => self.workspace_readonly("describe", arguments),
+            "mini_workspace_read" => self.workspace_readonly("read", arguments),
+            "mini_workspace_propose" => self.workspace_propose(arguments),
+            "mini_workspace_submit" => self.workspace_submit(arguments),
+            "mini_workspace_create" => self.workspace_create(arguments),
             "mini_grain_status" => {
                 if arguments != &json!({}) && !arguments.is_null() {
                     return Err("mini_grain_status takes no arguments".into());
@@ -10437,7 +11410,14 @@ impl Runtime {
                 let nonce = self.next_id()?;
                 self.supervised_resource_read(&configured, &read, nonce)
             }
-            "mini_create_resource" => self.create_resource(arguments, None),
+            "mini_create_resource" => {
+                if self.tool_catalog()?.resource_workspace_create {
+                    return Err(
+                        "fixed resource birth is superseded by this task's common workspace".into(),
+                    );
+                }
+                self.create_resource(arguments, None)
+            }
             "mini_create_application" => {
                 self.create_resource(arguments, Some(ApplicationBirthRoute::Application))
             }
@@ -10654,6 +11634,123 @@ impl Runtime {
             .as_ref()
             .ok_or("toolTask is not configured")?;
         match request.name.as_str() {
+            "mini_workspace_list" => {
+                if arguments != &json!({}) && !arguments.is_null() {
+                    return Err("workspace list takes no arguments".into());
+                }
+                self.workspace_root()?;
+            }
+            "mini_workspace_describe" | "mini_workspace_read" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("workspace read requires a name")?;
+                let name = object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or("workspace name absent")?;
+                if object.len() != 1
+                    || name.is_empty()
+                    || name.len() > 64
+                    || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                {
+                    return Err("workspace name is invalid".into());
+                }
+                self.workspace_root()?;
+            }
+            "mini_workspace_propose" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("workspace proposal requires request")?;
+                let request = object.get("request").ok_or("workspace request absent")?;
+                if object.len() != 1
+                    || request.get("type").and_then(Value::as_str)
+                        != Some("minidregg-workspace-proposal-v1")
+                    || !matches!(
+                        request.get("action").and_then(Value::as_str),
+                        Some("invoke" | "install-policy")
+                    )
+                    || serde_json::to_vec(arguments)
+                        .map_err(|e| e.to_string())?
+                        .len()
+                        > 32_768
+                {
+                    return Err("workspace proposal has invalid typed action or byte bound".into());
+                }
+                self.workspace_root()?;
+            }
+            "mini_workspace_submit" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("workspace submit requires proposalId")?;
+                let id = object
+                    .get("proposalId")
+                    .and_then(Value::as_str)
+                    .ok_or("proposalId absent")?;
+                decimal(id, "proposalId")?;
+                let parsed = id.parse::<u64>().map_err(|_| "proposalId exceeds u64")?;
+                if object.len() != 1
+                    || !self
+                        .journal
+                        .workspace_proposals
+                        .iter()
+                        .any(|proposal| proposal.id == parsed && !proposal.submitted)
+                {
+                    return Err("workspace proposal unavailable for submit".into());
+                }
+                self.workspace_root()?;
+            }
+            "mini_workspace_create" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("workspace create requires object")?;
+                let name = object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or("birth name absent")?;
+                let storage = object
+                    .get("storage")
+                    .and_then(Value::as_str)
+                    .ok_or("storage absent")?;
+                let predicate = object.get("predicate").ok_or("predicate absent")?;
+                if object.len() != 3
+                    || name.is_empty()
+                    || name.len() > 64
+                    || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    || !matches!(storage, "content" | "declared")
+                    || !predicate.is_object()
+                    || serde_json::to_vec(predicate)
+                        .map_err(|e| e.to_string())?
+                        .len()
+                        > 32_768
+                {
+                    return Err("workspace create has invalid typed input".into());
+                }
+                self.workspace_root()?;
+            }
+            "mini_workspace_recover" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("workspace recover requires operationId")?;
+                let id = object
+                    .get("operationId")
+                    .and_then(Value::as_str)
+                    .ok_or("operationId absent")?;
+                decimal(id, "operationId")?;
+                if object.len() != 1
+                    || (!self
+                        .journal
+                        .workspace_attempt
+                        .as_ref()
+                        .is_some_and(|pending| pending.operation_id.to_string() == id)
+                        && !self
+                            .journal
+                            .workspace_birth
+                            .as_ref()
+                            .is_some_and(|birth| birth.operation_id.to_string() == id))
+                {
+                    return Err("workspace attempt unavailable for recovery".into());
+                }
+            }
             "mini_grain_status" => {
                 if arguments != &json!({}) && !arguments.is_null() {
                     return Err("mini_grain_status takes no arguments".into());
@@ -10681,6 +11778,11 @@ impl Runtime {
                 }
             }
             "mini_create_resource" => {
+                if self.tool_catalog()?.resource_workspace_create {
+                    return Err(
+                        "fixed resource birth is superseded by this task's common workspace".into(),
+                    );
+                }
                 resource_tools::select_birth(&tool.allowed_birth_families, arguments)?;
             }
             "mini_create_application" | "mini_create_application_session" => {
@@ -10900,6 +12002,13 @@ impl Runtime {
         if !matches!(
             request.name.as_str(),
             "mini_grain_status"
+                | "mini_workspace_list"
+                | "mini_workspace_describe"
+                | "mini_workspace_read"
+                | "mini_workspace_propose"
+                | "mini_workspace_submit"
+                | "mini_workspace_create"
+                | "mini_workspace_recover"
                 | "mini_read_resource"
                 | "mini_create_resource"
                 | "mini_create_application"
@@ -10927,6 +12036,8 @@ impl Runtime {
             || self.journal.parent_hold.is_some()
             || self.journal.tool_pending.is_some()
             || self.journal.tool_hold.is_some()
+            || self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some()
             || self.journal.birth_operation.is_some()
             || self.journal.birth_pending.is_some()
             || self.journal.provider_pending.is_some()
@@ -11822,6 +12933,9 @@ impl Runtime {
             return Err(format!("unexpected tool status {status}"));
         }
         let after = self.query_as(&authority)?;
+        if self.journal.workspace_attempt.is_some() || self.journal.workspace_birth.is_some() {
+            return Err("workspace submission remains retained for exact recovery".into());
+        }
         match after.pointer("/grain/status").and_then(Value::as_str) {
             Some("5" | "7") => {
                 self.journal.unresolved_external.push(
@@ -11843,6 +12957,8 @@ impl Runtime {
         }
         if self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
+            || self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some()
             || self.journal.child.is_some()
             || self.journal.foreground_attempt.is_some()
             || self.journal.settlement_due.is_some()
@@ -12178,6 +13294,18 @@ impl Runtime {
             } else {
                 Vec::new()
             },
+            resource_workspace: tool.resource_workspace.is_some(),
+            resource_workspace_create: if let Some(root) = &tool.resource_workspace {
+                let workspace: Value = serde_json::from_slice(&bounded_regular_file(
+                    &root.join("workspace.json"),
+                    65_536,
+                )?)
+                .map_err(|e| format!("workspace catalog config: {e}"))?;
+                workspace["birthContext"].as_str().is_some()
+                    && workspace["namespaceRoot"].as_str().is_some()
+            } else {
+                false
+            },
         })
     }
 
@@ -12194,6 +13322,8 @@ impl Runtime {
         }
         if self.journal.pending.is_some()
             || self.journal.tool_pending.is_some()
+            || self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some()
             || self.journal.child.is_some()
             || self.journal.foreground_attempt.is_some()
             || self.journal.settlement_due.is_some()
@@ -13735,6 +14865,22 @@ impl Runtime {
             return Err("no-submit birth marker conflicts with a pending native birth".into());
         }
         self.retry_pending(true)?;
+        if let Some(operation_id) = self
+            .journal
+            .workspace_attempt
+            .as_ref()
+            .map(|attempt| attempt.operation_id)
+        {
+            self.workspace_recover_operation(operation_id, true)?;
+        }
+        if let Some(operation_id) = self
+            .journal
+            .workspace_birth
+            .as_ref()
+            .map(|birth| birth.operation_id)
+        {
+            self.workspace_recover_birth(operation_id, true)?;
+        }
         self.finish_no_birth()?;
         self.retry_pending(false)?;
         if self.journal.hard_reconnect_pending {
@@ -15873,6 +17019,100 @@ mod tests {
     }
 
     #[test]
+    fn workspace_pin_rejects_foreign_key_and_symlinked_private_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-workspace-pin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state = root.join("state");
+        let workspace = state.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        for dir in [
+            workspace.clone(),
+            workspace.join("refs"),
+            workspace.join("attempts"),
+            workspace.join("sources"),
+            workspace.join("proposals"),
+        ] {
+            if !dir.exists() {
+                fs::create_dir(&dir).unwrap();
+            }
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let config: Config = serde_json::from_value(json!({
+            "mini":root.join("mini"),"host":root.join("host"),
+            "hostConfig":root.join("host.json"),"hostSocket":root.join("host.sock"),
+            "controlSocket":root.join("control.sock"),"custodyKey":root.join("parent.key"),
+            "stateDir":state,"cwd":root,"task":"7101","subject":"7",
+            "capability":"71","queryCapability":"74","commands":[],
+            "toolTask":{"task":"7102","subject":"8","capability":"81",
+                "queryCapability":"82","custodyKey":root.join("tool.key"),
+                "parentCapability":"73","parentObserveCapability":"75",
+                "reserve":"3","charge":"1","allowedPublications":[],
+                "resourceWorkspace":workspace}
+        }))
+        .unwrap();
+        let tool = config.tool_task.as_ref().unwrap();
+        let config_path = workspace.join("workspace.json");
+        let mut pinned = json!({"type":"minidregg-participant-workspace-v1",
+            "host":config.host,"config":config.host_config,"key":tool.custody_key,
+            "subject":tool.subject,"socket":config.host_socket,
+            "birthContext":null,"namespaceRoot":null});
+        fs::write(&config_path, serde_json::to_vec(&pinned).unwrap()).unwrap();
+        fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            validate_resource_workspace(&config, tool).unwrap(),
+            workspace
+        );
+        pinned["key"] = json!(root.join("parent.key"));
+        fs::write(&config_path, serde_json::to_vec(&pinned).unwrap()).unwrap();
+        assert!(validate_resource_workspace(&config, tool).is_err());
+        pinned["key"] = json!(tool.custody_key);
+        fs::write(&config_path, serde_json::to_vec(&pinned).unwrap()).unwrap();
+        let proposal_id = 1;
+        let source = b"{\"type\":\"intent\"}";
+        let request = b"{\"type\":\"minidregg-workspace-proposal-v1\"}";
+        fs::write(
+            state.join("workspace-proposal-0000000000000001.json"),
+            request,
+        )
+        .unwrap();
+        let proposal_dir = workspace.join("proposals").join("1");
+        fs::create_dir_all(&proposal_dir).unwrap();
+        fs::write(proposal_dir.join("intent.json"), source).unwrap();
+        let mut journal = Journal::fresh(json!({}));
+        journal.next_operation_id = 3;
+        journal.workspace_proposals.push(WorkspaceProposal {
+            id: proposal_id,
+            request_sha256: sha256_bytes(request).unwrap(),
+            intent_sha256: sha256_bytes(source).unwrap(),
+            submitted: true,
+        });
+        journal.workspace_attempt = Some(WorkspaceAttempt {
+            operation_id: 2,
+            proposal_id,
+            intent_sha256: sha256_bytes(source).unwrap(),
+            attempt: root.join("forged-attempt"),
+            definite: false,
+            no_submit: false,
+        });
+        assert!(journal.validate_workspace(&config).is_err());
+        journal.workspace_attempt.as_mut().unwrap().attempt = workspace.join("attempts").join("2");
+        assert!(journal.validate_workspace(&config).is_ok());
+        fs::write(proposal_dir.join("intent.json"), b"changed source").unwrap();
+        assert!(journal.validate_workspace(&config).is_err());
+        fs::write(proposal_dir.join("intent.json"), source).unwrap();
+        fs::remove_dir(workspace.join("refs")).unwrap();
+        std::os::unix::fs::symlink(&root, workspace.join("refs")).unwrap();
+        assert!(validate_resource_workspace(&config, tool).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn foreground_result_identity_is_durable_and_not_a_hermes_session() {
         let directory = std::env::temp_dir().join(format!(
             "mini-foreground-journal-{}-{}",
@@ -16390,6 +17630,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                     observe_capability: "94".into(),
                 }],
                 allowed_reads: vec![],
+                resource_workspace: None,
                 allowed_birth_families: vec![],
                 allowed_application_families: vec![],
                 allowed_session_families: vec![],

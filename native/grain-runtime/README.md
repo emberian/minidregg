@@ -287,6 +287,15 @@ further tools until exact lookup or owner reconciliation. The MCP error reports
 which cleanup transition confirmed; it never treats a missing response as a
 negative native receipt.
 
+An operator-pinned `toolTask.resourceWorkspace` also exposes named Mini
+resources through `mini_workspace_list`, `describe`, `read`, `propose`, `submit`,
+and `recover`. The workspace client resolves typed proposals against current
+signed state; the controller reserves and settles the delegated tool task for
+submissions. A pinned birth context and namespace root additionally enable
+`mini_workspace_create`. See [RESOURCE-WORKSPACE-MIGRATION.md](RESOURCE-WORKSPACE-MIGRATION.md)
+for the compatibility boundary with fixed resource-birth families and the
+evidence required before removing them.
+
 Before attach or soft-to-hard mode change, the controller
 compares the whole signed installed predicate with source-authored canonical
 managed-law bytes for the configured worker subjects and permitted prior

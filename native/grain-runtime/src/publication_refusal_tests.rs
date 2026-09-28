@@ -146,6 +146,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
                 max_result_bytes: 1024,
                 fn_inbox_summary: false,
             }],
+            resource_workspace: None,
             allowed_birth_families: vec![],
             allowed_application_families: vec![],
             allowed_session_families: vec![],

@@ -765,6 +765,7 @@ mod tests {
             charge: "1".into(),
             allowed_publications: vec![],
             allowed_reads: vec![],
+            resource_workspace: None,
             allowed_birth_families: vec![],
             allowed_application_families: vec![],
             allowed_session_families: vec![],

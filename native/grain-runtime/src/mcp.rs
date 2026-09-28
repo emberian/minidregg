@@ -68,6 +68,8 @@ pub struct ToolCatalog {
     pub session_families: Vec<String>,
     pub applications: Vec<String>,
     pub api_applications: Vec<String>,
+    pub resource_workspace: bool,
+    pub resource_workspace_create: bool,
 }
 
 pub fn start_broker(
@@ -182,7 +184,9 @@ fn serve_broker_connection(
                 "applicationFamilies":snapshot.application_families,
                 "sessionFamilies":snapshot.session_families,
                 "applications":snapshot.applications,
-                "apiApplications":snapshot.api_applications})
+                "apiApplications":snapshot.api_applications,
+                "resourceWorkspace":snapshot.resource_workspace,
+                "resourceWorkspaceCreate":snapshot.resource_workspace_create})
         );
         return;
     }
@@ -249,6 +253,14 @@ fn catalog_from_reply(reply: &Value) -> Result<ToolCatalog, String> {
         session_families: catalog_names(reply, "sessionFamilies", 8)?,
         applications: catalog_names(reply, "applications", 64)?,
         api_applications: catalog_names(reply, "apiApplications", 16)?,
+        resource_workspace: reply
+            .get("resourceWorkspace")
+            .and_then(Value::as_bool)
+            .ok_or("controller MCP resourceWorkspace absent")?,
+        resource_workspace_create: reply
+            .get("resourceWorkspaceCreate")
+            .and_then(Value::as_bool)
+            .ok_or("controller MCP resourceWorkspaceCreate absent")?,
     };
     if catalog
         .applications
@@ -270,7 +282,41 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
         json!({"name":"mini_publish","description":"Atomically settle a delegated grain allowance and publish Mini resource targets. Success returns a historical signed publication receipt; current content requires a fresh signed read.",
             "inputSchema":{"type":"object","properties":{"publications":{"type":"array","items":{"type":"object"}}},"required":["publications"]}}),
     ];
-    if !catalog.birth_families.is_empty() {
+    if catalog.resource_workspace {
+        tools.extend([
+            json!({"name":"mini_workspace_list",
+                "description":"List names in this agent's private Mini resource workspace. Names are discovery hints; every use checks current signed authority.",
+                "inputSchema":{"type":"object","properties":{},"additionalProperties":false}}),
+            json!({"name":"mini_workspace_describe",
+                "description":"Describe one named resource and its current signed Mini policy through this agent's delegated observe authority.",
+                "inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":64}},"required":["name"],"additionalProperties":false}}),
+            json!({"name":"mini_workspace_read",
+                "description":"Read one named resource through this agent's current signed delegated observe authority.",
+                "inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":64}},"required":["name"],"additionalProperties":false}}),
+            json!({"name":"mini_workspace_propose",
+                "description":"Prepare a source-authored typed Mini invoke or policy installation against named workspace references and current signed state. This has no effect; submit the returned proposalId to attempt admission.",
+                "inputSchema":{"type":"object","properties":{"request":{"type":"object","description":"minidregg-workspace-proposal-v1: action invoke with named targets and typed payloads, or action install-policy with a named resource and predicate"}},"required":["request"],"additionalProperties":false}}),
+            json!({"name":"mini_workspace_submit",
+                "description":"Submit one retained workspace proposal under the delegated grain's signed reserve and charge. An uncertain result must be recovered by exact lookup before another effect.",
+                "inputSchema":{"type":"object","properties":{"proposalId":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"required":["proposalId"],"additionalProperties":false}}),
+            json!({"name":"mini_workspace_recover",
+                "description":"Read-only exact lookup of a retained workspace submission by controller operation ID. This never resubmits an effect.",
+                "inputSchema":{"type":"object","properties":{"operationId":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"required":["operationId"],"additionalProperties":false}}),
+        ]);
+    }
+    if catalog.resource_workspace_create {
+        tools.push(json!({"name":"mini_workspace_create",
+            "description":"Create one named Mini resource through the controller-pinned participant namespace, source-authored birth, and delegated grain reserve. The name does not grant authority; the signed birth receipt and current Mini law govern later use.",
+            "inputSchema":{"type":"object","properties":{
+                "name":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},
+                "storage":{"type":"string","enum":["content","declared"]},
+                "predicate":{"type":"object"}},"required":["name","storage","predicate"],
+                "additionalProperties":false}}));
+    }
+    // A configured common resource workspace owns this resource-birth surface.
+    // Keep the fixed-family tool only for deployments that have not crossed
+    // that migration boundary yet.
+    if !catalog.resource_workspace_create && !catalog.birth_families.is_empty() {
         tools.push(json!({"name":"mini_create_resource",
             "description":"Create one resource in an operator-approved family through Mini's signed, budgeted composite birth. The family selects fixed factory, payer, tariff, policy and bounded ID namespace; the model supplies no IDs or capabilities. Success returns a historical birth receipt. Later reads and writes require fresh Mini admission.",
             "inputSchema":{"type":"object","properties":{"family":{"type":"string","enum":catalog.birth_families}},"required":["family"],"additionalProperties":false}}));
@@ -314,7 +360,7 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "required":["application","path","content","message"],
                 "additionalProperties":false}}));
         tools.push(json!({"name":"mini_application_api",
-            "description":"Call one operator-pinned resident application API session. A fresh Mini agent dispatch permit and separate purse settlement are required for every call. The model chooses only the named app and bounded ordinary HTTP input. Path is relative to the signed /repo.git/ API prefix (for example git-receive-pack or info/refs); do not include that prefix in the path.",
+            "description":"Call one operator-pinned resident application API session. A fresh Mini agent dispatch permit and separate purse settlement are required for every call. The model chooses only the named app and bounded ordinary HTTP input. Path is relative to this route's signed API prefix; do not include that prefix in the path.",
             "inputSchema":{"type":"object","properties":{
                 "application":{"type":"string","enum":catalog.api_applications},
                 "method":{"type":"string","enum":["GET","HEAD","POST","PUT","PATCH","DELETE"]},
@@ -506,6 +552,75 @@ mod tests {
     static NEXT_SOCKET: AtomicUsize = AtomicUsize::new(1);
 
     #[test]
+    fn workspace_tools_require_controller_private_workspace_catalog() {
+        let absent = tools_for_catalog(&ToolCatalog::default());
+        assert!(absent["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| !tool["name"]
+                .as_str()
+                .unwrap()
+                .starts_with("mini_workspace_")));
+        let present = tools_for_catalog(&ToolCatalog {
+            resource_workspace: true,
+            ..ToolCatalog::default()
+        });
+        for name in [
+            "mini_workspace_list",
+            "mini_workspace_describe",
+            "mini_workspace_read",
+            "mini_workspace_propose",
+            "mini_workspace_submit",
+            "mini_workspace_recover",
+        ] {
+            assert!(present["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == name));
+        }
+        assert_eq!(
+            present["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == "mini_workspace_submit")
+                .unwrap()["inputSchema"]["properties"]
+                .as_object()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(present["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "mini_workspace_create"));
+        let enabled_birth = tools_for_catalog(&ToolCatalog {
+            resource_workspace: true,
+            resource_workspace_create: true,
+            ..ToolCatalog::default()
+        });
+        assert!(enabled_birth["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "mini_workspace_create"));
+        let migrated = tools_for_catalog(&ToolCatalog {
+            birth_families: vec!["legacy-note".into()],
+            resource_workspace: true,
+            resource_workspace_create: true,
+            ..ToolCatalog::default()
+        });
+        assert!(migrated["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "mini_create_resource"));
+    }
+
+    #[test]
     fn application_api_catalog_exposes_only_operator_selected_route_names() {
         let absent = tools_for_catalog(&ToolCatalog::default());
         assert!(absent["tools"]
@@ -548,6 +663,8 @@ mod tests {
                     session_families: vec!["office-web".into()],
                     applications: vec!["office-0-app".into()],
                     api_applications: vec![],
+                    resource_workspace: false,
+                    resource_workspace_create: false,
                 })),
             );
         });
