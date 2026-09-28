@@ -1,0 +1,4 @@
+f31e2a17cca37173693ad1c7142101fe8fcf665c32be8a190911e6568b9260c8  scripts/spk-platform/issue-agent-ticket.sh
+92504179eba3f45bea1aaf3a570b61c915daf77bdf3067905bc42c9bee22f9c8  docs/evidence/2026-09-27-agent-ticket-issuer/README.md
+02650a58db2808c13ea429b465d4f3f536f294cddd6580c16e8a4ea9382d122b  docs/evidence/2026-09-27-agent-ticket-issuer/schema-fixture.log
+025af71c9ea7d7cfe1c00a069ecaffcab4178eb9d31637472dd6e1f7ad1f0e94  docs/evidence/2026-09-27-agent-ticket-issuer/negative-schema.log

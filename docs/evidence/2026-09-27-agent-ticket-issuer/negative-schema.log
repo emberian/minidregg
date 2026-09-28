@@ -1,0 +1,8 @@
+cross-route candidate refused before staging
+agent ticket: candidate scope differs from A/B allocation
+agent ticket: accepted session birth receipt absent or changed
+altered accepted session receipt refused before staging
+changed selected role permissions refused before staging
+agent ticket: selected signed role missing, obsolete, or permissions changed
+repeat seal refused; original one-shot submit marker retained
+agent ticket: issue already prepared

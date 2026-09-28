@@ -1,0 +1,6 @@
+event22 candidate staged at /home/hbox/mini-agent-ticket-schema-r1/stage9; review preview before approval
+event22 exact-slot approval staged at /home/hbox/mini-agent-ticket-schema-r1/approval9.json
+event22 signed ingress prepared at /home/hbox/mini-agent-ticket-schema-r1/stage9/issue; no submit yet
+event22 accepted with exact retained receipt at /home/hbox/mini-agent-ticket-schema-r1/stage9/issue/receipt-anchor.json
+event22 accepted with exact retained receipt at /home/hbox/mini-agent-ticket-schema-r1/stage9/issue/receipt-anchor.json
+schema-only PASS: source API interface and role scope, accepted receipt joins, exact signer approval, one submit/repeated lookup
