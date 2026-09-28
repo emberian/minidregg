@@ -1,0 +1,26 @@
+{
+  "hermesCommand": [
+    {
+      "name": "hermes-acp",
+      "systemdScope": true,
+      "wallTimeSeconds": 600
+    }
+  ],
+  "providerTask": {
+    "maxInputTokens": 65024,
+    "maxIterations": 2,
+    "maxOutputTokens": 512,
+    "timeoutSeconds": 180,
+    "upstreamUrl": "http://127.0.0.1:18081/v1/chat/completions"
+  },
+  "toolCatalogInputs": {
+    "agentApiPin": false,
+    "apiRoutes": 0,
+    "applicationFamilies": 0,
+    "birthFamilies": 0,
+    "lifetimeApiPin": false,
+    "lifetimeRoutes": 0,
+    "registeredSharedApplications": 0,
+    "sessionFamilies": 0
+  }
+}
