@@ -26,6 +26,7 @@ reservation does not establish an implemented or accepted native path.
 | 25 | Source-bound launch completion v2 | Reserved for exact physical action/volume attestation and completed-create evidence; old event18 unchanged |
 | 26 | Paid agent dispatch under an explicit persistent agent grant | Reserved for current execution-generation witness joined to separately app-authorized task-level access; old event21 generation-bound semantics unchanged |
 | 27 | Persistent agent grant issuance | Reserved for atomic grant-content installation and current app delegation authorization, retained as an original-prefix certificate for event26 |
+| 28 | Checked application session enrollment | Reserved for a participant-signed joint session/descriptor mutation, original ticket selection, current app observation read guard and exact stable enrollment atom; ordinary invoke remains distinct |
 
 Wire frame revisions, content-object type tags, nullifier codec versions, and
 event tags are separate namespaces. Changing a wire frame to v2 does not mean
@@ -140,6 +141,23 @@ rule. A new namespace alone does not implement rotation or justify a cursor rese
 | 79 | Event26 grant-bound dispatch detached signature assembly (reserved private authoring) |
 | 80 | Verified-current-image event26 grant-bound purse reserve signing plan (reserved private authoring) |
 | 81 | Event26 grant-bound purse reserve detached signature assembly (reserved private authoring) |
+| 82 | Verified-current-image session enrollment signing plan (reserved private authoring) |
+| 83 | Session enrollment detached signature assembly (reserved private authoring) |
+| 84 | Checked session enrollment submit (reserved private admission) |
+| 85 | Session enrollment historical receipt-only lookup (reserved private; never a dispatch permit) |
+
+Event28 uses the participant's existing session and descriptor mutation rights,
+and a separately signed app observation with a physical read guard. The app is
+not an ordinary mutation target: only Alice has the app owner capability in
+the integrated allocation. Bob and both agents have allocated app-observe IDs
+that require admitted observe-only delegations. Their ticket-observe and
+manifest-observe IDs likewise need current grants to the joint command subject;
+separate envelopes do not change that subject. Admission must select the original event22 ticket from verified
+history, check the installed manifest role schema and ceiling, and atomically
+guard the current serving app generation alongside the joint edit. The stable
+descriptor atom is created on first enrollment and edited against its exact
+old record on renewal. Operations82/83 construct and assemble the current
+signed proposal; 84 alone submits through event28, and 85 is receipt-only.
 
 Operations80/81 prepare the separately signed reserve before the ordinary
 native invoke. Operations78/79 cover only the post-reserve dispatch plan. The

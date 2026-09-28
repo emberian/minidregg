@@ -36,6 +36,7 @@ import Kernel.ApplicationLifecycleBeginV3Admission
 import Kernel.ApplicationLifecycleClaimV3Core
 import Kernel.ApplicationLifecycleCompletionV2Core
 import Kernel.ApplicationLifecycleCreatedHistory
+import Kernel.ApplicationGrainSessionEnrollmentIntent
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -58,6 +59,25 @@ structure PriorIssue (config : Config) where
   index : Nat
   receipt : NativeHostCodec.Receipt
   evidence : ApplicationDispatchHistoricalCore.IssuedEvidence config
+
+/-- An enrollment may use only an event22 ticket minted by this replay walk.
+The three current signed observations are checked by the lower admission. -/
+structure SessionEnrollmentAt (config : Config) (opened : Opened config)
+    (ingress : ApplicationGrainSessionEnrollmentSource.Ingress) where
+  private mk ::
+  issue : PriorIssue config
+  event22 : issue.evidence.record.event.codecVersion = 22
+  issueIndex : issue.index = ingress.request.issueIndex
+  issueReceipt : issue.receipt = ingress.issueReceipt
+  ticketResource : issue.evidence.spec.ticket.resource = ingress.request.ticketResource
+  present : opened.durable.image.accepted[issue.index]? = some issue.evidence.record
+  checked : ApplicationGrainSessionEnrollmentAdmission.Checked config opened ingress
+    issue.evidence.spec issue.receipt
+
+def SessionEnrollmentAt.intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
+    (admitted : SessionEnrollmentAt config opened ingress) : DataIntent rootBytes :=
+  ApplicationGrainSessionEnrollmentIntent.intent admitted.checked
 
 /-- An original ordinary invocation is retained as compact reserve-eligible
 evidence only after its same-walk native admission, full record/receipt match,
@@ -698,6 +718,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
         opened.pins opened.durable
         ⟨config.federation, logicalHeight config opened.durable⟩ ingress) :
       NativeAdmission config opened (ApplicationShareIssueGrainReceiver.intent accepted)
+  | applicationSessionEnrollment
+      {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
+      (admitted : SessionEnrollmentAt config opened ingress) :
+      NativeAdmission config opened admitted.intent
   | applicationAgentLifetimeGrantIssue
       {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
       (admitted : LifetimeGrantIssueAt config opened ingress) :
@@ -855,6 +879,17 @@ def DispatchAt.toDerived {config : Config} {opened : Opened config}
   ⟨admitted.intent, .applicationDispatch admitted, none, none, none, none, none,
     none, none, none, none⟩
 
+def SessionEnrollmentAt.toDerived {config : Config} {opened : Opened config}
+    {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
+    (admitted : SessionEnrollmentAt config opened ingress) : Derived config opened :=
+  ⟨admitted.intent, .applicationSessionEnrollment admitted,
+    none, none, none, none, none, none, none, none, none⟩
+
+theorem SessionEnrollmentAt.toDerived_intent {config : Config} {opened : Opened config}
+    {ingress : ApplicationGrainSessionEnrollmentSource.Ingress}
+    (admitted : SessionEnrollmentAt config opened ingress) :
+    admitted.toDerived.intent = admitted.intent := rfl
+
 def AgentDispatchAt.toDerived {config : Config} {opened : Opened config}
     {ingress : ApplicationDispatchAgentIngress.Ingress}
     (admitted : AgentDispatchAt config opened ingress) : Derived config opened :=
@@ -962,6 +997,16 @@ private def priorIssueForLifetimeGrant (config : Config)
       issue.receipt = ingress.spec.grant.source.issueReceipt ∧
       issue.evidence.record.event.codecVersion = 22)
 
+private def priorIssueForSessionEnrollment (config : Config)
+    (issues : List (PriorIssue config))
+    (ingress : ApplicationGrainSessionEnrollmentSource.Ingress) :
+    Option (PriorIssue config) :=
+  issues.find? fun issue => decide
+    (issue.index = ingress.request.issueIndex ∧
+      issue.receipt = ingress.issueReceipt ∧
+      issue.evidence.record.event.codecVersion = 22 ∧
+      issue.evidence.spec.ticket.resource = ingress.request.ticketResource)
+
 private def priorBeginFor (config : Config) (begins : List (PriorBegin config))
     (ingress : ApplicationLifecycleClaimIngress.Ingress) :
     Option (PriorBegin config) :=
@@ -997,6 +1042,41 @@ private theorem priorIssueFor_empty (config : Config)
 private theorem priorBeginFor_empty (config : Config)
     (ingress : ApplicationLifecycleClaimIngress.Ingress) :
     priorBeginFor config [] ingress = none := rfl
+
+private def admitSessionEnrollmentAt (config : Config) (opened : Opened config)
+    (issues : List (PriorIssue config))
+    (ingress : ApplicationGrainSessionEnrollmentSource.Ingress) :
+    IO (Except String (SessionEnrollmentAt config opened ingress)) := do
+  let some issue := priorIssueForSessionEnrollment config issues ingress
+    | return .error "session enrollment original event22 ticket absent"
+  if event22 : issue.evidence.record.event.codecVersion = 22 then
+    if issueIndex : issue.index = ingress.request.issueIndex then
+      if issueReceipt : issue.receipt = ingress.issueReceipt then
+        if ticketResource : issue.evidence.spec.ticket.resource =
+            ingress.request.ticketResource then
+          if recordBytes : (opened.durable.image.accepted[issue.index]?.map
+              DurableReceiverCodec.intentStream.encode) =
+              some (DurableReceiverCodec.intentStream.encode issue.evidence.record) then
+            have present : opened.durable.image.accepted[issue.index]? =
+                some issue.evidence.record := by
+              cases found : opened.durable.image.accepted[issue.index]? with
+              | none => simp [found] at recordBytes
+              | some record =>
+                  simp only [found, Option.map_some, Option.some.injEq] at recordBytes
+                  have exact := (lawful_encode_injective
+                    DurableReceiverCodec.intentStream.toLawful) recordBytes
+                  simpa only [found, Option.some.injEq] using exact
+            match ← ApplicationGrainSessionEnrollmentAdmission.admitAt config opened
+                ingress issue.evidence.spec issue.receipt with
+            | .error reason => return .error reason
+            | .ok checked =>
+                return .ok ⟨issue, event22, issueIndex, issueReceipt,
+                  ticketResource, present, checked⟩
+          else return .error "session enrollment original ticket record differs"
+        else return .error "session enrollment original ticket resource differs"
+      else return .error "session enrollment original ticket receipt differs"
+    else return .error "session enrollment original ticket index differs"
+  else return .error "session enrollment original ticket was not event22"
 
 private def admitLifetimeGrantIssueAt (config : Config) (opened : Opened config)
     (issues : List (PriorIssue config))
@@ -1466,6 +1546,10 @@ private def derive (config : Config) (opened : Opened config)
         return .ok ⟨ApplicationShareIssueGrainReceiver.intent accepted,
           .applicationGrainShareIssue accepted, some (.grain issueIngress accepted rfl),
           none, none, none, none, none, none, none, none⟩
+  if let some ingress := ApplicationGrainSessionEnrollmentSource.ingressCodec.decode bytes then
+    match ← admitSessionEnrollmentAt config opened issues ingress with
+    | .error detail => return .error detail
+    | .ok admitted => return .ok admitted.toDerived
   if let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes then
     match ← admitLifetimeGrantIssueAt config opened issues ingress with
     | .error detail => return .error detail
@@ -2152,6 +2236,14 @@ def deriveVerified {config : Config} {target : Durable}
   derive config old.opened old.issues old.reserves old.begins old.beginsV2 old.claimsV2
     old.beginsV3 old.claimsV3 old.createdV3 old.runningV3 old.grants
     old.frontier old.releases bytes
+
+/-- Fresh enrollment uses only the event22 ticket certificate in the verified
+walk and then rechecks the signed joint command and three same-image reads. -/
+def admitSessionEnrollmentVerified {config : Config} {target : Durable}
+    (old : Verified config target)
+    (ingress : ApplicationGrainSessionEnrollmentSource.Ingress) :
+    IO (Except String (SessionEnrollmentAt config old.opened ingress)) :=
+  admitSessionEnrollmentAt config old.opened old.issues ingress
 
 /-- A fresh v2 BEGIN is checked on the same verified current image and then
 converted to the exact native admission used by physical CAS readback. Its
