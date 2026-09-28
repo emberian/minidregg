@@ -1,0 +1,6 @@
+
+running 1 test
+test http_entrance::tests::gitweb_human_seed_lost_reply_then_read_only_lookup ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 178 filtered out; finished in 0.16s
+

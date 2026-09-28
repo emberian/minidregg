@@ -1,0 +1,15 @@
+
+running 1 test
+
+thread 'http_entrance::tests::gitweb_human_seed_lost_reply_then_read_only_lookup' (178979) panicked at src/http_entrance_gitweb_probe.rs:97:6:
+called `Result::unwrap()` on an `Err` value: Custom { kind: InvalidData, error: "hostd journal ancestor is task-writable or symlinked" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test http_entrance::tests::gitweb_human_seed_lost_reply_then_read_only_lookup ... FAILED
+
+failures:
+
+failures:
+    http_entrance::tests::gitweb_human_seed_lost_reply_then_read_only_lookup
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 178 filtered out; finished in 0.00s
+

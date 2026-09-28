@@ -1006,6 +1006,8 @@ mod tests {
     use std::os::unix::fs::DirBuilderExt;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    include!("http_entrance_gitweb_probe.rs");
+
     #[test]
     fn two_private_poll_channels_report_only_the_ready_participant() {
         let (mut a, mut a_writer) = UnixStream::pair().unwrap();

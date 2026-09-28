@@ -895,6 +895,9 @@ fn view(args: &[String]) -> Result<()> {
 }
 
 fn main() {
+    // Git inherits this process mask; its cloned repository and newly created
+    // file directories must satisfy the same private-ancestor check as lookup.
+    unsafe { libc::umask(0o077) };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("seed-api") => seed(&args),

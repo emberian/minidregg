@@ -1,0 +1,4 @@
+Running as unit: run-p250542-i989701835.scope; invocation ID: 2c642ea14cae48ceb3bb1c0f564858bb
+   Compiling minidregg-spk-rpc v0.1.0 (/home/ember/build/minidregg-spk-gitweb-umask-src/native/spk-rpc)
+   Compiling minidregg-spk-host v0.1.0 (/home/ember/build/minidregg-spk-gitweb-umask-src/native/spk-host)
+    Finished `release` profile [optimized] target(s) in 18.69s
