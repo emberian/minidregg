@@ -1,0 +1,11 @@
+host_net=net:[4026531840]
+guest_net=net:[4026533324]
+apparmor=mini-grain-bwrap (unconfined)
+1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+1: lo    inet6 ::1/128 scope host proto kernel_lo \       valid_lft forever preferred_lft forever
+RTNETLINK answers: Network is unreachable
+global_userns=1
+root:hbox 750 /usr/local/libexec/mini-grain-bwrap
+root:root 644 /etc/apparmor.d/mini-grain-bwrap
+cccc95aebe85694cf34ca7e359308c019da692740f5bb909c3401363b06d9413  /usr/local/libexec/mini-grain-bwrap
+d9162a29ac987a26ab3548e2c63dadfa1f9eb1f2f58d027202dc67cd02336bdf  /etc/apparmor.d/mini-grain-bwrap

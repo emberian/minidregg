@@ -1,0 +1,10 @@
+# Candidate hbox-only profile for a root-owned copy of the distro bwrap ELF.
+# Install only after the executable SHA and its root:hbox 0750 custody are
+# checked. This does not alter the global unprivileged-userns sysctl or grant
+# the exception to every caller of /usr/bin/bwrap.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile mini-grain-bwrap /usr/local/libexec/mini-grain-bwrap flags=(unconfined) {
+  userns,
+}
