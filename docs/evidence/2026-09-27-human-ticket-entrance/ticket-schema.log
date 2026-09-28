@@ -1,0 +1,6 @@
+event22 candidate staged at /home/hbox/mini-agent-ticket-schema-r1/human-stage-r2; review preview before approval
+event22 exact-slot approval staged at /home/hbox/mini-agent-ticket-schema-r1/human-approval-r2.json
+event22 signed ingress prepared at /home/hbox/mini-agent-ticket-schema-r1/human-stage-r2/issue; no submit yet
+event22 accepted with exact retained receipt at /home/hbox/mini-agent-ticket-schema-r1/human-stage-r2/issue/receipt-anchor.json
+event22 accepted with exact retained receipt at /home/hbox/mini-agent-ticket-schema-r1/human-stage-r2/issue/receipt-anchor.json
+schema-only PASS: Alice web one-submit/repeat lookup; Bob web and Alice API source interface/ticket separation

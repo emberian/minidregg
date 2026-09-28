@@ -1,0 +1,7 @@
+53f414b1641986d5305dbc88addd8b296c77ee2a181976d0d6f9db51f2b20d24  scripts/spk-platform/issue-human-ticket.sh
+072c2c57a52df27ab7c03ded74404710f43311b61e1ff5d72dc14b73d3e5f880  scripts/spk-platform/prepare-human-entrance.sh
+3da55facd785eca1f4bc8d7a9bdecf9773a79edb826cf961f3f57f072eb6953c  docs/evidence/2026-09-27-human-ticket-entrance/README.md
+86d957437d0344b3a4a8bbc1c7a2ce9ccafeff9d7f6af4b3c86819779c1d2991  docs/evidence/2026-09-27-human-ticket-entrance/ticket-schema.log
+4bcfe464ad0e84e739dd51cd1f5a4da548f46d355e297c665e159dc449e742b4  docs/evidence/2026-09-27-human-ticket-entrance/entrance-schema.log
+0d3effc6228d0cf1585c7669936842aa513023b97c6c91607c977c85c3634490  docs/evidence/2026-09-27-human-ticket-entrance/negative-schema.log
+82465a3d9ff47859d0b2a6de18d2ce991f1466509d1a0ca1f41be8cf1ee646d2  docs/evidence/2026-09-27-human-ticket-entrance/native-cli-and-probe.log

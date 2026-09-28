@@ -1,0 +1,3 @@
+human custodian initialized at /home/hbox/mini-agent-ticket-schema-r1/alice-recovery-route-custody-staging
+human entrance staged at /home/hbox/mini-agent-ticket-schema-r1/alice-recovery-route; private tokens remain in native files
+component-only PASS: actual Rust custodian CLI, numbered read-only probe recovery, atomic private route; Mini/Host mocks
