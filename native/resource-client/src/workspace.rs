@@ -39,6 +39,18 @@ fn field_decimal(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
+fn decimal_leq(left: &str, right: &str) -> bool {
+    left.len() < right.len() || left.len() == right.len() && left <= right
+}
+
+fn decimal_max<'a>(left: &'a str, right: &'a str) -> &'a str {
+    if decimal_leq(left, right) {
+        right
+    } else {
+        left
+    }
+}
+
 fn validate_name(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 64
@@ -372,6 +384,38 @@ fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
     Ok(())
 }
 
+fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -> Result<()> {
+    let value = bounded_json(source)?;
+    if member(&value, "type")? != "minidregg-delegated-reference-v1"
+        || member(&value, "recipient")? != member(workspace, "subject")?
+    {
+        return Err("delegated reference is not addressed to this workspace subject".into());
+    }
+    let receipt = value
+        .get("receipt")
+        .ok_or("delegated reference lacks receipt")?;
+    if member(receipt, "type")? != "confirmed"
+        || !matches!(member(receipt, "confirmation")?, "installed" | "replayed")
+    {
+        return Err("delegated reference lacks confirmed admission receipt".into());
+    }
+    for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+        field_decimal(member(receipt, field)?, field)?;
+    }
+    import(
+        root,
+        ImportInput {
+            name,
+            kind: member(&value, "kind")?,
+            target: member(&value, "target")?,
+            observe: member(&value, "capability")?,
+            operation: Some(member(&value, "capability")?),
+            control: None,
+            provenance: Some(source),
+        },
+    )
+}
+
 fn list(root: &Path) -> Result<()> {
     let mut values = Vec::new();
     for entry in fs::read_dir(root.join("refs")).map_err(|error| error.to_string())? {
@@ -436,13 +480,18 @@ fn signed_view(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
     )?;
+    let inspection = if view == "capability" {
+        format!("view-{}-capability", member(reference, "kind")?)
+    } else {
+        format!("view-{view}")
+    };
     let result = query_retained(
         &member_path(workspace, "host")?,
         &member_path(workspace, "config")?,
         &source,
         OsStr::new("intent"),
         &member_path(workspace, "key")?,
-        &format!("view-{view}"),
+        &inspection,
         &attempt,
     )?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
@@ -549,6 +598,7 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
         return Err("unknown workspace proposal version".into());
     }
     let nonce = random_nonce()?;
+    let mut delegation = None::<Value>;
     let intent = match member(&request, "action")? {
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
@@ -661,12 +711,167 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 "grants":[{"kind":member(&reference,"kind")?,"target":target,
                     "capability":member(&reference,"observeCapability")?}]})
         }
-        _ => return Err("proposal action must be invoke or install-policy".into()),
+        "delegate" => {
+            let obj = request.as_object().ok_or("proposal must be an object")?;
+            if obj.len() != 6
+                || ["name", "recipient", "verbs", "maxCost"]
+                    .iter()
+                    .any(|field| !obj.contains_key(*field))
+            {
+                return Err(
+                    "delegate proposal requires type, action, name, recipient, verbs, maxCost"
+                        .into(),
+                );
+            }
+            let reference = reference(root, member(&request, "name")?)?;
+            let target = member(&reference, "target")?;
+            let kind = member(&reference, "kind")?;
+            let parent_id = member(&reference, "operationCapability")?;
+            let recipient = member(&request, "recipient")?;
+            decimal(recipient, "delegate recipient")?;
+            let maximum = member(&request, "maxCost")?;
+            field_decimal(maximum, "delegation maxCost")?;
+            let selected_verbs = request
+                .get("verbs")
+                .and_then(Value::as_array)
+                .ok_or("delegation verbs must be an array")?;
+            if selected_verbs.is_empty() || selected_verbs.len() > 8 {
+                return Err("delegation needs 1..8 narrowed verbs".into());
+            }
+            let (resource, resource_challenge, _) =
+                signed_view(root, workspace, &reference, "resource")?;
+            let (policy, policy_challenge, _) = signed_view(root, workspace, &reference, "policy")?;
+            let mut parent_ref = reference.clone();
+            parent_ref["observeCapability"] = json!(parent_id);
+            let (capability, cap_challenge, _) =
+                signed_view(root, workspace, &parent_ref, "capability")?;
+            let image = member(&resource_challenge, "imageBoundary")?;
+            let authority = signed_authority_root(&resource_challenge)?;
+            for challenge in [&policy_challenge, &cap_challenge] {
+                if member(challenge, "imageBoundary")? != image
+                    || signed_authority_root(challenge)? != authority
+                {
+                    return Err(
+                        "delegation observations disagree on current image or authority".into(),
+                    );
+                }
+            }
+            let head = capability
+                .get("head")
+                .ok_or("typed capability view lacks head")?;
+            if member(&capability, "kind")? != kind || member(head, "id")? != parent_id {
+                return Err("signed capability head differs from selected parent reference".into());
+            }
+            let targets = head
+                .get("targets")
+                .and_then(Value::as_array)
+                .ok_or("parent capability lacks targets")?;
+            if !targets.iter().any(|value| value.as_str() == Some(target)) {
+                return Err("parent capability does not cover named target".into());
+            }
+            let parent_verbs = head
+                .get("verbs")
+                .and_then(Value::as_array)
+                .ok_or("parent capability lacks verbs")?;
+            if !parent_verbs
+                .iter()
+                .any(|value| value.as_str() == Some("delegate"))
+            {
+                return Err("parent capability lacks delegation verb".into());
+            }
+            let mut unique_verbs = std::collections::BTreeSet::new();
+            for verb in selected_verbs {
+                let verb = verb.as_str().ok_or("delegation verb must be a string")?;
+                if !unique_verbs.insert(verb)
+                    || !parent_verbs.iter().any(|v| v.as_str() == Some(verb))
+                {
+                    return Err("delegation verbs must be unique and within parent scope".into());
+                }
+            }
+            let parent_max = member(head, "maxCost")?;
+            field_decimal(parent_max, "parent maxCost")?;
+            if !decimal_leq(maximum, parent_max) {
+                return Err("delegation maxCost exceeds parent".into());
+            }
+            let parent_before = member(head, "notBefore")?;
+            let parent_after = member(head, "notAfter")?;
+            let height = member(&resource_challenge, "height")?;
+            for (value, label) in [
+                (parent_before, "parent notBefore"),
+                (parent_after, "parent notAfter"),
+                (height, "current height"),
+            ] {
+                field_decimal(value, label)?;
+            }
+            let child_before = decimal_max(parent_before, height);
+            if !decimal_leq(child_before, parent_after) {
+                return Err("parent capability is outside its effective lifetime".into());
+            }
+            let mut ancestors = head
+                .get("ancestors")
+                .and_then(Value::as_array)
+                .ok_or("parent capability lacks ancestors")?
+                .clone();
+            if !ancestors
+                .iter()
+                .any(|value| value.as_str() == Some(parent_id))
+            {
+                ancestors.push(json!(parent_id));
+            }
+            let namespace = member_path(workspace, "namespaceRoot")?;
+            let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
+                "subject":member(workspace,"subject")?}))
+            .map_err(|error| error.to_string())?;
+            let reservation = participant_namespace::reserve(
+                &namespace,
+                member(&policy, "domain")?,
+                member(workspace, "subject")?,
+                &format!("delegate-{proposal_id}"),
+                &fingerprint,
+                &[Role {
+                    label: "childCapability".into(),
+                    kind: IdKind::Capability,
+                }],
+            )?;
+            let child_id = reservation
+                .ids
+                .get("childCapability")
+                .ok_or("namespace omitted delegated capability")?;
+            let target_root = resource
+                .get("page")
+                .and_then(|page| page.get("root"))
+                .and_then(Value::as_str)
+                .ok_or("signed resource view lacks page root")?;
+            field_decimal(target_root, "delegation target root")?;
+            let child = json!({"id":child_id,"root":member(head,"root")?,"parent":parent_id,
+                "issuer":member(head,"issuer")?,"holder":{"type":"subject","subject":recipient},
+                "targets":[target],"verbs":selected_verbs,"maxCost":maximum,
+                "notBefore":child_before,"notAfter":parent_after,
+                "issuerEpoch":member(head,"issuerEpoch")?,"policyId":member(head,"policyId")?,
+                "policyEpoch":member(head,"policyEpoch")?,"ancestors":ancestors,
+                "channels":head.get("channels").ok_or("parent capability lacks channels")?});
+            delegation = Some(json!({"recipient":recipient,"kind":kind,"target":target,
+                "childCapability":child_id,"reservation":reservation.request_digest,
+                "domain":member(&policy,"domain")?,"name":member(&request,"name")?}));
+            json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+                "purpose":{"type":"prepare","draft":{"type":"delegate-source",
+                    "command":{"kind":kind,"domain":member(&policy,"domain")?,
+                    "semantics":member(&policy,"semantics")?,"subject":member(workspace,"subject")?,
+                    "nonce":random_nonce()?,"expectedTargetRoot":target_root,
+                    "parentId":parent_id,"target":target,"expectedPreRoot":authority,
+                    "child":child}}},
+                "grants":[{"kind":kind,"target":target,"capability":parent_id}]})
+        }
+        _ => return Err("proposal action must be invoke, install-policy, or delegate".into()),
     };
     let intent_bytes = serde_json::to_vec_pretty(&intent).map_err(|error| error.to_string())?;
     let intent_sha = format!("{:x}", Sha256::digest(&intent_bytes));
     let proposal_dir = root.join("proposals").join(proposal_id);
     make_private_dir(&proposal_dir)?;
+    private_file(
+        &proposal_dir.join("request.json"),
+        &serde_json::to_vec_pretty(&request).map_err(|error| error.to_string())?,
+    )?;
     private_file(&proposal_dir.join("intent.json"), &intent_bytes)?;
     author(
         &member_path(workspace, "host")?,
@@ -677,7 +882,8 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
     )?;
     let summary = json!({"type":"minidregg-workspace-proposal-result-v1",
         "proposalId":proposal_id,"intentPath":proposal_dir.join("intent.json"),
-        "intentSha256":intent_sha,"effect":"none","authority":"requires-current-admission"});
+        "intentSha256":intent_sha,"effect":"none","authority":"requires-current-admission",
+        "delegation":delegation});
     let bytes = serde_json::to_vec_pretty(&summary).map_err(|error| error.to_string())?;
     private_file(&proposal_dir.join("proposal.json"), &bytes)?;
     println!(
@@ -711,6 +917,9 @@ fn submit_intent(
         new_attempt(root)?.0
     };
     let source = absolute(source)?;
+    if kind == "intent" {
+        bind_delegation_attempt(root, workspace, &source, &attempt)?;
+    }
     eprintln!("workspace attempt: {}", attempt.display());
     submit(
         &member_path(workspace, "host")?,
@@ -721,6 +930,76 @@ fn submit_intent(
         &attempt,
         prepare_only,
     )
+}
+
+fn bind_delegation_attempt(
+    root: &Path,
+    workspace: &Value,
+    source: &Path,
+    attempt: &Path,
+) -> Result<()> {
+    let source = fs::canonicalize(source).map_err(|error| error.to_string())?;
+    if source.file_name() != Some(OsStr::new("intent.json")) {
+        return Ok(());
+    }
+    let proposal_dir = source.parent().ok_or("proposal intent lacks parent")?;
+    let proposals = fs::canonicalize(root.join("proposals")).map_err(|error| error.to_string())?;
+    if proposal_dir.parent() != Some(proposals.as_path()) {
+        return Ok(());
+    }
+    let proposal_id = proposal_dir
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or("proposal ID is not UTF-8")?;
+    validate_name(proposal_id)?;
+    let summary = bounded_json(&proposal_dir.join("proposal.json"))?;
+    let Some(delegation) = summary.get("delegation").filter(|value| value.is_object()) else {
+        return Ok(());
+    };
+    if member(&summary, "proposalId")? != proposal_id {
+        return Err("delegation proposal ID differs from retained path".into());
+    }
+    let request = bounded_json(&proposal_dir.join("request.json"))?;
+    if member(&request, "action")? != "delegate"
+        || member(&request, "name")? != member(delegation, "name")?
+    {
+        return Err("delegation request differs from retained proposal".into());
+    }
+    let reference = reference(root, member(&request, "name")?)?;
+    let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
+        "subject":member(workspace,"subject")?}))
+    .map_err(|error| error.to_string())?;
+    let namespace = member_path(workspace, "namespaceRoot")?;
+    let reservation = participant_namespace::reserve(
+        &namespace,
+        member(delegation, "domain")?,
+        member(workspace, "subject")?,
+        &format!("delegate-{proposal_id}"),
+        &fingerprint,
+        &[Role {
+            label: "childCapability".into(),
+            kind: IdKind::Capability,
+        }],
+    )?;
+    if reservation.request_digest != member(delegation, "reservation")?
+        || reservation.ids.get("childCapability").map(String::as_str)
+            != Some(member(delegation, "childCapability")?)
+    {
+        return Err("delegation proposal differs from namespace reservation".into());
+    }
+    let intent = fs::read(&source).map_err(|error| error.to_string())?;
+    let source_sha = format!("{:x}", Sha256::digest(&intent));
+    if source_sha != member(&summary, "intentSha256")? {
+        return Err("delegation intent differs from retained proposal digest".into());
+    }
+    let binding = participant_namespace::bind_attempt(&reservation, attempt, &source_sha)?;
+    let canonical_attempt = fs::canonicalize(attempt.parent().ok_or("attempt lacks parent")?)
+        .map_err(|error| error.to_string())?
+        .join(attempt.file_name().ok_or("attempt lacks filename")?);
+    if binding.attempt_path != canonical_attempt || binding.source_sha256 != source_sha {
+        return Err("delegation attempt binding differs from requested exact attempt".into());
+    }
+    Ok(())
 }
 
 fn recover(root: &Path, attempt: &Path) -> Result<()> {
@@ -756,6 +1035,69 @@ fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
         }
     }
     Ok(None)
+}
+
+fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<()> {
+    validate_name(proposal_id)?;
+    let proposal_dir = root.join("proposals").join(proposal_id);
+    private_dir(&proposal_dir)?;
+    let summary = bounded_json(&proposal_dir.join("proposal.json"))?;
+    if member(&summary, "type")? != "minidregg-workspace-proposal-result-v1"
+        || member(&summary, "proposalId")? != proposal_id
+    {
+        return Err("delegation proposal identity differs".into());
+    }
+    let delegation = summary
+        .get("delegation")
+        .filter(|value| value.is_object())
+        .ok_or("proposal is not a delegation")?;
+    let source = proposal_dir.join("intent.json");
+    let bytes = fs::read(&source).map_err(|error| error.to_string())?;
+    if format!("{:x}", Sha256::digest(&bytes)) != member(&summary, "intentSha256")? {
+        return Err("retained delegation intent differs from proposal digest".into());
+    }
+    let source_value: Value = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    let child = &source_value["purpose"]["draft"]["command"]["child"];
+    if member(&source_value["purpose"]["draft"], "type")? != "delegate-source"
+        || member(child, "id")? != member(delegation, "childCapability")?
+        || member(&child["holder"], "subject")? != member(delegation, "recipient")?
+        || member(&source_value["purpose"]["draft"]["command"], "kind")?
+            != member(delegation, "kind")?
+        || member(&source_value["purpose"]["draft"]["command"], "target")?
+            != member(delegation, "target")?
+    {
+        return Err("delegation reference differs from retained source command".into());
+    }
+    let attempt = fs::canonicalize(attempt).map_err(|error| error.to_string())?;
+    let attempts = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
+    if attempt.parent() != Some(attempts.as_path())
+        || !attempt.join("call.bin").is_file()
+        || fs::read(attempt.join("intent.json")).map_err(|error| error.to_string())? != bytes
+    {
+        return Err("delegation attempt lacks this exact retained proposal call".into());
+    }
+    retry(&attempt, "lookup", false)?;
+    let receipt = accepted_outcome(&attempt)?
+        .ok_or("delegation historical lookup did not confirm admission")?;
+    let value = json!({"type":"minidregg-delegated-reference-v1",
+        "recipient":member(delegation,"recipient")?,"kind":member(delegation,"kind")?,
+        "target":member(delegation,"target")?,
+        "capability":member(delegation,"childCapability")?,
+        "receipt":receipt,"proposalSha256":member(&summary,"intentSha256")?,
+        "authority":"hint-only"});
+    let path = proposal_dir.join("recipient-reference.json");
+    if path.exists() {
+        if bounded_json(&path)? != value {
+            return Err("prior delegated reference differs from exact receipt".into());
+        }
+    } else {
+        private_file(
+            &path,
+            &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
+        )?;
+    }
+    println!("{}", path.display());
+    Ok(())
 }
 
 fn complete_birth(
@@ -1027,6 +1369,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let workspace = load(&root)?;
     match action.as_str() {
         "import" => {
+            if let Some(from) = args.optional("from-ref") {
+                let name = os_string(args.required("name")?, "reference name")?;
+                args.finish()?;
+                return import_delegated(&root, &workspace, &name, &path(from));
+            }
             let name = os_string(args.required("name")?, "reference name")?;
             let kind = os_string(args.required("kind")?, "resource kind")?;
             let target = os_string(args.required("target")?, "resource target")?;
@@ -1114,6 +1461,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             recover(&root, &attempt)
         }
+        "publish-delegation" => {
+            let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            let attempt = path(args.required("attempt")?);
+            args.finish()?;
+            publish_delegation(&root, &proposal_id, &attempt)
+        }
         _ => Err(
             "workspace action must be init, import, list, describe, read, submit or recover".into(),
         ),
@@ -1189,6 +1542,114 @@ mod tests {
         assert_eq!(
             accepted_outcome(&root).unwrap().unwrap()["transactionId"],
             "3"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn field_roots_and_resource_ids_have_distinct_decimal_bounds() {
+        let root =
+            "12345678901234567890123456789012345678901234567890123456789012345678901234567890";
+        field_decimal(root, "root").unwrap();
+        assert!(decimal(root, "resource ID").is_err());
+        assert!(field_decimal("01", "root").is_err());
+    }
+
+    #[test]
+    fn delegated_reference_is_recipient_scoped_and_only_a_hint() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-delegated-reference-{}-{}",
+            std::process::id(),
+            random_nonce().unwrap()
+        ));
+        make_private_dir(&root).unwrap();
+        make_private_dir(&root.join("refs")).unwrap();
+        let path = root.join("share.json");
+        private_file(
+            &path,
+            br#"{"type":"minidregg-delegated-reference-v1",
+            "recipient":"8","kind":"object","target":"600","capability":"63",
+            "receipt":{"type":"confirmed","confirmation":"installed",
+                "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"}}"#,
+        )
+        .unwrap();
+        assert!(import_delegated(&root, &json!({"subject":"7"}), "shared", &path).is_err());
+        import_delegated(&root, &json!({"subject":"8"}), "shared", &path).unwrap();
+        let imported = reference(&root, "shared").unwrap();
+        assert_eq!(imported["observeCapability"], "63");
+        assert_eq!(imported["authority"], "hint-only");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn delegated_child_id_is_bound_to_one_exact_attempt_before_submit() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-delegate-bind-{}-{}",
+            std::process::id(),
+            random_nonce().unwrap()
+        ));
+        make_private_dir(&root).unwrap();
+        for folder in ["refs", "proposals", "attempts"] {
+            make_private_dir(&root.join(folder)).unwrap();
+        }
+        import(
+            &root,
+            ImportInput {
+                name: "shared",
+                kind: "object",
+                target: "600",
+                observe: "61",
+                operation: Some("61"),
+                control: None,
+                provenance: None,
+            },
+        )
+        .unwrap();
+        let namespace = root.join("namespace");
+        let workspace = json!({"subject":"7","namespaceRoot":namespace});
+        let proposal = root.join("proposals/to-bob");
+        make_private_dir(&proposal).unwrap();
+        let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
+            "name":"shared","recipient":"8","verbs":["observe"],"maxCost":"10"});
+        private_file(
+            &proposal.join("request.json"),
+            &serde_json::to_vec(&request).unwrap(),
+        )
+        .unwrap();
+        let reference = reference(&root, "shared").unwrap();
+        let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
+            "subject":"7"}))
+        .unwrap();
+        let reservation = participant_namespace::reserve(
+            &namespace,
+            "8501",
+            "7",
+            "delegate-to-bob",
+            &fingerprint,
+            &[Role {
+                label: "childCapability".into(),
+                kind: IdKind::Capability,
+            }],
+        )
+        .unwrap();
+        let source = proposal.join("intent.json");
+        private_file(&source, b"{\"proposal\":true}").unwrap();
+        let sha = format!("{:x}", Sha256::digest(fs::read(&source).unwrap()));
+        let summary = json!({"proposalId":"to-bob","intentSha256":sha,
+            "delegation":{"name":"shared","domain":"8501",
+                "reservation":reservation.request_digest,
+                "childCapability":reservation.ids["childCapability"]}});
+        private_file(
+            &proposal.join("proposal.json"),
+            &serde_json::to_vec(&summary).unwrap(),
+        )
+        .unwrap();
+        let first = root.join("attempts/first");
+        bind_delegation_attempt(&root, &workspace, &source, &first).unwrap();
+        bind_delegation_attempt(&root, &workspace, &source, &first).unwrap();
+        assert!(
+            bind_delegation_attempt(&root, &workspace, &source, &root.join("attempts/second"))
+                .is_err()
         );
         fs::remove_dir_all(root).unwrap();
     }

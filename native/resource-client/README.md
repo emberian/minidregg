@@ -61,7 +61,7 @@ call without submitting it.
 
 For a bounded agent proposal, `workspace --action propose --proposal-id ID
 --request REQUEST.json --dir WORKSPACE` accepts a named `invoke` or
-`install-policy` request. An `invoke` request names 1–16 local references and
+`install-policy` request, or a narrowed `delegate` request. An `invoke` request names 1–16 local references and
 supplies supported typed actions; scalar create/write keys specify only their
 local field, and content proposals support local creation actions. The client
 fills resource IDs, capabilities, current roots, subject and nonces from
@@ -79,6 +79,26 @@ promise later admission. For example:
   ]}}
 ]}
 ```
+
+A delegation request names one reference and the recipient's already admitted
+subject. The client obtains signed resource, policy and typed parent-capability
+views from the same image, checks the requested verbs and cost against the
+parent, and durably reserves a fresh child capability ID. The requested grant
+still faces current-law admission:
+
+```json
+{"type":"minidregg-workspace-proposal-v1","action":"delegate",
+ "name":"notes","recipient":"8","verbs":["observe","mutate"],
+ "maxCost":"50000"}
+```
+
+Submit its retained `proposals/ID/intent.json` through the usual workspace
+`submit --attempt` path. After an admitted receipt, `workspace --action
+publish-delegation --proposal-id ID --attempt ATTEMPT` performs exact
+historical lookup and writes `proposals/ID/recipient-reference.json`. Transfer
+that file to the recipient through an authorized channel; they can run
+`workspace --action import --name LOCAL --from-ref RECEIVED.json`. The imported
+name remains a hint; their key and current law determine every later use.
 
 Generic native resource creation uses `workspace --action create --name NAME
 --storage content|declared --predicate PREDICATE.json --dir WORKSPACE`. The

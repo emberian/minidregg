@@ -1,6 +1,15 @@
 # Mini / agent-grain handoff
 
-**Current goal, September 27 UTC:** read the suite's
+**Current direction, September 28 UTC:** build the programmable Mini resource
+world through common participant, human-client and Hermes contracts. Read the
+suite's [current handoff](https://github.com/emberian/dregg-assortia/blob/main/HANDOFF.md)
+and [bounded recovery construction mandate](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-28/recovery-construction.md).
+The September 27 [platform reorientation](https://github.com/emberian/dregg-assortia/blob/main/research/platform-reorientation-2026-09-27.md)
+supersedes the fixture-first instructions below. Application grains are instances,
+not the organizing architecture. The preserved r3 INSTALL refusal is not an
+instruction to retry it. Source/component evidence is not deployment qualification.
+
+**Historical September 27 construction goal:** read the suite's
 [SPK application platform cycle](https://github.com/emberian/dregg-assortia/blob/main/sprints/2026-09-26/spk-platform-cycle.md).
 Ember cleared the previous goal after a retrospective and requested substantially
 greater use of actual packaged apps, shared browser/API access and fn version
