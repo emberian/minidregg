@@ -33,6 +33,9 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 77=lifetime dispatch receipt-only lookup, 78=private lifetime paid plan,
 79=private lifetime paid assembly, 80=private lifetime reserve plan,
 81=private lifetime reserve assembly. Op34/46/76 success uses a distinct
+82=private session enrollment plan, 83=private detached enrollment assembly,
+84=checked session enrollment submit, 85=receipt-only enrollment lookup.
+Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
 frame boundary ends normally; truncated/oversized/unknown frames terminate.
@@ -58,6 +61,7 @@ import Kernel.ApplicationShareIssueAuthoring
 import Kernel.ApplicationShareIssueGrainAuthoring
 import Kernel.ApplicationShareIssueGrainReceiver
 import Kernel.ApplicationShareIssueGrainLookup
+import Kernel.ApplicationGrainSessionEnrollmentReceiver
 import Kernel.ApplicationAgentLifetimeGrantLookup
 import Kernel.ApplicationDispatchReceiver
 import Kernel.ApplicationDispatchLookup
@@ -96,6 +100,8 @@ import Host.ApplicationLifecycleClaimV3Inspection
 import Host.ApplicationLifecycleStopClaimInspection
 import Host.ApplicationAgentLifetimePaidIngressInspection
 import Host.ApplicationAgentLifetimeGrantInspection
+import Host.ApplicationGrainSessionEnrollmentAuthoring
+import Host.ApplicationGrainSessionEnrollmentInspection
 import Host.ApplicationLifecycleClaimOperator
 import Host.FnConsumerNamespacePlan
 import Host.FnConsumerFrontierPlan
@@ -619,6 +625,12 @@ def inspectHost (kind : String) (bytes : List UInt8) : Except String Lean.Json :
     ApplicationLifecycleClaimInspection.inspect bytes
   else if kind == "application-lifecycle-claim-committed-v3" then
     ApplicationLifecycleClaimV3Inspection.inspect bytes
+  else if kind == "application-session-enrollment-request" then
+    ApplicationGrainSessionEnrollmentInspection.inspectRequest bytes
+  else if kind == "application-session-enrollment-plan" then
+    ApplicationGrainSessionEnrollmentInspection.inspectPlan bytes
+  else if kind == "application-session-enrollment-ingress" then
+    ApplicationGrainSessionEnrollmentInspection.inspectIngress bytes
   else if kind == "fn-consumer-namespace-plan" then
     FnConsumerNamespacePlan.inspectPlanBytes bytes
   else if kind == "fn-consumer-frontier-plan" then
@@ -924,9 +936,9 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
   | .confirmed confirmed =>
       state.set (some ⟨_, confirmed.verified⟩)
       return .confirmed confirmed.confirmation confirmed.receipt
-  | .rejected _ =>
+  | .rejected detail =>
       return .refused "application-lifecycle-completion".toUTF8.toList
-        "request refused".toUTF8.toList
+        detail.toUTF8.toList
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1171,6 +1183,46 @@ def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
       return .uncertain "original grain share issue history unavailable".toUTF8.toList
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
+
+/-- Event28 reselects the original event22 ticket and admits the joint edit
+with separately signed current app, manifest and ticket reads before one CAS. -/
+def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let session ← sessionCurrent config state
+  let result ← ApplicationGrainSessionEnrollmentReceiver.receiveVerified
+    session.verified payload
+  let outcome : NativeHostCodec.Outcome ← match result with
+    | .confirmed confirmed => do
+        state.set (some ⟨_, confirmed.verified⟩)
+        pure (.confirmed confirmed.confirmation confirmed.receipt)
+    | .historical receipt => pure (.confirmed .replayed receipt)
+    | .rejected detail => pure (.refused "application-session-enrollment".toUTF8.toList
+        detail.toUTF8.toList)
+    | .transactionConflict => pure (.refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList)
+    | .contention => pure .contention
+    | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
+    | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
+  return outcome
+
+/-- Historical event28 recovery returns only the verified original receipt. -/
+def applicationSessionEnrollmentLookupSession (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (payload : List UInt8) : IO NativeHostCodec.Outcome := do
+  let some ingress := ApplicationGrainSessionEnrollmentSource.ingressCodec.decode payload
+    | return .refused "application-session-enrollment".toUTF8.toList
+        "noncanonical ingress".toUTF8.toList
+  unless ingress.canonicalBytes.toByteArray == payload.toByteArray do
+    return .refused "application-session-enrollment".toUTF8.toList
+      "noncanonical ingress".toUTF8.toList
+  let session ← sessionCurrent config state
+  match ApplicationGrainSessionEnrollmentReceiver.lookupVerified session.verified ingress with
+  | none => return .absent
+  | some (.ok receipt) => return .confirmed .replayed receipt
+  | some (.error _) =>
+      return .refused "replay".toUTF8.toList
+        "transaction identity conflict".toUTF8.toList
 
 /-- Event27 grant installation is a durable Mini receipt, never a dispatch
 permit. The receiver re-derives its original event22 ticket and exact current
@@ -4640,6 +4692,7 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-physical-signing-frame" ||
               kind == "application-lifecycle-launch-physical-signed-report" ||
               kind == "application-agent-lifetime-grant-request" ||
+              kind == "application-session-enrollment-request" ||
               kind == "application-agent-lifetime-reserve-request" ||
               kind == "application-agent-lifetime-paid-request" then
             readDispatchAuthorJson input else readJson input
@@ -4672,6 +4725,9 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-physical-signed-report" ||
               kind == "application-agent-lifetime-grant-request" ||
               kind == "application-agent-lifetime-grant-plan" ||
+              kind == "application-session-enrollment-request" ||
+              kind == "application-session-enrollment-plan" ||
+              kind == "application-session-enrollment-ingress" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4702,6 +4758,9 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-lifecycle-launch-physical-signed-report" ||
               kind == "application-agent-lifetime-grant-request" ||
               kind == "application-agent-lifetime-grant-plan" ||
+              kind == "application-session-enrollment-request" ||
+              kind == "application-session-enrollment-plan" ||
+              kind == "application-session-enrollment-ingress" ||
               kind == "application-share-issue-grain-request" ||
               kind == "application-share-issue-grain-plan" ||
               kind == "application-dispatch-plan" ||
@@ -4855,6 +4914,14 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome ← agentLifetimeGrantLookupSession
                               pinnedConfig state payload
                             return ((73 : UInt8), outcomeCodec.encode outcome)
+                        | 84 =>
+                            let outcome ← applicationSessionEnrollmentSubmitSession
+                              pinnedConfig state payload
+                            return ((84 : UInt8), outcomeCodec.encode outcome)
+                        | 85 =>
+                            let outcome ← applicationSessionEnrollmentLookupSession
+                              pinnedConfig state payload
+                            return ((85 : UInt8), outcomeCodec.encode outcome)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload
@@ -5176,6 +5243,28 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "agent lifetime grant ingress exceeds host frame bound")
                             return ((75 : UInt8), ingress)
+                        | 82 =>
+                            let session ← sessionCurrent pinnedConfig state
+                            let plan ← IO.ofExcept <|
+                              ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
+                                pinnedConfig session.verified payload
+                            let bytes := ApplicationGrainSessionEnrollmentAuthoring.planCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "session enrollment plan exceeds host frame bound")
+                            return ((82 : UInt8), bytes)
+                        | 83 =>
+                            let (planBytes, signaturesBytes) ← splitPair payload
+                            let some plan := ApplicationGrainSessionEnrollmentAuthoring.planCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical session enrollment plan")
+                            let signatures ← decodeSignatures signaturesBytes
+                            let session ← sessionCurrent pinnedConfig state
+                            let ingress ← IO.ofExcept <|
+                              ApplicationGrainSessionEnrollmentAuthoring.assembleCurrent
+                                pinnedConfig session.verified plan signatures
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "session enrollment ingress exceeds host frame bound")
+                            return ((83 : UInt8), ingress)
                         | 48 | 49 | 58 | 59 =>
                             let some custody := settings.agentDispatchFixed
                               | return ((255 : UInt8), failure "application-agent-dispatch-author"

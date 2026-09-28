@@ -26,6 +26,7 @@ import Host.ApplicationLifecycleClaimOperator
 import Host.ApplicationDispatchAgentPaidInspection
 import Host.ApplicationAgentLifetimeDispatchPaidInspection
 import Host.ApplicationShareIssueGrainInspection
+import Host.ApplicationGrainSessionEnrollmentInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ApplicationLifecycleResidentProfile
@@ -2051,6 +2052,24 @@ private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt
     failAt "$" "signed SPK descriptor or fixed bridge mapping refused"
   return descriptor.canonicalBytes
 
+/-- Encode an operator's chosen issue, role and capability selectors. -/
+private def sessionEnrollmentRequest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$"
+    ["issueIndex", "ticketResource", "packageManifest", "role",
+     "descriptorCapability", "sessionObserveCapability",
+     "descriptorObserveCapability", "manifestObserveCapability", "nonce"] json
+  let request : ApplicationGrainSessionEnrollmentSource.Request :=
+    ⟨← nat "$.issueIndex" (← field "$" "issueIndex" obj),
+     ← nat "$.ticketResource" (← field "$" "ticketResource" obj),
+     ← nat "$.packageManifest" (← field "$" "packageManifest" obj),
+     ← shareIssueRole "$.role" (← field "$" "role" obj),
+     ⟨← nat "$.descriptorCapability" (← field "$" "descriptorCapability" obj)⟩,
+     ⟨← nat "$.sessionObserveCapability" (← field "$" "sessionObserveCapability" obj)⟩,
+     ⟨← nat "$.descriptorObserveCapability" (← field "$" "descriptorObserveCapability" obj)⟩,
+     ⟨← nat "$.manifestObserveCapability" (← field "$" "manifestObserveCapability" obj)⟩,
+     ← nat "$.nonce" (← field "$" "nonce" obj)⟩
+  pure <| ApplicationGrainSessionEnrollmentSource.requestCodec.encode request
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none) : Result (List UInt8) :=
@@ -2084,6 +2103,7 @@ def author (kind : String) (json : Lean.Json)
   | "application-share-issue-request" => shareIssueRequest json
   | "application-share-issue-grain-request" => grainShareIssueRequest json
   | "application-agent-lifetime-grant-request" => agentLifetimeGrantRequest json
+  | "application-session-enrollment-request" => sessionEnrollmentRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
       let raw ← object "$" json
@@ -2702,6 +2722,12 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       ApplicationAgentLifetimeGrantInspection.inspectRequest bytes
   | "application-agent-lifetime-grant-plan" =>
       ApplicationAgentLifetimeGrantInspection.inspectPlan bytes
+  | "application-session-enrollment-request" =>
+      ApplicationGrainSessionEnrollmentInspection.inspectRequest bytes
+  | "application-session-enrollment-plan" =>
+      ApplicationGrainSessionEnrollmentInspection.inspectPlan bytes
+  | "application-session-enrollment-ingress" =>
+      ApplicationGrainSessionEnrollmentInspection.inspectIngress bytes
   | "application-dispatch-request" => dispatchRequestJson <$>
       decoded "application-dispatch-request" ApplicationDispatchAuthoring.requestCodec bytes
   | "application-agent-reserve-request" => agentPaidReserveRequestJson <$>

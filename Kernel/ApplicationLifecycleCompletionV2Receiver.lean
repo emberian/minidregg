@@ -63,8 +63,9 @@ def receiveVerified (config : Config) {target : Durable}
     (bytes : List UInt8) : IO (Result config) := do
   let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
     | return .rejected "noncanonical checked lifecycle completion ingress"
-  let .ok admitted ← NativeHostReplay.admitCompletionV2Verified old ingress
-    | return .rejected "checked lifecycle completion current/history admission refused"
+  let admitted ← match ← NativeHostReplay.admitCompletionV2Verified old ingress with
+    | .error detail => return .rejected detail
+    | .ok admitted => pure admitted
   let derived := admitted.toDerived
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) != none then
