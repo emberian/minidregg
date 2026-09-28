@@ -45,7 +45,7 @@ private def interface (value : Interface) : Json := .mkObj
 /-- Strictly decode v2 only. This is a structural view of the full canonical
 frame, not proof that a caller obtained it from a fresh-tip op26 response. -/
 def inspect (bytes : List UInt8) : Except String Json := do
-  let some value := codecV2.decode bytes
+  let some value := ApplicationLifecycleClaimProjection.codecV2.decode bytes
     | throw "noncanonical descriptor-bound lifecycle claim frame"
   unless value.valid do
     throw "descriptor-bound lifecycle claim source shape refused"
