@@ -1,0 +1,1 @@
+4a9625cfad8f564fd69b1468bdf1114b05f441abc26ec259dff67b68c5d58cec  /home/ember/build/minidregg-resource-client-18166e5-target/release/mini

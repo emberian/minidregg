@@ -1,0 +1,1 @@
+a03253d6267d248cb7c0dce0b8104c551750a903abd32e3650e9297fde2a9d62  /home/ember/build/minidregg-spk-host-9f1fded-target/release/spk-host
