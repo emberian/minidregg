@@ -186,6 +186,37 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
     match ← DurableReceiverIO.bootstrap transport ResourceBirthCodec.rootBytes built.seed with
     | .error reason => throw (IO.userError s!"native bootstrap: {reason}")
     | .ok () => pure ()
+    let host : NativeHost.Config :=
+      { hostTemplate with expectedSeed := NativeHost.seedIdentity built.seed }
+    let host := { host with storage := ⟨storeBinary, directory / "store"⟩ }
+    let host := { host with signature := ⟨verifier⟩ }
+    let initial ← match ← NativeHost.openExisting host with
+      | .error reason => throw (IO.userError s!"initial native host open: {reason}")
+      | .ok value => pure value
+    let observation : NativeObservationCodec.Intent :=
+      ⟨⟨7⟩, 70071, .query ⟨.object, cfg.deployment.factoryId, .resource⟩,
+        [⟨.object, cfg.deployment.factoryId, ⟨46⟩⟩]⟩
+    let challenge ← match NativeHost.challengeLoaded host initial
+        (NativeObservationCodec.intentCodec.encode observation) with
+      | .error reason => throw (IO.userError s!"factory observation challenge: {reason}")
+      | .ok value => pure value
+    let [observationHeader] := challenge.headers
+      | throw (IO.userError "factory observation must have one signing header")
+    let (_, observationSignature) ← sign signer 7 observationHeader
+    let signedObservation := NativeObservationCodec.signedCodec.encode
+      ⟨challenge, [observationSignature]⟩
+    let plan ← match ← NativeHost.enrollmentPlanAuthorizedLoaded host initial signedObservation
+        (ParticipantKeyEnrollment.commandCodec.encode command) with
+      | .error reason => throw (IO.userError s!"authorized enrollment plan: {reason}")
+      | .ok value => pure value
+    require "authenticated factory observation releases exact two-signature plan"
+      (plan.commandBytes == ParticipantKeyEnrollment.commandCodec.encode command &&
+       plan.possessionHeader == ParticipantKeyEnrollment.possessionFrame
+         cfg.deployment.domain profile.semantics command)
+    let wrongSponsor := { command with sponsor := ⟨8⟩ }
+    require "factory observation cannot disclose a different sponsor's plan"
+      (rejected (← NativeHost.enrollmentPlanAuthorizedLoaded host initial signedObservation
+        (ParticipantKeyEnrollment.commandCodec.encode wrongSponsor)))
     let old ← match ← DurableReceiverIO.load transport ResourceBirthCodec.rootBytes with
       | .error reason => throw (IO.userError s!"native old load: {reason}")
       | .ok value => pure value
@@ -197,10 +228,6 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
       | .error reason => throw (IO.userError s!"native current load: {reason}")
       | .ok value => pure value
     require "one retained enrollment record" (current.image.accepted.length == 1)
-    let host : NativeHost.Config :=
-      { hostTemplate with expectedSeed := NativeHost.seedIdentity built.seed }
-    let host := { host with storage := ⟨storeBinary, directory / "store"⟩ }
-    let host := { host with signature := ⟨verifier⟩ }
     let opened ← match ← NativeHost.openExisting host with
       | .error reason => throw (IO.userError s!"full native historical replay: {reason}")
       | .ok value => pure value
@@ -253,7 +280,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
         ⟨verifier⟩ transport current badPossessionBytes with
     | .transactionConflict => pure ()
     | _ => throw (IO.userError "native changed same-identity ingress was not conflict")
-  IO.println "PASS participant key enrollment: current-law sponsor and lockout, new-key possession, canonical authority post, no grants, collisions/stale root/wrong signer refuse, durable original/replay/conflict, full Host replay selects new signer but withholds ungranted control"
+  IO.println "PASS participant key enrollment: signed observation gates exact two-signature plan, current-law sponsor and lockout, new-key possession, canonical authority post, no grants, collisions/stale root/wrong signer refuse, durable original/replay/conflict, full Host replay selects new signer but withholds ungranted control"
 
 end ParticipantKeyEnrollmentProbe
 

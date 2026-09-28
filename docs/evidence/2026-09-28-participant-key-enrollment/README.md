@@ -18,6 +18,8 @@ The captured [probe.log](probe.log) reports PASS. The probe source builds
 genesis with only sponsor subject 7, admits subject 8 through the real factory
 control capability and current compiled factory law, and checks an independent
 signature by subject 8 over the exact source-authored possession frame. It
+checks that an authenticated factory observation releases the exact two-signature
+plan on the same opened image, while a mismatched sponsor is refused. It
 checks canonical installed authority equality, current key selection, and
 that no grant was minted. Existing subject, duplicate key ID, stale authority
 root and wrong proof-of-possession signer refuse. A second genesis with a
@@ -36,7 +38,7 @@ Source SHA-256 at the run:
 | `Kernel/ParticipantKeyEnrollmentReceiver.lean` | `905ff49c93d7e9df65689332efa84e1d4ad27ea53b4ee4f50586d2bc62249bf2` |
 | `Kernel/NativeHostReplay.lean` | `ed0f41efa6750b204ce477e116e4a9276ddee350a44dbd572a4798d8e09b8fcc` |
 | `Kernel/NativeHost.lean` | `11794e2fd2cb72a19d80e3f3a7790f6f955ad5969e95dad55e069bfc39922e08` |
-| `scripts/probe-participant-key-enrollment.lean` | `a7bf2e1635fefed95ca0094b53413c69aee5ee8ac1a8c5514964d41ef87838c9` |
+| `scripts/probe-participant-key-enrollment.lean` | `c2c3411e382d948dd0c5fac7fbf4a830dbd37c493cddc405623bfae2d7f4ca07` |
 
 Execution binary SHA-256:
 

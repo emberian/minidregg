@@ -1,0 +1,18 @@
+'Minidregg.Kernel.ApplicationSpkProfileProofs.package_frame_lengths_equal_compiled' depends on axioms: [propext,
+ package_frame_lengths_equal_compiled._native.native_decide.ax_1_1]
+'Minidregg.Kernel.ApplicationSpkProfileProofs.package_frames_distinct_compiled' depends on axioms: [propext,
+ package_frames_distinct_compiled._native.native_decide.ax_1_1]
+'Minidregg.Kernel.ApplicationSpkProfileProofs.package_canonical_bytes_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ package_frame_lengths_equal_compiled._native.native_decide.ax_1_1,
+ package_frames_distinct_compiled._native.native_decide.ax_1_1]
+'Minidregg.Kernel.ApplicationSpkProfileProofs.launch_frame_lengths_equal_compiled' depends on axioms: [propext,
+ launch_frame_lengths_equal_compiled._native.native_decide.ax_1_1]
+'Minidregg.Kernel.ApplicationSpkProfileProofs.launch_frames_distinct_compiled' depends on axioms: [propext,
+ launch_frames_distinct_compiled._native.native_decide.ax_1_1]
+'Minidregg.Kernel.ApplicationSpkProfileProofs.launch_canonical_bytes_injective' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ launch_frame_lengths_equal_compiled._native.native_decide.ax_1_1,
+ launch_frames_distinct_compiled._native.native_decide.ax_1_1]
