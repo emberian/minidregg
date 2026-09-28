@@ -140,7 +140,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
         [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 54 | 55 | 56 | 58
-        | 66 | 68 | 70 | 72 | 73 | 74 | 76 | 77 | 78 | 80, payload @ ..] => {
+        | 66 | 68 | 70 | 72 | 73 | 74 | 76 | 77 | 78 | 80 | 82 | 84 | 85, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
         }
         [40 | 41, payload @ ..] => !payload.is_empty() && payload.len() <= 8192,
@@ -180,7 +180,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
             plan_length > 0 && plan_length < pair.len() - 4
         }
-        [45 | 49 | 51 | 53 | 57 | 59 | 67 | 69 | 71 | 75 | 79 | 81, pair @ ..]
+        [45 | 49 | 51 | 53 | 57 | 59 | 67 | 69 | 71 | 75 | 79 | 81 | 83, pair @ ..]
             if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME =>
         {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
@@ -1026,6 +1026,30 @@ mod tests {
         assert!(!allowed_operator_operation(&[32]));
         assert!(!allowed_operator_operation(&[33, 1, 0, 0, 0, b'P']));
         assert!(!allowed_operator_operation(&[30, b'{', b'}']));
+    }
+
+    #[test]
+    fn session_enrollment_is_private_and_pair_framed() {
+        for operation in [82, 84, 85] {
+            assert!(allowed_operator_operation(&[operation, 1]));
+            assert!(!allowed_operator_operation(&[operation]));
+            assert!(!allowed_operation(&[operation, 1], true));
+        }
+        let mut pair = vec![83];
+        pair.extend_from_slice(&1u32.to_le_bytes());
+        pair.extend_from_slice(b"PS");
+        assert!(allowed_operator_operation(&pair));
+        assert!(!allowed_operation(&pair, true));
+        let mut empty_plan = pair.clone();
+        empty_plan[1..5].copy_from_slice(&0u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&empty_plan));
+        let mut missing_signatures = pair.clone();
+        missing_signatures[1..5].copy_from_slice(&2u32.to_le_bytes());
+        assert!(!allowed_operator_operation(&missing_signatures));
+        let mut oversized = vec![83];
+        oversized.extend_from_slice(&1u32.to_le_bytes());
+        oversized.resize(HOST_MAX_FRAME + 1, 1);
+        assert!(!allowed_operator_operation(&oversized));
     }
 
     #[test]

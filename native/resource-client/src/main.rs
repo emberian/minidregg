@@ -40,6 +40,8 @@ mod selected_publisher;
 #[cfg(unix)]
 mod selected_release;
 #[cfg(unix)]
+mod session_enrollment;
+#[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
@@ -160,6 +162,10 @@ usage:
   mini agent-lifetime-grant-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-lifetime-grant-submit --attempt PRIVATE-DIR
   mini agent-lifetime-grant-lookup --attempt PRIVATE-DIR
+  mini session-enrollment-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
+  mini session-enrollment-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
+  mini session-enrollment-submit --attempt PRIVATE-DIR
+  mini session-enrollment-lookup --attempt PRIVATE-DIR
   mini agent-payer-sign --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --reserve-attempt ORIGINAL-RESERVE-DIR --plan PAID-PLAN.bin --approval OPERATOR-PRIVATE-APPROVAL.json --key PAYER-SEED.bin --dir NEW-PRIVATE-DIR
   mini inspect --host HOST --config CONFIG.json [--socket SOCKET] --kind fn-inbox-resource|application-permission-schema --input VIEW.bin --output RESULT.json
   mini submit --host HOST --config CONFIG.json --intent INTENT.json [--intent-kind KIND] [--prepare-only true] --key KEY --dir ATTEMPT
@@ -2408,6 +2414,35 @@ fn run(mut args: Args) -> Result<()> {
             let directory = path(args.required("attempt")?);
             args.finish()?;
             agent_lifetime_grant::grant_lookup(&directory)
+        }
+        #[cfg(unix)]
+        "session-enrollment-plan" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let socket = path(args.required("operator-socket")?);
+            let request = path(args.required("request")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            session_enrollment::plan(&host, &config, &socket, &request, &directory)
+        }
+        #[cfg(unix)]
+        "session-enrollment-seal" => {
+            let directory = path(args.required("attempt")?);
+            let approval = path(args.required("approval")?);
+            args.finish()?;
+            session_enrollment::seal(&directory, &approval)
+        }
+        #[cfg(unix)]
+        "session-enrollment-submit" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            session_enrollment::submit(&directory)
+        }
+        #[cfg(unix)]
+        "session-enrollment-lookup" => {
+            let directory = path(args.required("attempt")?);
+            args.finish()?;
+            session_enrollment::lookup(&directory)
         }
         #[cfg(unix)]
         "agent-payer-sign" => {

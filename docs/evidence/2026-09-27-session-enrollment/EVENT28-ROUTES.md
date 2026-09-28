@@ -34,6 +34,11 @@ cb55 OLeans. `ApplicationGrainSessionEnrollmentReceiver`,
 `ApplicationLifecycleCompletionV2Receiver`, and `Host.Main` exit 0 with empty
 logs. `Host.Json` exits 0 with its pre-existing grainPolicy warnings and axiom
 reports; there are no new errors. No broad Lake build or live Store write ran.
+The portable [EnrollmentJsonProbe.lean](EnrollmentJsonProbe.lean) was run with
+`lean --run` against that same overlay and emitted the captured
+[EnrollmentJsonProbe.log](EnrollmentJsonProbe.log): 73 canonical request bytes
+passed through source author/inspect, and an unknown JSON field was
+refused. This is a wire/refusal probe, not native admission evidence.
 
 ```
 8b6d5fdf72f80af9d75abf6f049f88ff7998807780011acf675701f74b8f6df8  Kernel/ApplicationGrainSessionEnrollmentReceiver.lean

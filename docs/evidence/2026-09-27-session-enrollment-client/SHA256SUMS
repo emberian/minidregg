@@ -1,0 +1,5 @@
+5027b3e6826b438f7f9e70ea13bf4fa61f4c7bf10914c1589941af3374f3a229  native/resource-client/src/main.rs
+61482712e76906560c1193ba5db9164098684fd3b1e50d3f5dd4ccd9cff3a4cc  native/resource-client/src/session_enrollment.rs
+86005eaa1b86847d0d77520453910ecfda33783cb8bf05e8aae8b7317d3bbef9  native/resource-client/src/transport.rs
+49331baca7e05e2d5e40f07d5b6ae2348863664d25aa36295d27b71fc7407c3e  docs/evidence/2026-09-27-session-enrollment-client/nextest.log
+a370960791090e30a6b3645177b8c8c138f97b878a2347afaad5ec49a665fda5  docs/evidence/2026-09-27-session-enrollment-client/clippy.log

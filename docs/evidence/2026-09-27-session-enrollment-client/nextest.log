@@ -1,0 +1,12 @@
+Running as unit: run-p574127-i990025283.scope; invocation ID: c20e2895fab5499d820c472165635c67
+   Compiling minidregg-resource-client v0.1.0 (/home/ember/build/minidregg-event28-mini-src/native/resource-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.87s
+────────────
+ Nextest run ID e037de70-8f0c-4958-b77a-acffa3c579c9 with nextest profile: default
+    Starting 4 tests across 1 binary (102 tests skipped)
+        PASS [   0.004s] (1/4) minidregg-resource-client::bin/mini session_enrollment::tests::plan_and_ingress_must_echo_exact_source_request_and_receipt
+        PASS [   0.003s] (2/4) minidregg-resource-client::bin/mini session_enrollment::tests::receipt_requires_a_positive_canonical_accepted_count
+        PASS [   0.013s] (3/4) minidregg-resource-client::bin/mini session_enrollment::tests::lost_submit_response_never_reinvokes_op84
+        PASS [   0.026s] (4/4) minidregg-resource-client::bin/mini transport::tests::session_enrollment_is_private_and_pair_framed
+────────────
+     Summary [   0.034s] 4 tests run: 4 passed, 102 skipped

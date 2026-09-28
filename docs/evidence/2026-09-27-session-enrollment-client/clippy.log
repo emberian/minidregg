@@ -1,0 +1,3 @@
+Running as unit: run-p575371-i990026527.scope; invocation ID: b736d240b31747d0baf6c3224bb9442c
+    Checking minidregg-resource-client v0.1.0 (/home/ember/build/minidregg-event28-mini-src/native/resource-client)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.78s
