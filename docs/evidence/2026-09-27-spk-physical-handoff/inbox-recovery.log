@@ -1,0 +1,2 @@
+PASS: exact ln crash recovered; ordinary inode and digest checked; unrelated link refused
+inbox has unexplained second hardlink

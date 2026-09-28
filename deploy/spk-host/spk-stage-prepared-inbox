@@ -80,9 +80,34 @@ lock=$inbox_dir/.stage-prepared.lock
 exec 9>>"$lock"
 [[ $(stat -c '%u:%a:%h' "$lock") == 0:600:1 ]] || exit 1
 flock -n 9 || { echo 'another inbox stage is active' >&2; exit 1; }
+recover_existing_inbox() {
+  local named=$1 directory=$2 owner=$3 expected=$4 links identity match candidate
+  [[ -f $named && ! -L $named && $(stat -c '%u:%a' "$named") == "$owner:600" &&
+     $(sha256sum "$named" | cut -d ' ' -f 1) == "$expected" ]] || return 1
+  links=$(stat -c '%h' "$named")
+  if [[ $links == 2 ]]; then
+    # A crash between atomic ln(stage,inbox) and rm(stage) leaves exactly
+    # these two names. Never unlink a different or ambiguous root file.
+    identity=$(stat -c '%d:%i' "$named")
+    match=''
+    for candidate in "$directory"/.prepared.*; do
+      [[ -e $candidate || -L $candidate ]] || continue
+      if [[ -f $candidate && ! -L $candidate &&
+         $(stat -c '%d:%i' "$candidate") == "$identity" ]]; then
+        [[ -z $match && $(stat -c '%u:%a:%h' "$candidate") == "$owner:600:2" &&
+           $(sha256sum "$candidate" | cut -d ' ' -f 1) == "$expected" ]] || return 1
+        match=$candidate
+      fi
+    done
+    [[ -n $match ]] || { echo 'inbox has unexplained second hardlink' >&2; return 1; }
+    rm -- "$match"
+    sync -f "$directory"
+  fi
+  [[ $(stat -c '%u:%a:%h' "$named") == "$owner:600:1" ]]
+}
 if [[ -e $inbox || -L $inbox ]]; then
-  [[ -f $inbox && ! -L $inbox && $(stat -c '%u:%a:%h' "$inbox") == 0:600:1 &&
-     $(sha256sum "$inbox" | cut -d ' ' -f 1) == 2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa ]] || exit 1
+  recover_existing_inbox "$inbox" "$inbox_dir" 0 \
+    2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa || exit 1
   echo "inbox_existing_verified=$inbox"
   exit 0
 fi
