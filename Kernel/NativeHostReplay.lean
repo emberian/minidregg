@@ -37,6 +37,7 @@ import Kernel.ApplicationLifecycleClaimV3Core
 import Kernel.ApplicationLifecycleCompletionV2Core
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
+import Kernel.ParticipantKeyEnrollmentReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -706,6 +707,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
+  | participantKeyEnrollment {ingress : ParticipantKeyEnrollment.DecodedIngress}
+      (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1484,6 +1489,13 @@ private def derive (config : Config) (opened : Opened config)
     (bytes : List UInt8) :
     IO (Except String (Derived config opened)) := do
   let height := logicalHeight config opened.durable
+  if let some ingress := ParticipantKeyEnrollment.decodeIngress bytes then
+    match ← ParticipantKeyEnrollmentReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"participant key enrollment refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
+          .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

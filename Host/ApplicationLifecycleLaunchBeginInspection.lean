@@ -78,7 +78,7 @@ private def slotJson (slot : SigningSlot) : Json :=
 def inspectRequest (bytes : List UInt8) : Except String Json := do
   let some request := requestCodec.decode bytes
     | throw "noncanonical launch BEGIN request"
-  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical
       request.descriptorBytes
     | throw "noncanonical signed-SPK launch descriptor"
   unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
@@ -96,7 +96,7 @@ def inspectRequest (bytes : List UInt8) : Except String Json := do
 def inspectContinueRequest (bytes : List UInt8) : Except String Json := do
   let some request := continueRequestCodec.decode bytes
     | throw "noncanonical launch continue request"
-  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical
       request.descriptorBytes
     | throw "noncanonical signed-SPK launch descriptor"
   unless descriptor.valid do throw "invalid signed-SPK launch descriptor"

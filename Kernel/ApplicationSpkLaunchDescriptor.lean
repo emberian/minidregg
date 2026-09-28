@@ -93,8 +93,28 @@ def codec : LawfulCodec Descriptor :=
   NativeHostCodec.framed
     "DREGG/APPLICATION/SPK-LAUNCH-DESCRIPTOR/v2".toUTF8.toList descriptorStream
 
+def codecV3 : LawfulCodec Descriptor :=
+  NativeHostCodec.framed
+    "DREGG/APPLICATION/SPK-LAUNCH-DESCRIPTOR/v3".toUTF8.toList descriptorStream
+
+/-- A launch whose signed package uses the new API prefix profile has its own
+frame and root domain. GitWeb and web-only launch identities stay byte-exact. -/
+def Descriptor.legacyProfile (descriptor : Descriptor) : Bool :=
+  descriptor.package.legacyProfile
+
 def Descriptor.canonicalBytes (descriptor : Descriptor) : List UInt8 :=
-  codec.encode descriptor
+  if descriptor.legacyProfile then codec.encode descriptor
+  else codecV3.encode descriptor
+
+def decodeCanonical (bytes : List UInt8) : Option Descriptor :=
+  match codec.decode bytes with
+  | some descriptor =>
+      if descriptor.legacyProfile then some descriptor else none
+  | none =>
+      match codecV3.decode bytes with
+      | some descriptor =>
+          if descriptor.legacyProfile then none else some descriptor
+      | none => none
 
 def Descriptor.valid (descriptor : Descriptor) : Bool :=
   descriptor.package.valid && !descriptor.createCommands.isEmpty &&
@@ -105,7 +125,9 @@ def Descriptor.valid (descriptor : Descriptor) : Bool :=
 
 def Descriptor.root (descriptor : Descriptor) : Digest :=
   (Sp800185Cshake256.hash
-    "DREGG/APPLICATION/SPK-PACKAGE-LAUNCH-ROOT/v2".toUTF8.toList
+    (if descriptor.legacyProfile then
+      "DREGG/APPLICATION/SPK-PACKAGE-LAUNCH-ROOT/v2".toUTF8.toList
+     else "DREGG/APPLICATION/SPK-PACKAGE-LAUNCH-ROOT/v3".toUTF8.toList)
     descriptor.canonicalBytes).digest
 
 def Descriptor.matchesManifest (descriptor : Descriptor)
@@ -125,15 +147,32 @@ def Descriptor.selectedCreate (descriptor : Descriptor) (index : Nat) :
     Option Command := descriptor.createCommands[index]?
 
 theorem decode_encode (descriptor : Descriptor) :
-    codec.decode descriptor.canonicalBytes = some descriptor :=
+    codec.decode (codec.encode descriptor) = some descriptor :=
   codec.decode_encode descriptor
+
+theorem decode_encode_v3 (descriptor : Descriptor) :
+    codecV3.decode (codecV3.encode descriptor) = some descriptor :=
+  codecV3.decode_encode descriptor
 
 theorem decoded_canonical {bytes : List UInt8} {descriptor : Descriptor}
     (decoded : codec.decode bytes = some descriptor) :
-    descriptor.canonicalBytes = bytes :=
+    codec.encode descriptor = bytes :=
   NativeHostCodec.framed_canonical _ descriptorStream decoded
 
-theorem canonical_injective : Function.Injective Descriptor.canonicalBytes :=
+theorem decoded_canonical_v3 {bytes : List UInt8} {descriptor : Descriptor}
+    (decoded : codecV3.decode bytes = some descriptor) :
+    codecV3.encode descriptor = bytes :=
+  NativeHostCodec.framed_canonical _ descriptorStream decoded
+
+theorem legacy_codec_injective : Function.Injective codec.encode :=
   lawful_encode_injective codec
+
+theorem canonical_injective_v3 : Function.Injective codecV3.encode :=
+  lawful_encode_injective codecV3
+
+theorem v2_frame_refuses_new_profile (descriptor : Descriptor)
+    (newProfile : descriptor.legacyProfile = false) :
+    decodeCanonical (codec.encode descriptor) = none := by
+  simp [decodeCanonical, codec.decode_encode, newProfile]
 
 end Minidregg.Kernel.ApplicationSpkLaunchDescriptor

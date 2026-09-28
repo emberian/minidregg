@@ -1,6 +1,6 @@
 /-
-Strict source-owned JSON author/inspect for the reusable v2 signed-SPK launch
-descriptor. The physical adapter must obtain all fields from one verified SPK
+Strict source-owned JSON author/inspect for the reusable signed-SPK launch
+descriptor (legacy v2 or new API-prefix v3). The physical adapter must obtain all fields from one verified SPK
 parse and compare the complete ordered command bytes; this helper only forms
 and inspects the canonical Mini commitment. Duplicate JSON keys are refused
 by Host.Json.parse before this module is called.
@@ -90,16 +90,16 @@ private def command (path : String) (json : Json) :
   unless command.valid do throw s!"{path}: invalid signed command shape"
   pure command
 
-/-- The package bytes must already be source-authored v1 identity bytes. This
+/-- The package bytes must already be source-authored canonical identity bytes. This
 module never accepts a naked raw SHA as a package commitment. -/
 def decodeSource (json : Json) : Result Descriptor := do
   let obj ← exactObject "launchDescriptor"
     ["packageCanonicalHex", "createCommands", "continueCommand"] json
   let packageBytes ← hex "launchDescriptor.packageCanonicalHex" (1024*1024)
     (← field "launchDescriptor" "packageCanonicalHex" obj)
-  let some package := ApplicationSpkPackageIdentity.codec.decode packageBytes
-    | throw "launchDescriptor: noncanonical v1 package identity"
-  unless package.valid do throw "launchDescriptor: invalid v1 package identity"
+  let some package := ApplicationSpkPackageIdentity.decodeCanonical packageBytes
+    | throw "launchDescriptor: noncanonical package identity profile"
+  unless package.valid do throw "launchDescriptor: invalid package identity"
   let actions ← array "launchDescriptor.createCommands" 64
     (← field "launchDescriptor" "createCommands" obj)
   let mut createCommands := []
@@ -124,11 +124,13 @@ private def commandJson (command : ApplicationSpkLaunchDescriptor.Command) : Jso
       .mkObj [("keyHex", hexJson key), ("valueHex", hexJson value)])]
 
 def inspect (bytes : List UInt8) : Result Json := do
-  let some descriptor := codec.decode bytes
-    | throw "noncanonical v2 launch descriptor"
-  unless descriptor.valid do throw "invalid v2 launch descriptor"
+  let some descriptor := decodeCanonical bytes
+    | throw "noncanonical launch descriptor profile"
+  unless descriptor.valid do throw "invalid launch descriptor"
   pure <| .mkObj
-    [("type", "application-spk-launch-descriptor-v2"),
+    [("type", if descriptor.legacyProfile then
+        "application-spk-launch-descriptor-v2" else
+        "application-spk-launch-descriptor-v3"),
      ("canonical", hexJson descriptor.canonicalBytes),
      ("root", decimal descriptor.root.value),
      ("packageCanonicalHex", hexJson descriptor.package.canonicalBytes),

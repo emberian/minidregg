@@ -29,6 +29,7 @@ import Host.ApplicationShareIssueGrainInspection
 import Host.ApplicationGrainSessionEnrollmentInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
+import Kernel.ParticipantKeyEnrollment
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -1163,6 +1164,21 @@ private def birthRootCapability {kind : ResourceKind}
   { NativeHostGenesis.rootCapability profile source kind identifier owner target verbs with
     notBefore := height, notAfter := height + profile.template.lifetime }
 
+/-- Existing offline authoring retains the genesis epochs. Loaded birth
+authoring substitutes the two epochs from the same verified authority image
+used by the receiver; all other grant fields keep their source derivation. -/
+private def birthRootCapabilityAt {kind : ResourceKind}
+    (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
+    (source : NativeHostGenesis.Config) (height : Nat)
+    (authority : Option AuthState) (identifier : CapabilityId)
+    (owner : SubjectId) (target : Nat) (verbs : Finset (Verb kind)) : Capability kind :=
+  let grant := birthRootCapability profile source height identifier owner target verbs
+  match authority with
+  | none => grant
+  | some current =>
+      { grant with issuerEpoch := current.issuerEpoch profile.template.issuer
+                   policyEpoch := current.policyEpoch ⟨target⟩ }
+
 private theorem birthRootCapability_time_window {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
@@ -1175,7 +1191,8 @@ private theorem birthRootCapability_time_window {kind : ResourceKind}
 
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
-    (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json) : Result BirthParts := do
+    (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
+    (authority : Option AuthState := none) : Result BirthParts := do
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
@@ -1215,13 +1232,13 @@ private def birthParts (path : String)
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
     ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner⟩
   let ownerGrant : ResourceBirth.AuthorityGrant := match kind with
-    | .object => ⟨.object, ⟨birthRootCapability profile source height
+    | .object => ⟨.object, ⟨birthRootCapabilityAt profile source height authority
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .object), []⟩⟩
-    | .account => ⟨.account, ⟨birthRootCapability profile source height
+    | .account => ⟨.account, ⟨birthRootCapabilityAt profile source height authority
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .account), []⟩⟩
-    | .program => ⟨.program, ⟨birthRootCapability profile source height
+    | .program => ⟨.program, ⟨birthRootCapabilityAt profile source height authority
         ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program), []⟩⟩
-  let control : Capability .program := birthRootCapability profile source height
+  let control : Capability .program := birthRootCapabilityAt profile source height authority
     controlId owner target {.installPolicy, .revokeCapability}
   pure ⟨item, ownerGrant, ⟨.program, ⟨control, []⟩⟩,
     ⟨rule.policyId, PolicyRecordCodec.digest rule, PolicyRecordCodec.encode rule⟩⟩
@@ -1231,7 +1248,9 @@ absent roots, declared cells, owner/control grants, policy addresses, identity,
 nullifier and quoted fee are never supplied as JSON assertions. -/
 private def birth (path : String) (json : Lean.Json)
     (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
-    (deployed : Option NativeHost.Config := none) : Result Draft := do
+    (deployed : Option NativeHost.Config := none)
+    (currentHeight : Option Nat := none)
+    (authority : Option AuthState := none) : Result Draft := do
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
@@ -1256,8 +1275,11 @@ private def birth (path : String) (json : Lean.Json)
     else if suppliedTariff.isSome then suppliedTariff else deployed.bind (·.grainBirthTariff)
   let source ← genesis (path ++ ".genesis") (← field path "genesis" obj)
   let height ← match obj.get? "height" with
-    | none => pure source.genesisHeight
+    | none => pure (currentHeight.getD source.genesisHeight)
     | some encoded => nat (path ++ ".height") encoded
+  if let some expected := currentHeight then
+    unless height == expected do
+      throw s!"{path}.height: differs from the verified current image"
   let templateObj ← exactObject (path ++ ".template") ["issuer", "ownerBudget", "lifetime"]
     (← field path "template" obj)
   let template : CanonicalRuntimeProfile.FactoryTemplate :=
@@ -1276,7 +1298,8 @@ private def birth (path : String) (json : Lean.Json)
     throw s!"{path}.genesis.expectedSemantics: does not match the source-derived native profile"
   let creator := SubjectId.mk (← nat (path ++ ".creator") (← field path "creator" obj))
   let nonce ← nat (path ++ ".nonce") (← field path "nonce" obj)
-  let parts ← list (path ++ ".resources") (fun itemPath => birthParts itemPath profile source height)
+  let parts ← list (path ++ ".resources")
+    (fun itemPath value => birthParts itemPath profile source height value authority)
     (← field path "resources" obj)
   let movements ← list (path ++ ".funding") funding (← field path "funding" obj)
   let payer ← nat (path ++ ".feePayer") (← field path "feePayer" obj)
@@ -1292,6 +1315,22 @@ private def birth (path : String) (json : Lean.Json)
   let capabilities ← list (path ++ ".sourceCapabilities")
     (fun p value => CapabilityId.mk <$> nat p value) (← field path "sourceCapabilities" obj)
   pure (.birth ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode priced) capabilities)
+
+/-- Author an ordinary resource birth against a verifier-loaded image. The
+caller supplies its checked current height and authority state; this parser
+checks the supplied genesis against the pinned seed before using it for
+immutable deployment coordinates. Current grant epochs come only from the
+loaded authority, never from that genesis description. -/
+def birthCurrent (path : String) (json : Lean.Json)
+    (deployed : NativeHost.Config) (height : Nat) (authority : AuthState) :
+    Result Draft := do
+  let raw ← object path json
+  let source ← genesis (path ++ ".genesis") (← field path "genesis" raw)
+  let built ← (NativeHostGenesis.build deployed.profile source).mapError
+    (fun reason => s!"{path}.genesis: refused: {repr reason}")
+  unless NativeHost.seedIdentity built.seed == deployed.expectedSeed do
+    throw s!"{path}.genesis: differs from the pinned seed"
+  birth path json none (some deployed) (some height) (some authority)
 
 structure ApplicationBirthContext where
   source : NativeHostGenesis.Config
@@ -1524,13 +1563,17 @@ private def applicationSessionGrainBirthIntent (path : String) (json : Lean.Json
   grainBirthIntentFrom path "applicationSessionGrainBirth" "applicationSessionBirth" json
     (fun path source tariff => applicationSessionBirth path source tariff deployed)
 
-private def birthIntent (path : String) (json : Lean.Json)
-    (deployed : Option NativeHost.Config := none) : Result Intent := do
+def birthIntentFrom (path : String) (json : Lean.Json)
+    (authorBirth : String → Lean.Json → Result Draft) : Result Intent := do
   let obj ← exactObject path ["subject", "nonce", "birth", "grants"] json
   pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
     ← nat (path ++ ".nonce") (← field path "nonce" obj),
-    .prepare (← birth (path ++ ".birth") (← field path "birth" obj) none deployed),
+    .prepare (← authorBirth (path ++ ".birth") (← field path "birth" obj)),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
+
+private def birthIntent (path : String) (json : Lean.Json)
+    (deployed : Option NativeHost.Config := none) : Result Intent :=
+  birthIntentFrom path json (fun birthPath source => birth birthPath source none deployed)
 
 private def applicationBirthIntent (path : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none) : Result Intent := do
@@ -2052,6 +2095,23 @@ private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt
     failAt "$" "signed SPK descriptor or fixed bridge mapping refused"
   return descriptor.canonicalBytes
 
+/-- Source-owned authoring for a participant's proposed signing key. The
+sponsor capability and proof of possession are checked only by the receiving
+path; these bytes do not claim that the new key is admitted. -/
+private def participantKeyEnrollment (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["sponsor", "control", "nonce",
+    "expectedFactoryRoot", "expectedAuthorityRoot", "key"] json
+  let command : ParticipantKeyEnrollment.Command :=
+    { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
+      control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot"
+        (← field "$" "expectedFactoryRoot" obj)⟩
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩
+      key := ← keyRecord "$.key" (← field "$" "key" obj) }
+  return ParticipantKeyEnrollment.commandCodec.encode command
+
 /-- Encode an operator's chosen issue, role and capability selectors. -/
 private def sessionEnrollmentRequest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$"
@@ -2093,6 +2153,7 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-launch-completion-request" => launchCompletionOperatorRequest json
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
+  | "participant-key-enrollment" => participantKeyEnrollment json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2237,6 +2298,24 @@ private def signedHeaderJson (bytes : List UInt8) : Lean.Json :=
        ("keyId", decimal header.keyId), ("keyEpoch", decimal header.keyEpoch),
        ("algorithm", decimal header.algorithm), ("domain", hexJson header.domain),
        ("message", hexJson header.message), ("nullifier", decimal header.nullifier)]
+
+private def participantKeyRecordJson (key : KeyRecord) : Lean.Json := .mkObj
+  [("keyId", decimal key.keyId), ("keyEpoch", decimal key.keyEpoch),
+   ("algorithm", decimal key.algorithm), ("subject", decimal key.subject),
+   ("publicKey", hexJson key.publicKey),
+   ("activeFrom", decimal key.activeFrom),
+   ("activeUntil", decimal key.activeUntil), ("revoked", .bool key.revoked)]
+
+private def participantKeyCommandJson
+    (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj
+  [("type", "participant-key-enrollment-v1"),
+   ("canonical", hexJson (ParticipantKeyEnrollment.commandCodec.encode command)),
+   ("sponsor", decimal command.sponsor.value),
+   ("control", decimal command.control.value),
+   ("nonce", decimal command.nonce),
+   ("expectedFactoryRoot", decimal command.expectedFactoryRoot.value),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
+   ("key", participantKeyRecordJson command.key)]
 
 private def planJson (plan : SigningPlan) : Lean.Json := .mkObj
   [("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
@@ -2451,7 +2530,7 @@ private def residentBeginOperatorPlanJson
   let some source := ApplicationLifecycleBegin.sourceCodec.decode plan.sourceBytes
     | failAt "application-lifecycle-resident-begin-operator-plan"
         "noncanonical resident BEGIN source"
-  let some descriptor := ApplicationSpkPackageIdentity.codec.decode plan.descriptorBytes
+  let some descriptor := ApplicationSpkPackageIdentity.decodeCanonical plan.descriptorBytes
     | failAt "application-lifecycle-resident-begin-operator-plan"
         "noncanonical signed-SPK descriptor"
   let slotJson := fun (slot : SigningSlot) => .mkObj
@@ -2529,7 +2608,9 @@ private def applicationSpkPackageIdentityJson
      ("schemaRoot", decimal interface.schema.root.value),
      ("schema", hexJson <| ApplicationPermissionSchema.schemaCodec.encode interface.schema)]
   pure <| .mkObj
-    [("type", "application-spk-package-identity-v1"),
+    [("type", if descriptor.legacyProfile then
+        "application-spk-package-identity-v1" else
+        "application-spk-package-identity-v2"),
      ("canonical", hexJson descriptor.canonicalBytes),
      ("root", decimal descriptor.root.value),
      ("imageIdentity", hexJson descriptor.imageIdentity),
@@ -2790,11 +2871,41 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ApplicationLifecycleClaimOperator.planCodec bytes
       lifecycleClaimOperatorPlanJson plan
   | "application-spk-package-identity" => do
-      let descriptor ← decoded "application-spk-package-identity"
-        ApplicationSpkPackageIdentity.codec bytes
+      let some descriptor := ApplicationSpkPackageIdentity.decodeCanonical bytes
+        | failAt "application-spk-package-identity" "noncanonical package identity profile"
       applicationSpkPackageIdentityJson descriptor
   | "application-spk-launch-descriptor" =>
       ApplicationSpkLaunchDescriptorAuthoring.inspect bytes
+  | "participant-key-enrollment" => do
+      let command ← decoded "participant-key-enrollment"
+        ParticipantKeyEnrollment.commandCodec bytes
+      pure (participantKeyCommandJson command)
+  | "participant-key-enrollment-plan" => do
+      let plan ← decoded "participant-key-enrollment-plan"
+        ParticipantKeyEnrollment.signingPlanCodec bytes
+      let some command := ParticipantKeyEnrollment.commandCodec.decode plan.commandBytes
+        | failAt "participant-key-enrollment-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "participant-key-enrollment-plan-v1"),
+         ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value),
+         ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("command", participantKeyCommandJson command),
+         ("sponsorHeader", signedHeaderJson plan.sponsorHeader),
+         ("possessionHeader", hexJson plan.possessionHeader)]
+  | "participant-key-enrollment-ingress" => do
+      let some parsed := ParticipantKeyEnrollment.decodeIngress bytes
+        | failAt "participant-key-enrollment-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "participant-key-enrollment-ingress-v1"),
+         ("canonical", hexJson bytes),
+         ("commandBytes", hexJson parsed.ingress.commandBytes),
+         ("command", participantKeyCommandJson parsed.command),
+         ("sponsorEnvelope", hexJson parsed.ingress.sponsorEnvelope),
+         ("possessionSignature", hexJson parsed.ingress.possessionSignature),
+         ("possessionSignatureLength", decimal parsed.ingress.possessionSignature.length),
+         ("signatureVerified", .bool false)]
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"

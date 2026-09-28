@@ -90,7 +90,7 @@ def prepareVerified (config : Config) {target : Durable}
     (request : Request) : Except String Plan := do
   unless request.kind == .install || request.kind == .start do
     throw "resident BEGIN plan supports INSTALL or START only"
-  let some descriptor := ApplicationSpkPackageIdentity.codec.decode request.descriptorBytes
+  let some descriptor := ApplicationSpkPackageIdentity.decodeCanonical request.descriptorBytes
     | throw "noncanonical signed-SPK descriptor"
   unless descriptor.valid do throw "invalid signed-SPK descriptor"
   let opened := verified.opened
@@ -193,7 +193,7 @@ def assemble (plan : Plan) (signatures : List (List UInt8)) :
     | _ => throw "resident BEGIN plan is not an invocation"
   let some source := ApplicationLifecycleBegin.sourceCodec.decode plan.sourceBytes
     | throw "noncanonical resident BEGIN plan source"
-  let some descriptor := ApplicationSpkPackageIdentity.codec.decode plan.descriptorBytes
+  let some descriptor := ApplicationSpkPackageIdentity.decodeCanonical plan.descriptorBytes
     | throw "noncanonical resident BEGIN plan descriptor"
   unless source.valid &&
       source.imageIdentity == descriptor.imageIdentity &&

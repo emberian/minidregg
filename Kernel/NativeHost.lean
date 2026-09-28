@@ -158,6 +158,72 @@ def prepareInternal (config : Config) (bytes : List UInt8) : IO (Except String S
       | .error detail => return .error detail
       | .ok opened => return prepareLoaded config opened draft
 
+/-- Source-authored enrollment plan on one verified image. The sponsor slot is
+the ordinary current-authority SignedHeader; the second slot is the exact raw
+proof-of-possession frame for the proposed new key. -/
+def enrollmentPlanLoaded (config : Config) (opened : Opened config)
+    (commandBytes : List UInt8) : Except String ParticipantKeyEnrollment.SigningPlan := do
+  let command ← need "noncanonical participant enrollment command"
+    (ParticipantKeyEnrollment.commandCodec.decode commandBytes)
+  let ambient : ParticipantKeyEnrollment.Ambient :=
+    ⟨config.federation, logicalHeight config opened.durable⟩
+  let prepared ← (ParticipantKeyEnrollment.prepare config.deployment config.profile ambient
+    opened.durable command).mapError (fun reason => s!"enrollment preparation: {repr reason}")
+  let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
+    (ParticipantKeyEnrollment.marker config.deployment.domain config.profile.semantics command)
+    ⟨.program, ParticipantKeyEnrollment.request config.deployment prepared.authority.snapshot
+      config.profile.semantics ambient command⟩).mapError
+        (fun reason => s!"enrollment sponsor key: {repr reason}")
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode selected,
+    ParticipantKeyEnrollment.possessionFrame config.deployment.domain
+      config.profile.semantics command⟩
+
+def enrollmentPlanAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes commandBytes : List UInt8) :
+    IO (Except String ParticipantKeyEnrollment.SigningPlan) := do
+  let some command := ParticipantKeyEnrollment.commandCodec.decode commandBytes
+    | return .error "enrollment observation refused"
+  let some signed := NativeObservationCodec.signedCodec.decode signedObservationBytes
+    | return .error "enrollment observation refused"
+  if signed.challenge.intent.subject != command.sponsor then
+    return .error "enrollment observation refused"
+  match signed.challenge.intent.purpose with
+  | .query query =>
+      if query.kind != .object || query.target != config.deployment.factoryId ||
+          query.view != .resource then
+        return .error "enrollment observation refused"
+  | .prepare _ => return .error "enrollment observation refused"
+  match ← NativeObservationController.authorize config.signature
+      ⟨opened.directory, opened.authority⟩ config.profile config.federation
+      config.genesisHeight signed with
+  | .error _ => return .error "enrollment observation refused"
+  | .ok _ => return enrollmentPlanLoaded config opened commandBytes
+
+def enrollmentPlan (config : Config) (signedObservationBytes commandBytes : List UInt8) :
+    IO (Except String ParticipantKeyEnrollment.SigningPlan) := do
+  match ← openExisting config with
+  | .error _ => return .error "enrollment observation refused"
+  | .ok opened =>
+      enrollmentPlanAuthorizedLoaded config opened signedObservationBytes commandBytes
+
+/-- Assembly transports two detached signatures. Native submission rechecks
+both, the current factory law, exact old state and fresh subject. -/
+def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
+    (sponsorSignature possessionSignature : List UInt8) : Except String (List UInt8) := do
+  check (decide (sponsorSignature.length = 64)) "sponsor signature must be 64 bytes"
+  check (decide (possessionSignature.length = 64)) "possession signature must be 64 bytes"
+  let header ← need "noncanonical enrollment sponsor header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader)
+  let command ← need "noncanonical enrollment plan command"
+    (ParticipantKeyEnrollment.commandCodec.decode plan.commandBytes)
+  check (decide (plan.possessionHeader = ParticipantKeyEnrollment.possessionFrame
+    plan.domain plan.semantics command)) "enrollment possession frame differs"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode
+    ⟨header, sponsorSignature⟩
+  pure (ParticipantKeyEnrollment.ingressCodec.encode
+    ⟨plan.commandBytes, envelope, possessionSignature⟩)
+
 def observationContext (config : Config) (opened : Opened config) :
     NativeObservationController.Context config.deployment opened.durable :=
   ⟨opened.directory, opened.authority⟩
@@ -331,6 +397,44 @@ private def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
       match historicalReceipt config opened.durable transactionId eventId with
       | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
       | some receipt => return .confirmed kind receipt
+
+def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← ParticipantKeyEnrollmentReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
+      config.storage.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused "enroll-key" s!"{repr reason}"
+  | .transactionConflict => return refused "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+def enrollmentSubmit (config : Config) (bytes : List UInt8) : IO Outcome := do
+  match ← openExisting config with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok opened => enrollmentSubmitLoaded config opened bytes
+
+/-- Receipt-only historical lookup. Absence never submits fresh work. -/
+def enrollmentLookupLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : Outcome :=
+  match ParticipantKeyEnrollment.decodeIngress bytes with
+  | none => refused "enroll-key" "noncanonical signed ingress"
+  | some ingress =>
+    match ParticipantKeyEnrollmentReceiver.replay config.deployment.domain
+        config.profile.semantics opened.durable ingress with
+    | some (.ok receipt) =>
+        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+        | some original => .confirmed .replayed original
+        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | some (.error _) => refused "replay" "transaction identity conflict"
+    | none => .absent
+
+def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
+  match ← openExisting config with
+  | .error detail => return .unavailable detail.toUTF8.toList
+  | .ok opened => return enrollmentLookupLoaded config opened bytes
 
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do

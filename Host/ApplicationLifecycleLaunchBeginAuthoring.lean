@@ -287,7 +287,7 @@ def prepareVerified (config : Config) {target : Durable}
     (request : Request) : Except String Plan := do
   if request.kind == .stop then
     throw "STOP requires the versioned running-witness operator plan"
-  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical
       request.descriptorBytes
     | throw "noncanonical signed-SPK launch descriptor"
   unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
@@ -303,7 +303,7 @@ def prepareStopVerified (config : Config) {target : Durable}
     (request : Request) : Except String StopPlan := do
   unless request.kind == .stop && request.createIndex == none do
     throw "versioned STOP plan requires STOP without create action"
-  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical
       request.descriptorBytes
     | throw "noncanonical signed-SPK launch descriptor"
   unless descriptor.valid do throw "invalid signed-SPK launch descriptor"
@@ -339,7 +339,7 @@ def prepareContinueRequestVerified (config : Config) {target : Durable}
     (bytes : List UInt8) : IO (Except String Plan) := do
   let some request := continueRequestCodec.decode bytes
     | return .error "noncanonical launch continue operator request"
-  let some descriptor := ApplicationSpkLaunchDescriptor.codec.decode
+  let some descriptor := ApplicationSpkLaunchDescriptor.decodeCanonical
       request.descriptorBytes
     | return .error "noncanonical signed-SPK launch descriptor"
   unless descriptor.valid do return .error "invalid signed-SPK launch descriptor"
