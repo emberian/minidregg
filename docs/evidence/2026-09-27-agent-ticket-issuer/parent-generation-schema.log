@@ -1,0 +1,4 @@
+event22 candidate staged at /home/hbox/mini-agent-ticket-schema-r1/stage11; review preview before approval
+schema-only PASS: exact source-current parent task/generation joined to original agent ticket
+agent ticket: preview differs from source request
+schema-only PASS: changed source-current parent generation refused before native op56

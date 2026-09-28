@@ -8,6 +8,9 @@ single source-inspected API interface. The ticket's package, interface and
 schema roots and versions therefore come from the qualified SPK, rather than
 the historical web-ticket example. An explicit operator policy selects a
 non-obsolete signed role and records its exact permission list.
+The source-current grain plan's parent task and generation must equal the
+ticket's original agent origin. A changed source parent is refused before
+Mini op56; `parent-generation-schema.log` records the focused schema fixture.
 
 Host authors the request and previews current signing slots. The operator
 approval pins those exact slots and protected signer keys. Mini op56/57 then

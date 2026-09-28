@@ -238,6 +238,13 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
     .request.canonicalSpec == $request[0].canonicalSpec and
     .request.spec.ticket.resource ==
       ($allocation[0].agents[] | select(.route == $route) | .ticket) and
+    .request.spec.ticket.participant.origin.type == "agent" and
+    .request.spec.ticket.participant.origin.task ==
+      ($allocation[0].agents[] | select(.route == $route) | .controller.task) and
+    .finalizedGrainBirth.parent.task ==
+      .request.spec.ticket.participant.origin.task and
+    .finalizedGrainBirth.parent.before.generation ==
+      .request.spec.ticket.participant.origin.generation and
     (.slots | type == "array" and length > 0) and
     .finalizedGrainBirth.tool.before.reserved != null
     ' "$DIR/preview-plan.json" >/dev/null || fail "preview differs from source request"
