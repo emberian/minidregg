@@ -97,7 +97,8 @@ for route in bob-web alice-api hermes-a hermes-b; do
 done
 query additional-session-tool-after 8 7902 81 \
   "$EVIDENCE/workroom/tool.key" 49000
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "0" and
+# Settling the final hard reservation returns the attached tool to status 1.
+jq -e '.page.grain.status == "1" and .page.grain.reserved == "0" and
   (.page.grain.remaining | tonumber > 0)' \
   "$EVIDENCE/additional-session-tool-after/view.json" >/dev/null
 jq -s '{type:"mini-spk-additional-session-births-v1",sessions:.}' \

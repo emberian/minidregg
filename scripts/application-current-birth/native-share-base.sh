@@ -256,7 +256,15 @@ jq '.applicationGrainBirth.applicationBirth =
         packageOwnerCapability:"143",packageControlCapability:"144",
         snapshotOwnerCapability:"145",snapshotControlCapability:"146"}}) |
     del(.applicationGrainBirth.source)' "$EVIDENCE/app-base.json" >"$EVIDENCE/app-source.json"
-OLD_HEIGHT=$(jq -er '.height' "$EVIDENCE/workroom/worker-bare-post/challenge.json")
+if [ -s "$EVIDENCE/workroom/worker-bare-post/challenge.json" ]; then
+  OLD_CHALLENGE="$EVIDENCE/workroom/worker-bare-post/challenge.json"
+elif [ -s "$EVIDENCE/workroom/tool-born/challenge.json" ]; then
+  # The integrated workroom has no direct-fixture worker-bare-post query.
+  OLD_CHALLENGE="$EVIDENCE/workroom/tool-born/challenge.json"
+else
+  echo "retained pre-birth signed challenge absent" >&2; exit 1
+fi
+OLD_HEIGHT=$(jq -er '.height' "$OLD_CHALLENGE")
 jq -e --arg old "$OLD_HEIGHT" '.height != $old' \
   "$EVIDENCE/app-tool/challenge.json" >/dev/null
 jq --arg height "$OLD_HEIGHT" '.applicationGrainBirth.applicationBirth.height=$height' \
