@@ -185,6 +185,114 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
 }
 
 #[test]
+fn workspace_recovery_releases_only_verified_prepare_refusal() {
+    let (mut runtime, root) = fixture(false, false, true);
+    let mini = fs::read_to_string(&runtime.config.mini)
+        .unwrap()
+        .replace("\"reserved\":\"3\"", "\"reserved\":\"0\"");
+    fs::write(&runtime.config.mini, mini).unwrap();
+    let workspace = runtime.config.state_dir.join("resource-workspace");
+    for path in [
+        workspace.clone(),
+        workspace.join("refs"),
+        workspace.join("sources"),
+        workspace.join("attempts"),
+        workspace.join("proposals"),
+    ] {
+        fs::create_dir(&path).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let tool = runtime.config.tool_task.as_mut().unwrap();
+    tool.resource_workspace = Some(workspace.clone());
+    let record = json!({"type":"minidregg-participant-workspace-v1",
+        "host":runtime.config.host,"config":runtime.config.host_config,
+        "key":tool.custody_key,"subject":tool.subject,"socket":runtime.config.host_socket,
+        "birthContext":null,"namespaceRoot":null});
+    fs::write(
+        workspace.join("workspace.json"),
+        serde_json::to_vec(&record).unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(
+        workspace.join("workspace.json"),
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
+    let proposal_dir = workspace.join("proposals").join("1");
+    fs::create_dir(&proposal_dir).unwrap();
+    let source = b"{\"type\": \"settle\", \"target\": \"7003\"}";
+    fs::write(proposal_dir.join("intent.json"), source).unwrap();
+    let request = b"{\"type\":\"minidregg-workspace-proposal-v1\"}";
+    fs::write(
+        runtime
+            .config
+            .state_dir
+            .join("workspace-proposal-0000000000000001.json"),
+        request,
+    )
+    .unwrap();
+    let attempt = workspace.join("attempts").join("2");
+    let source_path = root.join("workspace-source.json");
+    fs::write(&source_path, source).unwrap();
+    let status = Command::new(&runtime.config.mini)
+        .arg("submit")
+        .arg("--host")
+        .arg(&runtime.config.host)
+        .arg("--config")
+        .arg(&runtime.config.host_config)
+        .arg("--socket")
+        .arg(runtime.config.host_socket.as_ref().unwrap())
+        .arg("--intent")
+        .arg(&source_path)
+        .arg("--dir")
+        .arg(&attempt)
+        .status()
+        .unwrap();
+    assert!(!status.success());
+    fs::set_permissions(&attempt, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(attempt.join("intent.json"), source).unwrap();
+    let make_pending = |runtime: &mut Runtime| {
+        runtime.journal.next_operation_id = 3;
+        runtime.journal.workspace_proposals = vec![WorkspaceProposal {
+            id: 1,
+            request_sha256: sha256_bytes(request).unwrap(),
+            intent_sha256: sha256_bytes(source).unwrap(),
+            submitted: true,
+        }];
+        runtime.journal.workspace_attempt = Some(WorkspaceAttempt {
+            operation_id: 2,
+            proposal_id: 1,
+            intent_sha256: sha256_bytes(source).unwrap(),
+            attempt: attempt.clone(),
+            definite: false,
+            no_submit: false,
+        });
+        runtime.save().unwrap();
+    };
+    make_pending(&mut runtime);
+    let refusal = runtime.workspace_recover_operation(2, true).unwrap();
+    assert_eq!(refusal["outcome"]["type"], "refused");
+    assert_eq!(refusal["toolCharge"], "0");
+    assert!(runtime.journal.workspace_attempt.is_none());
+
+    make_pending(&mut runtime);
+    let marker = attempt.join("pre-submit-refusal.json");
+    let exact_marker = fs::read(&marker).unwrap();
+    fs::remove_file(&marker).unwrap();
+    assert!(runtime.workspace_recover_operation(2, true).is_err());
+    assert!(runtime.journal.workspace_attempt.is_some());
+    fs::write(&marker, &exact_marker).unwrap();
+    fs::write(
+        attempt.join("signed-observation.bin"),
+        b"changed after prepare",
+    )
+    .unwrap();
+    assert!(runtime.workspace_recover_operation(2, true).is_err());
+    assert!(runtime.journal.workspace_attempt.is_some());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn foreground_status_uses_signed_parent_lease_without_a_hermes_child() {
     let (mut runtime, root) = fixture(false, false, false);
     let original = fs::read_to_string(&runtime.config.mini).unwrap();
