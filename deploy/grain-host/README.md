@@ -24,9 +24,18 @@ Example fixed runtime command (the operator chooses paths and amounts):
 {"name":"hermes-acp", "program":"/opt/mini/deploy/grain-host/bwrap",
  "args":["--workspace","/srv/mini/grains/7001/work",
          "--runtime-root","/opt/hermes/runtime",
-         "--network","host","--","/agent/hermes-acp"],
+         "--network","none","--","/agent/hermes-acp"],
 "systemdScope":true,"reserve":"10000","charge":"10000"}
 ```
+
+The hosted Hermes preview keeps the worker network isolated. Model requests
+use the mounted provider bridge, whose controller checks the signed Mini
+provider task and budget; the worker does not receive the provider credential.
+The example above describes worker launch only, not a complete provider
+configuration. On hbox, the [qualified upstream startup](../../docs/evidence/2026-09-27-hermes-upstream-hbox/README.md)
+uses a dedicated root-owned bubblewrap executable and AppArmor profile because
+the generic executable cannot create the required namespaces under that
+host's policy. That evidence covers confined ACP startup, not a model prompt.
 
 Compile `launch-gate.rs` on the Linux host with
 `rustc --edition=2021 launch-gate.rs -o launch-gate` and install it beside
