@@ -4,6 +4,7 @@ grain-backed share request and detached signing plan. Neither JSON nor a
 decoded signing header is native admission or signer authority.
 -/
 import Kernel.ApplicationShareIssueGrainAuthoring
+import Kernel.ApplicationAgentLifetimeGrant
 import Lean.Data.Json
 
 namespace Minidregg.Host.ApplicationShareIssueGrainInspection
@@ -41,6 +42,7 @@ private def ticketJson (ticket : ApplicationDispatchAuthority.Ticket) : Json :=
          ("generation", signed generation)]
   .mkObj
     [("canonicalTicket", hex <| ApplicationDispatchAuthority.ticketCodec.encode ticket),
+     ("ticketDigest", decimal (ApplicationAgentLifetimeGrant.ticketDigest ticket).value),
      ("resource", decimal ticket.resource),
      ("issueNonce", decimal ticket.issueNonce),
      ("scope", .mkObj

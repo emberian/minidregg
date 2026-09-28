@@ -144,6 +144,12 @@ private def inspectAcceptedVerified {config : NativeHost.Config}
 
 def inspectAcceptedCurrent (config : NativeHost.Config) (bytes : List UInt8) :
     IO (Except String Json) := do
+  -- Reject malformed input before opening and replaying a potentially large
+  -- history. The verified lookup below still selects the accepted original.
+  let some ingress := ApplicationAgentLifetimeGrantSource.ingressCodec.decode bytes
+    | return .error "noncanonical agent lifetime grant ingress"
+  unless ingress.canonicalBytes.toByteArray == bytes.toByteArray do
+    return .error "noncanonical agent lifetime grant ingress"
   match ← NativeHost.openExisting config with
   | .error detail => return .error detail
   | .ok opened =>
