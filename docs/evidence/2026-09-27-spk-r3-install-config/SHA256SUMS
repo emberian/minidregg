@@ -1,0 +1,10 @@
+3e698a5cfd1a630d93f0682e67d526d87a9f086dfba6388b0bad0f7896f4e784  scripts/spk-platform/journey.sh
+5a8a82f8b6f1a6e916a20124b385f7eb23f4e9455a1ee704e30cedcbedeb2bf7  scripts/spk-platform/prepare-install-config.sh
+a8c60d6cee705cc05a7bbc1a13edcd0e154502243382c84291cbba62200fbdac  scripts/spk-platform/install-config-scope.jq
+c5cbe270a55f8f0bbc55a845bb91600fc36f922bf45deb5ea912ef9d56b6ef89  scripts/spk-platform/tests/install-config-scope.sh
+3f7ac2baf47f5c63015dbff4f9e7057114c2af3fa13b02fe7e078aeeab4722ce  scripts/spk-platform/tests/install-config-resume.sh
+5483b725e19d9869fce20b2c9ff363fc057011ddee0f9923df0692b7a5663e1d  deploy/spk-host/spk-publish-host-identity
+9e9f0744abb0f7b55c09473e50cb337ecffcce2524e6426ab98042d0ea483de4  docs/evidence/2026-09-27-spk-r3-install-config/README.md
+a4b5e84fcb52080387164f663109d309503b19d421199aa831f971e6531804ac  docs/evidence/2026-09-27-spk-r3-install-config/scope.log
+dfdc8d0bc8a5e9ee858a5b5026852f38fad1350d8e6da85a199474172489b8b1  docs/evidence/2026-09-27-spk-r3-install-config/resume.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-r3-install-config/shellcheck.log

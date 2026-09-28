@@ -9,7 +9,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: journey.sh status ROOT
        journey.sh resume-base ROOT ORIGINAL_HOST CONTINUATION_HOST MINI STORE_HELPER SIGNATURE_HELPER SPK_HOST ORIGINAL_SUBMIT_RECEIPT REPLAYED_LOOKUP_RECEIPT PINNED_RUN_BASE_SOURCE
-       journey.sh prepare-install ROOT QUALIFIED_HOST HOST_SHA256 OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL
+       journey.sh prepare-install ROOT QUALIFIED_HOST HOST_SHA256 OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL OPERATOR_CONFIG CONFIG_SHA256
        journey.sh install-prepare ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
        journey.sh materialize-request ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
        journey.sh adopt-materialized ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
@@ -144,8 +144,14 @@ case "$ACTION" in
     base=false; if base_ready; then base=true; fi
     install=none; resident=none
     if [ -d "$JOURNEY" ]; then
-      if [ -s "$JOURNEY/prepare-install-0001/install-path.txt" ]; then
-        install_path=$(cat "$JOURNEY/prepare-install-0001/install-path.txt")
+      prepare_path=''
+      for candidate in "$JOURNEY"/prepare-install-????; do
+        [ -s "$candidate/complete.txt" ] || continue
+        [ -z "$prepare_path" ] || fail "multiple completed INSTALL preparations"
+        prepare_path=$candidate
+      done
+      if [ -n "$prepare_path" ] && [ -s "$prepare_path/install-path.txt" ]; then
+        install_path=$(cat "$prepare_path/install-path.txt")
         if [ -s "$install_path/install-completed-v2.json" ]; then install=completed
         elif [ -s "$install_path/install-prepared-v2.json" ]; then install=prepared
         else install=attempted; fi
@@ -177,21 +183,37 @@ case "$ACTION" in
     /bin/sh "$HERE/resume-base.sh" "$ROOT" "$@"
     ;;
   prepare-install)
-    [ "$#" -eq 6 ] || usage
+    [ "$#" -eq 8 ] || usage
     base_ready || fail "same-Store base receipt/handoff incomplete"
     qualified_host=$1 host_sha=$2 socket=$3 app_uid=$4 image_dir=$5 install_dir=$6
-    for path in "$qualified_host" "$socket" "$image_dir" "$install_dir"; do absolute "$path"; done
+    operator_config=$7 config_sha=$8
+    for path in "$qualified_host" "$socket" "$image_dir" "$install_dir" \
+        "$operator_config"; do absolute "$path"; done
     [ ! -e "$install_dir" ] || fail "INSTALL journal already exists"
     [ "$(sha "$qualified_host")" = "$host_sha" ] || fail "qualified Host pin differs"
-    claim prepare-install-0001
+    [ "$(sha "$operator_config")" = "$config_sha" ] ||
+      fail "operator config differs from explicit pin"
+    claim_readonly prepare-install
     printf '%s\n' "$install_dir" >"$STEP/install-path.txt"
+    jq -n --arg path "$operator_config" --arg sha "$config_sha" '
+      {protocol:"mini-spk-install-config-selection-v1",path:$path,sha256:$sha}
+      ' >"$STEP/operator-config-selection.json"
+    chmod 600 "$STEP/operator-config-selection.json"
     sha256sum "$qualified_host" "$BASE_RECEIPT" "$HANDOFF" \
-      "$HERE/prepare-install-config.sh" >"$STEP/input-sha256.txt"
+      "$operator_config" "$STEP/operator-config-selection.json" \
+      "$HERE/prepare-install-config.sh" "$HERE/install-config-scope.jq" \
+      >"$STEP/input-sha256.txt"
     QUALIFIED_INSTALL_HOST_SHA256=$host_sha \
       /bin/sh "$HERE/prepare-install-config.sh" "$ROOT" "$qualified_host" \
       "$socket" "$app_uid" "$image_dir" "$install_dir" \
+      "$operator_config" "$config_sha" "$STEP" \
       >"$STEP/stdout" 2>"$STEP/stderr"
     [ -s "$install_dir/install.json" ] || fail "INSTALL config absent"
+    jq -e --slurpfile selected "$STEP/operator-config-selection.json" '
+      .miniConfig == $selected[0].path and
+      .miniConfigSha256 == $selected[0].sha256
+      ' "$install_dir/install.json" >/dev/null ||
+      fail "INSTALL selected a different operator config"
     sha256sum -c "$STEP/input-sha256.txt" >"$STEP/input-postcheck.txt"
     finish
     ;;
@@ -202,8 +224,20 @@ case "$ACTION" in
     absolute "$spk_host"; absolute "$install_dir"
     [ "$(sha "$spk_host")" = "$spk_sha" ] || fail "physical Host pin differs"
     [ -s "$install_dir/install.json" ] || fail "INSTALL config absent"
-    [ "$(jq -er .miniConfig "$install_dir/install.json")" = \
-      "$ROOT/base/workroom/deployment/pinned-config.json" ] || fail "INSTALL names another Store"
+    preparation=$(selected_action prepare-install)
+    [ "$(cat "$preparation/install-path.txt")" = "$install_dir" ] ||
+      fail "INSTALL journal differs from completed preparation"
+    selected="$preparation/operator-config-selection.json"
+    [ -s "$selected" ] ||
+      fail "explicit operator config selection absent"
+    sha256sum -c "$preparation/input-sha256.txt" >/dev/null ||
+      fail "INSTALL config selection inputs changed"
+    jq -e --slurpfile selected "$selected" '
+      $selected[0].protocol == "mini-spk-install-config-selection-v1" and
+      .miniConfig == $selected[0].path and
+      .miniConfigSha256 == $selected[0].sha256
+      ' "$install_dir/install.json" >/dev/null ||
+      fail "INSTALL config differs from selected broker config"
     if [ "$ACTION" = install-prepare ]; then
       [ ! -e "$install_dir/install-prepared-v2.json" ] || fail "INSTALL already prepared"
       name='install-prepare-0001'

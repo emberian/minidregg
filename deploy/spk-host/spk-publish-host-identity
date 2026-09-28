@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Publish only the nonsecret stable host/deployment IDs for the operator's
+# source-bound INSTALL plan. The canonical root:0600 registration stays in /etc.
+set -euo pipefail
+umask 077
+(( $# == 0 && EUID == 0 )) || {
+  echo 'usage (as root): spk-publish-host-identity' >&2; exit 2;
+}
+identity=/etc/minidregg/spk/host-identity
+published=/run/minidregg/spk/host-identity.public
+for directory in /etc /etc/minidregg /etc/minidregg/spk; do
+  [[ -d $directory && ! -L $directory && $(stat -c '%u' "$directory") == 0 ]] || exit 1
+  mode=$(stat -c '%a' "$directory")
+  (( (8#$mode & 8#022) == 0 )) || exit 1
+done
+[[ -f $identity && ! -L $identity &&
+   $(stat -c '%u:%a:%h' "$identity") == 0:600:1 ]] || {
+  echo 'canonical root host identity absent or unprotected' >&2; exit 1;
+}
+before=$(stat -c '%d:%i:%s:%Y:%Z' "$identity")
+mapfile -t lines <"$identity"
+[[ ${#lines[@]} == 2 &&
+   ${lines[0]} =~ ^deployment_id=([0-9a-f]{64})$ ]] || exit 1
+deployment=${BASH_REMATCH[1]}
+[[ ${lines[1]} =~ ^host_id=([0-9a-f]{64})$ ]] || exit 1
+host=${BASH_REMATCH[1]}
+[[ $deployment != "$host" &&
+   $(stat -c '%d:%i:%s:%Y:%Z' "$identity") == "$before" ]] || exit 1
+[[ -d /run && ! -L /run && $(stat -c '%u:%a' /run) == 0:755 ]] || exit 1
+if [[ ! -e /run/minidregg && ! -L /run/minidregg ]]; then
+  install -d -o root -g root -m 755 /run/minidregg
+  sync -f /run
+fi
+[[ -d /run/minidregg && ! -L /run/minidregg &&
+   $(stat -c '%u:%a' /run/minidregg) == 0:755 ]] || exit 1
+if [[ ! -e /run/minidregg/spk && ! -L /run/minidregg/spk ]]; then
+  install -d -o root -g root -m 755 /run/minidregg/spk
+  sync -f /run/minidregg
+fi
+for directory in /run /run/minidregg /run/minidregg/spk; do
+  [[ -d $directory && ! -L $directory && $(stat -c '%u' "$directory") == 0 ]] || exit 1
+  mode=$(stat -c '%a' "$directory")
+  (( (8#$mode & 8#022) == 0 )) || exit 1
+done
+stage=$(mktemp /run/minidregg/spk/.host-identity.XXXXXXXX)
+trap 'rm -f -- "$stage"' EXIT
+printf 'deployment_id=%s\nhost_id=%s\n' "$deployment" "$host" >"$stage"
+chmod 644 "$stage"
+sync -f "$stage"
+if [[ -e $published || -L $published ]]; then
+  if [[ -f $published && ! -L $published &&
+     $(stat -c '%u:%a:%h' "$published") == 0:644:1 ]] &&
+    cmp "$stage" "$published"; then
+    :
+  else
+    echo 'existing published host identity differs' >&2; exit 1;
+  fi
+else
+  mv -nT -- "$stage" "$published"
+  [[ ! -e $stage && -f $published && ! -L $published &&
+     $(stat -c '%u:%a:%h' "$published") == 0:644:1 ]] || exit 1
+  sync -f /run/minidregg/spk
+fi
+[[ $(stat -c '%d:%i:%s:%Y:%Z' "$identity") == "$before" ]] || exit 1
+echo "host_identity_published=$published"
