@@ -1,0 +1,24 @@
+{
+  "grainTariff": {
+    "base": 2,
+    "perBirth": 1
+  },
+  "ticketBirths": 1,
+  "grantBirths": 1,
+  "perEventGrainCharge": 3,
+  "plannedTickets": 5,
+  "plannedGrants": 2,
+  "requiredCharge": 21,
+  "toolTask": "7902",
+  "toolStatus": "1",
+  "toolRemaining": 25,
+  "toolReserved": 0,
+  "projectedRemaining": 4,
+  "parentTask": "7901",
+  "parentStatus": "3",
+  "parentRemaining": "99",
+  "parentReserved": "1"
+}
+75fb067f147bfebced7eed971b342a33facafe82c73cace174b4fa80fcb25dcb  /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3/base/workroom/deployment/operator-config.json
+ea5c20cd1c6bace6333e7fd7bfeb34a85808b24688e3cdc0a91f1f60aaaf3895  /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3/base/additional-session-tool-after/view.json
+b961bccff1a26f087be904ce45076fa7067ec3458d9425079a5dd85eaefb8f5f  /var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-client-session-r3/base/parent-after/view.json

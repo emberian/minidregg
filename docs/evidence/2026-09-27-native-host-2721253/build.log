@@ -1,0 +1,220 @@
+start_utc=2026-09-28T01:06:44Z
+root=/home/ember/build/minidregg-2721253-native-20260927
+lean_threads=2
+native_jobs=2
+seat=/tmp/minidregg-cycle-20260919/lean-seat-1
+incremental source/artifact check PASS 258 earlier modules, 1 declared later changes, 0 inserted modules, 93 unchanged later sources, 2933 package objects
+lean[259/353] Kernel.NativeHostReplay start
+lean[259/353] Kernel.NativeHostReplay PASS 8s
+lean[260/353] Kernel.NativeHost start
+lean[260/353] Kernel.NativeHost PASS 4s
+lean[261/353] Kernel.NativeHostSession start
+lean[261/353] Kernel.NativeHostSession PASS 2s
+lean[262/353] Kernel.NativeReserveContinuity start
+lean[262/353] Kernel.NativeReserveContinuity PASS 3s
+lean[263/353] Kernel.NativeHostGenesis start
+lean[263/353] Kernel.NativeHostGenesis PASS 5s
+lean[264/353] Kernel.FnEvidence start
+lean[264/353] Kernel.FnEvidence PASS 3s
+lean[265/353] Kernel.FnConsumerOperation start
+lean[265/353] Kernel.FnConsumerOperation PASS 3s
+lean[266/353] Kernel.FnConsumerProgress start
+lean[266/353] Kernel.FnConsumerProgress PASS 3s
+lean[267/353] Kernel.FnConsumerNamespaceAdmission start
+lean[267/353] Kernel.FnConsumerNamespaceAdmission PASS 3s
+lean[268/353] Kernel.FnConsumerNamespaceReceiver start
+lean[268/353] Kernel.FnConsumerNamespaceReceiver PASS 2s
+lean[269/353] Kernel.FnSelectedPollReleaseLink start
+lean[269/353] Kernel.FnSelectedPollReleaseLink PASS 3s
+lean[270/353] Kernel.FnSelectedPollAdmission start
+lean[270/353] Kernel.FnSelectedPollAdmission PASS 3s
+lean[271/353] Kernel.FnSelectedPollReceiver start
+lean[271/353] Kernel.FnSelectedPollReceiver PASS 2s
+lean[272/353] Kernel.FnEmptyPollAdmissionV2 start
+lean[272/353] Kernel.FnEmptyPollAdmissionV2 PASS 3s
+lean[273/353] Kernel.FnEmptyPollReceiverV2 start
+lean[273/353] Kernel.FnEmptyPollReceiverV2 PASS 3s
+lean[274/353] Kernel.FnOriginOutbox start
+lean[274/353] Kernel.FnOriginOutbox PASS 3s
+lean[275/353] Kernel.FnCatalogOwnRProgress start
+lean[275/353] Kernel.FnCatalogOwnRProgress PASS 3s
+lean[276/353] Kernel.FnReplyPublication start
+lean[276/353] Kernel.FnReplyPublication PASS 3s
+lean[277/353] Kernel.FnPortableSource start
+lean[277/353] Kernel.FnPortableSource PASS 3s
+lean[278/353] Kernel.FnReplySource start
+lean[278/353] Kernel.FnReplySource PASS 2s
+lean[279/353] Kernel.FnReplyConsumption start
+lean[279/353] Kernel.FnReplyConsumption PASS 4s
+lean[280/353] Kernel.ApplicationShareIssueAuthoring start
+lean[280/353] Kernel.ApplicationShareIssueAuthoring PASS 2s
+lean[281/353] Kernel.ApplicationShareIssueGrainAuthoring start
+lean[281/353] Kernel.ApplicationShareIssueGrainAuthoring PASS 3s
+lean[282/353] Kernel.ApplicationShareIssueGrainLookup start
+lean[282/353] Kernel.ApplicationShareIssueGrainLookup PASS 3s
+lean[283/353] Kernel.ApplicationAgentLifetimeGrantReceiver start
+lean[283/353] Kernel.ApplicationAgentLifetimeGrantReceiver PASS 3s
+lean[284/353] Kernel.ApplicationAgentLifetimeGrantLookup start
+lean[284/353] Kernel.ApplicationAgentLifetimeGrantLookup PASS 2s
+lean[285/353] Kernel.ApplicationDispatchProjection start
+lean[285/353] Kernel.ApplicationDispatchProjection PASS 3s
+lean[286/353] Kernel.ApplicationDispatchReceiver start
+lean[286/353] Kernel.ApplicationDispatchReceiver PASS 3s
+lean[287/353] Kernel.ApplicationDispatchLookup start
+lean[287/353] Kernel.ApplicationDispatchLookup PASS 2s
+lean[288/353] Kernel.ApplicationDispatchAgentProjection start
+lean[288/353] Kernel.ApplicationDispatchAgentProjection PASS 3s
+lean[289/353] Kernel.ApplicationDispatchAgentReceiver start
+lean[289/353] Kernel.ApplicationDispatchAgentReceiver PASS 3s
+lean[290/353] Kernel.ApplicationDispatchAgentLookup start
+lean[290/353] Kernel.ApplicationDispatchAgentLookup PASS 2s
+lean[291/353] Kernel.ApplicationDispatchAuthoring start
+lean[291/353] Kernel.ApplicationDispatchAuthoring PASS 3s
+lean[292/353] Kernel.ApplicationDispatchAgentAuthoring start
+lean[292/353] Kernel.ApplicationDispatchAgentAuthoring PASS 3s
+lean[293/353] Kernel.ApplicationDispatchAgentPaidAuthoring start
+lean[293/353] Kernel.ApplicationDispatchAgentPaidAuthoring PASS 3s
+lean[294/353] Kernel.ApplicationAgentLifetimeDispatchProjection start
+lean[294/353] Kernel.ApplicationAgentLifetimeDispatchProjection PASS 3s
+lean[295/353] Kernel.ApplicationAgentLifetimeDispatchReceiver start
+lean[295/353] Kernel.ApplicationAgentLifetimeDispatchReceiver PASS 2s
+lean[296/353] Kernel.ApplicationAgentLifetimeDispatchLookup start
+lean[296/353] Kernel.ApplicationAgentLifetimeDispatchLookup PASS 3s
+lean[297/353] Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring start
+lean[297/353] Kernel.ApplicationAgentLifetimeDispatchPaidAuthoring PASS 3s
+lean[298/353] Kernel.ApplicationLifecycleBeginV2Receiver start
+lean[298/353] Kernel.ApplicationLifecycleBeginV2Receiver PASS 3s
+lean[299/353] Kernel.ApplicationLifecycleBeginV3Receiver start
+lean[299/353] Kernel.ApplicationLifecycleBeginV3Receiver PASS 2s
+lean[300/353] Kernel.ApplicationLifecycleClaimV2Receiver start
+lean[300/353] Kernel.ApplicationLifecycleClaimV2Receiver PASS 3s
+lean[301/353] Kernel.ApplicationLifecycleClaimV3Receiver start
+lean[301/353] Kernel.ApplicationLifecycleClaimV3Receiver PASS 2s
+lean[302/353] Kernel.ApplicationLifecycleV2Lookup start
+lean[302/353] Kernel.ApplicationLifecycleV2Lookup PASS 3s
+lean[303/353] Kernel.ApplicationLifecycleV3Lookup start
+lean[303/353] Kernel.ApplicationLifecycleV3Lookup PASS 3s
+lean[304/353] Kernel.ApplicationLifecycleCompletionReceiver start
+lean[304/353] Kernel.ApplicationLifecycleCompletionReceiver PASS 3s
+lean[305/353] Kernel.ApplicationLifecycleCompletionV2Receiver start
+lean[305/353] Kernel.ApplicationLifecycleCompletionV2Receiver PASS 2s
+lean[306/353] Kernel.ApplicationLifecycleCompletionLookup start
+lean[306/353] Kernel.ApplicationLifecycleCompletionLookup PASS 3s
+lean[307/353] Kernel.ApplicationLifecycleCompletionV2Lookup start
+lean[307/353] Kernel.ApplicationLifecycleCompletionV2Lookup PASS 3s
+lean[308/353] Host.ApplicationDispatchInspection start
+lean[308/353] Host.ApplicationDispatchInspection PASS 2s
+lean[309/353] Host.ApplicationDispatchAgentPaidInspection start
+lean[309/353] Host.ApplicationDispatchAgentPaidInspection PASS 3s
+lean[310/353] Host.ApplicationDispatchAgentInspection start
+lean[310/353] Host.ApplicationDispatchAgentInspection PASS 3s
+lean[311/353] Host.ApplicationAgentLifetimeDispatchInspection start
+lean[311/353] Host.ApplicationAgentLifetimeDispatchInspection PASS 3s
+lean[312/353] Host.ApplicationAgentLifetimeDispatchPaidInspection start
+lean[312/353] Host.ApplicationAgentLifetimeDispatchPaidInspection PASS 2s
+lean[313/353] Kernel.ApplicationLifecycleResidentProfile start
+lean[313/353] Kernel.ApplicationLifecycleResidentProfile PASS 3s
+lean[314/353] Host.ApplicationLifecycleClaimInspection start
+lean[314/353] Host.ApplicationLifecycleClaimInspection PASS 2s
+lean[315/353] Host.ApplicationLifecycleCompletionAuthoring start
+lean[315/353] Host.ApplicationLifecycleCompletionAuthoring PASS 3s
+lean[316/353] Host.ApplicationLifecycleCompletionOperator start
+lean[316/353] Host.ApplicationLifecycleCompletionOperator PASS 3s
+lean[317/353] Host.ApplicationLifecycleBeginOperator start
+lean[317/353] Host.ApplicationLifecycleBeginOperator PASS 3s
+lean[318/353] Host.ApplicationLifecycleLaunchBeginAuthoring start
+lean[318/353] Host.ApplicationLifecycleLaunchBeginAuthoring PASS 3s
+lean[319/353] Host.ApplicationLifecycleLaunchBeginInspection start
+lean[319/353] Host.ApplicationLifecycleLaunchBeginInspection PASS 2s
+lean[320/353] Host.ApplicationLifecycleClaimOperator start
+lean[320/353] Host.ApplicationLifecycleClaimOperator PASS 3s
+lean[321/353] Host.ApplicationLifecycleLaunchClaimAuthoring start
+lean[321/353] Host.ApplicationLifecycleLaunchClaimAuthoring PASS 3s
+lean[322/353] Host.ApplicationLifecycleLaunchClaimInspection start
+lean[322/353] Host.ApplicationLifecycleLaunchClaimInspection PASS 2s
+lean[323/353] Host.ApplicationLifecycleLaunchCompletionAuthoring start
+lean[323/353] Host.ApplicationLifecycleLaunchCompletionAuthoring PASS 3s
+lean[324/353] Host.ApplicationLifecycleLaunchCompletionInspection start
+lean[324/353] Host.ApplicationLifecycleLaunchCompletionInspection PASS 2s
+lean[325/353] Host.ApplicationLifecycleClaimV3Inspection start
+lean[325/353] Host.ApplicationLifecycleClaimV3Inspection PASS 2s
+lean[326/353] Host.ApplicationLifecycleStopClaimInspection start
+lean[326/353] Host.ApplicationLifecycleStopClaimInspection PASS 3s
+lean[327/353] Host.ApplicationAgentLifetimePaidIngressInspection start
+lean[327/353] Host.ApplicationAgentLifetimePaidIngressInspection PASS 2s
+lean[328/353] Host.ApplicationAgentLifetimeGrantAuthoring start
+lean[328/353] Host.ApplicationAgentLifetimeGrantAuthoring PASS 3s
+lean[329/353] Host.ApplicationAgentLifetimeGrantInspection start
+lean[329/353] Host.ApplicationAgentLifetimeGrantInspection PASS 2s
+lean[330/353] Host.FnConsumerNamespacePlan start
+lean[330/353] Host.FnConsumerNamespacePlan PASS 3s
+lean[331/353] Host.BirthRuntimeProfile start
+lean[331/353] Host.BirthRuntimeProfile PASS 2s
+lean[332/353] Host.CapabilityInspection start
+lean[332/353] Host.CapabilityInspection PASS 3s
+lean[333/353] Kernel.ApplicationGrainBirth start
+lean[333/353] Kernel.ApplicationGrainBirth PASS 2s
+lean[334/353] Kernel.ApplicationGrainSessionBirth start
+lean[334/353] Kernel.ApplicationGrainSessionBirth PASS 3s
+lean[335/353] Host.ApplicationLifecycleLaunchReportAuthoring start
+lean[335/353] Host.ApplicationLifecycleLaunchReportAuthoring PASS 2s
+lean[336/353] Host.ApplicationShareIssueGrainInspection start
+lean[336/353] Host.ApplicationShareIssueGrainInspection PASS 2s
+lean[337/353] Host.ApplicationPermissionSchemaAuthoring start
+lean[337/353] Host.ApplicationPermissionSchemaAuthoring PASS 2s
+lean[338/353] Host.ApplicationSpkLaunchDescriptorAuthoring start
+lean[338/353] Host.ApplicationSpkLaunchDescriptorAuthoring PASS 2s
+lean[339/353] Host.Json start
+lean[339/353] Host.Json PASS 7s
+lean[340/353] Host.FnConsumerFrontierPlan start
+lean[340/353] Host.FnConsumerFrontierPlan PASS 3s
+lean[341/353] Kernel.FnSelectiveReleaseArticle start
+lean[341/353] Kernel.FnSelectiveReleaseArticle PASS 3s
+lean[342/353] Host.FnSelectiveReleaseAuthoring start
+lean[342/353] Host.FnSelectiveReleaseAuthoring PASS 3s
+lean[343/353] Host.FnSelectiveReleaseSourceAuthoring start
+lean[343/353] Host.FnSelectiveReleaseSourceAuthoring PASS 2s
+lean[344/353] Host.FnSelectiveReleaseFnReceiving start
+lean[344/353] Host.FnSelectiveReleaseFnReceiving PASS 2s
+lean[345/353] Host.FnSelectiveReleaseFnAck start
+lean[345/353] Host.FnSelectiveReleaseFnAck PASS 2s
+lean[346/353] Host.ApplicationCurrentBirthAuthoring start
+lean[346/353] Host.ApplicationCurrentBirthAuthoring PASS 3s
+lean[347/353] Host.FnInboxView start
+lean[347/353] Host.FnInboxView PASS 2s
+lean[348/353] Host.GrainOriginSource start
+lean[348/353] Host.GrainOriginSource PASS 2s
+lean[349/353] Host.GrainOriginPreparation start
+lean[349/353] Host.GrainOriginPreparation PASS 3s
+lean[350/353] Host.GrainOriginCommand start
+lean[350/353] Host.GrainOriginCommand PASS 2s
+lean[351/353] Kernel.ProviderMetering start
+lean[351/353] Kernel.ProviderMetering PASS 2s
+lean[352/353] Host.ProviderUsage start
+lean[352/353] Host.ProviderUsage PASS 2s
+lean[353/353] Host.Main start
+lean[353/353] Host.Main PASS 16s
+end_utc=2026-09-28T01:13:18Z
+elapsed_seconds=394
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-2721253-native-20260927
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+incremental_baseline=/home/ember/build/minidregg-cb55b81-evidence/build-r1
+incremental_changed_module=Kernel.NativeHostReplay
+unchanged_imported_modules=258
+unchanged_later_sources=93
+inserted_source_modules=0
+restart_source_unchanged=0
+unchanged_package_objects=2933
+reused_artifact_manifest=/home/ember/build/minidregg-2721253-evidence/build-r1/reused-artifact-sha256.txt
+compiled_source_modules=95
+source_modules=353
+package_modules=2933
+response_objects=3286
+reusable_artifact_manifest_sha256=8156b30c8205d66e4ce8635da0cba09f16a878520e6c0f3d0da523ab7257ac39
+usage_exit=1
+binary=/home/ember/build/minidregg-2721253-evidence/minidregg-host-2721253-r1
+binary_sha256=f62c716885d8f9258750da70113afc8d4086907a2cdbc1c11a8a5e3c5043bdcd

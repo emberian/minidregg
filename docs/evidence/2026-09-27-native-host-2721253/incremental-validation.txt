@@ -1,0 +1,12 @@
+baseline_snapshot=/home/ember/build/minidregg-cb55b81-native-20260927
+baseline_output=/home/ember/build/minidregg-cb55b81-evidence/build-r1
+baseline_binary_sha256=89973efe154b3f53bb279a931a93aed0b0a1d341d759dc776dca635dda01c354
+changed_module=Kernel.NativeHostReplay
+unchanged_imported_modules=258
+unchanged_later_sources=93
+additional_changed_sources=1
+inserted_source_modules=0
+restart_source_unchanged=0
+changed_source_manifest=/home/ember/build/minidregg-2721253-evidence/build-r1/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=b79fec6992e600cfb0c8e307b25193b14eb5537dcb433260756e3a27d3313acd

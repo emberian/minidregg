@@ -19,6 +19,17 @@ changed current source projection. `shell-gates.log` records shell syntax and
 ShellCheck. This test does not establish native event26 admission or accepted
 r3 event22/event27 grants.
 
+`r3-budget-readonly.log` pins the current retained r3 tariff and signed
+tool/parent views. Source `GrainResourceBirthController.Tariff.charge` is
+`base + perBirth × births`; event22 and event27 each create one birth. With
+the configured `2 + 1 × 1`, seven separate issues charge 21 from tool7902's
+remaining 25, leaving 4 if no other writer intervenes. Each issue needs its
+own fresh reserve of at least 3 because settlement clears the reserve.
+Parent7901 is an exact-state witness and has no grain charge. This does not
+quote the separate factory fee: event22 has fixed base/birth/grant component
+7 and event27 has component 8, each plus source-derived final payload bytes.
+Current op56/68 plans must supply the exact fee and confirm payer funding.
+
 The r3 candidate ticket inputs are separately retained under hbox
 `/var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-operator-inputs-r3`
 (directory 0700, files 0600). They pin accepted app/session birth receipts
