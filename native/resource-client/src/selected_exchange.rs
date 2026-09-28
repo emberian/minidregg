@@ -741,7 +741,7 @@ fn verify(config: &Value, state: &Path, transport_only: bool) -> Result<()> {
         &host(config)?,
         &recipient_config(config)?,
         &named_path(config, "recipientQueryIntent")?,
-        OsStr::new("json"),
+        OsStr::new("intent"),
         &named_path(config, "recipientQueryKey")?,
         "view-resource",
         &output,

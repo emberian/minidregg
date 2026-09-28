@@ -1,0 +1,34 @@
+{
+  "rawSha256": "bc424d5fd3cf60977cacdac328adfbee4de94f88d57383ad38b3d472c0c24f2d",
+  "rawLength": "17379772",
+  "signedAppId": "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
+  "signedAppVersion": "18",
+  "manifestSha256": "7ebb802cc26dd490ec6812983847faeb735d3e6fcee847e7d53ef603433e1e79",
+  "bridgeConfigSha256": "1a5fb4c75adda3647c6f9bfc3101190084ac82e21412bfd1fd4fb093a16938ee",
+  "bridgeApiPath": "/",
+  "signedSchema": {
+    "denied": [],
+    "permissions": [
+      {
+        "name": "admin",
+        "obsolete": false
+      },
+      {
+        "name": "fullapi",
+        "obsolete": false
+      }
+    ],
+    "roles": [
+      {
+        "default": false,
+        "obsolete": false,
+        "permissions": [
+          false,
+          true
+        ]
+      }
+    ],
+    "type": "minidregg-application-permission-schema-source-v1",
+    "version": "18"
+  }
+}

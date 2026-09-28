@@ -1,0 +1,9 @@
+{
+  "protocol": "mini-spk-launch-qualification-v1",
+  "sourceSpk": "/tank/dregg-build/api-path-check-20260928/sntfy.spk",
+  "miniHost": "/home/hbox/sntfy-gateb-20260928/offline/minidregg-host-e22d16b-r3",
+  "miniHostSha256": "723940446d3e0256bd446b07ca8d67ea9d67295d8c7cc78e08bb2487ffbe3db2",
+  "miniConfig": "/home/hbox/sntfy-gateb-20260928/offline/mini-config.json",
+  "miniConfigSha256": "b505b4554a756d65d8a90a698570c76117eb7d6f12e42eac2f741f6a081669f9",
+  "attemptDir": "/home/hbox/sntfy-gateb-20260928/offline/sntfy-qualification-attempt"
+}

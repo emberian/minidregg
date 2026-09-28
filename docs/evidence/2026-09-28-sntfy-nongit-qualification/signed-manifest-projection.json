@@ -1,0 +1,60 @@
+{
+  "app_id": "c6rk81r4qk6dm3k04x1kxmyccqewhh4npuxeyg1xrpfypn2ddy0h",
+  "app_title": "sntfy",
+  "app_version": 18,
+  "marketing_version": "v2.28.0-sandstorm-18",
+  "actions": [
+    {
+      "noun_phrase": "push service",
+      "command": {
+        "argv": [
+          "/sandstorm-http-bridge",
+          "8080",
+          "--",
+          "/bin/bash",
+          "/opt/app/.sandstorm/launcher.sh"
+        ],
+        "environ": [
+          [
+            "PATH",
+            "/usr/local/bin:/usr/bin:/bin"
+          ],
+          [
+            "SANDSTORM",
+            "1"
+          ]
+        ]
+      }
+    }
+  ],
+  "continue_command": {
+    "argv": [
+      "/sandstorm-http-bridge",
+      "8080",
+      "--",
+      "/bin/bash",
+      "/opt/app/.sandstorm/launcher.sh"
+    ],
+    "environ": [
+      [
+        "PATH",
+        "/usr/local/bin:/usr/bin:/bin"
+      ],
+      [
+        "SANDSTORM",
+        "1"
+      ]
+    ]
+  },
+  "bridge_config": {
+    "api_port": 8080,
+    "permissions": [],
+    "roles": []
+  },
+  "metadata": {
+    "author": "",
+    "website": "",
+    "categories": [],
+    "short_description": ""
+  }
+}

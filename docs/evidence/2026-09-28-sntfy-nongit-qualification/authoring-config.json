@@ -1,0 +1,21 @@
+{
+  "domain": 8500,
+  "federation": 9,
+  "factoryId": 10,
+  "resourceBookId": 11,
+  "authorityCatalogueId": 12,
+  "issuer": 5,
+  "ownerBudget": 100000,
+  "lifetime": 10000,
+  "tariffBase": 3,
+  "tariffPerBirth": 2,
+  "tariffPerGrant": 1,
+  "tariffPerInitialPayloadByte": 0,
+  "collector": 99,
+  "asset": 0,
+  "genesisHeight": 10,
+  "expectedSeed": 0,
+  "storageBinary": "/nonexistent/qualification-storage",
+  "storageRoot": "/nonexistent/qualification-store",
+  "signatureBinary": "/nonexistent/qualification-verifier"
+}
