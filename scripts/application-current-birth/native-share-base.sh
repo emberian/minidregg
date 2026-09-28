@@ -118,6 +118,89 @@ reserve_tool() {
     >"$EVIDENCE/$name.stdout"
   confirmed "$EVIDENCE/$name-attempt/outcome.json"
 }
+# The direct grain-birth workroom supplies an already reserved hard parent.
+# An integrated workroom may leave that parent paused. Only its initial paused
+# generation may attach and reserve the one-unit birth witness.
+ensure_app_parent_reserved() {
+  query app-parent-prepare-before 7 7901 71 "$EVIDENCE/workroom/controller.key" 42971
+  if jq -e '.page.grain.generation == "1" and .page.grain.status == "3" and
+      .page.grain.reserved == "1"' \
+      "$EVIDENCE/app-parent-prepare-before/view.json" >/dev/null; then
+    return
+  fi
+  jq -e '.page.grain == {task:"7901",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+    "$EVIDENCE/app-parent-prepare-before/view.json" >/dev/null
+  jq -n --slurpfile read "$EVIDENCE/app-parent-prepare-before/view.json" \
+    --slurpfile challenge "$EVIDENCE/app-parent-prepare-before/challenge.json" '
+    {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      expectedTargetRoot:$read[0].page.root,
+      context:{operationId:"42970",payload:"current app parent hard attach"},
+      before:($read[0].page.grain | {generation,status,remaining,reserved}),
+      operation:{type:"attach",soft:false},publications:[]},
+     grants:[{kind:"object",target:"7901",capability:"71"}],intentNonce:"42970"}' \
+    >"$EVIDENCE/app-parent-attach-intent.json"
+  "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    --intent "$EVIDENCE/app-parent-attach-intent.json" --intent-kind grain-intent \
+    --key "$EVIDENCE/workroom/controller.key" --dir "$EVIDENCE/app-parent-attach-attempt" \
+    >"$EVIDENCE/app-parent-attach.stdout"
+  confirmed "$EVIDENCE/app-parent-attach-attempt/outcome.json"
+  query app-parent-attached 7 7901 71 "$EVIDENCE/workroom/controller.key" 42972
+  jq -e '.page.grain == {task:"7901",generation:"1",status:"1",remaining:"100",reserved:"0"}' \
+    "$EVIDENCE/app-parent-attached/view.json" >/dev/null
+  jq -n --slurpfile read "$EVIDENCE/app-parent-attached/view.json" \
+    --slurpfile challenge "$EVIDENCE/app-parent-attached/challenge.json" '
+    {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      expectedTargetRoot:$read[0].page.root,
+      context:{operationId:"42980",payload:"current app parent witness reserve"},
+      before:($read[0].page.grain | {generation,status,remaining,reserved}),
+      operation:{type:"reserve",amount:"1"},publications:[]},
+     grants:[{kind:"object",target:"7901",capability:"71"}],intentNonce:"42980"}' \
+    >"$EVIDENCE/app-parent-reserve-intent.json"
+  "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    --intent "$EVIDENCE/app-parent-reserve-intent.json" --intent-kind grain-intent \
+    --key "$EVIDENCE/workroom/controller.key" --dir "$EVIDENCE/app-parent-reserve-attempt" \
+    >"$EVIDENCE/app-parent-reserve.stdout"
+  confirmed "$EVIDENCE/app-parent-reserve-attempt/outcome.json"
+  query app-parent-reserved 8 7901 73 "$EVIDENCE/workroom/tool.key" 42981
+  jq -e '.page.grain == {task:"7901",generation:"1",status:"3",remaining:"99",reserved:"1"}' \
+    "$EVIDENCE/app-parent-reserved/view.json" >/dev/null
+}
+# The direct grain-birth workroom already attaches its tool. The integrated
+# workroom leaves it paused after construction. A fresh app birth needs a
+# running tool before reserve; only the initial paused generation may attach.
+ensure_app_tool_attached() {
+  query app-tool-attach-before 8 7902 81 "$EVIDENCE/workroom/tool.key" 42991
+  if jq -e '.page.grain.generation == "1" and .page.grain.status == "1" and
+      .page.grain.reserved == "0"' \
+      "$EVIDENCE/app-tool-attach-before/view.json" >/dev/null; then
+    return
+  fi
+  jq -e '.page.grain.generation == "0" and .page.grain.status == "0" and
+    .page.grain.reserved == "0"' \
+    "$EVIDENCE/app-tool-attach-before/view.json" >/dev/null
+  jq -n --slurpfile read "$EVIDENCE/app-tool-attach-before/view.json" \
+    --slurpfile challenge "$EVIDENCE/app-tool-attach-before/challenge.json" '
+    {grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      expectedTargetRoot:$read[0].page.root,
+      context:{operationId:"42990",payload:"current app tool hard attach"},
+      before:($read[0].page.grain | {generation,status,remaining,reserved}),
+      operation:{type:"attach",soft:false},publications:[]},
+     grants:[{kind:"object",target:"7902",capability:"81"}],intentNonce:"42990"}' \
+    >"$EVIDENCE/app-tool-attach-intent.json"
+  "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
+    --intent "$EVIDENCE/app-tool-attach-intent.json" --intent-kind grain-intent \
+    --key "$EVIDENCE/workroom/tool.key" --dir "$EVIDENCE/app-tool-attach-attempt" \
+    >"$EVIDENCE/app-tool-attach.stdout"
+  confirmed "$EVIDENCE/app-tool-attach-attempt/outcome.json"
+  query app-tool-attached 8 7902 81 "$EVIDENCE/workroom/tool.key" 42992
+  jq -e --slurpfile before "$EVIDENCE/app-tool-attach-before/view.json" '
+    .page.grain.generation == "1" and .page.grain.status == "1" and
+    .page.grain.remaining == $before[0].page.grain.remaining and
+    .page.grain.reserved == "0"' "$EVIDENCE/app-tool-attached/view.json" >/dev/null
+}
 birth_source() {
   name=$1 nonce=$2 spec_field=$3
   query "$name-tool" 8 7902 81 "$EVIDENCE/workroom/tool.key" "$((nonce + 1))"
@@ -162,6 +245,8 @@ submit_current() {
   confirmed "$EVIDENCE/$name-attempt/outcome.json"
 }
 
+ensure_app_parent_reserved
+ensure_app_tool_attached
 reserve_tool app-reserve 43000 5
 birth_source app 43100 applicationGrainBirth
 jq '.applicationGrainBirth.applicationBirth =
@@ -265,7 +350,9 @@ cmp "$EVIDENCE/session-tool-before-reopen-state.json" \
   "$EVIDENCE/session-tool-after-lookup-state.json"
 query tool-after 8 7902 81 "$EVIDENCE/workroom/tool.key" 44202
 query parent-after 8 7901 73 "$EVIDENCE/workroom/tool.key" 44203
-jq -e '.page.grain.remaining == "38" and .page.grain.reserved == "0"' \
+jq -e --slurpfile initial "$EVIDENCE/app-tool-attach-before/view.json" '
+  .page.grain.remaining == ((($initial[0].page.grain.remaining | tonumber) - 9) | tostring) and
+  .page.grain.reserved == "0"' \
   "$EVIDENCE/tool-after/view.json" >/dev/null
 jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
   "$EVIDENCE/parent-after/view.json" >/dev/null
