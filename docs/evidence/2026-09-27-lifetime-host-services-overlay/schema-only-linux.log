@@ -1,0 +1,7 @@
+exact-current synthetic A/B: 7/8520/12/8530 8/8521/13/8531
+/home/hbox/mini-host-services-fixture-r1/out-r3/reinspected-b.json: OK
+altered receipt: lifetime Host services: route/grant/custody identity differs
+legacy scalar: lifetime Host services: base Host has conflicting or absent service pins
+duplicated A route: lifetime Host services: route/grant/custody identity differs
+changed current projection: lifetime Host services: current Store grant projection differs
+synthetic fixture only; no Mini event submit, native admission, or app START
