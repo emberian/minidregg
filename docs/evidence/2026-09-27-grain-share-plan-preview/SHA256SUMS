@@ -1,0 +1,4 @@
+b65fb1240dc5df999b4a7e1c752a49b971ab353dad9a4fbded9711478eaa7c35  native/resource-client/src/main.rs
+74210af50fe46e3a947093d3cab052c776570ac6ed219450ed1d0661fb4e25fc  native/resource-client/src/grain_share_issue.rs
+f6dd721593ca8f922cae0c8b92b494f58570e87cf8c800fec7ffb24575381bb8  docs/evidence/2026-09-27-grain-share-plan-preview/nextest-r2.log
+25e5fa444e11015a8784ec5cc0c0b91431b14cf19e848cdb28325dbde8f8ff78  docs/evidence/2026-09-27-grain-share-plan-preview/clippy-r2.log

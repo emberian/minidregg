@@ -1,0 +1,13 @@
+Running as unit: run-p306099-i989757362.scope; invocation ID: 89777d6ef2f24e38932e9f5efc717408
+   Compiling minidregg-resource-client v0.1.0 (/home/ember/build/minidregg-shareplan-mini-src/native/resource-client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.69s
+────────────
+ Nextest run ID 662e50af-407b-41bc-966e-3435f4fd122c with nextest profile: default
+    Starting 5 tests across 1 binary (97 tests skipped)
+        PASS [   0.003s] (1/5) minidregg-resource-client::bin/mini grain_share_issue::tests::detached_signatures_follow_birth_slots_then_app_slot
+        PASS [   0.003s] (2/5) minidregg-resource-client::bin/mini grain_share_issue::tests::full_request_approval_pins_funding_and_both_grain_selectors
+        PASS [   0.003s] (3/5) minidregg-resource-client::bin/mini grain_share_issue::tests::plan_only_join_rejects_a_plan_for_a_different_request
+        PASS [   0.034s] (4/5) minidregg-resource-client::bin/mini grain_share_issue::tests::retained_pin_is_rechecked_after_native_operation
+        PASS [   0.044s] (5/5) minidregg-resource-client::bin/mini grain_share_issue::tests::frame_only_recovery_anchors_receipt_and_rejects_changed_lookup
+────────────
+     Summary [   0.045s] 5 tests run: 5 passed, 97 skipped

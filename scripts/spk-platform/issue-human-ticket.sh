@@ -53,6 +53,10 @@ load_stage() {
   private "$DIR/request-inspected.json" 1048576
   private "$DIR/preview-plan.bin" 12102759
   private "$DIR/preview-plan.json" 1048576
+  private "$DIR/preview-native/plan.bin" 12102759
+  private "$DIR/preview-native/plan-pin.json" 4096
+  cmp -s "$DIR/preview-plan.bin" "$DIR/preview-native/plan.bin" ||
+    fail "retained typed preview plan changed"
   private "$DIR/selected-role.json" 65536
   SCOPE=$(jq -er .scope "$DIR/stage.json")
   POLICY=$(jq -er .policy "$DIR/stage.json")
@@ -72,6 +76,7 @@ load_stage() {
     --arg requestInspection "$(sha "$DIR/request-inspected.json")" \
     --arg plan "$(sha "$DIR/preview-plan.bin")" \
     --arg planInspection "$(sha "$DIR/preview-plan.json")" \
+    --arg previewPin "$(sha "$DIR/preview-native/plan-pin.json")" \
     --arg selectedRole "$(sha "$DIR/selected-role.json")" \
     --arg scope "$(sha "$SCOPE")" --arg policy "$(sha "$POLICY")" \
     --arg allocation "$(sha "$ALLOCATION")" \
@@ -87,6 +92,7 @@ load_stage() {
      .requestInspectionSha256 == $requestInspection and
      .previewPlanSha256 == $plan and
      .previewInspectionSha256 == $planInspection and
+     .previewPinSha256 == $previewPin and
      .selectedRoleSha256 == $selectedRole and
      .scopeSha256 == $scope and .policySha256 == $policy and
      .allocationSha256 == $allocation and .appBirthOutcomeSha256 == $app and
@@ -233,10 +239,38 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
     "$DIR/request.json" "$DIR/request.bin" || fail "source request refused"
   "$HOST" "$CONFIG" inspect application-share-issue-grain-request \
     "$DIR/request.bin" "$DIR/request-inspected.json" || fail "source request inspection refused"
-  "$HOST" "$CONFIG" application-grain-share-issue-plan \
-    "$DIR/request.bin" "$DIR/preview-plan.bin" || fail "current source plan refused"
-  "$HOST" "$CONFIG" inspect application-share-issue-grain-plan \
-    "$DIR/preview-plan.bin" "$DIR/preview-plan.json" || fail "source plan inspection refused"
+  "$MINI" grain-share-issue-plan --host "$HOST" --config "$CONFIG" \
+    --socket "$SOCKET" --request "$DIR/request.json" \
+    --dir "$DIR/preview-native" >"$DIR/preview.stdout" \
+    2>"$DIR/preview.stderr" || fail "typed current source plan refused"
+  chmod 600 "$DIR/preview.stdout" "$DIR/preview.stderr"
+  private "$DIR/preview-native/request.json" 12102759
+  private "$DIR/preview-native/config.json" 65536
+  private "$DIR/preview-native/request.bin" 12102759
+  private "$DIR/preview-native/request-inspected.json" 1048576
+  private "$DIR/preview-native/plan.frame" 12102759
+  private "$DIR/preview-native/plan.bin" 12102759
+  private "$DIR/preview-native/plan-inspected.json" 1048576
+  private "$DIR/preview-native/plan-pin.json" 4096
+  cmp -s "$DIR/request.json" "$DIR/preview-native/request.json" &&
+    cmp -s "$CONFIG" "$DIR/preview-native/config.json" &&
+    cmp -s "$DIR/request.bin" "$DIR/preview-native/request.bin" &&
+    cmp -s "$DIR/request-inspected.json" \
+      "$DIR/preview-native/request-inspected.json" ||
+    fail "typed preview request differs from reviewed source bytes"
+  jq -e --arg host "$HOST" --arg hostSha "$HOST_SHA" \
+    --arg config "$CONFIG" --arg configSha "$(sha "$CONFIG")" \
+    --arg socket "$SOCKET" --arg request "$(sha "$DIR/request.bin")" \
+    --arg plan "$(sha "$DIR/preview-native/plan.bin")" '
+    .format == "minidregg-grain-share-issue-plan-only-v1" and
+    .host == $host and .hostSha256 == $hostSha and
+    .config == $config and .configSha256 == $configSha and
+    .operatorSocket == $socket and .requestSha256 == $request and
+    .planSha256 == $plan' "$DIR/preview-native/plan-pin.json" >/dev/null ||
+    fail "typed preview pin differs"
+  cp "$DIR/preview-native/plan.bin" "$DIR/preview-plan.bin"
+  cp "$DIR/preview-native/plan-inspected.json" "$DIR/preview-plan.json"
+  chmod 600 "$DIR/preview-plan.bin" "$DIR/preview-plan.json"
   jq -e --arg route "$ROUTE" --slurpfile allocation "$ALLOCATION" \
     --slurpfile request "$DIR/request-inspected.json" '
     .type == "application-grain-share-issue-plan-v1" and
@@ -255,6 +289,7 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
     --arg requestInspection "$(sha "$DIR/request-inspected.json")" \
     --arg plan "$(sha "$DIR/preview-plan.bin")" \
     --arg planInspection "$(sha "$DIR/preview-plan.json")" \
+    --arg previewPin "$(sha "$DIR/preview-native/plan-pin.json")" \
     --arg selectedRole "$(sha "$DIR/selected-role.json")" \
     --arg scope "$(sha "$SCOPE")" --arg policy "$(sha "$POLICY")" \
     --arg allocation "$(sha "$ALLOCATION")" \
@@ -275,6 +310,7 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
      socket:$socket,requestSha256:$request,requestJsonSha256:$requestJson,
      requestInspectionSha256:$requestInspection,
      previewPlanSha256:$plan,previewInspectionSha256:$planInspection,
+     previewPinSha256:$previewPin,
      selectedRoleSha256:$selectedRole,scopeSha256:$scope,
      policySha256:$policy,allocationSha256:$allocation,
      scope:$scopePath,policy:$policyPath,allocation:$allocationPath,

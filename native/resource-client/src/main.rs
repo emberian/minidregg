@@ -185,6 +185,7 @@ usage:
   mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini share-issue-lookup --socket OPERATOR-OR-PUBLIC-SOCKET --attempt PREPARED-DIR
   mini share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini grain-share-issue-plan --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --dir NEW-PRIVATE-DIR
   mini grain-share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
   mini grain-share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini grain-share-issue-lookup --socket OPERATOR-SOCKET --attempt PREPARED-DIR
@@ -835,7 +836,7 @@ fn decode_hex(value: &str) -> Result<Vec<u8>> {
     }
     value
         .as_bytes()
-        .chunks_exact(2)
+        .chunks(2)
         .map(|pair| {
             std::str::from_utf8(pair)
                 .ok()
@@ -2486,6 +2487,18 @@ fn run(mut args: Args) -> Result<()> {
                 [fields[0], fields[1], fields[2], fields[3]],
                 &directory,
             )
+        }
+        #[cfg(unix)]
+        "grain-share-issue-plan" => {
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            let request = path(args.required("request")?);
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            let socket = SOCKET
+                .get()
+                .ok_or("grain-share-issue-plan requires --socket")?;
+            grain_share_issue::plan(&host, &config, socket, &request, &directory)
         }
         #[cfg(unix)]
         "grain-share-issue-prepare" => {

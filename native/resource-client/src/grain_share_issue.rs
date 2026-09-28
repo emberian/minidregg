@@ -281,6 +281,111 @@ fn ordered_slots(plan: &Value) -> Result<&[Value]> {
     Ok(slots)
 }
 
+fn exact_plan_view(
+    plan_view: &Value,
+    request_view: &Value,
+    request: &[u8],
+    plan: &[u8],
+) -> Result<()> {
+    if custody::member(plan_view, "type")? != "application-grain-share-issue-plan-v1"
+        || custody::member(plan_view, "canonicalRequest")? != hex(request)
+        || custody::member(plan_view, "canonicalPlanHex")? != hex(plan)
+        || plan_view.get("request") != Some(request_view)
+    {
+        return Err("grain share Plan differs from exact source Request or Plan".into());
+    }
+    Ok(())
+}
+
+/// Select and retain the exact current-image event22 plan without taking an
+/// approval, opening a signing key, assembling ingress, or submitting a birth.
+/// The private operator broker performs op56 on its persistent Host.
+pub(super) fn plan(
+    host: &Path,
+    config: &Path,
+    operator_socket: &Path,
+    request_json: &Path,
+    directory: &Path,
+) -> Result<()> {
+    let host = absolute(host)?;
+    let config = absolute(config)?;
+    let operator_socket = absolute(operator_socket)?;
+    custody::operator_socket_owned(&operator_socket)?;
+    let directory = absolute(directory)?;
+    let source = custody::private_bytes(request_json, REQUEST_LIMIT)?;
+    let config_bytes = custody::bounded(&config, 65_536)?;
+    let host_sha = host_image_sha256(&host)?;
+    let check_inputs = || -> Result<()> {
+        if host_image_sha256(&host)? != host_sha
+            || custody::bounded(&config, 65_536)? != config_bytes
+            || custody::private_bytes(request_json, REQUEST_LIMIT)? != source
+        {
+            return Err("grain share preview Host, config or request changed".into());
+        }
+        Ok(())
+    };
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .map_err(|e| format!("cannot create grain share preview directory: {e}"))?;
+    sync_directory_ancestors(&directory)?;
+    create_private(&directory.join("request.json"), &source)?;
+    create_private(&directory.join("config.json"), &config_bytes)?;
+    let request_path = directory.join("request.bin");
+    custody::source_process(
+        &host,
+        &config,
+        &[
+            OsStr::new("author"),
+            OsStr::new("application-share-issue-grain-request"),
+            directory.join("request.json").as_os_str(),
+            request_path.as_os_str(),
+        ],
+    )?;
+    sync_retained_call(&directory, &request_path)?;
+    let request = custody::bounded(&request_path, REQUEST_LIMIT)?;
+    let request_view = inspect_bounded(
+        &host,
+        &config,
+        "application-share-issue-grain-request",
+        &request_path,
+        &directory.join("request-inspected.json"),
+        INSPECT_LIMIT,
+    )?;
+    if custody::member(&request_view, "type")? != "application-grain-share-issue-request-v1"
+        || custody::member(&request_view, "canonicalRequest")? != hex(&request)
+    {
+        return Err("grain share preview request differs from source bytes".into());
+    }
+    check_inputs()?;
+    let frame = session_invoke(&host, &operator_socket, &config, 56, &request)?;
+    check_inputs()?;
+    create_private(&directory.join("plan.frame"), &frame)?;
+    sync_directory_ancestors(&directory)?;
+    let plan = custody::expect_reply(&frame, 56)?;
+    let plan_path = directory.join("plan.bin");
+    create_private(&plan_path, plan)?;
+    let plan_view = inspect_bounded(
+        &host,
+        &config,
+        "application-share-issue-grain-plan",
+        &plan_path,
+        &directory.join("plan-inspected.json"),
+        INSPECT_LIMIT,
+    )?;
+    exact_plan_view(&plan_view, &request_view, &request, plan)?;
+    check_inputs()?;
+    custody::retain_json(
+        &directory.join("plan-pin.json"),
+        &json!({"format":"minidregg-grain-share-issue-plan-only-v1",
+            "host":utf8_path(&host)?,"hostSha256":host_sha,
+            "config":utf8_path(&config)?,"configSha256":custody::digest(&config_bytes),
+            "operatorSocket":utf8_path(&operator_socket)?,
+            "requestSha256":custody::digest(&request),"planSha256":custody::digest(plan)}),
+    )?;
+    print_json(&plan_view)
+}
+
 /// Selection is private and current-image dependent. Approval pins the full
 /// source Request and every exact Host-selected signing header before any key
 /// signs. Plan and detached assembly are selectors, not native admission.
@@ -359,12 +464,7 @@ pub(super) fn prepare(
         &directory.join("plan-inspected.json"),
         INSPECT_LIMIT,
     )?;
-    if custody::member(&plan_inspected, "type")? != "application-grain-share-issue-plan-v1"
-        || custody::member(&plan_inspected, "canonicalRequest")? != hex(&request)
-        || custody::member(&plan_inspected, "canonicalPlanHex")? != hex(plan)
-    {
-        return Err("grain share Plan differs from exact approved Request or Plan bytes".into());
-    }
+    exact_plan_view(&plan_inspected, &request_inspected, &request, plan)?;
     let plan_request = plan_inspected
         .get("request")
         .ok_or("grain share Plan lacks exact Request presentation")?;
@@ -553,6 +653,19 @@ mod tests {
         let mut changed = valid;
         changed["slots"][1] = json!({"role":"5"});
         assert!(ordered_slots(&changed).is_err());
+    }
+
+    #[test]
+    fn plan_only_join_rejects_a_plan_for_a_different_request() {
+        let request = b"source request";
+        let source = inspected(request);
+        let plan = b"source plan";
+        let view = json!({"type":"application-grain-share-issue-plan-v1",
+            "canonicalRequest":hex(request),"canonicalPlanHex":hex(plan),
+            "request":source});
+        exact_plan_view(&view, &inspected(request), request, plan).unwrap();
+        assert!(exact_plan_view(&view, &inspected(b"another request"), request, plan).is_err());
+        assert!(exact_plan_view(&view, &inspected(request), request, b"another plan").is_err());
     }
 
     #[test]

@@ -1,0 +1,7 @@
+7edfb18625f9f8e457e9aea63d38ef8af78bcc7b9fb677a625ddfa898bcaf860  scripts/spk-platform/issue-human-ticket.sh
+ddf22797fd3344374233a443cfc02353e4906ace86d62078da9edab11f7d00f6  scripts/spk-platform/issue-agent-ticket.sh
+920e396a7944700b1227811696810a168077605c6f69aa6473f6ec1dc8bb0e09  docs/evidence/2026-09-27-ticket-preview-typed/README.md
+8dc8a937c516e1f84bcbd8316870b580c2ff3aaf97e3cd77b084b66c332a078a  docs/evidence/2026-09-27-ticket-preview-typed/mock-typed-mini.sh
+72e47578b5d1fc11d8e87b1f27046187f92a4fbfceb842857c96dec65592e2a6  docs/evidence/2026-09-27-ticket-preview-typed/test-preview.sh
+f2aabe8f55e8fe32e7e7c1fea13e4b2d5fafd505d11dd703a373ae1206629fe3  docs/evidence/2026-09-27-ticket-preview-typed/schema-only-hbox.log
+84531028a8c9d6d1c8da4213783b2bbaff1be8daf91c12e64b42c78c3bd1847c  docs/evidence/2026-09-27-ticket-preview-typed/shell-gates.log

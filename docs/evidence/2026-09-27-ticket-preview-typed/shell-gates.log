@@ -1,0 +1,2 @@
+sh -n PASS
+shellcheck -S warning PASS
