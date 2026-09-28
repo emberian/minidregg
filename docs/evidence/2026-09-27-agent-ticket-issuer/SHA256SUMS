@@ -1,5 +1,8 @@
-afd0f609afa0688f78ee01021daba07f26f755ceda7e5ad22943c9c0ecaa3bb3  scripts/spk-platform/issue-agent-ticket.sh
-17272e1155b04cb06e15a1f1685d39eea3a2cd952b5b829d78b7269902e73f2f  docs/evidence/2026-09-27-agent-ticket-issuer/README.md
+921b85fdf4f892667a89aff034e1d94b157a73d9be6670aa0220ff899a1ced91  scripts/spk-platform/issue-agent-ticket.sh
+2e0d6e967714981b8fb75a3d55f7e1a0003fb85154198b0c50015255632bbe4e  docs/evidence/2026-09-27-agent-ticket-issuer/README.md
 02650a58db2808c13ea429b465d4f3f536f294cddd6580c16e8a4ea9382d122b  docs/evidence/2026-09-27-agent-ticket-issuer/schema-fixture.log
 025af71c9ea7d7cfe1c00a069ecaffcab4178eb9d31637472dd6e1f7ad1f0e94  docs/evidence/2026-09-27-agent-ticket-issuer/negative-schema.log
 98963e365679bbdade95699a58b9e06105ece66fe65c20574f5d39de249f0440  docs/evidence/2026-09-27-agent-ticket-issuer/parent-generation-schema.log
+5f8c7b525db8f78b64fc7c8d9276ead6df0c136e959ecbd77bff2b1d3c5094cb  docs/evidence/2026-09-27-agent-ticket-issuer/mock-independent-parent-host.sh
+04a25451e00a625c228024a019a122ca1461fb00178c8068219c23f8e8da3295  docs/evidence/2026-09-27-agent-ticket-issuer/test-independent-parent.sh
+2ec74c6c8091f16d9a9c349024b476a5ac2a3191e6c0e6f9c4185a077c28c3cc  docs/evidence/2026-09-27-agent-ticket-issuer/independent-parent-schema.log

@@ -232,6 +232,7 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
   "$HOST" "$CONFIG" inspect application-share-issue-grain-plan \
     "$DIR/preview-plan.bin" "$DIR/preview-plan.json" || fail "source plan inspection refused"
   jq -e --arg route "$ROUTE" --slurpfile allocation "$ALLOCATION" \
+    --slurpfile scope "$SCOPE" --slurpfile policy "$POLICY" \
     --slurpfile request "$DIR/request-inspected.json" '
     .type == "application-grain-share-issue-plan-v1" and
     .canonicalRequest == $request[0].canonicalRequest and
@@ -241,10 +242,14 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
     .request.spec.ticket.participant.origin.type == "agent" and
     .request.spec.ticket.participant.origin.task ==
       ($allocation[0].agents[] | select(.route == $route) | .controller.task) and
+    .request.spec.ticket.participant.origin.generation ==
+      $scope[0].originGeneration and
+    .request.parent == $policy[0].parent and
     .finalizedGrainBirth.parent.task ==
-      .request.spec.ticket.participant.origin.task and
-    .finalizedGrainBirth.parent.before.generation ==
-      .request.spec.ticket.participant.origin.generation and
+      .request.parent.task and
+    .finalizedGrainBirth.parent.capability == .request.parent.capability and
+    .finalizedGrainBirth.parent.observeCapability ==
+      .request.parent.observeCapability and
     (.slots | type == "array" and length > 0) and
     .finalizedGrainBirth.tool.before.reserved != null
     ' "$DIR/preview-plan.json" >/dev/null || fail "preview differs from source request"
