@@ -209,13 +209,7 @@ impl LifetimeBinding {
     pub(crate) fn validate(&self) -> io::Result<()> {
         self.lineage.validate()?;
         if self.protocol != "mini-spk-agent-lifetime-binding-v3"
-            || !self.signed_api_path.starts_with('/')
-            || !self.signed_api_path.ends_with('/')
-            || self.signed_api_path.len() > 256
-            || self
-                .signed_api_path
-                .bytes()
-                .any(|byte| byte < 0x20 || byte == 0x7f)
+            || minidregg_signed_api_path::checked_prefix(&self.signed_api_path).is_err()
             || self.host_unit.is_empty()
             || self.host_unit.len() > 256
             || self

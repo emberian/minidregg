@@ -274,7 +274,10 @@ pub fn qualify_bridge_spk(package: &Path) -> io::Result<(InstalledPackage, Bridg
     let bridge = decode_bridge_config(member).map_err(invalid)?;
     if bridge.save_identity_caps
         || bridge.expect_app_hooks
-        || !matches!(bridge.api_path.as_deref(), None | Some("/repo.git/"))
+        || bridge
+            .api_path
+            .as_deref()
+            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
     {
         return Err(invalid(
             "signed bridge requires unsupported physical profile",

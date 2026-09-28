@@ -144,12 +144,9 @@ impl Request {
                         method.as_str(),
                         "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
                     )
-                    || path.len() > 8192
-                    || path.starts_with('/')
-                    || path.contains('?')
-                    || path.contains('#')
-                    || !control_free(path)
+                    || minidregg_signed_api_path::route("/", path).is_err()
                     || query.len() > 8192
+                    || query.contains('#')
                     || !control_free(query)
                     || headers.len() > 128
                     || !canonical_hex(body_hex)
@@ -211,10 +208,7 @@ impl FixedBinding {
             .iter()
             .all(|value| canonical_decimal(value))
             || self.parent_task == self.purse_task
-            || !self.signed_api_path.starts_with('/')
-            || !self.signed_api_path.ends_with('/')
-            || self.signed_api_path.len() > 256
-            || !control_free(&self.signed_api_path)
+            || minidregg_signed_api_path::checked_prefix(&self.signed_api_path).is_err()
             || self.host_unit.is_empty()
             || self.host_unit.len() > 256
             || !control_free(&self.host_unit)

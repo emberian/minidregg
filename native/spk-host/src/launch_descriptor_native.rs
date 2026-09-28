@@ -422,14 +422,16 @@ pub(crate) fn author_signed_launch<T: SourceTool>(
         &attempt_dir.join("launch-inspection.json"),
     )?;
     let view: Value = serde_json::from_slice(&inspected)?;
-    if field(&view, "type")? != "application-spk-launch-descriptor-v2"
+    if field(&view, "type")?
+        != minidregg_signed_api_path::launch_inspection_type(v1.api_path.as_deref())
+            .map_err(invalid)?
         || field(&view, "canonical")? != hex(&canonical)
         || field(&view, "packageCanonicalHex")? != hex(&v1.canonical)
         || field(&view, "packageRoot")? != v1.root
         || !decimal(field(&view, "root")?)
     {
         return Err(invalid(
-            "Mini v2 descriptor differs from verified v1 package",
+            "Mini launch descriptor differs from verified signed package",
         ));
     }
     let expected_creates = source["createCommands"]

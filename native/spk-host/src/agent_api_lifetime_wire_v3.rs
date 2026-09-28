@@ -148,11 +148,9 @@ impl Request {
                         method.as_str(),
                         "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE"
                     )
-                    || path.len() > 8192
-                    || path.starts_with('/')
-                    || path.contains(['?', '#'])
-                    || !control_free(path)
+                    || minidregg_signed_api_path::route("/", path).is_err()
                     || query.len() > 8192
+                    || query.contains('#')
                     || !control_free(query)
                     || headers.len() > 128
                     || !hex(body_hex)

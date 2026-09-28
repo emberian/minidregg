@@ -167,19 +167,14 @@ pub(crate) fn dispatch_request(operation_id: u64, input: &HttpInput) -> Value {
 
 /// Compare the Host's source-decoded reserve request with the exact forward
 /// call retained before socket I/O. The only routing transform permitted by
-/// the first SPK API bridge is its operator-pinned signed `/repo.git/` prefix.
+/// the signed SPK API bridge is its operator-pinned prefix.
 /// The model may choose a path relative to that prefix and ordinary headers, but may not substitute any
 /// different bytes when asking the controller to spend its purse.
 pub(crate) fn routed_reserve_http(
     retained_forward: &Value,
     signed_api_path: &str,
 ) -> Result<Value, String> {
-    // The first application profile has one native GitWeb API bridge. Future
-    // prefixes need a separately qualified source/host mapping, not a generic
-    // string concatenation rule chosen by the model.
-    if signed_api_path != "/repo.git/" {
-        return Err("signed API prefix differs from the first native bridge".into());
-    }
+    minidregg_signed_api_path::checked_prefix(signed_api_path).map_err(str::to_owned)?;
     let lifetime = retained_forward.get("type").and_then(Value::as_str) == Some("dispatch-v3")
         && retained_forward.get("protocol").and_then(Value::as_str) == Some(LIFETIME_PROTOCOL);
     let operation_id = retained_forward
@@ -203,9 +198,11 @@ pub(crate) fn routed_reserve_http(
     let path = field("path")?;
     let query = field("query")?;
     let body_hex = field(if lifetime { "bodyHex" } else { "body_hex" })?;
-    if path.starts_with('/') || path.contains(['?', '#']) || query.contains('#') {
+    if query.contains('#') {
         return Err("retained forward path or query differs from API profile".into());
     }
+    let app_path =
+        minidregg_signed_api_path::route(signed_api_path, path).map_err(str::to_owned)?;
     let headers = retained_forward
         .get("headers")
         .and_then(Value::as_array)
@@ -229,7 +226,7 @@ pub(crate) fn routed_reserve_http(
     Ok(json!({
         "operationId": operation_id,
         "methodHex": hex(method.as_bytes()),
-        "pathHex": hex(format!("{}{path}", &signed_api_path[1..]).as_bytes()),
+        "pathHex": hex(app_path.as_bytes()),
         "queryHex": hex(query.as_bytes()),
         "headers": headers,
         "bodyHex": body_hex,
@@ -579,7 +576,7 @@ impl FixedBinding {
             .iter()
             .all(|value| canonical_decimal(value))
             || self.parent_task == self.purse_task
-            || self.signed_api_path != "/repo.git/"
+            || minidregg_signed_api_path::checked_prefix(&self.signed_api_path).is_err()
             || self.host_unit.is_empty()
             || self.host_unit.len() > 256
             || !clean_text(&self.host_unit)
@@ -853,7 +850,7 @@ pub(crate) fn validate_lifetime_routes(
             ]
             .contains(&&route.grant_resource)
             || route.participant_subject != participant_subject
-            || route.signed_api_path != "/repo.git/"
+            || minidregg_signed_api_path::checked_prefix(&route.signed_api_path).is_err()
         {
             return Err("lifetime API route differs from operator dispatch binding".into());
         }
@@ -1125,7 +1122,7 @@ pub(crate) fn validate_routes(
             || route.parent_task != parent_task
             || route.parent_task == route.purse_resource
             || route.participant_subject != participant_subject
-            || route.signed_api_path != "/repo.git/"
+            || minidregg_signed_api_path::checked_prefix(&route.signed_api_path).is_err()
         {
             return Err("application API route differs from operator dispatch binding".into());
         }
@@ -1969,6 +1966,67 @@ mod tests {
         changed["base"]["http"]["headers"] = json!([]);
         assert!(verify_routed_reserve_http(&retained, "/repo.git/", &changed).is_err());
         assert!(verify_routed_reserve_http(&retained, "/other/", &expected).is_err());
+        let root_expected = routed_reserve_http(&retained, "/").unwrap();
+        assert_eq!(root_expected["pathHex"], hex(b"git-receive-pack"));
+        assert_eq!(
+            root_expected["queryHex"],
+            expected["base"]["http"]["queryHex"]
+        );
+        assert_eq!(
+            root_expected["bodyHex"],
+            expected["base"]["http"]["bodyHex"]
+        );
+        assert_eq!(
+            root_expected["headers"],
+            expected["base"]["http"]["headers"]
+        );
+        let root_inspection = json!({"base":{"http":root_expected}});
+        verify_routed_reserve_http(&retained, "/", &root_inspection).unwrap();
+        for bad in [
+            "/",
+            "//authority",
+            "topic/../admin",
+            "topic/%2e%2e/admin",
+            "topic//json",
+            "topic?json",
+        ] {
+            let mut altered = retained.clone();
+            altered["path"] = json!(bad);
+            assert!(routed_reserve_http(&altered, "/").is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn root_signed_profile_routes_json_post_and_poll_without_losing_custody_bytes() {
+        let post = json!({"application":"sntfy", "method":"POST", "path":"",
+            "query":"", "headers":[{"name":"content-type","value":"application/json"}],
+            "bodyHex":hex(br#"{"topic":"team","message":"ready"}"#)});
+        let parsed = parse_input(&post, &["sntfy".into()]).unwrap();
+        let retained = dispatch_request(41, &parsed);
+        let routed = routed_reserve_http(&retained, "/").unwrap();
+        assert_eq!(routed["pathHex"], "");
+        assert_eq!(routed["methodHex"], hex(b"POST"));
+        assert_eq!(routed["bodyHex"], post["bodyHex"]);
+        assert_eq!(routed["headers"][0]["valueHex"], hex(b"application/json"));
+        let source = json!({"base":{"http":routed}});
+        verify_routed_reserve_http(&retained, "/", &source).unwrap();
+        for field in ["bodyHex", "queryHex", "pathHex", "headers"] {
+            let mut altered = source.clone();
+            altered["base"]["http"][field] = json!("00");
+            assert!(verify_routed_reserve_http(&retained, "/", &altered).is_err());
+        }
+
+        let poll = json!({"application":"sntfy", "method":"GET", "path":"team/json",
+            "query":"poll=1", "headers":[], "bodyHex":""});
+        let parsed = parse_input(&poll, &["sntfy".into()]).unwrap();
+        let retained = dispatch_request(42, &parsed);
+        let routed = routed_reserve_http(&retained, "/").unwrap();
+        assert_eq!(routed["pathHex"], hex(b"team/json"));
+        assert_eq!(routed["queryHex"], hex(b"poll=1"));
+        assert_eq!(routed["bodyHex"], "");
+        let mut fragment = retained;
+        fragment["query"] = json!("poll=1#fragment");
+        assert!(routed_reserve_http(&fragment, "/").is_err());
     }
 
     #[test]

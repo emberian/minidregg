@@ -101,7 +101,7 @@ fn digest_nat_bytes(value: &str) -> io::Result<[u8; 32]> {
 pub(crate) enum Route<'a> {
     Browser,
     /// Decoded from the signature-verified bridge config and compared with
-    /// Mini's v1 fixed mapping. It is never supplied by HTTP input.
+    /// Mini's admitted package descriptor. It is never supplied by HTTP input.
     Api {
         signed_path: &'a str,
     },
@@ -172,12 +172,7 @@ pub(crate) fn app_route_path(http: &HttpProjection<'_>) -> io::Result<(String, S
     let app_path = match http.route {
         Route::Browser => path.to_owned(),
         Route::Api { signed_path } => {
-            if signed_path != "/repo.git/" {
-                return Err(invalid(
-                    "signed API prefix differs from Mini bridge v1 mapping",
-                ));
-            }
-            format!("repo.git/{path}")
+            minidregg_signed_api_path::route(signed_path, path).map_err(invalid)?
         }
     };
     Ok((app_path, query.to_owned()))
@@ -507,6 +502,28 @@ mod tests {
             ..http
         };
         assert_eq!(app_route_path(&browser).unwrap(), ("".into(), "".into()));
+        let root_api = HttpProjection {
+            path_and_query: "topic/json?poll=1",
+            route: Route::Api { signed_path: "/" },
+            ..http
+        };
+        assert_eq!(
+            app_route_path(&root_api).unwrap(),
+            ("topic/json".into(), "poll=1".into())
+        );
+        for path_and_query in [
+            "../admin",
+            "topic//json",
+            "topic/%2e%2e/admin",
+            "//authority",
+            "topic#fragment",
+        ] {
+            let malformed = HttpProjection {
+                path_and_query,
+                ..root_api
+            };
+            assert!(app_route_path(&malformed).is_err(), "{path_and_query}");
+        }
     }
 
     #[test]

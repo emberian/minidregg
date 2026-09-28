@@ -321,8 +321,8 @@ impl LifetimeCustodyV3 {
         Ok(binding)
     }
 
-    /// The only first-profile path transform: signed `/repo.git/` plus the
-    /// caller's relative path. Header order and bytes are preserved exactly.
+    /// Apply the signed API prefix to the exact relative request path. Header
+    /// order and bytes are preserved exactly.
     pub(crate) fn fixed_reserve_request(
         &self,
         request: &Request,
@@ -330,9 +330,6 @@ impl LifetimeCustodyV3 {
     ) -> io::Result<(Value, Value)> {
         self.validate()?;
         Request::parse(&serde_json::to_vec(request)?)?;
-        if signed_api_path != "/repo.git/" {
-            return Err(refused("lifetime signed GitWeb API path refused"));
-        }
         let Request::DispatchV3 {
             operation_id,
             method,
@@ -355,7 +352,8 @@ impl LifetimeCustodyV3 {
         let http = json!({
             "operationId":operation_id,
             "methodHex":hex(method.as_bytes()),
-            "pathHex":hex(format!("repo.git/{path}").as_bytes()),
+            "pathHex":hex(minidregg_signed_api_path::route(signed_api_path, path)
+                .map_err(refused)?.as_bytes()),
             "queryHex":hex(query.as_bytes()),
             "headers":ordered,
             "bodyHex":body_hex,
@@ -465,7 +463,12 @@ mod tests {
         assert_eq!(fixed["fixed"]["reserveOperationId"], "0");
         assert_eq!(fixed["grantIssueIndex"], "3");
         assert!(fixed.get("appGeneration").is_none());
-        assert!(custody.fixed_reserve_request(&request, "/api/").is_err());
+        let (_, rooted) = custody.fixed_reserve_request(&request, "/").unwrap();
+        assert_eq!(rooted["pathHex"], hex(b"git-receive-pack"));
+        assert_eq!(rooted["queryHex"], http["queryHex"]);
+        assert_eq!(rooted["bodyHex"], http["bodyHex"]);
+        assert_eq!(rooted["headers"], http["headers"]);
+        assert!(custody.fixed_reserve_request(&request, "/api//").is_err());
     }
 
     #[test]

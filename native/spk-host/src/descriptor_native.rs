@@ -106,7 +106,10 @@ pub(crate) fn author_signed_package<T: SourceTool>(
     let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
     if bridge.save_identity_caps
         || bridge.expect_app_hooks
-        || !matches!(bridge.api_path.as_deref(), None | Some("/repo.git/"))
+        || bridge
+            .api_path
+            .as_deref()
+            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
     {
         return Err(invalid("signed bridge outside resident Mini mapping"));
     }
@@ -173,7 +176,9 @@ pub(crate) fn author_signed_package<T: SourceTool>(
     let view: Value = serde_json::from_slice(&inspected)?;
     let mut image_identity = b"DREGG/SPK-IMAGE/v1".to_vec();
     image_identity.extend_from_slice(&package.raw_sha256_bytes);
-    if field(&view, "type")? != "application-spk-package-identity-v1"
+    if field(&view, "type")?
+        != minidregg_signed_api_path::descriptor_inspection_type(bridge.api_path.as_deref())
+            .map_err(invalid)?
         || field(&view, "canonical")? != hex(&canonical)
         || field(&view, "imageIdentity")? != hex(&image_identity)
         || field(&view, "rawSha256")? != hex(&package.raw_sha256_bytes)

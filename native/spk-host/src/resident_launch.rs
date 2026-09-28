@@ -139,7 +139,10 @@ impl<'a> SourceBoundLaunch<'a> {
         let bridge = decode_bridge_config(member).map_err(io::Error::other)?;
         if bridge.save_identity_caps
             || bridge.expect_app_hooks
-            || !matches!(bridge.api_path.as_deref(), None | Some("/repo.git/"))
+            || bridge
+                .api_path
+                .as_deref()
+                .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
         {
             return Err(invalid("retained signed bridge outside resident mapping"));
         }
@@ -172,7 +175,9 @@ impl<'a> SourceBoundLaunch<'a> {
             .ok_or_else(|| invalid("retained signed bridge digest absent"))?;
         let mut image_identity = b"DREGG/SPK-IMAGE/v1".to_vec();
         image_identity.extend_from_slice(&package.raw_sha256_bytes);
-        if source_text(&package_view, "type")? != "application-spk-package-identity-v1"
+        if source_text(&package_view, "type")?
+            != minidregg_signed_api_path::descriptor_inspection_type(bridge.api_path.as_deref())
+                .map_err(invalid)?
             || source_text(&package_view, "canonical")? != hex_bytes(&package_canonical)
             || source_text(&package_view, "rawSha256")? != hex_bytes(&package.raw_sha256_bytes)
             || source_text(&package_view, "rawLength")? != package.raw_length.to_string()
@@ -235,7 +240,9 @@ impl<'a> SourceBoundLaunch<'a> {
             &attempt_dir.join("launch-descriptor.bin"),
             &probe_dir.join("launch.json"),
         )?)?;
-        if source_text(&view, "type")? != "application-spk-launch-descriptor-v2"
+        if source_text(&view, "type")?
+            != minidregg_signed_api_path::launch_inspection_type(bridge.api_path.as_deref())
+                .map_err(invalid)?
             || source_text(&view, "canonical")? != hex_bytes(&canonical)
             || source_text(&view, "packageCanonicalHex")? != hex_bytes(&package_canonical)
             || source_text(&view, "packageRoot")? != package_root

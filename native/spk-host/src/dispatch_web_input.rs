@@ -311,6 +311,42 @@ mod tests {
     }
 
     #[test]
+    fn root_signed_api_poll_reaches_typed_session_with_exact_query() {
+        let mut source = matched();
+        source.method = "GET".into();
+        source.app_path_and_query = "team/json?poll=1".into();
+        let http = HttpProjection {
+            method: "GET",
+            path_and_query: "team/json?poll=1",
+            ordered_headers: &[],
+            body: b"",
+            route: Route::Api { signed_path: "/" },
+        };
+        let projected = physical_web_input(&source, &http, "Friend", "friend").unwrap();
+        assert_eq!(projected.binding.kind, SessionKind::Api);
+        assert_eq!(projected.binding.params.identity_id, [0xaa; 32]);
+        assert_eq!(projected.request.path_and_query, "team/json?poll=1");
+        assert!(projected.request.body.is_none());
+
+        source.method = "POST".into();
+        source.app_path_and_query.clear();
+        let headers = vec![("content-type".into(), "application/json".into())];
+        let body = br#"{"topic":"team","message":"ready"}"#;
+        let post = HttpProjection {
+            method: "POST",
+            path_and_query: "",
+            ordered_headers: &headers,
+            body,
+            route: Route::Api { signed_path: "/" },
+        };
+        let projected = physical_web_input(&source, &post, "Friend", "friend").unwrap();
+        assert_eq!(projected.request.path_and_query, "");
+        let posted = projected.request.body.unwrap();
+        assert_eq!(posted.mime_type, "application/json");
+        assert_eq!(posted.bytes, body);
+    }
+
+    #[test]
     fn ordinary_browser_headers_map_or_refuse_without_silent_drop() {
         let mut source = matched();
         source.method = "GET".into();

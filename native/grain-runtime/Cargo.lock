@@ -101,11 +101,16 @@ name = "minidregg-grain-runtime"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "minidregg-signed-api-path",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
 ]
+
+[[package]]
+name = "minidregg-signed-api-path"
+version = "0.1.0"
 
 [[package]]
 name = "proc-macro2"

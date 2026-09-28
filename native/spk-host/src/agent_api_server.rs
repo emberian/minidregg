@@ -955,7 +955,7 @@ fn match_committed(
         || binding.parent_generation != custody.parent_generation
         || binding.purse_task != custody.purse_task
         || binding.purse_generation != custody.purse_generation
-        || !app_path.starts_with(binding.signed_api_path.trim_start_matches('/'))
+        || !minidregg_signed_api_path::is_under(&binding.signed_api_path, app_path)
         || decimal(session, "resource")? != custody.session
         || string(session, "generation")? != binding.session_generation
         || decimal(session, "subject")? != custody.subject
@@ -1390,6 +1390,28 @@ mod tests {
             &reserve
         )
         .is_ok());
+        let mut root_binding = binding.clone();
+        root_binding.signed_api_path = "/".into();
+        let mut root_inspection = inspection.clone();
+        root_inspection["request"]["pathHex"] = json!(hex(b"info/refs"));
+        assert!(match_committed(
+            &root_inspection,
+            &request,
+            "info/refs",
+            &custody,
+            &root_binding,
+            &reserve
+        )
+        .is_ok());
+        assert!(match_committed(
+            &root_inspection,
+            &request,
+            "repo.git/info/refs",
+            &custody,
+            &root_binding,
+            &reserve
+        )
+        .is_err());
         let mut wrong_binding = binding.clone();
         wrong_binding.parent_task = binding.purse_task.clone();
         assert!(match_committed(

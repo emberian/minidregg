@@ -134,7 +134,11 @@ fn compare_claim_kind(
             "SPK bridge requires unsupported identity or hook behavior",
         ));
     }
-    if !matches!(bridge.api_path.as_deref(), None | Some("/repo.git/")) {
+    if bridge
+        .api_path
+        .as_deref()
+        .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
+    {
         return Err(invalid("signed API path has no Mini v1 interface mapping"));
     }
     let inspected: Value = serde_json::from_slice(claim_inspection)?;
