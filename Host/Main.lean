@@ -404,7 +404,7 @@ structure AgentDispatchFixedSettings where
   payerSubject : Nat
   reserveAmount : Int
   maximumCharge : Int
-  deriving ToJson
+  deriving ToJson, DecidableEq
 
 instance : FromJson AgentDispatchFixedSettings where
   fromJson? json := do
@@ -460,7 +460,7 @@ structure AgentLifetimeDispatchFixedSettings where
   grantIssueIndex : Nat
   grantResource : Nat
   grantObserveCapability : Nat
-  deriving ToJson
+  deriving ToJson, DecidableEq
 
 instance : FromJson AgentLifetimeDispatchFixedSettings where
   fromJson? json := do
@@ -508,6 +508,7 @@ structure Settings where
   fnReplyCatalog : Option FnReplyCatalogServiceSettings := none
   continuityProviderResourceId : Option Nat := none
   providerMetering : Option ProviderMeteringSettings := none
+  providerServices : Option (List ProviderMeteringSettings) := none
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
   completionManagement : Option CompletionManagementSettings := none
@@ -515,6 +516,7 @@ structure Settings where
   residentClaimManagement : Option ResidentClaimManagementSettings := none
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
+  agentLifetimeDispatchServices : Option (List AgentLifetimeDispatchFixedSettings) := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -544,11 +546,64 @@ def Settings.providerMeteringPin (settings : Settings) :
   let tariff ← ProviderUsage.parseTariff metering.tariff.compress
   return some (metering.providerResourceId, tariff)
 
+/-- Bounded unique service table, parsed once from operator configuration. -/
+def checkedProviderServices (services : List ProviderMeteringSettings) :
+    Except String (List (Nat × Kernel.ProviderMetering.Tariff)) := do
+  unless 0 < services.length && services.length ≤ 8 do
+    throw "providerServices requires one to eight entries"
+  let ids := services.map (·.providerResourceId)
+  unless ids.all (fun id => decide (0 < id)) && decide ids.Nodup do
+    throw "providerServices resource IDs must be positive and unique"
+  services.mapM fun service => do
+    let tariff ← ProviderUsage.parseTariff service.tariff.compress
+    pure (service.providerResourceId, tariff)
+
+/-- One operator-owned service list is shared by continuity and metering.
+Legacy scalar pins remain byte-compatible but cannot be mixed with the list. -/
+def Settings.providerServicePins (settings : Settings) :
+    Except String (List (Nat × Kernel.ProviderMetering.Tariff)) := do
+  let some services := settings.providerServices | return []
+  unless settings.continuityProviderResourceId.isNone &&
+      settings.providerMetering.isNone do
+    throw "providerServices cannot be combined with legacy provider pins"
+  checkedProviderServices services
+
+def Settings.continuityIds (settings : Settings) : Except String (List Nat) := do
+  if settings.providerServices.isSome then
+    return (← settings.providerServicePins).map Prod.fst
+  match settings.continuityProviderResourceId with
+  | some resourceId =>
+      unless resourceId > 0 do throw "provider continuity resource ID must be positive"
+      return [resourceId]
+  | none => return []
+
+def checkedLifetimeDispatchServices (services : List AgentLifetimeDispatchFixedSettings) :
+    Except String (List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) := do
+  unless 0 < services.length && services.length ≤ 8 do
+    throw "agentLifetimeDispatchServices requires one to eight entries"
+  unless decide services.Nodup do
+    throw "agentLifetimeDispatchServices contains duplicate full fixed selectors"
+  return services.map AgentLifetimeDispatchFixedSettings.selectors
+
+def Settings.lifetimeDispatchPins (settings : Settings) : Except String
+    (List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors) := do
+  match settings.agentLifetimeDispatchServices with
+  | some services =>
+      unless settings.agentLifetimeDispatchFixed.isNone do
+        throw "agentLifetimeDispatchServices cannot be combined with legacy pin"
+      checkedLifetimeDispatchServices services
+  | none =>
+      return settings.agentLifetimeDispatchFixed.toList.map
+        AgentLifetimeDispatchFixedSettings.selectors
+
 def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
   let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
   let settings : Settings ← IO.ofExcept (fromJson? json)
   discard <| IO.ofExcept settings.providerMeteringPin
+  discard <| IO.ofExcept settings.providerServicePins
+  discard <| IO.ofExcept settings.continuityIds
+  discard <| IO.ofExcept settings.lifetimeDispatchPins
   if let some tariff := settings.grainBirthTariff then
     unless 0 < tariff.base do
       throw (IO.userError "grainBirthTariff.base must be positive")
@@ -617,7 +672,8 @@ def inspectStopClaimCurrent (config : NativeHost.Config)
 this reads neither storage nor protected resource values. Full-width integers
 are decimal strings so clients cannot silently round a digest. -/
 def profileDescription (config : NativeHost.Config)
-    (metering : Option (Nat × Kernel.ProviderMetering.Tariff) := none) : Lean.Json :=
+    (metering : Option (Nat × Kernel.ProviderMetering.Tariff) := none)
+    (services : List (Nat × Kernel.ProviderMetering.Tariff) := []) : Lean.Json :=
   let n := fun value : Nat => toJson (toString value)
   let base :=
     [("runtime", toJson "minidregg-native"),
@@ -638,21 +694,24 @@ def profileDescription (config : NativeHost.Config)
        ("collector", n config.tariff.collector), ("asset", n config.tariff.asset)]),
      ("runtimeParameters", toJson (Minidregg.Host.Json.encodeHex config.runtimeParameters)),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false)]
-  let meteringFields := match metering with
-    | none => []
-    | some (providerResourceId, tariff) =>
-        [("providerMetering", Lean.Json.mkObj [
+  let meteringJson := fun (providerResourceId, tariff) => Lean.Json.mkObj [
           ("providerResourceId", n providerResourceId),
           ("tariffVersion", n tariff.version),
           ("model", toJson tariff.model),
           ("inputMicroPerMillion", n tariff.inputMicroPerMillion),
           ("outputMicroPerMillion", n tariff.outputMicroPerMillion),
-          ("tariffDigest", n (Kernel.ProviderMetering.tariffDigest tariff).value)])]
+          ("tariffDigest", n (Kernel.ProviderMetering.tariffDigest tariff).value)]
+  let meteringFields := match metering with
+    | none => []
+    | some (providerResourceId, tariff) =>
+        [("providerMetering", meteringJson (providerResourceId, tariff))]
+  let serviceFields := if services.isEmpty then [] else
+    [("providerMeterings", toJson (services.map meteringJson))]
   let grainBirthFields := match config.grainBirthTariff with
     | none => []
     | some tariff => [("grainBirthTariff", Lean.Json.mkObj
         [("base", n tariff.base), ("perBirth", n tariff.perBirth)])]
-  Lean.Json.mkObj (base ++ grainBirthFields ++ meteringFields)
+  Lean.Json.mkObj (base ++ grainBirthFields ++ meteringFields ++ serviceFields)
 
 def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
   let n := fun value : Nat => toJson (toString value)
@@ -1443,16 +1502,21 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
 /-- Event26 has independent reserve and paid plans. Only operator-pinned
 selectors reach source planning; retained plans are checked again before
 detached signatures are assembled. The final native submit re-admits fresh. -/
+def requireOneLifetimeDispatchPin
+    (approved : List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+    (predicate : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors → Bool) : IO Unit := do
+  unless (approved.filter predicate).length == 1 do
+    throw (IO.userError "lifetime dispatch request differs from unique full operator pin")
+
 def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (approved : ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
+    (approved : List ApplicationAgentLifetimeDispatchPaidAuthoring.FixedSelectors)
     (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
   match operation with
   | 80 =>
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode payload
         | throw (IO.userError "noncanonical lifetime reserve request")
-      unless request.matchesFixed approved do
-        throw (IO.userError "lifetime reserve request differs from operator pin")
+      requireOneLifetimeDispatchPin approved request.matchesFixed
       let session ← sessionCurrent config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.prepareReserveVerified
@@ -1466,8 +1530,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.reservePlanCodec.decode
           planBytes
         | throw (IO.userError "noncanonical lifetime reserve plan")
-      unless plan.request.matchesFixed approved do
-        throw (IO.userError "lifetime reserve plan differs from operator pin")
+      requireOneLifetimeDispatchPin approved plan.request.matchesFixed
       let signatures ← decodeSignatures signaturesBytes
       let signed ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.assembleReserve plan signatures
@@ -1485,8 +1548,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.paidRequestCodec.decode
           payload
         | throw (IO.userError "noncanonical lifetime paid dispatch request")
-      unless request.fixed.matchesFixed approved do
-        throw (IO.userError "lifetime paid request differs from operator pin")
+      requireOneLifetimeDispatchPin approved request.fixed.matchesFixed
       let session ← sessionCurrent config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.preparePaidVerified
@@ -1499,8 +1561,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.paidPlanCodec.decode planBytes
         | throw (IO.userError "noncanonical lifetime paid dispatch plan")
-      unless plan.request.fixed.matchesFixed approved do
-        throw (IO.userError "lifetime paid plan differs from operator pin")
+      requireOneLifetimeDispatchPin approved plan.request.fixed.matchesFixed
       let (appBytes, grantAndPayer) ← splitPair signaturesBytes
       let (grantSignature, payerBytes) ← splitPair grantAndPayer
       unless grantSignature.length == 64 do
@@ -4162,20 +4223,32 @@ def runFnOriginOutboxExportSession (config : NativeHost.Config)
      ("miniOrigin", evidenceReceiptJson prepared.originReceipt),
      ("miniOutbox", evidenceReceiptJson outboxReceipt)]).compress.toUTF8.toList)
 
+/-- Select exactly one configured provider from the signed command's actual
+targets. A caller-supplied provider label cannot choose a continuity cell. -/
+def providerFromReserveCall (providerIds : List Nat) (reserveCall : List UInt8) :
+    Except String Nat := do
+  let some (.invoke signed) := NativeHostCodec.callCodec.decode reserveCall
+    | throw "reserve call is not a canonical signed invocation"
+  let some command := DeclaredResourceController.commandCodec.decode signed.commandBytes
+    | throw "reserve call has no canonical signed command"
+  match command.targets.filter (fun target => providerIds.contains target.target) with
+  | [target] => return target.target
+  | _ => throw "reserve call must target exactly one configured provider service"
+
 /-- A current, read-only check of one originally confirmed provider reserve.
 The caller supplies its retained canonical call and outcome bytes; the
-provider resource ID is fixed by operator configuration. This check does not
-lease the provider resource across a later external send. -/
+provider resource ID comes from that signed call and the operator service list.
+This check does not lease the provider resource across a later external send. -/
 def runProviderContinuitySession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
-    (providerResourceId : Nat) (payload : List UInt8) :
+    (providerIds : List Nat) (payload : List UInt8) :
     IO (UInt8 × List UInt8) := do
-  unless providerResourceId > 0 do
-    throw (IO.userError "provider continuity resource ID must be positive")
   let (reserveCall, outcomeBytes) ← splitPair payload
   unless !reserveCall.isEmpty && !outcomeBytes.isEmpty &&
       outcomeBytes.length ≤ 1024 do
     throw (IO.userError "provider continuity needs bounded original call and outcome")
+  let providerResourceId ← IO.ofExcept <|
+    providerFromReserveCall providerIds reserveCall
   let some (.confirmed _ anchor) := outcomeCodec.decode outcomeBytes
     | throw (IO.userError "provider continuity outcome is not canonical confirmation")
   discard <| sessionOpened config state
@@ -4553,7 +4626,9 @@ def run (arguments : List String) : IO UInt32 := do
       let config := settings.config
       match command, rest with
       | "profile", [] =>
-          IO.println (profileDescription config (← IO.ofExcept settings.providerMeteringPin)).pretty
+          IO.println (profileDescription config
+            (← IO.ofExcept settings.providerMeteringPin)
+            (← IO.ofExcept settings.providerServicePins)).pretty
           pure 0
       | "author", [kind, input, output] =>
           let source ← if kind == "application-dispatch-request" ||
@@ -4729,23 +4804,29 @@ def run (arguments : List String) : IO UInt32 := do
                                   "A origin outbox service is not configured")
                             runFnOriginOutboxSession pinnedConfig state selected payload
                         | 17 =>
-                            let some providerResourceId := settings.continuityProviderResourceId
-                              | return ((255 : UInt8), failure "provider-continuity"
-                                  "provider continuity resource is not configured")
+                            let providerIds ← IO.ofExcept settings.continuityIds
+                            if providerIds.isEmpty then
+                              return ((255 : UInt8), failure "provider-continuity"
+                                "provider continuity resource is not configured")
                             runProviderContinuitySession pinnedConfig state
-                              providerResourceId payload
+                              providerIds payload
                         | 18 =>
                             unless catalogService.isSome do
                               return ((255 : UInt8), failure "fn-origin-outbox"
                                 "A origin outbox service is not configured")
                             runFnOriginOutboxExportSession pinnedConfig state payload
                         | 19 =>
-                            let some metering := settings.providerMetering
-                              | return ((255 : UInt8), failure "provider-metering"
-                                  "provider metering is not configured")
-                            let tariff ← IO.ofExcept <|
-                              ProviderUsage.parseTariff metering.tariff.compress
-                            match ProviderUsage.quotePayload metering.providerResourceId tariff payload with
+                            let services ← IO.ofExcept settings.providerServicePins
+                            let legacy ← IO.ofExcept settings.providerMeteringPin
+                            let quoted := match settings.providerServices with
+                              | some _ =>
+                                  ProviderUsage.quotePayloadV2 services payload
+                              | none =>
+                                  match legacy with
+                                  | some (providerResourceId, tariff) =>
+                                      ProviderUsage.quotePayload providerResourceId tariff payload
+                                  | none => .error "provider metering is not configured"
+                            match quoted with
                             | .ok report =>
                                 return ((19 : UInt8), report.compress.toUTF8.toList)
                             | .error reason =>
@@ -5102,15 +5183,17 @@ def run (arguments : List String) : IO UInt32 := do
                             agentDispatchAuthorSession pinnedConfig state custody.selectors
                               operation payload
                         | 78 | 79 | 80 | 81 =>
-                            let some custody := settings.agentLifetimeDispatchFixed
-                              | return ((255 : UInt8), failure "application-agent-lifetime-author"
-                                  "lifetime dispatch operator pin is not configured")
+                            let custody ← IO.ofExcept settings.lifetimeDispatchPins
+                            if custody.isEmpty then
+                              return ((255 : UInt8), failure "application-agent-lifetime-author"
+                                "lifetime dispatch operator pin is not configured")
                             agentLifetimeDispatchAuthorSession pinnedConfig state
-                              custody.selectors operation payload
+                              custody operation payload
                         | _ => throw (IO.userError "unsupported native host operation")
                       catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
                     (← IO.ofExcept settings.providerMeteringPin)
+                    (← IO.ofExcept settings.providerServicePins)
                   serveSession pinnedConfig state meteringProfile fnDispatch
                     (← IO.getStdin) (← IO.getStdout)
           pure 0

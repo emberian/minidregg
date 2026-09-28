@@ -248,6 +248,37 @@ fn provider_max_iterations(configured: Option<u8>) -> Result<u8> {
     Ok(iterations)
 }
 
+fn select_provider_metering<'a>(profile: &'a Value, task: &str) -> Result<&'a Value> {
+    if let Some(services) = profile.get("providerMeterings") {
+        if profile.get("providerMetering").is_some() {
+            return Err("Host profile mixes singular and multi-provider tariffs".into());
+        }
+        let services = services
+            .as_array()
+            .filter(|services| !services.is_empty() && services.len() <= 8)
+            .ok_or("Host provider metering list is not bounded")?;
+        let mut ids = std::collections::HashSet::new();
+        for service in services {
+            let id = service
+                .get("providerResourceId")
+                .and_then(Value::as_str)
+                .ok_or("Host provider metering resource ID absent")?;
+            decimal(id, "providerResourceId")?;
+            if id == "0" || !ids.insert(id) {
+                return Err("Host profile repeats or zeroes a provider metering ID".into());
+            }
+        }
+        services
+            .iter()
+            .find(|service| service.get("providerResourceId").and_then(Value::as_str) == Some(task))
+            .ok_or("pinned Host profile has no tariff for configured provider task".into())
+    } else {
+        profile
+            .get("providerMetering")
+            .ok_or("pinned Host profile has no provider metering tariff".into())
+    }
+}
+
 fn provider_required_network(task: &ProviderTask) -> Result<&'static str> {
     if !task.local_fixture_host_network {
         return Ok("none");
@@ -1297,6 +1328,8 @@ fn metered_audit_path(send_started: bool, outcome: Option<&str>) -> Result<Meter
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProviderMeteringPin {
     provider_resource_id: String,
+    #[serde(default = "legacy_metering_metadata_version")]
+    metadata_version: u8,
     model: String,
     tariff_version: String,
     tariff_digest: String,
@@ -1308,6 +1341,28 @@ struct ProviderMeteringPin {
     max_input_tokens: Option<u32>,
     #[serde(default)]
     max_output_tokens: Option<u32>,
+}
+
+fn legacy_metering_metadata_version() -> u8 {
+    1
+}
+
+fn provider_metering_metadata(
+    pin: &ProviderMeteringPin,
+    status: u16,
+    content_type: &str,
+    reserve: &str,
+) -> Result<Value> {
+    let common = json!({"status":status.to_string(),"contentType":content_type,
+        "reserve":reserve});
+    match pin.metadata_version {
+        1 => Ok(common),
+        2 => Ok(
+            json!({"version":"2","providerResourceId":pin.provider_resource_id,
+            "status":status.to_string(),"contentType":content_type,"reserve":reserve}),
+        ),
+        _ => Err("unknown pinned provider metering metadata version".into()),
+    }
 }
 
 fn provider_max_charge_bound(pin: &ProviderMeteringPin, input: u32, output: u32) -> Result<u128> {
@@ -8907,9 +8962,7 @@ impl Runtime {
         }
         let profile: Value = serde_json::from_slice(&output.stdout)
             .map_err(|e| format!("invalid provider metering profile: {e}"))?;
-        let metering = profile
-            .get("providerMetering")
-            .ok_or("pinned Host profile has no provider metering tariff")?;
+        let metering = select_provider_metering(&profile, &task.task)?;
         let field = |name: &str| -> Result<String> {
             let value = metering
                 .get(name)
@@ -8923,6 +8976,11 @@ impl Runtime {
         };
         let pin = ProviderMeteringPin {
             provider_resource_id: field("providerResourceId")?,
+            metadata_version: if profile.get("providerMeterings").is_some() {
+                2
+            } else {
+                1
+            },
             model: metering
                 .get("model")
                 .and_then(Value::as_str)
@@ -9415,8 +9473,7 @@ impl Runtime {
             .config
             .state_dir
             .join(format!("provider-meter-{id:016}.metadata.json"));
-        let metadata = json!({"status":status.to_string(),"contentType":content_type,
-            "reserve":hold.reserve.clone()});
+        let metadata = provider_metering_metadata(pin, status, &content_type, &hold.reserve)?;
         write_new(&metadata_path, metadata.to_string().as_bytes())?;
         let directory = self
             .config
@@ -9586,8 +9643,7 @@ impl Runtime {
                 "metered Host frame or copied inputs differ from the retained attempt".into(),
             );
         }
-        let metadata = json!({"status":status.to_string(),"contentType":content_type,
-            "reserve":reserve});
+        let metadata = provider_metering_metadata(pin, status, &content_type, reserve)?;
         if bounded_regular_file(&directory.join("metadata.json"), 4096)?
             != metadata.to_string().as_bytes()
             || bounded_regular_file(&directory.join("config.json"), 131_072)?
@@ -16590,6 +16646,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
     fn metered_quote_binds_tariff_hold_and_source_settle_charge() {
         let pin = ProviderMeteringPin {
             provider_resource_id: "7004".into(),
+            metadata_version: 1,
             model: "fixture".into(),
             tariff_version: "1".into(),
             tariff_digest: "123".into(),
@@ -16635,6 +16692,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
     fn metered_maximum_charge_uses_pinned_token_caps_and_rounds_up() {
         let pin = ProviderMeteringPin {
             provider_resource_id: "7004".into(),
+            metadata_version: 1,
             model: "fixture".into(),
             tariff_version: "1".into(),
             tariff_digest: "123".into(),
@@ -16695,6 +16753,56 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         ] {
             assert!(!provider_audit_coordinates(&changed, &hold));
         }
+    }
+
+    #[test]
+    fn provider_profile_selects_one_pinned_service_without_cross_task_tariff() {
+        let profile = json!({"providerMeterings":[
+            {"providerResourceId":"7950","model":"bonsai2-27b-ptq1"},
+            {"providerResourceId":"7951","model":"bonsai2-27b-ptq1"}]});
+        assert_eq!(
+            select_provider_metering(&profile, "7950").unwrap()["providerResourceId"],
+            "7950"
+        );
+        assert_eq!(
+            select_provider_metering(&profile, "7951").unwrap()["providerResourceId"],
+            "7951"
+        );
+        assert!(select_provider_metering(&profile, "7952").is_err());
+        let mut duplicate = profile.clone();
+        duplicate["providerMeterings"][1]["providerResourceId"] = json!("7950");
+        assert!(select_provider_metering(&duplicate, "7950").is_err());
+        let mut mixed = profile;
+        mixed["providerMetering"] = json!({"providerResourceId":"7950"});
+        assert!(select_provider_metering(&mixed, "7950").is_err());
+        let legacy = json!({"providerMetering":{"providerResourceId":"7004"}});
+        assert_eq!(
+            select_provider_metering(&legacy, "7004").unwrap()["providerResourceId"],
+            "7004"
+        );
+    }
+
+    #[test]
+    fn provider_quote_metadata_preserves_scalar_v1_and_pins_multi_v2() {
+        let mut pin: ProviderMeteringPin = serde_json::from_value(json!({
+            "providerResourceId":"7004","model":"fixture","tariffVersion":"1",
+            "tariffDigest":"123"
+        }))
+        .unwrap();
+        assert_eq!(pin.metadata_version, 1);
+        let scalar = provider_metering_metadata(&pin, 200, "application/json", "50").unwrap();
+        assert_eq!(
+            scalar,
+            json!({"status":"200","contentType":"application/json","reserve":"50"})
+        );
+        assert!(scalar.get("version").is_none());
+        pin.metadata_version = 2;
+        let multi = provider_metering_metadata(&pin, 200, "application/json", "50").unwrap();
+        assert_eq!(multi["version"], "2");
+        assert_eq!(multi["providerResourceId"], "7004");
+        assert_eq!(multi["reserve"], "50");
+        pin.metadata_version = 3;
+        assert!(provider_metering_metadata(&pin, 200, "application/json", "50").is_err());
     }
 
     #[test]

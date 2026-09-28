@@ -285,4 +285,30 @@ def quotePayload (providerResourceId : Nat) (tariff : Tariff)
   let quote ← quoteResponse tariff request response contentType status reserve
   pure (reportJson providerResourceId quote)
 
+/-- Multi-provider metadata names only a configured service. The tariff comes
+from the operator list; the reported HTTP bytes and usage retain the v1 checks. -/
+def quotePayloadV2 (services : List (Nat × Tariff))
+    (payload : List UInt8) : Result Json := do
+  let (metadataBytes, remainder) ← splitPairBounded payload 4096
+  let (request, response) ← splitPairBounded remainder 1048576
+  if response.isEmpty || response.length > 8388608 then
+    throw "provider metering response exceeds byte bound"
+  let metadataText ← textOfBytes "metadata" metadataBytes 4096
+  let metadata ← Minidregg.Host.Json.parse metadataText
+  let obj ← metadata.getObj?.mapError (fun _ => "metadata must be an object")
+  let expected := ["version", "providerResourceId", "status", "contentType", "reserve"]
+  let actual := obj.foldl (init := []) (fun names key _ => key :: names)
+  unless actual.length = expected.length && actual.all expected.contains do
+    throw "provider metering metadata differs from the v2 schema"
+  unless (← stringField metadata "version") == "2" do
+    throw "provider metering metadata version differs"
+  let providerResourceId ← canonicalNat metadata "providerResourceId"
+  let some (_, tariff) := services.find? (fun service => service.1 == providerResourceId)
+    | throw "provider metering selector is not configured"
+  let status ← canonicalNat metadata "status"
+  let contentType ← stringField metadata "contentType"
+  let reserve ← canonicalNat metadata "reserve"
+  let quote ← quoteResponse tariff request response contentType status reserve
+  pure (reportJson providerResourceId quote)
+
 end Minidregg.Host.ProviderUsage

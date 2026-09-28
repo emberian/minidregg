@@ -1,0 +1,7 @@
+36cccb3bd6bccc88b4d0c218e590063b8dcb49e7ad436d102582a68c8f6a346d  Host/Main.lean
+ca41d991dcae2e3350b3ea705144bcdae1279308e9c7b59a183578c303621854  Host/ProviderUsage.lean
+2f92be80ec06b9e55a07b1b41c738d4531ea399ba74fcdbf00e073759569db83  scripts/provider-services/Check.lean
+40a24ea5f2eb703985da5cd966db3121787d9862a605520fbc83043cce4b593c  native/grain-runtime/src/main.rs
+52909d141425f777234abae7abc78267d307c617e3285c408b143c5bccb85c1a  native/resource-client/src/meter.rs
+d26e5d20a58a43fe133c70ebc3f8eb7f5061973f419e7b779584fda5d516fc87  docs/evidence/2026-09-27-multi-provider-host/LEAN-CHECK.log
+1f56975d879cae836e053dd29db7b0eccdca33cf0a9224164afa29d5226b5f09  docs/evidence/2026-09-27-multi-provider-host/README.md

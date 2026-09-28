@@ -45,7 +45,31 @@ fn canonical_decimal(value: &Value, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn quoted_report(value: &Value) -> Result<()> {
+fn selected_provider(metadata: &[u8]) -> Result<Option<String>> {
+    let value: Value = serde_json::from_slice(metadata)
+        .map_err(|e| format!("invalid retained metering metadata: {e}"))?;
+    match value.get("version") {
+        None => Ok(None),
+        Some(Value::String(version)) if version == "2" => {
+            let id = value
+                .get("providerResourceId")
+                .and_then(Value::as_str)
+                .ok_or("v2 metering metadata lacks providerResourceId")?;
+            if id == "0"
+                || id.is_empty()
+                || id.len() > 80
+                || !id.bytes().all(|byte| byte.is_ascii_digit())
+                || (id.len() > 1 && id.starts_with('0'))
+            {
+                return Err("v2 metering metadata providerResourceId is not canonical".into());
+            }
+            Ok(Some(id.to_owned()))
+        }
+        _ => Err("unknown metering metadata version".into()),
+    }
+}
+
+fn quoted_report(value: &Value, expected_provider: Option<&str>) -> Result<()> {
     if value.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v1")
         || value.get("status").and_then(Value::as_str) != Some("quoted-reported-usage")
     {
@@ -73,6 +97,11 @@ fn quoted_report(value: &Value) -> Result<()> {
         "charge",
     ] {
         canonical_decimal(value, field)?;
+    }
+    if expected_provider
+        .is_some_and(|id| value.get("providerResourceId").and_then(Value::as_str) != Some(id))
+    {
+        return Err("provider quote selected another configured resource".into());
     }
     let operation = value
         .get("operation")
@@ -105,6 +134,7 @@ pub(crate) fn meter(
     // Read each input once. The bytes submitted to Lean are precisely those
     // copied into the private attempt, even if an input pathname later changes.
     let metadata_bytes = bounded_file(metadata, MAX_METADATA, "provider metadata")?;
+    let expected_provider = selected_provider(&metadata_bytes)?;
     let request_bytes = bounded_file(request, MAX_REQUEST, "provider request")?;
     let response_bytes = bounded_file(response, MAX_RESPONSE, "provider response")?;
     let total = 1usize
@@ -136,7 +166,7 @@ pub(crate) fn meter(
             let value: Value = serde_json::from_slice(&frame[1..]).map_err(|error| {
                 format!("invalid provider metering reply; complete frame retained: {error}")
             })?;
-            quoted_report(&value)?;
+            quoted_report(&value, expected_provider.as_deref())?;
             create_private(&directory.join("meter.json"), &frame[1..])?;
             sync_directory_ancestors(directory)?;
             print_json(&value)
@@ -171,11 +201,25 @@ mod tests {
             "operation":{"type":"settle","charge":"5"},
             "claim":"provider-reported usage under operator tariff; not invoice-verified"
         });
-        assert!(quoted_report(&report).is_ok());
+        assert!(quoted_report(&report, None).is_ok());
+        assert!(quoted_report(&report, Some("7004")).is_ok());
+        assert!(quoted_report(&report, Some("7950")).is_err());
         report["operation"]["charge"] = json!("4");
-        assert!(quoted_report(&report).is_err());
+        assert!(quoted_report(&report, None).is_err());
         report["operation"]["charge"] = json!("5");
         report["requestDigest"] = json!("02");
-        assert!(quoted_report(&report).is_err());
+        assert!(quoted_report(&report, None).is_err());
+    }
+
+    #[test]
+    fn selected_provider_is_explicit_in_v2_metadata() {
+        let metadata = br#"{"version":"2","providerResourceId":"7950","status":"200","contentType":"application/json","reserve":"8"}"#;
+        assert_eq!(
+            selected_provider(metadata).unwrap().as_deref(),
+            Some("7950")
+        );
+        assert!(selected_provider(br#"{"version":"2","providerResourceId":"07950"}"#).is_err());
+        assert!(selected_provider(br#"{"version":"3","providerResourceId":"7950"}"#).is_err());
+        assert_eq!(selected_provider(br#"{"status":"200"}"#).unwrap(), None);
     }
 }
