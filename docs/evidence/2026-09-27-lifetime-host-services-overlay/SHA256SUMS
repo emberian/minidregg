@@ -1,5 +1,5 @@
 ad9ce1f6356c89926aaf8d7ba720d7abc5998496dccce39a70570d03b5b75b27  scripts/spk-platform/prepare-lifetime-host-services.sh
-fa92fedc3098e4a818317d4a727bdfbe4309cdcdb4a1bd2899b8fdfb5d424336  docs/evidence/2026-09-27-lifetime-host-services-overlay/README.md
+dbbb56cf45035c17d3fd85fabe11e5563de1e5b7c4c5fef868cf9ac7bc24f54c  docs/evidence/2026-09-27-lifetime-host-services-overlay/README.md
 155c8b8c2a0effa5a9191fff46208616ecb379aa45440a8c4620a40af7055bb2  docs/evidence/2026-09-27-lifetime-host-services-overlay/shell-gates.log
 ebe4aab2cf213ac60ea44fee75fe5d20bcec5c4cf779fc3ccfe3cc775e87bf5c  docs/evidence/2026-09-27-lifetime-host-services-overlay/schema-only-linux.log
 c21a894a3e4613b50614adab1bf0667699ec2546e2ebefd3fd712c2faf1f56ff  docs/evidence/2026-09-27-lifetime-host-services-overlay/r3-budget-readonly.log

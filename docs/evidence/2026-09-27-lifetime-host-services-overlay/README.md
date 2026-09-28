@@ -19,16 +19,26 @@ changed current source projection. `shell-gates.log` records shell syntax and
 ShellCheck. This test does not establish native event26 admission or accepted
 r3 event22/event27 grants.
 
-`r3-budget-readonly.log` pins the current retained r3 tariff and signed
-tool/parent views. Source `GrainResourceBirthController.Tariff.charge` is
-`base + perBirth × births`; event22 and event27 each create one birth. With
-the configured `2 + 1 × 1`, seven separate issues charge 21 from tool7902's
-remaining 25, leaving 4 if no other writer intervenes. Each issue needs its
-own fresh reserve of at least 3 because settlement clears the reserve.
-Parent7901 is an exact-state witness and has no grain charge. This does not
-quote the separate factory fee: event22 has fixed base/birth/grant component
-7 and event27 has component 8, each plus source-derived final payload bytes.
-Current op56/68 plans must supply the exact fee and confirm payer funding.
+`r3-budget-readonly.log` pins the retained r3 tariff and signed tool/parent
+views, but its `requiredCharge:21` and `projectedRemaining:4` estimates from
+the earlier `98a79e2` checkpoint are superseded by source-path inspection.
+Event22 is grain-backed: [its authoring](../../../Kernel/ApplicationShareIssueGrainAuthoring.lean#L119)
+captures `toolBefore` and `parentBefore` and prepares the grain command.
+[The grain tariff](../../../Compiler/GrainResourceBirthController.lean#L40) charges
+`base + perBirth × births = 2 + 1 × 1 = 3` against tool7902 per ticket.
+The five planned event22 tickets therefore require 15 separate grain units,
+leaving 10 of the retained signed remaining 25 if no other tool consumption
+intervenes. Each event22 needs a fresh reserve of at least 3 because
+settlement clears it. Parent7901 is an exact-state witness with no grain
+charge. Event27 is an **ordinary** birth, not a grain-backed issue:
+[its authoring](../../../Host/ApplicationAgentLifetimeGrantAuthoring.lean#L89)
+calls `ResourceBirthController.Concrete.prepareDraft` and finalizes an ordinary
+descriptor; [native admission](../../../Kernel/ApplicationAgentLifetimeGrantAdmission.lean#L80)
+invokes `ResourceBirthPolicyController.Concrete.admitDecodedNative`. Its two planned
+grants require no tool7902 reserve or grain settlement. Event27 still pays
+its separately quoted ordinary factory fee, including source-derived final
+payload bytes; current op74 planning must establish exact payer funding.
+The event22 factory fee is also separate from its 3-unit grain charge.
 
 The r3 candidate ticket inputs are separately retained under hbox
 `/var/lib/minidregg/spk/fixtures/gitweb-v2-20260927-operator-inputs-r3`
