@@ -32,9 +32,15 @@ mod historical_call_receipt;
 #[cfg(unix)]
 mod meter;
 #[cfg(unix)]
+mod participant_enrollment;
+#[cfg(unix)]
+mod participant_namespace;
+#[cfg(unix)]
 mod prepare_refusal;
 #[cfg(unix)]
 mod publisher;
+#[cfg(unix)]
+mod selected_exchange;
 #[cfg(unix)]
 mod selected_publisher;
 #[cfg(unix)]
@@ -49,6 +55,8 @@ mod share_issue_receipt;
 mod transport;
 #[cfg(unix)]
 mod worker;
+#[cfg(unix)]
+mod workspace;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
@@ -139,12 +147,16 @@ const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-hos
 
 usage:
   mini keygen --secret KEY --public PUBLIC
+  mini workspace --action init|import|list|describe|read|submit|recover|create|propose --dir WORKSPACE [action options]
+  mini enroll --action plan|seal|submit|lookup [action options]
+  mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
   mini current-application-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
   mini current-session-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
+  mini current-resource-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --signed-observation SIGNED-FACTORY.bin --dir NEW-PRIVATE-DIR
   mini agent-reserve-plan --host HOST --config CONFIG.json --operator-socket PRIVATE-SOCKET --public-socket PUBLIC-SOCKET --request SOURCE.json --dir NEW-PRIVATE-DIR
   mini agent-reserve-seal --attempt PRIVATE-DIR --approval OPERATOR-PRIVATE-APPROVAL.json
   mini agent-reserve-submit --attempt PRIVATE-DIR
@@ -1099,7 +1111,7 @@ fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<Str
     }
 }
 
-fn query(
+fn query_retained(
     host: &Path,
     config: &Path,
     intent: &Path,
@@ -1107,7 +1119,7 @@ fn query(
     key: &Path,
     inspection_kind: &str,
     directory: &Path,
-) -> Result<()> {
+) -> Result<Value> {
     create_dir(directory)?;
     let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
         "intent-source.bin"
@@ -1148,7 +1160,27 @@ fn query(
             "host returned an unexpected fn inbox summary type; signed view retained".to_owned(),
         );
     }
-    print_json(&presented)
+    Ok(presented)
+}
+
+fn query(
+    host: &Path,
+    config: &Path,
+    intent: &Path,
+    intent_kind: &OsStr,
+    key: &Path,
+    inspection_kind: &str,
+    directory: &Path,
+) -> Result<()> {
+    print_json(&query_retained(
+        host,
+        config,
+        intent,
+        intent_kind,
+        key,
+        inspection_kind,
+        directory,
+    )?)
 }
 
 fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
@@ -1926,6 +1958,22 @@ fn run(mut args: Args) -> Result<()> {
         let _ = SOCKET.set(path(socket));
     }
     match args.command.to_string_lossy().as_ref() {
+        #[cfg(unix)]
+        "workspace" => workspace::run(args),
+        #[cfg(unix)]
+        "enroll" => participant_enrollment::run(args),
+        #[cfg(unix)]
+        "selected-exchange" => {
+            let phase = args.required("phase")?;
+            let phase = phase
+                .to_str()
+                .ok_or("selected-exchange phase must be UTF-8")?;
+            let contract = path(args.required("contract")?);
+            let state = path(args.required("state-dir")?);
+            let approval = args.optional("approval").map(path);
+            args.finish()?;
+            selected_exchange::run(phase, &contract, &state, approval.as_deref())
+        }
         "serve" => {
             let host = path(args.required("host")?);
             let config = path(args.required("config")?);
@@ -2262,9 +2310,11 @@ fn run(mut args: Args) -> Result<()> {
             inspect_public(&host, &config, kind, &input, &output)
         }
         #[cfg(unix)]
-        "current-application-intent" | "current-session-intent" => {
+        "current-application-intent" | "current-session-intent" | "current-resource-intent" => {
             let route = if args.command == OsStr::new("current-application-intent") {
                 current_birth::Route::Application
+            } else if args.command == OsStr::new("current-resource-intent") {
+                current_birth::Route::Resource
             } else {
                 current_birth::Route::Session
             };
@@ -2272,11 +2322,20 @@ fn run(mut args: Args) -> Result<()> {
             let config = path(args.required("config")?);
             let source = path(args.required("source")?);
             let directory = path(args.required("dir")?);
+            let observation = args.optional("signed-observation").map(path);
             args.finish()?;
             let socket = SOCKET
                 .get()
                 .ok_or("current birth authoring requires --socket")?;
-            current_birth::author(&host, &config, socket, &source, &directory, route)
+            current_birth::author(
+                &host,
+                &config,
+                socket,
+                &source,
+                observation.as_deref(),
+                &directory,
+                route,
+            )
         }
         #[cfg(unix)]
         "agent-reserve-plan" => {

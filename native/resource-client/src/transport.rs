@@ -130,6 +130,24 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && serde_json::from_slice::<serde_json::Value>(payload)
                     .is_ok_and(|value| value.is_object())
         }
+        [91, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(observation, source)| {
+                !observation.is_empty()
+                    && !source.is_empty()
+                    && source.len() <= 256 * 1024
+                    && serde_json::from_slice::<serde_json::Value>(source)
+                        .is_ok_and(|value| value.is_object())
+            })
+        }
+        [86, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [87, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .and_then(|(plan, signatures)| {
+                exact_pair(signatures).map(|(sponsor, possession)| (plan, sponsor, possession))
+            })
+            .is_some_and(|(plan, sponsor, possession)| {
+                !plan.is_empty() && sponsor.len() == 64 && possession.len() == 64
+            }),
+        [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         _ => false,
     }
 }
@@ -137,6 +155,15 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
 // These lifecycle, dispatch, share-issue, and fn namespace routes carry operator custody
 // selectors or may commit writes. They are available only on the separately
 // started owner-private operator socket, never on the public service socket.
+fn exact_pair(payload: &[u8]) -> Option<(&[u8], &[u8])> {
+    let prefix: [u8; 4] = payload.get(..4)?.try_into().ok()?;
+    let first_len = u32::from_le_bytes(prefix) as usize;
+    if first_len == 0 || first_len >= payload.len().checked_sub(4)? {
+        return None;
+    }
+    Some((&payload[4..4 + first_len], &payload[4 + first_len..]))
+}
+
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
         [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 54 | 55 | 56 | 58
@@ -168,6 +195,16 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
                 && pair.len() - 4 - plan_length == 64
         }
         [28 | 29, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        // Source-owned enrollment authoring and exact lookup. The host still
+        // canonical-decodes each component and checks current authority.
+        [86, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [87, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .and_then(|(plan, signatures)| {
+                let (sponsor, possession) = exact_pair(signatures)?;
+                Some(!plan.is_empty() && sponsor.len() == 64 && possession.len() == 64)
+            })
+            .unwrap_or(false),
+        [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
         [33, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
@@ -1005,13 +1042,49 @@ mod tests {
     fn current_birth_authoring_accepts_only_bounded_json_objects() {
         assert!(allowed_operation(&[30, b'{', b'}'], false));
         assert!(allowed_operation(&[31, b'{', b'}'], false));
+        let mut observed_resource = vec![91];
+        observed_resource.extend_from_slice(&1u32.to_le_bytes());
+        observed_resource.push(b'O');
+        observed_resource.extend_from_slice(b"{}");
+        assert!(allowed_operation(&observed_resource, false));
         assert!(!allowed_operation(&[30, b'[', b']'], false));
         assert!(!allowed_operation(&[31, b'{'], false));
+        assert!(!allowed_operation(&[91, b'{', b'}'], false));
         let mut oversized = vec![b' '; 256 * 1024 + 2];
         oversized[0] = 30;
         oversized[1] = b'{';
         *oversized.last_mut().unwrap() = b'}';
         assert!(!allowed_operation(&oversized, false));
+    }
+
+    #[test]
+    fn participant_enrollment_uses_strict_pairs_on_public_and_operator_sockets() {
+        let mut plan = vec![86];
+        plan.extend_from_slice(&1u32.to_le_bytes());
+        plan.extend_from_slice(b"SC");
+        assert!(allowed_operator_operation(&plan));
+        assert!(allowed_operation(&plan, false));
+        assert!(!allowed_operator_operation(&[86, 1, 0, 0, 0, b'S']));
+        assert!(!allowed_operation(&[86, 1, 0, 0, 0, b'S'], false));
+
+        let mut signatures = Vec::new();
+        signatures.extend_from_slice(&64u32.to_le_bytes());
+        signatures.extend_from_slice(&[1u8; 64]);
+        signatures.extend_from_slice(&[2u8; 64]);
+        let mut seal = vec![87];
+        seal.extend_from_slice(&1u32.to_le_bytes());
+        seal.push(b'P');
+        seal.extend_from_slice(&signatures);
+        assert!(allowed_operator_operation(&seal));
+        assert!(allowed_operation(&seal, false));
+        seal.pop();
+        assert!(!allowed_operator_operation(&seal));
+        assert!(!allowed_operation(&seal, false));
+        for operation in [88, 89] {
+            assert!(allowed_operator_operation(&[operation, b'I']));
+            assert!(!allowed_operator_operation(&[operation]));
+            assert!(allowed_operation(&[operation, b'I'], false));
+        }
     }
 
     #[test]

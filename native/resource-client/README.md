@@ -6,6 +6,110 @@ receiver that decides admission. The Rust process generates and holds raw
 Ed25519 keys, signs the host's exact inspected headers, and retains every byte
 needed to recover from an uncertain response.
 
+## Participant workspace
+
+`mini workspace` gives one already enrolled subject a private address book and
+retained attempts over the existing `author`, signed `query`, `submit`, and exact
+`lookup` paths. Initialization pins the Host image path, configuration, key,
+subject and optional socket. It does **not** enroll a new subject or grant any
+authority. A reference is a discovery hint; every read checks the current
+grant and every operation faces Lean admission under current law.
+
+For a newcomer, `mini enroll --action plan --sponsor-workspace W --factory-ref
+NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT` uses a sponsor's signed
+factory observation and control capability. Continue with `--action seal`,
+`submit`, and `lookup` on that exact attempt. The request label identifies the
+reservation attempt, not a permanent participant handle. Only a confirmed
+admission writes private `ATTEMPT/enrollment.json`; it conveys a signing
+identity, not a resource grant. Initialize the new workspace with
+`--enrollment ATTEMPT/enrollment.json` instead of `--key` and `--subject`. The
+client verifies the retained key matches the result's public key.
+
+```sh
+mini workspace --action init --dir /private/alice/workspace \
+  --host /absolute/minidregg-host --config /absolute/pinned-config.json \
+  --key /private/alice.key --subject 7 --socket /private/host.sock \
+  --birth-context /private/birth-context.json \
+  --namespace-root /private/shared-operator-namespace
+mini workspace --action import --dir /private/alice/workspace \
+  --name notes --kind object --target 600 --observe-capability 61 \
+  --operation-capability 61 --control-capability 62
+mini workspace --action list --dir /private/alice/workspace
+mini workspace --action describe --dir /private/alice/workspace --name notes
+mini workspace --action read --dir /private/alice/workspace --name notes
+```
+
+`describe` is a signed current policy query; `read` is a signed current resource
+query. The output includes the Host's typed view, and the private attempt is
+retained under `workspace/attempts`. Imported numeric references are never
+treated as proof that a grant exists. A source-owned operation can still be
+submitted in the full typed Mini vocabulary:
+
+```sh
+mini workspace --action submit --dir /private/alice/workspace \
+  --intent /private/operation.json --intent-kind intent \
+  --attempt /private/alice/workspace/attempts/operation-1
+mini workspace --action recover --dir /private/alice/workspace \
+  --attempt /private/alice/workspace/attempts/operation-1
+```
+
+The optional `--attempt` is a new direct child of the workspace attempt
+directory. A controller can retain that path before starting submission.
+`recover` performs **lookup only** on the exact retained `call.bin`; it never
+submits a fresh operation. `--prepare-only true` leaves a signed assembled
+call without submitting it.
+
+For a bounded agent proposal, `workspace --action propose --proposal-id ID
+--request REQUEST.json --dir WORKSPACE` accepts a named `invoke` or
+`install-policy` request. An `invoke` request names 1–16 local references and
+supplies supported typed actions; scalar create/write keys specify only their
+local field, and content proposals support local creation actions. The client
+fills resource IDs, capabilities, current roots, subject and nonces from
+private references and signed current reads, then asks Lean to author the
+resulting typed intent. The no-effect result is
+`workspace/proposals/ID/proposal.json`, binding the retained `intent.json` by
+SHA-256. The controller should pass only a proposal ID to a later submit step
+and recheck that digest; proposal generation does not grant authority or
+promise later admission. For example:
+
+```json
+{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
+  {"name":"notes","payload":{"type":"content","actions":[
+    {"type":"createAtom","atom":"7001","kind":{"type":"text"},"payload":"6869"}
+  ]}}
+]}
+```
+
+Generic native resource creation uses `workspace --action create --name NAME
+--storage content|declared --predicate PREDICATE.json --dir WORKSPACE`. The
+birth context pinned at initialization supplies deployment genesis, template,
+factory/payer grants and funding, while the participant selects any supported
+predicate tree. Its JSON shape is:
+
+```json
+{"type":"minidregg-participant-birth-context-v1",
+ "genesis":{},"template":{},"sourceCapabilities":[],"funding":[],
+ "feePayer":"7","grants":[]}
+```
+
+`genesis`, `template` and grants must be the real bootstrap values for the
+enrolled subject; empty values above only show the fields. A shared private
+namespace root durably reserves a target and owner/control capability IDs
+for this exact request. The client retains the source and binds it to one
+attempt **before** submit. A repeated create of the same name recovers that
+attempt and never authors a replacement call. Only a confirmed birth becomes
+a local reference. The namespace service currently coordinates controllers
+running under one operator Unix account; separate Unix accounts need an
+authenticated broker. Lean remains the final collision and authority checker.
+Creation uses the loaded-current resource birth route. The client first
+retains a signed factory resource observation, then asks Lean to derive the
+current height and authority epochs and author a canonical binary intent.
+The exact intent and signed observation are retained before binary submission.
+An interrupted pre-submit authoring step can resume from those bytes; once an
+attempt contains a call, recovery uses historical lookup without reauthoring.
+This newer route requires a qualified current Host image and a persistent
+socket. Do not treat the CLI's reservation as an admitted birth.
+
 ## Persistent local host session
 
 Start one local Lean host with a Unix socket in a directory owned by your
