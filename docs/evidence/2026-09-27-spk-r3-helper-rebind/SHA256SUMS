@@ -1,0 +1,11 @@
+cdb9e1bce7dac56a8aaac19ea8350613fe89fa0f786313769e36bbc2729bd2ef  scripts/spk-platform/rebind-helper-config.sh
+2c0c694ed34d61afbe0ce423726e4bef349c3d1f72ee5ea3f385966ee3217be3  scripts/spk-platform/install-config-scope.jq
+bf9184265a82f5eba69ddbe047ae4539b3f7dde7615290d645b25ef5fd1cbbe1  scripts/spk-platform/base-helper-rebind-scope.jq
+511bda290fc534feca41245ed8fd046a42045faa75da7989ebeabd1473d48dc8  scripts/spk-platform/prepare-install-config.sh
+1c52ec7df5ae6800caa1b1cc30c3949f5945f8d70c8a04be802f07e0ec2dfdef  scripts/spk-platform/journey.sh
+bc071704cc47509a46b24a8cf93730a8189ea315f9ac20f1e53ec932a41bbacf  scripts/spk-platform/tests/install-config-scope.sh
+eaffbca3ddf5a9233528003dec0dc05ac4cca70be90b495ce7c99bb7c0c9e3df  docs/evidence/2026-09-27-spk-r3-helper-rebind/README.md
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-r3-helper-rebind/shellcheck.log
+23be482c9c77163e1f20ae6d528f27a8c778b33e0e398c50faef18568ee509ef  docs/evidence/2026-09-27-spk-r3-helper-rebind/rebind-readback.log
+8008ce1d1d301c33da3e0a98c3e8bb95fd23b72dd8ef19af06f9875a01401703  docs/evidence/2026-09-27-spk-r3-helper-rebind/scope.log
+496c5267e532e287eaf4484d0176bf09dd612663f8a738f366082f27cc1a8e75  docs/evidence/2026-09-27-spk-r3-helper-rebind/resume.log

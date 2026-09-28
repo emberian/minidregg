@@ -9,7 +9,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: journey.sh status ROOT
        journey.sh resume-base ROOT ORIGINAL_HOST CONTINUATION_HOST MINI STORE_HELPER SIGNATURE_HELPER SPK_HOST ORIGINAL_SUBMIT_RECEIPT REPLAYED_LOOKUP_RECEIPT PINNED_RUN_BASE_SOURCE
-       journey.sh prepare-install ROOT QUALIFIED_HOST HOST_SHA256 OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL OPERATOR_CONFIG CONFIG_SHA256
+       journey.sh prepare-install ROOT QUALIFIED_HOST HOST_SHA256 OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL OPERATOR_CONFIG CONFIG_SHA256 BASE_REBOUND_CONFIG BASE_REBOUND_SHA256
        journey.sh install-prepare ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
        journey.sh materialize-request ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
        journey.sh adopt-materialized ROOT SPK_HOST SPK_HOST_SHA256 INSTALL_JOURNAL
@@ -183,30 +183,35 @@ case "$ACTION" in
     /bin/sh "$HERE/resume-base.sh" "$ROOT" "$@"
     ;;
   prepare-install)
-    [ "$#" -eq 8 ] || usage
+    [ "$#" -eq 10 ] || usage
     base_ready || fail "same-Store base receipt/handoff incomplete"
     qualified_host=$1 host_sha=$2 socket=$3 app_uid=$4 image_dir=$5 install_dir=$6
-    operator_config=$7 config_sha=$8
+    operator_config=$7 config_sha=$8 base_rebound_config=$9 base_rebound_sha=${10}
     for path in "$qualified_host" "$socket" "$image_dir" "$install_dir" \
-        "$operator_config"; do absolute "$path"; done
+        "$operator_config" "$base_rebound_config"; do absolute "$path"; done
     [ ! -e "$install_dir" ] || fail "INSTALL journal already exists"
     [ "$(sha "$qualified_host")" = "$host_sha" ] || fail "qualified Host pin differs"
     [ "$(sha "$operator_config")" = "$config_sha" ] ||
       fail "operator config differs from explicit pin"
+    [ "$(sha "$base_rebound_config")" = "$base_rebound_sha" ] ||
+      fail "base helper rebind differs from explicit pin"
     claim_readonly prepare-install
     printf '%s\n' "$install_dir" >"$STEP/install-path.txt"
-    jq -n --arg path "$operator_config" --arg sha "$config_sha" '
-      {protocol:"mini-spk-install-config-selection-v1",path:$path,sha256:$sha}
+    jq -n --arg path "$operator_config" --arg sha "$config_sha" \
+      --arg base "$base_rebound_config" --arg baseSha "$base_rebound_sha" '
+      {protocol:"mini-spk-install-config-selection-v1",path:$path,sha256:$sha,
+       baseReboundPath:$base,baseReboundSha256:$baseSha}
       ' >"$STEP/operator-config-selection.json"
     chmod 600 "$STEP/operator-config-selection.json"
     sha256sum "$qualified_host" "$BASE_RECEIPT" "$HANDOFF" \
-      "$operator_config" "$STEP/operator-config-selection.json" \
+      "$operator_config" "$base_rebound_config" "$STEP/operator-config-selection.json" \
       "$HERE/prepare-install-config.sh" "$HERE/install-config-scope.jq" \
+      "$HERE/base-helper-rebind-scope.jq" \
       >"$STEP/input-sha256.txt"
     QUALIFIED_INSTALL_HOST_SHA256=$host_sha \
       /bin/sh "$HERE/prepare-install-config.sh" "$ROOT" "$qualified_host" \
       "$socket" "$app_uid" "$image_dir" "$install_dir" \
-      "$operator_config" "$config_sha" "$STEP" \
+      "$operator_config" "$config_sha" "$base_rebound_config" "$base_rebound_sha" "$STEP" \
       >"$STEP/stdout" 2>"$STEP/stderr"
     [ -s "$install_dir/install.json" ] || fail "INSTALL config absent"
     jq -e --slurpfile selected "$STEP/operator-config-selection.json" '
@@ -214,6 +219,11 @@ case "$ACTION" in
       .miniConfigSha256 == $selected[0].sha256
       ' "$install_dir/install.json" >/dev/null ||
       fail "INSTALL selected a different operator config"
+    jq -e --slurpfile selected "$STEP/operator-config-selection.json" '
+      .baseReboundMiniConfig == $selected[0].baseReboundPath and
+      .baseReboundMiniConfigSha256 == $selected[0].baseReboundSha256
+      ' "$STEP/host-upgrade/host-upgrade.json" >/dev/null ||
+      fail "INSTALL selected a different base helper rebind"
     sha256sum -c "$STEP/input-sha256.txt" >"$STEP/input-postcheck.txt"
     finish
     ;;

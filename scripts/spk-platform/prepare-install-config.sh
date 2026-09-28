@@ -5,13 +5,14 @@
 set -eu
 umask 077
 
-if [ "$#" -ne 9 ]; then
-  echo "usage: $0 PREPARED_ROOT QUALIFIED_HOST OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL OPERATOR_CONFIG OPERATOR_CONFIG_SHA256 NEW_PREPARE_STEP" >&2
+if [ "$#" -ne 11 ]; then
+  echo "usage: $0 PREPARED_ROOT QUALIFIED_HOST OPERATOR_SOCKET APP_UID IMAGE_DIR NEW_INSTALL_JOURNAL OPERATOR_CONFIG OPERATOR_CONFIG_SHA256 BASE_REBOUND_CONFIG BASE_REBOUND_SHA256 NEW_PREPARE_STEP" >&2
   exit 2
 fi
 ROOT=$1 HOST=$2 SOCKET=$3 APP_UID=$4 IMAGE_DIR=$5 JOURNAL=$6
 CONFIG=$7 EXPECTED_CONFIG_SHA=$8
-PREPARE_STEP=$9
+BASE_REBOUND_CONFIG=$9 BASE_REBOUND_SHA=${10}
+PREPARE_STEP=${11}
 canonical_absolute() {
   case "$1" in /*) ;; *) echo "path must be absolute: $1" >&2; exit 2 ;; esac
   case "$1" in
@@ -41,7 +42,21 @@ protected_dir_chain() {
     [ -n "$path" ] || path=/
   done
 }
-for input in "$ROOT" "$HOST" "$SOCKET" "$IMAGE_DIR" "$JOURNAL" "$CONFIG" \
+protected_root_executable() {
+  executable=$1
+  canonical_absolute "$executable"
+  protected_dir_chain "${executable%/*}"
+  [ -f "$executable" ] && [ ! -L "$executable" ] && [ -x "$executable" ] &&
+    [ "$(stat -c '%u:%h' "$executable")" = '0:1' ] || {
+    echo "protected helper leaf is not a root-owned single-link executable" >&2; exit 2;
+  }
+  leaf_mode=$(stat -c '%a' "$executable")
+  case "$leaf_mode" in ''|*[!0-7]*) exit 2 ;; esac
+  [ $((0$leaf_mode & 022)) -eq 0 ] || {
+    echo "protected helper leaf is group/world writable" >&2; exit 2;
+  }
+}
+for input in "$ROOT" "$HOST" "$SOCKET" "$IMAGE_DIR" "$JOURNAL" "$CONFIG" "$BASE_REBOUND_CONFIG" \
     "$PREPARE_STEP"; do
   canonical_absolute "$input"
 done
@@ -106,21 +121,36 @@ SEED="$ROOT/base/workroom/tool.key"
 PUBLIC="$ROOT/base/workroom/tool.pub"
 COMPLETION="$ROOT/custody/completion.seed"
 SPK="$ROOT/packages/gitweb.spk"
-for file in "$BASE_CONFIG" "$CONFIG" "$PROFILE" "$SETTINGS" "$QUALIFICATION" "$HANDOFF" \
+for file in "$BASE_CONFIG" "$BASE_REBOUND_CONFIG" "$CONFIG" "$PROFILE" "$SETTINGS" "$QUALIFICATION" "$HANDOFF" \
     "$BASE_CALL" "$BASE_OUTCOME" "$SEED" "$PUBLIC" "$COMPLETION" "$SPK"; do
   [ -s "$file" ] && [ ! -L "$file" ] || {
     echo "missing fresh protected fixture input" >&2; exit 2;
   }
 done
 protected_dir_chain "${CONFIG%/*}"
+protected_dir_chain "${BASE_REBOUND_CONFIG%/*}"
 case "$EXPECTED_CONFIG_SHA" in *[!0-9a-f]*|'') exit 2 ;; esac
 [ "${#EXPECTED_CONFIG_SHA}" = 64 ] &&
   [ "$(sha256sum "$CONFIG" | cut -d ' ' -f 1)" = "$EXPECTED_CONFIG_SHA" ] || {
   echo "operator config differs from its explicit pin" >&2; exit 2;
 }
+case "$BASE_REBOUND_SHA" in *[!0-9a-f]*|'') exit 2 ;; esac
+[ "${#BASE_REBOUND_SHA}" = 64 ] &&
+  [ "$(sha256sum "$BASE_REBOUND_CONFIG" | cut -d ' ' -f 1)" = "$BASE_REBOUND_SHA" ] || {
+  echo "base helper rebind differs from its explicit pin" >&2; exit 2;
+}
+STORE_PROTECTED=/opt/minidregg-gitweb-r3-20260927/bin/minidregg-link-sqlite-store-9746c47
+SIGNATURE_PROTECTED=/opt/minidregg-gitweb-r3-20260927/bin/minidregg-credential-signature-verifier-9746c47
 # The base config remains immutable. This first cb55 selection allows only
-# two exact provider services and omission of three historical null fields.
+# two exact provider services, omission of three historical null fields, and
+# two hash-identical helpers promoted into protected root-owned ancestry.
 jq -e --slurpfile base "$BASE_CONFIG" \
+  --arg storeHelper "$STORE_PROTECTED" --arg signatureHelper "$SIGNATURE_PROTECTED" \
+  -f "$(dirname -- "$0")/base-helper-rebind-scope.jq" "$BASE_REBOUND_CONFIG" >/dev/null || {
+  echo "base config differs beyond exact helper relocation" >&2; exit 2;
+}
+jq -e --slurpfile base "$BASE_CONFIG" \
+  --arg storeHelper "$STORE_PROTECTED" --arg signatureHelper "$SIGNATURE_PROTECTED" \
   -f "$(dirname -- "$0")/install-config-scope.jq" "$CONFIG" >/dev/null || {
   echo "operator config differs beyond approved provider services" >&2; exit 2;
 }
@@ -141,19 +171,30 @@ PINNED_CONFIG_SHA=$(awk -v path="$BASE_CONFIG" '$2 == path {print $1}' "$BASE_MA
   [ "${#PINNED_CONFIG_SHA}" = 64 ] || {
   echo "Store Settings differ from base pin" >&2; exit 2;
 }
-STORE_BINARY=$(jq -er '.storageBinary | select(type == "string")' "$SETTINGS")
+ORIGINAL_STORE_BINARY=$(jq -er '.storageBinary | select(type == "string")' "$SETTINGS")
+STORE_BINARY=$(jq -er '.storageBinary | select(type == "string")' "$CONFIG")
 STORE_ROOT=$(jq -er '.storageRoot | select(type == "string")' "$SETTINGS")
+canonical_absolute "$ORIGINAL_STORE_BINARY"
 canonical_absolute "$STORE_BINARY"
 canonical_absolute "$STORE_ROOT"
 [ "$STORE_ROOT" = "$ROOT/base/workroom/store" ] && [ -x "$STORE_BINARY" ] || {
   echo "base Store helper/root changed" >&2; exit 2;
 }
-STORE_SHA=$(awk -v path="$STORE_BINARY" '$2 == path {print $1}' "$BASE_MANIFEST")
+STORE_SHA=$(awk -v path="$ORIGINAL_STORE_BINARY" '$2 == path {print $1}' "$BASE_MANIFEST")
 [ "${#STORE_SHA}" = 64 ] &&
+  [ "$(sha256sum "$ORIGINAL_STORE_BINARY" | cut -d ' ' -f 1)" = "$STORE_SHA" ] &&
   [ "$(sha256sum "$STORE_BINARY" | cut -d ' ' -f 1)" = "$STORE_SHA" ] || {
   echo "base Store helper differs from retained pin" >&2; exit 2;
 }
-protected_dir_chain "${STORE_BINARY%/*}"
+protected_root_executable "$STORE_BINARY"
+ORIGINAL_SIGNATURE_BINARY=$(jq -er '.signatureBinary | select(type == "string")' "$BASE_CONFIG")
+SIGNATURE_SHA=$(awk -v path="$ORIGINAL_SIGNATURE_BINARY" '$2 == path {print $1}' "$BASE_MANIFEST")
+[ "${#SIGNATURE_SHA}" = 64 ] &&
+  [ "$(sha256sum "$ORIGINAL_SIGNATURE_BINARY" | cut -d ' ' -f 1)" = "$SIGNATURE_SHA" ] &&
+  [ "$(sha256sum "$SIGNATURE_PROTECTED" | cut -d ' ' -f 1)" = "$SIGNATURE_SHA" ] || {
+  echo "signature helper differs from retained original" >&2; exit 2;
+}
+protected_root_executable "$SIGNATURE_PROTECTED"
 test "$(sha256sum "$SPK" | cut -d ' ' -f 1)" = \
   2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa
 test "$(od -An -tx1 -v "$ROOT/custody/completion.pub" | tr -d ' \n')" = \
@@ -199,7 +240,7 @@ UPGRADE="$PREPARE_STEP/host-upgrade"
 }
 mkdir -m 700 "$UPGRADE"
 "$STORE_BINARY" read-to "$STORE_ROOT" "$UPGRADE/store-before.bin"
-"$BASE_HOST" "$BASE_CONFIG" describe >"$UPGRADE/base-description.json"
+"$BASE_HOST" "$BASE_REBOUND_CONFIG" describe >"$UPGRADE/base-description.json"
 "$HOST" "$CONFIG" describe >"$UPGRADE/successor-description.json"
 for description in "$UPGRADE/base-description.json" \
     "$UPGRADE/successor-description.json"; do
@@ -216,8 +257,8 @@ jq -S '{runtime,semantics,domain,fieldModulus,orderDifferenceWidth,
   nativeChecked,succinctProofDeployment}' "$UPGRADE/successor-description.json" \
   >"$UPGRADE/successor-identity.json"
 cmp "$UPGRADE/base-identity.json" "$UPGRADE/successor-identity.json"
-"$BASE_HOST" "$BASE_CONFIG" lookup "$BASE_CALL" "$UPGRADE/base-outcome.bin"
-"$BASE_HOST" "$BASE_CONFIG" inspect outcome "$UPGRADE/base-outcome.bin" \
+"$BASE_HOST" "$BASE_REBOUND_CONFIG" lookup "$BASE_CALL" "$UPGRADE/base-outcome.bin"
+"$BASE_HOST" "$BASE_REBOUND_CONFIG" inspect outcome "$UPGRADE/base-outcome.bin" \
   "$UPGRADE/base-outcome.json"
 "$HOST" "$CONFIG" lookup "$BASE_CALL" "$UPGRADE/successor-outcome.bin"
 "$HOST" "$CONFIG" inspect outcome "$UPGRADE/successor-outcome.bin" \
@@ -247,6 +288,7 @@ UPGRADE_STORE_SHA=$(sha256sum "$UPGRADE/store-before.bin" | cut -d ' ' -f 1)
 jq -n --arg base "$BASE_HOST" --arg baseSha "$BASE_HOST_SHA" \
   --arg successor "$HOST" --arg successorSha "$QUALIFIED_INSTALL_HOST_SHA256" \
   --arg baseConfig "$BASE_CONFIG" --arg baseConfigSha "$PINNED_CONFIG_SHA" \
+  --arg baseRebound "$BASE_REBOUND_CONFIG" --arg baseReboundSha "$BASE_REBOUND_SHA" \
   --arg config "$CONFIG" --arg configSha "$CONFIG_SHA" \
   --arg profile "$PROFILE" --arg profileSha "$(sha256sum "$PROFILE" | cut -d ' ' -f 1)" \
   --argjson reusedHost "$([ "$BASE_HOST_SHA" = "$QUALIFIED_INSTALL_HOST_SHA256" ] && echo true || echo false)" \
@@ -256,6 +298,7 @@ jq -n --arg base "$BASE_HOST" --arg baseSha "$BASE_HOST_SHA" \
    baseHost:$base,baseHostSha256:$baseSha,
    successorHost:$successor,successorHostSha256:$successorSha,
    baseMiniConfig:$baseConfig,baseMiniConfigSha256:$baseConfigSha,
+   baseReboundMiniConfig:$baseRebound,baseReboundMiniConfigSha256:$baseReboundSha,
    miniConfig:$config,miniConfigSha256:$configSha,profile:$profile,
    profileSha256:$profileSha,storeImageSha256:$storeSha,
    originalAppReceipt:$receipt[0]}' >"$UPGRADE/host-upgrade.json"
@@ -349,8 +392,10 @@ jq -n --arg journal "$JOURNAL" --arg spk "$SPK" --arg image "$IMAGE_DIR" \
     completionManagementCustody:$completion,completionCustodianSeed:$seed,
     completionSemantics:$semantics}' >"$JOURNAL/install.json"
 chmod 600 "$JOURNAL/install.json"
-sha256sum "$BASE_HOST" "$HOST" "$BASE_CONFIG" "$CONFIG" "$PROFILE" "$SPK" \
+sha256sum "$BASE_HOST" "$HOST" "$BASE_CONFIG" "$BASE_REBOUND_CONFIG" "$CONFIG" "$PROFILE" "$SPK" \
   "$(dirname -- "$0")/install-config-scope.jq" \
+  "$(dirname -- "$0")/base-helper-rebind-scope.jq" \
+  "$STORE_BINARY" "$SIGNATURE_PROTECTED" \
   "$QUALIFICATION" "$HANDOFF" "$HOST_IDENTITY" \
   "$UPGRADE/host-upgrade.json" \
   "$DEPLOYMENT_ID_FILE" "$HOST_ID_FILE" "$BEGIN" "$CLAIM" \
