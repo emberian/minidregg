@@ -1,0 +1,12 @@
+baseline_snapshot=/home/ember/build/minidregg-d48aa81-native-20260927
+baseline_output=/home/ember/build/minidregg-d48aa81-evidence/build-r3
+baseline_binary_sha256=674e70c22f1e5c7923aa6ef049ead473c959b0551e22f19e0ecbdd48cdf67cca
+changed_module=Host.ApplicationAgentLifetimeGrantInspection
+unchanged_imported_modules=328
+unchanged_later_sources=23
+additional_changed_sources=1
+inserted_source_modules=0
+restart_source_unchanged=0
+changed_source_manifest=/home/ember/build/minidregg-8c13c42-evidence/build-r1/changed-source-sha256.txt
+unchanged_package_objects=2933
+changed_source_sha256=e6724dc608079ee1ec5711faabc95c7a9fe6c2b590188152928edc9e61ea3860

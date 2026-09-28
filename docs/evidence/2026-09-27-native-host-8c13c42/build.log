@@ -1,0 +1,80 @@
+start_utc=2026-09-28T00:20:45Z
+root=/home/ember/build/minidregg-8c13c42-native-20260927
+lean_threads=2
+native_jobs=2
+seat=/home/ember/build/minidregg-8c13c42-evidence/cycle/lean-seat-1
+incremental source/artifact check PASS 328 earlier modules, 1 declared later changes, 0 inserted modules, 23 unchanged later sources, 2933 package objects
+lean[329/353] Host.ApplicationAgentLifetimeGrantInspection start
+lean[329/353] Host.ApplicationAgentLifetimeGrantInspection PASS 11s
+lean[330/353] Host.FnConsumerNamespacePlan start
+lean[330/353] Host.FnConsumerNamespacePlan PASS 10s
+lean[331/353] Host.BirthRuntimeProfile start
+lean[331/353] Host.BirthRuntimeProfile PASS 10s
+lean[332/353] Host.CapabilityInspection start
+lean[332/353] Host.CapabilityInspection PASS 7s
+lean[333/353] Kernel.ApplicationGrainBirth start
+lean[333/353] Kernel.ApplicationGrainBirth PASS 7s
+lean[334/353] Kernel.ApplicationGrainSessionBirth start
+lean[334/353] Kernel.ApplicationGrainSessionBirth PASS 7s
+lean[335/353] Host.ApplicationLifecycleLaunchReportAuthoring start
+lean[335/353] Host.ApplicationLifecycleLaunchReportAuthoring PASS 10s
+lean[336/353] Host.ApplicationShareIssueGrainInspection start
+lean[336/353] Host.ApplicationShareIssueGrainInspection PASS 8s
+lean[337/353] Host.ApplicationPermissionSchemaAuthoring start
+lean[337/353] Host.ApplicationPermissionSchemaAuthoring PASS 7s
+lean[338/353] Host.ApplicationSpkLaunchDescriptorAuthoring start
+lean[338/353] Host.ApplicationSpkLaunchDescriptorAuthoring PASS 7s
+lean[339/353] Host.Json start
+lean[339/353] Host.Json PASS 22s
+lean[340/353] Host.FnConsumerFrontierPlan start
+lean[340/353] Host.FnConsumerFrontierPlan PASS 11s
+lean[341/353] Kernel.FnSelectiveReleaseArticle start
+lean[341/353] Kernel.FnSelectiveReleaseArticle PASS 10s
+lean[342/353] Host.FnSelectiveReleaseAuthoring start
+lean[342/353] Host.FnSelectiveReleaseAuthoring PASS 10s
+lean[343/353] Host.FnSelectiveReleaseSourceAuthoring start
+lean[343/353] Host.FnSelectiveReleaseSourceAuthoring PASS 8s
+lean[344/353] Host.FnSelectiveReleaseFnReceiving start
+lean[344/353] Host.FnSelectiveReleaseFnReceiving PASS 8s
+lean[345/353] Host.FnSelectiveReleaseFnAck start
+lean[345/353] Host.FnSelectiveReleaseFnAck PASS 9s
+lean[346/353] Host.ApplicationCurrentBirthAuthoring start
+lean[346/353] Host.ApplicationCurrentBirthAuthoring PASS 8s
+lean[347/353] Host.FnInboxView start
+lean[347/353] Host.FnInboxView PASS 8s
+lean[348/353] Host.GrainOriginSource start
+lean[348/353] Host.GrainOriginSource PASS 10s
+lean[349/353] Host.GrainOriginPreparation start
+lean[349/353] Host.GrainOriginPreparation PASS 9s
+lean[350/353] Host.GrainOriginCommand start
+lean[350/353] Host.GrainOriginCommand PASS 8s
+lean[351/353] Kernel.ProviderMetering start
+lean[351/353] Kernel.ProviderMetering PASS 9s
+lean[352/353] Host.ProviderUsage start
+lean[352/353] Host.ProviderUsage PASS 9s
+lean[353/353] Host.Main start
+lean[353/353] Host.Main PASS 52s
+end_utc=2026-09-28T00:29:05Z
+elapsed_seconds=500
+git_head=791a6d2c6671bdb9396e6c98053dd296da20e578
+root=/home/ember/build/minidregg-8c13c42-native-20260927
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=/home/ember/.elan/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+incremental_baseline=/home/ember/build/minidregg-d48aa81-evidence/build-r3
+incremental_changed_module=Host.ApplicationAgentLifetimeGrantInspection
+unchanged_imported_modules=328
+unchanged_later_sources=23
+inserted_source_modules=0
+restart_source_unchanged=0
+unchanged_package_objects=2933
+reused_artifact_manifest=/home/ember/build/minidregg-8c13c42-evidence/build-r1/reused-artifact-sha256.txt
+compiled_source_modules=25
+source_modules=353
+package_modules=2933
+response_objects=3286
+reusable_artifact_manifest_sha256=962eb84109270a690963ca0be37f9168cf3e7138a0541b1a80c695ff049894d5
+usage_exit=1
+binary=/home/ember/build/minidregg-8c13c42-evidence/minidregg-host-8c13c42-r1
+binary_sha256=370a9396c2109d1181d726361559f1f4a76ead1184a082bdacc4e23f22c648f9
