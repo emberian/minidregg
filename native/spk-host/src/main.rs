@@ -2,7 +2,7 @@
 fn main() {
     use minidregg_spk_host::launch_descriptor_native::qualify_launch;
     use minidregg_spk_host::materialize::{
-        materialize_spk, qualify_bridge_spk, signed_schema_source,
+        materialize_spk, qualify_bridge_spk, signed_schema_source, verify_installed_spk,
     };
     use serde_json::json;
     use std::path::Path;
@@ -60,6 +60,26 @@ fn main() {
             }
         }
     }
+    if args.len() == 9 && args[1] == "human-custodian-init" {
+        match minidregg_spk_host::http_entrance::initialize_custodian(
+            Path::new(&args[2]),
+            &args[3],
+            &args[4],
+            &args[5],
+            &args[6],
+            &args[7],
+            &args[8],
+        ) {
+            Ok(()) => {
+                println!("human custodian initialized at {}", args[2]);
+                return;
+            }
+            Err(error) => {
+                eprintln!("spk-host: human custodian initialization refused: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.len() == 3 && args[1] == "qualify" {
         match qualify_bridge_spk(Path::new(&args[2])) {
             Ok((package, bridge)) => {
@@ -86,6 +106,50 @@ fn main() {
             }
             Err(error) => {
                 eprintln!("spk-host: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    if args.len() == 4 && args[1] == "inspect-installed" {
+        let uid: u32 = match args[3].parse() {
+            Ok(uid) if uid != 0 => uid,
+            _ => {
+                eprintln!("spk-host: APP_UID must be a nonzero decimal Unix UID");
+                std::process::exit(2);
+            }
+        };
+        let image = Path::new(&args[2]);
+        if !image.is_absolute() {
+            eprintln!("spk-host: installed image path must be absolute");
+            std::process::exit(2);
+        }
+        match verify_installed_spk(image, uid) {
+            Ok(installed) => {
+                let bridge = match installed.signed_bridge_config_sha256 {
+                    Some(digest) => digest,
+                    None => {
+                        eprintln!("spk-host: installed signed bridge absent");
+                        std::process::exit(1);
+                    }
+                };
+                println!(
+                    "{}",
+                    json!({
+                        "protocol":"mini-spk-installed-inspection-v1",
+                        "imageDir":installed.directory,
+                        "appUid":uid,
+                        "rawSha256":installed.raw_sha256,
+                        "rawLength":installed.raw_length.to_string(),
+                        "signedAppId":installed.manifest.app_id.0,
+                        "signedAppVersion":installed.manifest.app_version.to_string(),
+                        "signedManifestSha256":hex(installed.signed_manifest_sha256),
+                        "signedBridgeConfigSha256":hex(bridge),
+                    })
+                );
+            }
+            Err(error) => {
+                eprintln!("spk-host: installed image inspection refused: {error}");
                 std::process::exit(1);
             }
         }
@@ -120,7 +184,7 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG"
+        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api"
     );
     eprintln!("spk-host: resident-run requires current Mini lifecycle admission and physical unit custody");
     std::process::exit(2);

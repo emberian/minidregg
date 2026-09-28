@@ -1,0 +1,8 @@
+073705af9726e0695d95740135ec000fc0e815aae6b0ced93d186be194231800  native/spk-host/src/main.rs
+0f51966590c4b0d72e568e16604b2740e24dbb11e4d80fdc99cfdfd121c540d6  scripts/spk-platform/journey.sh
+c53420c3b23199c7c0e7c3f87a1f903288eb2da1e62848c9e7d97b8ba3be004f  scripts/spk-platform/tests/journey-readonly-recovery.sh
+819ac249b7a01c095a88b72523ab89cb40bcf856b5b0f3aba845e1d7de2bca41  deploy/spk-host/spk-stage-prepared-inbox
+2cfbbc20da6f0b0c8df1040cc59bfa5272071415a55c7f5a90bfef05a1cfe2c7  docs/evidence/2026-09-27-spk-physical-handoff/README.md
+aa8c211ca7e2c26fedd81f6126bb45f3f531401ce20dabadd7d935ebfc8d2615  docs/evidence/2026-09-27-spk-physical-handoff/cli-build.log
+f2d296f7bb3276b06a4bb721edd20dbca0534f262bbd2f9454d2384a3f2f3819  docs/evidence/2026-09-27-spk-physical-handoff/readonly-recovery.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  docs/evidence/2026-09-27-spk-physical-handoff/shellcheck.log

@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Root-only retained Mini claim/request hash check followed by one exact SPK
+# inbox copy. This is not fresh native claim verification, image ingest, or an
+# ingest execution receipt; INSTALL completion later re-admits current state.
+set -euo pipefail
+umask 077
+
+(( $# == 1 && EUID == 0 )) || {
+  echo 'usage (as root): spk-stage-prepared-inbox MATERIALIZE_REQUEST.json' >&2
+  exit 2
+}
+request=$1
+[[ $request == /var/lib/minidregg/spk/fixtures/*/continuations/gitweb-journey/materialize-request-[0-9][0-9][0-9][0-9]/request.json &&
+   $request != */../* && $request != */./* && -f $request && ! -L $request ]] || {
+  echo 'prepared request path refused' >&2; exit 1;
+}
+root=${request%%/continuations/gitweb-journey/*}
+[[ $root != /var/lib/minidregg/spk/fixtures && $root != *//* ]] || exit 1
+[[ -s ${request%/*}/complete.txt ]] || { echo 'materialization request not complete' >&2; exit 1; }
+sha256sum -c "${request%/*}/input-sha256.txt" >/dev/null || {
+  echo 'prepared materialization input drift' >&2; exit 1;
+}
+prepared=$(jq -er .installJournal "$request")/install-prepared-v2.json
+config=$(jq -er .installJournal "$request")/install.json
+source_spk=$root/packages/gitweb.spk
+inbox=/var/lib/minidregg/spk/inbox/gitweb-2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa.spk
+[[ $prepared == /var/lib/minidregg/spk/install-ops/*/install-prepared-v2.json &&
+   $prepared != */../* && $prepared != */./* ]] || exit 1
+for path in "$request" "$prepared" "$config" "$source_spk"; do
+  [[ -f $path && ! -L $path && $(stat -c '%a:%h' -- "$path") == 600:1 ]] || {
+    echo "prepared source identity refused: $path" >&2; exit 1;
+  }
+done
+for path in "$root" "$root/packages" "$root/continuations" \
+    "$root/continuations/gitweb-journey" "${request%/*}" "${prepared%/*}"; do
+  [[ -d $path && ! -L $path ]] || exit 1
+  mode=$(stat -c '%a' -- "$path")
+  (( (8#$mode & 8#022) == 0 )) || exit 1
+done
+jq -e --arg root "$root" --arg inbox "$inbox" --arg install "${prepared%/*}" '
+  (keys | sort) == (["protocol","fixtureRoot","installJournal",
+    "preparedSha256","originalBeginSha256","committedClaimSha256",
+    "sourceSpk","rawSha256","inboxSpk","imageDir","appUid",
+    "spkHost","spkHostSha256"] | sort) and
+  .protocol == "mini-spk-materialize-request-v1" and .fixtureRoot == $root and
+  .installJournal == $install and
+  .sourceSpk == ($root + "/packages/gitweb.spk") and .inboxSpk == $inbox and
+  .rawSha256 == "2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa" and
+  .imageDir == ("/var/lib/minidregg/spk/packages/sha256-" + .rawSha256) and
+  (.appUid | type == "number" and . > 0 and floor == .) and
+  ([.preparedSha256,.originalBeginSha256,.committedClaimSha256,.spkHostSha256] |
+    all(.[]; type == "string" and test("^[0-9a-f]{64}$"))) and
+  (.spkHost | type == "string" and startswith("/"))
+  ' "$request" >/dev/null || {
+  echo 'prepared root inbox request shape refused' >&2; exit 1;
+}
+# Bind source intent and exact original accepted Mini claim, not just a raw SPK hash.
+[[ $(sha256sum "$prepared" | cut -d ' ' -f 1) == $(jq -er .preparedSha256 "$request") &&
+   $(sha256sum "$source_spk" | cut -d ' ' -f 1) == 2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa ]] || exit 1
+spk_host=$(jq -er .spkHost "$request")
+[[ -x $spk_host && ! -L $spk_host &&
+   $(sha256sum "$spk_host" | cut -d ' ' -f 1) == $(jq -er .spkHostSha256 "$request") ]] || exit 1
+jq -e --slurpfile request "$request" --slurpfile config "$config" '
+  .protocol == "mini-spk-install-prepared-v2" and
+  .rawSha256 == $request[0].rawSha256 and
+  .beginSha256 == $request[0].originalBeginSha256 and
+  .committedClaimSha256 == $request[0].committedClaimSha256 and
+  .launchRoot == "89066044197087243500897137644433855781716276082669749278782223953933431354679" and
+  $config[0].protocol == "mini-spk-resident-install-v2" and
+  $config[0].sourceSpk == $request[0].sourceSpk and
+  $config[0].imageDir == $request[0].imageDir and
+  $config[0].appUid == $request[0].appUid
+  ' "$prepared" >/dev/null || exit 1
+
+inbox_dir=${inbox%/*}
+[[ -d $inbox_dir && ! -L $inbox_dir && $(stat -c '%u:%a' "$inbox_dir") == 0:700 ]] || {
+  echo 'root-private SPK inbox absent' >&2; exit 1;
+}
+lock=$inbox_dir/.stage-prepared.lock
+exec 9>>"$lock"
+[[ $(stat -c '%u:%a:%h' "$lock") == 0:600:1 ]] || exit 1
+flock -n 9 || { echo 'another inbox stage is active' >&2; exit 1; }
+if [[ -e $inbox || -L $inbox ]]; then
+  [[ -f $inbox && ! -L $inbox && $(stat -c '%u:%a:%h' "$inbox") == 0:600:1 &&
+     $(sha256sum "$inbox" | cut -d ' ' -f 1) == 2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa ]] || exit 1
+  echo "inbox_existing_verified=$inbox"
+  exit 0
+fi
+stage=$(mktemp "$inbox_dir/.prepared.XXXXXXXX")
+trap 'rm -f -- "$stage"' EXIT
+install -o root -g root -m 600 -- "$source_spk" "$stage"
+[[ $(sha256sum "$stage" | cut -d ' ' -f 1) == 2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa ]] || exit 1
+sync -f "$stage"
+ln -- "$stage" "$inbox"
+sync -f "$inbox_dir"
+rm -- "$stage"
+trap - EXIT
+[[ $(sha256sum "$source_spk" | cut -d ' ' -f 1) == 2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa ]] || exit 1
+echo "inbox_staged=$inbox"
