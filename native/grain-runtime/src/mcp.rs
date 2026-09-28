@@ -298,6 +298,21 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "required":["family","application"],"additionalProperties":false}}));
     }
     if !catalog.api_applications.is_empty() {
+        tools.push(json!({"name":"mini_gitweb_read",
+            "description":"Read one bounded UTF-8 file from a named Mini GitWeb app through fresh authorized Git smart-HTTP requests.",
+            "inputSchema":{"type":"object","properties":{
+                "application":{"type":"string","enum":catalog.api_applications},
+                "path":{"type":"string","maxLength":256}},
+                "required":["application","path"],"additionalProperties":false}}));
+        tools.push(json!({"name":"mini_gitweb_edit",
+            "description":"Edit a bounded text file, commit, push, and verify the remote ref in one named Mini GitWeb app. Every Git HTTP request receives a fresh Mini dispatch and settlement. An uncertain push is retained and never retried automatically.",
+            "inputSchema":{"type":"object","properties":{
+                "application":{"type":"string","enum":catalog.api_applications},
+                "path":{"type":"string","maxLength":256},
+                "content":{"type":"string","maxLength":8192},
+                "message":{"type":"string","maxLength":256}},
+                "required":["application","path","content","message"],
+                "additionalProperties":false}}));
         tools.push(json!({"name":"mini_application_api",
             "description":"Call one operator-pinned resident application API session. A fresh Mini agent dispatch permit and separate purse settlement are required for every call. The model chooses only the named app and bounded ordinary HTTP input. Path is relative to the signed /repo.git/ API prefix (for example git-receive-pack or info/refs); do not include that prefix in the path.",
             "inputSchema":{"type":"object","properties":{
@@ -311,6 +326,10 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
                 "additionalProperties":false}}));
     }
     json!({"tools":tools})
+}
+
+fn public_tool_name(name: &str) -> bool {
+    !name.starts_with("__")
 }
 
 fn call_controller_with_timeout(
@@ -410,7 +429,54 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
                     .pointer("/params/arguments")
                     .cloned()
                     .unwrap_or(Value::Null);
-                let response = call_controller(path, name, arguments);
+                let response = if !public_tool_name(name) {
+                    json!({"isError":true,"text":"internal Mini broker operation is unavailable to MCP callers"})
+                } else if matches!(name, "mini_gitweb_read" | "mini_gitweb_edit") {
+                    let catalog = call_controller(path, "__catalog", json!({}));
+                    match catalog_from_reply(&catalog).and_then(|catalog| {
+                        let application = arguments
+                            .get("application")
+                            .and_then(Value::as_str)
+                            .ok_or("GitWeb application selector absent")?;
+                        if !catalog
+                            .api_applications
+                            .iter()
+                            .any(|name| name == application)
+                        {
+                            return Err(
+                                "GitWeb application is not in the current controller catalog"
+                                    .into(),
+                            );
+                        }
+                        let mut forward = |request| {
+                            let result = call_controller(path, "__mini_gitweb_http_raw", request);
+                            if result.get("isError").and_then(Value::as_bool) != Some(false) {
+                                return Err(result
+                                    .get("text")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("GitWeb HTTP outcome unavailable")
+                                    .to_owned());
+                            }
+                            serde_json::from_str(
+                                result
+                                    .get("text")
+                                    .and_then(Value::as_str)
+                                    .ok_or("GitWeb HTTP response absent")?,
+                            )
+                            .map_err(|_| "GitWeb HTTP response malformed".to_owned())
+                        };
+                        if name == "mini_gitweb_read" {
+                            crate::gitweb_worker::read(&arguments, &mut forward)
+                        } else {
+                            crate::gitweb_worker::edit(&arguments, &mut forward)
+                        }
+                    }) {
+                        Ok(value) => json!({"isError":false,"text":value.to_string()}),
+                        Err(error) => json!({"isError":true,"text":error}),
+                    }
+                } else {
+                    call_controller(path, name, arguments)
+                };
                 json!({"content":[{"type":"text","text":response.get("text").and_then(Value::as_str).unwrap_or("tool returned no text")}],
                     "isError":response.get("isError").and_then(Value::as_bool).unwrap_or(true)})
             }
@@ -428,6 +494,14 @@ pub fn serve_stdio(path: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn internal_broker_names_are_not_public_mcp_tools() {
+        assert!(!public_tool_name("__mini_gitweb_http_raw"));
+        assert!(!public_tool_name("__catalog"));
+        assert!(public_tool_name("mini_gitweb_edit"));
+        assert!(public_tool_name("mini_application_api"));
+    }
 
     static NEXT_SOCKET: AtomicUsize = AtomicUsize::new(1);
 

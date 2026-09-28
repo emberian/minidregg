@@ -9,6 +9,7 @@ mod custody_gate;
 mod dispatch_custody;
 #[cfg(test)]
 mod dispatch_runtime_tests;
+mod gitweb_worker;
 mod legacy_custody_audit;
 mod mcp;
 mod provider;
@@ -1212,6 +1213,7 @@ struct ActiveApplicationApi {
     reply: mpsc::Sender<Value>,
     step: ApplicationApiStep,
     deadline: Instant,
+    raw_worker_reply: bool,
 }
 
 enum ApplicationApiRoute {
@@ -7935,6 +7937,7 @@ impl Runtime {
         arguments: &Value,
         reply: mpsc::Sender<Value>,
         prompt_epoch: Option<u64>,
+        raw_worker_reply: bool,
     ) -> Result<ActiveApplicationApi> {
         if (self.foreground_operation.is_none() && prompt_epoch != Some(1))
             || (self.foreground_operation.is_some() && prompt_epoch.is_some())
@@ -7970,7 +7973,10 @@ impl Runtime {
             .find(|route| route.name == selected.application)
             .cloned()
         {
-            return self.begin_application_lifetime_api(selected, route, reply);
+            return self.begin_application_lifetime_api(selected, route, reply, raw_worker_reply);
+        }
+        if raw_worker_reply {
+            return Err("Git worker raw response requires a lifetime route".into());
         }
         let expected_host = tool
             .agent_api_host_sha256
@@ -8074,6 +8080,7 @@ impl Runtime {
             reply,
             step: ApplicationApiStep::Hello(hello),
             deadline,
+            raw_worker_reply,
         })
     }
 
@@ -8082,6 +8089,7 @@ impl Runtime {
         input: application_api_tools::HttpInput,
         route: application_api_tools::LifetimeRoutePin,
         reply: mpsc::Sender<Value>,
+        raw_worker_reply: bool,
     ) -> Result<ActiveApplicationApi> {
         let tool = self.config.tool_task.as_ref().ok_or("toolTask absent")?;
         let expected_host = tool
@@ -8145,6 +8153,7 @@ impl Runtime {
             reply,
             step: ApplicationApiStep::Hello(hello),
             deadline,
+            raw_worker_reply,
         })
     }
 
@@ -8323,9 +8332,25 @@ impl Runtime {
             ApplicationApiPhase::Uncertain
         };
         self.save()?;
+        let shown = if definite && !call.raw_worker_reply {
+            match application_api_tools::present_lifetime_http(&result) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.journal.application_api_attempt.as_mut().unwrap().phase =
+                        ApplicationApiPhase::Uncertain;
+                    self.save()?;
+                    let _ = call.reply.send(json!({"isError":true,
+                        "text":format!("verified lifetime HTTP reply has no safe model presentation: {error}")}));
+                    *active = None;
+                    return Ok(());
+                }
+            }
+        } else {
+            result.clone()
+        };
         let delivered = call
             .reply
-            .send(json!({"isError":!definite,"text":result.to_string()}))
+            .send(json!({"isError":!definite,"text":shown.to_string()}))
             .is_ok();
         if definite && delivered {
             let mut finished = self.journal.application_api_attempt.take().unwrap();
@@ -11227,7 +11252,7 @@ impl Runtime {
         input: &Receiver<Input>,
     ) -> Result<Value> {
         let (reply, received) = mpsc::channel();
-        let mut active = Some(self.begin_application_api(arguments, reply, None)?);
+        let mut active = Some(self.begin_application_api(arguments, reply, None, false)?);
         let deadline = Instant::now() + Duration::from_secs(1800);
         loop {
             self.poll_application_api(&mut active)?;
@@ -12744,7 +12769,12 @@ impl Runtime {
             }
             for _ in 0..4 {
                 match broker.requests.try_recv() {
-                    Ok(request) if request.name == "mini_application_api" => {
+                    Ok(request)
+                        if matches!(
+                            request.name.as_str(),
+                            "mini_application_api" | "__mini_gitweb_http_raw"
+                        ) =>
+                    {
                         if application_api_call.is_some() {
                             let _ = request.reply.send(json!({"isError":true,
                                 "text":"application API call already in progress"}));
@@ -12753,6 +12783,7 @@ impl Runtime {
                                 &request.arguments,
                                 request.reply.clone(),
                                 Some(request.prompt_epoch),
+                                request.name == "__mini_gitweb_http_raw",
                             ) {
                                 Ok(active) => application_api_call = Some(active),
                                 Err(error) => {

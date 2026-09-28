@@ -26,6 +26,7 @@ const MAX_PATH_QUERY_BYTES: usize = 8192;
 const MAX_HEADERS: usize = 128;
 const MAX_FORWARD_FRAME: usize = 262_144;
 const MAX_INSPECT_REPLY_FRAME: usize = 1_048_576;
+const MAX_MODEL_TEXT_BODY: usize = 32 * 1024;
 const PROTOCOL: &str = "mini-spk-agent-api-v1";
 const LIFETIME_PROTOCOL: &str = "mini-spk-agent-api-v3";
 
@@ -76,6 +77,52 @@ pub(crate) fn hello_request() -> Value {
 
 pub(crate) fn lifetime_hello_request() -> Value {
     json!({"type":"hello-v3","protocol":LIFETIME_PROTOCOL})
+}
+
+/// Render only a bounded, derived view of an already verified resident reply
+/// for the model. The exact `http-v3` frame remains in controller custody;
+/// this projection never supplies a dispatch or settlement authority.
+pub(crate) fn present_lifetime_http(reply: &Value) -> Result<Value, String> {
+    if reply.get("type").and_then(Value::as_str) != Some("http-v3") {
+        return Err("lifetime HTTP presentation requires a definite reply".into());
+    }
+    let body_hex = reply
+        .get("bodyHex")
+        .and_then(Value::as_str)
+        .ok_or("lifetime HTTP response body absent")?;
+    if body_hex.len() > MAX_INSPECT_REPLY_FRAME || !body_hex.len().is_multiple_of(2) {
+        return Err("lifetime HTTP response body exceeds presentation bound".into());
+    }
+    let mut body = Vec::with_capacity(body_hex.len() / 2);
+    for pair in body_hex.as_bytes().chunks_exact(2) {
+        let nibble = |byte| match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            _ => None,
+        };
+        body.push(
+            (nibble(pair[0]).ok_or("lifetime response body hex is not canonical")? << 4)
+                | nibble(pair[1]).ok_or("lifetime response body hex is not canonical")?,
+        );
+    }
+    let mut view = reply.clone();
+    let object = view
+        .as_object_mut()
+        .ok_or("lifetime HTTP reply is not an object")?;
+    object.remove("bodyHex");
+    object.insert("bodyBytes".into(), json!(body.len()));
+    if body.len() <= MAX_MODEL_TEXT_BODY {
+        if let Ok(text) = String::from_utf8(body) {
+            object.insert("bodyText".into(), json!(text));
+            object.insert("bodyPresentation".into(), json!("utf-8"));
+            return Ok(view);
+        }
+    }
+    object.insert(
+        "bodyPresentation".into(),
+        json!("binary-or-oversize-omitted"),
+    );
+    Ok(view)
 }
 
 pub(crate) fn lifetime_dispatch_request(
@@ -1806,6 +1853,33 @@ pub(crate) fn parse_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn definite_gitweb_http_projects_bounded_readable_body_without_changing_receipt() {
+        let raw = json!({"type":"http-v3","status":200,
+            "bodyHex":"3c68313e4769745765623c2f68313e",
+            "responseSha256":"aa".repeat(32),
+            "committedReceipt":{"transactionId":"1","eventId":"2",
+                "acceptedCount":"3","imageBoundary":"4"}});
+        let shown = present_lifetime_http(&raw).unwrap();
+        assert_eq!(shown["bodyText"], "<h1>GitWeb</h1>");
+        assert_eq!(shown["bodyBytes"], 15);
+        assert_eq!(shown["bodyPresentation"], "utf-8");
+        assert!(shown.get("bodyHex").is_none());
+        assert_eq!(shown["committedReceipt"], raw["committedReceipt"]);
+        assert_eq!(raw["bodyHex"], "3c68313e4769745765623c2f68313e");
+        let binary = json!({"type":"http-v3","bodyHex":"00ff"});
+        let omitted = present_lifetime_http(&binary).unwrap();
+        assert_eq!(omitted["bodyPresentation"], "binary-or-oversize-omitted");
+        assert!(omitted.get("bodyText").is_none());
+        let oversized = json!({"type":"http-v3","bodyHex":"61".repeat(32_769)});
+        assert_eq!(
+            present_lifetime_http(&oversized).unwrap()["bodyBytes"],
+            32_769
+        );
+        assert!(present_lifetime_http(&json!({"type":"http-v3","bodyHex":"0G"})).is_err());
+        assert!(present_lifetime_http(&json!({"type":"uncertain-v3","bodyHex":""})).is_err());
+    }
     use serde_json::json;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
