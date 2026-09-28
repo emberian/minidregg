@@ -51,6 +51,20 @@ fn decimal_max<'a>(left: &'a str, right: &'a str) -> &'a str {
     }
 }
 
+fn readable_delegation_verbs(selected: &[Value], parent: &[Value]) -> Result<()> {
+    let mut unique = std::collections::BTreeSet::new();
+    for verb in selected {
+        let verb = verb.as_str().ok_or("delegation verb must be a string")?;
+        if !unique.insert(verb) || !parent.iter().any(|value| value.as_str() == Some(verb)) {
+            return Err("delegation verbs must be unique and within parent scope".into());
+        }
+    }
+    if !unique.contains("observe") {
+        return Err("workspace delegated references require the observe verb".into());
+    }
+    Ok(())
+}
+
 fn validate_name(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 64
@@ -779,15 +793,7 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
             {
                 return Err("parent capability lacks delegation verb".into());
             }
-            let mut unique_verbs = std::collections::BTreeSet::new();
-            for verb in selected_verbs {
-                let verb = verb.as_str().ok_or("delegation verb must be a string")?;
-                if !unique_verbs.insert(verb)
-                    || !parent_verbs.iter().any(|v| v.as_str() == Some(verb))
-                {
-                    return Err("delegation verbs must be unique and within parent scope".into());
-                }
-            }
+            readable_delegation_verbs(selected_verbs, parent_verbs)?;
             let parent_max = member(head, "maxCost")?;
             field_decimal(parent_max, "parent maxCost")?;
             if !decimal_leq(maximum, parent_max) {
@@ -1553,6 +1559,15 @@ mod tests {
         field_decimal(root, "root").unwrap();
         assert!(decimal(root, "resource ID").is_err());
         assert!(field_decimal("01", "root").is_err());
+    }
+
+    #[test]
+    fn workspace_delegation_refuses_operation_only_child() {
+        let parent = json!(["observe", "mutate", "delegate"]);
+        let parent = parent.as_array().unwrap();
+        assert!(readable_delegation_verbs(json!(["mutate"]).as_array().unwrap(), parent).is_err());
+        readable_delegation_verbs(json!(["observe", "mutate"]).as_array().unwrap(), parent)
+            .unwrap();
     }
 
     #[test]

@@ -84,7 +84,9 @@ A delegation request names one reference and the recipient's already admitted
 subject. The client obtains signed resource, policy and typed parent-capability
 views from the same image, checks the requested verbs and cost against the
 parent, and durably reserves a fresh child capability ID. The requested grant
-still faces current-law admission:
+must include `observe` so the recipient can inspect its named reference;
+operation-only delegation remains available through the lower-level typed
+intent surface. The requested grant still faces current-law admission:
 
 ```json
 {"type":"minidregg-workspace-proposal-v1","action":"delegate",
