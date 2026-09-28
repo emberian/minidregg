@@ -1,0 +1,2 @@
+'Minidregg.Kernel.NativeHostReplay.Derived.ofBirth_intent' depends on axioms: [propext, Classical.choice, Quot.sound]
+'Minidregg.Kernel.NativeHostReplay.Derived.ofBirth_admission' depends on axioms: [propext, Classical.choice, Quot.sound]

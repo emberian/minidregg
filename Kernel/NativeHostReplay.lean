@@ -810,6 +810,27 @@ structure Derived (config : Config) (opened : Opened config) where
   grantIssue : Option (Σ ingress : ApplicationAgentLifetimeGrantSource.Ingress,
     { admitted : LifetimeGrantIssueAt config opened ingress // intent = admitted.intent }) := none
 
+/-- Retain the original native birth admission for an exact CAS readback.
+The accepted value can only be made by the complete birth admission path. -/
+def Derived.ofBirth {config : Config} {opened : Opened config}
+    (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
+      config.profile config.deployment opened.pins opened.durable
+      (logicalHeight config opened.durable)) : Derived config opened :=
+  ⟨ResourceBirthReceiver.intent accepted, .birth accepted,
+    none, none, none, none, none, none, none, none, none⟩
+
+theorem Derived.ofBirth_intent {config : Config} {opened : Opened config}
+    (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
+      config.profile config.deployment opened.pins opened.durable
+      (logicalHeight config opened.durable)) :
+    (Derived.ofBirth accepted).intent = ResourceBirthReceiver.intent accepted := rfl
+
+theorem Derived.ofBirth_admission {config : Config} {opened : Opened config}
+    (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
+      config.profile config.deployment opened.pins opened.durable
+      (logicalHeight config opened.durable)) :
+    (Derived.ofBirth accepted).admission = NativeAdmission.birth accepted := rfl
+
 /-- Retain the exact admitted ordinary invocation for the persistent native
 readback path. The constructor accepts the typed current-image admission, not
 caller-supplied intent bytes. -/
