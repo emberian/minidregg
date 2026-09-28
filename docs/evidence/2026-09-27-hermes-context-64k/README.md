@@ -53,10 +53,12 @@ and GGUF, with `--ctx-size 65536 --parallel 1 --flash-attn on
 is `bonsai2-27b-ptq1`, bound only at `127.0.0.1:18081`, using the existing
 mode-0600 private key file. [The server journal excerpt](selected-journal.log)
 confirms **one slot with `n_ctx_slot = 65536`**, model loaded and loopback
-listener. [Status](64k-status.txt) observed an active unit, 6.92 GB systemd
-memory peak against 32 GB cap; AMD VRAM use was 8,434,159,616 of
-12,868,124,672 bytes. The old 8k unit was inactive and only the new listener
-existed ([statuses](8k-after.txt), [listeners](listeners.txt)). Unauthenticated
+listener. [Status](64k-status.txt) after the long upstream prompt observed
+an active unit, 7,580,942,336 bytes (7.58 GB) systemd memory peak against
+32 GB cap; AMD VRAM use
+was 8,456,003,584 of 12,868,124,672 bytes. The old 8k unit was inactive
+and only the new listener existed ([statuses](8k-after.txt),
+[listeners](listeners.txt)). Unauthenticated
 `/v1/models` returned [401](unauth-code.txt).
 
 Direct authenticated local inference returned HTTP 200 for harmless
@@ -83,3 +85,10 @@ The full captured prompt/request and model response remain private under
 `/tank/dregg-preview/` on hbox. This evidence contains only request shape,
 hashes, timings, counts and keyless logs. The new service is a bounded local
 qualification, not yet a Mini provider/controller journey.
+
+The initial `c2127ac` evidence commit included the final status observation
+but an earlier manifest and memory-peak description. Its `MANIFEST.sha256`
+had become stale when the status was refreshed after the 140-second upstream
+prompt raised the recorded memory peak.
+The follow-up manifest is the qualified final source for this folder; the
+earlier manifest must not be read as passing against these later bytes.

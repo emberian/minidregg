@@ -1,0 +1,2 @@
+084bd2f8a4664e97f182b9b2332f95a3d1827af4ba0331a43d73f766a85be714  docs/evidence/2026-09-27-multi-provider-host/render-r3-bonsai-review.sh
+8d7a8880b5155cf30776b3d4e40bb4e15669aeb1e1098ac0e4c9d7b01b99af22  docs/evidence/2026-09-27-multi-provider-host/r3-config-review.md
