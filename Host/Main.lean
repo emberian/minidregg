@@ -3206,6 +3206,95 @@ def selectedReleaseFnPoll (fnBinary scopePath controlPath capabilitySource
        ("packetBytes", toJson (toString candidate.packetBytes.length)),
        ("ingressBytes", toJson (toString candidate.ingressBytes.length))]
 
+/-- The older NNTP publication route is a genuine fn Store observation but
+its poll report is a legacy `fn-r`, with no fn-authored-source or historical
+signature verdict. Extract only the stored article through fn's ACL2 decoder,
+bind its exact owner-authored suffix and Message-ID, and leave Mini admission
+to the independently signed release packet and current recipient law. This
+route never emits an fn-e verdict, event17 coverage, or cursor ACK. -/
+def selectedReleaseFnLegacyPoll (fnBinary scopePath controlPath expectedArticlePath
+    capabilitySource authoritySource targetSource cursorPath reportPath storedPath
+    packetPath ingressPath resultPath : String) : IO Unit := do
+  unless [fnBinary, scopePath, controlPath, expectedArticlePath].all (·.startsWith "/") do
+    throw (IO.userError "selected-release legacy fn inputs must be absolute")
+  selectedFnNewPaths [cursorPath, reportPath, storedPath, packetPath,
+    ingressPath, resultPath]
+  let capability : Minidregg.Theory.TypedAuthorization.CapabilityId :=
+    ⟨← IO.ofExcept (exactDecimal "recipient capability" capabilitySource)⟩
+  let authorityRoot : Minidregg.Theory.TypedAuthorization.Digest :=
+    ⟨← IO.ofExcept (exactDecimal "recipient authority root" authoritySource)⟩
+  let targetRoot : Minidregg.Theory.TypedAuthorization.Digest :=
+    ⟨← IO.ofExcept (exactDecimal "recipient target root" targetSource)⟩
+  let expected ← readBoundedBytes expectedArticlePath FnEvidenceCodec.maxSourceBytes
+  let scope ← selectedFnScope scopePath
+  IO.FS.withTempDir fun directory => do
+    let executable ← snapshotOperatorFile directory "selected-release-fn-helper"
+      fnBinary (64 * 1024 * 1024) "0500"
+    let (fromPosition, before) ← queryFnConsumerPosition executable scope controlPath
+    unless fromPosition == before.committedAck do
+      throw (IO.userError "selected-release legacy fn poll lacks durable start")
+    let (cursor, report) ← invokeFnConsumerPollRaw executable scope
+      controlPath cursorPath reportPath
+    unless report.take 5 == [68, 102, 110, 45, 114] do
+      throw (IO.userError "selected-release legacy fn poll requires fn-r report")
+    let (inspectedScope, position) ← inspectFnConsumerCursor executable cursorPath
+    unless inspectedScope == (← IO.ofExcept scope.progressScope) &&
+        fromPosition < position &&
+        position ≤ fromPosition + FnConsumerProgress.maxPollScan do
+      throw (IO.userError "selected-release legacy fn cursor differs from pinned scope or scan")
+    let child ← IO.Process.spawn
+      { cmd := executable, args := #["--fn", "consumer-article", "--json", reportPath],
+        stdin := .null, stdout := .piped, stderr := .piped }
+    let stderrTask ← IO.asTask (readDiagnosticStderr child.stderr 2048)
+    let output ← try readBoundedLoop child.stdout 3_200_000
+      catch error =>
+        child.kill
+        discard <| child.wait
+        throw error
+    let exitCode ← child.wait
+    let _ ← match stderrTask.get with
+      | .ok bytes => pure bytes
+      | .error error => throw error
+    unless exitCode == 0 do
+      throw (IO.userError "fn native legacy article extraction refused")
+    let some source := String.fromUTF8? output.toByteArray
+      | throw (IO.userError "fn native legacy article output is not UTF-8")
+    let [line, ""] := source.splitOn "\n"
+      | throw (IO.userError "fn native legacy article output has unexpected framing")
+    let json ← IO.ofExcept (Minidregg.Host.Json.parse line)
+    IO.ofExcept (requireExactFields "fn legacy article"
+      ["report", "message_id", "article_hex"] json)
+    let reportType ← IO.ofExcept (json.getObjValAs? String "report")
+    unless reportType == "article" do
+      throw (IO.userError "fn legacy report carries no article")
+    let messageId ← IO.ofExcept (json.getObjValAs? String "message_id")
+    let articleHex ← IO.ofExcept (json.getObjValAs? String "article_hex")
+    let stored ← IO.ofExcept (decodeCanonicalHex "fn stored article" articleHex)
+    unless stored.length ≤ FnEvidenceCodec.maxStorePollEventBytes &&
+        expected.length ≤ stored.length &&
+        stored.drop (stored.length - expected.length) == expected do
+      throw (IO.userError "fn stored article lacks exact selected owner source suffix")
+    let candidate ← IO.ofExcept <| FnSelectiveReleaseFnReceiving.derive
+      expected messageId.toUTF8.toList capability authorityRoot targetRoot
+    let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
+    unless afterPosition == fromPosition &&
+        after.committedAck == before.committedAck &&
+        cursor == (← readBoundedBytes cursorPath 346) &&
+        report == (← readBoundedBytes reportPath FnEvidenceCodec.maxStorePollEventBytes) do
+      throw (IO.userError "selected-release legacy fn observation changed")
+    writeBytes storedPath stored
+    writeBytes packetPath candidate.packetBytes
+    writeBytes ingressPath candidate.ingressBytes
+    writeJson resultPath <| Lean.Json.mkObj
+      [("type", toJson "selected-release-fn-legacy-poll-v1"),
+       ("status", toJson "candidate-unacknowledged"),
+       ("mode", toJson "fn-r-transport-only"),
+       ("fnPosition", toJson (toString position)),
+       ("messageId", toJson (Minidregg.Host.Json.encodeHex candidate.messageId)),
+       ("storedBytes", toJson (toString stored.length)),
+       ("sourceBytes", toJson (toString expected.length)),
+       ("packetBytes", toJson (toString candidate.packetBytes.length))]
+
 /-- Reproject the exact retained cursor/event and select the original accepted
 Mini event 13 from a fresh verifier-opened Store. Before a new ACK, repeat the
 authenticated local poll and require the fn Store to return those same bytes. -/
@@ -5648,6 +5737,14 @@ def run (arguments : List String) : IO UInt32 := do
           selectedReleaseFnPoll fnBinary scopePath controlPath capabilityText
             authorityText targetText cursorPath reportPath sourcePath packetPath
             ingressPath resultPath
+          pure 0
+      | "selected-release-fn-legacy-poll",
+          [fnBinary, scopePath, controlPath, expectedArticlePath,
+           capabilityText, authorityText, targetText, cursorPath, reportPath,
+           storedPath, packetPath, ingressPath, resultPath] =>
+          selectedReleaseFnLegacyPoll fnBinary scopePath controlPath
+            expectedArticlePath capabilityText authorityText targetText
+            cursorPath reportPath storedPath packetPath ingressPath resultPath
           pure 0
       | "selected-release-fn-ack",
           [cursorPath, reportPath, transaction, coveragePath, resultPath] =>

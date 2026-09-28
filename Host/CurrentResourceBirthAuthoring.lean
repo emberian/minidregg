@@ -52,6 +52,8 @@ def intentLoadedAuthorized (config : NativeHost.Config)
           let some descriptor :=
               (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).decode birthBytes
             | return .error refused
+          if descriptor.creator != intent.subject then
+            return .error refused
           unless descriptor.createRequests.all (fun request =>
               match opened.directory.directory.slots request.cellId with
               | .absent => true

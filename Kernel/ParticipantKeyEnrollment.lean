@@ -264,6 +264,9 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
+  subjectFresh : authority.snapshot.entries.all (fun entry => match entry with
+    | .subjectKey key => key.subject != command.key.subject
+    | _ => true) = true
   keyIdFresh : authority.snapshot.entries.all (fun entry => match entry with
     | .subjectKey key => key.keyId != command.key.keyId
     | _ => true) = true
@@ -289,45 +292,49 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   if rootExact : command.expectedAuthorityRoot = snapshot.cell.root then
     if subjectAbsent : snapshot.logical.fields (.subjectKeyEpoch ⟨command.key.subject⟩) = none then
       if keyAbsent : snapshot.logical.fields (.subjectKey ⟨command.key.subject⟩ command.key.keyEpoch) = none then
-        if keyIdFresh : snapshot.entries.all (fun entry => match entry with
-            | .subjectKey key => key.keyId != command.key.keyId
+        if subjectFresh : snapshot.entries.all (fun entry => match entry with
+            | .subjectKey key => key.subject != command.key.subject
             | _ => true) then
-          if publicKeyFresh : snapshot.entries.all (fun entry => match entry with
-              | .subjectKey key => key.publicKey != command.key.publicKey
+          if keyIdFresh : snapshot.entries.all (fun entry => match entry with
+              | .subjectKey key => key.keyId != command.key.keyId
               | _ => true) then
-            if keyShape : command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
-                command.key.publicKey.length = 32 ∧
-                command.key.revoked = false ∧
-                command.key.activeFrom ≤ snapshot.catalogue.revision + 1 ∧
-                snapshot.catalogue.revision + 1 ≤ command.key.activeUntil ∧
-                command.key.subject ≠ command.sponsor.value then
-              if fresh : isNullified snapshot.cell d.operationNullifier = false then
-                let update ← requireSome .authorityPreparation
-                  (CredentialAuthorityDomain.prepare snapshot (edits snapshot d))
-                match validate AuthorityMaterializer snapshot.cell d.patch with
-                | .rejected _ => throw .validation
-                | .accepted validated =>
-                  if same : CredentialAuthorityStateCodec.encode update.postLogical =
-                      CredentialAuthorityStateCodec.encode validated.apply.logical then
-                    let physical ← requireSome .physicalPreparation (lower directory authority update [])
-                    let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
-                      snapshot.domain directory.directory
-                      (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
-                        (snapshot.authState.policyRevision ⟨deployment.factoryId⟩)))
-                    let candidate : Candidate (family deployment snapshot profile.semantics ambient command)
-                        snapshot.cell d () :=
-                      { preStateBound := rfl
-                        modeEvidence := ⟨rootExact, subjectAbsent, keyAbsent, fresh⟩
-                        validated := validated
-                        postcondition := validated.resultAt }
-                    pure ⟨directory, authority, factory, candidate, update,
-                      CredentialAuthorityStateCodec.encode_injective same, physical, source,
-                      keyIdFresh, publicKeyFresh, keyShape⟩
-                  else throw .refinement
-              else throw .replayedMarker
-            else throw .malformedKey
-          else throw .publicKeyExists
-        else throw .keyIdExists
+            if publicKeyFresh : snapshot.entries.all (fun entry => match entry with
+                | .subjectKey key => key.publicKey != command.key.publicKey
+                | _ => true) then
+              if keyShape : command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
+                  command.key.publicKey.length = 32 ∧
+                  command.key.revoked = false ∧
+                  command.key.activeFrom ≤ snapshot.catalogue.revision + 1 ∧
+                  snapshot.catalogue.revision + 1 ≤ command.key.activeUntil ∧
+                  command.key.subject ≠ command.sponsor.value then
+                if fresh : isNullified snapshot.cell d.operationNullifier = false then
+                  let update ← requireSome .authorityPreparation
+                    (CredentialAuthorityDomain.prepare snapshot (edits snapshot d))
+                  match validate AuthorityMaterializer snapshot.cell d.patch with
+                  | .rejected _ => throw .validation
+                  | .accepted validated =>
+                    if same : CredentialAuthorityStateCodec.encode update.postLogical =
+                        CredentialAuthorityStateCodec.encode validated.apply.logical then
+                      let physical ← requireSome .physicalPreparation (lower directory authority update [])
+                      let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
+                        snapshot.domain directory.directory
+                        (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
+                          (snapshot.authState.policyRevision ⟨deployment.factoryId⟩)))
+                      let candidate : Candidate (family deployment snapshot profile.semantics ambient command)
+                          snapshot.cell d () :=
+                        { preStateBound := rfl
+                          modeEvidence := ⟨rootExact, subjectAbsent, keyAbsent, fresh⟩
+                          validated := validated
+                          postcondition := validated.resultAt }
+                      pure ⟨directory, authority, factory, candidate, update,
+                        CredentialAuthorityStateCodec.encode_injective same, physical, source,
+                        subjectFresh, keyIdFresh, publicKeyFresh, keyShape⟩
+                    else throw .refinement
+                else throw .replayedMarker
+              else throw .malformedKey
+            else throw .publicKeyExists
+          else throw .keyIdExists
+        else throw .subjectExists
       else throw .subjectExists
     else throw .subjectExists
   else throw .staleAuthority

@@ -21,7 +21,9 @@ signature by subject 8 over the exact source-authored possession frame. It
 checks that an authenticated factory observation releases the exact two-signature
 plan on the same opened image, while a mismatched sponsor is refused. It
 checks canonical installed authority equality, current key selection, and
-that no grant was minted. Existing subject, duplicate key ID, stale authority
+that no grant was minted. An explicit all-epochs subject scan also rejects an
+orphaned prior subject key if one is present; this is a defensive guard, not a
+claimed reachable state in the current runtime. Existing subject, duplicate key ID, stale authority
 root and wrong proof-of-possession signer refuse. A second genesis with a
 current factory law denying enrollment refuses despite valid sponsor and new
 key signatures. The native receiver installs one durable event; exact repeat
@@ -34,7 +36,7 @@ Source SHA-256 at the run:
 
 | File | SHA-256 |
 | --- | --- |
-| `Kernel/ParticipantKeyEnrollment.lean` | `ad4565ff507e305fc355877a1e7af30310561b31303148510df85d158a2f0773` |
+| `Kernel/ParticipantKeyEnrollment.lean` | `a9fb944de91ef3270ff0266383542a214926e94bc65c87ca3c3c9a39b917a4c1` |
 | `Kernel/ParticipantKeyEnrollmentReceiver.lean` | `905ff49c93d7e9df65689332efa84e1d4ad27ea53b4ee4f50586d2bc62249bf2` |
 | `Kernel/NativeHostReplay.lean` | `ed0f41efa6750b204ce477e116e4a9276ddee350a44dbd572a4798d8e09b8fcc` |
 | `Kernel/NativeHost.lean` | `11794e2fd2cb72a19d80e3f3a7790f6f955ad5969e95dad55e069bfc39922e08` |
