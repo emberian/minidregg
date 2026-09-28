@@ -1,0 +1,4 @@
+f49c872d497d15bfcf23e7e4e617161cff13d8cdc552fcaa1e58e6a6562e392c  scripts/spk-platform/issue-agent-lifetime-grant.sh
+62e53e4bc38ecdc8c7f9e6d8c971ac2577ad21fab3b5e893e9799b2b3bb8f9ea  docs/evidence/2026-09-27-agent-lifetime-grant-issuer/README.md
+4548b594da65c2c53813d258c183efbaf5ade393ae32768dfdf4564a23dcc52f  docs/evidence/2026-09-27-agent-lifetime-grant-issuer/schema-fixture.log
+124f51e9623bd4265e67e1c08e06a7cdd203c8437d646a676ffbe1944e5fec77  docs/evidence/2026-09-27-agent-lifetime-grant-issuer/negative-schema.log

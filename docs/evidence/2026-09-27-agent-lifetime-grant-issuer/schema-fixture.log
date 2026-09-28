@@ -1,0 +1,5 @@
+grant plan staged at /home/hbox/mini-agent-grant-schema-fixture-r5/grant-stage/grant-attempt; review source plan and approval before seal
+source-slot approval prepared at /home/hbox/mini-agent-grant-schema-fixture-r5/approval.json; review before seal
+grant sealed at /home/hbox/mini-agent-grant-schema-fixture-r5/grant-stage/grant-attempt; no event27 submitted
+event27 accepted; use exact /home/hbox/mini-agent-grant-schema-fixture-r5/grant-stage/grant-attempt/lookup-NNNN.outcome.json with route renderer
+schema-only PASS: exact event22 candidate, distinct grant plan/seal/one submit/lookup
