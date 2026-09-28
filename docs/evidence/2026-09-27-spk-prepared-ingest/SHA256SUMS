@@ -1,0 +1,4 @@
+c7bf06b51d5a27b0befe06e7c9a23462b8e753c8101a68c6fa6650e2ba128e22  deploy/spk-host/spk-ingest-prepared
+acbd1fcff93ad9c72607a32c70c0bf258006f8383fb1bd87299519b0cd6fd4ce  deploy/spk-host/tests/ingest-prepared-custody.sh
+721f0f9a19fc6cfdd8b4529d3261ea9168ba77f0c3ca994007ff433f55ce19de  docs/evidence/2026-09-27-spk-prepared-ingest/README.md
+17e856284268f8a13201e15b24cf126a2e9c579fbee523a64a518e1b31c365cf  docs/evidence/2026-09-27-spk-prepared-ingest/custody.log

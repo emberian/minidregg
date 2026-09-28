@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# One bounded root ingest for an exact prepared Mini INSTALL request. The
+# durable marker precedes the physical command; uncertainty never retries it.
+set -euo pipefail
+umask 077
+
+(( $# == 1 && EUID == 0 )) || {
+  echo 'usage (as root): spk-ingest-prepared MATERIALIZE_REQUEST.json' >&2
+  exit 2
+}
+request=$1
+[[ $request == /var/lib/minidregg/spk/fixtures/*/continuations/gitweb-journey/materialize-request-[0-9][0-9][0-9][0-9]/request.json &&
+   $request != */../* && $request != */./* && -f $request && ! -L $request ]] || exit 1
+helper_dir=$(dirname -- "$0")
+safe_root_executable() {
+  local binary=$1 part segment mode
+  [[ $binary == /* && -f $binary && ! -L $binary && -x $binary ]] || return 1
+  part=/
+  IFS=/ read -ra segments <<< "${binary#/}"
+  for segment in "${segments[@]}"; do
+    [[ -n $segment && $segment != . && $segment != .. ]] || return 1
+    part=${part%/}/$segment
+    [[ ! -L $part && $(stat -c '%u' -- "$part") == 0 ]] || return 1
+    mode=$(stat -c '%a' -- "$part")
+    (( (8#$mode & 8#022) == 0 )) || return 1
+  done
+}
+[[ $helper_dir == /* ]] || { echo 'root helper directory must be absolute' >&2; exit 1; }
+for helper in spk-stage-prepared-inbox spk-ingest; do
+  binary=$helper_dir/$helper
+  safe_root_executable "$binary" && [[ $(stat -c '%h' -- "$binary") == 1 ]] || {
+    echo "root-installed ingest helper identity refused: $helper" >&2; exit 1;
+  }
+done
+"$helper_dir/spk-stage-prepared-inbox" "$request"
+expected=2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa
+image=/var/lib/minidregg/spk/packages/sha256-$expected
+inbox=/var/lib/minidregg/spk/inbox/gitweb-$expected.spk
+host=$(jq -er .spkHost "$request")
+host_sha=$(jq -er .spkHostSha256 "$request")
+uid=$(jq -er .appUid "$request")
+[[ $host_sha =~ ^[0-9a-f]{64}$ ]] && safe_root_executable "$host" &&
+  [[ $(stat -c '%h' -- "$host") == 1 &&
+     $(sha256sum -- "$host" | cut -d ' ' -f 1) == "$host_sha" ]] || {
+  echo 'root Host binary custody or exact SHA refused' >&2; exit 1;
+}
+[[ $(jq -er .imageDir "$request") == "$image" &&
+   $(jq -er .inboxSpk "$request") == "$inbox" &&
+   $(jq -er .rawSha256 "$request") == "$expected" ]] || exit 1
+root=/var/lib/minidregg/spk/ingest-ops
+for protected in /var /var/lib /var/lib/minidregg /var/lib/minidregg/spk; do
+  [[ -d $protected && ! -L $protected && $(stat -c '%u' -- "$protected") == 0 ]] || exit 1
+  mode=$(stat -c '%a' -- "$protected")
+  (( (8#$mode & 8#022) == 0 )) || exit 1
+done
+if [[ ! -e $root && ! -L $root ]]; then
+  install -d -o root -g root -m 700 -- "$root"
+  sync -f /var/lib/minidregg/spk
+fi
+[[ -d $root && ! -L $root && $(stat -c '%u:%a' "$root") == 0:700 ]] || exit 1
+op=$root/gitweb-$expected
+if [[ ! -e $op && ! -L $op ]]; then
+  install -d -o root -g root -m 700 -- "$op"
+  sync -f "$root"
+fi
+[[ -d $op && ! -L $op && $(stat -c '%u:%a' "$op") == 0:700 ]] || exit 1
+exec 9>>"$op/.lock"
+[[ $(stat -c '%u:%a:%h' "$op/.lock") == 0:600:1 ]] || exit 1
+flock -n 9 || { echo 'another prepared ingest is active' >&2; exit 1; }
+
+inspect_image() {
+  local number inspection unit run_rc=0 created=0
+  # Each read-only inspection is retained independently. A crash or refusal
+  # cannot overwrite an older physical observation.
+  for number in $(seq -w 1 32); do
+    inspection=$op/inspection-$number
+    if mkdir -m 700 -- "$inspection" 2>/dev/null; then created=1; break; fi
+  done
+  [[ $created == 1 && -d $inspection && ! -L $inspection ]] || {
+    echo 'inspection attempt capacity reached' >&2; return 1;
+  }
+  safe_root_executable "$host" &&
+    [[ $(sha256sum -- "$host" | cut -d ' ' -f 1) == "$host_sha" ]] || {
+    echo 'Host identity drift before inspection' >&2; return 1;
+  }
+  unit=mini-spk-inspect-$(date -u +%Y%m%d%H%M%S)-$$-$number
+  timeout --kill-after=5s 150s systemd-run --unit="$unit" --wait --pipe --collect \
+    -p Type=exec -p User=root -p NoNewPrivileges=yes \
+    -p PrivateNetwork=yes -p PrivateTmp=yes -p ProtectSystem=strict \
+    -p MemoryMax=1G -p CPUQuota=100% -p TasksMax=16 \
+    -p RuntimeMaxSec=120 -p LimitFSIZE=1048576 -p KillMode=control-group \
+    -- "$host" inspect-installed "$image" "$uid" \
+    >"$inspection/inspection.json" 2>"$inspection/unit.stderr" || run_rc=$?
+  systemctl stop -- "$unit" >/dev/null 2>&1 || true
+  if [[ $run_rc != 0 ]] ||
+    ! grep -Eq "^Running as unit: ${unit}[.]service(; invocation ID: [0-9a-f]{32})?$" "$inspection/unit.stderr" ||
+    ! grep -Fxq 'Finished with result: success' "$inspection/unit.stderr" ||
+    ! grep -Fxq 'Main processes terminated with: code=exited, status=0/SUCCESS' "$inspection/unit.stderr"; then
+    echo 'isolated installed-image inspection did not confirm' >&2; return 1
+  fi
+  jq -e --arg image "$image" --argjson uid "$uid" --arg raw "$expected" '
+    .protocol == "mini-spk-installed-inspection-v1" and
+    .imageDir == $image and .appUid == $uid and .rawSha256 == $raw and
+    .rawLength == "14045864" and
+    .signedAppId == "6va4cjamc21j0znf5h5rrgnv0rpyvh1vaxurkrgknefvj0x63ash" and
+    .signedAppVersion == "10" and
+    .signedManifestSha256 == "3ef23992c6ee79e5b684cec632d4552c5b34889348ae63acaaedb42b9616024f" and
+    .signedBridgeConfigSha256 == "49d196f64ca2ce672a378581a8376ada53b27614bba522bbaec042237f0e70a2"
+    ' "$inspection/inspection.json" >/dev/null
+  chmod 600 "$inspection/inspection.json" "$inspection/unit.stderr"
+  sync -f "$inspection/inspection.json"
+  sync -f "$inspection/unit.stderr"
+  printf '%s\n' "$unit" >"$inspection/complete.txt"
+  chmod 600 "$inspection/complete.txt"
+  sync -f "$inspection/complete.txt"
+  sync -f "$inspection"
+}
+
+if [[ -e $image || -L $image ]]; then
+  inspect_image
+  echo "existing_image_read_only_verified=$image"
+  exit 0
+fi
+marker=$op/ingest-requested.json
+if [[ -e $marker || -L $marker ]]; then
+  echo 'earlier physical ingest was requested but image absent; audit retained attempt' >&2
+  exit 1
+fi
+jq -n --arg request "$(sha256sum "$request" | cut -d ' ' -f 1)" \
+  --arg host "$host_sha" --arg raw "$expected" --arg image "$image" '
+  {protocol:"mini-spk-root-ingest-requested-v1",requestSha256:$request,
+   spkHostSha256:$host,rawSha256:$raw,imageDir:$image}' >"$marker"
+chmod 600 "$marker"
+sync -f "$marker"
+sync -f "$op"
+if ! "$helper_dir/spk-ingest" "$host" "$host_sha" "$inbox" "$uid" \
+    >"$op/ingest.stdout" 2>"$op/ingest.stderr"; then
+  echo 'bounded root ingest did not confirm; exact attempt retained, no retry' >&2
+  exit 1
+fi
+chmod 600 "$op/ingest.stdout" "$op/ingest.stderr"
+sync -f "$op/ingest.stdout"
+sync -f "$op/ingest.stderr"
+inspect_image
+printf '%s\n' 'root_ingest_success_observed=true' >"$op/ingest-verdict.txt"
+chmod 600 "$op/ingest-verdict.txt"
+sync -f "$op/ingest-verdict.txt"
+sync -f "$op"
+echo "root_ingest_and_inspection_verified=$image"
