@@ -22,3 +22,6 @@ that older architecture or status text is current.
   are separate obligations; a source check does not establish deployment.
 - Publish scoped checkpoints regularly. Ember allows per-commit unsigned fallback
   when unavailable for 1Password signing; do not change global signing settings.
+- Keep recipient-specific team communications outside Git (for example,
+  `~/workbox`); commit reusable technical contracts and evidence instead.
+  Persvati and hbox are development/build machines, not Pug's homelab.
