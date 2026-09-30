@@ -110,7 +110,7 @@ noncomputable def bounded :
 
 def digestAgreement : GuardedDurableCommit.SharedDigestAgreement
     Genesis.documentMaterializer Genesis.authorityMaterializer
-      eventRepresentation where
+      eventMaterializer where
   eventRootFunction := rfl
   authorityRootFunction := rfl
 
@@ -131,7 +131,7 @@ abbrev intent : DataIntent rootBytes := plan.toDataIntent
     Genesis.documentMaterializer.rootBytes = rootBytes := rfl
 
 @[simp] theorem event_rootBytes_exact :
-    eventRepresentation.cellMaterializer.rootBytes = rootBytes := rfl
+    eventMaterializer.rootBytes = rootBytes := rfl
 
 @[simp] theorem authority_rootBytes_exact :
     Genesis.authorityMaterializer.rootBytes = rootBytes := rfl
@@ -160,7 +160,7 @@ abbrev intent : DataIntent rootBytes := plan.toDataIntent
 
 noncomputable def checkpointBytes (cellId : Digest) : List UInt8 :=
   if cellId = contentCellId then genesisPost.bytes
-  else if cellId = eventCellId then eventLogPre.{0, 0}.bytes
+  else if cellId = eventCellId then eventLogPre.bytes
   else if cellId = authorityCellId then Genesis.authorityPre.bytes
   else []
 
@@ -256,7 +256,7 @@ theorem erased_nullifiers_nodup : intent.erase.nullifiers.Nodup := by
     have nonempty : intent.erase.rootWrites ≠ [] := by
       rw [DataIntent.erase_rootWrites, intent_payloads_exact]
       simp
-    exact (nonempty empty).elim
+    exact (nonempty empty.1).elim
   · split
     · rename_i duplicate
       have duplicateIds : contentCellId = eventCellId := by
@@ -277,8 +277,8 @@ theorem ready : intent.preflight checkpoint = .ok () := by
     exact checkpoint_authority_root
   unfold DataIntent.preflight
   rw [guards]
-  simp only [Bool.not_true, Bool.false_eq_true, if_false,
-    erased_preflight_checkpoint]
+  simp only [Bool.not_true, Bool.false_eq_true, if_false]
+  rw [if_neg (by rw [intent_payloads_exact]; simp), erased_preflight_checkpoint]
 
 @[simp] theorem complete_install :
     Minidregg.Kernel.DurableDataIntent.execute .complete checkpoint intent =
@@ -319,14 +319,8 @@ noncomputable def stagedDevice :
   tornTail := none
   cache := some (walFrameCodec.encodeFrame intent.erase)
 
-theorem erased_ready : intent.erase.preflight checkpoint.model = .ok () := by
-  have dataReady := ready
-  unfold DataIntent.preflight at dataReady
-  split at dataReady
-  · contradiction
-  · split at dataReady
-    next reason failed => contradiction
-    next ok => exact ok
+theorem erased_ready : intent.erase.preflight checkpoint.model = .ok () :=
+  erased_preflight_checkpoint
 
 noncomputable def walSyncReady :
     SyncReady walFrameCodec stagedDevice intent.erase where

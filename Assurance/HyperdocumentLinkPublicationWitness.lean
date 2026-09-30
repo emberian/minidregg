@@ -13,7 +13,7 @@ computable in this witness; they are not collision-resistant hashes.  The
 publication handler remains an abstract boundary, so this proves logical
 atomicity and exact post containment, not durable installation or UI delivery.
 -/
-import Compiler.HyperdocumentCell
+import Kernel.DeployedMaterializerWitness
 import Kernel.HyperdocumentPublication
 import Theory.HyperdocumentCausalFamily
 
@@ -552,8 +552,9 @@ noncomputable def history : CausalVersionDag.History
 
 /-! ## Event-log effect after a retained genesis event
 
-The event log is the deployed log cell (`HyperdocumentCell.eventMaterializer`,
-the `StoreCodec` wire of the one append-only namespace). -/
+The event log uses the witness log materializer, whose root function is the
+same byte-length witness root as the document and authority witness cells, so
+one durable digest serves all three lanes downstream. -/
 
 deriving instance Countable for HyperdocumentVersionEffects.Declaration
 deriving instance Nonempty for VersionEventRecord
@@ -576,7 +577,7 @@ noncomputable def eventConfig : HyperdocumentVersionEffects.Config where
   historyDomain := genesisIntent.historyDomain
 
 abbrev eventMaterializer : HyperdocumentVersionEffects.LogMaterializer :=
-  Minidregg.Compiler.HyperdocumentCell.eventMaterializer
+  Minidregg.Kernel.DeployedMaterializerWitness.eventLogCellMaterializer
 
 open HyperdocumentEventLog.Sparse (eventAddress)
 
