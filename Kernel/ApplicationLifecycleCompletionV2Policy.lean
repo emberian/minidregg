@@ -26,22 +26,41 @@ open Minidregg.Kernel.ApplicationLifecycleCompletionV2Report
 set_option autoImplicit false
 set_option maxHeartbeats 800000
 
-/-- Only the application mutation incidence sees the checked completion slot.
-The package and authority policy views retain their ordinary DRC projection;
-the full joint command is still visible through the existing joint slots. -/
+/-- The checked completion slot is visible to every incidence whose policy
+view is the application's transition. That is the app mutation incidence and
+the authority incidence: DRC asks the authority envelope for the policy of
+`command.first` and projects the first target's local slots, and a completion
+command always puts the app first (`Source.command_has_app_first`). Withholding
+the slot there made the app law judge the authority leg's own completion edge
+(8→2, 9→4, 10→2) without its gate, so every checked completion was refused
+with `policyRejected` while BEGIN and claim (no gate) were admitted. The
+package incidence keeps its ordinary DRC projection; the full joint command is
+still visible to it through the joint slots. -/
 def extraSlots {command : DeclaredResourceController.Command}
     (app : Nat) (incidence : DeclaredResourceController.Incidence command) :
     List (String × Int) :=
   match incidence with
-  | none => []
+  | none =>
+      if command.first.target == app then
+        [(ApplicationGrain.completionSlot, 1)]
+      else []
   | some index =>
       if command.targets[index].target == app then
         [(ApplicationGrain.completionSlot, 1)]
       else []
 
-theorem authority_has_no_completion_slot
+theorem authority_completion_slot_iff_app_first
     {command : DeclaredResourceController.Command} (app : Nat) :
-    extraSlots (command := command) app none = [] := rfl
+    extraSlots (command := command) app none =
+      if command.first.target == app then [(ApplicationGrain.completionSlot, 1)] else [] := rfl
+
+theorem non_app_target_has_no_completion_slot
+    {command : DeclaredResourceController.Command} (app : Nat)
+    (index : DeclaredResourceController.TargetIndex command)
+    (other : command.targets[index].target ≠ app) :
+    extraSlots (command := command) app (some index) = [] := by
+  simp only [extraSlots]
+  exact if_neg (by simpa using other)
 
 def step {F : Type} [Field F] [DecidableEq F]
     {deployment : CanonicalCellRegistry.Deployment}

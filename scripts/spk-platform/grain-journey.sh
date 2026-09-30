@@ -24,7 +24,7 @@ shift 2
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BIN=${BIN:-/opt/minidregg-m6-20260930/bin}
 SPK=${SPK:-/home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk}
-HOST=$BIN/minidregg-host-m6
+HOST=${GRAIN_HOST:-$BIN/minidregg-host-m6c}
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 BWRAP=${BWRAP:-/usr/bin/bwrap}
@@ -395,6 +395,8 @@ run_phase() {
     get-b) step get-b http_get get-b-body 9201 /v1/health ;;
     start-a) step start-a "$SPK_HOST" grain start "$PROFILE" 9101 ;;
     stop-a) step stop-a "$SPK_HOST" grain stop "$PROFILE" 9101 ;;
+    start-a2) step start-a2 "$SPK_HOST" grain start "$PROFILE" 9101 ;;
+    stop-a2) step stop-a2 "$SPK_HOST" grain stop "$PROFILE" 9101 ;;
     *) fail "unknown phase $1" ;;
   esac
 }
@@ -405,7 +407,9 @@ case "$MODE" in
     for phase in "$@"; do run_phase "$phase"; done ;;
   stop-services) stop_services ;;
   all)
-    for phase in store services workroom profile birth-a install-a status-a; do
+    for phase in store services workroom profile birth-a install-a share-a start-a \
+        get-a stop-a start-a2 get-a2 birth-b install-b share-b start-b get-b \
+        status-a status-b stop-b stop-a2; do
       run_phase "$phase"
     done ;;
   *) usage ;;
