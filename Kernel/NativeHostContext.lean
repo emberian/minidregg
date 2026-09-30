@@ -130,8 +130,10 @@ theorem imageBoundaryCanonical_loaded (config : Config) (durable : Durable) :
       congrArg (imageBoundaryCanonical config) durable.canonical.symm
     _ = imageBoundary config durable.image := imageBoundaryCanonical_encode config durable.image
 
-#print axioms imageBoundaryCanonical_encode
-#print axioms imageBoundaryCanonical_loaded
+/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_encode
+/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_loaded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_loaded
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length

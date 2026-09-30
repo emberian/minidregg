@@ -1012,7 +1012,8 @@ theorem grainPolicy_plural_worker_clause (owner : Nat) (subjects : List Nat)
   right
   exact List.mem_map.mpr ⟨subject, named, rfl⟩
 
-#print axioms grainPolicy_plural_worker_clause
+/-- info: 'Minidregg.Host.Json.grainPolicy_plural_worker_clause' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_plural_worker_clause
 
 /-- Plural authoring with one subject retains the exact historical policy
 bytes, so adding a provider cannot silently alter the existing tool rule. -/
@@ -1026,7 +1027,8 @@ theorem grainPolicy_singleton_bytes (owner subject : Nat) (generation : Int) :
         .all [.eq "request/subject" (Int.ofNat subject),
           AgentGrain.witnessCaveat generation]]]) := rfl
 
-#print axioms grainPolicy_singleton_bytes
+/-- info: 'Minidregg.Host.Json.grainPolicy_singleton_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_singleton_bytes
 
 /-- A worker witness with a different old generation cannot satisfy even its
 own clause. This uses the deployed predicate evaluator, not list membership. -/
@@ -1091,7 +1093,8 @@ theorem grainPolicy_stale_worker_refused (owner : Nat) (subjects : List Nat)
           intro worker named
           exact workerFalseWith worker (by simp [named])
 
-#print axioms grainPolicy_stale_worker_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_stale_worker_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_stale_worker_refused
 
 /-- A non-owner subject absent from the bounded worker list cannot mutate
 through the plural resource policy, even when it presents a valid generation. -/
@@ -1133,7 +1136,8 @@ theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
           intro worker named
           exact workerFalseWith worker (by simp [named])
 
-#print axioms grainPolicy_unnamed_worker_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_unnamed_worker_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_unnamed_worker_refused
 
 private def grainWorker (path : String)
     (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (List Nat × Int)) := do
@@ -2243,9 +2247,12 @@ theorem grainPolicy_mixed_worker_forms_refused :
       ("workerSubjects", .arr #[.str "8", .str "9"]),
       ("workerGeneration", .str "1")]) = true := by decide
 
-#print axioms grainPolicy_duplicate_workers_refused
-#print axioms grainPolicy_overbound_workers_refused
-#print axioms grainPolicy_mixed_worker_forms_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_duplicate_workers_refused' depends on axioms: [propext, Classical.choice, Quot.sound, grainPolicy_duplicate_workers_refused._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_duplicate_workers_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_overbound_workers_refused' depends on axioms: [propext, Classical.choice, Quot.sound, grainPolicy_overbound_workers_refused._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_overbound_workers_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_mixed_worker_forms_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_mixed_worker_forms_refused
 
 /-- Source-derived, non-authoritative presentation data. This lets clients
 display the resulting grain generation/state without duplicating the state

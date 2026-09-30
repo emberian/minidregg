@@ -60,9 +60,15 @@ theorem comparePrior_other_key (prior : Recorded) (incoming : Release)
 
 end Minidregg.Kernel.FnSelectiveRelease
 
-#print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_injective
-#print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_exactRepeat
-#print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_conflict
-#print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_content
-#print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_selected_atom
-#print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_changed_content
+/-- info: 'Minidregg.Kernel.FnSelectiveRelease.signedPreimage_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_injective
+/-- info: 'Minidregg.Kernel.FnSelectiveRelease.comparePrior_exactRepeat' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_exactRepeat
+/-- info: 'Minidregg.Kernel.FnSelectiveRelease.comparePrior_conflict' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_conflict
+/-- info: 'Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_content' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_content
+/-- info: 'Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_selected_atom' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FnSelectiveRelease.signedPreimage_changes_selected_atom
+/-- info: 'Minidregg.Kernel.FnSelectiveRelease.comparePrior_changed_content' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.FnSelectiveRelease.comparePrior_changed_content

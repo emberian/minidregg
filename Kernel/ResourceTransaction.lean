@@ -206,7 +206,8 @@ theorem requestFor_eq_reference (snapshot : AuthoritySnapshot) (semantics : Dige
       requestForReference snapshot semantics ambient command target preRoot := by
   rfl
 
-#print axioms requestFor_eq_reference
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.requestFor_eq_reference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestFor_eq_reference
 
 def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (preRoot : Digest) : Request command.first.kind :=

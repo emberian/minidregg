@@ -2724,9 +2724,15 @@ def verifyBytes (config : Config) (bytes : List UInt8) : IO (Except Failure (Sig
 
 end Minidregg.Kernel.NativeHostReplay
 
-#print axioms Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append
-#print axioms Minidregg.Kernel.NativeHostReplay.Verified.accepted_history
-#print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
-#print axioms Minidregg.Kernel.NativeHostReplay.extendExact
-#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
-#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalBytes
+/-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append
+/-- info: 'Minidregg.Kernel.NativeHostReplay.Verified.accepted_history' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.Verified.accepted_history
+/-- info: 'Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_receipts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_physicalBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalBytes

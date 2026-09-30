@@ -109,9 +109,15 @@ def main (args : List String) : IO Unit := do
         (← IO.FS.readBinFile bobPath).toList
   | _ => throw (IO.userError "usage: probe-native-host-genesis <alice-public-key.bin> <bob-public-key.bin>")
 
-#print axioms Minidregg.Kernel.NativeHostGenesis.fund_conserves
-#print axioms Minidregg.Kernel.NativeHostGenesis.initialBook_conserved
-#print axioms Minidregg.Kernel.NativeHostGenesis.Built.restore
-#print axioms Minidregg.Kernel.NativeHostGenesis.incompatible_profile_refused
-#print axioms Minidregg.Kernel.NativeHostGenesis.duplicate_subjects_refused
-#print axioms Minidregg.Kernel.NativeHostGenesis.config_canonical
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.fund_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostGenesis.fund_conserves
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.initialBook_conserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostGenesis.initialBook_conserved
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.Built.restore' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostGenesis.Built.restore
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.incompatible_profile_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostGenesis.incompatible_profile_refused
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.duplicate_subjects_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostGenesis.duplicate_subjects_refused
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.config_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostGenesis.config_canonical

@@ -1,5 +1,7 @@
 import Host.CapabilityInspection
 
+namespace Minidregg.Host.CapabilityInspectionCheck
+
 open Lean
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CredentialAuthorityState
@@ -38,3 +40,7 @@ def main : IO Unit := do
   | .error _ => pure ()
   | .ok _ => throw (IO.userError "empty capability accepted")
   IO.println "capability inspection: exact parent fields, wide integer and malformed input PASS"
+
+#eval main
+
+end Minidregg.Host.CapabilityInspectionCheck

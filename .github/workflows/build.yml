@@ -1,0 +1,31 @@
+name: Build and gates
+
+# The same gate as scripts/local-gates.sh, on every push: proof hygiene, the
+# umbrella build, emitted-artifact drift, and the build-closure census.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/v3.1.1/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Fetch dependencies and the Mathlib build cache
+        run: |
+          lake exe cache get
+
+      - name: Gates
+        run: bash scripts/local-gates.sh

@@ -90,9 +90,13 @@ therefore the kernel's GATED EXECUTOR, derived — the gate exists as a constrai
 system produced by the compiler, never as a hand-authored executor arm.
 
 **`[ADMISSION-kernel-bridge]`** — the NAMED follow-on (Assurance-side, where both
-`Kernel` and `Compiler` are importable): prove this gadget's `AdmissionHolds` IS the
-kernel's actual admission predicate — (a) `CapAuthorizes` at a root that commits
-`k.caps` ⟺ `cap ∈ k.caps holder`, (b) the `rights` word decoded and checked against
+`Kernel` and `Compiler` are importable), OPEN and not started: prove this gadget's
+`AdmissionHolds` IS the admission predicate the kernel executes — the gate
+`Kernel/DeclaredHyperedge.lean` `Declaration.authorizationCheck` (↔
+`Declaration.AuthorizationAccepted`), which `DeclaredHyperedge.execute` consults, or
+its successor under the approved data model's scopes — (a) `CapAuthorizes` at a
+root that commits the authority state the declaration's `authState` projects ⟺ the
+presentation verifies as `.accepted` there, (b) the `rights` word decoded and checked against
 the fired verb (the rights-decode gadget is vocabulary this rung already carries:
 bit-decompose `capW rightsIdx` with `rangeGadget` and gate per-verb bits), (c) the
 window frame extended to the GLOBAL frame — cells outside the witnessed window stand
@@ -689,8 +693,10 @@ rejected while footprint+target accept, and a fully authorized turn is rejected 
 moment it touches (or declares) outside its capability's cells.
 
 **Named residual `[ADMISSION-kernel-bridge]`** (Assurance-side follow-on — `Compiler`
-cannot import `Kernel`): the identification of `AdmissionHolds` with the kernel's
-actual admission predicate over `KernelState` — authority root ↔ committed `k.caps`,
+cannot import `Kernel`), OPEN: the identification of `AdmissionHolds` with the
+admission predicate the kernel executes, `DeclaredHyperedge.Declaration.authorizationCheck`
+(or its successor under the approved data model's scopes) — authority root ↔ the
+authority state `Declaration.authState` projects,
 rights-word decode against the fired verb (vocabulary already on this rung:
 `rangeGadget` on `capW rightsIdx`), the witnessed-window frame extended to the global
 frame via the state-commitment discipline (an AIR constrains only wires it carries;

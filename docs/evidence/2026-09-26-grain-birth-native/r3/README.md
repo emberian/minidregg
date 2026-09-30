@@ -36,7 +36,9 @@ PASS`; its private log SHA-256 is
 `9b0a1682bca473dd45e15bf448b0a08491ba0532519b5c961609e4f8a081b86e`.
 
 `scripts/probe-grain-birth-factory-law.lean` (source SHA-256
-`5d2dcb32fd06784fbb34b8bba8716036ef3a8b5a15e206da6a3ec773efb5a8e3`)
+`5d2dcb32fd06784fbb34b8bba8716036ef3a8b5a15e206da6a3ec773efb5a8e3` as run;
+its `#print axioms` lines were later `#guard_msgs`-pinned, so the tracked file
+now hashes differently)
 proves for every policy state
 that the installed fixture predicate refuses a subject-8 bare factory
 mutation when the grain-backed mode slot is absent, while allowing owner 7

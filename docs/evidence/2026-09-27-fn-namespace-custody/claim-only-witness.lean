@@ -53,7 +53,11 @@ theorem claim_only_prepare_ready :
   next absurd =>
     exact False.elim (absurd _ claim_only_accepted)
 
-#print axioms claim_only_accepted
-#print axioms claim_only_append_reopens
-#print axioms claim_only_retry_replayed
-#print axioms claim_only_prepare_ready
+/-- info: 'claim_only_accepted' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms claim_only_accepted
+/-- info: 'claim_only_append_reopens' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms claim_only_append_reopens
+/-- info: 'claim_only_retry_replayed' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms claim_only_retry_replayed
+/-- info: 'claim_only_prepare_ready' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms claim_only_prepare_ready

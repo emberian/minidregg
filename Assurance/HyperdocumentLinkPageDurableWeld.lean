@@ -701,6 +701,8 @@ def mismatchedIntent : DataIntent rootBytes where
     simp [mismatchedIntent, mismatchedContentWrite, contentWrite, eventWrite,
       contentCellId, eventCellId]
   simp [DataIntent.preflight, guardsReady, durableRejected]
+  intro noWrites
+  simp [mismatchedIntent] at noWrites
 
 /-- The event pair has the same deliberately local security boundary.  It is
 recorded even though stale-content rejection above needs only the content

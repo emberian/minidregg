@@ -743,10 +743,14 @@ theorem lookupLoaded_malformed_composite (config : Config) (opened : Opened conf
       refused "grain-birth" "noncanonical ingress" := by
   simp [lookupLoaded, malformed, prefixExact]
 
-#print axioms lookupLoaded_composite_exact
-#print axioms lookupLoaded_composite_absent
-#print axioms lookupLoaded_composite_conflict
-#print axioms lookupLoaded_malformed_composite
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_composite_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_composite_exact
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_composite_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_composite_absent
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_composite_conflict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_composite_conflict
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_malformed_composite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_malformed_composite
 
 def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   match callCodec.decode bytes with
@@ -758,4 +762,5 @@ def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 
 end Minidregg.Kernel.NativeHost
 
-#print axioms Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh
+/-- info: 'Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh
