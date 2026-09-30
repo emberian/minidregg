@@ -1,8 +1,8 @@
 /-
 # Kernel.DurableCommitProtocol -- fail-closed durable settlement model
 
-`CanonicalTransition.PreparedTurn`, `TypedCellHyperedge`, and
-`MultiCellHyperedge` determine logical meaning.  This module does not interpret
+`CanonicalTransition.PreparedTurn` and `MultiCellHyperedge` determine
+logical meaning.  This module does not interpret
 state, effects, authority, or receipts again.  It models the smaller handler
 protocol which must install an already accepted meaning durably:
 
@@ -21,7 +21,6 @@ premise as a proof-relevant simulation relation.  No `Bool = true` receipt is
 treated as evidence of physical atomicity.
 -/
 import Kernel.MultiCellHyperedge
-import Kernel.TypedCellHyperedge
 import Theory.ResourceCost
 
 namespace Minidregg.Kernel.DurableCommitProtocol
@@ -695,246 +694,12 @@ end BoundedMultiCellCommit
 
 namespace Intent
 
-/-- One canonical prepared turn becomes one exact durable root write.  The
-funding witness is the existing `ChargeReceipt`; the runtime still rechecks the
-currently observed snapshot because the budget may have changed since quote
-construction. -/
-def ofPreparedTurn
-    {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {pre : CellState.Materialized M} {Nullifier : Type y}
-    (transactionId : TxId) (cellId : CellId)
-    (turn : PreparedTurn M pre Nullifier)
-    (bounded : BoundedPreparedTurn turn)
-    (available : Charge) (_funding : ChargeReceipt available bounded.quote)
-    (event : Event) : Intent TxId CellId Nullifier Event where
-  transactionId := transactionId
-  rootWrites := [{ cellId := cellId
-                   expectedPre := turn.preRoot
-                   exactPost := turn.postRoot }]
-  nullifiers := turn.nullifier.toList
-  exactCharge := bounded.quote.exact
-  event := event
-
-@[simp] theorem ofPreparedTurn_roots
-    {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {pre : CellState.Materialized M} {Nullifier : Type y}
-    (transactionId : TxId) (cellId : CellId)
-    (turn : PreparedTurn M pre Nullifier)
-    (bounded : BoundedPreparedTurn turn)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote)
-    (event : Event) :
-    (ofPreparedTurn transactionId cellId turn bounded available funding event).rootWrites =
-      [{ cellId := cellId
-         expectedPre := turn.preRoot
-         exactPost := turn.postRoot }] :=
-  rfl
-
-@[simp] theorem ofPreparedTurn_nullifiers
-    {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {pre : CellState.Materialized M} {Nullifier : Type y}
-    (transactionId : TxId) (cellId : CellId)
-    (turn : PreparedTurn M pre Nullifier)
-    (bounded : BoundedPreparedTurn turn)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote)
-    (event : Event) :
-    (ofPreparedTurn transactionId cellId turn bounded available funding event).nullifiers =
-      turn.nullifier.toList :=
-  rfl
-
-@[simp] theorem ofPreparedTurn_exactCharge
-    {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {pre : CellState.Materialized M} {Nullifier : Type y}
-    (transactionId : TxId) (cellId : CellId)
-    (turn : PreparedTurn M pre Nullifier)
-    (bounded : BoundedPreparedTurn turn)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote)
-    (event : Event) :
-    (ofPreparedTurn transactionId cellId turn bounded available funding event).exactCharge =
-      bounded.quote.exact :=
-  rfl
-
-/-- The ordinary one-cell receipt adapter uses the existing receipt projection,
-whose constructor is private and therefore already indexed by the exact
-accepted semantic effect. -/
-def ofAcceptedEffect
-    {TxId : Type u} {CellId : Type v}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
-    {portal : TypedAuthorization.Portal}
-    {authState : TypedAuthorization.AuthState}
-    {kind : TypedAuthorization.ResourceKind}
-    {request : TypedAuthorization.Request kind}
-    {pre : CellState.Materialized M}
-    {declaration : family.Declaration} {outcome : family.Outcome declaration}
-    (transactionId : TxId) (cellId : CellId)
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome)
-    (bounded : BoundedPreparedTurn accepted.prepared)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote) :
-    Intent TxId CellId Nullifier (ReceiptEvent family) :=
-  ofPreparedTurn transactionId cellId accepted.prepared bounded available funding
-    accepted.toReceiptEvent
-
-/-- The one durable write of an accepted effect is guarded at the root the
-request quoted, and installs the root of `run pre patch`: the durable post is
-the family patch run on the canonical pre-store, never a supplied value. -/
-theorem ofAcceptedEffect_rootWrites
-    {TxId : Type u} {CellId : Type v}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
-    {portal : TypedAuthorization.Portal}
-    {authState : TypedAuthorization.AuthState}
-    {kind : TypedAuthorization.ResourceKind}
-    {request : TypedAuthorization.Request kind}
-    {pre : CellState.Materialized M}
-    {declaration : family.Declaration} {outcome : family.Outcome declaration}
-    (transactionId : TxId) (cellId : CellId)
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome)
-    (bounded : BoundedPreparedTurn accepted.prepared)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote) :
-    (ofAcceptedEffect transactionId cellId accepted bounded available funding).rootWrites =
-      [{ cellId := cellId
-         expectedPre := request.preStateRoot
-         exactPost := M.rootOf
-           (Store.Patch.run pre.logical (family.patch declaration outcome)) }] := by
-  rw [accepted.preRootBound]
-  rfl
-
-/-- Satisfiable pole at the durable seam: an accepted effect whose cell still
-holds the quoted root, whose eager nullifier is unconsumed, and whose charge is
-funded passes preflight. -/
-theorem ofAcceptedEffect_preflight_ready
-    {TxId : Type u} {CellId : Type v}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
-    {portal : TypedAuthorization.Portal}
-    {authState : TypedAuthorization.AuthState}
-    {kind : TypedAuthorization.ResourceKind}
-    {request : TypedAuthorization.Request kind}
-    {pre : CellState.Materialized M}
-    {declaration : family.Declaration} {outcome : family.Outcome declaration}
-    (transactionId : TxId) (cellId : CellId)
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome)
-    (bounded : BoundedPreparedTurn accepted.prepared)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote)
-    [DecidableEq CellId] [DecidableEq Nullifier]
-    (before : Snapshot TxId CellId Nullifier (ReceiptEvent family))
-    (current : before.roots cellId = request.preStateRoot)
-    (fresh : ∀ nullifier, family.nullifier declaration outcome = some nullifier →
-      before.consumed nullifier = false)
-    (funded : Charge.fundedCheck bounded.quote.exact before.available = true) :
-    (ofAcceptedEffect transactionId cellId accepted bounded available funding).preflight
-      before = .ok () := by
-  rw [accepted.preRootBound] at current
-  cases hnull : family.nullifier declaration outcome with
-  | none =>
-      simp [Intent.preflight, ofAcceptedEffect, ofPreparedTurn, Intent.rootsMatchCheck,
-        Intent.nullifiersFreshCheck, AcceptedCellEffect.prepared, PreparedTurn.ofValidatedPatch,
-        PreparedTurn.preRoot, hnull, current, funded]
-  | some nullifier =>
-      simp [Intent.preflight, ofAcceptedEffect, ofPreparedTurn, Intent.rootsMatchCheck,
-        Intent.nullifiersFreshCheck, AcceptedCellEffect.prepared, PreparedTurn.ofValidatedPatch,
-        PreparedTurn.preRoot, hnull, current, funded, fresh nullifier hnull]
-
-/-- Refuting pole at the durable seam: once the durable cell has moved off the
-root the accepted effect was validated at, its intent is refused as stale. -/
-theorem ofAcceptedEffect_preflight_stale
-    {TxId : Type u} {CellId : Type v}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
-    {portal : TypedAuthorization.Portal}
-    {authState : TypedAuthorization.AuthState}
-    {kind : TypedAuthorization.ResourceKind}
-    {request : TypedAuthorization.Request kind}
-    {pre : CellState.Materialized M}
-    {declaration : family.Declaration} {outcome : family.Outcome declaration}
-    (transactionId : TxId) (cellId : CellId)
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome)
-    (bounded : BoundedPreparedTurn accepted.prepared)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote)
-    [DecidableEq CellId] [DecidableEq Nullifier]
-    (before : Snapshot TxId CellId Nullifier (ReceiptEvent family))
-    (moved : before.roots cellId ≠ request.preStateRoot) :
-    (ofAcceptedEffect transactionId cellId accepted bounded available funding).preflight
-      before = .error .stalePreRoot := by
-  rw [accepted.preRootBound] at moved
-  apply Intent.preflight_stale_root_rejected before _
-    { cellId := cellId, expectedPre := pre.root,
-      exactPost := accepted.prepared.postRoot } (by simp [ofAcceptedEffect, ofPreparedTurn]; rfl)
-    moved (by simp [ofAcceptedEffect, ofPreparedTurn])
-  simp only [ofAcceptedEffect, ofPreparedTurn, AcceptedCellEffect.prepared,
-    PreparedTurn.ofValidatedPatch]
-  cases family.nullifier declaration outcome <;> simp
-
-/-- A same-cell typed hyperedge has one canonical root transition but many
-heterogeneous incidence nullifiers.  Its `PreparedTurn` stores that complete
-list in one optional slot; this dedicated adapter deliberately flattens the
-list so every eager nullifier is consumed individually by `Snapshot.install`. -/
-def ofTypedCellHyperedge
-    {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {portal : TypedAuthorization.Portal}
-    {projection : TypedCellHyperedge.AuthorizationProjection L}
-    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : TypedCellHyperedge.ResourceLaw.{u, v, w, y, b}
-      L M portal Coordinate Balance}
-    {declaration : TypedCellHyperedge.Declaration.{u, v, w, y, z}
-      L M portal projection Incidence}
-    (transactionId : TxId) (cellId : CellId)
-    (commit : TypedCellHyperedge.Commit law declaration)
-    (bounded : BoundedPreparedTurn commit.prepared)
-    (available : Charge) (_funding : ChargeReceipt available bounded.quote)
-    (event : Event) :
-    Intent TxId CellId declaration.JointNullifier Event where
-  transactionId := transactionId
-  rootWrites := [{ cellId := cellId
-                   expectedPre := commit.prepared.preRoot
-                   exactPost := commit.prepared.postRoot }]
-  nullifiers := declaration.jointNullifiers
-  exactCharge := bounded.quote.exact
-  event := event
-
-@[simp] theorem ofTypedCellHyperedge_nullifiers
-    {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {L : Store.Layout.{u, v, w}}
-    {M : CellState.Materializer L TypedAuthorization.Digest}
-    {portal : TypedAuthorization.Portal}
-    {projection : TypedCellHyperedge.AuthorizationProjection L}
-    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : TypedCellHyperedge.ResourceLaw.{u, v, w, y, b}
-      L M portal Coordinate Balance}
-    {declaration : TypedCellHyperedge.Declaration.{u, v, w, y, z}
-      L M portal projection Incidence}
-    (transactionId : TxId) (cellId : CellId)
-    (commit : TypedCellHyperedge.Commit law declaration)
-    (bounded : BoundedPreparedTurn commit.prepared)
-    (available : Charge) (funding : ChargeReceipt available bounded.quote)
-    (event : Event) :
-    (ofTypedCellHyperedge transactionId cellId commit bounded available funding event).nullifiers =
-      declaration.jointNullifiers :=
-  rfl
+/- The single-cell adapters (`ofPreparedTurn`, `ofAcceptedEffect` and its
+root/preflight poles, `ofTypedCellHyperedge`) are gone: an accepted effect is a
+`Kernel.World.Leg` (`Kernel.TurnRecord.Leg.ofAccepted`), its post root is derived
+by `World.step` (`TurnRecord.step_ofAccepted_root`), and a stale pre-store is
+refused by the leg guard (`World.step_leg`, `Example.reject_guardFailed`).  A
+same-cell typed hyperedge is one leg carrying the concatenated patch (C3). -/
 
 /-- A heterogeneous multi-cell commit yields one write per incidence, with
 the exact pre/post roots owned by its complete accepted family.
@@ -1149,20 +914,12 @@ end Minidregg.Kernel.DurableCommitProtocol
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_retry_after_install
 /-- info: 'Minidregg.Kernel.DurableCommitProtocol.execute_crash_after_then_retry' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_crash_after_then_retry
-/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect
 /-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCellJointReceipt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCellJointReceipt
 /-- info: 'Minidregg.Kernel.DurableCommitProtocol.physical_step_no_partial_commit' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.physical_step_no_partial_commit
 /-- info: 'Minidregg.Kernel.DurableCommitProtocol.execute_stale_root_rejected' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_stale_root_rejected
-/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites
-/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_ready' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_ready
-/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_stale' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_stale
 /-- info: 'Minidregg.Kernel.DurableCommitProtocol.multiCellMemoryTouches_eq_accepted_footprints' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.multiCellMemoryTouches_eq_accepted_footprints
 /-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCell_rootWrites_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/

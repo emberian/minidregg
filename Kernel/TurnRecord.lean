@@ -67,9 +67,9 @@ theorem applyLeg_ofAccepted (cells : Cells R) (c : CellId)
 /-- **`exactPost` is derived.**  When `step` accepts a turn carrying the
 accepted effect's leg at a cell that held its pre-store, the cell's post store
 is the validated post and its materialized root is
-`M.rootOf (run pre.logical (family.patch d o))`, the value
-`DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites` names as the
-`exactPost` its intent carried. -/
+`M.rootOf (run pre.logical (family.patch d o))`: the value the deleted
+`DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites` equated with the
+`RootWrite.exactPost` its intent carried, now read off the world. -/
 theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
     (H : History R TxId Ev D) {w w' : World R TxId D} {t : Turn R TxId Ev}
     (h : World.step H w t = some w') (c : CellId)
