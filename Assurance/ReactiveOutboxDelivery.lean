@@ -108,10 +108,9 @@ section ReactiveSettlement
 
 variable
     {U : FirstOrderUniverse.{q, r}}
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {Condition Continuation BreakReason : Type}
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     {manifest : Manifest}
@@ -168,7 +167,7 @@ open Minidregg.Kernel.ProviderExecutionLease
 open Minidregg.Theory.CanonicalResourceKernel
 
 variable
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}

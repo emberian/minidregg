@@ -20,3 +20,20 @@ import Assurance.CredentialFoundationMigrationAudit  -- exact pins for revision/
 import Assurance.CredentialDelegationLineageAudit
 import Assurance.CredentialSourceAdmissionAudit
 import Compiler.DistributiveLaw  -- N4 stated and inhabited: DistLaw over a Signature's polynomial functor and a PFunctor behaviour, Bialgebra, the initial (Term, opModel) and final (PFunctor.M, denModel) bialgebras, N4_adequacy (fold denModel = M.corec opModel, the unique bialgebra morphism) and N4_congruence; FailClosed as a SEPARATE keystone with teeth — strictLaw and openLaw are BOTH laws (laws_inhabited), only one is fail-closed, and open_joint_commits exhibits the half-committed joint turn by rfl. Rooted here rather than in Compiler.lean, which carries uncommitted owner edits. Residuals [N4-home] [N4-hyperedge-instance] [N4-gsos]
+
+-- Library modules no per-directory root imported (found by olean census at wave S4); rooted so the umbrella covers them.
+import Compiler.PredCastHashProofs
+import Compiler.PredCompileOrderWitness
+import Compiler.PredOrderGadgetWitness
+import Compiler.ZkmlEltwiseAir
+import Compiler.ZkmlTraceCheck
+import Kernel.ApplicationDispatchUpper
+import Kernel.ApplicationGrainLaws
+import Kernel.ApplicationLifecycleBeginCheck
+import Kernel.ApplicationLifecycleClaimPolicyCheck
+import Kernel.ApplicationLifecycleClaimReceiver
+import Kernel.ApplicationLifecycleClaimVerified
+import Kernel.ApplicationShareIssueHistorical
+import Kernel.ApplicationSpkProfileProofs
+import Kernel.FnSelectedHistoricalStep
+import Kernel.FnSelectiveReleaseProofs

@@ -45,7 +45,7 @@ theorem no_joint_acceptance_without_read_capability [DecidableEq F]
 assertion or an arbitrary proposed post beside the authored command. -/
 theorem prepared_computation_exact (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) :
-    computeTarget deployment prepared.authority.snapshot profile.semantics ambient command
+    computeTarget prepared.authority.snapshot profile.semantics ambient command
       command.targets[i] (prepared.targets i).pre = .ok (prepared.targets i).post :=
   (prepared.targets i).candidate.modeEvidence.down
 
@@ -53,7 +53,7 @@ theorem prepared_computation_exact (prepared : PreparedInvocation deployment pro
 existing. Successful earlier computations do not become accepted sub-turns. -/
 theorem failed_target_cannot_prepare (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) (reason : Reject)
-    (failed : computeTarget deployment prepared.authority.snapshot profile.semantics ambient command
+    (failed : computeTarget prepared.authority.snapshot profile.semantics ambient command
       command.targets[i] (prepared.targets i).pre = .error reason) : False := by
   rw [prepared_computation_exact prepared i] at failed
   cases failed
@@ -82,10 +82,6 @@ theorem accepted_target_final_law [DecidableEq F]
     (accepted : AcceptedInvocation prepared signed) (i : TargetIndex command) :
     CanonicalCellRegistry.FinalPostLaw deployment command.targets[i].target (prepared.targets i).before
       (packTarget command.targets[i] (acceptedTargetPost accepted i)) := by
-  letI : DecidableEq ((layout prepared).schema (some i)).Field :=
-    (layout prepared).fieldDecidableEq (some i)
-  letI : DecidableEq ((layout prepared).schema (some i)).Resource :=
-    (layout prepared).resourceDecidableEq (some i)
   have exactPost : acceptedTargetPost accepted i = (prepared.targets i).candidate.post := by
     change accepted.declaration.post accepted.legs (some i) = (validated prepared (some i)).apply
     exact accepted.post_exact (some i)

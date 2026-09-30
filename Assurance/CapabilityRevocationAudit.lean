@@ -93,30 +93,27 @@ theorem inherited_revocation_denies_demo :
   intro admitted
   exact admitted.selfNotRevoked (by simp)
 
-def emptyAuthority : ResourceAuthorityProjection.Authority where
-  fields := 0
-  resources := fun resource => nomatch resource
+def emptyAuthority : ResourceAuthorityProjection.Authority := 0
 
 /-- An actual unrelated subject-key epoch change is invisible, even though
 full-domain serialization would have changed and leaked it to the policy. -/
 theorem foreign_key_epoch_invisible :
     ResourceAuthorityProjection.grantSlots "authority/victim" .object ⟨60⟩
-      { emptyAuthority with fields := emptyAuthority.fields.write (.subjectKeyEpoch ⟨900⟩) (37 : Nat) } =
+      (emptyAuthority.set ⟨.subjectKeyEpoch, ⟨900⟩⟩ (some (37 : Nat))) =
     ResourceAuthorityProjection.grantSlots "authority/victim" .object ⟨60⟩ emptyAuthority :=
-  ResourceAuthorityProjection.grantSlots_write_unselected _ _ _ _ _ _ (by decide) (by decide)
+  ResourceAuthorityProjection.grantSlots_write_unselected _ _ _ _ _ _
+    (by intro same; cases same) (by intro same; cases same)
 
 /-- The relevant revocation IS visible: the noninterference law has teeth and
 has not erased the operation's before/after distinction. -/
 theorem selected_revocation_visible :
     ResourceAuthorityProjection.grantSlots "authority/victim" .object ⟨60⟩
-      { emptyAuthority with fields := emptyAuthority.fields.write (.revoked (.capability ⟨60⟩)) true } ≠
+      (emptyAuthority.set ⟨.revoked, .capability ⟨60⟩⟩ (some ())) ≠
     ResourceAuthorityProjection.grantSlots "authority/victim" .object ⟨60⟩ emptyAuthority := by
   intro same
   have prefixExact := congrArg (List.take 2) same
   rw [ResourceAuthorityProjection.grantSlots_status, ResourceAuthorityProjection.grantSlots_status] at prefixExact
-  simp [ResourceAuthorityProjection.selfRevoked, emptyAuthority, CellState.FieldStore.write, CellState.FieldStore.assign] at prefixExact
-  change false = true at prefixExact
-  cases prefixExact
+  simp [ResourceAuthorityProjection.selfRevoked, emptyAuthority] at prefixExact
 
 /-- info: 'Minidregg.Assurance.CapabilityRevocationAudit.canonical_command_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonical_command_roundtrip
