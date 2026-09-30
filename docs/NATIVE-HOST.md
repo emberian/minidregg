@@ -49,11 +49,13 @@ remain necessary to support wider arithmetic in this compiler dialect.
 The profile's receiver parameters commit the actual deployment, federation,
 tariff, and genesis clock offset. The genesis commitment is separate, avoiding
 a cycle through the genesis policy records' own semantics identity. Every open
-checks the pinned genesis, canonical journal replay, native cell laws, complete
-authority, and the semantics of every selected policy source. Reopening also
-re-admits each retained original signed ingress at its original prefix and
-logical height. Its source-derived intent must equal the complete stored
-record; a physically consistent journal alone does not establish authority.
+checks the pinned genesis, the Store's MAC'd log chain and latest checkpoint,
+the replay of the records after that checkpoint, native cell laws, complete
+authority, and the semantics of every selected policy source. Opening trusts
+the Host's own past execution under its Store key (DATAMODEL §6 Q1; see
+`docs/DURABLE-STORE.md`). Re-admitting each retained original signed ingress at
+its original prefix and logical height is the operator `audit` command: its
+source-derived intent must equal the complete stored record.
 
 `profile` reports immutable configuration-derived protocol metadata before a
 store exists. It reads no resource state, and renders full-width identifiers as
@@ -162,9 +164,10 @@ the requests again and invokes the actual native signature, capability,
 compiled-policy, physical, and durable checks.
 
 Logical height is `genesisHeight + loaded.image.accepted.length`. The same
-loaded image supplies open checks, height, preparation, and the initial CAS.
-A concurrent image change returns contention; the host cannot transplant an
-old admission onto a newer journal. Replayed and refused operations do not
+loaded image supplies open checks, height, preparation, and the append, which
+the store helper accepts only at `head + 1` while the head is unchanged. A
+concurrent append returns contention; the host cannot transplant an old
+admission onto a newer journal. Replayed and refused operations do not
 advance height. This clock counts accepted commits, not elapsed seconds or
 Solana slots.
 
