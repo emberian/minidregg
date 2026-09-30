@@ -3,13 +3,13 @@
 
 This module exposes the concrete forward-link publication as one first-order
 endpoint shared by human and agent callers.  The origin is audit data only:
-both origins pass the same request bytes through the same Lean codecs, catalog
+both origins pass the same request bytes through the same Lean codecs, storage
 checks, accepted publication, guarded recovery controller, canonical query,
 and response codec.
 
 The native boundary may return only bytes or an opaque error.  Lean decodes
-the endpoint request, the bounded-page catalog, the Hyperdocument declaration,
-and the recovery frames.  Success returns only the canonical `LinkRecord`
+the endpoint request, the deployed storage frames, the Hyperdocument
+declaration, and the recovery frames.  Success returns only the canonical `LinkRecord`
 encoding whose exact value is proved by `HyperdocumentLinkReopenWitness`.
 
 No result here says an OS read real storage, that consensus finalized the
@@ -18,13 +18,13 @@ deployment obligations at the end of the module.
 -/
 import Assurance.HyperdocumentLinkFramedRecovery
 import Assurance.HyperdocumentLinkReopenWitness
-import Compiler.BoundedPageExtensionCatalog
+import Compiler.CredentialAuthorityCell
+import Compiler.HyperdocumentCell
 import Compiler.HyperdocumentCodec
 
 namespace Minidregg.Assurance.HyperdocumentLinkEndpointController
 
 open Minidregg.Compiler
-open Minidregg.Compiler.BoundedPageExtensionCatalog
 open Minidregg.Compiler.FramedWalRecoveryController
 open Minidregg.Compiler.HyperdocumentCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -105,14 +105,14 @@ inductive Origin where
   | agent
   deriving DecidableEq, Repr
 
-/-- The request carrier remains ordinary first-order data.  Inner catalog and
+/-- The request carrier remains ordinary first-order data.  Inner storage and
 declaration bytes are decoded by their own pinned codecs after this envelope
 has decoded. -/
 structure SubmitRequest where
   endpointVersion : Nat
   target : DocumentId
   expectedAuthorityRoot : Digest
-  catalogBytes : List UInt8
+  storageBytes : List UInt8
   declarationBytes : List UInt8
   deriving DecidableEq
 
@@ -127,13 +127,13 @@ def submitTupleStream : StreamCodec SubmitTuple :=
 
 def submitTuple (request : SubmitRequest) : SubmitTuple :=
   ⟨request.endpointVersion, request.target, request.expectedAuthorityRoot,
-    request.catalogBytes, request.declarationBytes⟩
+    request.storageBytes, request.declarationBytes⟩
 
 def submitOfTuple (wire : SubmitTuple) : SubmitRequest where
   endpointVersion := wire.1
   target := wire.2.1
   expectedAuthorityRoot := wire.2.2.1
-  catalogBytes := wire.2.2.2.1
+  storageBytes := wire.2.2.2.1
   declarationBytes := wire.2.2.2.2
 
 @[simp] theorem submitOfTuple_tuple (request : SubmitRequest) :
@@ -188,6 +188,21 @@ noncomputable def linkRecordStream : StreamCodec LinkRecord :=
 noncomputable def linkRecordCodec : LawfulCodec LinkRecord :=
   linkRecordStream.toLawful
 
+/-! ## Deployed storage frames
+
+The endpoint serves the deployed store cells: Hyperdocument content, the
+append-only event log, and the credential authority.  Each `StoreCodec` frame
+commits to its cell's layout digest, so a request naming any other storage
+(including a retired bounded-page catalog) is refused. -/
+
+def deployedStorage : List (List UInt8) :=
+  [StoreCodec.frame HyperdocumentCell.contentWire,
+   StoreCodec.frame HyperdocumentCell.eventWire,
+   StoreCodec.frame CredentialAuthorityCell.wire]
+
+def storageCodec : LawfulCodec (List (List UInt8)) :=
+  (StreamCodec.list bytesStream).toLawful
+
 /-! ## Lean-owned endpoint -/
 
 def endpointVersion : Nat := 1
@@ -198,7 +213,7 @@ inductive Failure (NativeError : Type) where
   | wrongVersion
   | wrongTarget
   | staleAuthority
-  | wrongCatalog
+  | wrongStorage
   | wrongDeclaration
   | malformedStorage
   deriving Repr
@@ -233,10 +248,10 @@ noncomputable def runRequest {NativeError : Type}
       Publication.Genesis.authorityPre.root then
     .error .staleAuthority
   else
-    match catalogCodec.decode request.catalogBytes with
-    | none => .error .wrongCatalog
-    | some catalog =>
-        if catalog ≠ deployedCatalog then .error .wrongCatalog
+    match storageCodec.decode request.storageBytes with
+    | none => .error .wrongStorage
+    | some storage =>
+        if storage ≠ deployedStorage then .error .wrongStorage
         else
           match Publication.declarationCodec.decode
               request.declarationBytes with
@@ -287,7 +302,7 @@ def honestRequest : SubmitRequest where
   endpointVersion := endpointVersion
   target := Publication.Genesis.documentId
   expectedAuthorityRoot := Publication.Genesis.authorityPre.root
-  catalogBytes := catalogCodec.encode deployedCatalog
+  storageBytes := storageCodec.encode deployedStorage
   declarationBytes :=
     Publication.declarationCodec.encode Publication.linkDeclaration
 
@@ -300,10 +315,10 @@ noncomputable def resultBytes : List UInt8 :=
     submitCodec.decode honestRequestBytes = some honestRequest :=
   submitCodec.decode_encode honestRequest
 
-@[simp] theorem catalog_decodes_deployed :
-    catalogCodec.decode (catalogCodec.encode deployedCatalog) =
-      some deployedCatalog :=
-  catalogCodec.decode_encode deployedCatalog
+@[simp] theorem storage_decodes_deployed :
+    storageCodec.decode (storageCodec.encode deployedStorage) =
+      some deployedStorage :=
+  storageCodec.decode_encode deployedStorage
 
 @[simp] theorem declaration_decodes_link :
     Publication.declarationCodec.decode
@@ -430,17 +445,17 @@ def malformedRequestBytes : List UInt8 := []
       .error .malformedRequest := by
   rfl
 
-def malformedCatalogRequest : SubmitRequest :=
-  { honestRequest with catalogBytes := [] }
+def malformedStorageFramesRequest : SubmitRequest :=
+  { honestRequest with storageBytes := [] }
 
-@[simp] theorem malformed_catalog_rejected (origin : Origin) :
+@[simp] theorem malformed_storage_frames_rejected (origin : Origin) :
     runAt Recovery.checkpoint origin
-        (submitCodec.encode malformedCatalogRequest) Recovery.reader =
-      .error .wrongCatalog := by
+        (submitCodec.encode malformedStorageFramesRequest) Recovery.reader =
+      .error .wrongStorage := by
   unfold runAt
   rw [submitCodec.decode_encode]
-  simp [runRequest, malformedCatalogRequest, honestRequest, endpointVersion,
-    catalogCodec, decodeCatalog]
+  simp [runRequest, malformedStorageFramesRequest, honestRequest, endpointVersion,
+    storageCodec, StreamCodec.toLawful, StreamCodec.list, StreamCodec.nat, StreamCodec.decodeNatPrefix]
 
 def wrongVersionRequest : SubmitRequest :=
   { honestRequest with endpointVersion := endpointVersion + 1 }
