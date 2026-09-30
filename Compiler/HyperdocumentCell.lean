@@ -466,6 +466,18 @@ def eventWire : Wire Sparse.layout where
 /-- The event-log cell materializer. -/
 def eventMaterializer : Sparse.Materializer Digest := StoreCodec.materializer eventWire
 
+/-- The deployed event-id derivation: cSHAKE256 under the version-event
+customization over the typed, domain-separated event preimage.  A recorded
+event's key is `eventScheme.address` of its causal preimage; the registry's
+event-history law checks it on every loaded and final log. -/
+def eventCustomization : List UInt8 := "LOOM.HDOC.VERSION.EVENT/v1".toUTF8.toList
+
+def eventDerivation : DigestDerivation where
+  digestBytes bytes := (Sp800185Cshake256.hash eventCustomization bytes).digest
+
+def eventScheme : ContentAddressing :=
+  causalVersionAddressing eventPreimageStream.toLawful eventDerivation
+
 /-! ## The link-index wire -/
 
 open Minidregg.Kernel.HyperdocumentIndexSync

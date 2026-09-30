@@ -1,26 +1,35 @@
 /-
 # Compiler.CanonicalCellRegistry — one executable receiving registry
 
-This is the production union of the existing bounded content/event/authority
-and declared-effect page materializers, with the canonical resource Book and
-authority catalogue. The old partial registries remain scoped exhibits; new
-birth, policy, authority-domain and native receivers select this registry.
+The production registry of deployed cell roles.  Every role's materializer is
+a `StoreCodec` cell at its layout (DATAMODEL B1): the hyperdocument content and
+event-log cells (`HyperdocumentCell`), the one credential-authority cell
+(`CredentialAuthorityCell`), the declared-effect cells (`DeclaredEffectCell`),
+the canonical resource Book, and immutable policy source cells.  There are no
+pages, shards or catalogue: the authority domain is one cell at the
+deployment's pinned `authorityCellId`.
 
-Kinds are semantic roles, even when their physical page schema is shared.
-Object/program/account-metadata roles have source-owned field laws and typed
-dispatch. No such role may carry an `accountBalance` field: only the domain's
-configured resource Book owns money. Account metadata uses the existing page
-schema, not another ledger; its created identity is the same account registered
-by `ResourceBirth.Descriptor.resourceBatch`.
+Kinds are semantic roles, even when their layout is shared.  Object/program/
+account-metadata roles have source-owned field laws and typed dispatch.  No
+such role may carry an `accountBalance` field: only the domain's configured
+resource Book owns money.
 
 `CellLaw` is an invariant for loaded and FINAL post cells, not only a birth
-check. `UserInitial` further refuses internal authority, Book and event-history
-payloads. Those cells are produced by their source-owned semantic lowerings.
-The registry supplies no public raw-state installation endpoint.
+check.  `UserInitial` further refuses internal authority, Book and
+event-history payloads.  Those cells are produced by their source-owned
+semantic lowerings.  The registry supplies no public raw-state installation
+endpoint.
+
+**Domain.**  A store cell carries no in-cell domain tag: the cell's deployment
+is the directory that holds it.  The one place a domain is semantic data is
+the hyperdocument event record (`VersionEventRecord.historyDomain`, hashed into
+the event id and supplied by the authoring request), so the event-history law
+requires every recorded event to name this deployment's domain
+(`foreign_domain_event_refused`).
 -/
-import Compiler.BoundedPageExtensionCatalog
 import Compiler.DeclaredEffectCell
-import Compiler.CredentialAuthorityDomain
+import Compiler.CredentialAuthorityCell
+import Compiler.HyperdocumentCell
 import Compiler.CanonicalResourcePageMaterializer
 import Compiler.ResourceBirthCodec
 import Compiler.PolicySourceCell
@@ -36,6 +45,7 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.DeclaredActionLowering
 open Minidregg.Theory.EffectDeclaration
+open Minidregg.Theory.Hyperdocument
 open Minidregg.Theory.Store (Store)
 
 set_option autoImplicit false
@@ -43,28 +53,27 @@ set_option autoImplicit false
 inductive Kind where
   | content
   | eventHistory
-  | authorityShard
+  | authority
   | declaredObject
   | resourceBook
-  | authorityCatalogue
   | accountMetadata
   | declaredProgram
   | policySource
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
-  [.content, .eventHistory, .authorityShard, .declaredObject,
-    .resourceBook, .authorityCatalogue, .accountMetadata, .declaredProgram, .policySource]
+  [.content, .eventHistory, .authority, .declaredObject,
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource]
 
-/-- Existing bounded-page tags 1/2/3 and effect-page tag 5 are retained.
-Tag 4 remains unassigned. New tags and schema refs are deployment pins. -/
+/-- Tags 1/2/3/5/6/8/9/10 are deployment pins.  Tag 3 is the one authority
+cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
+retired and decodes to nothing; tag 4 was never assigned. -/
 def Kind.tag : Kind → UInt8
   | .content => 1
   | .eventHistory => 2
-  | .authorityShard => 3
+  | .authority => 3
   | .declaredObject => 5
   | .resourceBook => 6
-  | .authorityCatalogue => 7
   | .accountMetadata => 8
   | .declaredProgram => 9
   | .policySource => PolicySourceCell.registryTag
@@ -72,10 +81,9 @@ def Kind.tag : Kind → UInt8
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
   | 2 => some .eventHistory
-  | 3 => some .authorityShard
+  | 3 => some .authority
   | 5 => some .declaredObject
   | 6 => some .resourceBook
-  | 7 => some .authorityCatalogue
   | 8 => some .accountMetadata
   | 9 => some .declaredProgram
   | 10 => some .policySource
@@ -84,13 +92,19 @@ def kindAtTag : UInt8 → Option Kind
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
   cases kind <;> rfl
 
+/-- The retired catalogue tag selects no role: a packed catalogue cell refuses
+to decode. -/
+theorem retired_catalogue_tag : kindAtTag 7 = none := rfl
+
+/-- Store-cell wire versions.  Content, event and authority moved from page
+frames to `StoreCodec` frames; the Book's balance codec became the zigzag
+integer codec; the declared roles moved in S2c. -/
 def schemaRef : Kind → SchemaRef
-  | .content => ⟨⟨91001⟩, 2⟩
-  | .eventHistory => ⟨⟨91002⟩, 1⟩
-  | .authorityShard => ⟨⟨91003⟩, 4⟩
+  | .content => ⟨⟨91001⟩, 3⟩
+  | .eventHistory => ⟨⟨91002⟩, 2⟩
+  | .authority => ⟨⟨91003⟩, 5⟩
   | .declaredObject => ⟨⟨91004⟩, 2⟩
-  | .resourceBook => ⟨⟨91005⟩, 2⟩
-  | .authorityCatalogue => ⟨⟨91006⟩, 2⟩
+  | .resourceBook => ⟨⟨91005⟩, 3⟩
   | .accountMetadata => ⟨⟨91007⟩, 2⟩
   | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
@@ -100,46 +114,22 @@ theorem schemaRef_injective : Function.Injective schemaRef := by
   cases left <;> cases right <;>
     simp [schemaRef, PolicySourceCell.schemaId, PolicySourceCell.wireVersion] at same ⊢
 
-def schema : Kind → CellState.Schema.{0, 0, 0, 0}
-  | .content => HyperdocumentContentPageMaterializer.schema
-  | .eventHistory => HyperdocumentEventPageMaterializer.schema
-  | .authorityShard => CredentialAuthorityPageMaterializer.schema
+abbrev layout : Kind → Store.Layout.{0, 0, 0}
+  | .content => Hyperdocument.layout
+  | .eventHistory => Kernel.HyperdocumentEventLog.Sparse.layout
+  | .authority => CredentialAuthorityState.layout
   | .declaredObject => EffectDeclaration.effectLayout
-  | .resourceBook => CanonicalResourceKernel.schema
-  | .authorityCatalogue => CredentialAuthorityDomain.catalogueSchema
+  | .resourceBook => CanonicalResourceKernel.layout
   | .accountMetadata => EffectDeclaration.effectLayout
   | .declaredProgram => EffectDeclaration.effectLayout
-  | .policySource => PolicySourceCell.schema
+  | .policySource => PolicySourceCell.layout
 
-instance fieldDecidableEq : (kind : Kind) → DecidableEq (schema kind).Field
-  | .content => inferInstanceAs (DecidableEq HyperdocumentContentPageMaterializer.schema.Field)
-  | .eventHistory => inferInstanceAs (DecidableEq HyperdocumentEventPageMaterializer.schema.Field)
-  | .authorityShard => inferInstanceAs (DecidableEq CredentialAuthorityPageMaterializer.schema.Field)
-  | .declaredObject => inferInstanceAs (DecidableEq DeclaredEffectPageMaterializer.schema.Field)
-  | .resourceBook => inferInstanceAs (DecidableEq CanonicalResourceKernel.Field)
-  | .authorityCatalogue => inferInstanceAs (DecidableEq CredentialAuthorityDomain.catalogueSchema.Field)
-  | .accountMetadata => inferInstanceAs (DecidableEq DeclaredEffectPageMaterializer.schema.Field)
-  | .declaredProgram => inferInstanceAs (DecidableEq DeclaredEffectPageMaterializer.schema.Field)
-  | .policySource => inferInstanceAs (DecidableEq PolicySourceCell.schema.Field)
-
-instance resourceDecidableEq : (kind : Kind) → DecidableEq (schema kind).Resource
-  | .content => inferInstanceAs (DecidableEq Empty)
-  | .eventHistory => inferInstanceAs (DecidableEq Empty)
-  | .authorityShard => inferInstanceAs (DecidableEq Empty)
-  | .declaredObject => inferInstanceAs (DecidableEq Empty)
-  | .resourceBook => inferInstanceAs (DecidableEq Empty)
-  | .authorityCatalogue => inferInstanceAs (DecidableEq Empty)
-  | .accountMetadata => inferInstanceAs (DecidableEq Empty)
-  | .declaredProgram => inferInstanceAs (DecidableEq Empty)
-  | .policySource => inferInstanceAs (DecidableEq Empty)
-
-def materializer : (kind : Kind) → Materializer (schema kind) Digest
-  | .content => HyperdocumentContentPageMaterializer.materializer
-  | .eventHistory => HyperdocumentEventPageMaterializer.materializer
-  | .authorityShard => CredentialAuthorityPageMaterializer.materializer
+def materializer : (kind : Kind) → Materializer (layout kind) Digest
+  | .content => HyperdocumentCell.contentMaterializer
+  | .eventHistory => HyperdocumentCell.eventMaterializer
+  | .authority => CredentialAuthorityCell.materializer
   | .declaredObject => DeclaredEffectCell.materializer
   | .resourceBook => CanonicalResourcePageMaterializer.materializer
-  | .authorityCatalogue => CredentialAuthorityDomain.catalogueMaterializer
   | .accountMetadata => DeclaredEffectCell.materializer
   | .declaredProgram => DeclaredEffectCell.materializer
   | .policySource => PolicySourceCell.materializer
@@ -151,18 +141,12 @@ def registry : TypeRegistry Digest where
   kindAtTag_tag := kindAtTag_tag
   schemaRef := schemaRef
   schemaRef_injective := schemaRef_injective
-  schema := schema
+  layout := layout
   materializer := materializer
   rootBytes := ResourceBirthCodec.rootBytes
 
 instance registryKindDecidableEq : DecidableEq registry.Kind :=
   inferInstanceAs (DecidableEq Kind)
-
-instance registryFieldDecidableEq (kind : registry.Kind) :
-    DecidableEq (registry.schema kind).Field := fieldDecidableEq kind
-
-instance registryResourceDecidableEq (kind : registry.Kind) :
-    DecidableEq (registry.schema kind).Resource := resourceDecidableEq kind
 
 /-- This is a source-fixed role mapping, never a caller-supplied callback.
 Book is an internal account resource; accountMetadata is the user's identity. -/
@@ -177,13 +161,11 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
   ResourceBirthCodec.sourceEncoding registry resourceKindOf
 
 @[simp] theorem registry_content_materializer :
-    registry.materializer .content = HyperdocumentContentPageMaterializer.materializer := rfl
+    registry.materializer .content = HyperdocumentCell.contentMaterializer := rfl
 @[simp] theorem registry_event_materializer :
-    registry.materializer .eventHistory = HyperdocumentEventPageMaterializer.materializer := rfl
+    registry.materializer .eventHistory = HyperdocumentCell.eventMaterializer := rfl
 @[simp] theorem registry_authority_materializer :
-    registry.materializer .authorityShard = CredentialAuthorityPageMaterializer.materializer := rfl
-@[simp] theorem registry_catalogue_materializer :
-    registry.materializer .authorityCatalogue = CredentialAuthorityDomain.catalogueMaterializer := rfl
+    registry.materializer .authority = CredentialAuthorityCell.materializer := rfl
 @[simp] theorem registry_book_materializer :
     registry.materializer .resourceBook = CanonicalResourcePageMaterializer.materializer := rfl
 @[simp] theorem registry_factory_materializer :
@@ -196,16 +178,6 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
     registry.materializer .declaredProgram = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_lifecycle_root :
     registry.rootBytes = ResourceBirthCodec.rootBytes := rfl
-
-theorem retained_content_pin : schemaRef .content =
-    ⟨BoundedPageExtensionCatalog.contentController.schemaId,
-      BoundedPageExtensionCatalog.contentController.wireVersion⟩ := rfl
-theorem retained_event_pin : schemaRef .eventHistory =
-    ⟨BoundedPageExtensionCatalog.eventHistoryController.schemaId,
-      BoundedPageExtensionCatalog.eventHistoryController.wireVersion⟩ := rfl
-theorem retained_authority_pin : schemaRef .authorityShard =
-    ⟨BoundedPageExtensionCatalog.authorityPolicyController.schemaId,
-      BoundedPageExtensionCatalog.authorityPolicyController.wireVersion⟩ := rfl
 
 /-- Strict dependent decoding preserves the exact selected native codec/root.
 It also rejects aliases accepted by older primitive prefix decoders. -/
@@ -223,26 +195,23 @@ theorem decoded_cell_canonical {bytes : List UInt8} {cell : PackedCell registry}
 
 /-- Pins belong to one deployment/authority domain. They do not impose one
 Book across all nodes or domains. A request cannot choose a different Book or
-catalogue merely because its payload has the right schema tag. -/
+authority cell merely because its payload has the right schema tag. -/
 structure Deployment where
   domain : Digest
   factoryId : Nat
   resourceBookId : Nat
-  authorityCatalogueId : Nat
+  authorityCellId : Nat
   deriving DecidableEq, Repr
 
 def Deployment.Valid (deployment : Deployment) : Prop :=
-  [deployment.factoryId, deployment.resourceBookId, deployment.authorityCatalogueId].Nodup
+  [deployment.factoryId, deployment.resourceBookId, deployment.authorityCellId].Nodup
 
 instance deploymentValidDecidable (deployment : Deployment) : Decidable deployment.Valid := by
   unfold Deployment.Valid
   infer_instance
 
-def Deployment.authorityAnchor (deployment : Deployment) : CredentialAuthorityDomain.Anchor :=
-  ⟨deployment.domain, ⟨deployment.authorityCatalogueId⟩⟩
-
 /-- Field constructors, not textual key names, determine role membership.
-The account role's page contains metadata only; it cannot encode money. -/
+The account role's cell contains metadata only; it cannot encode money. -/
 def KeyAllowed (kind : ResourceKind) (cellId : Nat) : StateKey → Prop
   | .objectField object _ =>
       (kind = .object ∨ kind = .account) ∧ object.value = cellId
@@ -283,6 +252,49 @@ instance presentLawDecidable {α : Type} (law : α → Prop) [∀ value, Decidab
     (value : Option α) : Decidable (PresentLaw law value) := by
   cases value <;> unfold PresentLaw <;> infer_instance
 
+/-! ### Hyperdocument content: one document per cell -/
+
+/-- The document a content record belongs to, where the record names one.
+Element-owned fields and their conflicts are located through the element. -/
+def recordDocument? : (space : Hyperdocument.Namespace) → Hyperdocument.Key space →
+    Hyperdocument.Value space → Option DocumentId
+  | .documents, document, _ => some document
+  | .atoms, _, record => some record.document
+  | .runs, _, record => some record.document
+  | .elements, _, record => some record.document
+  | .fields, key, _ =>
+      match key.owner with
+      | .document document => some document
+      | .element _ => none
+  | .conflicts, _, record =>
+      match record.field.owner with
+      | .document document => some document
+      | .element _ => none
+  | .links, _, record => some record.sourceDocument
+  | .transclusions, _, record => some record.hostDocument
+  | .marks, _, record => some record.document
+  | .annotations, _, record => some record.document
+
+/-- The document named by the record at `address`, if any. -/
+def documentAt (store : Store Hyperdocument.layout)
+    (address : Store.Address Hyperdocument.layout) : Option DocumentId :=
+  (store address).bind (recordDocument? address.1 address.2)
+
+/-- A content cell holds one document: every record that names a document
+names the same one (the retired content page's `Entry.LocalTo`, over every
+namespace). -/
+def ContentLaw (store : Store Hyperdocument.layout) : Prop :=
+  ∀ left ∈ store.support, ∀ right ∈ store.support,
+    documentAt store left = none ∨ documentAt store right = none ∨
+      documentAt store left = documentAt store right
+
+instance contentLawDecidable (store : Store Hyperdocument.layout) :
+    Decidable (ContentLaw store) := by
+  unfold ContentLaw
+  infer_instance
+
+/-! ### Hyperdocument event history: this domain's well-formed, addressed events -/
+
 local instance eventWellFormedDecidable (event : CausalVersionDag.EventPreimage) :
     Decidable event.WellFormed :=
   decidable_of_iff
@@ -291,41 +303,65 @@ local instance eventWellFormedDecidable (event : CausalVersionDag.EventPreimage)
     ⟨fun valid => ⟨valid.1, valid.2⟩,
       fun valid => ⟨valid.parentFrontierCanonical, valid.parentFrontierUnique⟩⟩
 
-local instance eventEntryDecidable (page : HyperdocumentEventPageMaterializer.Page)
-    (entry : HyperdocumentEventPageMaterializer.Entry) : Decidable (entry.ValidFor page) := by
-  unfold HyperdocumentEventPageMaterializer.Entry.ValidFor Hyperdocument.VersionEventRecord.CausallyWellFormed
+/-- One recorded event is valid in this deployment: it names this deployment's
+history domain, its parent frontier is canonical, and its key is the derived
+event address of its causal preimage. -/
+def EventValid (deployment : Deployment) (key : VersionEventId) :
+    Option VersionEventRecord → Prop
+  | none => True
+  | some record =>
+      record.historyDomain = deployment.domain ∧ record.CausallyWellFormed ∧
+        key.digest = HyperdocumentCell.eventScheme.address record.toCausalPreimage
+
+instance eventValidDecidable (deployment : Deployment) (key : VersionEventId)
+    (record : Option VersionEventRecord) : Decidable (EventValid deployment key record) := by
+  cases record <;> unfold EventValid <;> infer_instance
+
+/-- The event-log law: every recorded event is valid here, and all events are
+of one document (the retired event page's scope). -/
+def EventHistoryLaw (deployment : Deployment)
+    (store : Store Kernel.HyperdocumentEventLog.Sparse.layout) : Prop :=
+  (∀ address ∈ store.support, EventValid deployment address.2 (store address)) ∧
+    ∀ left ∈ store.support, ∀ right ∈ store.support,
+      (store left).map VersionEventRecord.document = (store right).map VersionEventRecord.document
+
+instance eventHistoryLawDecidable (deployment : Deployment)
+    (store : Store Kernel.HyperdocumentEventLog.Sparse.layout) :
+    Decidable (EventHistoryLaw deployment store) := by
+  unfold EventHistoryLaw
   infer_instance
 
-local instance eventPageDecidable (page : HyperdocumentEventPageMaterializer.Page) :
-    Decidable page.Valid :=
-  decidable_of_iff
-    ((∀ entry ∈ page.entries, entry.ValidFor page) ∧
-      (page.entries.map HyperdocumentEventPageMaterializer.Entry.key).Nodup)
-    ⟨fun valid => ⟨valid.1, valid.2⟩, fun valid => ⟨valid.entriesValid, valid.keysNodup⟩⟩
+/-- **The domain restoration (S3 decision 1).**  An event record naming any
+other history domain cannot sit in this deployment's event log. -/
+theorem foreign_domain_event_refused (deployment : Deployment)
+    (store : Store Kernel.HyperdocumentEventLog.Sparse.layout)
+    (address : Store.Address Kernel.HyperdocumentEventLog.Sparse.layout) (record : VersionEventRecord)
+    (present : store address = some record) (foreign : record.historyDomain ≠ deployment.domain) :
+    ¬ EventHistoryLaw deployment store := by
+  intro law
+  have valid := law.1 address (DFinsupp.mem_support_toFun _ _ |>.mpr (by rw [present]; intro same; cases same))
+  rw [present] at valid
+  exact foreign valid.1
 
-/-- Semantic identity of the source-owned loaded/final law. The Book codec is
-lossless on unsupported balances; refusing them is a receiving-law change,
-so it changes runtime compatibility without changing the wire representation. -/
+/-- Satisfiable pole: the empty event log is lawful in every deployment. -/
+theorem empty_event_history_lawful (deployment : Deployment) :
+    EventHistoryLaw deployment 0 := by
+  constructor <;> intro address member <;> simp at member
+
+/-- Semantic identity of the source-owned loaded/final law. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.BOOK-ACCOUNT-SUPPORT/v2".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v3".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
 def LogicalLaw (deployment : Deployment) (cellId : Nat) :
-    (kind : Kind) → LogicalState (schema kind) → Prop
+    (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, state => DeclaredCellLaw .object cellId state
   | .accountMetadata, state => DeclaredCellLaw .account cellId state
   | .declaredProgram, state => DeclaredCellLaw .program cellId state
-  | .content, state => PresentLaw (fun page => page.contentDomain = deployment.domain ∧ page.Valid)
-      (HyperdocumentContentPageMaterializer.pageAt state)
-  | .eventHistory, state => PresentLaw (fun page => page.historyDomain = deployment.domain ∧ page.Valid)
-      (HyperdocumentEventPageMaterializer.pageAt state)
-  | .authorityShard, state => PresentLaw (fun page => page.authorityDomain = deployment.domain ∧
-      page.Valid ∧ CredentialAuthorityDomain.Routed page)
-      (CredentialAuthorityPageMaterializer.pageAt state)
-  | .authorityCatalogue, state => cellId = deployment.authorityCatalogueId ∧
-      PresentLaw (fun catalogue => catalogue.domain = deployment.domain ∧ catalogue.Valid)
-        (CredentialAuthorityDomain.catalogueAt state)
+  | .content, state => ContentLaw state
+  | .eventHistory, state => EventHistoryLaw deployment state
+  | .authority, _ => cellId = deployment.authorityCellId
   | .resourceBook, state => cellId = deployment.resourceBookId ∧
       (CanonicalResourcePageMaterializer.bookAt state).isSome = true ∧
       (CanonicalResourceKernel.logicalBook state).AccountSupported
@@ -333,7 +369,7 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       (PolicySourceCell.recordAt state)
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
-    (kind : Kind) (state : LogicalState (schema kind)) :
+    (kind : Kind) (state : Store (layout kind)) :
     Decidable (LogicalLaw deployment cellId kind state) := by
   cases kind <;> unfold LogicalLaw <;> infer_instance
 
@@ -356,11 +392,11 @@ def cellCheck (deployment : Deployment) (cellId : Nat) (cell : PackedCell regist
 admission. A family must run this on the composed joint post, not cache a local
 candidate's Boolean. The role is selected from the actual old packed cell. -/
 def postStateCheck (deployment : Deployment) (cellId : Nat) (kind : Kind)
-    (state : LogicalState (schema kind)) : Bool :=
+    (state : Store (layout kind)) : Bool :=
   decide (deployment.Valid ∧ LogicalLaw deployment cellId kind state)
 
 @[simp] theorem postStateCheck_iff (deployment : Deployment) (cellId : Nat) (kind : Kind)
-    (state : LogicalState (schema kind)) :
+    (state : Store (layout kind)) :
     postStateCheck deployment cellId kind state = true ↔
       deployment.Valid ∧ LogicalLaw deployment cellId kind state := by
   simp [postStateCheck]
@@ -375,23 +411,21 @@ instance finalPostLawDecidable (deployment : Deployment) (cellId : Nat)
   unfold FinalPostLaw
   infer_instance
 
-/-- Neutral content genesis names this new identity. Historical provenance,
-authority grants, Book balances and catalogue references are generated by
-their semantic controllers, never injected as raw user initial payloads. -/
-def UserShape (cellId : Nat) : (kind : Kind) → LogicalState (schema kind) → Prop
+/-- Neutral content genesis is an empty document cell: the cell's identifier is
+the new document's identity.  Historical provenance, authority grants, Book
+balances and policy sources are generated by their semantic controllers, never
+injected as raw user initial payloads. -/
+def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
-  | .content, state => PresentLaw (fun page => page.document.digest = ⟨cellId⟩ ∧
-      page.pageNumber = 0 ∧ page.entries = [])
-      (HyperdocumentContentPageMaterializer.pageAt state)
-  | .eventHistory, _ | .authorityShard, _ | .authorityCatalogue, _ | .resourceBook, _ |
-      .policySource, _ => False
+  | .content, state => state.support = ∅
+  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ => False
 
-instance userShapeDecidable (cellId : Nat) (kind : Kind) (state : LogicalState (schema kind)) :
-    Decidable (UserShape cellId kind state) := by
+instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
+    Decidable (UserShape kind state) := by
   cases kind <;> unfold UserShape <;> infer_instance
 
 def UserInitial (deployment : Deployment) (cellId : Nat) (cell : PackedCell registry) : Prop :=
-  CellLaw deployment cellId cell ∧ UserShape cellId cell.kind cell.payload.logical
+  CellLaw deployment cellId cell ∧ UserShape cell.kind cell.payload.logical
 
 instance userInitialDecidable (deployment : Deployment) (cellId : Nat) (cell : PackedCell registry) :
     Decidable (UserInitial deployment cellId cell) := by
@@ -411,8 +445,8 @@ def BirthsAdmissible (deployment : Deployment) (descriptor : ResourceBirth.Descr
 instance birthsAdmissibleDecidable (deployment : Deployment) (descriptor : ResourceBirth.Descriptor registry) :
     Decidable (BirthsAdmissible deployment descriptor) := by unfold BirthsAdmissible; infer_instance
 
-/-- The shared physical page schema is not authority to select another role's
-family. Object requests cannot select account metadata with the same id. -/
+/-- The shared layout is not authority to select another role's family.
+Object requests cannot select account metadata with the same id. -/
 def selectDeclared (deployment : Deployment) (cellId : Nat) (requested : ResourceKind)
     (cell : PackedCell registry) : Option (Materialized DeclaredEffectCell.materializer) :=
   if CellLaw deployment cellId cell then
@@ -433,6 +467,12 @@ theorem book_identity_is_pinned (deployment : Deployment) (cellId : Nat)
     (payload : Materialized CanonicalResourcePageMaterializer.materializer)
     (valid : CellLaw deployment cellId ⟨.resourceBook, payload⟩) :
     cellId = deployment.resourceBookId := valid.2.1
+
+/-- The one authority cell lives at the deployment's pinned identifier. -/
+theorem authority_identity_is_pinned (deployment : Deployment) (cellId : Nat)
+    (payload : Materialized CredentialAuthorityCell.materializer)
+    (valid : CellLaw deployment cellId ⟨.authority, payload⟩) :
+    cellId = deployment.authorityCellId := valid.2
 
 /-- Loaded and final canonical Books cannot carry balances for unregistered
 accounts. The lossless wire codec deliberately imposes no such semantic law. -/
@@ -455,12 +495,12 @@ theorem no_user_book_birth (deployment : Deployment) (cellId : Nat)
     ¬UserInitial deployment cellId ⟨.resourceBook, payload⟩ := fun admitted => admitted.2
 
 theorem no_user_authority_birth (deployment : Deployment) (cellId : Nat)
-    (payload : Materialized CredentialAuthorityPageMaterializer.materializer) :
-    ¬UserInitial deployment cellId ⟨.authorityShard, payload⟩ := fun admitted => admitted.2
+    (payload : Materialized CredentialAuthorityCell.materializer) :
+    ¬UserInitial deployment cellId ⟨.authority, payload⟩ := fun admitted => admitted.2
 
-theorem no_user_catalogue_birth (deployment : Deployment) (cellId : Nat)
-    (payload : Materialized CredentialAuthorityDomain.catalogueMaterializer) :
-    ¬UserInitial deployment cellId ⟨.authorityCatalogue, payload⟩ := fun admitted => admitted.2
+theorem no_user_event_birth (deployment : Deployment) (cellId : Nat)
+    (payload : Materialized HyperdocumentCell.eventMaterializer) :
+    ¬UserInitial deployment cellId ⟨.eventHistory, payload⟩ := fun admitted => admitted.2
 
 /-- The metadata identity is exactly the account registered by the existing
 source-derived resource batch; it is not an independently funded Book. -/
@@ -730,6 +770,16 @@ theorem account_dispatch_inhabited :
 theorem object_dispatch_refused : selectDeclared deployment 10 .object account = none :=
   object_cannot_select_account deployment 10 payload
 
+/-- Neutral content genesis: the empty document cell. -/
+def emptyContent : PackedCell registry :=
+  ⟨.content, materialize HyperdocumentCell.contentMaterializer 0⟩
+
+theorem user_content_inhabited : UserInitial deployment 11 emptyContent := by
+  refine ⟨⟨by decide, ?_⟩, ?_⟩
+  · intro left member
+    exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
+  · rfl
+
 end Witness
 
 end Minidregg.Compiler.CanonicalCellRegistry
@@ -742,3 +792,11 @@ end Minidregg.Compiler.CanonicalCellRegistry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.DeclaredCellLaw.no_balance
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.foreign_domain_event_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.foreign_domain_event_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.empty_event_history_lawful' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.empty_event_history_lawful
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.authority_identity_is_pinned' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.authority_identity_is_pinned
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.user_content_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.user_content_inhabited
