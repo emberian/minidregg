@@ -41,16 +41,6 @@ variable {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
 variable {durable : ResourceBirthController.Concrete.Durable}
 variable {descriptor : Descriptor CanonicalCellRegistry.registry}
 
-local instance fieldEq
-    (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (incidence : Legs descriptor) : DecidableEq ((layout prepared).schema incidence).Field :=
-  (layout prepared).fieldDecidableEq incidence
-
-local instance resourceEq
-    (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (incidence : Legs descriptor) : DecidableEq ((layout prepared).schema incidence).Resource :=
-  (layout prepared).resourceDecidableEq incidence
-
 /-! ## Exact semantic and physical post correspondence -/
 
 theorem tuple_source_exact
@@ -95,9 +85,8 @@ theorem accepted_book_post
       .book = prepared.resources.post :=
   accepted_post_exact prepared height tuple portals evidence .book
 
-/-- The authority incidence is virtual. Its actual post is represented by
-the computed complete domain after the grouped shard/catalogue update; it is
-never packed as an invented full-authority physical cell. -/
+/-- The authority incidence is the one pinned authority cell. Its accepted post
+is exactly the cell the grant batch writes. -/
 theorem accepted_authority_post
     (prepared : ResourceBirthController.Concrete.PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (tuple : PreparedTuple (plan prepared height))
@@ -105,9 +94,8 @@ theorem accepted_authority_post
     (tuple.toDeclaration portals
       (CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor)).post
       (tuple.accept portals (CanonicalCellRegistry.sourceEncoding.effectsDigest descriptor) evidence)
-      .authority = prepared.grants.physical.post.cell :=
-  (accepted_post_exact prepared height tuple portals evidence .authority).trans
-    prepared.authority_post_exact.symm
+      .authority = prepared.grants.post :=
+  accepted_post_exact prepared height tuple portals evidence .authority
 
 /-- Allocation posts are already physical lifecycle envelopes. The equality
 prevents double wrapping and preserves the exact signed typed payload. -/
@@ -124,8 +112,8 @@ theorem accepted_allocation_bytes
   rw [accepted_post_exact prepared height tuple portals evidence (.allocation index)]
   change (LifecycleSlot.materializer CanonicalCellRegistry.registry).codec.encode
     (ResourceBirthController.allocationValidated prepared.directory.directory
-      (creation descriptor index)).apply.logical = _
-  rw [ResourceBirthController.allocation_post_exact]
+      (creation descriptor index) (allocationFresh prepared index)).apply.logical = _
+  rw [ResourceBirthController.allocation_post_exact _ _ (allocationFresh prepared index)]
   simpa only [LifecycleSlot.cell, CellState.materialize, CellState.Materialized.bytes,
     ResourceBirthController.birthWrite] using
     LifecycleSlot.bytes_exact CanonicalCellRegistry.registry (.live (creation descriptor index).cell)
@@ -170,8 +158,8 @@ is already a guarded write, it does not become a second read-only participant. -
 def readGuards {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) : List ReadGuard :=
   accepted.prepared.readGuards ++
-    CredentialAuthorityDomainReceiver.readonlyGuards (sourceReadGuards accepted)
-      accepted.prepared.writes
+    (sourceReadGuards accepted).filter fun guard =>
+      guard.cellId ∉ accepted.prepared.writes.map DataWrite.cellId
 
 private theorem branch_read_exact {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
@@ -217,7 +205,7 @@ theorem readGuards_readonly {height : Height}
     guard.cellId ∉ accepted.prepared.writes.map DataWrite.cellId := by
   rcases List.mem_append.mp member with authority | source
   · exact accepted.prepared.readGuards_readonly guard authority
-  · exact of_decide_eq_true (List.mem_filter.mp source).2
+  · simpa using (List.mem_filter.mp source).2
 
 theorem source_reads_covered {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
@@ -393,142 +381,17 @@ theorem installed_initial_policy_source {height : Height}
   rw [facts.2.2.1] at installed
   exact ⟨record, decoded, facts, installed⟩
 
-/-! ## Complete authority survives every role in the final physical write set -/
+/-! ## The authority cell in the installed image -/
 
-private theorem observed_native_bytes {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
-    {identifier : Nat} {kind : CanonicalCellRegistry.Kind}
-    (observed : ResourceBirthController.Concrete.ObservedCell deployment
-      accepted.prepared.directory.directory identifier kind) :
-    durable.snapshot.canonicalBytes ⟨identifier⟩ =
-      LifecycleImage.bytes CanonicalCellRegistry.registry (.live ⟨kind, observed.payload⟩) := by
-  rw [← accepted.prepared.directory.bytes_exact]
-  rw [(LifecycleImage.view_live_iff CanonicalCellRegistry.registry
-    accepted.prepared.directory.directory identifier _).mpr observed.present]
-
-private theorem live_bytes_kind_exact
-    (left right : CellRegistry.PackedCell CanonicalCellRegistry.registry)
-    (same : LifecycleImage.bytes CanonicalCellRegistry.registry (.live left) =
-      LifecycleImage.bytes CanonicalCellRegistry.registry (.live right)) :
-    left.kind = right.kind := by
-  have encoded : (LifecycleImage.codec CanonicalCellRegistry.registry).encode (.live left) =
-      (LifecycleImage.codec CanonicalCellRegistry.registry).encode (.live right) := same
-  have images := lawful_encode_injective (LifecycleImage.codec CanonicalCellRegistry.registry) encoded
-  exact congrArg CellRegistry.PackedCell.kind (LifecycleImage.live.inj images)
-
-private theorem shard_ne_native {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
-    {identifier : Nat} {kind : CanonicalCellRegistry.Kind}
-    (observed : ResourceBirthController.Concrete.ObservedCell deployment
-      accepted.prepared.directory.directory identifier kind)
-    (different : kind ≠ .authorityShard)
-    (cellId : DurableDataIntent.CellId) (page : CredentialAuthorityPageMaterializer.Page)
-    (physical : durable.snapshot.canonicalBytes cellId =
-      CredentialAuthorityDomainReceiver.shardBytes page) :
-    cellId ≠ ⟨identifier⟩ := by
-  intro same
-  subst cellId
-  have bytes := (observed_native_bytes accepted observed).symm.trans physical
-  exact different (live_bytes_kind_exact _ _ bytes)
-
-/-- The whole birth cannot overwrite an authority page that its own authority
-lowering leaves unchanged. Fresh allocations conflict with its actual live
-bytes; the factory and Book conflict with its actual decoded schema kind.
-Filtered read guards alone would not establish this property. -/
-theorem unchanged_authority_shard_unwritten {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
-    (cellId : DurableDataIntent.CellId) (page : CredentialAuthorityPageMaterializer.Page)
-    (physical : durable.snapshot.canonicalBytes cellId =
-      CredentialAuthorityDomainReceiver.shardBytes page)
-    (authorityUnwritten : cellId ∉
-      accepted.prepared.grants.physical.writes.map DataWrite.cellId) :
-    cellId ∉ accepted.prepared.writes.map DataWrite.cellId := by
-  intro member
-  obtain ⟨write, member, same⟩ := List.mem_map.mp member
-  rcases List.mem_append.mp member with front | authority
-  · rcases List.mem_append.mp front with allocation | native
-    · obtain ⟨request, inRequests, rfl⟩ := List.mem_map.mp allocation
-      have fresh := accepted.prepared.fresh_before request inRequests
-      change (⟨request.cellId⟩ : DurableDataIntent.CellId) = cellId at same
-      rw [same] at fresh
-      have impossible := fresh.symm.trans physical
-      cases impossible
-    · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
-      rcases native with rfl | rfl
-      · exact shard_ne_native accepted accepted.prepared.factory (by decide) cellId page
-          physical same.symm
-      · exact shard_ne_native accepted accepted.prepared.book (by decide) cellId page
-          physical same.symm
-  · exact authorityUnwritten (List.mem_map.mpr ⟨write, authority, same⟩)
-
-private theorem installed_authority_page {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height)
-    (reference : CredentialAuthorityDomain.Ref) (page : CredentialAuthorityPageMaterializer.Page)
-    (represented : CredentialAuthorityDomainReceiver.PostPageRepresented durable.snapshot
-      accepted.prepared.grants.physical.writes accepted.prepared.grants.physical.readGuards
-      accepted.prepared.grants.physical.placement.auxiliaryCreates reference page) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes reference.cellId =
-      CredentialAuthorityDomainReceiver.shardBytes page := by
-  rcases represented.2 with written | created | unchanged
-  · obtain ⟨write, member, same, bytes⟩ := written
-    have installed := installed_write_bytes accepted write (List.mem_append_right _ member)
-    rw [same, bytes] at installed
-    exact installed
-  · obtain ⟨request, member, same, bytes⟩ := created
-    have inRequests : request ∈ accepted.descriptor.createRequests := by
-      unfold Descriptor.createRequests
-      apply List.mem_append_right
-      change request ∈ accepted.ingress.descriptor.auxiliaryCreates
-      rw [accepted.prepared.auxiliaryExact]
-      exact List.mem_append_right _ member
-    have inWrites : ResourceBirthController.birthWrite request ∈ accepted.prepared.writes :=
-      List.mem_append_left _ (List.mem_append_left _ (List.mem_map.mpr ⟨request, inRequests, rfl⟩))
-    have installed := installed_write_bytes accepted _ inWrites
-    change (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-      ⟨request.cellId⟩ = LifecycleImage.bytes CanonicalCellRegistry.registry (.live request.cell)
-      at installed
-    rw [same, bytes] at installed
-    exact installed
-  · obtain ⟨bytes, guard, member, same⟩ := unchanged
-    have localFrame := accepted.prepared.grants.physical.readGuards_readonly guard member
-    rw [same] at localFrame
-    have frame := unchanged_authority_shard_unwritten accepted reference.cellId page bytes localFrame
-    change (DataSnapshot.lookupPostBytes reference.cellId accepted.prepared.writes).getD
-      (durable.snapshot.canonicalBytes reference.cellId) = _
-    rw [DurableReceiver.lookupPostBytes_missing _ _ frame]
-    exact bytes
-
-/-- Every page of the complete semantic authority post has its exact bytes
-in the actual installed snapshot, including old unchanged pages and freshly
-allocated shards. No page/root equality assumption is supplied by a caller. -/
-theorem installed_authority_pages {height : Height}
-    (accepted : AcceptedBirth profile deployment pins durable height) :
-    List.Forall₂
-      (fun (reference : CredentialAuthorityDomain.Ref)
-          (page : CredentialAuthorityPageMaterializer.Page) =>
-        (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes reference.cellId =
-          CredentialAuthorityDomainReceiver.shardBytes page)
-      accepted.prepared.grants.physical.post.catalogue.pages
-      accepted.prepared.grants.physical.post.pages := by
-  exact accepted.prepared.grants.physical.represented.imp
-    (fun reference page represented => installed_authority_page accepted reference page represented)
-
-theorem installed_authority_catalogue {height : Height}
+/-- The installed image holds exactly the grant batch's post authority cell at
+the pinned identifier. There is one authority write; no page, shard or catalogue
+correspondence remains to be established. -/
+theorem installed_authority_cell {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) :
     (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-        deployment.authorityAnchor.catalogueCellId =
-      CredentialAuthorityDomainReceiver.catalogueBytes
-        accepted.prepared.grants.physical.post.catalogue := by
-  let write := CredentialAuthorityDomainReceiver.catalogueWrite deployment.authorityAnchor
-    durable.snapshot (CredentialAuthorityDomainReceiver.placedCatalogue
-      accepted.prepared.authority.snapshot.catalogue accepted.prepared.grants.physical.placement)
-  have member : write ∈ accepted.prepared.writes :=
-    List.mem_append_right _ (List.mem_append_right _ (by simp [write]))
-  have installed := installed_write_bytes accepted write member
-  change (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-    deployment.authorityAnchor.catalogueCellId = _ at installed
-  rw [accepted.prepared.grants.physical.postCatalogue]
-  exact installed
+        (CredentialAuthorityDomainReceiver.cellIdOf deployment) =
+      CredentialAuthorityDomainReceiver.cellBytes accepted.prepared.grants.post :=
+  installed_write_bytes accepted _ accepted.prepared.authority_write_member
 
 theorem refusal_no_mutation {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height)
