@@ -313,8 +313,6 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   chainExact : chain = chainAfter logStart image.accepted
   /-- The world root, cached; `worldRoot_eq` below. -/
   roots : RootCache
-  /-- The height of the latest persisted checkpoint (0: none). -/
-  checkpointed : Nat
 
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
@@ -348,7 +346,7 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
   | some snapshot =>
       let chain := chainAfter logStart image.accepted
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
-        rfl, RootCache.ofEntries (entriesOf image snapshot chain), 0⟩
+        rfl, RootCache.ofEntries (entriesOf image snapshot chain)⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
     {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
@@ -424,7 +422,7 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some snapshot =>
             return .ok ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
-              rfl, RootCache.ofEntries (entriesOf image snapshot headChain), baseHeight⟩
+              rfl, RootCache.ofEntries (entriesOf image snapshot headChain)⟩
       else return .error "checkpoint beyond the log head"
 
 inductive Confirmation where
@@ -476,13 +474,12 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     ready.resumed, loaded.logStart, chain,
     by show chainStep loaded.chain record = _
        rw [loaded.chainExact]; simp [chainAfter, Image.append, List.foldl_append, record],
-    loaded.roots.writeAll (recordSlots (loaded.image.accepted.length + 1) chain record),
-    loaded.checkpointed⟩
+    loaded.roots.writeAll (recordSlots (loaded.image.accepted.length + 1) chain record)⟩
 
 /-- Materialize the head as a fresh base (no replayed suffix), as a cold
 open of a checkpoint at the head would. -/
-def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (checkpointed : Nat) : Option (Loaded rootBytes) :=
+def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    Option (Loaded rootBytes) :=
   let state := State.ofSnapshot loaded.image loaded.snapshot
   let height := loaded.image.accepted.length
   match resumed : resume rootBytes loaded.image height state with
@@ -493,14 +490,14 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
       -- state; a disagreement keeps the old base (and `extendFrom` refuses).
       if roots.root ≠ loaded.roots.root then none else
       some ⟨loaded.image, height, state, snapshot, Nat.le_refl _, resumed, loaded.logStart,
-        loaded.chain, loaded.chainExact, roots, checkpointed⟩
+        loaded.chain, loaded.chainExact, roots⟩
 
-def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (checkpointed : Nat) : Loaded rootBytes :=
-  (loaded.rebase checkpointed).getD loaded
+def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    Loaded rootBytes :=
+  loaded.rebase.getD loaded
 
-theorem Loaded.rebaseD_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
-    (checkpointed : Nat) : (loaded.rebaseD checkpointed).image = loaded.image := by
+theorem Loaded.rebaseD_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.rebaseD.image = loaded.image := by
   unfold rebaseD rebase
   dsimp only
   split
@@ -518,21 +515,26 @@ def storeCheckpoint (transport : Transport) (rootBytes : List UInt8 → Digest)
   | .error _ => return false
   | .ok () => return true
 
+/-- A checkpoint is due at every height that is a multiple of
+`checkpointEvery`: a function of the height alone, so any process (a
+long-lived session that re-derives its tip from the store, or a one-shot
+receiver) seals at the same heights and never again in between.  A failed
+seal loses nothing; the next multiple seals. -/
 def checkpointDue {rootBytes : List UInt8 → Digest} (transport : Transport)
     (loaded : Loaded rootBytes) : Bool :=
   transport.checkpointEvery > 0 &&
-    loaded.image.accepted.length ≥ loaded.checkpointed + transport.checkpointEvery
+    loaded.image.accepted.length % transport.checkpointEvery == 0
 
 /-- After a stored checkpoint, rebase on it; otherwise keep the base. -/
 def afterCheckpoint {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (stored : Bool) : Loaded rootBytes :=
-  if stored then loaded.rebaseD loaded.image.accepted.length else loaded
+  if stored then loaded.rebaseD else loaded
 
 theorem afterCheckpoint_image {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
     (stored : Bool) : (afterCheckpoint loaded stored).image = loaded.image := by
   unfold afterCheckpoint
   split
-  · exact Loaded.rebaseD_image _ _
+  · exact Loaded.rebaseD_image _
   · rfl
 
 /-- Read back the entry at `height`; exact equality with what this attempt
@@ -648,7 +650,7 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
         | .inr _ => return .error "durable log suffix does not replay through the canonical executor"
       if current.chain ≠ chain then return .error "durable log chain mismatch"
       if current.image.accepted.length ≥ current.baseHeight + 2 * max 1 transport.checkpointEvery then
-        match current.rebase current.checkpointed with
+        match current.rebase with
         | some rebased => return .ok rebased
         | none => return .error "world root cache disagrees with a full rebuild"
       return .ok current
