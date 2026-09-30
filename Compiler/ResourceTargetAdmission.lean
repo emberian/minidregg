@@ -47,7 +47,7 @@ def observe (deployment : CanonicalCellRegistry.Deployment)
       else none
     else none
 
-theorem internal_authority_unselectable : externalKind .authorityShard = none := rfl
+theorem internal_authority_unselectable : externalKind .authority = none := rfl
 theorem content_is_object : externalKind .content = some .object := rfl
 theorem account_cannot_be_object : externalKind .accountMetadata ≠ some .object := by decide
 
