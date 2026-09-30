@@ -9,9 +9,11 @@ routing of entry groups to pages and no second view of the same store.
 A `Snapshot` is the deployment's domain digest together with that one cell.
 Everything a consumer reads is read from the cell:
 
-* the revocation universe is the finite support of the `revoked` plane
-  (`CanonicalAuthorityProjection.projection`), so no caller-authored list can
-  omit a live revocation;
+* the revocation universe is the keys of the `revoked` and `registered`
+  planes in the cell's finite support, so no caller-authored list can omit a
+  live revocation (`mem_revoked_iff`), and a registered, unrevoked key is in
+  the universe (`mem_revocationUniverse_iff`), which is how families read
+  registration;
 * the authority clock (`Snapshot.revision`) is the number of spent operation
   nullifiers.  The nullifier plane is append-only, so the clock never runs
   backwards under any valid patch (`revision_monotone`) and every accepted
@@ -59,17 +61,64 @@ namespace Snapshot
 
 def logical (snapshot : Snapshot) : Store layout := snapshot.cell.logical
 
-/-- The revocation universe is derived from the cell's own support. -/
+/-- Every supported registration address contributes its key. -/
+def registeredAt : Address layout → Finset RevocationKey
+  | ⟨.registered, key⟩ => {key}
+  | _ => ∅
+
+/-- The keys the cell registers. -/
+def registeredKeys (snapshot : Snapshot) : Finset RevocationKey :=
+  snapshot.cell.logical.support.biUnion registeredAt
+
+/-- The revocation universe is derived from the cell's own support: every
+revoked key and every registered key. -/
 def revocationUniverse (snapshot : Snapshot) : ProjectionUniverse :=
-  CanonicalAuthorityProjection.projection snapshot.cell
+  ⟨CanonicalAuthorityProjection.revocationKeys snapshot.cell ∪ registeredKeys snapshot⟩
+
+theorem mem_registeredKeys_iff (snapshot : Snapshot) (key : RevocationKey) :
+    key ∈ registeredKeys snapshot ↔ isRegistered snapshot.cell key = true := by
+  constructor
+  · rw [registeredKeys, Finset.mem_biUnion]
+    rintro ⟨⟨plane, stored⟩, supported, contributes⟩
+    cases plane <;> simp [registeredAt] at contributes
+    have same : key = stored := Finset.mem_singleton.mp contributes
+    subst same
+    have present := DFinsupp.mem_support_iff.mp supported
+    simp only [isRegistered, Option.isSome_iff_ne_none]
+    exact present
+  · intro registered
+    rw [registeredKeys, Finset.mem_biUnion]
+    refine ⟨⟨.registered, key⟩, ?_, Finset.mem_singleton_self key⟩
+    rw [DFinsupp.mem_support_iff]
+    simpa [isRegistered, Option.isSome_iff_ne_none] using registered
+
+theorem mem_revocationUniverse_iff (snapshot : Snapshot) (key : RevocationKey) :
+    key ∈ snapshot.revocationUniverse.revocationKeys ↔
+      isRevoked snapshot.cell key = true ∨ isRegistered snapshot.cell key = true := by
+  change key ∈ CanonicalAuthorityProjection.revocationKeys snapshot.cell ∪
+    registeredKeys snapshot ↔ _
+  rw [Finset.mem_union, mem_registeredKeys_iff, CanonicalAuthorityProjection.mem_revocationKeys_iff]
+  constructor
+  · rintro (supported | registered)
+    · left
+      have present := DFinsupp.mem_support_iff.mp supported
+      simpa [isRevoked, Option.isSome_iff_ne_none] using present
+    · exact Or.inr registered
+  · rintro (revoked | registered)
+    · exact Or.inl (CanonicalAuthorityProjection.supported_of_isRevoked snapshot.cell key revoked)
+    · exact Or.inr registered
 
 def authState (snapshot : Snapshot) : AuthState :=
   CredentialAuthorityState.authState snapshot.revocationUniverse snapshot.cell
 
 /-- Projected revocation membership is exactly the cell's read. -/
 theorem mem_revoked_iff (snapshot : Snapshot) (key : RevocationKey) :
-    key ∈ snapshot.authState.revoked ↔ isRevoked snapshot.cell key = true :=
-  CanonicalAuthorityProjection.mem_authState_revoked_iff snapshot.cell key
+    key ∈ snapshot.authState.revoked ↔ isRevoked snapshot.cell key = true := by
+  rw [authState, CredentialAuthorityState.mem_authState_revoked_iff, mem_revocationUniverse_iff]
+  constructor
+  · exact And.right
+  · intro revoked
+    exact ⟨Or.inl revoked, revoked⟩
 
 end Snapshot
 
@@ -610,7 +659,7 @@ theorem Snapshot.authState_extension_exact (snapshot : Snapshot)
     simp only [Finset.mem_filter, Finset.mem_union]
     constructor
     · rintro ⟨_, live⟩
-      exact ⟨CanonicalAuthorityProjection.complete snapshot.cell key live, live⟩
+      exact ⟨(snapshot.mem_revocationUniverse_iff key).mpr (Or.inl live), live⟩
     · rintro ⟨registered, live⟩
       exact ⟨Or.inl registered, live⟩
   unfold CredentialAuthorityState.authState Snapshot.authState
@@ -670,6 +719,10 @@ end Witness
 #guard_msgs (whitespace := lax) in #print axioms preparePolicyAndNullifier_used_refused
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.signingKeyPatch_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms signingKeyPatch_current
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.mem_revocationUniverse_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Snapshot.mem_revocationUniverse_iff
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.mem_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Snapshot.mem_revoked_iff
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.authState_extension_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Snapshot.authState_extension_exact
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Witness.update_prepares' depends on axioms: [propext, Classical.choice, Quot.sound] -/
