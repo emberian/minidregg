@@ -31,6 +31,7 @@ import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
 import Kernel.ParticipantFactoryProvisioning
+import Kernel.FleetTurn
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -2153,6 +2154,41 @@ private def sessionEnrollmentRequest (json : Lean.Json) : Result (List UInt8) :=
      ← nat "$.nonce" (← field "$" "nonce" obj)⟩
   pure <| ApplicationGrainSessionEnrollmentSource.requestCodec.encode request
 
+/-- Source-owned authoring for one fleet turn draft. `fee` and a zero
+publication `sequence` are finalized by the Host plan from pinned tariff and
+current topic head; the signer then signs the finalized command. -/
+private def fleetTurnCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "payer", "spend", "nonce", "fee",
+    "transfer", "publication"] json
+  let transfer ← optional "$.transfer" (fun path value => do
+    let t ← exactObject path ["destination", "asset", "amount"] value
+    pure ({ destination := ← nat (path ++ ".destination") (← field path "destination" t)
+            asset := ← nat (path ++ ".asset") (← field path "asset" t)
+            amount := ← nat (path ++ ".amount") (← field path "amount" t) } :
+      FleetTurn.Transfer)) (← field "$" "transfer" obj)
+  let publication ← optional "$.publication" (fun path value => do
+    let p ← exactObject path ["topic", "sequence", "payload"] value
+    pure ({ topic := ← decodeHex (path ++ ".topic") (← field path "topic" p)
+            sequence := ← nat (path ++ ".sequence") (← field path "sequence" p)
+            payload := ← decodeHex (path ++ ".payload") (← field path "payload" p) } :
+      FleetTurn.Publication)) (← field "$" "publication" obj)
+  let command : FleetTurn.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      payer := ← nat "$.payer" (← field "$" "payer" obj)
+      spend := ⟨← nat "$.spend" (← field "$" "spend" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      fee := ← nat "$.fee" (← field "$" "fee" obj)
+      transfer := transfer
+      publication := publication }
+  -- A draft may leave the topic position zero for the Host plan to assign;
+  -- every other shape rule is the receiver's own.
+  let assigned : FleetTurn.Command := { command with
+    publication := command.publication.map fun (p : FleetTurn.Publication) =>
+      ({ p with sequence := max p.sequence 1 } : FleetTurn.Publication) }
+  unless assigned.shapeOk do
+    failAt "$" "a fleet turn needs a positive transfer to another account or a 1..64-byte topic event with at most 16384 payload bytes"
+  return FleetTurn.commandCodec.encode command
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none) : Result (List UInt8) :=
@@ -2178,6 +2214,7 @@ def author (kind : String) (json : Lean.Json)
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "participant-key-enrollment" => participantKeyEnrollment json
   | "participant-factory-provisioning" => participantFactoryProvisioning json
+  | "fleet-turn" => fleetTurnCommand json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2825,6 +2862,21 @@ private def launchPhysicalReportJson
     ("installedManifestHex", hexJson report.installedManifest),
     ("volumeCustody", custody)]
 
+private def fleetCommandJson (command : FleetTurn.Command) : Lean.Json := .mkObj
+  [("type", "fleet-turn-v1"),
+   ("canonical", hexJson (FleetTurn.commandCodec.encode command)),
+   ("subject", decimal command.subject.value), ("payer", decimal command.payer),
+   ("spend", decimal command.spend.value), ("nonce", decimal command.nonce),
+   ("fee", decimal command.fee),
+   ("transfer", match command.transfer with
+     | none => .null
+     | some t => .mkObj [("destination", decimal t.destination), ("asset", decimal t.asset),
+         ("amount", decimal t.amount)]),
+   ("publication", match command.publication with
+     | none => .null
+     | some p => .mkObj [("topic", hexJson p.topic), ("sequence", decimal p.sequence),
+         ("payload", hexJson p.payload), ("payloadBytes", decimal p.payload.length)])]
+
 /-- Inspect bounded public host products. Header/envelope bytes remain exact hex. -/
 def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
@@ -2972,6 +3024,24 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("command", participantProvisioningCommandJson parsed.command),
          ("sponsorEnvelope", hexJson parsed.ingress.sponsorEnvelope),
          ("signatureVerified", .bool false)]
+  | "fleet-turn" => fleetCommandJson <$> decoded "fleet-turn" FleetTurn.commandCodec bytes
+  | "fleet-turn-plan" => do
+      let plan ← decoded "fleet-turn-plan" FleetTurn.signingPlanCodec bytes
+      let some command := FleetTurn.commandCodec.decode plan.commandBytes
+        | failAt "fleet-turn-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "fleet-turn-plan-v1"), ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes), ("command", fleetCommandJson command),
+         ("header", hexJson plan.header), ("signing", signedHeaderJson plan.header)]
+  | "fleet-turn-ingress" => do
+      let some parsed := FleetTurn.decodeIngress bytes
+        | failAt "fleet-turn-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "fleet-turn-ingress-v1"), ("canonical", hexJson bytes),
+         ("commandBytes", hexJson parsed.ingress.commandBytes),
+         ("command", fleetCommandJson parsed.command),
+         ("envelope", hexJson parsed.ingress.envelope), ("signatureVerified", .bool false)]
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"
@@ -3014,5 +3084,46 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
   | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, or view-capability"
+
+private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
+  [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
+   ("acceptedCount", decimal receipt.acceptedCount),
+   ("imageBoundary", decimal receipt.imageBoundary.value)]
+
+/-- The topic poll view. `payload` is null when the accepted ingress does not
+reproduce the committed digest; the reader must then treat the event as unreadable. -/
+def fleetPollJson (view : NativeHost.FleetPollView) : Lean.Json := .mkObj
+  [("type", "minidregg-fleet-topic-poll-v1"), ("subject", decimal view.subject.value),
+   ("payer", decimal view.payer), ("topic", hexJson view.topic),
+   ("stream", decimal view.stream.value), ("cursor", decimal view.cursor),
+   ("head", decimal view.head),
+   ("events", .arr <| view.events.toArray.map fun event => .mkObj
+     [("sequence", decimal event.sequence), ("eventKey", decimal event.eventKey.value),
+      ("transactionId", decimal event.transactionId.value),
+      ("effectId", decimal event.effectId.value),
+      ("payloadDigest", decimal event.payloadDigest.value),
+      ("payload", match event.payload with | none => .null | some bytes => hexJson bytes),
+      ("author", principalJson event.author),
+      ("bookPreRoot", decimal event.bookPreRoot.value),
+      ("bookPostRoot", decimal event.bookPostRoot.value),
+      ("receipt", match event.receipt with | none => .null | some r => fleetReceiptJson r)])]
+
+def fleetHeadJson (view : NativeHost.FleetHeadView) : Lean.Json := .mkObj
+  [("type", "minidregg-fleet-agent-head-v1"), ("subject", decimal view.subject.value),
+   ("payer", decimal view.payer), ("turns", decimal view.turns),
+   ("head", match view.head with
+     | none => .null
+     | some (_, receipt) => fleetReceiptJson receipt)]
+
+def fleetReceiptLookupJson (transactionId : Nat) (receipt : Option Receipt) : Lean.Json :=
+  match receipt with
+  | none => .mkObj [("type", "absent"), ("transactionId", decimal transactionId)]
+  | some r => .mkObj [("type", "confirmed"), ("receipt", fleetReceiptJson r)]
+
+/-- `{"topic": HEX, "cursor": DECIMAL, "limit": DECIMAL}` -/
+def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := do
+  let obj ← exactObject "$" ["topic", "cursor", "limit"] json
+  pure (← decodeHex "$.topic" (← field "$" "topic" obj),
+    ← nat "$.cursor" (← field "$" "cursor" obj), ← nat "$.limit" (← field "$" "limit" obj))
 
 end Minidregg.Host.Json

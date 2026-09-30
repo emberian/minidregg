@@ -39,6 +39,7 @@ import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
 import Kernel.ParticipantFactoryProvisioningReceiver
+import Kernel.FleetTurnReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -716,6 +717,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : ParticipantFactoryProvisioningReceiver.AcceptedProvisioning config.deployment
         config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantFactoryProvisioningReceiver.intent accepted)
+  | fleetTurn {ingress : FleetTurn.DecodedIngress}
+      (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile config.tariff
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (FleetTurnReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1494,6 +1499,13 @@ private def derive (config : Config) (opened : Opened config)
     (bytes : List UInt8) :
     IO (Except String (Derived config opened)) := do
   let height := logicalHeight config opened.durable
+  if let some ingress := FleetTurn.decodeIngress bytes then
+    match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile config.tariff
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"fleet turn refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨FleetTurnReceiver.intent accepted,
+          .fleetTurn accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ParticipantKeyEnrollment.decodeIngress bytes then
     match ← ParticipantKeyEnrollmentReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

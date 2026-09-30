@@ -24,6 +24,8 @@ mod drain;
 #[cfg(unix)]
 mod fn_frontier;
 #[cfg(unix)]
+mod fleet;
+#[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
@@ -184,6 +186,12 @@ usage:
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
+  mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
+  mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
+  mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
+  mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
+  mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
+  mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -2008,6 +2016,7 @@ fn run(mut args: Args) -> Result<()> {
         "enroll" => participant_enrollment::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
+        "fleet" => fleet::run(args),
         #[cfg(unix)]
         "selected-exchange" => {
             let phase = args.required("phase")?;

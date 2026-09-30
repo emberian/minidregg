@@ -499,6 +499,94 @@ def provisionSubmitLoaded (config : Config) (opened : Opened config)
       config.storage.transport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused "provision-factory-observe" s!"{repr reason}"
+/-! ## Fleet turns: plan, assembly, submit, lookup, topic reads, heads -/
+
+/-- Bound on page reads when walking one topic stream (4 events per page). -/
+def fleetMaxPages : Nat := 4096
+
+/-- The finalized command fills exactly two draft fields: the pinned base
+tariff and, when the draft's publication position is zero, the stream's next
+position on this image. Every other field is the draft's. -/
+def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.Command) :
+    FleetTurn.Command :=
+  let publication := draft.publication.map fun publication =>
+    if publication.sequence = 0 then
+      let head := FleetTurn.streamHead config.deployment opened.directory.directory
+        (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
+        fleetMaxPages
+      { publication with sequence := head + 1 }
+    else publication
+  { draft with fee := config.tariff.base, publication := publication }
+
+def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetTurn.Command) :
+    Except String FleetTurn.SigningPlan := do
+  let ambient : FleetTurn.Ambient := ⟨config.federation, logicalHeight config opened.durable⟩
+  let prepared ← (FleetTurn.prepare config.deployment config.profile config.tariff ambient
+    opened.durable command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
+  let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
+    (FleetTurn.marker config.deployment.domain config.profile.semantics command)
+    ⟨.account, FleetTurn.request prepared.authority.snapshot config.profile.semantics ambient
+      command⟩).mapError (fun reason => s!"fleet turn signer key: {repr reason}")
+  pure ⟨config.deployment.domain, config.profile.semantics, FleetTurn.commandCodec.encode command,
+    CredentialSignedEnvelopeController.headerCodec.encode selected⟩
+
+/-- Planning reads the paying account's balance and topic pages, so it is
+released only behind a current signed observation of that account by the
+turn's own signer. -/
+def fleetObservedAccount (config : Config) (opened : Opened config)
+    (signedObservationBytes : List UInt8) : IO (Except String (SubjectId × Nat)) := do
+  let some signed := NativeObservationCodec.signedCodec.decode signedObservationBytes
+    | return .error "fleet observation refused"
+  match signed.challenge.intent.purpose with
+  | .query query =>
+      if query.kind != .account || query.view != .resource then
+        return .error "fleet observation refused"
+      match ← NativeObservationController.authorize config.signature
+          ⟨opened.directory, opened.authority⟩ config.profile config.federation
+          config.genesisHeight signed with
+      | .error _ => return .error "fleet observation refused"
+      | .ok _ => return .ok (signed.challenge.intent.subject, query.target)
+  | .prepare _ => return .error "fleet observation refused"
+
+def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes draftBytes : List UInt8) :
+    IO (Except String FleetTurn.SigningPlan) := do
+  let some draft := FleetTurn.commandCodec.decode draftBytes
+    | return .error "noncanonical fleet turn draft"
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error detail => return .error detail
+  | .ok (subject, account) =>
+      if subject != draft.subject || account != draft.payer then
+        return .error "fleet observation refused"
+      return fleetPlanLoaded config opened (fleetFinalize config opened draft)
+
+def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "fleet signature must be 64 bytes"
+  let header ← need "noncanonical fleet turn header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let _ ← need "noncanonical fleet turn plan command"
+    (FleetTurn.commandCodec.decode plan.commandBytes)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (FleetTurn.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+/-- `confirm` seals the original receipt from the image the caller already
+tracks (a session refreshes by the appended delta); it never substitutes a
+different admission. -/
+def fleetSubmitLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO Outcome := do
+  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile config.tariff
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
+      config.storage.transport opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  -- The signed header names an authority root older than the loaded one: the
+  -- plan was made against an earlier image and nothing moved. That is the
+  -- typed contention outcome (re-plan against the new state), decided from the
+  -- header's root before any signature is examined.
+  | .rejected (.signature (.envelope .staleAuthority)) => return .contention
+  | .rejected reason => return refused "fleet-turn" s!"{repr reason}"
   | .transactionConflict => return refused "replay" "transaction identity conflict"
   | .durableRejected reason => return refused "durable" s!"{repr reason}"
   | .contention => return .contention
@@ -512,6 +600,14 @@ def provisionLookupLoaded (config : Config) (opened : Opened config)
   | none => refused "provision-factory-observe" "noncanonical signed ingress"
   | some ingress =>
     match ParticipantFactoryProvisioningReceiver.replay config.deployment.domain
+/-- Receipt-only historical lookup of one retained ingress. Absence never
+submits fresh work. -/
+def fleetLookupLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : Outcome :=
+  match FleetTurn.decodeIngress bytes with
+  | none => refused "fleet-turn" "noncanonical signed ingress"
+  | some ingress =>
+    match FleetTurnReceiver.replay config.deployment.domain
         config.profile.semantics opened.durable ingress with
     | some (.ok receipt) =>
         match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
@@ -519,6 +615,97 @@ def provisionLookupLoaded (config : Config) (opened : Opened config)
         | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
     | some (.error _) => refused "replay" "transaction identity conflict"
     | none => .absent
+
+/-- Exact receipt of one accepted transaction, by transaction id alone. It
+names the original accepted prefix; a later tip does not replace it. -/
+def receiptByTransactionLoaded (config : Config) (opened : Opened config)
+    (transactionId : Digest) : Option Receipt := do
+  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+  historicalReceipt config opened.durable transactionId record.event.eventId
+
+structure FleetPolledEvent where
+  sequence : Nat
+  eventKey : Digest
+  transactionId : Digest
+  effectId : Digest
+  payloadDigest : Digest
+  /-- The exact payload from the accepted signed ingress, present only when
+  its digest equals the one the page committed. -/
+  payload : Option (List UInt8)
+  author : Hyperdocument.PrincipalRef
+  bookPreRoot : Digest
+  bookPostRoot : Digest
+  receipt : Option Receipt
+
+structure FleetPollView where
+  subject : SubjectId
+  payer : Nat
+  topic : List UInt8
+  stream : Digest
+  cursor : Nat
+  head : Nat
+  events : List FleetPolledEvent
+
+def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId : Digest) :
+    Option FleetTurn.DecodedIngress := do
+  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+  FleetTurn.decodeIngress record.event.canonicalBytes
+
+def fleetPolledEvent (config : Config) (opened : Opened config)
+    (entry : FleetTurn.EventEntry) : FleetPolledEvent :=
+  let record := entry.record
+  let payload := (fleetJournalTurn opened record.requestId).bind fun ingress =>
+    ingress.command.publication.bind fun publication =>
+      if FleetTurn.payloadDigest config.deployment.domain publication.payload = record.operation.digest
+      then some publication.payload else none
+  let receipt := receiptByTransactionLoaded config opened record.requestId
+  ⟨record.semanticVersion, entry.key.digest, record.requestId, record.effectId,
+    record.operation.digest, payload, record.author, record.preStateRoot, record.postStateRoot,
+    receipt⟩
+
+def fleetPollMax : Nat := 64
+
+/-- Events of `(observed account, topic)` strictly after `cursor`, behind a
+current signed observation of that account. Reading an account's topics is
+the account's own observe grant; a topic label confers nothing. -/
+def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
+    IO (Except String FleetPollView) := do
+  if topic.isEmpty || topic.length > FleetTurn.maxTopicBytes then
+    return .error "fleet topic must be 1..64 bytes"
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error detail => return .error detail
+  | .ok (subject, payer) =>
+      let stream := FleetTurn.streamDigest config.deployment.domain payer topic
+      let directory := opened.directory.directory
+      let entries := FleetTurn.eventsSince config.deployment directory stream cursor
+        (min limit fleetPollMax)
+      return .ok ⟨subject, payer, topic, stream, cursor,
+        FleetTurn.streamHead config.deployment directory stream fleetMaxPages,
+        entries.map (fleetPolledEvent config opened)⟩
+
+structure FleetHeadView where
+  subject : SubjectId
+  payer : Nat
+  /-- Accepted fleet turns paid by this account, in journal order. -/
+  turns : Nat
+  head : Option (Digest × Receipt)
+
+/-- The newest accepted fleet turn paid by the observed account. This is a
+scan of the accepted journal, decoding each retained ingress exactly. -/
+def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes : List UInt8) : IO (Except String FleetHeadView) := do
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error detail => return .error detail
+  | .ok (subject, payer) =>
+      let paid := opened.durable.image.accepted.filter fun record =>
+        match FleetTurn.decodeIngress record.event.canonicalBytes with
+        | some ingress => ingress.command.payer == payer
+        | none => false
+      let head := paid.getLast?.bind fun record =>
+        (historicalReceipt config opened.durable record.transactionId record.event.eventId).map
+          fun receipt => (record.transactionId, receipt)
+      return .ok ⟨subject, payer, paid.length, head⟩
 
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
