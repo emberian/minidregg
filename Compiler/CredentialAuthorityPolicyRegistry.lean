@@ -80,8 +80,9 @@ def projection (snapshot : Snapshot) :
   snapshot.revocationUniverse.stateProjection
 
 @[simp] theorem projection_authState (snapshot : Snapshot) :
-    (projection snapshot).authState snapshot.cell = snapshot.authState :=
-  CredentialAuthorityState.authState_identity_projection _ _
+    (projection snapshot).authState snapshot.cell = snapshot.authState := by
+  rw [snapshot.authStateExact, projection, CredentialAuthorityState.authState_identity_projection]
+  rfl
 
 /-- Data returned by the actual resolver retains every checked source fact. -/
 structure LoadedPolicy (snapshot : Snapshot) (store : PayloadStore)

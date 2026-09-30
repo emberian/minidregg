@@ -356,7 +356,8 @@ theorem Accepted.revoked [DecidableEq F]
     (accepted : Accepted prepared envelope) :
     RevocationKey.capability command.capability ∈
       (authState prepared.authority.snapshot.revocationUniverse accepted.semantic.prepared.post).revoked :=
-  revocation_post_is_authorizer_member accepted.semantic
+  by simpa using (revocation_post_is_authorizer_member
+    (accepted.semantic.recast prepared.authority.snapshot.authStateExact))
 
 theorem Accepted.rejects_victim [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
@@ -399,7 +400,10 @@ theorem Accepted.grants_preserved [DecidableEq F]
     (accepted : Accepted prepared envelope) (other : ResourceKind) (identifier : CapabilityId) :
     readCapability accepted.semantic.prepared.post other identifier =
       readCapability prepared.authority.snapshot.cell other identifier := by
-  exact revoke_frame accepted.semantic ⟨.capability other, identifier⟩
+  have frame := revoke_frame (accepted.semantic.recast prepared.authority.snapshot.authStateExact)
+    ⟨.capability other, identifier⟩
+  simp only [AcceptedCellEffect.recast_prepared] at frame
+  exact frame
     (by
       intro member
       rcases Finset.mem_insert.mp member with impossible | member
@@ -412,14 +416,16 @@ theorem Accepted.policy_generation_preserved [DecidableEq F]
     (accepted : Accepted prepared envelope) (policy : PolicyId) :
     policyEpochAt accepted.semantic.prepared.post policy =
       policyEpochAt prepared.authority.snapshot.cell policy := by
-  exact congrArg (fun value : Option Nat => value.getD 0)
-    (revoke_frame accepted.semantic ⟨.policyEpoch, policy⟩
+  have frame := revoke_frame (accepted.semantic.recast prepared.authority.snapshot.authStateExact)
+    ⟨.policyEpoch, policy⟩
       (by
       intro member
       rcases Finset.mem_insert.mp member with impossible | member
       · cases impossible
       · have impossible := Finset.mem_singleton.mp member
-        cases impossible))
+        cases impossible)
+  rw [AcceptedCellEffect.recast_prepared] at frame
+  exact congrArg (fun value : Option Nat => value.getD 0) frame
 
 /-- The CURRENT resource law evaluates the scoped source-derived old/post
 authority view. It may refuse its own management, including owner revocation. -/

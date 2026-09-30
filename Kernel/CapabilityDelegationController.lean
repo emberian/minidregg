@@ -430,9 +430,12 @@ def authorize [DecidableEq F] (prepared : Prepared deployment profile ambient du
         throw .policyInputRange
       if !decide (castInjOn F (intsOf committed.record.predicate witness.oldState witness.newState)) then
         throw .policyCastAlias
-      let epochExact : wanted.policyEpoch = prepared.authority.snapshot.authState.policyEpoch wanted.policyId :=
-        prepared.descent.policyCurrent
-      let revisionExact : wanted.policyRevision = prepared.authority.snapshot.authState.policyRevision wanted.policyId := rfl
+      let epochExact : wanted.policyEpoch = prepared.authority.snapshot.authState.policyEpoch wanted.policyId := by
+        rw [CredentialAuthorityDomain.Snapshot.authState_policyEpoch]
+        exact prepared.descent.policyCurrent
+      let revisionExact : wanted.policyRevision = prepared.authority.snapshot.authState.policyRevision wanted.policyId := by
+        rw [CredentialAuthorityDomain.Snapshot.authState_policyRevision]
+        rfl
       match admitted : CanonicalPolicyAdmission.admit config prepared.authority.snapshot.authState wanted evidence witness
           (.policy wanted.policyId wanted.policyRevision) epochExact revisionExact with
       | none => .error .policyRejected
@@ -528,7 +531,9 @@ theorem Accepted.policy_evaluated_actual_post [DecidableEq F]
   have sound := canonical_context_verifies_sound (config := policyConfig prepared)
     (step prepared) rfl (Bool.and_eq_true_iff.mp verified).2
   obtain ⟨committed, resolved, evaluated⟩ := sound.2.2.2
-  exact ⟨committed, resolved, evaluated⟩
+  refine ⟨committed, ?_, evaluated⟩
+  rw [CredentialAuthorityDomain.Snapshot.authState_policyRevision]
+  exact resolved
 
 /-- info: 'Minidregg.Kernel.CapabilityDelegationController.project_noninterference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms project_noninterference

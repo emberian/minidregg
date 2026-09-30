@@ -52,14 +52,7 @@ set_option autoImplicit false
 
 abbrev Cell := CredentialAuthorityCell.Cell
 
-/-- The deployment's authority domain: its domain digest and its one cell. -/
-structure Snapshot where
-  domain : Digest
-  cell : Cell
-
 namespace Snapshot
-
-def logical (snapshot : Snapshot) : Store layout := snapshot.cell.logical
 
 /-- The revocation keys a stored capability names: its own, its ancestors'
 and its channels'. -/
@@ -82,6 +75,73 @@ def keysAt (store : Store layout) : Address layout → Finset RevocationKey
 
 def revocationKeysOf (store : Store layout) : Finset RevocationKey :=
   store.support.biUnion (keysAt store)
+
+end Snapshot
+
+/-- The authorization projection of an authority cell: its revocation universe
+is derived from the cell's own support (`Snapshot.revocationUniverse`). -/
+def authStateOf (cell : Cell) : AuthState :=
+  CredentialAuthorityState.authState ⟨Snapshot.revocationKeysOf cell.logical⟩ cell
+
+/-- The deployment's authority domain: its domain digest, its one cell, and the
+cell's authorization projection, computed once when the snapshot is built
+(`authStateExact` pins it to `authStateOf`). Every request reads it; recomputing
+it walked every address of the cell, nullifiers included, on each read. -/
+structure Snapshot where
+  domain : Digest
+  cell : Cell
+  authState : AuthState
+  authStateExact : authState = authStateOf cell
+
+/-- The only constructor callers use. -/
+def Snapshot.ofCell (domain : Digest) (cell : Cell) : Snapshot :=
+  ⟨domain, cell, authStateOf cell, rfl⟩
+
+/-! The projection's coordinates read the cell, whatever the snapshot's
+provenance; these are what the definitional unfolding used to give. -/
+
+@[simp] theorem Snapshot.authState_policyEpoch (snapshot : Snapshot) (policy : PolicyId) :
+    snapshot.authState.policyEpoch policy = policyEpochAt snapshot.cell policy := by
+  rw [snapshot.authStateExact]; rfl
+
+@[simp] theorem Snapshot.authState_policyRevision (snapshot : Snapshot) (policy : PolicyId) :
+    snapshot.authState.policyRevision policy = policyRevisionAt snapshot.cell policy := by
+  rw [snapshot.authStateExact]; rfl
+
+@[simp] theorem Snapshot.authState_issuerEpoch (snapshot : Snapshot) (issuer : IssuerId) :
+    snapshot.authState.issuerEpoch issuer = issuerEpochAt snapshot.cell issuer := by
+  rw [snapshot.authStateExact]; rfl
+
+@[simp] theorem Snapshot.authState_subjectKeyEpoch (snapshot : Snapshot) (subject : SubjectId) :
+    snapshot.authState.subjectKeyEpoch subject = subjectKeyEpochAt snapshot.cell subject := by
+  rw [snapshot.authStateExact]; rfl
+
+@[simp] theorem Snapshot.authState_policyAddress (snapshot : Snapshot) :
+    snapshot.authState.policyAddress = policyAddressAt snapshot.cell := by
+  rw [snapshot.authStateExact]; rfl
+
+@[simp] theorem Snapshot.authState_roots (snapshot : Snapshot) :
+    snapshot.authState.capabilityRoot = snapshot.cell.root ∧
+      snapshot.authState.revocationRoot = snapshot.cell.root ∧
+      snapshot.authState.policyRoot = snapshot.cell.root := by
+  rw [snapshot.authStateExact]; exact ⟨rfl, rfl, rfl⟩
+
+/-- A snapshot is its domain and cell; the projection is determined. -/
+theorem Snapshot.ext_cell {left right : Snapshot} (domains : left.domain = right.domain)
+    (cells : left.cell = right.cell) : left = right := by
+  cases left with
+  | mk leftDomain leftCell leftState leftExact =>
+      cases right with
+      | mk rightDomain rightCell rightState rightExact =>
+          simp only at domains cells
+          subst domains cells
+          have states : leftState = rightState := leftExact.trans rightExact.symm
+          subst states
+          rfl
+
+namespace Snapshot
+
+def logical (snapshot : Snapshot) : Store layout := snapshot.cell.logical
 
 /-- The revocation universe is derived from the cell's own support: every
 revoked key, every registered key, and every key a stored capability names
@@ -146,13 +206,10 @@ theorem mem_revocationUniverse_of_stored (snapshot : Snapshot) {kind : ResourceK
     key ∈ snapshot.revocationUniverse.revocationKeys :=
   (snapshot.mem_revocationUniverse_iff key).mpr (Or.inr (Or.inr ⟨kind, identifier, stored, read, named⟩))
 
-def authState (snapshot : Snapshot) : AuthState :=
-  CredentialAuthorityState.authState snapshot.revocationUniverse snapshot.cell
-
 /-- Projected revocation membership is exactly the cell's read. -/
 theorem mem_revoked_iff (snapshot : Snapshot) (key : RevocationKey) :
     key ∈ snapshot.authState.revoked ↔ isRevoked snapshot.cell key = true := by
-  rw [authState, CredentialAuthorityState.mem_authState_revoked_iff]
+  rw [snapshot.authStateExact, authStateOf, CredentialAuthorityState.mem_authState_revoked_iff]
   constructor
   · exact And.right
   · intro revoked
@@ -166,7 +223,7 @@ end Snapshot
 accepted cell re-encodes to exactly the loaded bytes (`load_bytes`). -/
 def load (domain : Digest) (bytes : List UInt8) : Option Snapshot :=
   (CredentialAuthorityCell.materializer.codec.decode bytes).map fun store =>
-    ⟨domain, materialize CredentialAuthorityCell.materializer store⟩
+    Snapshot.ofCell domain (materialize CredentialAuthorityCell.materializer store)
 
 theorem load_bytes {domain : Digest} {bytes : List UInt8} {snapshot : Snapshot}
     (loaded : load domain bytes = some snapshot) :
@@ -180,7 +237,7 @@ theorem load_bytes {domain : Digest} {bytes : List UInt8} {snapshot : Snapshot}
       exact ⟨CredentialAuthorityCell.decode_canonical decoded, rfl⟩
 
 theorem load_cell (domain : Digest) (cell : Cell) :
-    load domain cell.bytes = some ⟨domain, cell⟩ := by
+    load domain cell.bytes = some (Snapshot.ofCell domain cell) := by
   unfold load
   rw [CredentialAuthorityCell.cell_decode cell]
   rfl
@@ -360,7 +417,7 @@ theorem Prepared.frame {snapshot : Snapshot} {patch : Patch layout}
 /-- The prepared post as a snapshot of the same domain. -/
 def Prepared.post {snapshot : Snapshot} {patch : Patch layout}
     (prepared : Prepared snapshot patch) : Snapshot :=
-  ⟨snapshot.domain, prepared.validated.apply⟩
+  Snapshot.ofCell snapshot.domain prepared.validated.apply
 
 theorem Prepared.revision_monotone {snapshot : Snapshot} {patch : Patch layout}
     (prepared : Prepared snapshot patch) : snapshot.revision ≤ prepared.post.revision :=
@@ -700,7 +757,8 @@ theorem Snapshot.authState_extension_exact (snapshot : Snapshot)
       exact ⟨(snapshot.mem_revocationUniverse_iff key).mpr (Or.inl live), live⟩
     · rintro ⟨registered, live⟩
       exact ⟨Or.inl registered, live⟩
-  unfold CredentialAuthorityState.authState Snapshot.authState
+  rw [snapshot.authStateExact]
+  unfold CredentialAuthorityState.authState authStateOf
   dsimp only
   rw [revokedExact]
   rfl
@@ -719,7 +777,7 @@ def store : Store layout :=
       ⟨⟨.policyAddress, (policy, 3)⟩, (⟨3300⟩ : Digest)⟩,
       ⟨⟨.nullifier, (5 : Nat)⟩, ()⟩] : List (StoreCodec.Entry layout))
 
-def snapshot : Snapshot := ⟨⟨91⟩, materialize CredentialAuthorityCell.materializer store⟩
+def snapshot : Snapshot := Snapshot.ofCell ⟨91⟩ (materialize CredentialAuthorityCell.materializer store)
 
 theorem head : snapshot.currentHead policy = some ⟨3, ⟨3300⟩⟩ := by decide
 

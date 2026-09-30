@@ -88,7 +88,7 @@ def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : P
     match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
     | none => none
     | some cell =>
-        some ⟨⟨deployment.domain, cell⟩, valid, rfl, (decodeCell_canonical decoded).symm⟩
+        some ⟨Snapshot.ofCell deployment.domain cell, valid, rfl, (decodeCell_canonical decoded).symm⟩
   else none
 
 /-- Refuting pole: a pinned identifier that does not hold a live authority cell
@@ -130,19 +130,8 @@ theorem Loaded.snapshot_unique {deployment : CanonicalCellRegistry.Deployment}
     have decoded := decodeCell_bytes left.snapshot.cell
     rw [← left.observed, right.observed, decodeCell_bytes] at decoded
     exact (Option.some.inj decoded).symm
-  cases hl : left.snapshot with
-  | mk leftDomain leftCell =>
-      cases hr : right.snapshot with
-      | mk rightDomain rightCell =>
-          have domains : leftDomain = rightDomain := by
-            have l := left.domainExact
-            have r := right.domainExact
-            rw [hl] at l
-            rw [hr] at r
-            exact l.trans r.symm
-          rw [hl, hr] at cells
-          simp only at cells
-          rw [domains, cells]
+  exact CredentialAuthorityDomain.Snapshot.ext_cell
+    (left.domainExact.trans right.domainExact.symm) cells
 
 theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :

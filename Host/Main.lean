@@ -830,7 +830,7 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
         n := n + (Minidregg.Theory.Store.Store.set store ⟨.nullifier, i⟩ none).support.card
       pure n
     discard <| timed s!"K={k} authState x3" do
-      let snap : CredentialAuthorityDomain.Snapshot := ⟨config.deployment.domain, cell⟩
+      let snap := CredentialAuthorityDomain.Snapshot.ofCell config.deployment.domain cell
       let mut n := 0
       for i in [0:3] do n := n + snap.authState.revoked.card + snap.authState.policyEpoch ⟨i⟩
       pure n

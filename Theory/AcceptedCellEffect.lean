@@ -355,6 +355,30 @@ def prepared
   PreparedTurn.ofValidatedPatch accepted.validated
     (family.nullifier declaration outcome)
 
+/-- The authorization state is a parameter the effect was checked against; an
+equal state carries the same accepted effect, with the same validated patch
+(so the same prepared post). Used where a snapshot caches its projection. -/
+def recast {other : AuthState} (same : authState = other)
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome) :
+    AcceptedCellEffect (portal := portal) (authState := other)
+      family request pre declaration outcome :=
+  same ▸ accepted
+
+@[simp] theorem recast_validated {other : AuthState} (same : authState = other)
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome) :
+    (accepted.recast same).validated = accepted.validated := by
+  subst same
+  rfl
+
+@[simp] theorem recast_prepared {other : AuthState} (same : authState = other)
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome) :
+    (accepted.recast same).prepared = accepted.prepared := by
+  subst same
+  rfl
+
 @[simp] theorem prepared_post
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome) :
