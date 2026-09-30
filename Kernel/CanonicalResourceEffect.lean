@@ -15,7 +15,7 @@ therefore constructs the ordinary `AcceptedCellEffect` without equality side
 conditions.
 
 The resource laws below read their delta from the exact accepted pre/post book.
-They work for `TypedCellHyperedge` and the fixed-resource-schema specialization
+They work for `TypedCellHyperedge` and the fixed-resource-layout specialization
 of `MultiCellHyperedge`; there is no callback capable of reporting a different
 balance vector from the installed patch.  Physical settlement, durable CAS,
 cryptographic collision resistance, sharding, and wall-clock lease expiry remain
@@ -33,16 +33,9 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CanonicalResourceKernel
+open Minidregg.Theory.Store
 
 set_option autoImplicit false
-
-local instance schemaFieldDecidableEq : DecidableEq CanonicalResourceKernel.schema.Field := by
-  change DecidableEq CanonicalResourceKernel.Field
-  infer_instance
-
-local instance schemaResourceDecidableEq : DecidableEq CanonicalResourceKernel.schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
 
 /-! ## Canonical first-order operation and posting commitments -/
 
@@ -132,7 +125,7 @@ structure RequestContext where
 The operation/effect commitments distinguish mint, burn, fee, and lease from an
 ordinary transfer; the account target is never supplied separately. -/
 def RequestContext.request
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (context : RequestContext) (pre : CellState.Materialized M)
     (operation : CanonicalResourceKernel.Operation) : Request .account where
   domain := context.domain
@@ -153,28 +146,28 @@ def RequestContext.request
   cost := operation.feeDebit
 
 @[simp] theorem RequestContext.request_target
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (context : RequestContext) (pre : CellState.Materialized M)
     (operation : CanonicalResourceKernel.Operation) :
     (context.request pre operation).target.value = operation.posting.source :=
   rfl
 
 @[simp] theorem RequestContext.request_argsDigest
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (context : RequestContext) (pre : CellState.Materialized M)
     (operation : CanonicalResourceKernel.Operation) :
     (context.request pre operation).argsDigest = argsDigest operation :=
   rfl
 
 @[simp] theorem RequestContext.request_effectsDigest
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (context : RequestContext) (pre : CellState.Materialized M)
     (operation : CanonicalResourceKernel.Operation) :
     (context.request pre operation).effectsDigest = effectDigest operation :=
   rfl
 
 @[simp] theorem RequestContext.request_preRoot
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (context : RequestContext) (pre : CellState.Materialized M)
     (operation : CanonicalResourceKernel.Operation) :
     (context.request pre operation).preStateRoot = pre.root :=
@@ -193,9 +186,9 @@ def unitCodec : LawfulCodec Unit where
 posting reads the current book.  Its declaration remains first-order: only the
 operation crosses the boundary, while the family closes over trusted state. -/
 def family
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (pre : CellState.Materialized M) (context : RequestContext) :
-    SemanticEffectFamily.{0, 0, 0, 0, 0, 0} CanonicalResourceKernel.schema M Unit where
+    SemanticEffectFamily.{0, 0, 0, 0, 0} CanonicalResourceKernel.layout M Unit where
   pre := pre
   Declaration := CanonicalResourceKernel.Operation
   request := fun operation => ⟨.account, context.request pre operation⟩
@@ -219,7 +212,7 @@ def family
 /-- An already-admitted canonical resource transition enters the universal
 accepted-effect path under authority for the one fully derived request. -/
 def toCellEffect
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -230,7 +223,6 @@ def toCellEffect
   preStateBound := rfl
   requestBound := rfl
   effectsDigestBound := rfl
-  preRootBound := rfl
   modeEvidence := PLift.up accepted.admission
   validated := accepted.validated
   postcondition := ⟨accepted.validated.resultAt, accepted.post_logicalBook⟩
@@ -238,7 +230,7 @@ def toCellEffect
   disclosureAllowed := rfl
 
 @[simp] theorem toCellEffect_prepared_post
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -247,7 +239,7 @@ def toCellEffect
   rfl
 
 @[simp] theorem toCellEffect_post_book
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -259,8 +251,22 @@ def toCellEffect
     operation.apply (CanonicalResourceKernel.logicalBook pre.logical)
   exact accepted.post_logicalBook
 
+/-- Refuting pole of the root binding: a request quoting any root other than
+the canonical pre-cell's has no accepted resource effect, whatever authority
+accompanies it.  The accepted token's patch is validated at the request's own
+quoted root, so a stale quote cannot be carried onto a newer book. -/
+theorem no_cellEffect_of_stale_request
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
+    {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
+    {portal : Portal} {authState : AuthState} (context : RequestContext)
+    {kind : ResourceKind} (request : Request kind)
+    (stale : request.preStateRoot ≠ pre.root) :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (family pre context) request pre operation ()) :=
+  ⟨fun accepted => stale accepted.preRootBound⟩
+
 theorem toCellEffect_conserves
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -268,8 +274,8 @@ theorem toCellEffect_conserves
     (asset : CanonicalResourceKernel.AssetId) :
     (CanonicalResourceKernel.logicalBook
       (toCellEffect accepted context authorization).prepared.post.logical).totalAsset asset =
-      (CanonicalResourceKernel.logicalBook pre.logical).totalAsset asset := by
-  simpa using accepted.conserves asset
+      (CanonicalResourceKernel.logicalBook pre.logical).totalAsset asset :=
+  accepted.conserves asset
 
 /-! ## Birth batches retain factory and every source's old authority
 
@@ -303,7 +309,7 @@ def sourceArgsDigest {registry : CellRegistry.TypeRegistry Digest}
     (sourceArgsBytes encoding descriptor position)).digest
 
 def batchSourceRequest {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (encoding : ResourceBirth.SourceEncoding registry) (pre : CellState.Materialized M)
     (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry)
     (position : Fin descriptor.resourceBatch.operations.length) : Request .account :=
@@ -319,7 +325,7 @@ def feePosition {registry : CellRegistry.TypeRegistry Digest}
   ⟨descriptor.funding.length, by simp [ResourceBirth.Descriptor.resourceBatch]⟩
 
 def birthRequest {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (encoding : ResourceBirth.SourceEncoding registry) (pre : CellState.Materialized M)
     (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry) :
     Request .account :=
@@ -331,7 +337,7 @@ def birthRequest {registry : CellRegistry.TypeRegistry Digest}
   simp [feePosition, ResourceBirth.Descriptor.resourceBatch]
 
 @[simp] theorem birthRequest_target {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (encoding : ResourceBirth.SourceEncoding registry) (pre : CellState.Materialized M)
     (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry) :
     (birthRequest encoding pre contexts descriptor).target.value = descriptor.fee.payer := by
@@ -340,7 +346,7 @@ def birthRequest {registry : CellRegistry.TypeRegistry Digest}
   rfl
 
 @[simp] theorem birthRequest_cost {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (encoding : ResourceBirth.SourceEncoding registry) (pre : CellState.Materialized M)
     (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry) :
     (birthRequest encoding pre contexts descriptor).cost = descriptor.fee.amount := by
@@ -352,7 +358,7 @@ def birthRequest {registry : CellRegistry.TypeRegistry Digest}
 the same old authority snapshot. Their portal-indexed authorization tokens
 remain distinct; one context is never coerced into the other. -/
 structure BirthBatchEvidence {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
     (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
     (pre : CellState.Materialized M) (contexts : Nat → RequestContext)
@@ -364,11 +370,11 @@ structure BirthBatchEvidence {registry : CellRegistry.TypeRegistry Digest}
     Authorized sourcePortal oldAuthority (batchSourceRequest encoding pre contexts descriptor position)
 
 def birthFamily {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
     (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
     (pre : CellState.Materialized M) (contexts : Nat → RequestContext) :
-    SemanticEffectFamily.{0, 0, 0, 0, 0, 0} CanonicalResourceKernel.schema M Unit where
+    SemanticEffectFamily.{0, 0, 0, 0, 0} CanonicalResourceKernel.layout M Unit where
   pre := pre
   Declaration := ResourceBirth.Descriptor registry
   declarationCodec := encoding.codec
@@ -393,7 +399,7 @@ This contains no factory or source authorization and cannot mint an accepted
 effect until `PreparedPatch.accept` receives the complete `BirthBatchEvidence`.
 -/
 def prepareBirthPatch {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
     (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
     (pre : CellState.Materialized M) (contexts : Nat → RequestContext)
@@ -411,7 +417,7 @@ def prepareBirthPatch {registry : CellRegistry.TypeRegistry Digest}
 batch result. A controller may use that result to assemble its policy context
 and then bind the prepared family to the resulting real portal. -/
 @[simp] theorem prepareBirthPatch_post {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (pins : ResourceBirth.FactoryPins) (encoding : ResourceBirth.SourceEncoding registry)
     (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState) (factoryPreRoot : Digest) (height : Height)
     (pre : CellState.Materialized M) (contexts : Nat → RequestContext)
@@ -422,7 +428,7 @@ and then bind the prepared family to the resulting real portal. -/
         (AcceptedBatch.ofAdmission admission).post := rfl
 
 def toBirthCellEffect {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
     {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
@@ -437,7 +443,7 @@ def toBirthCellEffect {registry : CellRegistry.TypeRegistry Digest}
       (evidence.sources (feePosition descriptor)) rfl rfl rfl .sealed rfl
 
 theorem toBirthCellEffect_post_book {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
     {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
@@ -449,7 +455,7 @@ theorem toBirthCellEffect_post_book {registry : CellRegistry.TypeRegistry Digest
   (AcceptedBatch.ofAdmission evidence.admission).post_logicalBook
 
 theorem toBirthCellEffect_conserves {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
     {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
@@ -461,7 +467,7 @@ theorem toBirthCellEffect_conserves {registry : CellRegistry.TypeRegistry Digest
   (AcceptedBatch.ofAdmission evidence.admission).conserves asset
 
 def birth_sources_authorized {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
     {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
@@ -474,7 +480,7 @@ def birth_sources_authorized {registry : CellRegistry.TypeRegistry Digest}
 /-- Possessing the factory authorization never authorizes an unrelated payer.
 One missing source permission makes the batch evidence uninhabited. -/
 theorem no_birthEvidence_of_unauthorized_source {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pins : ResourceBirth.FactoryPins} {encoding : ResourceBirth.SourceEncoding registry}
     {factoryPortal sourcePortal : Portal} {oldAuthority : AuthState} {factoryPreRoot : Digest} {height : Height}
     {pre : CellState.Materialized M} {contexts : Nat → RequestContext}
@@ -487,23 +493,28 @@ theorem no_birthEvidence_of_unauthorized_source {registry : CellRegistry.TypeReg
   ⟨fun evidence => refused.false (evidence.sources position)⟩
 
 @[simp] theorem batchSourceRequest_target {registry : CellRegistry.TypeRegistry Digest}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (encoding : ResourceBirth.SourceEncoding registry) (pre : CellState.Materialized M)
     (contexts : Nat → RequestContext) (descriptor : ResourceBirth.Descriptor registry)
     (position : Fin descriptor.resourceBatch.operations.length) :
     (batchSourceRequest encoding pre contexts descriptor position).target.value =
       (descriptor.resourceBatch.operations.get position).posting.source := rfl
 
-theorem birth_one_book_write {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+/-- A birth batch is one guarded book operation: an overwrite at the exact
+present book, or an allocation of an absent one. -/
+theorem birth_one_book_write {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (pre : CellState.Materialized M) (batch : Batch) :
-    (batch.patch pre).fieldWrites.length = 1 ∧
-      (batch.patch pre).fieldFootprint = {.book} := ⟨rfl, rfl⟩
+    (batch.patch pre).length = 1 ∧
+      Patch.writeFootprint (batch.patch pre) = {bookAddress} := by
+  refine ⟨?_, bookPatch_writeFootprint _ _⟩
+  unfold Batch.patch bookPatch
+  split <;> rfl
 
 /-! ## Patch-derived resource laws -/
 
 /-- The only balance delta used by the adapters: exact accepted post minus exact
 canonical pre.  It is not an executor touch count or caller declaration. -/
-def bookDelta (pre post : CellState.LogicalState CanonicalResourceKernel.schema)
+def bookDelta (pre post : Store CanonicalResourceKernel.layout)
     (asset : CanonicalResourceKernel.AssetId) : Int :=
   (CanonicalResourceKernel.logicalBook post).totalAsset asset -
     (CanonicalResourceKernel.logicalBook pre).totalAsset asset
@@ -511,13 +522,13 @@ def bookDelta (pre post : CellState.LogicalState CanonicalResourceKernel.schema)
 /-- Same-cell resource law for `TypedCellHyperedge`, derived from every leg's
 accepted patch application. -/
 def typedResourceLaw
-    (M : CellState.Materializer CanonicalResourceKernel.schema Digest) (portal : Portal) :
-    Minidregg.Kernel.TypedCellHyperedge.ResourceLaw CanonicalResourceKernel.schema M portal CanonicalResourceKernel.AssetId Int where
-  stateDelta := fun pre post _ _ asset => bookDelta pre post asset
+    (M : CellState.Materializer CanonicalResourceKernel.layout Digest) (portal : Portal) :
+    Minidregg.Kernel.TypedCellHyperedge.ResourceLaw CanonicalResourceKernel.layout M portal CanonicalResourceKernel.AssetId Int where
+  stateDelta := fun pre post _ asset => bookDelta pre post asset
 
 /-- Package the canonical accepted resource effect as one typed-hyperedge leg. -/
 def toTypedLeg
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -535,7 +546,7 @@ def toTypedLeg
 operation-selected post-book difference.  The law has no independent posting
 or delta input. -/
 theorem typedResourceLaw_delta_eq_operation
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -552,7 +563,7 @@ theorem typedResourceLaw_delta_eq_operation
   rw [toCellEffect_post_book]
 
 @[simp] theorem typedResourceLaw_delta_toTypedLeg
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -565,49 +576,25 @@ theorem typedResourceLaw_delta_eq_operation
     operation.apply_conserves (CanonicalResourceKernel.logicalBook pre.logical)
       accepted.admission.sourcePresent accepted.admission.destinationPresent asset
 
-/-- A fixed-schema `CellFamily` for genuinely distinct resource-book cells. -/
+/-- A fixed-layout `CellFamily` for genuinely distinct resource-book cells. -/
 def resourceCells
-    {Incidence : Type} (M : Incidence -> CellState.Materializer CanonicalResourceKernel.schema Digest)
+    {Incidence : Type} (M : Incidence -> CellState.Materializer CanonicalResourceKernel.layout Digest)
     (portal : Incidence -> Portal)
-    (projectAuthority : Incidence -> CellState.LogicalState CanonicalResourceKernel.schema -> AuthState)
+    (projectAuthority : Incidence -> Store CanonicalResourceKernel.layout -> AuthState)
     (cellId : Incidence -> Digest) : Minidregg.Kernel.MultiCellHyperedge.CellFamily Incidence where
-  schema := fun _ => CanonicalResourceKernel.schema
-  fieldDecidableEq := fun _ => schemaFieldDecidableEq
-  resourceDecidableEq := fun _ => schemaResourceDecidableEq
+  storeLayout := fun _ => CanonicalResourceKernel.layout
   materializer := M
   portal := portal
   projectAuthority := projectAuthority
   cellId := cellId
 
-local instance resourceCellsFieldDecidableEq
-    {Incidence : Type}
-    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.schema Digest}
-    {portal : Incidence -> Portal}
-    {projectAuthority : Incidence -> CellState.LogicalState CanonicalResourceKernel.schema -> AuthState}
-    {cellId : Incidence -> Digest} (incidence : Incidence) :
-    DecidableEq
-      ((resourceCells M portal projectAuthority cellId).schema incidence).Field := by
-  change DecidableEq CanonicalResourceKernel.schema.Field
-  exact schemaFieldDecidableEq
-
-local instance resourceCellsResourceDecidableEq
-    {Incidence : Type}
-    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.schema Digest}
-    {portal : Incidence -> Portal}
-    {projectAuthority : Incidence -> CellState.LogicalState CanonicalResourceKernel.schema -> AuthState}
-    {cellId : Incidence -> Digest} (incidence : Incidence) :
-    DecidableEq
-      ((resourceCells M portal projectAuthority cellId).schema incidence).Resource := by
-  change DecidableEq CanonicalResourceKernel.schema.Resource
-  exact schemaResourceDecidableEq
-
 /-- Multi-cell resource law, again computed only from each accepted incidence's
 exact local post and exact local pre. -/
 def multiCellResourceLaw
     {Incidence : Type}
-    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Incidence -> Portal}
-    {projectAuthority : Incidence -> CellState.LogicalState CanonicalResourceKernel.schema -> AuthState}
+    {projectAuthority : Incidence -> Store CanonicalResourceKernel.layout -> AuthState}
     {cellId : Incidence -> Digest}
     (declaration : Minidregg.Kernel.MultiCellHyperedge.Declaration
       (resourceCells M portal projectAuthority cellId)) :
@@ -618,9 +605,9 @@ def multiCellResourceLaw
 
 @[simp] theorem multiCellResourceLaw_delta
     {Incidence : Type}
-    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Incidence -> Portal}
-    {projectAuthority : Incidence -> CellState.LogicalState CanonicalResourceKernel.schema -> AuthState}
+    {projectAuthority : Incidence -> Store CanonicalResourceKernel.layout -> AuthState}
     {cellId : Incidence -> Digest}
     (declaration : Minidregg.Kernel.MultiCellHyperedge.Declaration
       (resourceCells M portal projectAuthority cellId))
@@ -633,9 +620,9 @@ def multiCellResourceLaw
 
 theorem multiCellResourceLaw_delta_eq_zero_of_conserves
     {Incidence : Type}
-    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : Incidence -> CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Incidence -> Portal}
-    {projectAuthority : Incidence -> CellState.LogicalState CanonicalResourceKernel.schema -> AuthState}
+    {projectAuthority : Incidence -> Store CanonicalResourceKernel.layout -> AuthState}
     {cellId : Incidence -> Digest}
     (declaration : Minidregg.Kernel.MultiCellHyperedge.Declaration
       (resourceCells M portal projectAuthority cellId))
@@ -656,7 +643,7 @@ theorem multiCellResourceLaw_delta_eq_zero_of_conserves
 post-state refutation, not merely the fact that `creditOnly` has no constructor
 in `Operation`. -/
 theorem no_creditOnly_post
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {pre : CellState.Materialized M} {operation : CanonicalResourceKernel.Operation}
     {portal : Portal} {authState : AuthState}
     (accepted : CanonicalResourceKernel.Accepted pre operation) (context : RequestContext)
@@ -702,7 +689,7 @@ noncomputable def witnessAuthorization :
   policyMembershipVerified := rfl
   policyVerified := rfl
 
-/-- A deployed-schema, request-indexed, authorized resource effect is inhabited. -/
+/-- A deployed-layout, request-indexed, authorized resource effect is inhabited. -/
 noncomputable def witnessCellEffect :
     AcceptedCellEffect (portal := demoPortal) (authState := demoState)
       (family CanonicalResourceKernel.witnessCell witnessContext)
@@ -724,20 +711,32 @@ noncomputable def witnessTypedLeg :
   toTypedLeg CanonicalResourceKernel.witnessMintAccepted
     witnessContext witnessAuthorization
 
-example :
+theorem witnessTypedLeg_delta_zero :
     (typedResourceLaw CanonicalResourceKernel.materializer demoPortal).delta
-      witnessTypedLeg 0 = 0 := by
-  exact typedResourceLaw_delta_toTypedLeg
+      witnessTypedLeg 0 = 0 :=
+  typedResourceLaw_delta_toTypedLeg
     CanonicalResourceKernel.witnessMintAccepted witnessContext witnessAuthorization 0
 
-example :
+/-- The witness mint really moves value: the issuer is debited to `-10`. -/
+theorem witnessCellEffect_issuer_debited :
     (CanonicalResourceKernel.logicalBook witnessCellEffect.prepared.post.logical).balance 0 0 = -10 := by
+  unfold witnessCellEffect
+  rw [toCellEffect_post_book, CanonicalResourceKernel.witnessCell_logicalBook]
   decide
 
-example :
+theorem witnessCellEffect_total_zero :
     (CanonicalResourceKernel.logicalBook witnessCellEffect.prepared.post.logical).totalAsset 0 = 0 := by
-  simpa using toCellEffect_conserves CanonicalResourceKernel.witnessMintAccepted
-    witnessContext witnessAuthorization 0
+  unfold witnessCellEffect
+  rw [toCellEffect_conserves CanonicalResourceKernel.witnessMintAccepted
+    witnessContext witnessAuthorization 0, CanonicalResourceKernel.witnessCell_logicalBook]
+  simp only [Book.totalAsset, witnessBook]
+  decide
+
+/-- The satisfiable pole's request is the non-stale one. -/
+theorem witnessRequest_quotes_pre :
+    (witnessContext.request CanonicalResourceKernel.witnessCell (.mint 0 1 2)).preStateRoot =
+      CanonicalResourceKernel.witnessCell.root :=
+  witnessCellEffect.preRootBound
 
 /-! ## Axiom pins -/
 
@@ -751,5 +750,13 @@ example :
 #guard_msgs (whitespace := lax) in #print axioms no_creditOnly_post
 /-- info: 'Minidregg.Kernel.CanonicalResourceEffect.witnessCellEffect_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms witnessCellEffect_nonempty
+/-- info: 'Minidregg.Kernel.CanonicalResourceEffect.no_cellEffect_of_stale_request' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_cellEffect_of_stale_request
+/-- info: 'Minidregg.Kernel.CanonicalResourceEffect.birth_one_book_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms birth_one_book_write
+/-- info: 'Minidregg.Kernel.CanonicalResourceEffect.witnessCellEffect_issuer_debited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms witnessCellEffect_issuer_debited
+/-- info: 'Minidregg.Kernel.CanonicalResourceEffect.witnessCellEffect_total_zero' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms witnessCellEffect_total_zero
 
 end Minidregg.Kernel.CanonicalResourceEffect
