@@ -48,13 +48,12 @@ structure EventEvidence
     (MDoc : Hyperdocument.Materializer Digest)
     {MAuth : CredentialAuthorityState.Materializer}
     (config : HyperdocumentOperations.Config)
-    (projection : ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (portal : Portal)
     (event : CausalVersionDag.EventPreimage) : Type where
   documentPre : Hyperdocument.Cell MDoc
   declaration : HyperdocumentOperations.Declaration
-  accepted : HyperdocumentOperations.Accepted config projection authorityPre
+  accepted : HyperdocumentOperations.Accepted config authorityPre
     documentPre portal declaration
   eventExact : accepted.causalPreimage = event
 
@@ -64,11 +63,10 @@ def post
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : HyperdocumentOperations.Config}
-    {projection : ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {portal : Portal}
     {event : CausalVersionDag.EventPreimage}
-    (evidence : EventEvidence MDoc config projection authorityPre portal event) :
+    (evidence : EventEvidence MDoc config authorityPre portal event) :
     Hyperdocument.Cell MDoc :=
   evidence.accepted.accepted.prepared.post
 
@@ -76,11 +74,10 @@ def post
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : HyperdocumentOperations.Config}
-    {projection : ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {portal : Portal}
     {event : CausalVersionDag.EventPreimage}
-    (evidence : EventEvidence MDoc config projection authorityPre portal event) :
+    (evidence : EventEvidence MDoc config authorityPre portal event) :
     evidence.documentPre.root = event.preStateRoot := by
   exact evidence.accepted.causalPreimage_pre_root.trans
     (congrArg CausalVersionDag.EventPreimage.preStateRoot evidence.eventExact)
@@ -89,11 +86,10 @@ def post
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : HyperdocumentOperations.Config}
-    {projection : ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {portal : Portal}
     {event : CausalVersionDag.EventPreimage}
-    (evidence : EventEvidence MDoc config projection authorityPre portal event) :
+    (evidence : EventEvidence MDoc config authorityPre portal event) :
     evidence.post.root = event.postStateRoot := by
   exact evidence.accepted.causalPreimage_post_root.trans
     (congrArg CausalVersionDag.EventPreimage.postStateRoot evidence.eventExact)
@@ -117,12 +113,11 @@ def Step
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     (config : HyperdocumentOperations.Config)
-    (projection : ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (portal : Portal)
     (event : CausalVersionDag.EventPreimage)
     (before after : Hyperdocument.Cell MDoc) : Prop :=
-  ∃ evidence : EventEvidence MDoc config projection authorityPre portal event,
+  ∃ evidence : EventEvidence MDoc config authorityPre portal event,
     before = evidence.documentPre ∧ after = evidence.post
 
 /-- The concrete causal family for ordinary accepted Hyperdocument effects. -/
@@ -130,14 +125,13 @@ def family
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     (config : HyperdocumentOperations.Config)
-    (projection : ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (portal : Portal) :
     CausalVersionDag.SemanticFamily (Hyperdocument.Cell MDoc) where
-  Evidence := EventEvidence MDoc config projection authorityPre portal
+  Evidence := EventEvidence MDoc config authorityPre portal
   ParentCompatible := ParentCompatible
   root := fun cell => cell.root
-  Step := Step config projection authorityPre portal
+  Step := Step config authorityPre portal
   stepPreRoot := by
     intro event before after _ step
     rcases step with ⟨evidence, rfl, _⟩
@@ -153,11 +147,10 @@ def anchorOf
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : HyperdocumentOperations.Config}
-    {projection : ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {portal : Portal} {documentPre : Hyperdocument.Cell MDoc}
     {declaration : HyperdocumentOperations.Declaration}
-    (accepted : HyperdocumentOperations.Accepted config projection authorityPre
+    (accepted : HyperdocumentOperations.Accepted config authorityPre
       documentPre portal declaration) : CausalVersionDag.Anchor where
   historyDomain := accepted.causalPreimage.historyDomain
   streamId := accepted.causalPreimage.streamId
@@ -166,11 +159,10 @@ def anchorOf
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : HyperdocumentOperations.Config}
-    {projection : ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {portal : Portal} {documentPre : Hyperdocument.Cell MDoc}
     {declaration : HyperdocumentOperations.Declaration}
-    (accepted : HyperdocumentOperations.Accepted config projection authorityPre
+    (accepted : HyperdocumentOperations.Accepted config authorityPre
       documentPre portal declaration) :
     (anchorOf accepted).Contains accepted.causalPreimage :=
   ⟨rfl, rfl⟩
@@ -336,9 +328,6 @@ def capability : Capability .object where
 
 def storedCapability : StoredCapability .object := ⟨capability, []⟩
 
-def projection : ProjectionUniverse where
-  revocationKeys := {.capability capability.id}
-
 def authorityLogical : Store.Store CredentialAuthorityState.layout :=
   (0 : Store.Store CredentialAuthorityState.layout).set
     ⟨.capability .object, capability.id⟩ (some storedCapability)
@@ -353,7 +342,7 @@ theorem capability_opened :
     some storedCapability
   exact Store.Store.set_eq _ _ _
 
-def principal : AuthenticatedPrincipal projection authorityPre
+def principal : AuthenticatedPrincipal authorityPre
     requestEnvelope.height author where
   stored := storedCapability
   opened := capability_opened
@@ -373,7 +362,7 @@ def principal : AuthenticatedPrincipal projection authorityPre
         (authorityLogical ⟨.revoked, .capability storedCapability.head.id⟩).isSome = false
       rw [authorityLogical, Store.Store.set_ne _ _ _ _ (by intro same; cases same)]
       rfl
-    exact Bool.false_ne_true (notRevoked.symm.trans member.2)
+    exact Bool.false_ne_true (notRevoked.symm.trans member)
   ancestorsNotRevoked := by
     intro ancestor member
     simp [storedCapability, capability] at member
@@ -383,7 +372,7 @@ def principal : AuthenticatedPrincipal projection authorityPre
 
 theorem namedCapabilityAdmissible :
     capability.Admissible
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (declaration.toRequest config) where
   holder := rfl
   scope :=
@@ -403,7 +392,7 @@ theorem namedCapabilityAdmissible :
   channelNotRevoked := principal.channelsNotRevoked
 
 def authorization : Authorized permissivePortal
-    (CredentialAuthorityState.authState projection authorityPre)
+    (CredentialAuthorityState.authState authorityPre)
     (declaration.toRequest config) where
   evidence := .proof () rfl
   policyWitness := ()
@@ -442,12 +431,12 @@ theorem validated : CellState.ValidatedPatch hyperdocumentMaterializer
   (CellState.validate_accepts _ _ _ _ semantic.preRootExact
     semantic.guardsValid).elim fun validated _ => validated
 
-noncomputable def accepted : HyperdocumentOperations.Accepted config projection
+noncomputable def accepted : HyperdocumentOperations.Accepted config
     authorityPre hyperdocumentCell permissivePortal declaration :=
   HyperdocumentOperations.accept principal semantic namedCapabilityAdmissible
     authorization validated
 
-noncomputable def eventEvidence : EventEvidence hyperdocumentMaterializer config projection authorityPre permissivePortal
+noncomputable def eventEvidence : EventEvidence hyperdocumentMaterializer config authorityPre permissivePortal
     accepted.causalPreimage where
   documentPre := hyperdocumentCell
   declaration := declaration
@@ -457,7 +446,7 @@ noncomputable def eventEvidence : EventEvidence hyperdocumentMaterializer config
 noncomputable def semanticFamily :
     CausalVersionDag.SemanticFamily
       (Hyperdocument.Cell hyperdocumentMaterializer) :=
-  family config projection authorityPre permissivePortal
+  family config authorityPre permissivePortal
 
 noncomputable def addressing : CausalVersionDag.ContentAddressing :=
   causalVersionAddressing eventCodec derivation
@@ -520,7 +509,7 @@ cell inequality alone would be too strong. -/
 theorem no_step_from_wrong_pre_root
     (other : Hyperdocument.Cell hyperdocumentMaterializer)
     (wrong : other.root ≠ hyperdocumentCell.root) :
-    ¬Step config projection authorityPre permissivePortal
+    ¬Step config authorityPre permissivePortal
       accepted.causalPreimage other accepted.accepted.prepared.post := by
   intro step
   rcases step with ⟨evidence, rfl, afterExact⟩

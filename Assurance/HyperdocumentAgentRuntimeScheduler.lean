@@ -66,8 +66,6 @@ noncomputable abbrev pre :=
   Minidregg.Assurance.HyperdocumentLinkPublicationWitness.genesisPost
 noncomputable abbrev config :=
   Minidregg.Assurance.HyperdocumentLinkPublicationWitness.config
-noncomputable abbrev projection :=
-  Minidregg.Assurance.HyperdocumentLinkPublicationWitness.Genesis.projection
 noncomputable abbrev authorityPre :=
   Minidregg.Assurance.HyperdocumentLinkPublicationWitness.Genesis.authorityPre
 noncomputable abbrev portal :=
@@ -193,7 +191,7 @@ def acceptedOperation : HyperdocumentAgentOperation.AcceptedOperation
     (U := ReactiveWitness.firstOrder)
     (MDoc := Link.materializer) (MAuth :=
       Minidregg.Assurance.HyperdocumentLinkPublicationWitness.Genesis.authorityMaterializer)
-    (contentConfig := Link.config) (projection := Link.projection)
+    (contentConfig := Link.config)
     (authorityPre := Link.authorityPre) (documentPre := Link.pre)
     (contentPortal := Link.portal) (contentDeclaration := Link.declaration)
     (manifest := manifest) (registry := registry)
@@ -209,7 +207,7 @@ def finalized : Finalized
     (clauseEvidence := clauseEvidence) (entryFamily := family)
     (headerCells := headerCells) (C := code)
     (portal := Link.portal)
-    (authState := CredentialAuthorityState.authState Link.projection
+    (authState := CredentialAuthorityState.authState
       Link.authorityPre)
     historyRules promiseSpec :=
   HyperdocumentAgentOperation.AcceptedOperation.finalized acceptedOperation

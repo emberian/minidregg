@@ -120,9 +120,6 @@ def finalCell : CredentialAuthorityState.Cell AuthorityMaterializer :=
 
 @[simp] theorem finalCell_logical : finalCell.logical = finalLogical := rfl
 
-def projection : ProjectionUniverse where
-  revocationKeys := {oldKeyRevocation, newKeyRevocation}
-
 def signerSubject (node : Node) : SubjectId := ⟨41 + node.val⟩
 
 def signerIdentity (node : Node) : VersionedPublicKeyIdentity Nat where
@@ -166,7 +163,6 @@ def directory : KeyDirectory Nat where
 
 def authority :
     SignerAuthority AuthorityMaterializer Node Nat where
-  projection := projection
   cell := liveCell
   directory := directory
   protocolDomain := ⟨8844⟩

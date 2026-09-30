@@ -308,9 +308,6 @@ def ownerEntries : List (Entry layout) :=
 
 def ownerCell : Cell := materialize materializer (fromEntries ownerEntries)
 
-/-- The declared revocation universe contains the owner's own key. -/
-def domain : ProjectionUniverse := ⟨{.capability demoCapability.id}⟩
-
 theorem owner_capability_exact :
     readCapability ownerCell .object demoCapability.id = some ⟨demoCapability, []⟩ := by
   decide
@@ -328,12 +325,12 @@ theorem owner_registered_not_revoked :
       isRevoked ownerCell (.capability demoCapability.id) = false := by
   decide
 
-theorem owner_revoked_empty : (authState domain ownerCell).revoked = ∅ := by
+theorem owner_revoked_empty : (authState ownerCell).revoked = ∅ := by
   decide
 
 /-- Satisfiable pole: the committed owner capability is admissible. -/
 theorem owner_admissible :
-    demoCapability.Admissible (authState domain ownerCell) demoRequest := by
+    demoCapability.Admissible (authState ownerCell) demoRequest := by
   refine
     { holder := demoCapability_admissible.holder
       scope := demoCapability_admissible.scope
@@ -352,14 +349,14 @@ theorem owner_admissible :
 
 /-- Refuting pole: a different subject is refused by the same cell. -/
 theorem other_subject_refused :
-    ¬ demoCapability.Admissible (authState domain ownerCell)
+    ¬ demoCapability.Admissible (authState ownerCell)
       { demoRequest with subject := ⟨99⟩ } := by
   intro admitted
   have holder := admitted.holder
   simp [demoCapability, Holder.Covers] at holder
 
 theorem other_target_refused :
-    ¬ demoCapability.Admissible (authState domain ownerCell)
+    ¬ demoCapability.Admissible (authState ownerCell)
       (demoRequest.retarget demoOtherTarget) :=
   target_substitution_rejected demoCapability _ _ _ (by decide)
 
@@ -369,7 +366,7 @@ def rotatedCell : Cell :=
     (fromEntries (⟨⟨.issuerEpoch, demoCapability.issuer⟩, (4 : Nat)⟩ :: ownerEntries))
 
 theorem rotated_issuer_refused :
-    ¬ demoCapability.Admissible (authState domain rotatedCell) demoRequest := by
+    ¬ demoCapability.Admissible (authState rotatedCell) demoRequest := by
   intro admitted
   have current : demoCapability.issuerEpoch = issuerEpochAt rotatedCell demoCapability.issuer :=
     admitted.issuerCurrent
@@ -384,7 +381,7 @@ def revokedCell : Cell :=
     (fromEntries (⟨⟨.revoked, .capability demoCapability.id⟩, ()⟩ :: ownerEntries))
 
 theorem revocation_refuses_owner :
-    ¬ demoCapability.Admissible (authState domain revokedCell) demoRequest := by
+    ¬ demoCapability.Admissible (authState revokedCell) demoRequest := by
   intro admitted
   exact admitted.selfNotRevoked (by decide)
 

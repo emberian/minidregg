@@ -389,7 +389,6 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
@@ -398,7 +397,7 @@ variable
 /-- The two first-order actions which write a forward `LinkRecord`.  Both retain
 the accepted content token and the exact action equality. -/
 inductive AcceptedLinkWrite
-    (content : Accepted contentConfig projection authorityPre documentPre
+    (content : Accepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration) : Type
   | link (payload : LinkPayload)
       (actionExact : contentDeclaration.action = .link payload)
@@ -408,7 +407,7 @@ inductive AcceptedLinkWrite
 namespace AcceptedLinkWrite
 
 variable
-    {content : Accepted contentConfig projection authorityPre documentPre
+    {content : Accepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration}
 
 def id (write : AcceptedLinkWrite content) : LinkId :=
@@ -477,12 +476,11 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Declaration}
-    {content : Accepted contentConfig projection authorityPre documentPre
+    {content : Accepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration}
     {historyProjection : HistoryProjection
       (Minidregg.Theory.HyperdocumentOperations.family

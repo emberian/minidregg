@@ -227,7 +227,6 @@ part of their trusted source. No per-token `argsExact` premise is needed.
 
 def bindIssue
     {M : CredentialAuthorityState.Materializer}
-    {domain : CredentialAuthorityState.ProjectionUniverse}
     {pre : CredentialAuthorityState.Cell M}
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     {codec : LawfulCodec (CredentialAuthorityEffects.IssueDeclaration kind)}
@@ -235,21 +234,20 @@ def bindIssue
     {declaration : CredentialAuthorityEffects.IssueDeclaration kind}
     {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
-      (CredentialAuthorityEffects.issueFamily domain pre codec effectDigest context)
+      (authState := CredentialAuthorityState.authState pre)
+      (CredentialAuthorityEffects.issueFamily pre codec effectDigest context)
       request pre declaration ())
     :
     Bound (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
+      (authState := CredentialAuthorityState.authState pre)
       (wholeDeclarationAddressing
-        (CredentialAuthorityEffects.issueFamily domain pre codec effectDigest context)
+        (CredentialAuthorityEffects.issueFamily pre codec effectDigest context)
         context.argsDigestBytes (fun _ => rfl))
       request pre declaration () :=
   accepted
 
 def bindAttenuation
     {M : CredentialAuthorityState.Materializer}
-    {domain : CredentialAuthorityState.ProjectionUniverse}
     {pre : CredentialAuthorityState.Cell M}
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     {codec : LawfulCodec (CredentialAuthorityEffects.AttenuateDeclaration kind)}
@@ -259,20 +257,19 @@ def bindAttenuation
     {parent : CredentialAuthorityState.StoredCapability kind}
     {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
-      (CredentialAuthorityEffects.attenuateFamily domain pre codec parentCodec
+      (authState := CredentialAuthorityState.authState pre)
+      (CredentialAuthorityEffects.attenuateFamily pre codec parentCodec
         effectDigest context) request pre declaration parent)
     :
     Bound (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
+      (authState := CredentialAuthorityState.authState pre)
       (wholeDeclarationAddressing
-        (CredentialAuthorityEffects.attenuateFamily domain pre codec parentCodec
+        (CredentialAuthorityEffects.attenuateFamily pre codec parentCodec
           effectDigest context) context.argsDigestBytes (fun _ => rfl)) request pre declaration parent :=
   accepted
 
 def bindRevocation
     {M : CredentialAuthorityState.Materializer}
-    {domain : CredentialAuthorityState.ProjectionUniverse}
     {pre : CredentialAuthorityState.Cell M}
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     {codec : LawfulCodec CredentialAuthorityEffects.RevokeDeclaration}
@@ -280,21 +277,20 @@ def bindRevocation
     {declaration : CredentialAuthorityEffects.RevokeDeclaration}
     {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
-      (CredentialAuthorityEffects.revokeFamily domain pre codec effectDigest context)
+      (authState := CredentialAuthorityState.authState pre)
+      (CredentialAuthorityEffects.revokeFamily pre codec effectDigest context)
       request pre declaration ())
     :
     Bound (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
+      (authState := CredentialAuthorityState.authState pre)
       (wholeDeclarationAddressing
-        (CredentialAuthorityEffects.revokeFamily domain pre codec effectDigest context)
+        (CredentialAuthorityEffects.revokeFamily pre codec effectDigest context)
         context.argsDigestBytes (fun _ => rfl))
       request pre declaration () :=
   accepted
 
 def bindEpochRotation
     {M : CredentialAuthorityState.Materializer}
-    {domain : CredentialAuthorityState.ProjectionUniverse}
     {pre : CredentialAuthorityState.Cell M}
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
     {codec : LawfulCodec CredentialAuthorityEffects.RotateEpochDeclaration}
@@ -302,12 +298,12 @@ def bindEpochRotation
     {declaration : CredentialAuthorityEffects.RotateEpochDeclaration}
     {context : CredentialAuthorityEffects.RequestContext}
     (accepted : AcceptedCellEffect (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
+      (authState := CredentialAuthorityState.authState pre)
       (CredentialAuthorityEffects.rotateEpochFamily pre codec effectDigest context)
       request pre declaration ())
     :
     Bound (portal := portal)
-      (authState := CredentialAuthorityState.authState domain pre)
+      (authState := CredentialAuthorityState.authState pre)
       (wholeDeclarationAddressing
         (CredentialAuthorityEffects.rotateEpochFamily pre codec effectDigest context)
         context.argsDigestBytes (fun _ => rfl))
@@ -347,14 +343,13 @@ def bindHyperdocument
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : HyperdocumentOperations.Declaration}
-    (accepted : HyperdocumentOperations.Accepted config projection authorityPre
+    (accepted : HyperdocumentOperations.Accepted config authorityPre
       documentPre portal declaration) :
     Bound (portal := portal)
-      (authState := CredentialAuthorityState.authState projection authorityPre)
+      (authState := CredentialAuthorityState.authState authorityPre)
       (hyperdocumentAddressing (MDoc := MDoc) config documentPre)
       (declaration.toRequest config) documentPre declaration () :=
   accepted.accepted

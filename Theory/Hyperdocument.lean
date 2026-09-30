@@ -243,7 +243,7 @@ current epoch, validity-window, holder, and revocation facts are proof fields.
 This is a credential path, not a signature verifier or operation admission. -/
 structure AuthenticatedPrincipal
     {M : CredentialAuthorityState.Materializer}
-    (projection : ProjectionUniverse) (authorityCell : Cell M)
+    (authorityCell : Cell M)
     (height : Height) (principal : PrincipalRef) : Type where
   stored : StoredCapability principal.capabilityKind
   opened : readCapability authorityCell principal.capabilityKind
@@ -254,17 +254,17 @@ structure AuthenticatedPrincipal
   validFrom : stored.head.notBefore ≤ height
   validUntil : height ≤ stored.head.notAfter
   issuerCurrent : stored.head.issuerEpoch =
-    (authState projection authorityCell).issuerEpoch stored.head.issuer
+    (authState authorityCell).issuerEpoch stored.head.issuer
   policyCurrent : stored.head.policyEpoch =
-    (authState projection authorityCell).policyEpoch stored.head.policyId
+    (authState authorityCell).policyEpoch stored.head.policyId
   selfNotRevoked : RevocationKey.capability stored.head.id ∉
-    (authState projection authorityCell).revoked
+    (authState authorityCell).revoked
   ancestorsNotRevoked : ∀ ancestor, ancestor ∈ stored.head.ancestors →
     RevocationKey.capability ancestor ∉
-      (authState projection authorityCell).revoked
+      (authState authorityCell).revoked
   channelsNotRevoked : ∀ channel, channel ∈ stored.head.channels →
     RevocationKey.channel channel ∉
-      (authState projection authorityCell).revoked
+      (authState authorityCell).revoked
 
 /-! ## Typed hyperdocument values -/
 

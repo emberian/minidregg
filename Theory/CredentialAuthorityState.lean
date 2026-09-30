@@ -3,9 +3,9 @@
 
 The authorization projection is not an independently supplied cache.  This
 module places capability records, issuer/policy/subject epochs, revocations,
-and single-use operation nullifiers in one typed `CellState`.  A finite
-deployment universe turns the sparse revocation plane into the exact `Finset`
-required by `TypedAuthorization.AuthState`; both authenticated-set roots are
+and single-use operation nullifiers in one typed `CellState`.  The exact `Finset`
+revoked set required by `TypedAuthorization.AuthState` is the revoked plane's
+own finite support, not a deployment key list; both authenticated-set roots are
 the root of the same canonical materialization.
 
 Capability lineage is retained as first-order capability and edge-origin data.
@@ -281,124 +281,83 @@ theorem LineageValid.nonempty_lineage {kind : ResourceKind}
       obtain ⟨lineage⟩ := ih
       exact ⟨.delegate child parent request lineage shape⟩
 
-/-! ## Exact projection into the common authorization judgment -/
+/-! ## Exact projection into the common authorization judgment
 
-/-- A deployment declares the finite revocation keys whose sparse cells are
-part of this authority domain.  Issuer/policy/subject epoch reads remain total
-typed addresses and require no enumerable universe. -/
-structure ProjectionUniverse where
-  revocationKeys : Finset RevocationKey
+The revoked set is the `revoked` plane's own finite support: the store is a
+dependent finitely-supported map, so no deployment universe, key list or
+caller-selected filter participates.  A key the plane holds is in the set, and
+nothing else is. -/
 
-/-- A layout-owned view of canonical authority addresses. A concrete deployment
-fixes this projection with its layout; it is not supplied by a request or a
-host authority cache. This lets a bounded physical page retain its own exact
-materialization while sharing the same authorization judgment. -/
-structure StateProjection (L : Layout.{0, 0, 0}) where
-  toCanonicalState : Store L → Store layout
-  revocationKeys : Store L → Finset RevocationKey
+/-- The key an address contributes to the revoked set: its own key on the
+`revoked` plane, nothing on any other plane. -/
+def revokedKeyAt : Address layout → Finset RevocationKey
+  | ⟨.revoked, key⟩ => {key}
+  | _ => ∅
 
-/-- Read the common authorization state from the projected logical fields
-and the actual materialized cell root. No second materializer or synthetic
-encoding of the projected state participates. -/
-def StateProjection.authState {L : Layout.{0, 0, 0}}
-    {M : CellState.Materializer L Digest} (projection : StateProjection L)
-    (pre : CellState.Materialized M) : AuthState :=
-  let logical := projection.toCanonicalState pre.logical
-  { capabilityRoot := pre.root
-    revocationRoot := pre.root
-    policyRoot := pre.root
-    policyAddress := fun policy epoch =>
-      (show Option Digest from logical ⟨.policyAddress, (policy, epoch)⟩).getD ⟨0⟩
-    revoked := (projection.revocationKeys pre.logical).filter fun key =>
-      (logical ⟨.revoked, key⟩).isSome
-    issuerEpoch := fun issuer =>
-      (logical ⟨.issuerEpoch, issuer⟩).getD (show Epoch from 0)
-    policyEpoch := fun policy =>
-      (logical ⟨.policyEpoch, policy⟩).getD (show Epoch from 0)
-    policyRevision := fun policy =>
-      (logical ⟨.policyRevision, policy⟩).getD (show PolicyRevision from 0)
-    subjectKeyEpoch := fun subject =>
-      (logical ⟨.subjectKeyEpoch, subject⟩).getD (show Epoch from 0) }
+/-- The revoked keys of one authority store: exactly the `revoked` plane's
+finite support. -/
+def revokedKeys (logical : Store layout) : Finset RevocationKey :=
+  logical.support.biUnion revokedKeyAt
 
-/-- The unbounded canonical authority layout is the identity instance of the
-same state-derived view. Existing clients keep this exact interpretation. -/
-def ProjectionUniverse.stateProjection (domain : ProjectionUniverse) :
-    StateProjection layout where
-  toCanonicalState := fun logical => logical
-  revocationKeys := fun _ => domain.revocationKeys
-
-@[simp] theorem StateProjection.authState_policyRoot {L : Layout.{0, 0, 0}}
-    {M : CellState.Materializer L Digest} (projection : StateProjection L)
-    (pre : CellState.Materialized M) :
-    (projection.authState pre).policyRoot = pre.root := rfl
+theorem mem_revokedKeys_iff (logical : Store layout) (key : RevocationKey) :
+    key ∈ revokedKeys logical ↔ (logical ⟨.revoked, key⟩).isSome = true := by
+  constructor
+  · intro member
+    obtain ⟨⟨plane, stored⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
+    cases plane <;> simp [revokedKeyAt] at contributes
+    have same : key = stored := Finset.mem_singleton.mp contributes
+    subst same
+    exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
+  · intro present
+    exact Finset.mem_biUnion.mpr ⟨⟨.revoked, key⟩,
+      DFinsupp.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
+      Finset.mem_singleton_self key⟩
 
 /-- The sole `AuthState` projection.  Capability and revocation witnesses use
 the SAME canonical cell root; revoked membership and every epoch are read from
 that exact cell. -/
-def authState {M : Materializer} (domain : ProjectionUniverse)
-    (pre : Cell M) : AuthState where
+def authState {M : Materializer} (pre : Cell M) : AuthState where
   capabilityRoot := pre.root
   revocationRoot := pre.root
   policyRoot := pre.root
   policyAddress := policyAddressAt pre
-  revoked := domain.revocationKeys.filter fun key => isRevoked pre key
+  revoked := revokedKeys pre.logical
   issuerEpoch := issuerEpochAt pre
   policyEpoch := policyEpochAt pre
   policyRevision := policyRevisionAt pre
   subjectKeyEpoch := subjectKeyEpochAt pre
 
-@[simp] theorem authState_identity_projection
-    {M : CellState.Materializer layout Digest}
-    (domain : ProjectionUniverse) (pre : Cell M) :
-    domain.stateProjection.authState pre = authState domain pre := rfl
+@[simp] theorem authState_capabilityRoot {M : Materializer} (pre : Cell M) :
+    (authState pre).capabilityRoot = pre.root := rfl
 
-@[simp] theorem authState_capabilityRoot {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) :
-    (authState domain pre).capabilityRoot = pre.root := rfl
+@[simp] theorem authState_revocationRoot {M : Materializer} (pre : Cell M) :
+    (authState pre).revocationRoot = pre.root := rfl
 
-@[simp] theorem authState_revocationRoot {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) :
-    (authState domain pre).revocationRoot = pre.root := rfl
+@[simp] theorem authState_policyRoot {M : Materializer} (pre : Cell M) :
+    (authState pre).policyRoot = pre.root := rfl
 
-@[simp] theorem authState_policyRoot {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) :
-    (authState domain pre).policyRoot = pre.root := rfl
-
-@[simp] theorem authState_policyAddress {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M)
+@[simp] theorem authState_policyAddress {M : Materializer} (pre : Cell M)
     (policy : PolicyId) (epoch : Epoch) :
-    (authState domain pre).policyAddress policy epoch =
-      policyAddressAt pre policy epoch := rfl
+    (authState pre).policyAddress policy epoch = policyAddressAt pre policy epoch := rfl
 
-@[simp] theorem authState_issuerEpoch {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) (issuer : IssuerId) :
-    (authState domain pre).issuerEpoch issuer = issuerEpochAt pre issuer := rfl
+@[simp] theorem authState_issuerEpoch {M : Materializer} (pre : Cell M) (issuer : IssuerId) :
+    (authState pre).issuerEpoch issuer = issuerEpochAt pre issuer := rfl
 
-@[simp] theorem authState_policyEpoch {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) (policy : PolicyId) :
-    (authState domain pre).policyEpoch policy = policyEpochAt pre policy := rfl
+@[simp] theorem authState_policyEpoch {M : Materializer} (pre : Cell M) (policy : PolicyId) :
+    (authState pre).policyEpoch policy = policyEpochAt pre policy := rfl
 
-@[simp] theorem authState_policyRevision {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) (policy : PolicyId) :
-    (authState domain pre).policyRevision policy = policyRevisionAt pre policy := rfl
+@[simp] theorem authState_policyRevision {M : Materializer} (pre : Cell M) (policy : PolicyId) :
+    (authState pre).policyRevision policy = policyRevisionAt pre policy := rfl
 
-@[simp] theorem authState_subjectKeyEpoch {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) (subject : SubjectId) :
-    (authState domain pre).subjectKeyEpoch subject = subjectKeyEpochAt pre subject := rfl
+@[simp] theorem authState_subjectKeyEpoch {M : Materializer} (pre : Cell M) (subject : SubjectId) :
+    (authState pre).subjectKeyEpoch subject = subjectKeyEpochAt pre subject := rfl
 
-theorem mem_authState_revoked_iff {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) (key : RevocationKey) :
-    key ∈ (authState domain pre).revoked ↔
-      key ∈ domain.revocationKeys ∧ isRevoked pre key = true := by
-  simp [authState]
-
-/-- Outside the declared sparse revocation universe there is no projected
-revocation member, even if some unrelated host data mentions the key. -/
-theorem not_mem_authState_revoked_of_outside {M : Materializer}
-    (domain : ProjectionUniverse) (pre : Cell M) (key : RevocationKey)
-    (outside : key ∉ domain.revocationKeys) :
-    key ∉ (authState domain pre).revoked := by
-  simp [mem_authState_revoked_iff, outside]
+/-- Projected revocation membership is exactly the cell's `revoked` plane read:
+no key outside the plane is revoked, and no key in it can be filtered away. -/
+@[simp] theorem mem_authState_revoked_iff {M : Materializer} (pre : Cell M)
+    (key : RevocationKey) :
+    key ∈ (authState pre).revoked ↔ isRevoked pre key = true :=
+  mem_revokedKeys_iff pre.logical key
 
 /-! ## Append-only presence planes: revocation is monotone -/
 
@@ -633,4 +592,6 @@ theorem register_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.register_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms register_accepted
 
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_revokedKeys_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mem_revokedKeys_iff
 end Minidregg.Theory.CredentialAuthorityState

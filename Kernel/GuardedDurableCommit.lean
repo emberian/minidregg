@@ -124,13 +124,12 @@ noncomputable def ofHyperdocumentPublication
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
-      contentConfig projection authorityPre documentPre contentPortal
+      contentConfig authorityPre documentPre contentPortal
       contentDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -192,13 +191,12 @@ noncomputable def ofHyperdocumentPublication
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
-      contentConfig projection authorityPre documentPre contentPortal
+      contentConfig authorityPre documentPre contentPortal
       contentDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -235,13 +233,12 @@ noncomputable def ofHyperdocumentPublication
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
-      contentConfig projection authorityPre documentPre contentPortal
+      contentConfig authorityPre documentPre contentPortal
       contentDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -282,13 +279,12 @@ theorem authority_rotation_or_revocation_rejects_old_publication
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
-      contentConfig projection authorityPre documentPre contentPortal
+      contentConfig authorityPre documentPre contentPortal
       contentDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}

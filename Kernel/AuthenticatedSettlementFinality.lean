@@ -74,7 +74,6 @@ Changing `cell` changes the authority root included in every expected vote. -/
 structure SignerAuthority
     (M : CredentialAuthorityState.Materializer)
     (Node : Type n) (PublicKey : Type k) where
-  projection : ProjectionUniverse
   cell : CredentialAuthorityState.Cell M
   directory : KeyDirectory PublicKey
   protocolDomain : Digest
@@ -86,7 +85,7 @@ variable {M : CredentialAuthorityState.Materializer}
   (authority : SignerAuthority M Node PublicKey)
 
 def authState : TypedAuthorization.AuthState :=
-  CredentialAuthorityState.authState authority.projection authority.cell
+  CredentialAuthorityState.authState authority.cell
 
 /-- Exact currentness of one signer at the canonical authority snapshot.  The
 directory entry, key epoch, policy epoch/address, and revocation membership all

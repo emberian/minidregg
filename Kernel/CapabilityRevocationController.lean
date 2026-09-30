@@ -175,7 +175,7 @@ def request {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
 
 inductive Reject where
   | malformedCommand | directoryUnavailable | authorityUnavailable | targetUnavailable
-  | staleAuthority | victimUnavailable | victimPolicy | alreadyRevoked | replayedMarker
+  | staleAuthority | victimUnavailable | unregisteredVictim | victimPolicy | alreadyRevoked | replayedMarker
   | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
@@ -195,7 +195,7 @@ def observeTarget (deployment : Deployment) (directory : Directory Nat Registry)
 
 def family {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command kind) :=
-  revokeFamily snapshot.revocationUniverse snapshot.cell declarationCodec
+  revokeFamily snapshot.cell declarationCodec
     (effectsDigest snapshot.domain semantics command) (context snapshot semantics ambient command)
 
 structure Prepared {F : Type} [Field F] (deployment : Deployment)
@@ -228,7 +228,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     if victimIdentity : victim.head.id = command.capability then
      if victimPolicy : victim.head.policyId = ⟨command.target.value⟩ then
       if rootExact : command.expectedAuthorityRoot = authority.snapshot.cell.root then
-        if registered : RevocationKey.capability command.capability ∈ authority.snapshot.revocationUniverse.revocationKeys then
+        if registered : isRegistered authority.snapshot.cell (.capability command.capability) = true then
           if live : isRevoked authority.snapshot.cell (.capability command.capability) = false then
             if fresh : isNullified authority.snapshot.cell (operationMarker authority.snapshot.domain profile.semantics command) = false then
               match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
@@ -248,7 +248,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                     source⟩
             else .error .replayedMarker
           else .error .alreadyRevoked
-        else .error .victimUnavailable
+        else .error .unregisteredVictim
       else .error .staleAuthority
      else .error .victimPolicy
     else .error .victimUnavailable
@@ -355,14 +355,14 @@ theorem Accepted.revoked [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
     RevocationKey.capability command.capability ∈
-      (authState prepared.authority.snapshot.revocationUniverse accepted.semantic.prepared.post).revoked :=
+      (authState accepted.semantic.prepared.post).revoked :=
   revocation_post_is_authorizer_member accepted.semantic
 
 theorem Accepted.rejects_victim [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) (wanted : Request command.victimKind) :
     ¬ prepared.victim.head.Admissible
-      (authState prepared.authority.snapshot.revocationUniverse accepted.semantic.prepared.post) wanted := by
+      (authState accepted.semantic.prepared.post) wanted := by
   intro admitted
   apply admitted.selfNotRevoked
   rw [prepared.victimIdentity]
@@ -373,7 +373,7 @@ theorem Accepted.rejects_descendant [DecidableEq F]
     (accepted : Accepted prepared envelope) {other : ResourceKind} (descendant : Capability other)
     (wanted : Request other) (ancestor : command.capability ∈ descendant.ancestors) :
     ¬ descendant.Admissible
-      (authState prepared.authority.snapshot.revocationUniverse accepted.semantic.prepared.post) wanted :=
+      (authState accepted.semantic.prepared.post) wanted :=
   ancestor_revocation_rejected descendant _ wanted command.capability ancestor accepted.revoked
 
 /-- Neither a subject signature nor a proof-only portal can replace the

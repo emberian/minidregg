@@ -43,11 +43,10 @@ abbrev MergeAccepted
     (history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor)
     (mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config)
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentPre : Hyperdocument.Cell MDoc)
     (mergePortal : Portal) (mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration) :=
-  Minidregg.Kernel.HyperdocumentMerge.Accepted history mergeConfig projection authorityPre documentPre
+  Minidregg.Kernel.HyperdocumentMerge.Accepted history mergeConfig authorityPre documentPre
     mergePortal mergeDeclaration
 
 def derivedEventDeclaration
@@ -56,11 +55,10 @@ def derivedEventDeclaration
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     (expectedLogRoot : Digest) : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration :=
   Minidregg.Kernel.HyperdocumentMerge.eventDeclaration merge expectedLogRoot
@@ -71,11 +69,10 @@ def derivedEventDeclaration
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     (expectedLogRoot : Digest) :
     (derivedEventDeclaration merge expectedLogRoot).record =
@@ -88,11 +85,10 @@ def derivedEventDeclaration
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     (expectedLogRoot : Digest) :
     (derivedEventDeclaration merge expectedLogRoot).expectedLogRoot =
@@ -108,27 +104,26 @@ structure EventAccepted
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store)
     (eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config)
     (eventPortal : Portal) (expectedLogRoot : Digest) : Type _ where
   inputs : Minidregg.Kernel.HyperdocumentMerge.PublicationInputs merge eventConfig expectedLogRoot
-  principal : AuthenticatedPrincipal projection authorityPre
+  principal : AuthenticatedPrincipal authorityPre
     mergeDeclaration.request.height mergeDeclaration.intent.author
   namedCapabilityAdmissible :
     (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
       principal merge.semantic.objectCapability).Admissible
-    (CredentialAuthorityState.authState projection authorityPre)
+    (CredentialAuthorityState.authState authorityPre)
     ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig)
   accepted : AcceptedCellEffect
     (portal := eventPortal)
-    (authState := CredentialAuthorityState.authState projection authorityPre)
+    (authState := CredentialAuthorityState.authState authorityPre)
     (Minidregg.Kernel.HyperdocumentVersionEffects.family MLog eventConfig
       (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store))
     ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig)
@@ -141,11 +136,10 @@ def acceptEvent
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -155,14 +149,14 @@ def acceptEvent
     (namedCapabilityAdmissible :
       (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
         merge.principal merge.semantic.objectCapability).Admissible
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig))
     (fresh : store (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
       ((derivedEventDeclaration merge expectedLogRoot).key eventConfig)) = none)
     (domainExact : (derivedEventDeclaration merge expectedLogRoot).record.historyDomain =
       eventConfig.historyDomain)
     (authorization : Authorized eventPortal
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig))
     (validated : CellState.ValidatedPatch MLog
       (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store)
@@ -190,11 +184,10 @@ def acceptEvent
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -221,11 +214,10 @@ theorem EventAccepted.pre_fresh
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -244,11 +236,10 @@ theorem EventAccepted.domain_exact
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -273,7 +264,6 @@ structure Header where
 
 def cells
     {MAuth : CredentialAuthorityState.Materializer}
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
     (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
@@ -290,7 +280,7 @@ def cells
     | .content => mergePortal
     | .eventLog => eventPortal
   projectAuthority := fun _ _ =>
-    CredentialAuthorityState.authState projection authorityPre
+    CredentialAuthorityState.authState authorityPre
   cellId
     | .content => contentCellId
     | .eventLog => eventCellId
@@ -301,11 +291,10 @@ def declaration
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -315,7 +304,7 @@ def declaration
       expectedLogRoot)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.Declaration
-      (cells projection authorityPre MDoc MLog mergePortal eventPortal
+      (cells authorityPre MDoc MLog mergePortal eventPortal
         contentCellId eventCellId) where
   header :=
     { domain := mergeConfig.requestDomain
@@ -348,11 +337,10 @@ def acceptedLegs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -371,11 +359,10 @@ def zeroResourceLaw
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -390,7 +377,6 @@ def zeroResourceLaw
 
 theorem cellIds_injective
     {MAuth : CredentialAuthorityState.Materializer}
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
     (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
@@ -398,7 +384,7 @@ theorem cellIds_injective
     {contentCellId eventCellId : Digest}
     (distinct : contentCellId ≠ eventCellId) :
     Function.Injective
-      (cells projection authorityPre documentMaterializer MLog
+      (cells authorityPre documentMaterializer MLog
         mergePortal eventPortal contentCellId eventCellId).cellId := by
   intro left right equal
   cases left <;> cases right
@@ -413,11 +399,10 @@ theorem aggregate_zero
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -438,11 +423,10 @@ def commit
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (merge : MergeAccepted history mergeConfig projection authorityPre
+    (merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -462,7 +446,7 @@ def commit
     Minidregg.Kernel.MultiCellHyperedge.Commit
       (zeroResourceLaw merge event header contentCellId eventCellId)
       (acceptedLegs merge event header contentCellId eventCellId) boundary where
-  cellIdsDistinct := cellIds_injective projection authorityPre MDoc MLog
+  cellIdsDistinct := cellIds_injective authorityPre MDoc MLog
     mergePortal eventPortal cellIdsDistinct
   sharedDomain := by
     intro incidence
@@ -480,11 +464,10 @@ def commit
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -512,11 +495,10 @@ def commit
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -552,11 +534,10 @@ theorem commit_conflict_retained
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -599,11 +580,10 @@ theorem commit_conflict_cannot_be_erased
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : MergeAccepted history mergeConfig projection authorityPre
+    {merge : MergeAccepted history mergeConfig authorityPre
       documentPre mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}

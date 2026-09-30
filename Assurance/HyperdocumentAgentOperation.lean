@@ -130,7 +130,6 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : HDO.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
@@ -138,7 +137,7 @@ variable
 
 def contentCapability
     (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre
+      authorityPre documentPre
       contentPortal contentDeclaration) : Capability .object :=
   authenticatedObjectHead content.principal
     content.semantic.canonical.objectCapability
@@ -147,10 +146,10 @@ def contentCapability
 typed v1 interface negotiation; no second authorization is introduced. -/
 def acceptedNegotiation
     (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre
+      authorityPre documentPre
       contentPortal contentDeclaration) :
     ActionSuccess contentConfig contentPortal
-      (CredentialAuthorityState.authState projection authorityPre) documentPre
+      (CredentialAuthorityState.authState authorityPre) documentPre
       (actionInvocation contentMutationV1 contentDeclaration)
       (contentDeclaration.toRequest contentConfig)
       (contentCapability content) where
@@ -210,7 +209,6 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : HDO.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
@@ -281,14 +279,14 @@ end ReactiveRequest
 at the exact promise indices, then supplies the typed interface negotiation. -/
 structure AcceptedOperation
     (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre contentPortal contentDeclaration)
+      authorityPre documentPre contentPortal contentDeclaration)
     (interfaceId : InterfaceId) : Type _ where
   reactive : ReactiveRequest (manifest := manifest) (registry := registry)
     (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
     (headerCells := headerCells) (C := C) rules requestPreRootExact promiseId
     adviceCode condition deadline continuation cancelKind cancelRequest
   negotiation : ActionSuccess contentConfig contentPortal
-    (CredentialAuthorityState.authState projection authorityPre) documentPre
+    (CredentialAuthorityState.authState authorityPre) documentPre
     (actionInvocation interfaceId contentDeclaration)
     (contentDeclaration.toRequest contentConfig)
     (contentCapability content)
@@ -299,7 +297,7 @@ variable {rules requestPreRootExact promiseId adviceCode condition deadline
   continuation cancelKind cancelRequest}
 variable
     {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre contentPortal contentDeclaration}
+      authorityPre documentPre contentPortal contentDeclaration}
 
 local notation "AcceptedAt" interfaceId =>
   AcceptedOperation (manifest := manifest) (registry := registry)
@@ -326,7 +324,7 @@ def finalized
       (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
       (headerCells := headerCells) (C := C)
       (portal := contentPortal)
-      (authState := CredentialAuthorityState.authState projection authorityPre)
+      (authState := CredentialAuthorityState.authState authorityPre)
       rules Spec :=
   finalize rules operation.reactive.reaction content.accepted
 
@@ -392,13 +390,12 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : HDO.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : HDO.Declaration}
     {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre
+      authorityPre documentPre
       contentPortal contentDeclaration}
     {MLog : HEP.LogMaterializer}
     {store : HEP.Store}
@@ -429,13 +426,12 @@ structure PublishedOperation
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : HDO.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : HDO.Declaration}
     {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre
+      authorityPre documentPre
       contentPortal contentDeclaration}
     {MLog : HEP.LogMaterializer}
     {store : HEP.Store}
@@ -452,7 +448,7 @@ structure PublishedOperation
         header contentCellId eventCellId)) : Type _ where
   finalizedContent : AcceptedCellEffect
     (portal := contentPortal)
-    (authState := CredentialAuthorityState.authState projection authorityPre)
+    (authState := CredentialAuthorityState.authState authorityPre)
     (family (M := MDoc) contentConfig documentPre)
     (contentDeclaration.toRequest contentConfig) documentPre
     contentDeclaration ()
@@ -488,7 +484,7 @@ variable
 def build
     (finalizedContent : AcceptedCellEffect
       (portal := contentPortal)
-      (authState := CredentialAuthorityState.authState projection authorityPre)
+      (authState := CredentialAuthorityState.authState authorityPre)
       (family (M := MDoc) contentConfig documentPre)
       (contentDeclaration.toRequest contentConfig) documentPre
       contentDeclaration ())
@@ -521,13 +517,12 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : HDO.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : HDO.Declaration}
     (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre
+      authorityPre documentPre
       contentPortal contentDeclaration)
 
 theorem selected_address_touched (selection : Selection contentDeclaration) :

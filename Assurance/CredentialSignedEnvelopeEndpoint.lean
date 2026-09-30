@@ -163,7 +163,7 @@ theorem canonical_projection_is_committed :
 policy registry and common authorization state. -/
 theorem canonical_projection_root_join :
     canonicalRegistry.authorityRoot =
-        (authState authorityDomain attenuatedCell).policyRoot /\
+        (authState attenuatedCell).policyRoot /\
       canonicalState.authorityRoot = attenuatedCell.root := by
   exact ⟨rfl, rfl⟩
 
@@ -268,7 +268,7 @@ theorem attenuated_subject_key_epoch_zero :
 
 def signedAuthorization :
     Authorized (signaturePortal demoVerifier)
-      (authState authorityDomain attenuatedCell) useRequest where
+      (authState attenuatedCell) useRequest where
   evidence := .signature canonicalWitness
     (by
       change useRequest.subjectKeyEpoch =
@@ -295,7 +295,7 @@ def signedAuthorization :
 
 noncomputable def acceptedSignature :
     AcceptedCredential requestDigestScheme (signaturePortal demoVerifier)
-      (authState authorityDomain attenuatedCell) useRequest where
+      (authState attenuatedCell) useRequest where
   authorization := signedAuthorization
   carrier := .signature
   carrierSupported := rfl
@@ -325,7 +325,7 @@ structure SemanticPath
   credential :
     Nonempty (AcceptedCredential requestDigestScheme
       (signaturePortal demoVerifier)
-      (authState authorityDomain attenuatedCell) useRequest)
+      (authState attenuatedCell) useRequest)
   signerIssued :
     SignerIssued canonicalKey.keyId canonicalKey.keyEpoch
       canonicalEnvelope.frame canonicalEnvelope.signature

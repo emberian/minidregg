@@ -333,18 +333,26 @@ def capabilityEntry {kind : ResourceKind} (capability : Capability kind) :
     CredentialAuthorityEffects.Entry :=
   ⟨⟨.capability kind, capability.id⟩, (⟨capability, []⟩ : CredentialAuthorityState.StoredCapability kind)⟩
 
+/-- A genesis capability is installed together with the registration of its
+own revocation key, exactly as issuance does: "registered" is presence in the
+`registered` plane, and genesis holds no capability it could not revoke. -/
+def capabilityEntries {kind : ResourceKind} (capability : Capability kind) :
+    List CredentialAuthorityEffects.Entry :=
+  [capabilityEntry capability,
+   CredentialAuthorityEffects.registrationEntry (.capability capability.id)]
+
 /-- Every genesis authority record, as entries of the one authority cell. -/
 def entries {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     List CredentialAuthorityEffects.Entry :=
-  [⟨⟨.issuerEpoch, profile.template.issuer⟩, config.issuerEpoch⟩,
-   capabilityEntry (controlCapability profile config)] ++
+  ⟨⟨.issuerEpoch, profile.template.issuer⟩, config.issuerEpoch⟩ ::
+  capabilityEntries (controlCapability profile config) ++
   (policies profile config).flatMap policyEntries ++
   config.enrollments.flatMap (fun enrollment =>
     keyEntries enrollment.key ++
-    [capabilityEntry (accountCapability profile config enrollment),
-     capabilityEntry (accountControlCapability profile config enrollment),
-     capabilityEntry (factoryObserveCapability profile config enrollment)])
+    capabilityEntries (accountCapability profile config enrollment) ++
+    capabilityEntries (accountControlCapability profile config enrollment) ++
+    capabilityEntries (factoryObserveCapability profile config enrollment))
 
 /-- The genesis authority store. -/
 def authorityStore {F : Type} [Field F]
@@ -356,9 +364,11 @@ theorem entries_not_nullifier {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
     (entry : CredentialAuthorityEffects.Entry) (member : entry ∈ entries profile config) :
     entry.1.1 ≠ .nullifier := by
-  simp only [entries, policyEntries, keyEntries, capabilityEntry, List.mem_append, List.mem_cons,
+  simp only [entries, policyEntries, keyEntries, capabilityEntries, capabilityEntry,
+    CredentialAuthorityEffects.registrationEntry, List.mem_append, List.mem_cons,
     List.mem_flatMap, List.not_mem_nil, or_false] at member
-  rcases member with ((rfl | rfl) | ⟨_, _, rfl | rfl | rfl⟩) | ⟨_, _, (rfl | rfl) | rfl | rfl | rfl⟩ <;>
+  rcases member with ((rfl | rfl | rfl) | ⟨_, _, rfl | rfl | rfl⟩) |
+      ⟨_, _, (((rfl | rfl) | rfl | rfl) | rfl | rfl) | rfl | rfl⟩ <;>
     exact fun same => by cases same
 
 /-- No operation nullifier is spent at genesis: the authority clock starts at
