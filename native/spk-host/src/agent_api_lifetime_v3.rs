@@ -77,7 +77,7 @@ pub(crate) struct ReceiptPin {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 impl ReceiptPin {
@@ -86,7 +86,7 @@ impl ReceiptPin {
             &self.transaction_id,
             &self.event_id,
             &self.accepted_count,
-            &self.image_boundary,
+            &self.world_root,
         ]
         .into_iter()
         .all(|value| decimal(value))
@@ -552,7 +552,7 @@ mod tests {
             transaction_id: "11".into(),
             event_id: "12".into(),
             accepted_count: count.into(),
-            image_boundary: "13".into(),
+            world_root: "13".into(),
         }
     }
 

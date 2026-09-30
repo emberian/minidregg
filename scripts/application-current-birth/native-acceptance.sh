@@ -66,7 +66,7 @@ confirmed() {
     (.acceptedCount | type == "string" and test("^[1-9][0-9]*$"))' "$1" >/dev/null
 }
 receipt_projection() {
-  jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' "$1" >"$2"
+  jq -S '{transactionId,eventId,acceptedCount,worldRoot}' "$1" >"$2"
 }
 check_replay() {
   name=$1
@@ -106,9 +106,9 @@ reserve_tool() {
     --slurpfile challenge "$EVIDENCE/$name-before/challenge.json" \
     '{grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
       schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-      expectedTargetRoot:$read[0].page.root,
+      expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$n,payload:"current app birth reserve"},
-      before:($read[0].page.grain | {generation,status,remaining,reserved}),
+      before:($read[0].cell.grain | {generation,status,remaining,reserved}),
       operation:{type:"reserve",amount:$amount},publications:[]},
       grants:[{kind:"object",target:"7902",capability:"81"}],intentNonce:$n}' \
     >"$EVIDENCE/$name-intent.json"
@@ -123,11 +123,11 @@ birth_source() {
   query "$name-tool" 8 7902 81 "$EVIDENCE/workroom/tool.key" "$((nonce + 1))"
   query "$name-parent" 8 7901 73 "$EVIDENCE/workroom/tool.key" "$((nonce + 2))"
   jq -e --slurpfile parent "$EVIDENCE/$name-parent/challenge.json" \
-    '.height == $parent[0].height and .imageBoundary == $parent[0].imageBoundary' \
+    '.height == $parent[0].height and .worldRoot == $parent[0].worldRoot' \
     "$EVIDENCE/$name-tool/challenge.json" >/dev/null
-  jq -e '.page.grain.status == "3" and .page.grain.reserved != "0"' \
+  jq -e '.cell.grain.status == "3" and .cell.grain.reserved != "0"' \
     "$EVIDENCE/$name-tool/view.json" >/dev/null
-  jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
+  jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
     "$EVIDENCE/$name-parent/view.json" >/dev/null
   jq -n --arg nonce "$nonce" --arg spec "$spec_field" \
     --slurpfile genesis "$EVIDENCE/workroom/genesis.json" \
@@ -143,10 +143,10 @@ birth_source() {
         authorityRoot:$challenge[0].signing[0].authorityRoot,
         source:{genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
           creator:"8",nonce:$nonce,sourceCapabilities:["42"],funding:[],feePayer:"8"},
-        tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].page.root,
-          before:($tool[0].page.grain | {generation,status,remaining,reserved})},
-        parent:{task:"7901",capability:"73",observeCapability:"73",targetRoot:$parent[0].page.root,
-          before:($parent[0].page.grain | {generation,status,remaining,reserved})}}}
+        tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].cell.root,
+          before:($tool[0].cell.grain | {generation,status,remaining,reserved})},
+        parent:{task:"7901",capability:"73",observeCapability:"73",targetRoot:$parent[0].cell.root,
+          before:($parent[0].cell.grain | {generation,status,remaining,reserved})}}}
       | {subject,nonce,grants,($spec):.shell}' \
     >"$EVIDENCE/$name-base.json"
 }
@@ -190,11 +190,11 @@ query_policy app-policy 8 8401 141 "$EVIDENCE/workroom/tool.key" 43203
 query_policy package-policy 8 8402 143 "$EVIDENCE/workroom/tool.key" 43204
 query_policy snapshot-policy 8 8403 145 "$EVIDENCE/workroom/tool.key" 43205
 jq -e --arg target "8401" \
-  '([.page.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
+  '([.cell.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/app-born/view.json" >/dev/null
-jq -e '.page.document == "8402" and .page.entries == []' \
+jq -e '.cell.document == "8402" and .cell.entries == []' \
   "$EVIDENCE/package-born/view.json" >/dev/null
-jq -e '.page.document == "8403" and .page.entries == []' \
+jq -e '.cell.document == "8403" and .cell.entries == []' \
   "$EVIDENCE/snapshot-born/view.json" >/dev/null
 for target in app package snapshot; do
   case "$target" in
@@ -214,14 +214,14 @@ check_replay app
 "$STORE_BINARY" read-to "$EVIDENCE/workroom/store" "$EVIDENCE/app-after-lookup-image.bin"
 cmp "$EVIDENCE/app-before-reopen-image.bin" "$EVIDENCE/app-after-lookup-image.bin"
 query app-tool-after-lookup 8 7902 81 "$EVIDENCE/workroom/tool.key" 43207
-jq -S '.page.grain | {generation,status,remaining,reserved}' \
+jq -S '.cell.grain | {generation,status,remaining,reserved}' \
   "$EVIDENCE/app-tool-before-reopen/view.json" >"$EVIDENCE/app-tool-before-reopen-state.json"
-jq -S '.page.grain | {generation,status,remaining,reserved}' \
+jq -S '.cell.grain | {generation,status,remaining,reserved}' \
   "$EVIDENCE/app-tool-after-lookup/view.json" >"$EVIDENCE/app-tool-after-lookup-state.json"
 cmp "$EVIDENCE/app-tool-before-reopen-state.json" "$EVIDENCE/app-tool-after-lookup-state.json"
 query app-reopened 8 8401 141 "$EVIDENCE/workroom/tool.key" 43300
 jq -e --slurpfile born "$EVIDENCE/app-born/view.json" \
-  '.page == $born[0].page' "$EVIDENCE/app-reopened/view.json" >/dev/null
+  '.cell == $born[0].cell' "$EVIDENCE/app-reopened/view.json" >/dev/null
 
 reserve_tool session-reserve 44000 4
 birth_source session 44100 applicationSessionGrainBirth
@@ -238,9 +238,9 @@ query descriptor-born 8 8405 149 "$EVIDENCE/workroom/tool.key" 44201
 query_policy session-policy 8 8404 147 "$EVIDENCE/workroom/tool.key" 44204
 query_policy descriptor-policy 8 8405 149 "$EVIDENCE/workroom/tool.key" 44205
 jq -e --arg target "8404" \
-  '([.page.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
+  '([.cell.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/session-born/view.json" >/dev/null
-jq -e '.page.document == "8405" and .page.entries == []' \
+jq -e '.cell.document == "8405" and .cell.entries == []' \
   "$EVIDENCE/descriptor-born/view.json" >/dev/null
 for target in session descriptor; do
   if [ "$target" = session ]; then id=8404; else id=8405; fi
@@ -255,19 +255,19 @@ check_replay session
 "$STORE_BINARY" read-to "$EVIDENCE/workroom/store" "$EVIDENCE/session-after-lookup-image.bin"
 cmp "$EVIDENCE/session-before-reopen-image.bin" "$EVIDENCE/session-after-lookup-image.bin"
 query session-tool-after-lookup 8 7902 81 "$EVIDENCE/workroom/tool.key" 44207
-jq -S '.page.grain | {generation,status,remaining,reserved}' \
+jq -S '.cell.grain | {generation,status,remaining,reserved}' \
   "$EVIDENCE/session-tool-before-reopen/view.json" \
   >"$EVIDENCE/session-tool-before-reopen-state.json"
-jq -S '.page.grain | {generation,status,remaining,reserved}' \
+jq -S '.cell.grain | {generation,status,remaining,reserved}' \
   "$EVIDENCE/session-tool-after-lookup/view.json" \
   >"$EVIDENCE/session-tool-after-lookup-state.json"
 cmp "$EVIDENCE/session-tool-before-reopen-state.json" \
   "$EVIDENCE/session-tool-after-lookup-state.json"
 query tool-after 8 7902 81 "$EVIDENCE/workroom/tool.key" 44202
 query parent-after 8 7901 73 "$EVIDENCE/workroom/tool.key" 44203
-jq -e '.page.grain.remaining == "38" and .page.grain.reserved == "0"' \
+jq -e '.cell.grain.remaining == "38" and .cell.grain.reserved == "0"' \
   "$EVIDENCE/tool-after/view.json" >/dev/null
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
+jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-after/view.json" >/dev/null
 shasum -a 256 -c "$EVIDENCE/input-sha256.txt" >"$EVIDENCE/input-recheck.txt"
 echo "current metered app/session birth native acceptance PASS"

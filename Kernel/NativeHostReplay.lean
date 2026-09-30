@@ -1978,7 +1978,7 @@ def AdmittedStep (config : Config) (before after : Opened config)
       advance before derived = .ok next ∧
       validateLoaded config next = .ok after ∧
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
-        before.durable.image.accepted.length + 1, imageBoundary config next.image⟩
+        before.durable.image.accepted.length + 1, worldRoot config next.image⟩
 
 /-- The ordered semantic history that `walk` actually constructs. -/
 inductive AdmittedReplay (config : Config) : Opened config →
@@ -2146,7 +2146,7 @@ private def walk (config : Config) (opened : Opened config)
             | .ok after =>
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
-                  index + 1, imageBoundary config next.image⟩
+                  index + 1, worldRoot config next.image⟩
               let nextIssues := issuesAfter config opened issues record receipt derived matched
               let nextReserves := reservesAfter config opened reserves record receipt derived matched
               let nextBegins := beginsAfter config opened begins record derived matched
@@ -2440,7 +2440,7 @@ def extendExact {config : Config} {oldTarget : Durable}
   let target := exactCandidate old readback.derived readback.ready
   let receipt : NativeHostCodec.Receipt :=
     ⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
-      old.opened.durable.image.accepted.length + 1, imageBoundary config target.image⟩
+      old.opened.durable.image.accepted.length + 1, worldRoot config target.image⟩
   have matched : recordMatches record readback.derived.intent = true := by
     exact (recordMatches_iff _ _).mpr rfl
   have step : AdmittedStep config old.opened readback.after record receipt := by
@@ -2499,7 +2499,7 @@ theorem extendExact_receipts {config : Config} {oldTarget : Durable}
     (extendExact old readback).receipts = old.receipts ++
       [⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        imageBoundary config (exactCandidate old readback.derived readback.ready).image⟩] := by
+        worldRoot config (exactCandidate old readback.derived readback.ready).image⟩] := by
   rfl
 
 /-- The physically read-back entry is exactly this admitted intent's record. -/
@@ -2531,7 +2531,7 @@ def SemanticStep (config : Config) (verifier : VerifierSemantics config)
       advance before derived = .ok next ∧
       validateLoaded config next = .ok after ∧
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
-        before.durable.image.accepted.length + 1, imageBoundary config next.image⟩
+        before.durable.image.accepted.length + 1, worldRoot config next.image⟩
 
 /-- Ordered accepted-record replay with one original receipt per transition.
 This is the pure trace of the operational `walk`, conditional on a stable

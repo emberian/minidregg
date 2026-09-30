@@ -19,7 +19,7 @@ bind all of these values on one loaded image:
   app resource, BEGIN kind, process generation, and claimed app phase. The
   only claim phases are install 8, start 9, stop 10, and upgrade 11.
 - Exact installed package digest and immutable image identity, process/unit
-  identity, current app/package/authority roots, and current image boundary.
+  identity, current app/package/authority roots, and current world root.
 - Fresh current signed mutation authority under the original BEGIN subject
   and capability, the installed v2 app/package management policies, and fresh
   signed app/package observations. The native result must establish these;

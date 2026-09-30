@@ -22,8 +22,8 @@ mkdir -p "$dir"
 if [ "$command" = query ]; then
   status=$(cat "$state/status")
   reserved=$(cat "$state/reserved")
-  printf '{"page":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"%s"}}}\n' "$status" "$reserved" > "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300","height":"10"}' > "$dir/challenge.json"
+  printf '{"cell":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"%s"}}}\n' "$status" "$reserved" > "$dir/view.json"
+  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300","height":"10"}' > "$dir/challenge.json"
   exit 0
 fi
 [ "$command" = submit ] || exit 40
@@ -40,7 +40,7 @@ elif grep -q '"type": "disconnect"' "$intent"; then
 else
   exit 42
 fi
-printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
+printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
 "#
     .replace("__STATE__", runtime.config.state_dir.to_str().unwrap());
     fs::write(&runtime.config.mini, script).unwrap();

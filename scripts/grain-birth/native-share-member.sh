@@ -133,10 +133,10 @@ grain_action() {
     --slurpfile challenge "$EVIDENCE/$name-before/challenge.json" \
     '{grain:{task:$task,subject:$subject,capability:$cap,observeCapability:$cap,
       schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-      expectedTargetRoot:$read[0].page.root,
+      expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$nonce,payload:"fresh grain-backed birth acceptance"},
-      before:{generation:$read[0].page.grain.generation,status:$read[0].page.grain.status,
-        remaining:$read[0].page.grain.remaining,reserved:$read[0].page.grain.reserved},
+      before:{generation:$read[0].cell.grain.generation,status:$read[0].cell.grain.status,
+        remaining:$read[0].cell.grain.remaining,reserved:$read[0].cell.grain.reserved},
       operation:$operation,publications:[]},
       grants:[{kind:"object",target:$task,capability:$cap}],intentNonce:$nonce}' \
     >"$EVIDENCE/$name-intent.json"
@@ -157,12 +157,12 @@ grain_action tool-reserve 8 7902 81 "$EVIDENCE/tool.key" 40030 \
 
 query tool-ready 8 7902 81 "$EVIDENCE/tool.key" 40040
 query parent-ready 8 7901 73 "$EVIDENCE/tool.key" 40041
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "4"' \
+jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "4"' \
   "$EVIDENCE/tool-ready/view.json" >/dev/null
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
+jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-ready/view.json" >/dev/null
 jq -e --slurpfile parent "$EVIDENCE/parent-ready/challenge.json" \
-  '.height == $parent[0].height and .imageBoundary == $parent[0].imageBoundary' \
+  '.height == $parent[0].height and .worldRoot == $parent[0].worldRoot' \
   "$EVIDENCE/tool-ready/challenge.json" >/dev/null
 
 # New object 8301 is absent from genesis and from the earlier provisioner.
@@ -180,11 +180,11 @@ jq -n --slurpfile genesis "$EVIDENCE/genesis.json" \
           predicate:{type:"all",predicates:[]}}],
         sourceCapabilities:["42"],funding:[],feePayer:"8"},
       tool:{task:"7902",capability:"81",observeCapability:"81",
-        targetRoot:$tool[0].page.root,
-        before:($tool[0].page.grain | {generation,status,remaining,reserved})},
+        targetRoot:$tool[0].cell.root,
+        before:($tool[0].cell.grain | {generation,status,remaining,reserved})},
       parent:{task:"7901",capability:"73",observeCapability:"73",
-        targetRoot:$parent[0].page.root,
-        before:($parent[0].page.grain | {generation,status,remaining,reserved})}},
+        targetRoot:$parent[0].cell.root,
+        before:($parent[0].cell.grain | {generation,status,remaining,reserved})}},
     grants:[{kind:"object",target:"10",capability:"55"},
       {kind:"account",target:"8",capability:"42"},
       {kind:"object",target:"7902",capability:"81"},
@@ -196,13 +196,13 @@ jq -n --slurpfile genesis "$EVIDENCE/genesis.json" \
   >"$EVIDENCE/grain-birth.stdout"
 confirmed "$EVIDENCE/grain-birth-attempt/outcome.json"
 query born-content 8 8301 85 "$EVIDENCE/tool.key" 41010
-jq -e '.page.document == "8301" and .page.entries == []' \
+jq -e '.cell.document == "8301" and .cell.entries == []' \
   "$EVIDENCE/born-content/view.json" >/dev/null
 query tool-after 8 7902 81 "$EVIDENCE/tool.key" 41011
 query parent-after 8 7901 73 "$EVIDENCE/tool.key" 41012
-jq -e '.page.grain.remaining == "47" and .page.grain.reserved == "0"' \
+jq -e '.cell.grain.remaining == "47" and .cell.grain.reserved == "0"' \
   "$EVIDENCE/tool-after/view.json" >/dev/null
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
+jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-after/view.json" >/dev/null
 
 # A same-profile owner-7 bare content birth is the positive factory-law
@@ -226,7 +226,7 @@ jq --slurpfile observed "$EVIDENCE/tool-after/challenge.json" \
   >"$EVIDENCE/owner-bare.stdout"
 confirmed "$EVIDENCE/owner-bare-attempt/outcome.json"
 query owner-bare-content 7 8303 103 "$EVIDENCE/controller.key" 41510
-jq -e '.page.document == "8303" and .page.entries == []' \
+jq -e '.cell.document == "8303" and .cell.entries == []' \
   "$EVIDENCE/owner-bare-content/view.json" >/dev/null
 
 # The same worker's ordinary bare birth has valid source-account authority,
@@ -257,6 +257,6 @@ jq -e '.type == "refused" and .phase == "61646d697373696f6e" and
   "$EVIDENCE/worker-bare-attempt/outcome.json" >/dev/null
 query worker-bare-post 7 8303 103 "$EVIDENCE/controller.key" 42010
 jq -e --slurpfile before "$EVIDENCE/owner-bare-content/challenge.json" \
-  '.imageBoundary == $before[0].imageBoundary' \
+  '.worldRoot == $before[0].worldRoot' \
   "$EVIDENCE/worker-bare-post/challenge.json" >/dev/null
 echo "grain-backed resource birth native acceptance PASS"

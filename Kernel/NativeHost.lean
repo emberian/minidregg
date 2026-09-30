@@ -157,7 +157,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
         let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
         pure (.revoke bytes, [signature])
-  pure ⟨config.deployment.domain, profile.semantics, imageBoundary config opened.durable.image,
+  pure ⟨config.deployment.domain, profile.semantics, worldRoot config opened.durable.image,
     height, finalized, slots⟩
 
 /-- Internal operator computation only. It must not be exposed to an untrusted
@@ -379,7 +379,35 @@ def historicalReceipt (config : Config) (durable : Durable) (transactionId event
   let record ← durable.image.accepted[index]?
   if record.event.eventId != eventId then none else
     let acceptedPrefix : DurableReceiver.Image := ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
-    some ⟨transactionId, eventId, index + 1, imageBoundary config acceptedPrefix⟩
+    some ⟨transactionId, eventId, index + 1, worldRoot config acceptedPrefix⟩
+
+/-- **Receipt binding (DATAMODEL §3.4).**  A sealed receipt names its
+transaction's accepted prefix, and carries exactly that prefix's world root and
+height. -/
+theorem historicalReceipt_bound (config : Config) (durable : Durable)
+    (transactionId eventId : Digest) (receipt : NativeHostCodec.Receipt)
+    (sealed : historicalReceipt config durable transactionId eventId = some receipt) :
+    ∃ index, durable.image.accepted.findIdx?
+        (fun record => record.transactionId == transactionId) = some index ∧
+      receipt.worldRoot = worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩ ∧
+      receipt.acceptedCount =
+        NativeHostCodec.height ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩ := by
+  unfold historicalReceipt at sealed
+  rcases hidx : durable.image.accepted.findIdx?
+      (fun record => record.transactionId == transactionId) with _ | index
+  · simp [hidx] at sealed
+  · have hlt : index < durable.image.accepted.length := by
+      rcases List.findIdx?_eq_some_iff_getElem.mp hidx with ⟨h, _⟩
+      exact h
+    rcases hrec : durable.image.accepted[index]? with _ | record
+    · simp at hrec; omega
+    · simp only [hidx, hrec, Option.bind_eq_bind, Option.bind_some] at sealed
+      split at sealed
+      · cases sealed
+      · cases sealed
+        refine ⟨index, hidx, rfl, ?_⟩
+        simp [NativeHostCodec.height, List.length_take]
+        omega
 
 /-- When the old chronological prefix has no matching transaction ID, the
 historical selector points at the newly appended record and reproduces its
@@ -396,7 +424,7 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
       derived.intent.transactionId derived.intent.event.eventId =
       some ⟨derived.intent.transactionId, derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        imageBoundary config (NativeHostReplay.exactCandidate old derived ready).image⟩ := by
+        worldRoot config (NativeHostReplay.exactCandidate old derived ready).image⟩ := by
   simp [historicalReceipt, NativeHostReplay.exactCandidate, DurableReceiverIO.Loaded.extend,
     DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, List.take_append,
@@ -668,3 +696,5 @@ def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 end Minidregg.Kernel.NativeHost
 
 #print axioms Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh
+/-- info: 'Minidregg.Kernel.NativeHost.historicalReceipt_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHost.historicalReceipt_bound

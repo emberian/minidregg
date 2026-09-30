@@ -30,7 +30,7 @@ pub(crate) struct ExactReceipt {
     transaction_id: String,
     event_id: String,
     accepted_count: String,
-    image_boundary: String,
+    world_root: String,
 }
 
 impl ExactReceipt {
@@ -38,9 +38,9 @@ impl ExactReceipt {
         transaction_id: &str,
         event_id: &str,
         accepted_count: &str,
-        image_boundary: &str,
+        world_root: &str,
     ) -> io::Result<Self> {
-        if [transaction_id, event_id, accepted_count, image_boundary]
+        if [transaction_id, event_id, accepted_count, world_root]
             .iter()
             .any(|value| !decimal(value))
             || accepted_count == "0"
@@ -51,7 +51,7 @@ impl ExactReceipt {
             transaction_id: transaction_id.to_owned(),
             event_id: event_id.to_owned(),
             accepted_count: accepted_count.to_owned(),
-            image_boundary: image_boundary.to_owned(),
+            world_root: world_root.to_owned(),
         })
     }
 
@@ -66,7 +66,7 @@ impl ExactReceipt {
             field("transactionId")?,
             field("eventId")?,
             field("acceptedCount")?,
-            field("imageBoundary")?,
+            field("worldRoot")?,
         )
     }
 
@@ -75,7 +75,7 @@ impl ExactReceipt {
             transaction_id: &self.transaction_id,
             event_id: &self.event_id,
             accepted_count: &self.accepted_count,
-            image_boundary: &self.image_boundary,
+            world_root: &self.world_root,
         }
     }
 
@@ -88,8 +88,8 @@ impl ExactReceipt {
     pub(crate) fn accepted_count(&self) -> &str {
         &self.accepted_count
     }
-    pub(crate) fn image_boundary(&self) -> &str {
-        &self.image_boundary
+    pub(crate) fn world_root(&self) -> &str {
+        &self.world_root
     }
 }
 
@@ -179,8 +179,8 @@ fn committed_source_receipt(
         view.get("receipt")
             .ok_or_else(|| invalid("STOP committed source receipt absent"))?,
     )?;
-    if field("postImageBoundary")? != receipt.image_boundary {
-        return Err(invalid("STOP committed post-image boundary differs"));
+    if field("postWorldRoot")? != receipt.world_root {
+        return Err(invalid("STOP committed post-world root differs"));
     }
     Ok(receipt)
 }
@@ -242,7 +242,7 @@ pub(crate) fn submit_once(
             "transactionId":begin_receipt.transaction_id(),
             "eventId":begin_receipt.event_id(),
             "acceptedCount":begin_receipt.accepted_count(),
-            "imageBoundary":begin_receipt.image_boundary(),
+            "worldRoot":begin_receipt.world_root(),
         }
     });
     write_new(
@@ -335,8 +335,8 @@ mod tests {
             "frameByteCount":frame.len().to_string(),
             "originalClaimHex":hex(claim),
             "originalBeginHex":hex(begin),
-            "postImageBoundary":"4",
-            "receipt":{"transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"}
+            "postWorldRoot":"4",
+            "receipt":{"transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}
         });
         assert!(committed_source_receipt(&source, frame, claim, begin).is_ok());
         assert!(committed_source_receipt(&source, frame, b"changed", begin).is_err());
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn historical_outcome_cannot_be_fresh_callback() {
         let mut reply = Vec::new();
-        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v2:replayed";
+        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v3:replayed";
         reply.extend_from_slice(&(payload.len() as u32 + 1).to_le_bytes());
         reply.push(26);
         reply.extend_from_slice(payload);

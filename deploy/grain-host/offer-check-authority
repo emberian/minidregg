@@ -70,16 +70,16 @@ query witness "$worker" "$parent" "$witness" "$tool_key" resource
 query content "$worker" 8001 "$read_cap" "$tool_key" resource
 query parent-policy "$owner" "$parent" "$parent_cap" "$controller_key" policy
 jq -e --arg task "$parent" \
-  '.page.grain == {task:$task,generation:"0",status:"0",
+  '.cell.grain == {task:$task,generation:"0",status:"0",
     remaining:"100",reserved:"0"}' "$evidence/parent/view.json" >/dev/null ||
   fail 'parent is not the fresh unheld grain'
 jq -e --arg task "$tool" \
-  '.page.grain == {task:$task,generation:"0",status:"0",
+  '.cell.grain == {task:$task,generation:"0",status:"0",
     remaining:"50",reserved:"0"}' "$evidence/tool/view.json" >/dev/null ||
   fail 'tool is not the fresh unheld grain'
-[[ $(jq -er .page.root "$evidence/witness/view.json") == "$(jq -er .page.root "$evidence/parent/view.json")" ]] ||
+[[ $(jq -er .cell.root "$evidence/witness/view.json") == "$(jq -er .cell.root "$evidence/parent/view.json")" ]] ||
   fail 'worker parent witness sees a different target root'
-jq -e '.page.document == "8001" and .page.entries == []' \
+jq -e '.cell.document == "8001" and .cell.entries == []' \
   "$evidence/content/view.json" >/dev/null ||
   fail 'shared content is not the fresh empty workroom'
 jq -n --arg owner "$owner" --arg worker "$worker" \
@@ -97,8 +97,8 @@ cmp "$evidence/expected-policy.bin" "$evidence/view-predicate.bin" ||
 jq -e '.version == "0"' "$evidence/parent-policy/view.json" >/dev/null ||
   fail 'parent policy is not the fresh birth version'
 jq -n --arg peer "$peer" --arg parent "$parent" --arg tool "$tool" \
-  --arg parentRoot "$(jq -er .page.root "$evidence/parent/view.json")" \
-  --arg contentRoot "$(jq -er .page.root "$evidence/content/view.json")" \
+  --arg parentRoot "$(jq -er .cell.root "$evidence/parent/view.json")" \
+  --arg contentRoot "$(jq -er .cell.root "$evidence/content/view.json")" \
   '{stage:"fresh-signed-readback",peer:$peer,parent:$parent,tool:$tool,
     parentRoot:$parentRoot,contentRoot:$contentRoot,
     publicationAdmissionVerified:false,friendReady:false}' >"$evidence/verdict.json"

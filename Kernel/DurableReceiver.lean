@@ -255,6 +255,71 @@ theorem Image.outside_support (rootBytes : List UInt8 → Digest) (image : Image
     simp [Seed.snapshot, Seed.lookup_missing image.seed.cells cellId absent.1]
   next => simp at restored
 
+/-- A cell's current bytes, read off the image alone: its last accepted write,
+else its seeded bytes, else the deployment's fresh image.  The world root is
+computed over these (`NativeHostCodec.worldRoot`); `Image.currentBytes_restore`
+says they are the restored snapshot's bytes. -/
+def Image.currentBytes (image : Image) (cellId : CellId) : List UInt8 :=
+  (image.accepted.reverse.findSome? fun record =>
+      DataSnapshot.lookupPostBytes cellId record.writes).getD
+    ((Seed.lookup image.seed.cells cellId).getD image.seed.absentBytes)
+
+/-- An accepted complete execution is exactly the installation. -/
+theorem execute_accepted_install {rootBytes : List UInt8 → Digest}
+    (before : DataSnapshot rootBytes) (intent : DataIntent rootBytes) (next : DataSnapshot rootBytes)
+    (h : DurableDataIntent.execute .complete before intent = .accepted next) :
+    next = DataSnapshot.install before intent := by
+  unfold DurableDataIntent.execute at h
+  split at h
+  · split at h <;> cases h
+  · split at h
+    · cases h
+    · cases h; rfl
+
+theorem replay_canonicalBytes (rootBytes : List UInt8 → Digest) :
+    ∀ (records : List IntentRecord) (before after : DataSnapshot rootBytes),
+      replay rootBytes before records = some after → ∀ cellId,
+        after.canonicalBytes cellId =
+          (records.reverse.findSome? fun record =>
+              DataSnapshot.lookupPostBytes cellId record.writes).getD
+            (before.canonicalBytes cellId)
+  | [], before, after, restored, cellId => by
+      cases Option.some.inj restored
+      rfl
+  | record :: records, before, after, restored, cellId => by
+      unfold replay at restored
+      cases bound : record.bind? rootBytes with
+      | none => simp [bound] at restored
+      | some intent =>
+          simp only [bound, bind, Option.bind] at restored
+          have writes : intent.writes = record.writes :=
+            congrArg IntentRecord.writes (IntentRecord.bind_exact bound)
+          cases executed : DurableDataIntent.execute .complete before intent with
+          | accepted next =>
+              simp only [executed] at restored
+              rw [replay_canonicalBytes rootBytes records next after restored cellId,
+                execute_accepted_install before intent next executed,
+                DataSnapshot.install_canonicalBytes, writes, List.reverse_cons,
+                List.findSome?_append]
+              cases (records.reverse.findSome? fun record =>
+                  DataSnapshot.lookupPostBytes cellId record.writes) <;>
+                simp [List.findSome?_cons]
+              cases DataSnapshot.lookupPostBytes cellId record.writes <;> rfl
+          | replayed recorded => simp [executed] at restored
+          | rejected reason => simp [executed] at restored
+          | crashed point next => simp [executed] at restored
+
+/-- The bytes the world root reads are the restored snapshot's bytes. -/
+theorem Image.currentBytes_restore (rootBytes : List UInt8 → Digest) (image : Image)
+    (snapshot : DataSnapshot rootBytes) (restored : image.restore rootBytes = some snapshot)
+    (cellId : CellId) : snapshot.canonicalBytes cellId = image.currentBytes cellId := by
+  unfold Image.restore at restored
+  split at restored
+  next =>
+    rw [replay_canonicalBytes rootBytes image.accepted _ snapshot restored cellId]
+    rfl
+  next => simp at restored
+
 theorem replay_append (rootBytes : List UInt8 → Digest)
     (before : DataSnapshot rootBytes) (left right : List IntentRecord) :
     replay rootBytes before (left ++ right) =
@@ -311,3 +376,9 @@ end Minidregg.Kernel.DurableReceiver
 
 /-- info: 'Minidregg.Kernel.DurableReceiver.Image.outside_support' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.Image.outside_support
+/-- info: 'Minidregg.Kernel.DurableReceiver.execute_accepted_install' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.execute_accepted_install
+/-- info: 'Minidregg.Kernel.DurableReceiver.replay_canonicalBytes' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.replay_canonicalBytes
+/-- info: 'Minidregg.Kernel.DurableReceiver.Image.currentBytes_restore' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.Image.currentBytes_restore

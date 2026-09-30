@@ -70,8 +70,8 @@ private_file "$D/lookup-after-submit.json"
 jq -e '.type == "absent"' "$A/retry-0001.json" >/dev/null || fail 'historical lookup not absent'
 jq -e '.type == "confirmed" and .confirmation == "installed" and .acceptedCount == "1"' "$D/submit.json" >/dev/null || fail 'submit not installed'
 jq -e '.type == "confirmed" and .confirmation == "replayed" and .acceptedCount == "1"' "$D/lookup-after-submit.json" >/dev/null || fail 'lookup not replayed'
-[ "$(jq -Sc '{transactionId,eventId,acceptedCount,imageBoundary}' "$D/submit.json")" = \
-  "$(jq -Sc '{transactionId,eventId,acceptedCount,imageBoundary}' "$D/lookup-after-submit.json")" ] || fail 'four-field receipts differ'
+[ "$(jq -Sc '{transactionId,eventId,acceptedCount,worldRoot}' "$D/submit.json")" = \
+  "$(jq -Sc '{transactionId,eventId,acceptedCount,worldRoot}' "$D/lookup-after-submit.json")" ] || fail 'four-field receipts differ'
 [ "$(stat -c '%d' "$D")" = "$(stat -c '%d' "$A")" ] || fail 'source and attempt are on different filesystems'
 
 # Creation of this private plan is the durable boundary. Any partial links

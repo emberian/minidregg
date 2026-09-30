@@ -69,7 +69,7 @@ fn exact_receipt(value: &Value) -> Result<Value> {
         return Err("grant outcome did not confirm accepted history".into());
     }
     let mut receipt = serde_json::Map::new();
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let text = field(value, name)?;
         if !canonical_decimal(text) {
             return Err(format!("grant receipt has noncanonical {name}"));
@@ -587,7 +587,7 @@ mod tests {
     fn grant_receipt_requires_four_canonical_fields() {
         let good = json!({"type":"confirmed","confirmation":"installed",
             "transactionId":"10","eventId":"20","acceptedCount":"31",
-            "imageBoundary":"40"});
+            "worldRoot":"40"});
         assert_eq!(exact_receipt(&good).unwrap()["grantIndex"], "30");
         let mut wrong = good.clone();
         wrong["acceptedCount"] = json!("031");

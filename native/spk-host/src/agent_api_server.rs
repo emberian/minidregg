@@ -975,7 +975,7 @@ fn match_committed(
         || decimal(original, "transactionId")? != reserve.transaction_id
         || decimal(original, "eventId")? != reserve.event_id
         || decimal(original, "acceptedCount")? != reserve.accepted_count
-        || decimal(original, "imageBoundary")? != reserve.image_boundary
+        || decimal(original, "worldRoot")? != reserve.world_root
         || decimal(inspection, "ticketResource")? != custody.ticket_resource
         || decimal(source_request, "operationId")? != operation_id
         || string(source_request, "methodHex")? != hex(method.as_bytes())
@@ -1038,8 +1038,8 @@ fn match_committed(
         dispatch_event: decimal(inspection, "dispatchEvent")?.to_owned(),
         session_fingerprint: digest_nat(decimal(inspection, "sessionFingerprint")?)?,
         principal: unhex32(string(identity, "principalHex")?)?,
-        before_image_boundary: decimal(inspection, "currentImageBoundary")?.to_owned(),
-        after_image_boundary: decimal(receipt, "imageBoundary")?.to_owned(),
+        before_world_root: decimal(inspection, "currentWorldRoot")?.to_owned(),
+        after_world_root: decimal(receipt, "worldRoot")?.to_owned(),
         accepted_count: decimal(receipt, "acceptedCount")?.to_owned(),
         effective_bits,
         app_path_and_query: if query.is_empty() {
@@ -1359,7 +1359,7 @@ mod tests {
             transaction_id: "100".into(),
             event_id: "101".into(),
             accepted_count: "5".into(),
-            image_boundary: "200".into(),
+            world_root: "200".into(),
         };
         let mut inspection = json!({
             "type":"application-agent-dispatch-committed-inspection-v2",
@@ -1370,16 +1370,16 @@ mod tests {
             "purse":{"task":"6600","generation":"5","payerSubject":"8",
                 "reserveAmount":"20","maximumCharge":"10","reserveOperationId":"9",
                 "reserveIndex":"4","originalReceipt":{"transactionId":"100","eventId":"101",
-                    "acceptedCount":"5","imageBoundary":"200"}},
+                    "acceptedCount":"5","worldRoot":"200"}},
             "ticketResource":"6408",
             "request":{"operationId":"7","methodHex":hex(b"GET"),
                 "pathHex":hex(b"repo.git/info/refs"),"queryHex":hex(b"service=git-upload-pack"),
                 "bodyHex":"","headers":[{"nameHex":hex(b"accept"),
                     "valueHex":hex(b"application/x-git-upload-pack-advertisement"),"generated":false}]},
-            "receipt":{"transactionId":"300","eventId":"301","acceptedCount":"6","imageBoundary":"400"},
+            "receipt":{"transactionId":"300","eventId":"301","acceptedCount":"6","worldRoot":"400"},
             "dispatchTransaction":"300","dispatchEvent":"301","identity":{"principalHex":"a".repeat(64)},
             "effectiveBits":[true,false],"physicalRequestDigest":"42","sessionFingerprint":"43",
-            "currentImageBoundary":"350"
+            "currentWorldRoot":"350"
         });
         assert!(match_committed(
             &inspection,

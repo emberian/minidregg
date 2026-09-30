@@ -110,7 +110,7 @@ jq -e --slurpfile allocation "$R/source-stage/agent-allocation.json" '
   .grants[0].capability == ($allocation[0].agents[] | select(.route == "hermes-a") | .plannedCaps.parentOwner) and
   .nonce == "57920" and .purpose.type == "query" and .purpose.view == "resource"' \
   "$Q/intent.json" >/dev/null || fail 'retained query does not match allocation'
-jq -e '.type == "resource" and .page.grain ==
+jq -e '.type == "resource" and .cell.grain ==
   {task:"7920",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
   "$P/reinspected-view.json" >/dev/null || fail 'retained grain view differs'
 # Change only the first-query block: it reuses retained signed evidence. Keep

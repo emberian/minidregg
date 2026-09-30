@@ -34,7 +34,7 @@ authorization. Fn is a semi-untrusted transport of the exact signed release.
 
 ## Why the current receipt cannot be selectively opened
 
-`NativeHostCodec.imageBoundary` hashes the complete canonical image bytes.
+`NativeHostCodec.worldRoot` hashes the complete canonical image bytes.
 `FnEvidence.Package.acceptedPrefix` carries the genesis and every original
 record through the receipt; `NativeHostReplay.verifyBytes` re-admits each
 record's original ingress and compares every resulting intent. Individual

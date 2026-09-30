@@ -906,7 +906,7 @@ private def agentLifetimeGrantRequest (json : Lean.Json) : Result (List UInt8) :
     ["resource", "issueIndex", "issueReceipt", "ticketResource", "ticketDigest"]
     (← field "$.grant" "source" grantObj)
   let receiptObj ← exactObject "$.grant.source.issueReceipt"
-    ["transactionId", "eventId", "acceptedCount", "imageBoundary"]
+    ["transactionId", "eventId", "acceptedCount", "worldRoot"]
     (← field "$.grant.source" "issueReceipt" sourceObj)
   let receipt : NativeHostCodec.Receipt := {
     transactionId := ⟨← nat "$.grant.source.issueReceipt.transactionId"
@@ -915,8 +915,8 @@ private def agentLifetimeGrantRequest (json : Lean.Json) : Result (List UInt8) :
       (← field "$.grant.source.issueReceipt" "eventId" receiptObj)⟩
     acceptedCount := ← nat "$.grant.source.issueReceipt.acceptedCount"
       (← field "$.grant.source.issueReceipt" "acceptedCount" receiptObj)
-    imageBoundary := ⟨← nat "$.grant.source.issueReceipt.imageBoundary"
-      (← field "$.grant.source.issueReceipt" "imageBoundary" receiptObj)⟩ }
+    worldRoot := ⟨← nat "$.grant.source.issueReceipt.worldRoot"
+      (← field "$.grant.source.issueReceipt" "worldRoot" receiptObj)⟩ }
   let participantObj ← exactObject "$.grant.participant"
     ["app", "session", "subject", "parentTask", "originalGeneration",
       "grantObserveCapability"] (← field "$.grant" "participant" grantObj)
@@ -2309,7 +2309,7 @@ private def participantKeyCommandJson
 
 private def planJson (plan : SigningPlan) : Lean.Json := .mkObj
   [("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
-   ("imageBoundary", decimal plan.imageBoundary.value), ("height", decimal plan.height),
+   ("worldRoot", decimal plan.worldRoot.value), ("height", decimal plan.height),
    ("finalizedDraft", draftJson plan.finalizedDraft),
    ("slots", .arr <| plan.slots.toArray.map fun slot => .mkObj
      [("role", decimal slot.role), ("index", decimal slot.index),
@@ -2475,7 +2475,7 @@ private def dispatchPlanJson (plan : ApplicationDispatchAuthoring.Plan) :
      ("unsignedIngress", hexJson plan.unsignedIngress),
      ("domain", decimal plan.invocation.domain.value),
      ("semantics", decimal plan.invocation.semantics.value),
-     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("worldRoot", decimal plan.invocation.worldRoot.value),
      ("height", decimal plan.invocation.height),
      ("appResource", decimal dispatch.app.resource),
      ("appGeneration", signedDecimal dispatch.app.generation),
@@ -2504,7 +2504,7 @@ private def completionOperatorPlanJson
      ("command", hexJson <| DeclaredResourceController.commandCodec.encode command),
      ("domain", decimal plan.invocation.domain.value),
      ("semantics", decimal plan.invocation.semantics.value),
-     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("worldRoot", decimal plan.invocation.worldRoot.value),
      ("height", decimal plan.invocation.height),
      ("app", decimal source.app),
      ("packageManifest", decimal source.originalBegin.base.source.packageManifest),
@@ -2533,7 +2533,7 @@ private def residentBeginOperatorPlanJson
      ("descriptor", hexJson plan.descriptorBytes),
      ("domain", decimal plan.invocation.domain.value),
      ("semantics", decimal plan.invocation.semantics.value),
-     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("worldRoot", decimal plan.invocation.worldRoot.value),
      ("height", decimal plan.invocation.height),
      ("kind", (match source.kind with
        | .install => "install" | .start => "start"
@@ -2570,7 +2570,7 @@ private def lifecycleClaimOperatorPlanJson
      ("descriptor", hexJson begin.descriptor.canonicalBytes),
      ("domain", decimal plan.invocation.domain.value),
      ("semantics", decimal plan.invocation.semantics.value),
-     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("worldRoot", decimal plan.invocation.worldRoot.value),
      ("height", decimal plan.invocation.height),
      ("app", decimal source.begin.source.app),
      ("originalIndex", decimal source.originalIndex),
@@ -2581,7 +2581,7 @@ private def lifecycleClaimOperatorPlanJson
      ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
      ("currentAppRoot", decimal source.currentAppRoot.value),
      ("currentPackageRoot", decimal source.currentPackageRoot.value),
-     ("currentImageBoundary", decimal source.currentImageBoundary.value),
+     ("currentWorldRoot", decimal source.currentWorldRoot.value),
      ("slots", .arr <| (plan.invocation.slots ++
         [plan.appObservationSlot, plan.packageObservationSlot]).toArray.map slotJson)]
 
@@ -2629,7 +2629,7 @@ private def intentJson (value : Intent) : Lean.Json := .mkObj
 private def challengeJson (value : Challenge) : Lean.Json := .mkObj
   [("intent", intentJson value.intent), ("domain", decimal value.domain.value),
    ("semantics", decimal value.semantics.value), ("federation", decimal value.federation.value),
-   ("imageBoundary", decimal value.imageBoundary.value), ("height", decimal value.height),
+   ("worldRoot", decimal value.worldRoot.value), ("height", decimal value.height),
    ("headers", .arr <| value.headers.toArray.map hexJson),
    ("signing", .arr <| value.headers.toArray.map signedHeaderJson)]
 
@@ -2641,7 +2641,7 @@ private def outcomeJson : Outcome → Lean.Json
         | .replayed => "replayed"
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
-      ("acceptedCount", decimal receipt.acceptedCount), ("imageBoundary", decimal receipt.imageBoundary.value)]
+      ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
   | .refused phase detail => .mkObj [("type", "refused"), ("phase", hexJson phase), ("detail", hexJson detail)]
   | .contention => .mkObj [("type", "contention")]
   | .unavailable detail => .mkObj [("type", "unavailable"), ("detail", hexJson detail)]
@@ -2733,12 +2733,12 @@ private def resourceJson (value : List UInt8 × List (Nat × Int)) : Result Lean
   let packed ← match Minidregg.Theory.CellRegistry.PackedCell.decode
       CanonicalCellRegistry.registry value.1 with
     | some packed => pure packed
-    | none => failAt "view-resource.page" "noncanonical packed cell"
+    | none => failAt "view-resource.cell" "noncanonical packed cell"
   let view := match packed with
     | ⟨.content, payload⟩ => contentCellJson payload.root payload.logical
     | ⟨.declaredObject, payload⟩ => declaredCellJson payload.root payload.logical
     | _ => .mkObj [("root", decimal packed.payload.root.value), ("canonical", hexJson value.1)]
-  pure <| .mkObj [("type", "resource"), ("page", view),
+  pure <| .mkObj [("type", "resource"), ("cell", view),
     ("balances", .arr <| value.2.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2])]
 
 private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCodec α)

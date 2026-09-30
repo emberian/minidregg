@@ -42,7 +42,7 @@ fn exact_receipt(value: &Value, expected: [&str; 4]) -> Result<()> {
     {
         return Err("native exact call lookup has no historical replayed receipt".into());
     }
-    for (field, wanted) in ["transactionId", "eventId", "acceptedCount", "imageBoundary"]
+    for (field, wanted) in ["transactionId", "eventId", "acceptedCount", "worldRoot"]
         .into_iter()
         .zip(expected)
     {
@@ -113,7 +113,7 @@ pub(super) fn lookup(
         "config":utf8_path(config)?,"configSha256":hex(&Sha256::digest(&config_bytes)),
         "socket":utf8_path(socket)?,"callSha256":hex(&Sha256::digest(&call)),
         "expected":{"transactionId":expected[0],"eventId":expected[1],
-            "acceptedCount":expected[2],"imageBoundary":expected[3]}});
+            "acceptedCount":expected[2],"worldRoot":expected[3]}});
     create_private(
         &directory.join("lookup-marker.json"),
         &serde_json::to_vec_pretty(&marker).map_err(|error| error.to_string())?,
@@ -211,9 +211,9 @@ mod tests {
     #[test]
     fn replayed_receipt_must_match_all_fields() {
         let valid = json!({"type":"confirmed","confirmation":"replayed",
-            "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"});
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
         exact_receipt(&valid, ["1", "2", "3", "4"]).unwrap();
-        for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+        for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
             let mut wrong = valid.clone();
             wrong[field] = json!("8");
             assert!(exact_receipt(&wrong, ["1", "2", "3", "4"]).is_err());

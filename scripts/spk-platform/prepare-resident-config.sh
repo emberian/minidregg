@@ -134,7 +134,7 @@ jq -e --slurpfile prepared "$PREPARED" --slurpfile completed "$COMPLETED" \
   ($prepared[0].begin.volumeIdHex | type == "string" and test("^[0-9a-f]{64}$")) and
   ($prepared[0].begin.acceptedCount | dec) and
   ($prepared[0].claim.acceptedCount | dec) and
-  ($completed[0].completionReceipt | [.transactionId,.eventId,.acceptedCount,.imageBoundary] | all(dec))
+  ($completed[0].completionReceipt | [.transactionId,.eventId,.acceptedCount,.worldRoot] | all(dec))
   ' "$INSTALL_CONFIG" >/dev/null || fail "INSTALL evidence differs from retained source"
 jq -e --arg digest "$(sha "$INGRESS")" '
   .protocol == "mini-spk-launch-completion-submit-requested-v1" and
@@ -207,7 +207,7 @@ if [ "$(jq -er .startAction.kind "$REQUEST")" = continue ]; then
   jq -e --arg admitted "$(sha "$CREATED_JOURNAL/start-admitted-v3.json")" '
     .protocol == "mini-spk-resident-start-completed-v3" and
     .admittedSha256 == $admitted and
-    (.completionReceipt | [.transactionId,.eventId,.acceptedCount,.imageBoundary] |
+    (.completionReceipt | [.transactionId,.eventId,.acceptedCount,.worldRoot] |
       all(type == "string" and test("^(0|[1-9][0-9]*)$")))
     ' "$CREATED_JOURNAL/start-completed-v3.json" >/dev/null || fail "prior create completion absent"
   jq -e --arg ingress "$(sha "$CREATED_INGRESS")" \
@@ -310,7 +310,7 @@ protected_chain "$JOURNAL"
   >"$JOURNAL/install-inspect.stdout" 2>"$JOURNAL/install-inspect.stderr" || fail "INSTALL outcome inspect refused; journal retained"
 jq -e --slurpfile completed "$COMPLETED" '
   .type == "confirmed" and .confirmation == "replayed" and
-  {transactionId,eventId,acceptedCount,imageBoundary} == $completed[0].completionReceipt
+  {transactionId,eventId,acceptedCount,worldRoot} == $completed[0].completionReceipt
   ' "$JOURNAL/install-lookup.json" >/dev/null || fail "INSTALL historical receipt differs"
 if [ "$(jq -er .startAction.kind "$REQUEST")" = continue ]; then
   "$HOST" "$CONFIG" application-lifecycle-completion-lookup "$CREATED_INGRESS" \
@@ -321,7 +321,7 @@ if [ "$(jq -er .startAction.kind "$REQUEST")" = continue ]; then
     2>"$JOURNAL/created-inspect.stderr" || fail "create inspect refused; journal retained"
   jq -e --slurpfile completed "$CREATED_JOURNAL/start-completed-v3.json" '
     .type == "confirmed" and .confirmation == "replayed" and
-    {transactionId,eventId,acceptedCount,imageBoundary} == $completed[0].completionReceipt
+    {transactionId,eventId,acceptedCount,worldRoot} == $completed[0].completionReceipt
     ' "$JOURNAL/created-lookup.json" >/dev/null || fail "create historical receipt differs"
 fi
 

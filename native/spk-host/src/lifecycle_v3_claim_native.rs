@@ -161,7 +161,7 @@ impl FixedLaunchClaimSigners {
             || text(view, "originalBeginTransactionId")? != begin.transaction_id
             || text(view, "originalBeginEventId")? != begin.event_id
             || text(view, "originalBeginAcceptedCount")? != begin.accepted_count
-            || text(view, "originalBeginImageBoundary")? != begin.image_boundary
+            || text(view, "originalBeginWorldRoot")? != begin.world_root
             || !lowercase_hex(text(view, "originalBeginReceiptHex")?)
             || text(view, "originalBeginReceiptHex")?.is_empty()
             || !lowercase_hex(text(view, "sourceHex")?)
@@ -169,8 +169,8 @@ impl FixedLaunchClaimSigners {
             || !decimal(text(view, "currentAuthorityRoot")?)
             || !decimal(text(view, "currentAppRoot")?)
             || !decimal(text(view, "currentPackageRoot")?)
-            || !decimal(text(view, "currentImageBoundary")?)
-            || !decimal(text(view, "imageBoundary")?)
+            || !decimal(text(view, "currentWorldRoot")?)
+            || !decimal(text(view, "worldRoot")?)
             || !decimal(text(view, "height")?)
         {
             return Err(invalid("v3 claim plan differs from retained fresh BEGIN"));
@@ -244,7 +244,7 @@ pub(crate) struct CommittedLaunchClaim {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 /// Current-image op68 plan plus detached op69 ingress. This does not submit
@@ -375,7 +375,7 @@ fn checked_committed(
         || !decimal(text(view, "appPhysicalRoot")?)
         || !decimal(text(view, "packagePhysicalRoot")?)
         || !decimal(text(view, "authorityPhysicalRoot")?)
-        || !decimal(text(view, "postImageBoundary")?)
+        || !decimal(text(view, "postWorldRoot")?)
     {
         return Err(invalid(
             "v3 committed claim differs from fresh ingress or signed SPK",
@@ -435,15 +435,15 @@ fn checked_committed(
     let transaction_id = receipt_field("transactionId")?;
     let event_id = receipt_field("eventId")?;
     let accepted_count = receipt_field("acceptedCount")?;
-    let image_boundary = receipt_field("imageBoundary")?;
+    let world_root = receipt_field("worldRoot")?;
     if !later_decimal(&accepted_count, &begin.accepted_count)
-        || image_boundary != text(view, "postImageBoundary")?
+        || world_root != text(view, "postWorldRoot")?
     {
         return Err(invalid(
             "v3 committed receipt differs from claimed post-image",
         ));
     }
-    Ok((transaction_id, event_id, accepted_count, image_boundary))
+    Ok((transaction_id, event_id, accepted_count, world_root))
 }
 
 /// Submit once to op26. Only its fresh-tip committed-v3 callback can arm a
@@ -480,7 +480,7 @@ pub(crate) fn submit_fresh_once(
         &attempt_dir.join("committed-v3.json"),
     )?;
     let view: Value = serde_json::from_slice(&inspection)?;
-    let (transaction_id, event_id, accepted_count, image_boundary) =
+    let (transaction_id, event_id, accepted_count, world_root) =
         checked_committed(&view, &committed, &assembled, begin, launch, fixed)?;
     let physical_begin = verified_physical_begin(fixed, begin, launch, &transaction_id, &event_id)?;
     Ok(CommittedLaunchClaim {
@@ -491,7 +491,7 @@ pub(crate) fn submit_fresh_once(
         transaction_id,
         event_id,
         accepted_count,
-        image_boundary,
+        world_root,
     })
 }
 
@@ -659,7 +659,7 @@ mod tests {
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "12".into(),
-            image_boundary: "13".into(),
+            world_root: "13".into(),
         };
         let fixed = FixedLaunchClaimSigners {
             protocol: "mini-spk-resident-claim-management-v1".into(),
@@ -685,14 +685,14 @@ mod tests {
             "originalBeginTransactionId":"9",
             "originalBeginEventId":"10",
             "originalBeginAcceptedCount":"12",
-            "originalBeginImageBoundary":"13",
+            "originalBeginWorldRoot":"13",
             "originalBeginReceiptHex":"ab",
             "sourceHex":"cd",
             "currentAuthorityRoot":"1",
             "currentAppRoot":"2",
             "currentPackageRoot":"3",
-            "currentImageBoundary":"4",
-            "imageBoundary":"5",
+            "currentWorldRoot":"4",
+            "worldRoot":"5",
             "height":"6",
             "binding":{"choice":"create","createIndex":"0","commandDigest":"33","priorCreate":null},
             "slots":[],
@@ -741,7 +741,7 @@ mod tests {
             transaction_id: "10".into(),
             event_id: "11".into(),
             accepted_count: "12".into(),
-            image_boundary: "13".into(),
+            world_root: "13".into(),
         };
         let fixed = FixedLaunchClaimSigners {
             protocol: "mini-spk-resident-claim-management-v1".into(),
@@ -759,11 +759,11 @@ mod tests {
             "authorizationOperationId":"9", "originalIndex":"11", "queryNonce":"14",
             "app":"5", "managementSubject":"4",
             "originalBeginTransactionId":"10", "originalBeginEventId":"11",
-            "originalBeginAcceptedCount":"12", "originalBeginImageBoundary":"13",
+            "originalBeginAcceptedCount":"12", "originalBeginWorldRoot":"13",
             "originalBeginReceiptHex":"ab", "sourceHex":"cd",
             "currentAuthorityRoot":"1", "currentAppRoot":"2",
-            "currentPackageRoot":"3", "currentImageBoundary":"4",
-            "imageBoundary":"5", "height":"6",
+            "currentPackageRoot":"3", "currentWorldRoot":"4",
+            "worldRoot":"5", "height":"6",
             "binding":{"choice":"continue","createIndex":null,"commandDigest":"44",
                        "priorCreate":{"receiptHex":"abcd","custodyHex":"ef01"}},
             "slots":[],
@@ -797,7 +797,7 @@ mod tests {
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "11".into(),
-            image_boundary: "12".into(),
+            world_root: "12".into(),
         };
         let assembled = AssembledLaunchClaim {
             attempt_dir: "/protected/claim-attempt".into(),
@@ -831,11 +831,11 @@ mod tests {
             "originalTransaction":"9", "originalEvent":"10",
             "originalNullifier":"15", "claimNullifier":"16",
             "appPhysicalRoot":"17", "packagePhysicalRoot":"18",
-            "authorityPhysicalRoot":"19", "postImageBoundary":"24",
+            "authorityPhysicalRoot":"19", "postWorldRoot":"24",
             "binding":{"choice":"create","createIndex":"0",
                        "commandDigest":"33","priorCreate":null},
             "receipt":{"transactionId":"21","eventId":"22",
-                       "acceptedCount":"23","imageBoundary":"24"}
+                       "acceptedCount":"23","worldRoot":"24"}
         });
         assert_eq!(
             checked_committed(&view, committed, &assembled, &begin, &launch, &fixed).unwrap(),
@@ -851,7 +851,7 @@ mod tests {
             ("originalBeginHex", "00"),
             ("volumeIdHex", "00"),
             ("originalTransaction", "99"),
-            ("postImageBoundary", "20"),
+            ("postWorldRoot", "20"),
         ] {
             let saved = view[field].clone();
             view[field] = json!(changed);
@@ -901,7 +901,7 @@ mod tests {
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "11".into(),
-            image_boundary: "12".into(),
+            world_root: "12".into(),
         };
         let assembled = AssembledLaunchClaim {
             attempt_dir: attempt_dir.clone(),

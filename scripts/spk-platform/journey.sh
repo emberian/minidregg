@@ -49,7 +49,7 @@ protected_chain() {
 receipt() {
   [ -s "$1" ] && [ ! -L "$1" ] &&
     jq -e '.type == "confirmed" and
-      ([.transactionId,.eventId,.acceptedCount,.imageBoundary] |
+      ([.transactionId,.eventId,.acceptedCount,.worldRoot] |
        all(.[]; type == "string" and test("^(0|[1-9][0-9]*)$")))' "$1" >/dev/null
 }
 absolute "$ROOT"
@@ -68,7 +68,7 @@ base_ready() {
     jq -e '.type == "mini-spk-v2-install-handoff-v1" and
       .rawSha256 == "2bbfe6d3c705dfb0696905ecd9c1d00d6554cc1224e63dc5545152af5f8f2caa" and
       .packageEmpty == true and .snapshotEmpty == true and
-      .appBirth == (input | {acceptedCount,transactionId,eventId,imageBoundary})' \
+      .appBirth == (input | {acceptedCount,transactionId,eventId,worldRoot})' \
       "$HANDOFF" "$BASE_RECEIPT" >/dev/null 2>&1 &&
     [ -s "$ROOT/base/additional-sessions.json" ] &&
     [ -s "$ROOT/base/workroom/agents/verified/birth-evidence.json" ]
@@ -309,8 +309,8 @@ case "$ACTION" in
       .rawSha256 == $install[0].expectedRawSha256 and
       .launchRoot == "89066044197087243500897137644433855781716276082669749278782223953933431354679" and
       (.begin.volumeIdHex | type == "string" and test("^[0-9a-f]{64}$")) and
-      ([.begin.transactionId,.begin.eventId,.begin.acceptedCount,.begin.imageBoundary,
-        .claim.transactionId,.claim.eventId,.claim.acceptedCount,.claim.imageBoundary] |
+      ([.begin.transactionId,.begin.eventId,.begin.acceptedCount,.begin.worldRoot,
+        .claim.transactionId,.claim.eventId,.claim.acceptedCount,.claim.worldRoot] |
         all(.[]; type == "string" and test("^(0|[1-9][0-9]*)$")))
       ' "$prepared" >/dev/null || fail "prepared Mini claim differs"
     [ "$(sha "$ROOT/packages/gitweb.spk")" = "$(jq -er .rawSha256 "$prepared")" ] ||

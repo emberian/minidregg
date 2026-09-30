@@ -55,7 +55,7 @@ private def requestJson (request : Request) : Json :=
        [("acceptedCount", decimal grant.source.issueReceipt.acceptedCount),
         ("transactionId", decimal grant.source.issueReceipt.transactionId.value),
         ("eventId", decimal grant.source.issueReceipt.eventId.value),
-        ("imageBoundary", decimal grant.source.issueReceipt.imageBoundary.value)]),
+        ("worldRoot", decimal grant.source.issueReceipt.worldRoot.value)]),
      ("ticketResource", decimal grant.source.ticketResource),
      ("ticketDigest", decimal grant.source.ticketDigest.value),
      ("grantResource", decimal grant.source.resource),
@@ -93,7 +93,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("request", requestJson plan.request),
      ("birthDomain", decimal plan.birth.domain.value),
      ("birthSemantics", decimal plan.birth.semantics.value),
-     ("birthBoundary", decimal plan.birth.imageBoundary.value),
+     ("birthBoundary", decimal plan.birth.worldRoot.value),
      ("birthHeight", decimal plan.birth.height),
      ("finalizedDraftHex", hex <|
        NativeHostCodec.draftStream.encode plan.birth.finalizedDraft),
@@ -118,7 +118,7 @@ private def inspectAcceptedVerified {config : NativeHost.Config}
         [("acceptedCount", decimal receipt.acceptedCount),
          ("transactionId", decimal receipt.transactionId.value),
          ("eventId", decimal receipt.eventId.value),
-         ("imageBoundary", decimal receipt.imageBoundary.value)]
+         ("worldRoot", decimal receipt.worldRoot.value)]
       pure <| .mkObj
         [("type", "application-agent-lifetime-grant-accepted-v1"),
          ("canonicalIngressHex", hex original.ingress.canonicalBytes),

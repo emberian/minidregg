@@ -136,15 +136,15 @@ WRAPPER
     jq -e --arg confirmation "$(test "$mode" = lost-cas-reply && echo recoveredAfterUncertainResponse || echo installed)" \
       '.type == "confirmed" and .confirmation == $confirmation and .acceptedCount == "2"' \
       "$CASE/attempt/retry-0001.json" > /dev/null
-    test "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$CASE/attempt/retry-0001.json")" = \
-      "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$FIXTURE/content-attempt/retry-0001.json")"
+    test "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$CASE/attempt/retry-0001.json")" = \
+      "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$FIXTURE/content-attempt/retry-0001.json")"
   fi
   "$MINI" retry --attempt "$CASE/attempt" --mode lookup \
     --socket "$CASE/private/mini.sock" > "$CASE/lookup.log" 2>&1
   jq -e '.type == "confirmed" and .confirmation == "replayed" and .acceptedCount == "2"' \
     "$CASE/attempt/retry-0002.json" > /dev/null
-  test "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$CASE/attempt/retry-0002.json")" = \
-    "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$FIXTURE/content-attempt/retry-0001.json")"
+  test "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$CASE/attempt/retry-0002.json")" = \
+    "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$FIXTURE/content-attempt/retry-0001.json")"
   cleanup
   SERVER_PID=
   unset MINI_TEST_MODE MINI_TEST_CASE MINI_TEST_STORE MINI_TEST_FIXTURE

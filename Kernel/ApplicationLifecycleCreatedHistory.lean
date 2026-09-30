@@ -42,7 +42,7 @@ structure Candidate (config : Config) (opened : Opened config)
   custodyExact : ingress.source.physical.report.volumeCustody = some custody
   receiptTransaction : selected.record.transactionId = receipt.transactionId
   receiptEvent : selected.record.event.eventId = receipt.eventId
-  receiptBoundary : imageBoundary config after.durable.image = receipt.imageBoundary
+  receiptBoundary : worldRoot config after.durable.image = receipt.worldRoot
 
 /-- Creation may have used an older package version. The reusable certificate
 joins app identity, the permanent volume ID, exact signed custody and original
@@ -126,8 +126,8 @@ def select (config : Config) (opened : Opened config)
                   if custodyExact : ingress.source.physical.report.volumeCustody = some custody then
                     if transaction : selected.record.transactionId = receipt.transactionId then
                       if event : selected.record.event.eventId = receipt.eventId then
-                        if boundary : imageBoundary config after.durable.image =
-                            receipt.imageBoundary then
+                        if boundary : worldRoot config after.durable.image =
+                            receipt.worldRoot then
                           return .ok ⟨receipt, custody, priorExact, index, indexExact,
                             selected, after, afterImage, ingress, ingressExact,
                             accepted, recordExact, created, choice, appExact,

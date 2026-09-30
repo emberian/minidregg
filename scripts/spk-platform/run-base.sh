@@ -241,7 +241,7 @@ test -s "$CONFIG"
 AGENT_BIRTH="$ROOT/base/workroom/agents/verified/birth-evidence.json"
 jq -e --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
   .type == "mini-spk-agent-genesis-birth-evidence-v1" and
-  (.birthReceipt | [.acceptedCount,.transactionId,.eventId,.imageBoundary] |
+  (.birthReceipt | [.acceptedCount,.transactionId,.eventId,.worldRoot] |
     all(.[]; type == "string" and test("^[1-9][0-9]*$"))) and
   ([.resources[].route] == [$allocation[0].agents[].route]) and
   ([.resources[] | .controller,.tool,.dispatch,.provider] ==
@@ -257,7 +257,7 @@ jq -e --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
       .plannedCaps.parentDispatchWitness,
       .plannedCaps.parentProviderWitness]) and
   ([.parentDelegations[].receipt |
-      .acceptedCount,.transactionId,.eventId,.imageBoundary] |
+      .acceptedCount,.transactionId,.eventId,.worldRoot] |
     all(.[]; type == "string" and test("^[1-9][0-9]*$")))' \
   "$AGENT_BIRTH" >/dev/null
 ADDITIONAL_SESSIONS="$ROOT/base/additional-sessions.json"
@@ -272,7 +272,7 @@ jq -e --slurpfile allocation "$SPK_AGENT_ALLOCATION" '
       $allocation[0].agents[0].descriptor,$allocation[0].agents[1].descriptor]) and
   ([.sessions[].participant] == ["9","8","10","20"]) and
   ([.sessions[].birthReceipt |
-      .acceptedCount,.transactionId,.eventId,.imageBoundary] |
+      .acceptedCount,.transactionId,.eventId,.worldRoot] |
     all(.[]; type == "string" and test("^[1-9][0-9]*$")))' \
   "$ADDITIONAL_SESSIONS" >/dev/null
 jq -e --arg key "$SPK_COMPLETION_PUBLIC" '
@@ -298,11 +298,11 @@ jq -n --slurpfile qualified "$QUALIFY_RESULT" \
    embeddedPackageRoot:$qualified[0].packageRoot,
    launchRoot:$qualified[0].launchRoot,
    launchCanonicalSha256:$qualified[0].launchCanonicalSha256,
-   appBirth:($birth[0] | {acceptedCount,transactionId,eventId,imageBoundary}),
-   packageBornRoot:$package[0].page.root,
-   snapshotBornRoot:$snapshot[0].page.root,
-   packageEmpty:($package[0].page.entries == []),
-   snapshotEmpty:($snapshot[0].page.entries == [])}' \
+   appBirth:($birth[0] | {acceptedCount,transactionId,eventId,worldRoot}),
+   packageBornRoot:$package[0].cell.root,
+   snapshotBornRoot:$snapshot[0].cell.root,
+   packageEmpty:($package[0].cell.entries == []),
+   snapshotEmpty:($snapshot[0].cell.entries == [])}' \
   >"$ROOT/source-stage/install-v2-handoff.json"
 jq -e '.packageEmpty and .snapshotEmpty and
   (.launchRoot | type == "string" and test("^[1-9][0-9]*$"))' \

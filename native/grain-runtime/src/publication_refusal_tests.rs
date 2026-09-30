@@ -53,11 +53,11 @@ mkdir -p "$dir"
 if [ "$command" = query ]; then
   case "$dir" in
     *resource-read-*)
-      printf '%s\n' '{"type":"resource","page":{"root":"701","entries":[]}}' > "$dir/view.json" ;;
+      printf '%s\n' '{"type":"resource","cell":{"root":"701","entries":[]}}' > "$dir/view.json" ;;
     *)
       status=$(cat "$state/status")
-      printf '{"page":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"3"}}}\n' "$status" > "$dir/view.json"
-      printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300"}' > "$dir/challenge.json" ;;
+      printf '{"cell":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"3"}}}\n' "$status" > "$dir/view.json"
+      printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300"}' > "$dir/challenge.json" ;;
   esac
   exit 0
 fi
@@ -94,7 +94,7 @@ elif grep -q '"type": "settle"' "$intent"; then
   fi
   printf 1 > "$state/status"
 fi
-printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
+printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
 "#
     .replace("__STATE__", state.to_str().unwrap());
     fs::write(&mini, script).unwrap();
@@ -576,7 +576,7 @@ fi
 "#;
     let policy_query = r#"if [ "$command" = query ] && grep -q '"view":"policy"' "$intent"; then
   cp "$state/policy-view.json" "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300"}' > "$dir/challenge.json"
+  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300"}' > "$dir/challenge.json"
   exit 0
 fi
 "#;
@@ -732,11 +732,11 @@ fn definitive_refusal_releases_hold_for_same_prompt_read_and_retry() {
     let read = runtime
         .tool_call("mini_read_resource", &json!({"name":"publication"}))
         .unwrap();
-    assert_eq!(read["view"]["page"]["root"], "701");
+    assert_eq!(read["view"]["cell"]["root"], "701");
     runtime
         .tool_call(
             "mini_publish",
-            &publication(read["view"]["page"]["root"].as_str().unwrap()),
+            &publication(read["view"]["cell"]["root"].as_str().unwrap()),
         )
         .unwrap();
     assert_eq!(runtime.journal.publication_receipts.len(), 1);

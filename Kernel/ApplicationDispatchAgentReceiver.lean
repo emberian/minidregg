@@ -39,7 +39,7 @@ def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     permit.old.opened.durable.image.accepted.length + 1,
-    imageBoundary config candidate.image⟩
+    worldRoot config candidate.image⟩
 
 theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
     permit.readback.appended.entry.record =

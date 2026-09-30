@@ -28,7 +28,7 @@ def projection {config : Config} {opened : Opened config} {index : Nat}
   let begin := source.originalBegin.base.source
   let receipt : NativeHostCodec.Receipt :=
     ⟨accepted.intent.transactionId, accepted.intent.event.eventId,
-      index + 1, imageBoundary config post.image⟩
+      index + 1, worldRoot config post.image⟩
   { core :=
       { source := source.originalClaim.base.source
         originalTransaction := accepted.original.record.transactionId
@@ -44,7 +44,7 @@ def projection {config : Config} {opened : Opened config} {index : Nat}
         packagePhysicalRoot := post.snapshot.model.roots ⟨begin.packageManifest⟩
         authorityPhysicalRoot :=
           post.snapshot.model.roots ⟨config.deployment.authorityCellId⟩
-        postImageBoundary := receipt.imageBoundary }
+        postWorldRoot := receipt.worldRoot }
     originalClaim := source.originalClaim }
 
 structure Candidate (config : Config) (opened : Opened config)

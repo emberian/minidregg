@@ -43,7 +43,7 @@ challenge_decimal() {
 
 receipt() {
   jq -e '.type == "confirmed" and .confirmation == $kind and
-    (all(.transactionId, .eventId, .acceptedCount, .imageBoundary;
+    (all(.transactionId, .eventId, .acceptedCount, .worldRoot;
       type == "string" and test("^(0|[1-9][0-9]*)$")))' \
     --arg kind "$2" "$1" >/dev/null
 }
@@ -227,12 +227,12 @@ CANONICAL=$(jq -er '.canonical | select(type == "string" and test("^[0-9a-f]+$")
 test "$ROUNDTRIP" = "$CANONICAL"
 
 query_resource alice-before-delegate 7 61 "$EVIDENCE/alice.key" 30005
-TARGET_ROOT=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+TARGET_ROOT=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-delegate/view.json")
 AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-delegate/challenge.json")
-BEFORE_DENIAL=$(challenge_decimal "$EVIDENCE/alice-before-delegate/challenge.json" imageBoundary)
+BEFORE_DENIAL=$(challenge_decimal "$EVIDENCE/alice-before-delegate/challenge.json" worldRoot)
 
 # A valid Alice signer and owner grant cannot mutate under the installed law.
 cat >"$EVIDENCE/alice-denied-intent.json" <<EOF
@@ -256,14 +256,14 @@ test -s "$EVIDENCE/alice-denied-attempt/call.bin"
 refusal "$EVIDENCE/alice-denied-attempt/outcome.json"
 test -f "$EVIDENCE/alice-denied-attempt/signed-observation.bin"
 query_resource alice-after-denial 7 61 "$EVIDENCE/alice.key" 30008
-test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" imageBoundary)" = "$BEFORE_DENIAL"
+test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" worldRoot)" = "$BEFORE_DENIAL"
 test "$(challenge_decimal "$EVIDENCE/alice-after-denial/challenge.json" height)" = 12
-test "$(jq -er '.page.root' "$EVIDENCE/alice-after-denial/view.json")" = "$TARGET_ROOT"
-jq -e '(.page.entries | length) == 1 and
-  .page.entries[0].key.type == "object" and
-  .page.entries[0].key.resource == "600" and
-  .page.entries[0].key.field == "1" and
-  .page.entries[0].value == "0"' \
+test "$(jq -er '.cell.root' "$EVIDENCE/alice-after-denial/view.json")" = "$TARGET_ROOT"
+jq -e '(.cell.entries | length) == 1 and
+  .cell.entries[0].key.type == "object" and
+  .cell.entries[0].key.resource == "600" and
+  .cell.entries[0].key.field == "1" and
+  .cell.entries[0].value == "0"' \
   "$EVIDENCE/alice-after-denial/view.json" >/dev/null
 
 cat >"$EVIDENCE/delegate-intent.json" <<EOF
@@ -286,7 +286,7 @@ receipt "$EVIDENCE/delegate-attempt/outcome.json" installed
 test "$(decimal "$EVIDENCE/delegate-attempt/outcome.json" acceptedCount)" = 3
 
 query_resource bob-before-write 8 63 "$EVIDENCE/bob.key" 30011
-BOB_ROOT=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+BOB_ROOT=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/bob-before-write/view.json")
 test "$BOB_ROOT" = "$TARGET_ROOT"
 BOB_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
@@ -310,10 +310,10 @@ receipt "$EVIDENCE/bob-write-attempt/outcome.json" installed
 test "$(decimal "$EVIDENCE/bob-write-attempt/outcome.json" acceptedCount)" = 4
 
 query_resource alice-after-bob 7 61 "$EVIDENCE/alice.key" 30014
-jq -e '[.page.entries[] | select(.key.type == "object" and .key.resource == "600" and
+jq -e '[.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
   .key.field == "0" and .value == "1")] | length == 1' \
   "$EVIDENCE/alice-after-bob/view.json" >/dev/null
-POST_BOB_ROOT=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+POST_BOB_ROOT=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-after-bob/view.json")
 POST_BOB_AUTHORITY=$(jq -er '.signing[0].authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
@@ -328,7 +328,7 @@ BOB_POLICY_ROOT=$(jq -er '.signing[0].authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/bob-policy/challenge.json")
 BOB_POLICY_ADDRESS=$(decimal "$EVIDENCE/bob-policy/view.json" address)
-BEFORE_CONTROL_DENIAL=$(challenge_decimal "$EVIDENCE/bob-policy/challenge.json" imageBoundary)
+BEFORE_CONTROL_DENIAL=$(challenge_decimal "$EVIDENCE/bob-policy/challenge.json" worldRoot)
 cat >"$EVIDENCE/bob-denied-install-intent.json" <<EOF
 {"subject":"8","nonce":"30016","purpose":{"type":"prepare","draft":{
  "type":"install-source","subject":"8","control":"63","declaration":{
@@ -351,7 +351,7 @@ test -f "$EVIDENCE/bob-denied-install-attempt/signed-observation.bin"
 test -s "$EVIDENCE/bob-denied-install-attempt/call.bin"
 refusal "$EVIDENCE/bob-denied-install-attempt/outcome.json"
 query_policy alice-policy-before-revoke 7 61 "$EVIDENCE/alice.key" 30018
-test "$(challenge_decimal "$EVIDENCE/alice-policy-before-revoke/challenge.json" imageBoundary)" = "$BEFORE_CONTROL_DENIAL"
+test "$(challenge_decimal "$EVIDENCE/alice-policy-before-revoke/challenge.json" worldRoot)" = "$BEFORE_CONTROL_DENIAL"
 test "$(challenge_decimal "$EVIDENCE/alice-policy-before-revoke/challenge.json" height)" = 14
 test "$(decimal "$EVIDENCE/alice-policy-before-revoke/view.json" address)" = "$NEW_ADDRESS"
 
@@ -386,17 +386,17 @@ fi
 test ! -e "$EVIDENCE/bob-after-revoke-query/view.json"
 
 query_resource alice-before-retry 7 61 "$EVIDENCE/alice.key" 30022
-FINAL_BEFORE_BOUNDARY=$(challenge_decimal "$EVIDENCE/alice-before-retry/challenge.json" imageBoundary)
+FINAL_BEFORE_BOUNDARY=$(challenge_decimal "$EVIDENCE/alice-before-retry/challenge.json" worldRoot)
 FINAL_BEFORE_HEIGHT=$(challenge_decimal "$EVIDENCE/alice-before-retry/challenge.json" height)
 test "$FINAL_BEFORE_HEIGHT" = 15
-test "$FINAL_BEFORE_BOUNDARY" = "$(decimal "$EVIDENCE/revoke-attempt/outcome.json" imageBoundary)"
-FINAL_TARGET_ROOT=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+test "$FINAL_BEFORE_BOUNDARY" = "$(decimal "$EVIDENCE/revoke-attempt/outcome.json" worldRoot)"
+FINAL_TARGET_ROOT=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-retry/view.json")
 test "$FINAL_TARGET_ROOT" = "$POST_BOB_ROOT"
-jq -e '(.page.entries | length) == 2 and
-  ([.page.entries[] | select(.key.type == "object" and .key.resource == "600" and
+jq -e '(.cell.entries | length) == 2 and
+  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
     .key.field == "0" and .value == "1")] | length) == 1 and
-  ([.page.entries[] | select(.key.type == "object" and .key.resource == "600" and
+  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
     .key.field == "1" and .value == "0")] | length) == 1' \
   "$EVIDENCE/alice-before-retry/view.json" >/dev/null
 FINAL_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
@@ -430,18 +430,18 @@ CALL_HASH_BEFORE=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{
 CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/bob-write-attempt/call.bin" | awk '{print $1}')
 test "$CALL_HASH_BEFORE" = "$CALL_HASH_AFTER"
 receipt "$EVIDENCE/bob-write-attempt/retry-0001.json" replayed
-for field in transactionId eventId acceptedCount imageBoundary; do
+for field in transactionId eventId acceptedCount worldRoot; do
   initial=$(decimal "$EVIDENCE/bob-write-attempt/outcome.json" "$field")
   replay=$(decimal "$EVIDENCE/bob-write-attempt/retry-0001.json" "$field")
   test "$initial" = "$replay"
 done
 query_resource alice-final 7 61 "$EVIDENCE/alice.key" 30025
-test "$(challenge_decimal "$EVIDENCE/alice-final/challenge.json" imageBoundary)" = "$FINAL_BEFORE_BOUNDARY"
+test "$(challenge_decimal "$EVIDENCE/alice-final/challenge.json" worldRoot)" = "$FINAL_BEFORE_BOUNDARY"
 test "$(challenge_decimal "$EVIDENCE/alice-final/challenge.json" height)" = "$FINAL_BEFORE_HEIGHT"
-jq -e '(.page.entries | length) == 2 and
-  ([.page.entries[] | select(.key.type == "object" and .key.resource == "600" and
+jq -e '(.cell.entries | length) == 2 and
+  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
     .key.field == "0" and .value == "1")] | length) == 1 and
-  ([.page.entries[] | select(.key.type == "object" and .key.resource == "600" and
+  ([.cell.entries[] | select(.key.type == "object" and .key.resource == "600" and
     .key.field == "1" and .value == "0")] | length) == 1' \
   "$EVIDENCE/alice-final/view.json" >/dev/null
 
@@ -456,7 +456,7 @@ cat >"$EVIDENCE/authority-acceptance.json" <<EOF
  "birthTransaction":"$birth_id","policyInstallTransaction":"$install_id",
  "delegationTransaction":"$delegate_id","bobWriteTransaction":"$bob_id",
  "revocationTransaction":"$revoke_id","bobCallSha256":"$CALL_HASH_AFTER",
- "finalHeight":"$FINAL_BEFORE_HEIGHT","finalImageBoundary":"$FINAL_BEFORE_BOUNDARY",
+ "finalHeight":"$FINAL_BEFORE_HEIGHT","finalWorldRoot":"$FINAL_BEFORE_BOUNDARY",
  "policyRefusedAliceMutation":true,"bobManagementRefused":true,
  "revokedBobReadAndMutationRefused":true,"historicalRetryExact":true}
 EOF

@@ -42,7 +42,7 @@ private def receiptJson (receipt : NativeHostCodec.Receipt) : Json := .mkObj
   [("transactionId", number receipt.transactionId.value),
    ("eventId", number receipt.eventId.value),
    ("acceptedCount", number receipt.acceptedCount),
-   ("imageBoundary", number receipt.imageBoundary.value)]
+   ("worldRoot", number receipt.worldRoot.value)]
 
 private def ascii (label : String) (bytes : List UInt8) : Except String String := do
   unless bytes.all (fun byte => 32 ≤ byte.toNat && byte.toNat ≤ 126) do
@@ -288,9 +288,9 @@ retained native signed query and its `view.bin` remain the exact-byte evidence.
 No atom or page entry is silently omitted from the summary. -/
 def render (viewBin : List UInt8) : Except String Json := do
   let raw ← Minidregg.Host.Json.inspect "view-resource" viewBin
-  let some page := (raw.getObjVal? "page").toOption
-    | throw "native query returned no resource page"
-  let some entries := (page.getObjVal? "entries").toOption.bind (·.getArr?.toOption)
+  let some cell := (raw.getObjVal? "cell").toOption
+    | throw "native query returned no resource cell"
+  let some entries := (cell.getObjVal? "entries").toOption.bind (·.getArr?.toOption)
     | throw "resource is not a content page"
   let mut summaries : Array Json := #[]
   for entry in entries do
@@ -313,10 +313,10 @@ def render (viewBin : List UInt8) : Except String Json := do
          ("schema", toJson schema), ("typed", ← typedAtom schema payload)]
   pure <| .mkObj
     [("type", toJson "fn-inbox-resource-summary-v1"),
-     ("resourceRoot", (page.getObjVal? "root").toOption.getD .null),
-     ("contentDomain", (page.getObjVal? "contentDomain").toOption.getD .null),
-     ("document", (page.getObjVal? "document").toOption.getD .null),
-     ("pageNumber", (page.getObjVal? "pageNumber").toOption.getD .null),
+     ("resourceRoot", (cell.getObjVal? "root").toOption.getD .null),
+     ("contentDomain", (cell.getObjVal? "contentDomain").toOption.getD .null),
+     ("document", (cell.getObjVal? "document").toOption.getD .null),
+     ("pageNumber", (cell.getObjVal? "pageNumber").toOption.getD .null),
      ("entryCount", number entries.size), ("entries", .arr summaries),
      ("interpretation", toJson
        "decoded signed Mini resource view; carried fn publication is not a local mutation of its origin resource")]

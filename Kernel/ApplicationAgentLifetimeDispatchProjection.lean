@@ -123,7 +123,7 @@ def ofLifetimeDispatchAt {config : Config} {opened : Opened config}
       issueEvent := admitted.issue.evidence.eventId
       dispatchTransaction := pending.transactionId
       dispatchEvent := pending.event.eventId
-      currentImageBoundary := imageBoundary config opened.durable.image
+      currentWorldRoot := worldRoot config opened.durable.image
       physicalRequestDigest := ApplicationDispatchCodec.requestDigest dispatch.request }
   let parent : ApplicationDispatchAgentProjection.Parent :=
     ⟨task, state.generation, state.status, state.remaining, state.reserved,

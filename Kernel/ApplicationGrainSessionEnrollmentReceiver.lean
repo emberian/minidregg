@@ -63,7 +63,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) : Receipt
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    imageBoundary config candidate.image⟩
+    worldRoot config candidate.image⟩
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
     confirmed.readback.appended.entry.record =

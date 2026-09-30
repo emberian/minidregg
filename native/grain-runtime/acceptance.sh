@@ -288,14 +288,14 @@ query_task publication-born 7 "$PUBLICATION_TARGET" 91 "$EVIDENCE/controller.key
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
   query_task provider-born 9 "$PROVIDER_TASK" 101 "$EVIDENCE/provider.key" 30010
   jq -e --arg task "$PROVIDER_TASK" --arg remaining "$PROVIDER_BUDGET" \
-    '.page.grain == {task:$task,generation:"0",status:"0",
+    '.cell.grain == {task:$task,generation:"0",status:"0",
       remaining:$remaining,reserved:"0"}' "$EVIDENCE/provider-born/view.json" >/dev/null
 fi
 jq -e --arg task "$CONTROLLER_TASK" \
-  '.page.grain == {task:$task,generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+  '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"100",reserved:"0"}' \
   "$EVIDENCE/controller-born/view.json" >/dev/null
 jq -e --arg task "$TOOL_TASK" \
-  '.page.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+  '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
   "$EVIDENCE/tool-born/view.json" >/dev/null
 
 grain_names='controller tool'
@@ -340,7 +340,7 @@ done
 # Parent witness authority is a distinct delegated child grant held by the
 # tool identity. The source-authored parent rule permits that subject only the
 # pinned-generation witness no-op; the tool owns its own spendable task.
-PARENT_ROOT=$(jq -er '.page.root' "$EVIDENCE/controller-born/view.json")
+PARENT_ROOT=$(jq -er '.cell.root' "$EVIDENCE/controller-born/view.json")
 PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/controller-born/challenge.json")
 cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF
 {"subject":"7","nonce":"31000","purpose":{"type":"prepare","draft":{
@@ -360,7 +360,7 @@ EOF
   --dir "$EVIDENCE/delegation-attempt" >"$EVIDENCE/delegation.stdout"
 confirmed "$EVIDENCE/delegation-attempt/outcome.json"
 query_task delegated-parent 8 "$CONTROLLER_TASK" 73 "$EVIDENCE/tool.key" 31002
-test "$(jq -er '.page.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
   query_task parent-for-provider 7 "$CONTROLLER_TASK" 71 "$EVIDENCE/controller.key" 31003
   PROVIDER_PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
@@ -384,10 +384,10 @@ EOF
     >"$EVIDENCE/provider-parent-delegation.stdout"
   confirmed "$EVIDENCE/provider-parent-delegation-attempt/outcome.json"
   query_task delegated-provider-parent 9 "$CONTROLLER_TASK" 75 "$EVIDENCE/provider.key" 31006
-  test "$(jq -er '.page.root' "$EVIDENCE/delegated-provider-parent/view.json")" = "$PARENT_ROOT"
+  test "$(jq -er '.cell.root' "$EVIDENCE/delegated-provider-parent/view.json")" = "$PARENT_ROOT"
 fi
 
-PUBLICATION_ROOT=$(jq -er '.page.root' "$EVIDENCE/publication-born/view.json")
+PUBLICATION_ROOT=$(jq -er '.cell.root' "$EVIDENCE/publication-born/view.json")
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
   query_task publication-for-delegation 7 "$PUBLICATION_TARGET" 91 "$EVIDENCE/controller.key" 31007
   PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
@@ -414,7 +414,7 @@ EOF
   --dir "$EVIDENCE/publication-delegation-attempt" >"$EVIDENCE/publication-delegation.stdout"
 confirmed "$EVIDENCE/publication-delegation-attempt/outcome.json"
 query_task delegated-publication 8 "$PUBLICATION_TARGET" 93 "$EVIDENCE/tool.key" 31012
-test "$(jq -er '.page.root' "$EVIDENCE/delegated-publication/view.json")" = "$PUBLICATION_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/delegated-publication/view.json")" = "$PUBLICATION_ROOT"
 
 # Reads use a separate observe-only sibling grant. The MCP reader cannot use
 # the publication mutation authority or select an arbitrary target.
@@ -439,7 +439,7 @@ EOF
   >"$EVIDENCE/publication-read-delegation.stdout"
 confirmed "$EVIDENCE/publication-read-delegation-attempt/outcome.json"
 query_task delegated-read 8 "$PUBLICATION_TARGET" 94 "$EVIDENCE/tool.key" 31022
-test "$(jq -er '.page.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATION_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATION_ROOT"
 
 if [ "${BOOTSTRAP_ONLY:-0}" = 1 ]; then
   if [ -n "$PROFILE" ]; then
@@ -604,8 +604,8 @@ wait "$RUNTIME_PID"
 RUNTIME_PID=
 wait_for_journal '.connection == "soft" and .pending == null and .child == null and .settlementDue == null'
 query_task after-soft 7 7001 71 "$EVIDENCE/controller.key" 30005
-jq -e '.page.grain.status == "2" and .page.grain.remaining == "99" and
-  .page.grain.reserved == "0"' "$EVIDENCE/after-soft/view.json" >/dev/null
+jq -e '.cell.grain.status == "2" and .cell.grain.remaining == "99" and
+  .cell.grain.reserved == "0"' "$EVIDENCE/after-soft/view.json" >/dev/null
 
 # Switch to hard mode, hold a local process, then disconnect while reserved.
 # The runtime stops its process group before submitting the generation fence.
@@ -627,7 +627,7 @@ tool_witness_source() {
   name=$1 operation=$2 nonce=$3
   query_task "$name-tool" 8 7002 81 "$EVIDENCE/tool.key" "$((nonce + 1))"
   query_task "$name-parent" 8 7001 73 "$EVIDENCE/tool.key" "$((nonce + 2))"
-  jq -e '.page.grain.status == "3" and .page.grain.generation == "1"' \
+  jq -e '.cell.grain.status == "3" and .cell.grain.generation == "1"' \
     "$EVIDENCE/$name-parent/view.json" >/dev/null
   jq -n --argjson op "$operation" --arg nonce "$nonce" \
     --slurpfile tool "$EVIDENCE/$name-tool/view.json" \
@@ -635,16 +635,16 @@ tool_witness_source() {
     --slurpfile parent "$EVIDENCE/$name-parent/view.json" \
     '{grain:{task:"7002",subject:"8",capability:"81",observeCapability:"81",
       schemaVersion:"1",expectedAuthorityRoot:$toolChallenge[0].signing[0].authorityRoot,
-      expectedTargetRoot:$tool[0].page.root,
+      expectedTargetRoot:$tool[0].cell.root,
       context:{operationId:$nonce,payload:"separate tool task with parent witness"},
-      before:{generation:$tool[0].page.grain.generation,status:$tool[0].page.grain.status,
-        remaining:$tool[0].page.grain.remaining,reserved:$tool[0].page.grain.reserved},
+      before:{generation:$tool[0].cell.grain.generation,status:$tool[0].cell.grain.status,
+        remaining:$tool[0].cell.grain.remaining,reserved:$tool[0].cell.grain.reserved},
       operation:$op,
       parentWitness:{task:"7001",capability:"73",observeCapability:"73",
-        expectedTargetRoot:$parent[0].page.root,
-        before:{generation:$parent[0].page.grain.generation,
-          status:$parent[0].page.grain.status,remaining:$parent[0].page.grain.remaining,
-          reserved:$parent[0].page.grain.reserved}},publications:[]},
+        expectedTargetRoot:$parent[0].cell.root,
+        before:{generation:$parent[0].cell.grain.generation,
+          status:$parent[0].cell.grain.status,remaining:$parent[0].cell.grain.remaining,
+          reserved:$parent[0].cell.grain.reserved}},publications:[]},
       grants:[{kind:"object",target:"7002",capability:"81"},
         {kind:"object",target:"7001",capability:"73"}],intentNonce:$nonce}' \
     >"$EVIDENCE/$name-intent.json"
@@ -680,8 +680,8 @@ if [ -n "$HOLD_UNIT" ]; then
   esac
 fi
 query_task after-hard 7 7001 71 "$EVIDENCE/controller.key" 30006
-jq -e '.page.grain.generation == "2" and .page.grain.status == "5" and
-  .page.grain.reserved == "3"' "$EVIDENCE/after-hard/view.json" >/dev/null
+jq -e '.cell.grain.generation == "2" and .cell.grain.status == "5" and
+  .cell.grain.reserved == "3"' "$EVIDENCE/after-hard/view.json" >/dev/null
 if "$MINI" retry --attempt "$EVIDENCE/stale-tool-input-attempt" --socket "$SOCKET" \
     --mode submit >"$EVIDENCE/stale-tool-input-retry.stdout" \
     2>"$EVIDENCE/stale-tool-input-retry.stderr"; then
@@ -699,8 +699,8 @@ jq -e '.type == "refused"' "$EVIDENCE/stale-tool-input-attempt/retry-0001.json" 
 wait_for_journal '.parentHold == null and
   (.reconciliationLog | any(.authority == "parent" and .stage == "signed-settlement-confirmed"))'
 query_task reconciled-parent 7 7001 71 "$EVIDENCE/controller.key" 30010
-jq -e '.page.grain.generation == "2" and .page.grain.status == "0" and
-  .page.grain.remaining == "99" and .page.grain.reserved == "0"' \
+jq -e '.cell.grain.generation == "2" and .cell.grain.status == "0" and
+  .cell.grain.remaining == "99" and .cell.grain.reserved == "0"' \
   "$EVIDENCE/reconciled-parent/view.json" >/dev/null
 "$GRAIN" admin "$EVIDENCE/runtime-state/admin.sock" 'reconcile effects' \
   >"$EVIDENCE/reconcile-effects.stdout" 2>"$EVIDENCE/reconcile-effects.stderr"
@@ -760,10 +760,10 @@ jq -es 'length == 4 and .[0].result.serverInfo.name == "mini-grain" and
     .kind == "object" and .target == "7003" and .view.type == "resource")' \
   "$EVIDENCE/mcp-responses.jsonl" >/dev/null
 query_task after-mcp-publication 8 7003 93 "$EVIDENCE/tool.key" 33005
-POST_PUBLICATION_ROOT=$(jq -er '.page.root' "$EVIDENCE/after-mcp-publication/view.json")
+POST_PUBLICATION_ROOT=$(jq -er '.cell.root' "$EVIDENCE/after-mcp-publication/view.json")
 test "$POST_PUBLICATION_ROOT" != "$PUBLICATION_ROOT"
 jq -es --arg root "$POST_PUBLICATION_ROOT" \
-  '(.[3].result.content[0].text | fromjson | .view.page.root) == $root' \
+  '(.[3].result.content[0].text | fromjson | .view.cell.root) == $root' \
   "$EVIDENCE/mcp-responses.jsonl" >/dev/null
 : >"$ACP_RELEASE"
 wait_for_journal '.connection == "soft" and .pending == null and .child == null and .settlementDue == null'
@@ -772,10 +772,10 @@ wait "$RUNTIME_PID"
 RUNTIME_PID=
 query_task final-controller 7 7001 71 "$EVIDENCE/controller.key" 30007
 query_task final-tool 8 7002 81 "$EVIDENCE/tool.key" 30008
-jq -e '.page.grain.generation == "3" and .page.grain.status == "2" and
-  .page.grain.remaining == "97" and .page.grain.reserved == "0"' \
+jq -e '.cell.grain.generation == "3" and .cell.grain.status == "2" and
+  .cell.grain.remaining == "97" and .cell.grain.reserved == "0"' \
   "$EVIDENCE/final-controller/view.json" >/dev/null
-jq -e '.page.grain == {task:"7002",generation:"4",status:"0",remaining:"49",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7002",generation:"4",status:"0",remaining:"49",reserved:"0"}' \
   "$EVIDENCE/final-tool/view.json" >/dev/null
 
 # The runtime itself renews the source-authored witness rule after each
@@ -803,8 +803,8 @@ jq -n --slurpfile birth "$EVIDENCE/birth-attempt/outcome.json" \
   --slurpfile publication "$EVIDENCE/after-mcp-publication/view.json" \
   '{type:"grain-native-acceptance",birth:$birth[0],
     reconciliation:$reconciliation[0].reconciliationLog,
-    controller:$controller[0].page.grain,tool:$tool[0].page.grain,
-    publicationRoot:$publication[0].page.root}' \
+    controller:$controller[0].cell.grain,tool:$tool[0].cell.grain,
+    publicationRoot:$publication[0].cell.root}' \
   >"$EVIDENCE/acceptance.json"
 cat >"$EVIDENCE/OPERATE.txt" <<EOF
 This directory is a native Mini deployment with two distinct grain resources.

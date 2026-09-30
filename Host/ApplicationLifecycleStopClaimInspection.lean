@@ -28,7 +28,7 @@ private def receiptJson (receipt : NativeHostCodec.Receipt) : Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value),
    ("eventId", decimal receipt.eventId.value),
    ("acceptedCount", decimal receipt.acceptedCount),
-   ("imageBoundary", decimal receipt.imageBoundary.value)]
+   ("worldRoot", decimal receipt.worldRoot.value)]
 
 def inspectVerified {config : NativeHost.Config} {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target)

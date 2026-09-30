@@ -106,7 +106,7 @@ jq -n '{subject:"8",nonce:"85100",purpose:{type:"query",kind:"object",
 "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$CONT/ticket-read-intent.json" --key "$KEY" --view resource \
   --dir "$CONT/ticket-read" >"$CONT/ticket-read.stdout"
-jq -e '.page.document == "8500" and (.page.entries | length) == 1' \
+jq -e '.cell.document == "8500" and (.cell.entries | length) == 1' \
   "$CONT/ticket-read/view.json" >/dev/null
 "$STORE_BINARY" read-to "$STORE" "$CONT/before-lookup-image.bin"
 stop_service
@@ -117,9 +117,9 @@ start_service serve-operator operator-lookup
   >"$CONT/lookup.stdout"
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$ISSUE/lookup-0000.outcome.json" >/dev/null
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$ISSUE/submit.outcome.json" >"$CONT/original-receipt.json"
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$ISSUE/lookup-0000.outcome.json" >"$CONT/recovered-receipt.json"
 cmp "$CONT/original-receipt.json" "$CONT/recovered-receipt.json"
 "$STORE_BINARY" read-to "$STORE" "$CONT/after-lookup-image.bin"

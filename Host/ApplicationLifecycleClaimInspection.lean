@@ -74,12 +74,12 @@ def inspect (bytes : List UInt8) : Except String Json := do
      ("appPhysicalRoot", decimal core.appPhysicalRoot.value),
      ("packagePhysicalRoot", decimal core.packagePhysicalRoot.value),
      ("authorityPhysicalRoot", decimal core.authorityPhysicalRoot.value),
-     ("postImageBoundary", decimal core.postImageBoundary.value),
+     ("postWorldRoot", decimal core.postWorldRoot.value),
      ("receipt", .mkObj
        [("transactionId", decimal core.claimReceipt.transactionId.value),
         ("eventId", decimal core.claimReceipt.eventId.value),
         ("acceptedCount", decimal core.claimReceipt.acceptedCount),
-        ("imageBoundary", decimal core.claimReceipt.imageBoundary.value)]),
+        ("worldRoot", decimal core.claimReceipt.worldRoot.value)]),
      ("descriptor", .mkObj
        [("canonicalHex", hex descriptor.canonicalBytes),
         ("root", decimal descriptor.root.value),

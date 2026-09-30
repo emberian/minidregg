@@ -147,7 +147,7 @@ The real provider key stays in the private controller state directory. Each
 worker receives only a new prompt token and a generated local Hermes profile.
 Before forwarding one exact request, the controller retains its bytes, gets
 a signed provider-task reserve with a parent-generation witness, and checks
-the confirmed reserve's signed image boundary again at the durable send
+the confirmed reserve's signed world root again at the durable send
 boundary. It retains the response or uncertainty before acknowledging the
 worker; an uncertain send is never retried automatically. A completed local
 response has a retained, digest-checked replay entry before its fixed signed
@@ -267,9 +267,9 @@ no-op witness. The parent witness is authored by Lean and checked in the same
 native transaction; a later generation cannot authorize the old prompt's
 publication.
 On success, `mini_publish` retains the signed current tool-grain query fields
-(`grain`, `targetRoot`, `authorityRoot`, `imageBoundary`) and adds
+(`grain`, `targetRoot`, `authorityRoot`, `worldRoot`) and adds
 `publicationReceipt`. The nested receipt contains the exact confirmed
-`transactionId`, `eventId`, `acceptedCount`, `imageBoundary`, and
+`transactionId`, `eventId`, `acceptedCount`, `worldRoot`, and
 `publicationTargetIds`, with `promptOperationId` and `toolOperationId` for the
 current tool call. Its scope is `historical-accepted-transition`: those IDs
 identify the accepted publication, not the current contents of its targets.
@@ -371,7 +371,7 @@ Missing or changed evidence keeps the provider allowance held for audit.
 The [local-provider acceptance](../../native/hermes-test-provider/evidence/2026-09-26/gateway-r1/)
 used real upstream Hermes with a deterministic local HTTP endpoint and signed
 Mini provider reserve, tool publication and fixed-charge settlement. That
-earlier runtime used the conservative whole-image boundary; the op17
+earlier runtime used the conservative whole-world root; the op17
 continuity consumer requires a separate source-matched native run before its
 receiving claim. The existing
 Mini/fn two-Store evidence is in fn's `planning/evidence/two-store-join-1a9dd747-2026-09-24.md`;

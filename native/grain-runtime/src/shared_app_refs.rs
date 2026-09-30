@@ -78,7 +78,7 @@ pub(super) struct ExactReceiptPin {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -94,7 +94,7 @@ pub(super) struct ShareIssuePin {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,7 +173,7 @@ fn validate_pin(pin: &ExactReceiptPin) -> Result<()> {
         (&pin.transaction_id, "transactionId"),
         (&pin.event_id, "eventId"),
         (&pin.accepted_count, "acceptedCount"),
-        (&pin.image_boundary, "imageBoundary"),
+        (&pin.world_root, "worldRoot"),
     ] {
         decimal(value, label)?;
     }
@@ -191,7 +191,7 @@ fn validate_issue_pin(pin: &ShareIssuePin) -> Result<()> {
         (&pin.transaction_id, "transactionId"),
         (&pin.event_id, "eventId"),
         (&pin.accepted_count, "acceptedCount"),
-        (&pin.image_boundary, "imageBoundary"),
+        (&pin.world_root, "worldRoot"),
     ] {
         decimal(value, label)?;
     }
@@ -338,7 +338,7 @@ fn receipt_matches(
     transaction_id: &str,
     event_id: &str,
     accepted_count: &str,
-    image_boundary: &str,
+    world_root: &str,
 ) -> Result<()> {
     if result.get("type").and_then(Value::as_str) != Some("confirmed")
         || result.get("confirmation").and_then(Value::as_str) != Some("replayed")
@@ -349,7 +349,7 @@ fn receipt_matches(
         ("transactionId", transaction_id),
         ("eventId", event_id),
         ("acceptedCount", accepted_count),
-        ("imageBoundary", image_boundary),
+        ("worldRoot", world_root),
     ] {
         if result.get(field).and_then(Value::as_str) != Some(expected) {
             return Err(format!(
@@ -379,7 +379,7 @@ fn read_result(result: Value, target: &str) -> Result<Value> {
         return Err("shared application signed read selected a different target".into());
     }
     if result.pointer("/view/type").and_then(Value::as_str) != Some("resource")
-        || !result.pointer("/view/page").is_some_and(Value::is_object)
+        || !result.pointer("/view/cell").is_some_and(Value::is_object)
     {
         return Err("shared application native read has no complete resource view".into());
     }
@@ -414,7 +414,7 @@ pub(super) fn resolve_with(
         &reference.birth.transaction_id,
         &reference.birth.event_id,
         &reference.birth.accepted_count,
-        &reference.birth.image_boundary,
+        &reference.birth.world_root,
     )?;
     if hash_bounded_file(&birth_call, MAX_CALL_BYTES)? != reference.birth.call_sha256 {
         return Err("shared application exact birth call changed during lookup".into());
@@ -428,7 +428,7 @@ pub(super) fn resolve_with(
         &reference.issue.transaction_id,
         &reference.issue.event_id,
         &reference.issue.accepted_count,
-        &reference.issue.image_boundary,
+        &reference.issue.world_root,
     )?;
     if hash_bounded_file(&issue_ingress, MAX_ISSUE_BYTES)? != reference.issue.ingress_sha256 {
         return Err("shared application exact issue ingress changed during lookup".into());
@@ -465,7 +465,7 @@ pub(super) fn resolve_with(
         .try_into()
         .map_err(|_| "shared application read count differs from full bundle")?;
     // These are four independently signed current observations. The public
-    // resource presentation does not carry one shared image boundary; source
+    // resource presentation does not carry one shared world root; source
     // admission must re-read and join them at its own loaded image.
     Ok(CurrentSharedApplication {
         name: reference.name.clone(),
@@ -497,14 +497,14 @@ pub(super) fn validate_selected(
         &reference.birth.transaction_id,
         &reference.birth.event_id,
         &reference.birth.accepted_count,
-        &reference.birth.image_boundary,
+        &reference.birth.world_root,
     )?;
     receipt_matches(
         &selected.issue_receipt,
         &reference.issue.transaction_id,
         &reference.issue.event_id,
         &reference.issue.accepted_count,
-        &reference.issue.image_boundary,
+        &reference.issue.world_root,
     )?;
     for (view, target) in [
         (&selected.app_read, &reference.app_target),
@@ -530,7 +530,7 @@ mod tests {
             transaction_id: "1".into(),
             event_id: "2".into(),
             accepted_count: "3".into(),
-            image_boundary: "4".into(),
+            world_root: "4".into(),
         }
     }
 
@@ -554,7 +554,7 @@ mod tests {
                 transaction_id: "5".into(),
                 event_id: "6".into(),
                 accepted_count: "7".into(),
-                image_boundary: "8".into(),
+                world_root: "8".into(),
             },
         }
     }
@@ -680,9 +680,9 @@ mod tests {
     fn historical_receipt_requires_every_exact_native_field() {
         let accepted = json!({"type":"confirmed","confirmation":"replayed",
             "transactionId":"1","eventId":"2","acceptedCount":"3",
-            "imageBoundary":"4"});
+            "worldRoot":"4"});
         receipt_matches(&accepted, "1", "2", "3", "4").unwrap();
-        for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+        for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
             let mut changed = accepted.clone();
             changed[field] = json!("999");
             assert!(receipt_matches(&changed, "1", "2", "3", "4").is_err());
@@ -694,11 +694,11 @@ mod tests {
 
     #[test]
     fn read_projection_cannot_replace_signed_target_or_complete_page() {
-        let valid = json!({"target":"100","view":{"type":"resource","page":{}}});
+        let valid = json!({"target":"100","view":{"type":"resource","cell":{}}});
         read_result(valid.clone(), "100").unwrap();
         assert!(read_result(valid.clone(), "101").is_err());
         let mut without_page = valid;
-        without_page["view"]["page"] = Value::Null;
+        without_page["view"]["cell"] = Value::Null;
         assert!(read_result(without_page, "100").is_err());
     }
 
@@ -708,11 +708,11 @@ mod tests {
         let confirmed = |tx: &str, event: &str, count: &str, boundary: &str| {
             json!({"type":"confirmed","confirmation":"replayed",
                 "transactionId":tx,"eventId":event,
-                "acceptedCount":count,"imageBoundary":boundary})
+                "acceptedCount":count,"worldRoot":boundary})
         };
         let view = |target: &str| {
             json!({"target":target,
-            "view":{"type":"resource","page":{}}})
+            "view":{"type":"resource","cell":{}}})
         };
         let selected = CurrentSharedApplication {
             name: reference.name.clone(),
@@ -729,7 +729,7 @@ mod tests {
         swapped.name = "other-app".into();
         assert!(validate_selected(&reference, &swapped).is_err());
         let mut swapped = selected.clone();
-        swapped.issue_receipt["imageBoundary"] = json!("999");
+        swapped.issue_receipt["worldRoot"] = json!("999");
         assert!(validate_selected(&reference, &swapped).is_err());
         let mut swapped = selected;
         swapped.ticket_read["target"] = json!("104");
@@ -771,7 +771,7 @@ mod tests {
             transaction_id: "1".into(),
             event_id: "2".into(),
             accepted_count: "3".into(),
-            image_boundary: "4".into(),
+            world_root: "4".into(),
         };
         assert_eq!(
             exact_issue_input(&config, &pin).unwrap(),
@@ -783,7 +783,7 @@ mod tests {
             transaction_id: "5".into(),
             event_id: "6".into(),
             accepted_count: "7".into(),
-            image_boundary: "8".into(),
+            world_root: "8".into(),
         };
         assert_eq!(
             exact_birth_input(&config, &birth).unwrap(),

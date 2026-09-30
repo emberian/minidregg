@@ -684,9 +684,9 @@ mod tests {
             "#!/bin/sh\n",
             "case \"$4\" in\n",
             "  *lookup-*) printf '%s\\n' '{\"type\":\"confirmed\",\"confirmation\":\"replayed\",",
-            "\"transactionId\":\"1\",\"eventId\":\"99\",\"acceptedCount\":\"3\",\"imageBoundary\":\"4\"}' > \"$5\" ;;\n",
+            "\"transactionId\":\"1\",\"eventId\":\"99\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;;\n",
             "  *) printf '%s\\n' '{\"type\":\"confirmed\",\"confirmation\":\"installed\",",
-            "\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"imageBoundary\":\"4\"}' > \"$5\" ;;\n",
+            "\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;;\n",
             "esac\n"
         )).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();

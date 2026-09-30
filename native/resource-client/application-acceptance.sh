@@ -31,7 +31,7 @@ decimal() {
 }
 confirmed() {
   jq -e '.type == "confirmed" and .confirmation == "installed" and
-    (all(.transactionId, .eventId, .acceptedCount, .imageBoundary;
+    (all(.transactionId, .eventId, .acceptedCount, .worldRoot;
       type == "string" and test("^(0|[1-9][0-9]*)$")))' "$1" >/dev/null
 }
 query() (
@@ -183,7 +183,7 @@ query app-owner 7 6100 101 "$EVIDENCE/owner.key" 10002 resource
 query package-owner 7 6101 103 "$EVIDENCE/owner.key" 10003 resource
 query snapshot-owner 7 6102 105 "$EVIDENCE/owner.key" 10004 resource
 query app-policy 7 6100 101 "$EVIDENCE/owner.key" 10005 policy
-jq -e --arg target "6100" '[.page.entries[] |
+jq -e --arg target "6100" '[.cell.entries[] |
   select(.key.type == "object" and .key.resource == $target)] | length == 4' \
   "$EVIDENCE/app-owner/view.json" >/dev/null
 jq -e '.policyId == "6100" and .version == "0"' \
@@ -223,9 +223,9 @@ EOF
   query "session-$member-policy" "$subject" "$session_target" "$owner_cap" \
     "$key" "$((nonce + 102))" policy
   jq -e --arg resource "$session_target" --arg tag "$tag" \
-    '([.page.entries[] | select(.key.type == "object" and .key.resource == $resource and
+    '([.cell.entries[] | select(.key.type == "object" and .key.resource == $resource and
       .key.field == "0" and .value == "6100")] | length) == 1 and
-     ([.page.entries[] | select(.key.type == "object" and .key.resource == $resource and
+     ([.cell.entries[] | select(.key.type == "object" and .key.resource == $resource and
       .key.field == "3" and .value == $tag)] | length) == 1' \
     "$EVIDENCE/session-$member-read/view.json" >/dev/null
   jq -e --arg target "$session_target" '.policyId == $target and .version == "0"' \
@@ -238,7 +238,7 @@ for member in first second; do
   if [ "$member" = first ]; then subject=8 child=301; else subject=9 child=302; fi
   query "app-before-delegate-$member" 7 6100 101 "$EVIDENCE/owner.key" \
     "$((13000 + subject))" resource
-  root=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+  root=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
     "$EVIDENCE/app-before-delegate-$member/view.json")
   authority=$(jq -er '.signing[0].authorityRoot |
     select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
@@ -260,8 +260,8 @@ EOF
 done
 query app-first 8 6100 301 "$EVIDENCE/first.key" 16008 resource
 query app-second 9 6100 302 "$EVIDENCE/second.key" 16009 resource
-FIRST_ROOT=$(jq -er '.page.root' "$EVIDENCE/app-first/view.json")
-SECOND_ROOT=$(jq -er '.page.root' "$EVIDENCE/app-second/view.json")
+FIRST_ROOT=$(jq -er '.cell.root' "$EVIDENCE/app-first/view.json")
+SECOND_ROOT=$(jq -er '.cell.root' "$EVIDENCE/app-second/view.json")
 [ "$FIRST_ROOT" = "$SECOND_ROOT" ]
 "$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/before-denied-image.bin"
 deny_query second-cannot-read-first 9 6208 201 "$EVIDENCE/second.key" 17009
@@ -272,7 +272,7 @@ cmp "$EVIDENCE/before-denied-image.bin" "$EVIDENCE/after-denied-image.bin"
 # Restart the pinned Host session, recover the original exact signed call by
 # lookup, and show that no second birth or debit was installed.
 query factory-before-reopen 7 10 54 "$EVIDENCE/owner.key" 18001 resource
-BEFORE_BOUNDARY=$(decimal "$EVIDENCE/factory-before-reopen/challenge.json" imageBoundary)
+BEFORE_BOUNDARY=$(decimal "$EVIDENCE/factory-before-reopen/challenge.json" worldRoot)
 "$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/before-reopen-image.bin"
 stop_session
 start_session session-reopen
@@ -280,17 +280,17 @@ start_session session-reopen
   --socket "$SOCKET" >"$EVIDENCE/session-first-replay.stdout"
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/session-first-attempt/retry-0001.json" >/dev/null
-for field in transactionId eventId acceptedCount imageBoundary; do
+for field in transactionId eventId acceptedCount worldRoot; do
   [ "$(decimal "$EVIDENCE/session-first-attempt/outcome.json" "$field")" = \
     "$(decimal "$EVIDENCE/session-first-attempt/retry-0001.json" "$field")" ]
 done
 query factory-after-reopen 7 10 54 "$EVIDENCE/owner.key" 18002 resource
-[ "$(decimal "$EVIDENCE/factory-after-reopen/challenge.json" imageBoundary)" = \
+[ "$(decimal "$EVIDENCE/factory-after-reopen/challenge.json" worldRoot)" = \
   "$BEFORE_BOUNDARY" ]
 query app-first-reopen 8 6100 301 "$EVIDENCE/first.key" 18008 resource
 query app-second-reopen 9 6100 302 "$EVIDENCE/second.key" 18009 resource
-[ "$(jq -er '.page.root' "$EVIDENCE/app-first-reopen/view.json")" = "$FIRST_ROOT" ]
-[ "$(jq -er '.page.root' "$EVIDENCE/app-second-reopen/view.json")" = "$FIRST_ROOT" ]
+[ "$(jq -er '.cell.root' "$EVIDENCE/app-first-reopen/view.json")" = "$FIRST_ROOT" ]
+[ "$(jq -er '.cell.root' "$EVIDENCE/app-second-reopen/view.json")" = "$FIRST_ROOT" ]
 "$STORE_BINARY" read-to "$EVIDENCE/store" "$EVIDENCE/after-reopen-image.bin"
 cmp "$EVIDENCE/before-reopen-image.bin" "$EVIDENCE/after-reopen-image.bin"
 
@@ -302,7 +302,7 @@ jq -n --arg app "6100" --arg first "6208" --arg second "6209" \
   '{status:"pass",scope:"native-two-subject-app-birth-and-observe",
     app:$app,firstSession:$first,secondSession:$second,
     appReceipt:$appReceipt[0],firstSessionReceipt:$firstReceipt[0],
-    secondSessionReceipt:$secondReceipt[0],reopenImageBoundary:$boundary,
+    secondSessionReceipt:$secondReceipt[0],reopenWorldRoot:$boundary,
     appObserveDelegatedSeparately:true,crossSessionReadsRefused:true,
     originalSessionReceiptReplayed:true}' \
   >"$EVIDENCE/application-acceptance.json"

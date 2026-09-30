@@ -51,7 +51,7 @@ selected-release-submit|selected-release-lookup)
     selected-release-lookup) name=request-0002 ; kind=absent ;;
   esac
   if [ "$kind" = confirmed ]; then
-    printf '%s\n' '{"type":"confirmed","confirmation":"installed","transactionId":"42","eventId":"43","acceptedCount":"4","imageBoundary":"44"}' >"$out/$name.outcome.json"
+    printf '%s\n' '{"type":"confirmed","confirmation":"installed","transactionId":"42","eventId":"43","acceptedCount":"4","worldRoot":"44"}' >"$out/$name.outcome.json"
   else
     printf '%s\n' '{"type":"absent"}' >"$out/$name.outcome.json"
   fi

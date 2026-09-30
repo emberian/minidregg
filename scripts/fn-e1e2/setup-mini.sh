@@ -184,7 +184,7 @@ EOF
 "$MINI" query --host "$HOST" --config "$ROOT/deployment/pinned-config.json" \
   --intent "$ROOT/gateway-query.json" --key "$ROOT/custody.key" --view resource \
   --dir "$ROOT/gateway-query" >"$ROOT/gateway-query.stdout"
-TARGET_ROOT=$(jq -er '.page.root' "$ROOT/gateway-query/view.json")
+TARGET_ROOT=$(jq -er '.cell.root' "$ROOT/gateway-query/view.json")
 AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$ROOT/gateway-query/challenge.json")
 cat >"$ROOT/delegate-intent.json" <<EOF
 {"subject":"$GATEWAY_SUBJECT","nonce":"30009","purpose":{"type":"prepare","draft":{

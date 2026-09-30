@@ -116,9 +116,9 @@ if [ "$#" -eq 11 ] && [ "$1" = prepare ]; then
   chmod 600 "$ATTEMPT/query.stdout" "$ATTEMPT/query.stderr"
   private "$ATTEMPT/before/view.json" 1048576
   private "$ATTEMPT/before/challenge.json" 1048576
-  jq -e '.page.grain.task == "7902" and .page.grain.status == "1" and
-    .page.grain.reserved == "0" and
-    (.page.grain.remaining | tonumber >= 3)' \
+  jq -e '.cell.grain.task == "7902" and .cell.grain.status == "1" and
+    .cell.grain.reserved == "0" and
+    (.cell.grain.remaining | tonumber >= 3)' \
     "$ATTEMPT/before/view.json" >/dev/null ||
     fail "tool is not settled with at least 3 remaining"
   jq -n --arg nonce "$NONCE" \
@@ -126,9 +126,9 @@ if [ "$#" -eq 11 ] && [ "$1" = prepare ]; then
     --slurpfile challenge "$ATTEMPT/before/challenge.json" '
     {grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
       schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-      expectedTargetRoot:$read[0].page.root,
+      expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$nonce,payload:"one event22 ticket birth reserve"},
-      before:($read[0].page.grain | {generation,status,remaining,reserved}),
+      before:($read[0].cell.grain | {generation,status,remaining,reserved}),
       operation:{type:"reserve",amount:"3"},publications:[]},
      grants:[{kind:"object",target:"7902",capability:"81"}],intentNonce:$nonce}
     ' >"$ATTEMPT/intent.json"
@@ -197,13 +197,13 @@ if [ "$#" -eq 2 ] && [ "$1" = lookup ]; then
     (.transactionId | type == "string") and
     (.eventId | type == "string") and
     (.acceptedCount | type == "string") and
-    (.imageBoundary | type == "string")' "$latest" >/dev/null ||
+    (.worldRoot | type == "string")' "$latest" >/dev/null ||
     fail "reserve not confirmed"
   if [ ! -e "$ATTEMPT/confirmed.json" ]; then
     jq -n --arg call "$(sha "$ATTEMPT/native/call.bin")" \
       --slurpfile outcome "$latest" '
       {type:"mini-spk-ticket-tool-reserve-confirmed-v1",callSha256:$call,
-       receipt:($outcome[0] | {transactionId,eventId,acceptedCount,imageBoundary})}
+       receipt:($outcome[0] | {transactionId,eventId,acceptedCount,worldRoot})}
       ' >"$ATTEMPT/confirmed.json"
     chmod 600 "$ATTEMPT/confirmed.json"
     sync -f "$ATTEMPT/confirmed.json" "$ATTEMPT"
@@ -213,7 +213,7 @@ if [ "$#" -eq 2 ] && [ "$1" = lookup ]; then
       --slurpfile outcome "$latest" '
       .type == "mini-spk-ticket-tool-reserve-confirmed-v1" and
       .callSha256 == $call and
-      .receipt == ($outcome[0] | {transactionId,eventId,acceptedCount,imageBoundary})
+      .receipt == ($outcome[0] | {transactionId,eventId,acceptedCount,worldRoot})
       ' "$ATTEMPT/confirmed.json" >/dev/null || fail "reserve receipt changed"
   fi
   if [ ! -e "$ATTEMPT/after-view.json" ]; then
@@ -245,11 +245,11 @@ if [ "$#" -eq 2 ] && [ "$1" = lookup ]; then
       "$ATTEMPT/after-query-$suffix.stderr"
     private "$after_dir/view.json" 1048576
     jq -e --slurpfile before "$ATTEMPT/before/view.json" '
-      .page.grain.task == "7902" and .page.grain.status == "3" and
-      .page.grain.generation == $before[0].page.grain.generation and
-      .page.grain.reserved == "3" and
-      (.page.grain.remaining | tonumber) ==
-        (($before[0].page.grain.remaining | tonumber) - 3)
+      .cell.grain.task == "7902" and .cell.grain.status == "3" and
+      .cell.grain.generation == $before[0].cell.grain.generation and
+      .cell.grain.reserved == "3" and
+      (.cell.grain.remaining | tonumber) ==
+        (($before[0].cell.grain.remaining | tonumber) - 3)
       ' "$after_dir/view.json" >/dev/null ||
       fail "source-current reserve post-state differs"
     (set -C; cat "$after_dir/view.json" >"$ATTEMPT/after-view.json") ||
@@ -304,9 +304,9 @@ if [ "$#" -eq 3 ] && [ "$1" = advance-ticket ]; then
     .finalizedGrainBirth.tool.task == "7902" and
     .finalizedGrainBirth.tool.capability == "81" and
     .finalizedGrainBirth.tool.observeCapability == "81" and
-    .finalizedGrainBirth.tool.root == $after[0].page.root and
+    .finalizedGrainBirth.tool.root == $after[0].cell.root and
     .finalizedGrainBirth.tool.before ==
-      ($after[0].page.grain | {generation,status,remaining,reserved}) and
+      ($after[0].cell.grain | {generation,status,remaining,reserved}) and
     .finalizedGrainBirth.parent.task == "7901"
     ' "$PROBE" >/dev/null ||
     fail "event22 did not consume exact retained reserve post-state"
@@ -322,7 +322,7 @@ if [ "$#" -eq 3 ] && [ "$1" = advance-ticket ]; then
   chmod 600 "$ATTEMPT/$stem.stdout" "$ATTEMPT/$stem.stderr"
   jq -e --slurpfile anchor "$ISSUE/receipt-anchor.json" '
     .type == "confirmed" and .confirmation == "replayed" and
-    {transactionId,eventId,acceptedCount,imageBoundary} == $anchor[0].receipt
+    {transactionId,eventId,acceptedCount,worldRoot} == $anchor[0].receipt
     ' "$ATTEMPT/$stem.stdout" >/dev/null ||
     fail "event22 receipt differs from retained anchor"
   NONCE=$(jq -er .nonce "$ROOT/active.json")

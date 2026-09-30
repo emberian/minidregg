@@ -2166,7 +2166,7 @@ def evidenceReceiptJson (receipt : NativeHostCodec.Receipt) : Lean.Json :=
      ("transactionId", n receipt.transactionId.value),
      ("eventId", n receipt.eventId.value),
      ("acceptedCount", n receipt.acceptedCount),
-     ("imageBoundary", n receipt.imageBoundary.value)]
+     ("worldRoot", n receipt.worldRoot.value)]
 
 structure ConsumerReportSource where
   application : String
@@ -4432,7 +4432,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
     | throw (IO.userError "provider continuity outcome is not canonical confirmation")
   let current ← sessionWalked config state
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
-  let checkedBoundary := (NativeHost.imageBoundary config current.target.image).value
+  let checkedWorldRoot := (NativeHost.worldRoot config current.target.image).value
   let checkedCount := current.target.image.accepted.length
   let verdict := NativeReserveContinuity.check current anchor reserveCall providerCell
   let (continuous, reason) := match verdict with
@@ -4444,7 +4444,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
      ("continuous", toJson continuous),
      ("providerResourceId", toJson (toString providerResourceId)),
      ("anchor", evidenceReceiptJson anchor),
-     ("checkedImageBoundary", toJson (toString checkedBoundary)),
+     ("checkedWorldRoot", toJson (toString checkedWorldRoot)),
      ("checkedAcceptedCount", toJson (toString checkedCount)),
      ("reason", toJson reason)]).compress.toUTF8.toList)
 

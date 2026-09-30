@@ -80,3 +80,8 @@ root = "Host.Main"
 [[lean_exe]]
 name = "world-fold-bench"
 root = "Host.WorldFoldBench"
+
+# Wall-clock of the compiled world root (Kernel.WorldRoot). Not part of the umbrella gate.
+[[lean_exe]]
+name = "world-root-bench"
+root = "Host.WorldRootBench"

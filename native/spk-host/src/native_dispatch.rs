@@ -12,7 +12,7 @@ use std::io;
 // Native Host's max frame counts the opcode as well as its payload.
 const MAX_HOST_FRAME: usize = 12_102_760;
 const COMMITTED_TAG: &[u8] = b"DREGG/APPLICATION/DISPATCH-COMMITTED-PERMIT/v1";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v2";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v3";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)

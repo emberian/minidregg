@@ -402,7 +402,7 @@ pub fn inspect(input: &Input<'_>) -> Result<Value> {
         || challenge["intent"]["nonce"].as_str() != Some(operation_id.as_str())
         || challenge["intent"]["purpose"]["type"] != "prepare"
         || challenge["intent"]["grants"] != source["grants"]
-        || challenge["imageBoundary"] != input.reserve_boundary
+        || challenge["worldRoot"] != input.reserve_boundary
     {
         return Err("legacy signed prepare challenge differs from pending source/origin".into());
     }
@@ -410,7 +410,7 @@ pub fn inspect(input: &Input<'_>) -> Result<Value> {
     pinned(&reserve_outcome, &audit.reserve_outcome_sha256)?;
     let reserve: Value = serde_json::from_slice(&bounded_owned(&reserve_outcome, uid, 65_536)?)
         .map_err(|e| format!("legacy reserve receipt: {e}"))?;
-    if reserve["type"] != "confirmed" || reserve["imageBoundary"] != input.reserve_boundary {
+    if reserve["type"] != "confirmed" || reserve["worldRoot"] != input.reserve_boundary {
         return Err("legacy reserve origin is not the confirmed exact attempt".into());
     }
     absent_after_prepare(input.attempt)?;
@@ -662,7 +662,7 @@ fn exact_zero_lookup(rt: &mut Runtime, tool: &Authority, settlement_id: u64) -> 
         "transactionId",
         "eventId",
         "acceptedCount",
-        "imageBoundary",
+        "worldRoot",
     ] {
         if replayed[field] != original[field] {
             return Err(format!("B44 zero exact lookup differs: {field}"));
@@ -683,7 +683,7 @@ fn exact_zero_lookup(rt: &mut Runtime, tool: &Authority, settlement_id: u64) -> 
         "transactionId":original["transactionId"],
         "eventId":original["eventId"],
         "acceptedCount":original["acceptedCount"],
-        "imageBoundary":original["imageBoundary"]}))
+        "worldRoot":original["worldRoot"]}))
 }
 
 /// Admin-only second phase. A requested settlement records its predicted

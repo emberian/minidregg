@@ -68,7 +68,7 @@ fn exact_receipt(value: &Value, expected: [&str; 4]) -> Result<()> {
     {
         return Err("native share issue lookup has no historical receipt".into());
     }
-    for (field, wanted) in ["transactionId", "eventId", "acceptedCount", "imageBoundary"]
+    for (field, wanted) in ["transactionId", "eventId", "acceptedCount", "worldRoot"]
         .into_iter()
         .zip(expected)
     {
@@ -177,7 +177,7 @@ fn lookup_profile(
     {
         return Err("share issue receipt paths must be absolute".into());
     }
-    for (field, wanted) in ["transactionId", "eventId", "acceptedCount", "imageBoundary"]
+    for (field, wanted) in ["transactionId", "eventId", "acceptedCount", "worldRoot"]
         .into_iter()
         .zip(expected)
     {
@@ -198,7 +198,7 @@ fn lookup_profile(
         "socket":utf8_path(socket)?,
         "ingressSha256":hex(&Sha256::digest(&ingress)),
         "expected":{"transactionId":expected[0],"eventId":expected[1],
-            "acceptedCount":expected[2],"imageBoundary":expected[3]}});
+            "acceptedCount":expected[2],"worldRoot":expected[3]}});
     create_private(
         &directory.join("lookup-marker.json"),
         &serde_json::to_vec_pretty(&marker).map_err(|error| error.to_string())?,
@@ -268,9 +268,9 @@ mod tests {
     #[test]
     fn receipt_requires_native_replay_and_all_four_exact_fields() {
         let accepted = json!({"type":"confirmed","confirmation":"replayed",
-            "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"});
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
         exact_receipt(&accepted, ["1", "2", "3", "4"]).unwrap();
-        for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+        for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
             let mut tampered = accepted.clone();
             tampered[field] = json!("9");
             assert!(exact_receipt(&tampered, ["1", "2", "3", "4"]).is_err());

@@ -49,12 +49,12 @@ grain_intent() {
     --slurpfile challenge "$EVIDENCE/$primary/challenge.json" \
     '{grain:{task:$t,subject:$s,capability:$c,observeCapability:$c,
       schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-      expectedTargetRoot:$source[0].page.root,
+      expectedTargetRoot:$source[0].cell.root,
       context:{operationId:$n,payload:$label},
-      before:{generation:$source[0].page.grain.generation,
-        status:$source[0].page.grain.status,
-        remaining:$source[0].page.grain.remaining,
-        reserved:$source[0].page.grain.reserved},
+      before:{generation:$source[0].cell.grain.generation,
+        status:$source[0].cell.grain.status,
+        remaining:$source[0].cell.grain.remaining,
+        reserved:$source[0].cell.grain.reserved},
       operation:$op,publications:[]},
       grants:[{kind:"object",target:$t,capability:$c}],intentNonce:$n}' \
     >"$EVIDENCE/$name-intent.json"
@@ -63,11 +63,11 @@ with_parent_witness() {
   name=$1 parent=$2
   jq --slurpfile parent "$EVIDENCE/$parent/view.json" \
     '.grain.parentWitness = {task:"7001",capability:"75",observeCapability:"75",
-      expectedTargetRoot:$parent[0].page.root,
-      before:{generation:$parent[0].page.grain.generation,
-        status:$parent[0].page.grain.status,
-        remaining:$parent[0].page.grain.remaining,
-        reserved:$parent[0].page.grain.reserved}} |
+      expectedTargetRoot:$parent[0].cell.root,
+      before:{generation:$parent[0].cell.grain.generation,
+        status:$parent[0].cell.grain.status,
+        remaining:$parent[0].cell.grain.remaining,
+        reserved:$parent[0].cell.grain.reserved}} |
       .grants += [{kind:"object",target:"7001",capability:"75"}]' \
     "$EVIDENCE/$name-intent.json" >"$EVIDENCE/$name-witness-intent.json"
   mv "$EVIDENCE/$name-witness-intent.json" "$EVIDENCE/$name-intent.json"
@@ -92,8 +92,8 @@ grain_intent parent-reserve 7001 7 71 40006 '{"type":"reserve","amount":"3"}' pa
 submit parent-reserve controller
 query_task parent-pending 7 7001 71 "$EVIDENCE/controller.key" 40007
 query_task provider-running 9 7004 101 "$EVIDENCE/provider.key" 40008
-jq -e '.page.grain.generation == "1" and .page.grain.status == "3" and
-  .page.grain.reserved == "3"' "$EVIDENCE/parent-pending/view.json" >/dev/null
+jq -e '.cell.grain.generation == "1" and .cell.grain.status == "3" and
+  .cell.grain.reserved == "3"' "$EVIDENCE/parent-pending/view.json" >/dev/null
 grain_intent provider-overbudget 7004 9 101 40009 \
   '{"type":"reserve","amount":"51"}' provider-running
 with_parent_witness provider-overbudget parent-pending
@@ -107,22 +107,22 @@ if "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
 fi
 jq -e '.type == "refused"' "$EVIDENCE/provider-overbudget-attempt/outcome.json" >/dev/null
 query_task provider-after-refusal 9 7004 101 "$EVIDENCE/provider.key" 40010
-test "$(jq -er '.page.root' "$EVIDENCE/provider-after-refusal/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/provider-running/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/provider-after-refusal/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/provider-running/view.json")"
 query_task parent-after-refusal 7 7001 71 "$EVIDENCE/controller.key" 40011
-test "$(jq -er '.page.root' "$EVIDENCE/parent-after-refusal/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/parent-pending/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/parent-after-refusal/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/parent-pending/view.json")"
 
 grain_intent provider-reserve 7004 9 101 40012 \
   '{"type":"reserve","amount":"3"}' provider-after-refusal
 with_parent_witness provider-reserve parent-after-refusal
 submit provider-reserve provider
 query_task provider-pending 9 7004 101 "$EVIDENCE/provider.key" 40013
-jq -e '.page.grain.generation == "1" and .page.grain.status == "3" and
-  .page.grain.reserved == "3"' "$EVIDENCE/provider-pending/view.json" >/dev/null
+jq -e '.cell.grain.generation == "1" and .cell.grain.status == "3" and
+  .cell.grain.reserved == "3"' "$EVIDENCE/provider-pending/view.json" >/dev/null
 query_task parent-after-provider 7 7001 71 "$EVIDENCE/controller.key" 40014
-test "$(jq -er '.page.root' "$EVIDENCE/parent-after-provider/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/parent-pending/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/parent-after-provider/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/parent-pending/view.json")"
 
 grain_intent provider-stale 7004 9 101 40015 '{"type":"input"}' provider-pending
 with_parent_witness provider-stale parent-after-provider
@@ -134,8 +134,8 @@ test -s "$EVIDENCE/provider-stale-attempt/call.bin"
 grain_intent parent-hard-trip 7001 7 71 40016 '{"type":"disconnect"}' parent-after-provider
 submit parent-hard-trip controller
 query_task parent-fenced 7 7001 71 "$EVIDENCE/controller.key" 40017
-jq -e '.page.grain.generation == "2" and .page.grain.status == "5" and
-  .page.grain.reserved == "3"' "$EVIDENCE/parent-fenced/view.json" >/dev/null
+jq -e '.cell.grain.generation == "2" and .cell.grain.status == "5" and
+  .cell.grain.reserved == "3"' "$EVIDENCE/parent-fenced/view.json" >/dev/null
 if "$MINI" retry --attempt "$EVIDENCE/provider-stale-attempt" --socket "$SOCKET" \
     --mode submit >"$EVIDENCE/provider-stale-retry.stdout" \
     2>"$EVIDENCE/provider-stale-retry.stderr"; then
@@ -143,9 +143,9 @@ if "$MINI" retry --attempt "$EVIDENCE/provider-stale-attempt" --socket "$SOCKET"
   exit 1
 fi
 jq -e '.type == "refused"' "$EVIDENCE/provider-stale-attempt/retry-0001.json" >/dev/null
-test "$(jq -er '.page.root' "$EVIDENCE/parent-fenced/view.json")" != \
-  "$(jq -er '.page.root' "$EVIDENCE/parent-after-provider/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/parent-fenced/view.json")" != \
+  "$(jq -er '.cell.root' "$EVIDENCE/parent-after-provider/view.json")"
 query_task provider-after-fence 9 7004 101 "$EVIDENCE/provider.key" 40018
-test "$(jq -er '.page.root' "$EVIDENCE/provider-after-fence/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/provider-pending/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/provider-after-fence/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/provider-pending/view.json")"
 printf 'signed provider joint reserve and refusal gates passed: %s\n' "$EVIDENCE"

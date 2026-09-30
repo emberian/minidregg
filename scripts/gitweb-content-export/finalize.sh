@@ -90,9 +90,9 @@ check_pins
 [ -f "$latest" ] || die "lookup produced no new retained outcome"
 jq -e '.type == "confirmed" and .confirmation == "replayed" and
   (.transactionId | type == "string") and (.eventId | type == "string") and
-  (.acceptedCount | type == "string") and (.imageBoundary | type == "string")' \
+  (.acceptedCount | type == "string") and (.worldRoot | type == "string")' \
   "$latest" >/dev/null || die "latest lookup is not an exact historical receipt"
-receipt_fields='[.transactionId,.eventId,.acceptedCount,.imageBoundary]'
+receipt_fields='[.transactionId,.eventId,.acceptedCount,.worldRoot]'
 if [ -f "$output/create/retry-0001.json" ] &&
     jq -e '.type == "confirmed"' "$output/create/retry-0001.json" >/dev/null; then
   [ "$(jq -c "$receipt_fields" "$latest")" = \
@@ -101,7 +101,7 @@ if [ -f "$output/create/retry-0001.json" ] &&
 fi
 if [ -f "$output/result.json" ]; then
   [ "$(jq -c "$receipt_fields" "$latest")" = \
-    "$(jq -c '.receipt | [ .transactionId,.eventId,.acceptedCount,.imageBoundary ]' "$output/result.json")" ] ||
+    "$(jq -c '.receipt | [ .transactionId,.eventId,.acceptedCount,.worldRoot ]' "$output/result.json")" ] ||
     die "completed handoff receipt changed"
 fi
 
@@ -134,17 +134,17 @@ check_pins
 [ -s "$readback/signed-observation.bin" ] && [ -s "$readback/view.bin" ] ||
   die "missing signed source readback"
 jq -e --arg atom "$atom" --rawfile payload "$output/payload.hex" \
-  '[.page.entries[] | select(.type == "atom" and .id == $atom and
+  '[.cell.entries[] | select(.type == "atom" and .id == $atom and
     .kind == {"type":"text"} and .payload == $payload and .tombstonedAt == null)] |
     length == 1' "$readback/view.json" >/dev/null || die "current atom differs"
-root=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$readback/view.json")
+root=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$readback/view.json")
 if [ -e "$output/selected" ]; then
   [ -f "$output/selected/view.json" ] && [ -s "$output/selected/signed-observation.bin" ] ||
     die "completed selected readback is incomplete"
-  [ "$(jq -er '.page.root' "$output/selected/view.json")" = "$root" ] ||
+  [ "$(jq -er '.cell.root' "$output/selected/view.json")" = "$root" ] ||
     die "completed handoff source root changed"
   jq -e --arg atom "$atom" --rawfile payload "$output/payload.hex" \
-    '[.page.entries[] | select(.type == "atom" and .id == $atom and
+    '[.cell.entries[] | select(.type == "atom" and .id == $atom and
       .kind == {"type":"text"} and .payload == $payload and .tombstonedAt == null)] |
       length == 1' "$output/selected/view.json" >/dev/null ||
     die "completed selected atom changed"

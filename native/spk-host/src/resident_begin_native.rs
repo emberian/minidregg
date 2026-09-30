@@ -308,7 +308,7 @@ pub(crate) struct AcceptedBegin {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 fn prior_index(accepted_count: &str) -> io::Result<String> {
@@ -451,7 +451,7 @@ pub(crate) fn submit_once(
         transaction_id: receipt("transactionId")?,
         event_id: receipt("eventId")?,
         accepted_count: receipt("acceptedCount")?,
-        image_boundary: receipt("imageBoundary")?,
+        world_root: receipt("worldRoot")?,
     })
 }
 

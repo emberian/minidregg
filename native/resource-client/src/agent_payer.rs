@@ -214,7 +214,7 @@ mod tests {
             "context":{"canonicalHex":"aa","requestDigest":"9"},
             "canonicalHttpHex":"abcd"});
         let receipt = json!({"transactionId":"1","eventId":"2",
-            "acceptedCount":"3","imageBoundary":"4","reserveIndex":"2"});
+            "acceptedCount":"3","worldRoot":"4","reserveIndex":"2"});
         let paid = json!({"type":"application-agent-paid-dispatch-plan-v2",
             "fixedSelectors":original["fixedSelectors"],"context":original["context"],
             "canonicalHttpHex":"abcd","reserveIndex":"2"});

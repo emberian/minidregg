@@ -350,7 +350,7 @@ pub(super) fn confirmed(value: &Value) -> Result<()> {
     if value.get("type").and_then(Value::as_str) != Some("confirmed") {
         return Err("share issue outcome did not confirm".into());
     }
-    for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         receipt_field(value, field)?;
     }
     Ok(())
@@ -359,7 +359,7 @@ pub(super) fn confirmed(value: &Value) -> Result<()> {
 pub(super) fn same_receipt(original: &Value, recovered: &Value) -> Result<()> {
     confirmed(original)?;
     confirmed(recovered)?;
-    for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         if receipt_field(original, field)? != receipt_field(recovered, field)? {
             return Err(format!("share issue historical lookup changed {field}"));
         }
@@ -373,7 +373,7 @@ pub(super) fn receipt_projection(value: &Value) -> Result<Value> {
         json!({"transactionId":receipt_field(value,"transactionId")?,
         "eventId":receipt_field(value,"eventId")?,
         "acceptedCount":receipt_field(value,"acceptedCount")?,
-        "imageBoundary":receipt_field(value,"imageBoundary")?}),
+        "worldRoot":receipt_field(value,"worldRoot")?}),
     )
 }
 
@@ -792,7 +792,7 @@ mod tests {
         let absent = json!({"type":"absent"});
         let first = json!({"type":"confirmed","confirmation":"replayed",
             "transactionId":"10","eventId":"11","acceptedCount":"12",
-            "imageBoundary":"13"});
+            "worldRoot":"13"});
         let mut changed = first.clone();
         changed["eventId"] = Value::String("99".into());
         // A lost submit reply leaves no original receipt. The first retained

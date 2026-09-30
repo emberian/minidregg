@@ -75,6 +75,6 @@ jq -n --arg task "$WORKROOM_MEMBER_TASK" \
   --intent "$EVIDENCE/member-born-intent.json" --key "$EVIDENCE/member.key" \
   --view resource --dir "$EVIDENCE/member-born" >"$EVIDENCE/member-born.stdout"
 jq -e --arg task "$WORKROOM_MEMBER_TASK" \
-  '.page.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+  '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
   "$EVIDENCE/member-born/view.json" >/dev/null
 printf '%s\n' "$EVIDENCE/member-born/view.json"

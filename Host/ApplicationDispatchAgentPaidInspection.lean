@@ -94,7 +94,7 @@ def inspectReservePlan (bytes : List UInt8) : Except String Json := do
      ("context", contextJson plan.context),
      ("canonicalHttpHex", hex <|
        ApplicationDispatchCodec.requestStream.encode plan.request.base.base.http),
-     ("invocationImageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("invocationWorldRoot", decimal plan.invocation.worldRoot.value),
      ("invocationHeight", decimal plan.invocation.height),
      ("slots", .arr <| plan.invocation.slots.toArray.map slotJson)]
 
@@ -115,8 +115,8 @@ def inspectPaidPlan (bytes : List UInt8) : Except String Json := do
      ("canonicalHttpHex", hex <| ApplicationDispatchCodec.requestStream.encode
        dispatch.request),
      ("unsignedAppIngressHex", hex plan.app.unsignedIngress),
-     ("appImageBoundary", decimal plan.app.invocation.imageBoundary.value),
-     ("payerImageBoundary", decimal plan.payer.imageBoundary.value),
+     ("appWorldRoot", decimal plan.app.invocation.worldRoot.value),
+     ("payerWorldRoot", decimal plan.payer.worldRoot.value),
      ("appSlots", .arr <|
        (plan.app.invocation.slots ++ plan.app.observationSlots).toArray.map slotJson),
      ("payerSlots", .arr <| plan.payer.slots.toArray.map slotJson)]

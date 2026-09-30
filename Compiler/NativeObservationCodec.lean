@@ -51,7 +51,8 @@ structure Challenge where
   domain : Digest
   semantics : Digest
   federation : FederationId
-  imageBoundary : Digest
+  /-- The world root the observation is answered from, at `height`. -/
+  worldRoot : Digest
   height : Nat
   headers : List (List UInt8)
   deriving DecidableEq, Repr
@@ -124,12 +125,16 @@ def challengeStream : StreamCodec Challenge :=
         (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
           (StreamCodec.list bytesStream)))))))
     (fun value => (value.intent, value.domain, value.semantics, value.federation,
-      value.imageBoundary, value.height, value.headers))
+      value.worldRoot, value.height, value.headers))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
       wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
-def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v3".toUTF8.toList
+/-- v4 binds `(worldRoot, height)`; v3 bound the whole-image boundary and
+refuses (`v3_challenge_refused`). -/
+def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v4".toUTF8.toList
+
+def retiredChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v3".toUTF8.toList
 
 def challengeCodec : LawfulCodec Challenge := NativeHostCodec.framed challengeFrame challengeStream
 
@@ -138,7 +143,9 @@ def signedStream : StreamCodec Signed :=
     (fun value => (value.challenge, value.signatures))
     (fun wire => ⟨wire.1, wire.2⟩) (by intro value; cases value; rfl)
 
-def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v3".toUTF8.toList
+def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v4".toUTF8.toList
+
+def retiredSignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v3".toUTF8.toList
 
 def signedCodec : LawfulCodec Signed := NativeHostCodec.framed signedFrame signedStream
 
@@ -168,5 +175,30 @@ theorem challenge_canonical {bytes : List UInt8} {challenge : Challenge}
 theorem signed_canonical {bytes : List UInt8} {signed : Signed}
     (decoded : signedCodec.decode bytes = some signed) : signedCodec.encode signed = bytes :=
   NativeHostCodec.framed_canonical _ _ decoded
+
+/-- A v3 challenge (bound to the whole-image boundary) refuses to decode. -/
+theorem v3_challenge_refused (payload : List UInt8) :
+    challengeCodec.decode (retiredChallengeFrame ++ payload) = none := by
+  have lengthExact : challengeFrame.length = retiredChallengeFrame.length := by decide +kernel
+  have different : retiredChallengeFrame ≠ challengeFrame := by decide +kernel
+  have raw : (NativeHostCodec.framedRaw challengeFrame challengeStream).decode
+      (retiredChallengeFrame ++ payload) = none := by
+    simp [NativeHostCodec.framedRaw, lengthExact, different]
+  simp [challengeCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+
+/-- A v3 signed observation refuses to decode. -/
+theorem v3_signed_refused (payload : List UInt8) :
+    signedCodec.decode (retiredSignedFrame ++ payload) = none := by
+  have lengthExact : signedFrame.length = retiredSignedFrame.length := by decide +kernel
+  have different : retiredSignedFrame ≠ signedFrame := by decide +kernel
+  have raw : (NativeHostCodec.framedRaw signedFrame signedStream).decode
+      (retiredSignedFrame ++ payload) = none := by
+    simp [NativeHostCodec.framedRaw, lengthExact, different]
+  simp [signedCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
+
+/-- info: 'Minidregg.Compiler.NativeObservationCodec.v3_challenge_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v3_challenge_refused
+/-- info: 'Minidregg.Compiler.NativeObservationCodec.v3_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v3_signed_refused
 
 end Minidregg.Compiler.NativeObservationCodec

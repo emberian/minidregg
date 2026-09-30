@@ -166,7 +166,7 @@ for route in hermes-a hermes-b; do
       --dir "$EVIDENCE/agents/verified/$label" \
       >"$EVIDENCE/agents/verified/$label.stdout"
     jq -e --arg t "$task" --arg b "$budget" '
-      .page.grain == {task:$t,generation:"0",status:"0",
+      .cell.grain == {task:$t,generation:"0",status:"0",
         remaining:$b,reserved:"0"}' \
       "$EVIDENCE/agents/verified/$label/view.json" >/dev/null
     jq -cn --arg route "$route" --arg role "$role" --arg task "$task" \
@@ -175,7 +175,7 @@ for route in hermes-a hermes-b; do
         "$EVIDENCE/agents/verified/$label/view.json" | cut -d ' ' -f 1)" \
       --slurpfile view "$EVIDENCE/agents/verified/$label/view.json" '
       {route:$route,role:$role,task:$task,subject:$subject,
-       capability:$capability,root:$view[0].page.root,viewSha256:$viewSha}' \
+       capability:$capability,root:$view[0].cell.root,viewSha256:$viewSha}' \
       >>"$EVIDENCE/agents/verified/born-views.jsonl"
   done
 done
@@ -270,7 +270,7 @@ for route in hermes-a hermes-b; do
       --key "$EVIDENCE/agents/$route/controller.key" --view resource \
       --dir "$EVIDENCE/agents/verified/$label-owner" \
       >"$EVIDENCE/agents/verified/$label-owner.stdout"
-    parent_root=$(jq -er '.page.root' \
+    parent_root=$(jq -er '.cell.root' \
       "$EVIDENCE/agents/verified/$label-owner/view.json")
     authority=$(jq -er '.signing[0].authorityRoot' \
       "$EVIDENCE/agents/verified/$label-owner/challenge.json")
@@ -308,7 +308,7 @@ for route in hermes-a hermes-b; do
       --key "$EVIDENCE/agents/$route/$role.key" --view resource \
       --dir "$EVIDENCE/agents/verified/$label-holder" \
       >"$EVIDENCE/agents/verified/$label-holder.stdout"
-    test "$(jq -er '.page.root' \
+    test "$(jq -er '.cell.root' \
       "$EVIDENCE/agents/verified/$label-holder/view.json")" = "$parent_root"
     jq -cn --arg route "$route" --arg role "$role" \
       --arg task "$parent_task" --arg holder "$holder_subject" \
@@ -317,7 +317,7 @@ for route in hermes-a hermes-b; do
         "$EVIDENCE/agents/verified/$label-delegation-attempt/outcome.json" '
       {route:$route,role:$role,parentTask:$task,holder:$holder,
        capability:$capability,parentRoot:$root,
-       receipt:($receipt[0] | {acceptedCount,transactionId,eventId,imageBoundary})}' \
+       receipt:($receipt[0] | {acceptedCount,transactionId,eventId,worldRoot})}' \
       >>"$EVIDENCE/agents/verified/parent-delegations.jsonl"
   done
 done
@@ -326,7 +326,7 @@ jq -n --slurpfile receipt "$EVIDENCE/birth-attempt/outcome.json" \
   --slurpfile born "$EVIDENCE/agents/verified/born-views.jsonl" \
   --slurpfile delegated "$EVIDENCE/agents/verified/parent-delegations.jsonl" '
   {type:"mini-spk-agent-genesis-birth-evidence-v1",
-   birthReceipt:($receipt[0] | {acceptedCount,transactionId,eventId,imageBoundary}),
+   birthReceipt:($receipt[0] | {acceptedCount,transactionId,eventId,worldRoot}),
    resources:[$allocation[0].agents[] as $agent |
      {route:$agent.route,controller:$agent.controller.task,
       tool:$agent.tool.task,dispatch:$agent.dispatch.task,

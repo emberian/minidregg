@@ -84,8 +84,8 @@ jq -e --arg callSha "$CALL_SHA" \
   "$LOOKUP_STEM.marker.json" >/dev/null || fail "lookup does not name exact sealed grant"
 jq -e --slurpfile receipt "$GRANT/receipt.json" '
   .type == "confirmed" and .confirmation == "replayed" and
-  {transactionId,eventId,acceptedCount,imageBoundary} ==
-    ($receipt[0] | {transactionId,eventId,acceptedCount,imageBoundary})
+  {transactionId,eventId,acceptedCount,worldRoot} ==
+    ($receipt[0] | {transactionId,eventId,acceptedCount,worldRoot})
   ' "$LOOKUP" >/dev/null || fail "exact event27 lookup receipt differs"
 jq -e '
   def decimal: type == "string" and test("^(0|[1-9][0-9]*)$");
@@ -132,7 +132,7 @@ jq -e --slurpfile receipt "$GRANT/receipt.json" '
   .type == "application-agent-lifetime-grant-accepted-v1" and
   (.canonicalIngressHex | type == "string" and length > 0 and length % 2 == 0 and
     test("^[0-9a-f]+$")) and
-  .grantIssueReceipt == ($receipt[0] | {transactionId,eventId,acceptedCount,imageBoundary}) and
+  .grantIssueReceipt == ($receipt[0] | {transactionId,eventId,acceptedCount,worldRoot}) and
   .grantIssueIndex == $receipt[0].grantIndex and
   (.originalDescriptorHex | type == "string" and length > 0 and length % 2 == 0 and
     test("^[0-9a-f]+$")) and
@@ -140,8 +140,8 @@ jq -e --slurpfile receipt "$GRANT/receipt.json" '
     .subject,.parentTask,.originalGeneration,.grantObserveCapability,.originalEvent22Index,
     .grantIssueIndex] | all(.[]; decimal)) and
   ([.originalEvent22Receipt,.grantIssueReceipt] |
-    all(.[]; (keys | sort) == (["transactionId","eventId","acceptedCount","imageBoundary"] | sort) and
-      ([.transactionId,.eventId,.acceptedCount,.imageBoundary] | all(.[]; decimal)))) and
+    all(.[]; (keys | sort) == (["transactionId","eventId","acceptedCount","worldRoot"] | sort) and
+      ([.transactionId,.eventId,.acceptedCount,.worldRoot] | all(.[]; decimal)))) and
   .app == "8401" and
   ((.session == "8420" and .ticketResource == "8520" and .grantResource == "8530" and
     .subject == "10" and .parentTask == "7920") or

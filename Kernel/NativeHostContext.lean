@@ -1,7 +1,7 @@
 /-
 Shared source-owned host configuration and structural validation. Semantic
 history verification imports this module; ordinary host APIs import the verifier.
-There is one profile, one image-boundary commitment, and one validation path.
+There is one profile, one world-root commitment, and one validation path.
 -/
 import Compiler.NativeHostCodec
 import Compiler.GrainResourceBirthController
@@ -104,8 +104,9 @@ def seedIdentity (seed : DurableReceiver.Seed) : Digest :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.GENESIS/v1".toUTF8.toList
     (DurableReceiverCodec.seedStream.encode seed)).digest
 
-def imageBoundary (config : Config) (image : DurableReceiver.Image) : Digest :=
-  NativeHostCodec.imageBoundary config.deployment.domain config.profile.semantics image
+/-- The world root of an image under this deployment (`NativeHostCodec.worldRoot`). -/
+def worldRoot (config : Config) (image : DurableReceiver.Image) : Digest :=
+  NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics image
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length

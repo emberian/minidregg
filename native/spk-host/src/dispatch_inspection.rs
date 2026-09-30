@@ -139,8 +139,8 @@ pub(crate) struct MatchedInspection {
     pub dispatch_event: String,
     pub session_fingerprint: [u8; 32],
     pub principal: [u8; 32],
-    pub before_image_boundary: String,
-    pub after_image_boundary: String,
+    pub before_world_root: String,
+    pub after_world_root: String,
     pub accepted_count: String,
     pub effective_bits: Vec<bool>,
     pub app_path_and_query: String,
@@ -321,8 +321,8 @@ pub(crate) fn match_inspection(
         dispatch_event: decimal(&parsed, "dispatchEvent")?.to_owned(),
         session_fingerprint: digest_nat_bytes(decimal(&parsed, "sessionFingerprint")?)?,
         principal,
-        before_image_boundary: decimal(&parsed, "currentImageBoundary")?.to_owned(),
-        after_image_boundary: decimal(receipt, "imageBoundary")?.to_owned(),
+        before_world_root: decimal(&parsed, "currentWorldRoot")?.to_owned(),
+        after_world_root: decimal(receipt, "worldRoot")?.to_owned(),
         accepted_count: decimal(receipt, "acceptedCount")?.to_owned(),
         effective_bits,
         app_path_and_query: if query.is_empty() {
@@ -353,8 +353,8 @@ mod tests {
                     "valueHex":hex(b"application/x-git-upload-pack-advertisement"),"generated":false}]},
             "effectiveBits":[true,false],"ticketResource":"6309","physicalRequestDigest":"123",
             "dispatchTransaction":"456","dispatchEvent":"789","sessionFingerprint":"42",
-            "currentImageBoundary":"111",
-            "receipt":{"transactionId":"456","eventId":"789","acceptedCount":"12","imageBoundary":"222"}
+            "currentWorldRoot":"111",
+            "receipt":{"transactionId":"456","eventId":"789","acceptedCount":"12","worldRoot":"222"}
         })
     }
 
@@ -392,8 +392,8 @@ mod tests {
         assert_eq!(inspected.effective_bits, [true, false]);
         assert_eq!(inspected.session_fingerprint[0], 42);
         assert_eq!(inspected.principal, [0xaa; 32]);
-        assert_eq!(inspected.before_image_boundary, "111");
-        assert_eq!(inspected.after_image_boundary, "222");
+        assert_eq!(inspected.before_world_root, "111");
+        assert_eq!(inspected.after_world_root, "222");
     }
 
     #[test]

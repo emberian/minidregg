@@ -146,7 +146,7 @@ fn confirmed(value: &Value) -> Result<()> {
     if value.get("type").and_then(Value::as_str) != Some("confirmed") {
         return Err("selected source publication is not confirmed".into());
     }
-    for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let number = value
             .get(field)
             .and_then(Value::as_str)
@@ -361,7 +361,7 @@ fn verify_source_lookup(
         }
         if let Ok(retained) = inspect_outcome(host, config, &binary, &presentation) {
             if confirmed(&retained).is_ok() {
-                for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+                for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
                     if retained.get(field) != submitted_receipt.get(field) {
                         return Err(format!("exact source lookup changed {field}"));
                     }
@@ -569,7 +569,7 @@ mod tests {
         let config = state.join("config.json");
         fs::write(&config, b"{}\n").unwrap();
         fs::write(state.join("ingress.bin"), b"exact-source-ingress").unwrap();
-        fs::write(&host, b"#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-submit) printf truncated > \"$4\" ;;\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n  inspect) case \"$4\" in *source-submit.bin) exit 1 ;; esac\n    printf '%s\\n' '{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"imageBoundary\":\"4\"}' > \"$5\" ;;\n  *) exit 9 ;;\nesac\n").unwrap();
+        fs::write(&host, b"#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-submit) printf truncated > \"$4\" ;;\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n  inspect) case \"$4\" in *source-submit.bin) exit 1 ;; esac\n    printf '%s\\n' '{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;;\n  *) exit 9 ;;\nesac\n").unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let first = source_receipt(&host, &config, &state).unwrap();
         confirmed(&first).unwrap();
@@ -612,7 +612,7 @@ mod tests {
         )
         .unwrap();
         fs::write(state.join("source-lookup-000.bin"), b"absent").unwrap();
-        fs::write(&host, b"#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n  inspect) case \"$4\" in *000.bin) printf '%s\\n' '{\"type\":\"absent\"}' > \"$5\" ;; *) printf '%s\\n' '{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"imageBoundary\":\"4\"}' > \"$5\" ;; esac ;;\n  *) exit 9 ;;\nesac\n").unwrap();
+        fs::write(&host, b"#!/bin/sh\nset -eu\nprintf '%s\\n' \"$2\" >> \"$1.calls\"\ncase \"$2\" in\n  selected-source-publication-lookup) printf confirmed > \"$4\" ;;\n  inspect) case \"$4\" in *000.bin) printf '%s\\n' '{\"type\":\"absent\"}' > \"$5\" ;; *) printf '%s\\n' '{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}' > \"$5\" ;; esac ;;\n  *) exit 9 ;;\nesac\n").unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let receipt = source_receipt(&host, &config, &state).unwrap();
         confirmed(&receipt).unwrap();
@@ -636,7 +636,7 @@ mod tests {
         );
         assert!(source_action(false, true).is_err());
         let receipt = json!({"type":"confirmed","transactionId":"1", "eventId":"2",
-            "acceptedCount":"3","imageBoundary":"4"});
+            "acceptedCount":"3","worldRoot":"4"});
         confirmed(&receipt).unwrap();
         assert_eq!(
             post_action(false, None, &receipt, "abc").unwrap(),
@@ -652,7 +652,7 @@ mod tests {
     #[test]
     fn only_exact_accepted_result_can_finalize_without_repost() {
         let receipt = json!({"type":"confirmed","transactionId":"1", "eventId":"2",
-            "acceptedCount":"3","imageBoundary":"4"});
+            "acceptedCount":"3","worldRoot":"4"});
         let accepted = json!({"type":"minidregg-selected-fn-post-v1",
             "sourceReceipt":receipt,"articleSha256":"abc",
             "status":"accepted","detail":"240 article received OK"});

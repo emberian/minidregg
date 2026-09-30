@@ -60,7 +60,7 @@ retained "$STORE"
 for n in app session bob-web-session alice-api-session hermes-a-session hermes-b-session; do
   retained "$B/$n-attempt/outcome.json"
   jq -e '.type == "confirmed" and .confirmation == "installed" and
-    ([.acceptedCount,.transactionId,.eventId,.imageBoundary] |
+    ([.acceptedCount,.transactionId,.eventId,.worldRoot] |
       all(.[]; type == "string" and test("^(0|[1-9][0-9]*)$")))' \
     "$B/$n-attempt/outcome.json" >/dev/null || fail "$n birth receipt not installed"
 done
@@ -68,9 +68,9 @@ for n in app session; do
   retained "$B/$n-attempt/retry-0001.json"
   jq -e --slurpfile original "$B/$n-attempt/outcome.json" '
     .type == "confirmed" and .confirmation == "replayed" and
-    [.acceptedCount,.transactionId,.eventId,.imageBoundary] ==
+    [.acceptedCount,.transactionId,.eventId,.worldRoot] ==
     [$original[0].acceptedCount,$original[0].transactionId,
-      $original[0].eventId,$original[0].imageBoundary]' \
+      $original[0].eventId,$original[0].worldRoot]' \
     "$B/$n-attempt/retry-0001.json" >/dev/null || fail "$n lookup differs"
 done
 retained "$B/additional-sessions.jsonl"
@@ -83,9 +83,9 @@ for route in bob-web alice-api hermes-a hermes-b; do
   jq -e --arg route "$route" --slurpfile original "$B/$route-session-attempt/outcome.json" '
     select(.route == $route) |
     [.birthReceipt.acceptedCount,.birthReceipt.transactionId,
-      .birthReceipt.eventId,.birthReceipt.imageBoundary] ==
+      .birthReceipt.eventId,.birthReceipt.worldRoot] ==
     [$original[0].acceptedCount,$original[0].transactionId,
-      $original[0].eventId,$original[0].imageBoundary]' \
+      $original[0].eventId,$original[0].worldRoot]' \
     "$B/additional-sessions.jsonl" >/dev/null || fail "$route retained receipt differs"
   jq -e --arg route "$route" \
     --arg sessionSha "$(sha "$B/$route-session-born/view.json")" \
@@ -102,7 +102,7 @@ for n in app-born package-born snapshot-born session-born descriptor-born \
 done
 retained "$B/additional-session-tool-after/view.bin"
 retained "$B/additional-session-tool-after/view.json"
-jq -e '.page.grain == {task:"7902",generation:"1",status:"1",remaining:"25",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7902",generation:"1",status:"1",remaining:"25",reserved:"0"}' \
   "$B/additional-session-tool-after/view.json" >/dev/null || fail 'final attached tool differs'
 [ "$(jq -r .acceptedCount "$B/hermes-b-session-attempt/outcome.json")" = 27 ] ||
   fail 'final accepted count differs'

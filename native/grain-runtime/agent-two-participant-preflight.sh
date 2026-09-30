@@ -140,7 +140,7 @@ check_pin() {
     $shared.issue.transactionId == $receipt[0].transactionId and
     $shared.issue.eventId == $receipt[0].eventId and
     $shared.issue.acceptedCount == $receipt[0].acceptedCount and
-    $shared.issue.imageBoundary == $receipt[0].imageBoundary and
+    $shared.issue.worldRoot == $receipt[0].worldRoot and
     $route.name == "gitweb-app" and $route.appResource == "8401" and
     $route.sessionResource == $session and $route.ticketResource == $ticket and
     $route.participantSubject == $participant and
@@ -153,7 +153,7 @@ check_pin() {
   jq -e '.type == "confirmed" and .confirmation == "installed" and
     (.transactionId | type == "string") and (.eventId | type == "string") and
     (.acceptedCount | type == "string" and test("^[1-9][0-9]*$")) and
-    (.imageBoundary | type == "string")' "$receipt" >/dev/null
+    (.worldRoot | type == "string")' "$receipt" >/dev/null
 }
 
 # The source-selected event index comes from the independently retained
@@ -181,19 +181,19 @@ lookup() {
   transaction=$(jq -er .transactionId "$receipt")
   event=$(jq -er .eventId "$receipt")
   count=$(jq -er .acceptedCount "$receipt")
-  boundary=$(jq -er .imageBoundary "$receipt")
+  boundary=$(jq -er .worldRoot "$receipt")
   "$MINI" grain-share-issue-receipt-lookup --host "$HOST" \
     --config "$(jq -er .hostConfig "$config")" --socket "$socket" \
     --ingress "$ingress" --transaction-id "$transaction" \
     --event-id "$event" --accepted-count "$count" \
-    --image-boundary "$boundary" --dir "$EVIDENCE/$label-op55" \
+    --world-root "$boundary" --dir "$EVIDENCE/$label-op55" \
     >"$EVIDENCE/$label-op55.stdout"
   jq -e --slurpfile original "$receipt" '
     .type == "confirmed" and .confirmation == "replayed" and
     .transactionId == $original[0].transactionId and
     .eventId == $original[0].eventId and
     .acceptedCount == $original[0].acceptedCount and
-    .imageBoundary == $original[0].imageBoundary
+    .worldRoot == $original[0].worldRoot
   ' "$EVIDENCE/$label-op55/outcome.json" >/dev/null
 }
 lookup a "$CONFIG_A" "$INGRESS_A" "$RECEIPT_A"
@@ -212,10 +212,10 @@ signed_read() {
     --intent "$EVIDENCE/$label-intent.json" --key "$key" --view resource \
     --dir "$EVIDENCE/$label-read" >"$EVIDENCE/$label-read.stdout"
   jq -e --arg target "$target" '
-    .type == "resource" and .page.grain.task == $target and
-    (.page.root | type == "string" and test("^[0-9]+$"))
+    .type == "resource" and .cell.grain.task == $target and
+    (.cell.root | type == "string" and test("^[0-9]+$"))
   ' "$EVIDENCE/$label-read/view.json" >/dev/null
-  jq -e '(.imageBoundary | type == "string" and test("^[0-9]+$"))' \
+  jq -e '(.worldRoot | type == "string" and test("^[0-9]+$"))' \
     "$EVIDENCE/$label-read/challenge.json" >/dev/null
 }
 read_agent() {
@@ -245,18 +245,18 @@ read_agent() {
   signed_read "$label-purse" "$config" "$(jq -er .dispatchTask.subject "$config")" \
     "$(jq -er .dispatchTask.custodyKey "$config")" "$((base + 5))" "$purse" \
     "$(jq -er .dispatchTask.queryCapability "$config")"
-  test "$(jq -er .page.grain.generation "$EVIDENCE/$label-parent-read/view.json")" = \
+  test "$(jq -er .cell.grain.generation "$EVIDENCE/$label-parent-read/view.json")" = \
     "$(jq -er .toolTask.allowedApplicationApiRoutes[0].parentGeneration "$config")"
-  test "$(jq -er .page.grain.generation "$EVIDENCE/$label-purse-read/view.json")" = \
+  test "$(jq -er .cell.grain.generation "$EVIDENCE/$label-purse-read/view.json")" = \
     "$(jq -er .toolTask.allowedApplicationApiRoutes[0].dispatchGeneration "$config")"
 }
 read_agent a "$CONFIG_A" "$NONCE_BASE"
 read_agent b "$CONFIG_B" "$((NONCE_BASE + 10))"
-same_image=$(jq -er .imageBoundary "$EVIDENCE/a-appTarget-read/challenge.json")
+same_image=$(jq -er .worldRoot "$EVIDENCE/a-appTarget-read/challenge.json")
 for challenge in "$EVIDENCE"/*-read/challenge.json; do
-  test "$(jq -er .imageBoundary "$challenge")" = "$same_image"
+  test "$(jq -er .worldRoot "$challenge")" = "$same_image"
 done
-test "$(jq -er .page.root "$EVIDENCE/a-appTarget-read/view.json")" = \
-  "$(jq -er .page.root "$EVIDENCE/b-appTarget-read/view.json")"
+test "$(jq -er .cell.root "$EVIDENCE/a-appTarget-read/view.json")" = \
+  "$(jq -er .cell.root "$EVIDENCE/b-appTarget-read/view.json")"
 sha256sum -c "$EVIDENCE/input-sha256.txt" >"$EVIDENCE/input-postcheck.txt"
 echo "two distinct agent recipients: op55 exact replay and current signed views passed; no API dispatch"

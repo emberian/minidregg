@@ -55,7 +55,7 @@ structure Source where
   currentAuthorityRoot : Digest
   currentAppRoot : Digest
   currentPackageRoot : Digest
-  currentImageBoundary : Digest
+  currentWorldRoot : Digest
   appObserveCapability : CapabilityId
   packageObserveCapability : CapabilityId
   queryNonce : Nat
@@ -93,14 +93,14 @@ def sourceStream : StreamCodec Source :=
                       StreamCodec.nat)))))))))
     (fun source => (source.begin, source.originalIndex, source.before,
       source.currentAuthorityRoot, source.currentAppRoot,
-      source.currentPackageRoot, source.currentImageBoundary,
+      source.currentPackageRoot, source.currentWorldRoot,
       source.appObserveCapability, source.packageObserveCapability,
       source.queryNonce))
     (fun (begin, originalIndex, before, currentAuthorityRoot, currentAppRoot,
-          currentPackageRoot, currentImageBoundary, appObserveCapability,
+          currentPackageRoot, currentWorldRoot, appObserveCapability,
           packageObserveCapability, queryNonce) =>
       ⟨begin, originalIndex, before, currentAuthorityRoot, currentAppRoot,
-        currentPackageRoot, currentImageBoundary, appObserveCapability,
+        currentPackageRoot, currentWorldRoot, appObserveCapability,
         packageObserveCapability, queryNonce⟩)
     (by intro source; cases source; rfl)
 

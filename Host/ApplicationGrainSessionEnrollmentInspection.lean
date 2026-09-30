@@ -25,7 +25,7 @@ private def receiptJson (receipt : Receipt) : Json :=
   .mkObj [("transactionId", decimal receipt.transactionId.value),
     ("eventId", decimal receipt.eventId.value),
     ("acceptedCount", decimal receipt.acceptedCount),
-    ("imageBoundary", decimal receipt.imageBoundary.value)]
+    ("worldRoot", decimal receipt.worldRoot.value)]
 
 private def basisJson : RoleBasis → Json
   | .none => .mkObj [("type", "none")]
@@ -96,7 +96,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
       | some atom => hex <| HyperdocumentCodec.atomRecordStream.encode atom),
     ("invocationDomain", decimal plan.invocation.domain.value),
     ("invocationSemantics", decimal plan.invocation.semantics.value),
-    ("invocationBoundary", decimal plan.invocation.imageBoundary.value),
+    ("invocationBoundary", decimal plan.invocation.worldRoot.value),
     ("invocationHeight", decimal plan.invocation.height),
     ("slots", .arr slots.toArray)]
 

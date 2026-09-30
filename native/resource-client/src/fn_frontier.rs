@@ -237,7 +237,7 @@ fn receipt(value: &Value) -> Result<Value> {
         return Err("fn frontier original Mini receipt is not confirmed".into());
     }
     let mut fields = serde_json::Map::new();
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let number = member(value, name)?;
         if number.is_empty()
             || number.len() > 80
@@ -845,10 +845,10 @@ mod tests {
     #[test]
     fn receipt_refuses_noncanonical_decimal_fields() {
         let original = json!({"type":"confirmed","transactionId":"01",
-            "eventId":"2","acceptedCount":"3","imageBoundary":"4"});
+            "eventId":"2","acceptedCount":"3","worldRoot":"4"});
         assert!(receipt(&original).is_err());
         let corrected = json!({"type":"confirmed","transactionId":"1",
-            "eventId":"2","acceptedCount":"3","imageBoundary":"4"});
+            "eventId":"2","acceptedCount":"3","worldRoot":"4"});
         assert!(receipt(&corrected).is_ok());
     }
 }

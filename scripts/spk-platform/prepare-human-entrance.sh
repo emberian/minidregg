@@ -140,7 +140,7 @@ mkdir -m 700 "$PROBE"
   fail "exact event22 lookup refused"
 jq -e --slurpfile anchor "$ISSUE/receipt-anchor.json" '
   .type == "confirmed" and .confirmation == "replayed" and
-  {transactionId,eventId,acceptedCount,imageBoundary} == $anchor[0].receipt
+  {transactionId,eventId,acceptedCount,worldRoot} == $anchor[0].receipt
   ' "$PROBE/lookup.json" >/dev/null || fail "event22 receipt changed"
 COUNT=$(jq -er .receipt.acceptedCount "$ISSUE/receipt-anchor.json")
 printf '%s' "$COUNT" | grep -Eq '^[1-9][0-9]{0,14}$' || fail "issue index out of bound"
