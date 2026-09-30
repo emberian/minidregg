@@ -24,6 +24,7 @@ import Theory.CanonicalTransition  -- one canonical materialized post and proof-
 import Theory.ResourceCost  -- Lean-owned multi-lane bounds/exact debits, checked word overflow, canonical-turn metering, atomic refusal, and additive composition
 import Theory.CanonicalResourceKernel  -- typed sparse asset/account nucleus: transfer, issuer-backed mint/burn, fees, and prepaid leases share one patch-derived conservation law
 import Theory.AuthMap  -- sparse Merkle map over hashed canonical key bytes: root a function of the logical map, O(depth) incremental root, openings; soundness under a pair-scoped collision carrier refuted at a length hash
+import Theory.AuthMapCellRoot  -- AuthMap's world level instantiated at `cellRoot := Materializer.rootOf`: materialized cell roots open at the world root, world soundness names the cell store, a validated patch moves the world root along one path
 import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical payload decoding, and monotone identifiers make creation and retirement first-class transitions
 import Theory.CanonicalReactiveView  -- observer-indexed typed lenses advance directly from canonical deltas; accepted guarded holes retain eager nullifiers without a parallel uniform post
 import Theory.TypedAuthorization  -- complete-request-indexed authority evidence, explicit bearer/subject holders, exact epochs/revocation, and monotone capability attenuation
@@ -31,6 +32,8 @@ import Theory.AuthorizationDeclaration  -- first-order authorization plans compi
 import Theory.CredentialAuthorityFamily  -- signature/proof/capability/token carriers share exact request digests, holder/scope/current-policy semantics, and proof-relevant strict attenuation without mode bypasses
 import Theory.EffectDeclaration  -- target-indexed effects derive exact footprints and full-width resource deltas; only authorized, balanced declarations yield an AuthorizedEffect token
 import Theory.DeclaredActionLowering  -- a closed create/write/move action language lowers into exact accepted semantic effects without reviving the legacy runtime
+import Theory.Conservation  -- conservation as a homomorphism: delta of an abstract value view, the per-asset sum, postings generate its kernel, per-move bounds
+import Theory.ConservationBridge  -- the store value view (`valueView`) and the Book / declared-action conservation results derived from the kernel theorem
 import Theory.DeclaredTurn  -- data-only authorization/effect execution with exact-post semantic certification and definitional rejection atomicity
 import Theory.TurnTransition  -- ordinary and resumed reactive turns share canonical roots, exact footprints/deltas, frame laws, and atomic refusal
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
