@@ -3,23 +3,26 @@
 
 This module joins the Lean-derived reactive controller with canonical cell
 materialization.  There is no caller-supplied verifier: `transition` first runs
-`ReactiveController.control`, then validates the exact typed cell patch, and
-finally checks the declaration-derived roots and footprint before minting an
-`Accepted` package.
+`ReactiveController.control`, then validates the exact typed cell patch against
+the pre-root the controller's request quoted, and finally checks the verified
+post-root and the footprint before minting an `Accepted` package.  The
+`PreparedTurn.ofReactiveAccepted` adapter into the canonical transition nucleus
+lives at the end of this module.
 
 The accepted post-cell below remains a logical candidate.  A physical durable
 compare-and-swap plus nullifier insertion is represented by one explicit
 handler-receipt premise at the final release boundary; no definition in this
 module silently mutates a durable store.
 -/
-import Theory.CellState
+import Theory.CanonicalTransition
 
 namespace Minidregg.Theory.ReactiveCellTransition
 
 open Minidregg.Theory
 open Minidregg.Theory.IndexedProgram
+open Minidregg.Theory.Store
 
-universe u v w x y z
+universe u v w z
 
 /-! ## Indexed accepted and total transition outcomes -/
 
@@ -32,27 +35,26 @@ structure Accepted
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    (M : CellState.Materializer S T.Root)
-    (layout : CellState.ControllerLayout S T)
+    {L : Layout.{u, v, w}}
+    (M : CellState.Materializer L T.Root)
+    (layout : CellState.ControllerLayout L T)
     (decl : ReactiveController.Declaration U T)
     (obs : ReactiveController.HostObservation T)
     (advice : ReactiveController.Advice decl.hole)
     (proof : ReactiveController.ProofData T)
     (controllerPre : ReactiveReceipt.Store T.Key T.Value)
-    (pre : CellState.Materialized M) (patch : CellState.Patch S T.Root) where
+    (pre : CellState.Materialized M) (patch : Patch L) where
   private mk ::
   intent : ReactiveController.CommitIntent decl obs advice proof controllerPre
-  validated : CellState.ValidatedPatch M pre patch
+  validated : CellState.ValidatedPatch M pre intent.request.preRoot patch
   binding : CellState.IntentBinding M layout intent pre validated
 
 /-- Transition failures preserve their source: controller policy/temporal
-failure, cell validation failure, or a precise cross-layer binding mismatch. -/
+failure, cell validation failure (a stale quoted pre-root is
+`patch .stalePreRoot`), or a precise cross-layer binding mismatch. -/
 inductive RejectReason
   | controller (reason : ReactiveController.RejectReason)
   | patch (reason : CellState.RejectReason)
-  | preRootMismatch
   | postRootMismatch
   | footprintMismatch
 deriving DecidableEq, Repr
@@ -65,16 +67,15 @@ inductive Outcome
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    (M : CellState.Materializer S T.Root)
-    (layout : CellState.ControllerLayout S T)
+    {L : Layout.{u, v, w}}
+    (M : CellState.Materializer L T.Root)
+    (layout : CellState.ControllerLayout L T)
     (decl : ReactiveController.Declaration U T)
     (obs : ReactiveController.HostObservation T)
     (advice : ReactiveController.Advice decl.hole)
     (proof : ReactiveController.ProofData T)
     (controllerPre : ReactiveReceipt.Store T.Key T.Value)
-    (pre : CellState.Materialized M) (patch : CellState.Patch S T.Root) where
+    (pre : CellState.Materialized M) (patch : Patch L) where
   | blocked
   | rejected (reason : RejectReason)
   | accepted (result :
@@ -89,34 +90,31 @@ def transition
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    (M : CellState.Materializer S T.Root)
-    (layout : CellState.ControllerLayout S T)
+    {L : Layout.{u, v, w}}
+    (M : CellState.Materializer L T.Root)
+    (layout : CellState.ControllerLayout L T)
     (decl : ReactiveController.Declaration U T)
     (obs : ReactiveController.HostObservation T)
     (advice : ReactiveController.Advice decl.hole)
     (proof : ReactiveController.ProofData T)
     (controllerPre : ReactiveReceipt.Store T.Key T.Value)
-    (pre : CellState.Materialized M) (patch : CellState.Patch S T.Root) :
+    (pre : CellState.Materialized M) (patch : Patch L) :
     Outcome M layout decl obs advice proof controllerPre pre patch :=
   match ReactiveController.control decl obs advice proof controllerPre with
   | .pending => .blocked
   | .reject reason => .rejected (.controller reason)
   | .commitIntent intent =>
-      match CellState.validate M pre patch with
+      match CellState.validate M pre intent.request.preRoot patch with
       | .rejected reason => .rejected (.patch reason)
       | .accepted validated =>
-          if hpre : intent.request.preRoot = pre.root then
-            if hpost : intent.verified.postRoot = validated.apply.root then
-              if hfootprint : patch.controllerFootprint layout = decl.hole.footprint then
-                .accepted ⟨intent, validated, ⟨hpre, hpost, hfootprint⟩⟩
-              else
-                .rejected .footprintMismatch
+          if hpost : intent.verified.postRoot = validated.apply.root then
+            if hfootprint :
+                CellState.controllerFootprint layout patch = decl.hole.footprint then
+              .accepted ⟨intent, validated, ⟨hpost, hfootprint⟩⟩
             else
-              .rejected .postRootMismatch
+              .rejected .footprintMismatch
           else
-            .rejected .preRootMismatch
+            .rejected .postRootMismatch
 
 /-! ## Logical post-state and atomic refusal -/
 
@@ -129,16 +127,15 @@ def Outcome.logicalPost
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
     {decl : ReactiveController.Declaration U T}
     {obs : ReactiveController.HostObservation T}
     {advice : ReactiveController.Advice decl.hole}
     {proof : ReactiveController.ProofData T}
     {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root} :
+    {pre : CellState.Materialized M} {patch : Patch L} :
     Outcome M layout decl obs advice proof controllerPre pre patch →
       CellState.Materialized M
   | .blocked => pre
@@ -152,16 +149,15 @@ def Outcome.logicalPost
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
     {decl : ReactiveController.Declaration U T}
     {obs : ReactiveController.HostObservation T}
     {advice : ReactiveController.Advice decl.hole}
     {proof : ReactiveController.ProofData T}
     {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root} :
+    {pre : CellState.Materialized M} {patch : Patch L} :
     (Outcome.blocked (M := M) (layout := layout) (decl := decl) (obs := obs)
       (advice := advice) (proof := proof) (controllerPre := controllerPre)
       (pre := pre) (patch := patch)).logicalPost = pre :=
@@ -174,16 +170,15 @@ def Outcome.logicalPost
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
     {decl : ReactiveController.Declaration U T}
     {obs : ReactiveController.HostObservation T}
     {advice : ReactiveController.Advice decl.hole}
     {proof : ReactiveController.ProofData T}
     {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root}
+    {pre : CellState.Materialized M} {patch : Patch L}
     (reason : RejectReason) :
     (Outcome.rejected (M := M) (layout := layout) (decl := decl) (obs := obs)
       (advice := advice) (proof := proof) (controllerPre := controllerPre)
@@ -200,16 +195,15 @@ structure BindingFacts
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
     {decl : ReactiveController.Declaration U T}
     {obs : ReactiveController.HostObservation T}
     {advice : ReactiveController.Advice decl.hole}
     {proof : ReactiveController.ProofData T}
     {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root}
+    {pre : CellState.Materialized M} {patch : Patch L}
     (accepted : Accepted M layout decl obs advice proof controllerPre pre patch) : Prop where
   holeId : accepted.intent.request.holeId = decl.hole.holeId
   code : accepted.intent.request.code = decl.hole.code
@@ -237,7 +231,7 @@ structure BindingFacts
   effectPostRoot : proof.postRoot = decl.effect.expectedPostRoot
   effectFootprint : decl.effect.touched = decl.hole.footprint
   verifiedPostRoot : accepted.intent.verified.postRoot = proof.postRoot
-  patchFootprint : patch.controllerFootprint layout = decl.hole.footprint
+  patchFootprint : CellState.controllerFootprint layout patch = decl.hole.footprint
   cellPreRoot : accepted.intent.request.preRoot = pre.root
   cellPostRoot : accepted.intent.verified.postRoot = accepted.validated.apply.root
 
@@ -250,16 +244,15 @@ theorem Accepted.exact_bindings
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
     {decl : ReactiveController.Declaration U T}
     {obs : ReactiveController.HostObservation T}
     {advice : ReactiveController.Advice decl.hole}
     {proof : ReactiveController.ProofData T}
     {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root}
+    {pre : CellState.Materialized M} {patch : Patch L}
     (accepted : Accepted M layout decl obs advice proof controllerPre pre patch) :
     BindingFacts accepted := by
   rcases accepted.intent.request_binds_hole with
@@ -295,56 +288,8 @@ theorem Accepted.exact_bindings
         simpa [ReactiveController.Declaration.verifier] using
           accepted.intent.verified.postRoot_eq
       patchFootprint := accepted.binding.footprint_bound
-      cellPreRoot := accepted.binding.preRoot_bound
+      cellPreRoot := accepted.validated.preRoot_bound
       cellPostRoot := accepted.binding.postRoot_bound }
-
-/-- Applying an accepted patch changes no field outside its declaration. -/
-theorem Accepted.field_frame
-    {U : FirstOrderUniverse} {T : ReactiveController.Types.{z}}
-    [LinearOrder T.Height]
-    [DecidableEq (ReactiveController.HoleSpec U T)] [DecidableEq T.TurnId]
-    [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
-    [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
-    [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
-    {decl : ReactiveController.Declaration U T}
-    {obs : ReactiveController.HostObservation T}
-    {advice : ReactiveController.Advice decl.hole}
-    {proof : ReactiveController.ProofData T}
-    {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root}
-    (accepted : Accepted M layout decl obs advice proof controllerPre pre patch)
-    (field : S.Field) (outside : field ∉ patch.fieldFootprint) :
-    accepted.validated.apply.logical.fields field = pre.logical.fields field :=
-  accepted.validated.field_frame field outside
-
-/-- Applying an accepted patch changes no resource/authority/evidence package
-outside its declaration. -/
-theorem Accepted.resource_frame
-    {U : FirstOrderUniverse} {T : ReactiveController.Types.{z}}
-    [LinearOrder T.Height]
-    [DecidableEq (ReactiveController.HoleSpec U T)] [DecidableEq T.TurnId]
-    [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
-    [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
-    [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
-    {decl : ReactiveController.Declaration U T}
-    {obs : ReactiveController.HostObservation T}
-    {advice : ReactiveController.Advice decl.hole}
-    {proof : ReactiveController.ProofData T}
-    {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root}
-    (accepted : Accepted M layout decl obs advice proof controllerPre pre patch)
-    (resource : S.Resource) (outside : resource ∉ patch.resourceFootprint) :
-    accepted.validated.apply.logical.resources resource =
-      pre.logical.resources resource :=
-  accepted.validated.resource_frame resource outside
 
 /-! ## One explicit physical handler premise -/
 
@@ -364,16 +309,15 @@ structure HandlerPremise
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
     {decl : ReactiveController.Declaration U T}
     {obs : ReactiveController.HostObservation T}
     {advice : ReactiveController.Advice decl.hole}
     {proof : ReactiveController.ProofData T}
     {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root}
+    {pre : CellState.Materialized M} {patch : Patch L}
     (accepted : Accepted M layout decl obs advice proof controllerPre pre patch)
     (receipt : HandlerReceipt T) : Prop where
   atomic : receipt.atomic = true
@@ -390,19 +334,150 @@ def Accepted.releaseAfterPhysicalCommit
     [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
     [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
     [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S T.Root}
-    {layout : CellState.ControllerLayout S T}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
     {decl : ReactiveController.Declaration U T}
     {obs : ReactiveController.HostObservation T}
     {advice : ReactiveController.Advice decl.hole}
     {proof : ReactiveController.ProofData T}
     {controllerPre : ReactiveReceipt.Store T.Key T.Value}
-    {pre : CellState.Materialized M} {patch : CellState.Patch S T.Root}
+    {pre : CellState.Materialized M} {patch : Patch L}
     (accepted : Accepted M layout decl obs advice proof controllerPre pre patch)
     (receipt : HandlerReceipt T) (_handler : HandlerPremise accepted receipt) :
     CellState.Materialized M :=
   accepted.validated.apply
 
 end Minidregg.Theory.ReactiveCellTransition
+
+namespace Minidregg.Theory.CanonicalTransition
+
+open Minidregg.Theory
+open Minidregg.Theory.IndexedProgram
+open Minidregg.Theory.Store
+
+universe u v w z
+
+/-! ## Adapter into the canonical transition nucleus -/
+
+/-- Reactive acceptance projects into the canonical nucleus using only its
+validated typed cell patch.  The parallel controller store is not retained. -/
+def PreparedTurn.ofReactiveAccepted
+    {U : FirstOrderUniverse} {T : ReactiveController.Types.{z}}
+    [LinearOrder T.Height]
+    [DecidableEq (ReactiveController.HoleSpec U T)] [DecidableEq T.TurnId]
+    [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
+    [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
+    [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
+    {declaration : ReactiveController.Declaration U T}
+    {observation : ReactiveController.HostObservation T}
+    {advice : ReactiveController.Advice declaration.hole}
+    {proof : ReactiveController.ProofData T}
+    {controllerPre : ReactiveReceipt.Store T.Key T.Value}
+    {pre : CellState.Materialized M} {patch : Patch L}
+    (accepted : ReactiveCellTransition.Accepted M layout declaration observation
+      advice proof controllerPre pre patch) :
+    PreparedTurn M pre (GuardedAdvice.NullifierKey T.vocabulary) :=
+  PreparedTurn.ofValidatedPatch accepted.validated (some declaration.hole.nullifierKey)
+
+@[simp] theorem PreparedTurn.ofReactiveAccepted_nullifier
+    {U : FirstOrderUniverse} {T : ReactiveController.Types.{z}}
+    [LinearOrder T.Height]
+    [DecidableEq (ReactiveController.HoleSpec U T)] [DecidableEq T.TurnId]
+    [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
+    [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
+    [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
+    {declaration : ReactiveController.Declaration U T}
+    {observation : ReactiveController.HostObservation T}
+    {advice : ReactiveController.Advice declaration.hole}
+    {proof : ReactiveController.ProofData T}
+    {controllerPre : ReactiveReceipt.Store T.Key T.Value}
+    {pre : CellState.Materialized M} {patch : Patch L}
+    (accepted : ReactiveCellTransition.Accepted M layout declaration observation
+      advice proof controllerPre pre patch) :
+    (PreparedTurn.ofReactiveAccepted accepted).nullifier =
+      some declaration.hole.nullifierKey :=
+  rfl
+
+/-- The reactive adapter's pre-root is exactly the eager request root. -/
+theorem PreparedTurn.ofReactiveAccepted_preRoot
+    {U : FirstOrderUniverse} {T : ReactiveController.Types.{z}}
+    [LinearOrder T.Height]
+    [DecidableEq (ReactiveController.HoleSpec U T)] [DecidableEq T.TurnId]
+    [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
+    [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
+    [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
+    {declaration : ReactiveController.Declaration U T}
+    {observation : ReactiveController.HostObservation T}
+    {advice : ReactiveController.Advice declaration.hole}
+    {proof : ReactiveController.ProofData T}
+    {controllerPre : ReactiveReceipt.Store T.Key T.Value}
+    {pre : CellState.Materialized M} {patch : Patch L}
+    (accepted : ReactiveCellTransition.Accepted M layout declaration observation
+      advice proof controllerPre pre patch) :
+    (PreparedTurn.ofReactiveAccepted accepted).preRoot =
+      accepted.intent.request.preRoot :=
+  PreparedTurn.ofValidatedPatch_preRoot accepted.validated _
+
+/-- The reactive adapter's post-root is exactly the verified fill root. -/
+theorem PreparedTurn.ofReactiveAccepted_postRoot
+    {U : FirstOrderUniverse} {T : ReactiveController.Types.{z}}
+    [LinearOrder T.Height]
+    [DecidableEq (ReactiveController.HoleSpec U T)] [DecidableEq T.TurnId]
+    [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
+    [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
+    [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
+    {declaration : ReactiveController.Declaration U T}
+    {observation : ReactiveController.HostObservation T}
+    {advice : ReactiveController.Advice declaration.hole}
+    {proof : ReactiveController.ProofData T}
+    {controllerPre : ReactiveReceipt.Store T.Key T.Value}
+    {pre : CellState.Materialized M} {patch : Patch L}
+    (accepted : ReactiveCellTransition.Accepted M layout declaration observation
+      advice proof controllerPre pre patch) :
+    (PreparedTurn.ofReactiveAccepted accepted).postRoot =
+      accepted.intent.verified.postRoot :=
+  accepted.exact_bindings.cellPostRoot.symm
+
+/-- The adapter preserves the eager unified footprint: the controller image of
+the delta's (derived) footprint is the hole's footprint. -/
+theorem PreparedTurn.ofReactiveAccepted_footprint
+    {U : FirstOrderUniverse} {T : ReactiveController.Types.{z}}
+    [LinearOrder T.Height]
+    [DecidableEq (ReactiveController.HoleSpec U T)] [DecidableEq T.TurnId]
+    [DecidableEq T.AuthorityDemand] [DecidableEq T.Commitment]
+    [DecidableEq T.Root] [DecidableEq T.Key] [DecidableEq T.Value]
+    [DecidableEq (GuardedAdvice.NullifierKey T.vocabulary)]
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L T.Root}
+    {layout : CellState.ControllerLayout L T}
+    {declaration : ReactiveController.Declaration U T}
+    {observation : ReactiveController.HostObservation T}
+    {advice : ReactiveController.Advice declaration.hole}
+    {proof : ReactiveController.ProofData T}
+    {controllerPre : ReactiveReceipt.Store T.Key T.Value}
+    {pre : CellState.Materialized M} {patch : Patch L}
+    (accepted : ReactiveCellTransition.Accepted M layout declaration observation
+      advice proof controllerPre pre patch) :
+    (PreparedTurn.ofReactiveAccepted accepted).delta.footprint.image layout.addressKey =
+      declaration.hole.footprint :=
+  accepted.exact_bindings.patchFootprint
+
+/-- info: 'Minidregg.Theory.CanonicalTransition.PreparedTurn.ofReactiveAccepted_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedTurn.ofReactiveAccepted_footprint
+/-- info: 'Minidregg.Theory.CanonicalTransition.PreparedTurn.ofReactiveAccepted_postRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedTurn.ofReactiveAccepted_postRoot
+
+end Minidregg.Theory.CanonicalTransition
