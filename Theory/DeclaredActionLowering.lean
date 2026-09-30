@@ -3,17 +3,19 @@
 
 This module closes the declaration half of the legacy-effect migration without
 introducing an executor callback.  A batch is closed data: `create`, guarded
-`write`, and exact account `move`.  Its lawful bytes, typed writes, footprint,
+`write`, and exact account `move`.  Its lawful bytes, guarded patch, footprint,
 full-width balance postings, eager nullifier, request commitment, and resource
 charge are all projections of that one value.
 
-`run` is only the guard checker for the same ordered checked writes used by the
-canonical `CellState.Patch`; it does not compute an alternative post-state.
-`Accepted` retains the equality between that checker result and the sole
-validator-minted post.  Thus a host may submit bytes and authority evidence,
-but cannot substitute a callback or a separately interpreted replacement.
+Each action lowers to guarded `Store.Op`s over `EffectDeclaration.effectLayout`:
+a present expected value is an `Op.write` guarded by it, an absent one is an
+`Op.allocate`.  There is no second guarded-write type; the guard checker is
+`Store.Patch.ValidFrom` and the post is `Store.Patch.run`.  `Accepted` retains
+admission and guard validity at the sole validator-minted pre-cell.  Thus a
+host may submit bytes and authority evidence, but cannot substitute a callback
+or a separately interpreted replacement.
 
-The state schema is deliberately the deployed `DeclaredTurn.effectSchema`.
+The state layout is deliberately the deployed `EffectDeclaration.effectLayout`.
 This is a bounded lowering for that effect vocabulary, not a claim that every
 future language can be encoded by these three constructors.
 -/
@@ -28,16 +30,12 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.EffectDeclaration
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.ResourceCost
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-local instance fieldValueDecidableEq
-    (key : DeclaredTurn.effectSchema.{0, 0}.Field) :
-    DecidableEq (DeclaredTurn.effectSchema.{0, 0}.FieldType key) :=
-  inferInstanceAs (DecidableEq Int)
-
-/-! ## Closed action syntax and exact checked writes -/
+/-! ## Closed action syntax and its guarded operations -/
 
 /-- One action in the bounded declared language.  `move` retains both exact
 representation-level expected values; absence and a stored zero are therefore
@@ -75,41 +73,49 @@ def Action.admissionCheck {kind : ResourceKind} (target : ResourceId kind) :
 def Action.Admitted {kind : ResourceKind} (target : ResourceId kind)
     (action : Action) : Prop := action.admissionCheck target = true
 
-/-- The one guarded mutation carrier. -/
-structure CheckedWrite where
-  key : StateKey
-  expected : Option Int
-  replacement : Option Int
-  deriving DecidableEq, Repr
+/-- The guarded operation installing `replacement` at `key` when the key holds
+exactly `expected`: an overwrite guarded by a present value, or an allocation
+guarded by absence. -/
+def guardedSet (key : StateKey) (expected : Option Int) (replacement : Int) :
+    Op effectLayout :=
+  match expected with
+  | some before => .write () key before replacement
+  | none => .allocate () key replacement
 
-def Action.checkedWrites : Action -> List CheckedWrite
-  | .create key initial =>
-      [{ key := key, expected := none, replacement := some initial }]
-  | .write key expected replacement =>
-      [{ key := key, expected := expected, replacement := some replacement }]
+@[simp] theorem guardedSet_address (key : StateKey) (expected : Option Int)
+    (replacement : Int) :
+    (guardedSet key expected replacement).writeAddress? = some key.address := by
+  cases expected <;> rfl
+
+/-- The guard of `guardedSet` is exactly the expected representation-level
+value (the effect layout is RAM, so no discipline side condition remains). -/
+theorem guardedSet_enabled_iff (store : Store effectLayout) (key : StateKey)
+    (expected : Option Int) (replacement : Int) :
+    (guardedSet key expected replacement).Enabled store ↔
+      store key.address = expected := by
+  cases expected with
+  | some before =>
+      change effectLayout.discipline () = .ram ∧ store key.address = some before ↔ _
+      simp
+  | none =>
+      change effectLayout.discipline () ≠ .rom ∧ store key.address = none ↔ _
+      simp
+
+@[simp] theorem guardedSet_apply (store : Store effectLayout) (key : StateKey)
+    (expected : Option Int) (replacement : Int) :
+    (guardedSet key expected replacement).apply store =
+      store.set key.address (some replacement) := by
+  cases expected <;> rfl
+
+/-- The one lowering: every action is a list of guarded operations. -/
+def Action.ops : Action -> Patch effectLayout
+  | .create key initial => [guardedSet key none initial]
+  | .write key expected replacement => [guardedSet key expected replacement]
   | .move source destination resource sourceExpected destinationExpected amount =>
-      [{ key := .accountBalance source resource
-         expected := sourceExpected
-         replacement := some (sourceExpected.getD 0 - amount) },
-       { key := .accountBalance destination resource
-         expected := destinationExpected
-         replacement := some (destinationExpected.getD 0 + amount) }]
-
-def CheckedWrite.toFieldWrite (write : CheckedWrite) :
-    FieldWrite DeclaredTurn.effectSchema.{0, 0} where
-  field := write.key
-  value := write.replacement
-
-/-- Guard and application are one ordered fold over `CheckedWrite`.  The
-successful branch uses `FieldStore.assign`, exactly as `applyFieldWrites` does. -/
-def runCheckedWrites : List CheckedWrite ->
-    FieldStore DeclaredTurn.effectSchema.{0, 0} ->
-      Option (FieldStore DeclaredTurn.effectSchema.{0, 0})
-  | [], fields => some fields
-  | write :: rest, fields =>
-      if fields write.key = write.expected then
-        runCheckedWrites rest (fields.assign write.key write.replacement)
-      else none
+      [guardedSet (.accountBalance source resource) sourceExpected
+         (sourceExpected.getD 0 - amount),
+       guardedSet (.accountBalance destination resource) destinationExpected
+         (destinationExpected.getD 0 + amount)]
 
 /-- A full-width posting is derived only for a move. -/
 structure Posting where
@@ -138,22 +144,24 @@ def postingSum (postings : List Posting) (resource : Digest) : Int :=
       · simp [Action.postings, postingSum, same]
       · simp [Action.postings, postingSum, same]
 
-/-! ## Actual-state balance accounting for the ordered write fold -/
+/-! ## Actual-state balance accounting for the ordered patch -/
 
 /-- The semantic balance view retains absence in the guards but reads absent
-balances as zero for full-width accounting. -/
-def scalarAt (fields : FieldStore DeclaredTurn.effectSchema.{0, 0})
-    (key : StateKey) : Option Int := fields key
-
-def balance (fields : FieldStore DeclaredTurn.effectSchema.{0, 0})
+balances as zero (`EffectDeclaration.read`) for full-width accounting. -/
+def balance (store : Store effectLayout)
     (account : ResourceId .account) (resource : Digest) : Int :=
-  (scalarAt fields (.accountBalance account resource)).getD 0
+  EffectDeclaration.read store (.accountBalance account resource)
 
-def CheckedWrite.balanceDelta (write : CheckedWrite)
-    (account : ResourceId .account) (resource : Digest) : Int :=
-  if write.key = .accountBalance account resource then
-    write.replacement.getD 0 - write.expected.getD 0
-  else 0
+/-- The balance change one guarded operation makes at one balance key, read
+from the operation's own syntax. -/
+def balanceDelta : Op effectLayout → ResourceId .account → Digest → Int
+  | .read _ _ _, _, _ => 0
+  | .write _ key before after, account, resource =>
+      if key = .accountBalance account resource then after - before else 0
+  | .allocate _ key value, account, resource =>
+      if key = .accountBalance account resource then value else 0
+  | .free _ key before, account, resource =>
+      if key = .accountBalance account resource then -before else 0
 
 def postingDelta (postings : List Posting)
     (account : ResourceId .account) (resource : Digest) : Int :=
@@ -161,64 +169,73 @@ def postingDelta (postings : List Posting)
     if posting.account = account ∧ posting.resource = resource then
       posting.amount else 0).sum
 
-theorem balance_assign (fields : FieldStore DeclaredTurn.effectSchema.{0, 0})
-    (write : CheckedWrite) (account : ResourceId .account) (resource : Digest)
-    (guard : fields write.key = write.expected) :
-    balance (fields.assign write.key write.replacement) account resource -
-      balance fields account resource = write.balanceDelta account resource := by
-  by_cases same : write.key = .accountBalance account resource
-  · have current : scalarAt fields write.key = write.expected := guard
-    have assigned : scalarAt (fields.assign write.key write.replacement)
-        write.key = write.replacement :=
-      FieldStore.read_assign_self fields write.key write.replacement
-    unfold balance
-    rw [← same, assigned, current]
-    simp [CheckedWrite.balanceDelta, same]
-  · have unchanged : scalarAt (fields.assign write.key write.replacement)
-        (.accountBalance account resource) =
-        scalarAt fields (.accountBalance account resource) :=
-      FieldStore.read_assign_other fields same write.replacement
-    unfold balance
-    rw [unchanged]
-    simp [CheckedWrite.balanceDelta, same]
+/-- An enabled operation changes a balance by exactly its syntactic delta. -/
+theorem balance_apply (store : Store effectLayout) (op : Op effectLayout)
+    (enabled : op.Enabled store) (account : ResourceId .account) (resource : Digest) :
+    balance (op.apply store) account resource - balance store account resource =
+      balanceDelta op account resource := by
+  have other : ∀ key : StateKey, key ≠ .accountBalance account resource →
+      ∀ value, read (store.set key.address value) (.accountBalance account resource) =
+        EffectDeclaration.read store (.accountBalance account resource) := by
+    intro key different value
+    unfold EffectDeclaration.read
+    rw [Store.set_ne]
+    intro same
+    exact different (StateKey.address_injective same).symm
+  cases op with
+  | read => simp [Op.apply, balanceDelta]
+  | write space key before after =>
+      change balance (store.set key.address (some after)) account resource -
+        balance store account resource = balanceDelta (.write space key before after) account resource
+      by_cases same : key = .accountBalance account resource
+      · subst same
+        have present : store (StateKey.accountBalance account resource).address =
+            some before := enabled.2
+        simp only [balance, EffectDeclaration.read, Store.set_eq, present, Option.getD_some,
+          balanceDelta, if_true]
+      · simp only [balance, balanceDelta, same, if_false, other key same, sub_self]
+  | allocate space key value =>
+      change balance (store.set key.address (some value)) account resource -
+        balance store account resource = balanceDelta (.allocate space key value) account resource
+      by_cases same : key = .accountBalance account resource
+      · subst same
+        have absent : store (StateKey.accountBalance account resource).address = none :=
+          enabled.2
+        simp only [balance, EffectDeclaration.read, Store.set_eq, absent, Option.getD_some,
+          Option.getD_none, balanceDelta, if_true, sub_zero]
+      · simp only [balance, balanceDelta, same, if_false, other key same, sub_self]
+  | free space key before =>
+      change balance (store.set key.address none) account resource -
+        balance store account resource = balanceDelta (.free space key before) account resource
+      by_cases same : key = .accountBalance account resource
+      · subst same
+        have present : store (StateKey.accountBalance account resource).address =
+            some before := enabled.2
+        simp only [balance, EffectDeclaration.read, Store.set_eq, present, Option.getD_some,
+          Option.getD_none, balanceDelta, if_true, zero_sub]
+      · simp only [balance, balanceDelta, same, if_false, other key same, sub_self]
+
+theorem guardedSet_balanceDelta (key : StateKey) (expected : Option Int)
+    (replacement : Int) (account : ResourceId .account) (resource : Digest) :
+    balanceDelta (guardedSet key expected replacement) account resource =
+      if key = .accountBalance account resource then
+        replacement - expected.getD 0 else 0 := by
+  cases expected <;> simp [guardedSet, balanceDelta]
 
 /-- Every guarded step contributes its actual coordinate difference. This
 telescopes across duplicate keys, including the two writes of a self-transfer. -/
-theorem runCheckedWrites_balance
-    (writes : List CheckedWrite)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
-    (run : runCheckedWrites writes fields = some post)
+theorem patch_run_balance (patch : Patch effectLayout) (store : Store effectLayout)
+    (valid : Patch.ValidFrom store patch)
     (account : ResourceId .account) (resource : Digest) :
-    balance post account resource - balance fields account resource =
-      (writes.map fun write => write.balanceDelta account resource).sum := by
-  induction writes generalizing fields with
-  | nil =>
-      have same : fields = post := Option.some.inj run
-      subst fields
-      simp
-  | cons write rest induction =>
-      simp only [runCheckedWrites] at run
-      split at run
-      · rename_i guard
-        have tailDelta := induction (fields.assign write.key write.replacement) run
-        have headDelta := balance_assign fields write account resource guard
-        simp only [List.map_cons, List.sum_cons]
-        omega
-      · contradiction
-
-theorem runCheckedWrites_post
-    (writes : List CheckedWrite)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
-    (run : runCheckedWrites writes fields = some post) :
-    post = applyFieldWrites (writes.map CheckedWrite.toFieldWrite) fields := by
-  induction writes generalizing fields with
-  | nil => exact (Option.some.inj run).symm
-  | cons write rest induction =>
-      simp only [runCheckedWrites] at run
-      split at run
-      · simpa [applyFieldWrites, CheckedWrite.toFieldWrite] using
-          induction (fields.assign write.key write.replacement) run
-      · contradiction
+    balance (Patch.run store patch) account resource - balance store account resource =
+      (patch.map fun op => balanceDelta op account resource).sum := by
+  induction patch generalizing store with
+  | nil => simp
+  | cons op rest induction =>
+      have tailDelta := induction (op.apply store) valid.2
+      have headDelta := balance_apply store op valid.1 account resource
+      simp only [Patch.run_cons, List.map_cons, List.sum_cons]
+      omega
 
 theorem Action.admitted_move_iff
     (target source destination : ResourceId .account) (resource : Digest)
@@ -230,47 +247,50 @@ theorem Action.admitted_move_iff
     decide_eq_true_eq]
   tauto
 
-/-- Every successful admitted move leaves its source nonnegative. The first
-guard binds solvency to the actual source read, and telescoping handles the
+/-- Every valid admitted move leaves its source nonnegative. The first guard
+binds solvency to the actual source read, and telescoping handles the
 self-transfer case without assuming distinct endpoints. -/
 theorem Action.run_move_source_nonnegative
     (target source destination : ResourceId .account) (resource : Digest)
     (sourceExpected destinationExpected : Option Int) (amount : Int)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
+    (store : Store effectLayout)
     (admitted : (Action.move source destination resource sourceExpected
       destinationExpected amount).Admitted target)
-    (run : runCheckedWrites
+    (valid : Patch.ValidFrom store
       (Action.move source destination resource sourceExpected destinationExpected
-        amount).checkedWrites fields = some post) :
-    0 ≤ balance post source resource := by
+        amount).ops) :
+    0 ≤ balance (Patch.run store
+      (Action.move source destination resource sourceExpected destinationExpected
+        amount).ops) source resource := by
   have scopeFacts := (Action.admitted_move_iff target source destination resource
     sourceExpected destinationExpected amount).mp admitted
-  have firstRead : scalarAt fields (.accountBalance source resource) = sourceExpected := by
-    by_contra mismatch
-    have mismatch' : fields (.accountBalance source resource) ≠ sourceExpected := mismatch
-    simp [Action.checkedWrites, runCheckedWrites, mismatch'] at run
-  have funded : amount ≤ balance fields source resource := by
-    simpa only [balance, firstRead] using scopeFacts.2.2
-  have delta := runCheckedWrites_balance _ fields post run source resource
-  simp only [Action.checkedWrites, List.map_cons, List.map_nil,
-    List.sum_cons, List.sum_nil, CheckedWrite.balanceDelta,
-    Option.getD_some, StateKey.accountBalance.injEq] at delta
+  have firstRead : store (StateKey.accountBalance source resource).address =
+      sourceExpected :=
+    (guardedSet_enabled_iff _ _ _ _).mp valid.1
+  have readEq : balance store source resource = sourceExpected.getD 0 := by
+    simp only [balance, EffectDeclaration.read, firstRead]
+  have delta := patch_run_balance _ store valid source resource
+  simp only [Action.ops, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
+    guardedSet_balanceDelta, StateKey.accountBalance.injEq, and_true,
+    if_true] at delta ⊢
+  have funded := scopeFacts.2.2
   split_ifs at delta <;> omega
 
 /-- Account support is derived from an actual patch footprint, not supplied
 beside the patch or captured from another declaration. -/
-def balanceAccounts (footprint : Finset StateKey) : Finset (ResourceId .account) :=
-  footprint.biUnion fun key =>
-    match key with
+def balanceAccounts (footprint : Finset (Address effectLayout)) :
+    Finset (ResourceId .account) :=
+  footprint.biUnion fun address =>
+    match address.2 with
     | .accountBalance account _ => {account}
     | _ => ∅
 
-theorem mem_balanceAccounts {footprint : Finset StateKey}
+theorem mem_balanceAccounts {footprint : Finset (Address effectLayout)}
     {account : ResourceId .account} {resource : Digest}
-    (member : .accountBalance account resource ∈ footprint) :
+    (member : (StateKey.accountBalance account resource).address ∈ footprint) :
     account ∈ balanceAccounts footprint := by
   apply Finset.mem_biUnion.mpr
-  exact ⟨.accountBalance account resource, member, by simp⟩
+  exact ⟨_, member, by simp [StateKey.address]⟩
 
 theorem postingDelta_sum (postings : List Posting)
     (accounts : Finset (ResourceId .account))
@@ -301,37 +321,38 @@ theorem writableKey_not_account {kind : ResourceKind} (target : ResourceId kind)
   subst key
   cases kind <;> simp [writableKeyCheck] at admitted
 
-theorem Action.checkedWrites_balanceDelta {kind : ResourceKind}
+theorem Action.ops_balanceDelta {kind : ResourceKind}
     (target : ResourceId kind) (action : Action) (admitted : action.Admitted target)
     (account : ResourceId .account) (resource : Digest) :
-    (action.checkedWrites.map fun write => write.balanceDelta account resource).sum =
+    (action.ops.map fun op => balanceDelta op account resource).sum =
       postingDelta action.postings account resource := by
   cases action with
   | create key initial =>
       have outside := writableKey_not_account target key admitted account resource
-      simp [Action.checkedWrites, Action.postings, CheckedWrite.balanceDelta,
-        postingDelta, outside]
+      simp [Action.ops, Action.postings, guardedSet_balanceDelta, postingDelta, outside]
   | write key expected replacement =>
       have outside := writableKey_not_account target key admitted account resource
-      simp [Action.checkedWrites, Action.postings, CheckedWrite.balanceDelta,
-        postingDelta, outside]
+      simp [Action.ops, Action.postings, guardedSet_balanceDelta, postingDelta, outside]
   | move source destination moved sourceExpected destinationExpected amount =>
-      simp only [Action.checkedWrites, List.map_cons, List.map_nil,
-        List.sum_cons, List.sum_nil, CheckedWrite.balanceDelta,
-        Option.getD_some, Action.postings, postingDelta]
+      simp only [Action.ops, List.map_cons, List.map_nil,
+        List.sum_cons, List.sum_nil, guardedSet_balanceDelta,
+        Action.postings, postingDelta]
       simp only [StateKey.accountBalance.injEq]
       split_ifs <;> omega
 
 theorem Action.posting_key_mem (action : Action) (posting : Posting)
     (member : posting ∈ action.postings) :
-    .accountBalance posting.account posting.resource ∈
-      action.checkedWrites.map CheckedWrite.key := by
+    (StateKey.accountBalance posting.account posting.resource).address ∈
+      Patch.writeFootprint action.ops := by
   cases action with
   | create => simp [Action.postings] at member
   | write => simp [Action.postings] at member
   | move source destination resource sourceExpected destinationExpected amount =>
       simp only [Action.postings, List.mem_cons, List.not_mem_nil, or_false] at member
-      rcases member with rfl | rfl <;> simp [Action.checkedWrites]
+      rw [Patch.mem_writeFootprint_iff]
+      rcases member with rfl | rfl
+      · exact ⟨_, List.mem_cons_self, guardedSet_address _ _ _⟩
+      · exact ⟨_, List.mem_cons_of_mem _ List.mem_cons_self, guardedSet_address _ _ _⟩
 
 /-! ## Lawful first-order bytes -/
 
@@ -514,30 +535,18 @@ def declarationCodec {kind : ResourceKind} (target : ResourceId kind) :
 
 /-! ## The sole semantic lowering -/
 
-def Declaration.checkedWrites {kind : ResourceKind} {target : ResourceId kind}
-    (declaration : Declaration target) : List CheckedWrite :=
-  declaration.actions.flatMap Action.checkedWrites
-
-def Declaration.fieldWrites {kind : ResourceKind} {target : ResourceId kind}
-    (declaration : Declaration target) :
-    List (FieldWrite DeclaredTurn.effectSchema.{0, 0}) :=
-  declaration.checkedWrites.map CheckedWrite.toFieldWrite
-
+/-- The one guarded patch of a batch. -/
 def Declaration.patch {kind : ResourceKind} {target : ResourceId kind}
-    (declaration : Declaration target) :
-    Patch DeclaredTurn.effectSchema.{0, 0} Digest where
-  expectedPreRoot := declaration.expectedPreRoot
-  fieldWrites := declaration.fieldWrites
-  resourceWrites := []
-  fieldFootprint := (declaration.fieldWrites.map FieldWrite.field).toFinset
-  resourceFootprint := ∅
+    (declaration : Declaration target) : Patch effectLayout :=
+  declaration.actions.flatMap Action.ops
 
+/-- The executable checker: scoped admission, then every guard in sequence.
+Its post is the one patch run; there is no second interpreter. -/
 def Declaration.run {kind : ResourceKind} {target : ResourceId kind}
-    (declaration : Declaration target)
-    (fields : FieldStore DeclaredTurn.effectSchema.{0, 0}) :
-    Option (FieldStore DeclaredTurn.effectSchema.{0, 0}) :=
-  if declaration.admissionCheck then
-    runCheckedWrites declaration.checkedWrites fields
+    (declaration : Declaration target) (store : Store effectLayout) :
+    Option (Store effectLayout) :=
+  if declaration.admissionCheck = true ∧ Patch.ValidFrom store declaration.patch then
+    some (Patch.run store declaration.patch)
   else none
 
 def Declaration.postings {kind : ResourceKind} {target : ResourceId kind}
@@ -551,21 +560,28 @@ theorem Declaration.admitted_iff {kind : ResourceKind} {target : ResourceId kind
   simp [Declaration.Admitted, Declaration.admissionCheck, Action.Admitted]
 
 theorem Declaration.run_eq_some_iff {kind : ResourceKind} {target : ResourceId kind}
-    (declaration : Declaration target)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0}) :
-    declaration.run fields = some post ↔
-      declaration.Admitted ∧
-        runCheckedWrites declaration.checkedWrites fields = some post := by
-  by_cases admitted : declaration.admissionCheck = true
-  · simp [Declaration.run, Declaration.Admitted, admitted]
-  · simp [Declaration.run, Declaration.Admitted, admitted]
+    (declaration : Declaration target) (store post : Store effectLayout) :
+    declaration.run store = some post ↔
+      declaration.Admitted ∧ Patch.ValidFrom store declaration.patch ∧
+        post = Patch.run store declaration.patch := by
+  unfold Declaration.run Declaration.Admitted
+  split_ifs with checked
+  · simp only [Option.some.injEq]
+    constructor
+    · intro exact
+      exact ⟨checked.1, checked.2, exact.symm⟩
+    · intro facts
+      exact facts.2.2.symm
+  · simp only [false_iff]
+    intro facts
+    exact checked ⟨facts.1, facts.2.1⟩
 
-theorem actions_checkedWrites_balanceDelta {kind : ResourceKind}
+theorem actions_ops_balanceDelta {kind : ResourceKind}
     (target : ResourceId kind) (actions : List Action)
     (admitted : ∀ action ∈ actions, action.Admitted target)
     (account : ResourceId .account) (resource : Digest) :
-    ((actions.flatMap Action.checkedWrites).map fun write =>
-        write.balanceDelta account resource).sum =
+    ((actions.flatMap Action.ops).map fun op =>
+        balanceDelta op account resource).sum =
       postingDelta (actions.flatMap Action.postings) account resource := by
   induction actions with
   | nil => simp [postingDelta]
@@ -575,39 +591,34 @@ theorem actions_checkedWrites_balanceDelta {kind : ResourceKind}
         intro entry member
         exact admitted entry (by simp [member])
       simp only [List.flatMap_cons, List.map_append, List.sum_append]
-      rw [Action.checkedWrites_balanceDelta target action headAdmitted,
+      rw [Action.ops_balanceDelta target action headAdmitted,
         induction tailAdmitted]
       simp [postingDelta]
 
-/-- The ordered executor's actual coordinate difference is exactly the
-declared posting delta for every account and full resource identifier. -/
+/-- The ordered patch's actual coordinate difference is exactly the declared
+posting delta for every account and full resource identifier. -/
 theorem Declaration.run_balance {kind : ResourceKind} {target : ResourceId kind}
     (declaration : Declaration target)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
-    (run : declaration.run fields = some post)
+    (store post : Store effectLayout)
+    (run : declaration.run store = some post)
     (account : ResourceId .account) (resource : Digest) :
-    balance post account resource - balance fields account resource =
+    balance post account resource - balance store account resource =
       postingDelta declaration.postings account resource := by
-  obtain ⟨admitted, checked⟩ := (declaration.run_eq_some_iff fields post).mp run
-  rw [runCheckedWrites_balance declaration.checkedWrites fields post checked]
-  exact actions_checkedWrites_balanceDelta target declaration.actions
+  obtain ⟨admitted, valid, rfl⟩ := (declaration.run_eq_some_iff store post).mp run
+  rw [patch_run_balance declaration.patch store valid]
+  exact actions_ops_balanceDelta target declaration.actions
     (declaration.admitted_iff.mp admitted) account resource
 
 theorem Declaration.posting_account_mem {kind : ResourceKind}
     {target : ResourceId kind} (declaration : Declaration target)
     (posting : Posting) (member : posting ∈ declaration.postings) :
-    posting.account ∈ balanceAccounts declaration.patch.fieldFootprint := by
+    posting.account ∈ balanceAccounts (Patch.writeFootprint declaration.patch) := by
   apply mem_balanceAccounts (resource := posting.resource)
-  change .accountBalance posting.account posting.resource ∈
-    (declaration.fieldWrites.map FieldWrite.field).toFinset
-  apply List.mem_toFinset.mpr
   obtain ⟨action, actionMember, postingMember⟩ := List.mem_flatMap.mp member
   have keyMember := action.posting_key_mem posting postingMember
-  obtain ⟨write, writeMember, keyExact⟩ := List.mem_map.mp keyMember
-  apply List.mem_map.mpr
-  refine ⟨write.toFieldWrite, ?_, keyExact⟩
-  apply List.mem_map.mpr
-  exact ⟨write, List.mem_flatMap.mpr ⟨action, actionMember, writeMember⟩, rfl⟩
+  rw [Patch.mem_writeFootprint_iff] at keyMember ⊢
+  obtain ⟨op, opMember, written⟩ := keyMember
+  exact ⟨op, List.mem_flatMap.mpr ⟨action, actionMember, opMember⟩, written⟩
 
 theorem postingSum_append (left right : List Posting) (resource : Digest) :
     postingSum (left ++ right) resource =
@@ -646,10 +657,8 @@ def exactCharge {kind : ResourceKind} {target : ResourceId kind}
     match lane with
     | .incidences => 1
     | .turnBytes => (declarationCodec target).encode declaration |>.length
-    | .memoryTouches =>
-        (declaration.patch : Patch DeclaredTurn.effectSchema.{0, 0} Digest)
-          |>.fieldFootprint.card
-    | .storageBytes => declaration.fieldWrites.length
+    | .memoryTouches => (Patch.writeFootprint declaration.patch).card
+    | .storageBytes => declaration.patch.length
     | .sideEffectCount => declaration.actions.length
     | .feeDebit => declaration.actions.foldl (fun total action =>
         match action with
@@ -665,11 +674,20 @@ def unitCodec : LawfulCodec Unit where
 /-- Scoped admission and ordered guard success concern the exact canonical
 pre-cell used by this family's receiving constructor. -/
 structure ValidAt {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     (pre : Materialized M) (declaration : Declaration target) : Prop where
   rootExact : declaration.expectedPreRoot = pre.root
-  guardsAndPost : declaration.run pre.logical.fields =
-    some (applyFieldWrites declaration.fieldWrites pre.logical.fields)
+  admitted : declaration.Admitted
+  guards : Patch.ValidFrom pre.logical declaration.patch
+
+/-- The executable checker accepts exactly at a valid pre-cell, with the one
+patch run as its post. -/
+theorem ValidAt.run {kind : ResourceKind} {target : ResourceId kind}
+    {M : Materializer effectLayout Digest}
+    {pre : Materialized M} {declaration : Declaration target}
+    (valid : ValidAt pre declaration) :
+    declaration.run pre.logical = some (Patch.run pre.logical declaration.patch) :=
+  (declaration.run_eq_some_iff _ _).mpr ⟨valid.admitted, valid.guards, rfl⟩
 
 /-! ## Complete request and accepted lowering -/
 
@@ -708,9 +726,9 @@ def RequestContext.request {kind : ResourceKind} {target : ResourceId kind}
 
 def family {kind : ResourceKind} (target : ResourceId kind)
     (context : RequestContext)
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     (pre : Materialized M) :
-    SemanticEffectFamily DeclaredTurn.effectSchema.{0, 0} M Nat where
+    SemanticEffectFamily effectLayout M Nat where
   Declaration := Declaration target
   declarationCodec := declarationCodec target
   pre := pre
@@ -729,27 +747,18 @@ def family {kind : ResourceKind} (target : ResourceId kind)
   DisclosureAllowed := fun _ _ decision => decision = .sealed
 
 theorem patch_validated {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {pre : Materialized M} {declaration : Declaration target}
     (valid : ValidAt pre declaration) :
-    Nonempty (ValidatedPatch M pre declaration.patch) := by
-  have accepted : ∃ validated : ValidatedPatch M pre declaration.patch,
-      validate M pre declaration.patch = ValidationOutcome.accepted validated := by
-    unfold validate
-    have rootExact : declaration.patch.expectedPreRoot = pre.root := by
-      simpa [Declaration.patch] using valid.rootExact
-    rw [dif_pos rootExact]
-    rw [dif_pos (show declaration.patch.fieldFootprint =
-      declaration.patch.namedFields from rfl)]
-    rw [dif_pos (show declaration.patch.resourceFootprint =
-      declaration.patch.namedResources from rfl)]
-    exact ⟨_, rfl⟩
-  exact ⟨accepted.choose⟩
+    ValidatedPatch M pre declaration.expectedPreRoot declaration.patch := by
+  obtain ⟨validated, _⟩ := validate_accepts M pre declaration.expectedPreRoot
+    declaration.patch valid.rootExact valid.guards
+  exact validated
 
 /-- Positive lowering carrier with scoped admission and guard/post equality
 retained by the generic accepted effect's family evidence. -/
 structure Accepted {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     (portal : Portal) (authState : AuthState)
     (context : RequestContext) (pre : Materialized M)
     (declaration : Declaration target) : Type where
@@ -759,14 +768,14 @@ structure Accepted {kind : ResourceKind} {target : ResourceId kind}
 /-- Validation lives on the family face, so a generic accepted-effect consumer
 cannot discard it when the wrapper is projected away. -/
 def Accepted.valid {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (accepted : Accepted portal authState context pre declaration) :
     ValidAt pre declaration := accepted.cellEffect.modeEvidence.down
 
 def accept {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M}
     {declaration : Declaration target}
@@ -778,10 +787,9 @@ def accept {kind : ResourceKind} {target : ResourceId kind}
       preStateBound := rfl
       requestBound := rfl
       effectsDigestBound := rfl
-      preRootBound := valid.rootExact.trans rfl
       modeEvidence := PLift.up valid
-      validated := Classical.choice (patch_validated valid)
-      postcondition := (Classical.choice (patch_validated valid)).resultAt
+      validated := patch_validated valid
+      postcondition := (patch_validated valid).resultAt
       disclosure := .sealed
       disclosureAllowed := rfl }
 
@@ -789,71 +797,62 @@ def accept {kind : ResourceKind} {target : ResourceId kind}
 guards before constructing the existing accepted carrier. Its post is always
 the canonical patch application, never the returned host proposal. -/
 def admit {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     (pre : Materialized M) (declaration : Declaration target)
     (authorization : Authorized portal authState (context.request declaration)) :
     Option (Accepted portal authState context pre declaration) :=
   if root : declaration.expectedPreRoot = pre.root then
-    match run : declaration.run pre.logical.fields with
-    | none => none
-    | some post =>
-        some (accept authorization
-          { rootExact := root
-            guardsAndPost := by
-              have checked := (declaration.run_eq_some_iff pre.logical.fields post).mp run
-              have exactPost := runCheckedWrites_post declaration.checkedWrites
-                pre.logical.fields post checked.2
-              simpa [Declaration.fieldWrites, exactPost] using run })
+    if checked : declaration.admissionCheck = true ∧
+        Patch.ValidFrom pre.logical declaration.patch then
+      some (accept authorization
+        { rootExact := root, admitted := checked.1, guards := checked.2 })
+    else none
   else none
 
 /-- The executable constructor is complete for the same family validity
 evidence consumed by the proof-relevant lowering. -/
 theorem admit_eq_some {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (authorization : Authorized portal authState (context.request declaration))
     (valid : ValidAt pre declaration) :
     admit pre declaration authorization = some (accept authorization valid) := by
-  simp only [admit, dif_pos valid.rootExact]
-  split
-  · rename_i refused
-    have exactPost := valid.guardsAndPost
-    rw [refused] at exactPost
-    cases exactPost
-  · rfl
+  simp only [admit, dif_pos valid.rootExact,
+    dif_pos (show declaration.admissionCheck = true ∧
+      Patch.ValidFrom pre.logical declaration.patch from ⟨valid.admitted, valid.guards⟩)]
 
 theorem Accepted.admitted {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (accepted : Accepted portal authState context pre declaration) :
     declaration.Admitted :=
-  ((declaration.run_eq_some_iff _ _).mp accepted.valid.guardsAndPost).1
+  accepted.valid.admitted
 
 /-- The accepted canonical post, rather than a separately asserted balance
 vector, realizes every declared full-width coordinate delta. -/
 theorem Accepted.balance_delta {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (accepted : Accepted portal authState context pre declaration)
     (account : ResourceId .account) (resource : Digest) :
-    balance accepted.cellEffect.prepared.post.logical.fields account resource -
-        balance pre.logical.fields account resource =
+    balance accepted.cellEffect.prepared.post.logical account resource -
+        balance pre.logical account resource =
       postingDelta declaration.postings account resource :=
-  declaration.run_balance _ _ accepted.valid.guardsAndPost account resource
+  declaration.run_balance _ _ accepted.valid.run account resource
 
 theorem Accepted.conserves {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (accepted : Accepted portal authState context pre declaration)
     (resource : Digest) :
-    (∑ account ∈ balanceAccounts declaration.patch.fieldFootprint,
-      (balance accepted.cellEffect.prepared.post.logical.fields account resource -
-        balance pre.logical.fields account resource)) = 0 := by
+    (∑ account ∈ balanceAccounts (Patch.writeFootprint declaration.patch),
+      (balance accepted.cellEffect.prepared.post.logical account resource -
+        balance pre.logical account resource)) = 0 := by
   simp_rw [accepted.balance_delta]
   rw [postingDelta_sum declaration.postings _ declaration.posting_account_mem]
   exact declaration.postingSum_zero resource
@@ -862,14 +861,14 @@ theorem Accepted.conserves {kind : ResourceKind} {target : ResourceId kind}
 changed outside the conservation sum. -/
 theorem Accepted.unposted_account_unchanged {kind : ResourceKind}
     {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (accepted : Accepted portal authState context pre declaration)
     (account : ResourceId .account) (resource : Digest)
     (outside : ∀ posting ∈ declaration.postings, posting.account ≠ account) :
-    balance accepted.cellEffect.prepared.post.logical.fields account resource =
-      balance pre.logical.fields account resource := by
+    balance accepted.cellEffect.prepared.post.logical account resource =
+      balance pre.logical account resource := by
   have delta := accepted.balance_delta account resource
   have zero : postingDelta declaration.postings account resource = 0 := by
     apply List.sum_eq_zero
@@ -881,7 +880,7 @@ theorem Accepted.unposted_account_unchanged {kind : ResourceKind}
 
 theorem no_accepted_of_inadmissible {kind : ResourceKind}
     {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (inadmissible : declaration.admissionCheck = false) :
@@ -893,7 +892,7 @@ theorem no_accepted_of_inadmissible {kind : ResourceKind}
 /-- The public family face retains the same exact-pre guard proof. Receiving
 code constructs both occurrences of `pre` from one reopened canonical cell. -/
 theorem cellEffect_valid {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind}
@@ -904,7 +903,7 @@ theorem cellEffect_valid {kind : ResourceKind} {target : ResourceId kind}
 /-- The family now derives the complete request from source data, so generic
 consumers retain the same authority target rather than only its effect digest. -/
 theorem cellEffect_target_exact {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind}
@@ -914,7 +913,7 @@ theorem cellEffect_target_exact {kind : ResourceKind} {target : ResourceId kind}
   effect.request_projection (fun packed => packed.2.target.value)
 
 theorem no_cellEffect_of_wrong_target {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind} (wrong : request.target.value ≠ target.value) :
@@ -924,7 +923,7 @@ theorem no_cellEffect_of_wrong_target {kind : ResourceKind} {target : ResourceId
 
 theorem no_cellEffect_of_inadmissible {kind : ResourceKind}
     {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind}
@@ -932,39 +931,38 @@ theorem no_cellEffect_of_inadmissible {kind : ResourceKind}
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
       (family target context pre) request pre declaration ()) :=
   ⟨fun effect => by
-    have admitted := ((declaration.run_eq_some_iff _ _).mp
-      (cellEffect_valid effect).guardsAndPost).1
+    have admitted := (cellEffect_valid effect).admitted
     simp [Declaration.Admitted, inadmissible] at admitted⟩
 
 theorem no_cellEffect_of_guard_mismatch {kind : ResourceKind}
     {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     {request : Request kind}
-    (mismatch : declaration.run pre.logical.fields = none) :
+    (mismatch : declaration.run pre.logical = none) :
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
       (family target context pre) request pre declaration ()) :=
   ⟨fun effect => by
-    have exactPost := (cellEffect_valid effect).guardsAndPost
+    have exactPost := (cellEffect_valid effect).run
     rw [mismatch] at exactPost
     simp at exactPost⟩
 
 theorem no_accepted_of_guard_mismatch {kind : ResourceKind}
     {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
-    (mismatch : declaration.run pre.logical.fields = none) :
+    (mismatch : declaration.run pre.logical = none) :
     IsEmpty (Accepted portal authState context pre declaration) :=
   ⟨fun accepted => by
-    have exactPost := accepted.valid.guardsAndPost
+    have exactPost := accepted.valid.run
     rw [mismatch] at exactPost
     simp at exactPost⟩
 
 theorem no_cellEffect_of_wrong_digest {kind : ResourceKind}
     {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (request : Request kind)
@@ -975,7 +973,7 @@ theorem no_cellEffect_of_wrong_digest {kind : ResourceKind}
 
 theorem no_cellEffect_of_stale_root {kind : ResourceKind}
     {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : Declaration target}
     (request : Request kind) (stale : request.preStateRoot ≠ pre.root) :
@@ -991,10 +989,10 @@ def source : ResourceId .account := ⟨1⟩
 def destination : ResourceId .account := ⟨2⟩
 def asset : Digest := ⟨3⟩
 
-def fields : FieldStore DeclaredTurn.effectSchema.{0, 0} :=
-  ((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
-    (.accountBalance source asset) (7 : Int)).write
-      (.accountBalance destination asset) (0 : Int)
+def balances : Store effectLayout :=
+  ((0 : Store effectLayout).set (StateKey.accountBalance source asset).address
+    (some (7 : Int))).set (StateKey.accountBalance destination asset).address
+      (some (0 : Int))
 
 def batch (actions : List Action) : Declaration source where
   schemaVersion := 1
@@ -1008,76 +1006,76 @@ def program : ResourceId .program := ⟨6⟩
 def otherProgram : ResourceId .program := ⟨7⟩
 
 theorem different_object_write_refused :
-    (Action.write (.objectField otherObject asset) none 1).admissionCheck object = false :=
-  rfl
+    (Action.write (.objectField otherObject asset) none 1).admissionCheck object = false := by
+  decide
 
 theorem object_to_program_write_refused :
-    (Action.write (.programCode program) none 1).admissionCheck object = false := rfl
+    (Action.write (.programCode program) none 1).admissionCheck object = false := by decide
 
 theorem different_program_write_refused :
-    (Action.write (.programCode otherProgram) none 1).admissionCheck program = false := rfl
+    (Action.write (.programCode otherProgram) none 1).admissionCheck program = false := by decide
 
 theorem program_to_balance_write_refused :
     (Action.write (.accountBalance source asset) (some 7) 100).admissionCheck program =
-      false := rfl
+      false := by decide
 
 theorem raw_balance_write_refused :
-    (batch [.write (.accountBalance source asset) (some 7) 100]).run fields = none :=
-  rfl
+    (batch [.write (.accountBalance source asset) (some 7) 100]).run balances = none := by
+  decide
 
 theorem raw_balance_create_refused :
-    (batch [.create (.accountBalance destination asset) 100]).run fields = none :=
-  rfl
+    (batch [.create (.accountBalance destination asset) 100]).run balances = none := by
+  decide
 
 theorem different_source_refused :
-    (batch [.move destination source asset (some 7) (some 0) 4]).run fields = none :=
-  rfl
+    (batch [.move destination source asset (some 7) (some 0) 4]).run balances = none := by
+  decide
 
 theorem negative_amount_refused :
-    (batch [.move source destination asset (some 7) (some 0) (-1)]).run fields = none :=
-  rfl
+    (batch [.move source destination asset (some 7) (some 0) (-1)]).run balances = none := by
+  decide
 
 theorem unfunded_move_refused :
-    (batch [.move source destination asset (some 7) (some 0) 8]).run fields = none :=
-  rfl
+    (batch [.move source destination asset (some 7) (some 0) 8]).run balances = none := by
+  decide
 
 /-- A self-transfer's credit guard observes the debit's result, not a second
 copy of the initial balance. The net coordinate change is zero. -/
 theorem self_transfer_sequential :
-    ((batch [.move source source asset (some 7) (some 3) 4]).run fields).map
-      (fun post => balance post source asset) = some 7 :=
-  rfl
+    ((batch [.move source source asset (some 7) (some 3) 4]).run balances).map
+      (fun post => balance post source asset) = some 7 := by
+  decide
 
 theorem self_transfer_stale_credit_refused :
-    (batch [.move source source asset (some 7) (some 7) 4]).run fields = none :=
-  rfl
+    (batch [.move source source asset (some 7) (some 7) 4]).run balances = none := by
+  decide
 
 theorem sequential_moves :
     ((batch
       [.move source destination asset (some 7) (some 0) 4,
-       .move source destination asset (some 3) (some 4) 3]).run fields).map
+       .move source destination asset (some 3) (some 4) 3]).run balances).map
         (fun post => (balance post source asset, balance post destination asset)) =
-      some (0, 7) :=
-  rfl
+      some (0, 7) := by
+  decide
 
 theorem sequential_stale_source_refused :
     (batch
       [.move source destination asset (some 7) (some 0) 4,
-       .move source destination asset (some 7) (some 4) 3]).run fields = none :=
-  rfl
+       .move source destination asset (some 7) (some 4) 3]).run balances = none := by
+  decide
 
 /-- Presence participates in the guard even when the semantic balance is zero. -/
 theorem absent_and_zero_differ :
-    (batch [.move source destination asset (some 7) none 4]).run fields = none :=
-  rfl
+    (batch [.move source destination asset (some 7) none 4]).run balances = none := by
+  decide
 
 theorem missing_destination_can_receive :
     ((batch [.move source destination asset (some 7) none 4]).run
-      ((0 : FieldStore DeclaredTurn.effectSchema.{0, 0}).write
-        (.accountBalance source asset) (7 : Int))).map
+      ((0 : Store effectLayout).set (StateKey.accountBalance source asset).address
+        (some (7 : Int)))).map
           (fun post => (balance post source asset, balance post destination asset)) =
-      some (3, 4) :=
-  rfl
+      some (3, 4) := by
+  decide
 
 end ScopeWitness
 
