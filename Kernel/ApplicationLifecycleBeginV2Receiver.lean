@@ -70,24 +70,13 @@ def receiveVerified (config : Config) {target : Durable}
   let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
-  | .exact kind ready preparedEq readback readbackExact =>
-      let candidate := NativeHostReplay.exactCandidate old derived ready
-      match validated : validateLoaded config candidate with
+  | .exact kind appended =>
+      match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"v2 lifecycle BEGIN post-image: {detail}"
-      | .ok after =>
-          if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
-            let proof : NativeHostReplay.ExactReadback config old :=
-              { derived := derived
-                ready := ready
-                prepared := preparedEq
-                physicalBytes := readback
-                exactBytes := readbackExact
-                after := after
-                validated := validated
-                afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+      | .ok ⟨proof, proofDerived⟩ =>
             return .confirmed ⟨target, old, ingress, accepted,
-              proof, NativeHostReplay.beginV2Derived_intent old accepted, kind⟩
-          else return .uncertain "v2 lifecycle BEGIN successor bytes changed"
+              proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans
+                (NativeHostReplay.beginV2Derived_intent old accepted)), kind⟩
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ =>

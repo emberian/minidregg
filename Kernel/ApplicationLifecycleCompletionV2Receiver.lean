@@ -47,9 +47,11 @@ theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :
   rw [confirmed.derivedExact]
   exact ApplicationLifecycleCompletionV2Core.intent_event confirmed.admitted.conditional
 
-theorem Confirmed.postBytes_exact {config : Config} (confirmed : Confirmed config) :
-    confirmed.verified.opened.durable.bytes = confirmed.readback.physicalBytes :=
-  NativeHostReplay.extendExact_physicalBytes confirmed.old confirmed.readback
+theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
+    confirmed.readback.appended.entry.record =
+      DurableCheckpointCodec.recordFrame.encode
+        (DurableReceiver.IntentRecord.ofIntent confirmed.readback.derived.intent) :=
+  NativeHostReplay.extendExact_physicalRecord confirmed.old confirmed.readback
 
 inductive Result (config : Config) where
   | confirmed (confirmed : Confirmed config)
@@ -73,24 +75,12 @@ def receiveVerified (config : Config) {target : Durable}
   let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
-  | .exact kind ready preparedEq readback readbackExact =>
-      let candidate := NativeHostReplay.exactCandidate old derived ready
-      match validated : validateLoaded config candidate with
+  | .exact kind appended =>
+      match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"checked lifecycle completion post-image: {detail}"
-      | .ok after =>
-          if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
-            let proof : NativeHostReplay.ExactReadback config old :=
-              { derived := derived
-                ready := ready
-                prepared := preparedEq
-                physicalBytes := readback
-                exactBytes := readbackExact
-                after := after
-                validated := validated
-                afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+      | .ok ⟨proof, proofDerived⟩ =>
             return .confirmed ⟨target, old, ingress, admitted, proof,
-              admitted.toDerived_intent, kind⟩
-          else return .uncertain "checked lifecycle completion successor bytes changed"
+              ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind⟩
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ =>

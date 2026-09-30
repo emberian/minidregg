@@ -282,8 +282,9 @@ theorem LoadedDirectory.bytes_exact
   split
   next => rfl
   next outside =>
-    exact (durable.image.outside_support ResourceBirthCodec.rootBytes durable.snapshot
-      durable.represented ⟨identifier⟩ outside).trans loaded.absentDefault |>.symm
+    exact (Kernel.DurableCheckpoint.resume_outside_support ResourceBirthCodec.rootBytes
+      durable.image durable.baseHeight durable.base durable.snapshot durable.resumed
+      ⟨identifier⟩ outside).trans loaded.absentDefault |>.symm
 
 /-! ## Concrete preparation of the root-issuance batch -/
 

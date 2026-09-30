@@ -1954,11 +1954,10 @@ theorem matched_record_admitted {config : Config} {opened : Opened config}
 intent, never the untrusted stored post. This reuses its checked next snapshot
 and append proof instead of replaying the whole physical prefix again. -/
 def advance {config : Config} (opened : Opened config) (derived : Derived config opened) : Except String Durable :=
-  match DurableReceiver.prepare opened.durable.image opened.durable.snapshot
-      opened.durable.represented derived.intent with
-  | .inl ready =>
-      let image := opened.durable.image.append derived.intent
-      .ok ⟨DurableReceiverCodec.encode image, image, ready.next, rfl, ready.restored⟩
+  let durable := opened.durable
+  match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
+      durable.withinLog durable.resumed derived.intent with
+  | .inl ready => .ok (durable.extend ready (durable.chainAfterIntent derived.intent))
   | .inr (.rejected reason) => .error s!"derived durable intent refused: {repr reason}"
   | .inr (.replayed _) => .error "duplicate accepted history entry"
   | .inr _ => .error "derived durable intent did not make one new commit"
@@ -2147,7 +2146,7 @@ private def walk (config : Config) (opened : Opened config)
             | .ok after =>
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
-                  index + 1, imageBoundaryCanonical config next.bytes⟩
+                  index + 1, imageBoundary config next.image⟩
               let nextIssues := issuesAfter config opened issues record receipt derived matched
               let nextReserves := reservesAfter config opened reserves record receipt derived matched
               let nextBegins := beginsAfter config opened begins record derived matched
@@ -2169,9 +2168,7 @@ private def walk (config : Config) (opened : Opened config)
               | .error failure => return .error failure
               | .ok tail =>
                 let step : AdmittedStep config opened after record receipt :=
-                  ⟨derived, matched, next, advanced, validated, by
-                    simp only [receipt, index]
-                    rw [imageBoundaryCanonical_loaded]⟩
+                  ⟨derived, matched, next, advanced, validated, rfl⟩
                 let selectedAt :=
                   if selectIndex == some index then
                     let selected : SelectedStep config opened tail.final
@@ -2195,7 +2192,7 @@ structure Verified (config : Config) (target : Durable) where
   private mk ::
   origin : Opened config
   opened : Opened config
-  exactBytes : opened.durable.bytes = target.bytes
+  exactImage : opened.durable.image = target.image
   receipts : List NativeHostCodec.Receipt
   countExact : receipts.length = target.image.accepted.length
   admitted : AdmittedReplay config origin target.image.accepted opened receipts
@@ -2379,10 +2376,8 @@ def admitLifetimeDispatchVerified {config : Config} {target : Durable}
 /-- The final comparison binds the full finite image, not merely a digest or
 its materialized state. No collision-resistance hypothesis is involved. -/
 theorem Verified.image_exact {config : Config} {target : Durable}
-    (verified : Verified config target) : verified.opened.durable.image = target.image := by
-  apply DurableReceiverCodec.encode_injective
-  rw [verified.opened.durable.canonical, target.canonical]
-  exact verified.exactBytes
+    (verified : Verified config target) : verified.opened.durable.image = target.image :=
+  verified.exactImage
 
 /-- A successful operational verification carries every accepted transition,
 including its original receipt, from the checked genesis to the exact tip. -/
@@ -2396,30 +2391,48 @@ theorem Verified.accepted_history {config : Config} {target : Durable}
 receiver's checked `Ready`; it contains no caller-supplied post snapshot. -/
 def exactCandidate {config : Config} {oldTarget : Durable}
     (old : Verified config oldTarget) (derived : Derived config old.opened)
-    (ready : DurableReceiver.Ready ResourceBirthCodec.rootBytes
-      old.opened.durable.image old.opened.durable.snapshot derived.intent) : Durable :=
-  let image := old.opened.durable.image.append derived.intent
-  ⟨DurableReceiverCodec.encode image, image, ready.next, rfl, ready.restored⟩
+    (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
+      old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
+      old.opened.durable.snapshot derived.intent) : Durable :=
+  old.opened.durable.extend ready (old.opened.durable.chainAfterIntent derived.intent)
 
-/-- A receiver-created exact readback carries the *complete* physical bytes.
-The readback equality must come from its post-CAS byte comparison, never from a
-hash or the mere `.confirmed` result, which also covers concurrent suffixes. -/
+/-- A receiver-created exact readback: the store holds, at the next height,
+exactly the entry this admitted intent produced (record bytes and tag), read
+back after the append — never a hash or the mere `.confirmed` result, which
+also covers concurrent suffixes. -/
 structure ExactReadback (config : Config) {oldTarget : Durable}
     (old : Verified config oldTarget) where
   derived : Derived config old.opened
-  ready : DurableReceiver.Ready ResourceBirthCodec.rootBytes
-    old.opened.durable.image old.opened.durable.snapshot derived.intent
-  prepared : DurableReceiver.prepare old.opened.durable.image
-    old.opened.durable.snapshot old.opened.durable.represented derived.intent = .inl ready
-  physicalBytes : List UInt8
-  exactBytes : physicalBytes = (exactCandidate old derived ready).bytes
+  ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
+    old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
+    old.opened.durable.snapshot derived.intent
+  prepared : DurableCheckpoint.prepare old.opened.durable.image old.opened.durable.baseHeight
+    old.opened.durable.base old.opened.durable.snapshot old.opened.durable.withinLog
+    old.opened.durable.resumed derived.intent = .inl ready
+  appended : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes old.opened.durable
+    derived.intent
   after : Opened config
   validated : validateLoaded config (exactCandidate old derived ready) = .ok after
-  afterExact : after.durable.bytes = (exactCandidate old derived ready).bytes
 
-/-- This is the pure proof target for a future receiving fast path: the
-verifier-minted old trace plus the same admitted command's exact readback gives
-one new accepted step and its *original-prefix* receipt. -/
+/-- Build the exact readback from a receiver's `.exact` append: the shared
+executor is re-run at the same verified snapshot (it is a pure function), the
+successor validated. -/
+def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
+    (old : Verified config oldTarget) (derived : Derived config old.opened)
+    (appended : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes old.opened.durable
+      derived.intent) :
+    Except String {readback : ExactReadback config old // readback.derived = derived} :=
+  match prepared : DurableCheckpoint.prepare old.opened.durable.image old.opened.durable.baseHeight
+      old.opened.durable.base old.opened.durable.snapshot old.opened.durable.withinLog
+      old.opened.durable.resumed derived.intent with
+  | .inr _ => .error "appended intent no longer prepares at the verified image"
+  | .inl ready =>
+      match validated : validateLoaded config (exactCandidate old derived ready) with
+      | .error detail => .error s!"post-image validation: {detail}"
+      | .ok after => .ok ⟨⟨derived, ready, prepared, appended, after, validated⟩, rfl⟩
+
+/-- The verifier-minted old trace plus the same admitted command's exact
+readback gives one new accepted step and its *original-prefix* receipt. -/
 def extendExact {config : Config} {oldTarget : Durable}
     (old : Verified config oldTarget) (readback : ExactReadback config old) :
     Verified config (exactCandidate old readback.derived readback.ready) := by
@@ -2433,13 +2446,15 @@ def extendExact {config : Config} {oldTarget : Durable}
   have step : AdmittedStep config old.opened readback.after record receipt := by
     have advanced : advance old.opened readback.derived = .ok target := by
       unfold advance
+      simp only
       rw [readback.prepared]
       rfl
     exact ⟨readback.derived, matched, target, advanced, readback.validated, rfl⟩
-  have exactBytes : readback.after.durable.bytes = target.bytes := readback.afterExact
+  have exactImage : readback.after.durable.image = target.image :=
+    congrArg DurableReceiverIO.Loaded.image (validateLoaded_durable readback.validated)
   have countExact : (old.receipts ++ [receipt]).length = target.image.accepted.length := by
-    simp [target, exactCandidate, DurableReceiver.Image.append, old.countExact,
-      ← old.image_exact]
+    simp [target, exactCandidate, DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append,
+      old.countExact, ← old.image_exact]
   have admitted : AdmittedReplay config old.origin target.image.accepted
       readback.after (old.receipts ++ [receipt]) := by
     change AdmittedReplay config old.origin
@@ -2473,7 +2488,7 @@ def extendExact {config : Config} {oldTarget : Durable}
     | .ok next => next
     | .error _ => { old.frontier with fault := true }
   let releases := selectedReleaseAfter config readback.after old.releases record receipt
-  exact ⟨old.origin, readback.after, exactBytes, old.receipts ++ [receipt], countExact,
+  exact ⟨old.origin, readback.after, exactImage, old.receipts ++ [receipt], countExact,
     admitted, issues, reserves, begins, beginsV2, claimsV2, frontier, releases,
     beginsV3, claimsV3, createdV3, runningV3, grants⟩
 
@@ -2487,12 +2502,13 @@ theorem extendExact_receipts {config : Config} {oldTarget : Durable}
         imageBoundary config (exactCandidate old readback.derived readback.ready).image⟩] := by
   rfl
 
-/-- The newly verified target is byte-for-byte the physical post-CAS readback.
-This is stronger than equal height, state root, or transaction digest. -/
-theorem extendExact_physicalBytes {config : Config} {oldTarget : Durable}
+/-- The physically read-back entry is exactly this admitted intent's record. -/
+theorem extendExact_physicalRecord {config : Config} {oldTarget : Durable}
     (old : Verified config oldTarget) (readback : ExactReadback config old) :
-    (extendExact old readback).opened.durable.bytes = readback.physicalBytes := by
-  exact (extendExact old readback).exactBytes.trans readback.exactBytes.symm
+    readback.appended.entry.record =
+      DurableCheckpointCodec.recordFrame.encode
+        (DurableReceiver.IntentRecord.ofIntent readback.derived.intent) :=
+  readback.appended.entryExact
 
 /-- An explicit semantic model of the native helper's verdicts. Physical
 `derive` performs IO; a fixed pathname in `Config` does not make its result
@@ -2581,8 +2597,7 @@ theorem SemanticReplay.append_stable {config : Config}
   (left.verifier_congr stable).append right
 
 def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Verified config target)) := do
-  let genesis : DurableReceiver.Image := ⟨target.image.seed, []⟩
-  match DurableReceiverIO.loadBytes rootBytes (DurableReceiverCodec.encode genesis) with
+  match DurableReceiverIO.loadSeed rootBytes target.image.seed with
   | .error detail => return .error ⟨0, s!"genesis decoding: {detail}"⟩
   | .ok initial =>
     match validateLoaded config initial with
@@ -2591,9 +2606,9 @@ def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Veri
       match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] none target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
-        if exactBytes : walked.final.durable.bytes = target.bytes then
+        if exactImage : walked.final.durable.image = target.image then
           if countExact : walked.receipts.length = target.image.accepted.length then
-            return .ok ⟨opened, walked.final, exactBytes, walked.receipts,
+            return .ok ⟨opened, walked.final, exactImage, walked.receipts,
               countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
               walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
               walked.beginsV3, walked.claimsV3, walked.createdV3,
@@ -2635,8 +2650,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
     IO (Except Failure (VerifiedSelection config target index)) := do
   if !(index < target.image.accepted.length) then
     return .error ⟨index, "selected accepted history index unavailable"⟩
-  let genesis : DurableReceiver.Image := ⟨target.image.seed, []⟩
-  match DurableReceiverIO.loadBytes rootBytes (DurableReceiverCodec.encode genesis) with
+  match DurableReceiverIO.loadSeed rootBytes target.image.seed with
   | .error detail => return .error ⟨0, s!"genesis decoding: {detail}"⟩
   | .ok initial =>
     match validateLoaded config initial with
@@ -2645,14 +2659,14 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
       match ← walk config opened [] [] [] [] [] [] [] [] [] [] {} [] (some index) target.image.accepted with
       | .error failure => return .error failure
       | .ok walked =>
-        if exactBytes : walked.final.durable.bytes = target.bytes then
+        if exactImage : walked.final.durable.image = target.image then
           if countExact : walked.receipts.length = target.image.accepted.length then
             match walked.selected with
             | none => return .error ⟨index, "selected native checkpoint unavailable"⟩
             | some selected =>
               if indexExact : selected.priorRecords.length = index then
                 let verified : Verified config target :=
-                  ⟨opened, walked.final, exactBytes, walked.receipts,
+                  ⟨opened, walked.final, exactImage, walked.receipts,
                     countExact, walked.trace, walked.issues, walked.reserves, walked.begins,
                     walked.beginsV2, walked.claimsV2, walked.frontier, walked.releases,
                     walked.beginsV3, walked.claimsV3, walked.createdV3,
@@ -2686,7 +2700,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
         old.frontier old.releases none suffix with
     | .error failure => return .error failure
     | .ok walked =>
-      if exactBytes : walked.final.durable.bytes = target.bytes then
+      if exactImage : walked.final.durable.image = target.image then
         let receipts := old.receipts ++ walked.receipts
         if countExact : receipts.length = target.image.accepted.length then
           have prefixExact : target.image.accepted.take count =
@@ -2703,7 +2717,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
               walked.final receipts := by
             rw [acceptedExact]
             exact old.admitted.append walked.trace
-          return .ok ⟨old.origin, walked.final, exactBytes, receipts, countExact,
+          return .ok ⟨old.origin, walked.final, exactImage, receipts, countExact,
             admitted, walked.issues, walked.reserves, walked.begins, walked.beginsV2, walked.claimsV2,
             walked.frontier, walked.releases, walked.beginsV3, walked.claimsV3,
             walked.createdV3, walked.runningV3, walked.grants⟩
@@ -2729,4 +2743,4 @@ end Minidregg.Kernel.NativeHostReplay
 #print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
 #print axioms Minidregg.Kernel.NativeHostReplay.extendExact
 #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
-#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalBytes
+#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord

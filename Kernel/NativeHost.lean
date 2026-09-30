@@ -28,14 +28,28 @@ set_option autoImplicit false
 
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
-/-- Ordinary open only reads and validates. It never installs a missing seed. -/
+/-- Ordinary open only reads and validates; it never installs a missing seed.
+It trusts the host's own MAC'd checkpoint and log (DATAMODEL §6 Q1): the latest
+checkpoint is materialized and only the records after it are replayed through
+the shared executor (`DurableCheckpoint.resume`, sound by `resume_sound`). No
+signed ingress is re-admitted here; `audit` does that. -/
 def openExisting (config : Config) : IO (Except String (Opened config)) := do
+  match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
+  | .error detail => return .error detail
+  | .ok durable => return validateLoaded config durable
+
+/-- Operator audit: the genesis re-admission of every retained signed ingress
+by its real native receiver at its original prefix height, compared with the
+stored history record for record (formerly the request path's `verifyLoaded`).
+Returns the number of accepted records audited. -/
+def audit (config : Config) : IO (Except String Nat) := do
   match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable =>
       match ← NativeHostReplay.verifyLoaded config durable with
-      | .error failure => return .error s!"semantic history refused at entry {failure.index}: {failure.detail}"
-      | .ok verified => return .ok verified.opened
+      | .error failure =>
+          return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
+      | .ok verified => return .ok verified.receipts.length
 
 /-- Explicit local administration, separate from the signed network protocol.
 The exact operator-pinned source genesis must have no accepted transactions. -/
@@ -143,9 +157,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
         let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
         pure (.revoke bytes, [signature])
-  -- Loaded.canonical and imageBoundaryCanonical_loaded preserve the exact
-  -- commitment while avoiding another whole-history serialization per plan.
-  pure ⟨config.deployment.domain, profile.semantics, imageBoundaryCanonical config opened.durable.bytes,
+  pure ⟨config.deployment.domain, profile.semantics, imageBoundary config opened.durable.image,
     height, finalized, slots⟩
 
 /-- Internal operator computation only. It must not be exposed to an untrusted
@@ -375,8 +387,9 @@ original-prefix receipt. This is a list fact, not a hash collision premise. -/
 theorem historicalReceipt_exactCandidate_fresh (config : Config)
     {oldTarget : Durable} (old : NativeHostReplay.Verified config oldTarget)
     (derived : NativeHostReplay.Derived config old.opened)
-    (ready : DurableReceiver.Ready ResourceBirthCodec.rootBytes
-      old.opened.durable.image old.opened.durable.snapshot derived.intent)
+    (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
+      old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
+      old.opened.durable.snapshot derived.intent)
     (fresh : old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) = none) :
     historicalReceipt config (NativeHostReplay.exactCandidate old derived ready)
@@ -384,7 +397,7 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
       some ⟨derived.intent.transactionId, derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
         imageBoundary config (NativeHostReplay.exactCandidate old derived ready).image⟩ := by
-  simp [historicalReceipt, NativeHostReplay.exactCandidate,
+  simp [historicalReceipt, NativeHostReplay.exactCandidate, DurableReceiverIO.Loaded.extend,
     DurableReceiver.Image.append, List.findIdx?_append, fresh,
     DurableReceiver.IntentRecord.ofIntent, List.take_append,
     List.take_of_length_le (Nat.le_succ _)]
@@ -520,110 +533,6 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
 
 def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome :=
   submitLoadedWith config opened call (confirmed config)
-
-/-- Complete one already admitted native operation from the exact CAS readback.
-The only durable shortcut is complete-byte equality to the receiver's prepared
-successor; an ordinary confirmation retains the existing reopen path. -/
-private def submitDerivedVerifiedWith (config : Config) {oldTarget : Durable}
-    (old : NativeHostReplay.Verified config oldTarget)
-    (derived : NativeHostReplay.Derived config old.opened)
-    (durableRejected : DurableDataIntent.RejectReason → Outcome)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (confirmExact : (kind : DurableReceiverIO.Confirmation) →
-      {target : Durable} → NativeHostReplay.Verified config target →
-      NativeHostCodec.Receipt → IO Outcome) : IO Outcome := do
-  let intent := derived.intent
-  let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
-    ResourceBirthCodec.rootBytes old.opened.durable intent
-  match result with
-  | .exact kind ready preparedEq readback readbackExact =>
-      let candidate := NativeHostReplay.exactCandidate old derived ready
-      match validated : validateLoaded config candidate with
-      | .error detail =>
-          return .uncertain s!"receipt readback: {detail}".toUTF8.toList
-      | .ok after =>
-          if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
-            let proof : NativeHostReplay.ExactReadback config old :=
-              { derived := derived
-                ready := ready
-                prepared := preparedEq
-                physicalBytes := readback
-                exactBytes := readbackExact
-                after := after
-                validated := validated
-                afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
-            let verified := NativeHostReplay.extendExact old proof
-            let receipt : NativeHostCodec.Receipt :=
-              ⟨intent.transactionId, intent.event.eventId,
-                old.opened.durable.image.accepted.length + 1,
-                imageBoundary config candidate.image⟩
-            match historicalReceipt config candidate intent.transactionId intent.event.eventId with
-            | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
-            | some selected =>
-                if _selectedExact : selected = receipt then
-                  confirmExact kind verified selected
-                else return .uncertain "original receipt prefix mismatch".toUTF8.toList
-          else return .uncertain "receipt readback: validated successor bytes changed".toUTF8.toList
-  | .ordinary result =>
-      match result with
-      | .confirmed kind _ => confirm kind intent.transactionId intent.event.eventId
-      | .rejected reason => return durableRejected reason
-      | .contention => return .contention
-      | .unavailable detail => return .unavailable detail.toUTF8.toList
-      | .uncertain detail => return .uncertain detail.toUTF8.toList
-
-/-- A persistent session retains a typed fresh admission and complete CAS
-readback for ordinary invocation and birth. Concurrent or nonexact outcomes
-keep the historical confirmation/current-tip refresh behavior. -/
-def submitVerifiedLoadedWith (config : Config) {oldTarget : Durable}
-    (old : NativeHostReplay.Verified config oldTarget) (call : SignedCall)
-    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome)
-    (confirmExact : (kind : DurableReceiverIO.Confirmation) →
-      {target : Durable} → NativeHostReplay.Verified config target →
-      NativeHostCodec.Receipt → IO Outcome) : IO Outcome := do
-  match call with
-  | .invoke signed =>
-      let height := logicalHeight config old.opened.durable
-      DeclaredResourceController.withAcceptedLoaded config.deployment config.profile
-        ⟨config.federation, height⟩ config.signature old.opened.durable signed
-        (fun prepared shape accepted => do
-          let intent := accepted.dataIntent shape
-          if (FnConsumerProgress.recognizedLegacyIntentAnyGateway?
-              config.deployment.domain config.profile.semantics intent).isSome then
-            return refused "invoke" "v1 fn consumer progress is historical only"
-          let derived : NativeHostReplay.Derived config old.opened :=
-            NativeHostReplay.Derived.ofInvoke prepared signed shape accepted
-          submitDerivedVerifiedWith config old derived
-            (fun reason => refused "durable" s!"{repr reason}") confirm confirmExact)
-        (fun result =>
-          match result with
-          | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
-          | .rejected reason => pure <| refused "invoke" s!"{repr reason}"
-          | .transactionConflict => pure <| refused "replay" "transaction identity conflict"
-          | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
-          | .settlement _ => pure (.unavailable "unexpected invocation settlement".toUTF8.toList))
-  | .birth bytes =>
-      if (GrainResourceBirthPolicyController.decodeIngress bytes).isSome then
-        submitLoadedWith config old.opened call confirm
-      else
-        match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
-        | none => return refused "birth" (birthRejection .malformedIngress)
-        | some ingress =>
-            match ResourceBirthReceiver.replay config.deployment.domain old.opened.durable ingress with
-            | some (.ok receipt) => confirm .replayed receipt.transactionId receipt.eventId
-            | some (.error reason) => return refused "birth" (birthRejection reason)
-            | none =>
-                let height := logicalHeight config old.opened.durable
-                match ← ResourceBirthPolicyController.Concrete.admitDecodedNative
-                    config.profile config.deployment old.opened.pins config.signature
-                    old.opened.durable height ingress with
-                | .error reason => return refused "birth" (birthRejection (.admission reason))
-                | .ok accepted =>
-                    submitDerivedVerifiedWith config old
-                      (NativeHostReplay.Derived.ofBirth accepted)
-                      (fun reason => refused "birth" (birthRejection (.durable reason)))
-                      confirm confirmExact
-  | _ => submitLoadedWith config old.opened call confirm
 
 /-- A fresh mutation need not confer read authority (blind writes and credits
 remain possible). Its preflight/native/semantic refusal therefore exposes no

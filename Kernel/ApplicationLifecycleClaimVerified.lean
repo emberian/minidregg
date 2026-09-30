@@ -20,8 +20,8 @@ structure Admitted (config : Config) (target : Durable) (ingress : Ingress) wher
   private mk ::
   selection : VerifiedSelection config target ingress.source.originalIndex
   claim : ClaimAt config selection.verified.opened ingress
-  originalPrefixExact : claim.conditional.original.selected.prior.durable.bytes =
-    selection.selected.before.durable.bytes
+  originalPrefixExact : claim.conditional.original.selected.prior.durable.image =
+    selection.selected.before.durable.image
   originalRecordExact : recordMatches selection.selected.record
     claim.conditional.original.admitted.intent = true
   originalReceiptTransaction : selection.selected.receipt.transactionId =
@@ -52,8 +52,8 @@ def admit (config : Config) (target : Durable) (ingress : Ingress) :
     | return .error "lifecycle claim selected native history refused"
   let .ok claim ← admitClaimVerified selection.verified ingress
     | return .error "lifecycle claim current or original admission refused"
-  if originalPrefixExact : claim.conditional.original.selected.prior.durable.bytes =
-      selection.selected.before.durable.bytes then
+  if originalPrefixExact : claim.conditional.original.selected.prior.durable.image =
+      selection.selected.before.durable.image then
     if originalRecordExact : recordMatches selection.selected.record
         claim.conditional.original.admitted.intent = true then
       if originalReceiptTransaction : selection.selected.receipt.transactionId =

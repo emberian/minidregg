@@ -25,9 +25,9 @@ policy address; superseded addresses are freed) are used to refuse an ordinary
 command that purports to target an authority cell. An ordinary invocation's admitted marker
 does write an authority nullifier, so these cells must not be used as a blunt
 physical-write exclusion for otherwise unrelated invocations. -/
-def authorityCells {config : Config} (session : NativeHostSession.Session config) :
+def authorityCells {config : Config} (session : NativeHostSession.Walked config) :
     List CellId :=
-  let snapshot := session.opened.authority.snapshot
+  let snapshot := session.verified.opened.authority.snapshot
   ⟨config.deployment.authorityCellId⟩ ::
     (StoreCodec.entries CredentialAuthorityCell.wire snapshot.logical).filterMap (fun entry =>
       match entry with
@@ -79,7 +79,7 @@ Ordinary invocations add an authority nullifier marker, so their physical
 authority write cannot by itself close the fence. This family check does not
 prove that an ordinary invocation left every parent/policy dependency intact;
 the caller composes fresh signed parent and provider checks. -/
-def ordinaryOther {config : Config} (session : NativeHostSession.Session config)
+def ordinaryOther {config : Config} (session : NativeHostSession.Walked config)
     (providerCell : CellId) (record : DurableReceiver.IntentRecord) : Bool :=
   let bytes := record.event.canonicalBytes
   if (CapabilityRevocationReceiver.decodeIngress bytes).isSome ||
@@ -107,18 +107,18 @@ def reserveIngress? (config : Config) (reserveCall : List UInt8) : Option (List 
         config.profile.semantics signed)
   | _ => none
 
-def SafeSuffix {config : Config} (session : NativeHostSession.Session config)
+def SafeSuffix {config : Config} (session : NativeHostSession.Walked config)
     (providerCell : CellId) (records : List DurableReceiver.IntentRecord) : Prop :=
   records.all (ordinaryOther session providerCell) = true
 
-instance {config : Config} (session : NativeHostSession.Session config)
+instance {config : Config} (session : NativeHostSession.Walked config)
     (providerCell : CellId) (records : List DurableReceiver.IntentRecord) :
     Decidable (SafeSuffix session providerCell records) := by
   unfold SafeSuffix
   infer_instance
 
 theorem ordinaryOther_no_provider_write {config : Config}
-    (session : NativeHostSession.Session config) (providerCell : CellId)
+    (session : NativeHostSession.Walked config) (providerCell : CellId)
     (record : DurableReceiver.IntentRecord)
     (safe : ordinaryOther session providerCell record = true) :
     ¬ writesCell record providerCell := by
@@ -129,7 +129,7 @@ theorem ordinaryOther_no_provider_write {config : Config}
   exact safe.2
 
 theorem safeSuffix_no_provider_write {config : Config}
-    (session : NativeHostSession.Session config) (providerCell : CellId)
+    (session : NativeHostSession.Walked config) (providerCell : CellId)
     (records : List DurableReceiver.IntentRecord)
     (safe : SafeSuffix session providerCell records)
     (record : DurableReceiver.IntentRecord) (member : record ∈ records) :
@@ -139,7 +139,7 @@ theorem safeSuffix_no_provider_write {config : Config}
 
 /-- The result records exact evidence, rather than exporting a bare Boolean
 whose connection to the verified Store could be lost by the caller. -/
-structure Continuity {config : Config} (session : NativeHostSession.Session config)
+structure Continuity {config : Config} (session : NativeHostSession.Walked config)
     (anchor : NativeHostCodec.Receipt) (reserveCall : List UInt8)
     (providerCell : CellId) : Type where
   positive : 0 < anchor.acceptedCount
@@ -157,7 +157,7 @@ structure Continuity {config : Config} (session : NativeHostSession.Session conf
       (session.target.image.accepted.drop anchor.acceptedCount)
 
 theorem Continuity.no_later_provider_write {config : Config}
-    {session : NativeHostSession.Session config} {anchor : NativeHostCodec.Receipt}
+    {session : NativeHostSession.Walked config} {anchor : NativeHostCodec.Receipt}
     {reserveCall : List UInt8} {providerCell : CellId}
     (checked : Continuity session anchor reserveCall providerCell)
     (record : DurableReceiver.IntentRecord)
@@ -170,7 +170,7 @@ The receipt is checked against the semantic replay's recomputed prefix receipt,
 including transaction, event, accepted count and prefix image boundary.
 The physical caller must refresh the session immediately before invoking this
 check; it still owns the external send race and exclusive upstream custody. -/
-def check {config : Config} (session : NativeHostSession.Session config)
+def check {config : Config} (session : NativeHostSession.Walked config)
     (anchor : NativeHostCodec.Receipt) (reserveCall : List UInt8)
     (providerCell : CellId) : Except String (Continuity session anchor reserveCall providerCell) := do
   if positive : 0 < anchor.acceptedCount then

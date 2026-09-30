@@ -79,6 +79,8 @@ extern "C" {
     fn sqlite3_column_blob(statement: *mut sqlite3_stmt, column: c_int) -> *const c_void;
     fn sqlite3_column_bytes(statement: *mut sqlite3_stmt, column: c_int) -> c_int;
     fn sqlite3_column_int(statement: *mut sqlite3_stmt, column: c_int) -> c_int;
+    fn sqlite3_column_int64(statement: *mut sqlite3_stmt, column: c_int) -> i64;
+    fn sqlite3_bind_int64(statement: *mut sqlite3_stmt, index: c_int, value: i64) -> c_int;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,6 +101,9 @@ pub enum StoreError {
     Missing,
     TooLarge { actual: usize, maximum: usize },
     Conflict,
+    /// The Store holds the retired single whole-image record. It is never
+    /// reinterpreted as a durable log; the deployment must re-genesis.
+    RetiredImage,
     InvalidRoot(PathBuf),
     InvalidPath,
     Sqlite { code: i32, message: String },
@@ -115,6 +120,9 @@ impl fmt::Display for StoreError {
             Self::Conflict => {
                 formatter.write_str("current bytes differ from expected and proposed bytes")
             }
+            Self::RetiredImage => formatter.write_str(
+                "store holds a retired whole-image record; re-genesis (no migration)",
+            ),
             Self::InvalidRoot(path) => {
                 write!(
                     formatter,
@@ -261,9 +269,46 @@ impl Statement<'_> {
         }
     }
 
+    fn bind_blob_at(&self, index: c_int, bytes: &[u8]) -> Result<(), StoreError> {
+        // SQLITE_STATIC (`None`): `bytes` outlives the statement's use.
+        let code = unsafe {
+            sqlite3_bind_blob(
+                self.raw.as_ptr(),
+                index,
+                bytes.as_ptr().cast(),
+                bytes.len() as c_int,
+                None,
+            )
+        };
+        if code == SQLITE_OK {
+            Ok(())
+        } else {
+            Err(self.database.error(code))
+        }
+    }
+
+    fn bind_int64(&self, index: c_int, value: i64) -> Result<(), StoreError> {
+        // SAFETY: `raw` is a prepared, non-finalized statement.
+        let code = unsafe { sqlite3_bind_int64(self.raw.as_ptr(), index, value) };
+        if code == SQLITE_OK {
+            Ok(())
+        } else {
+            Err(self.database.error(code))
+        }
+    }
+
+    fn column_int64(&self, column: c_int) -> i64 {
+        // SAFETY: called only while the statement is on SQLITE_ROW.
+        unsafe { sqlite3_column_int64(self.raw.as_ptr(), column) }
+    }
+
     fn column_blob(&self) -> Result<Vec<u8>, StoreError> {
+        self.column_blob_at(0)
+    }
+
+    fn column_blob_at(&self, column: c_int) -> Result<Vec<u8>, StoreError> {
         // SAFETY: this is called only while the statement is on SQLITE_ROW.
-        let length = unsafe { sqlite3_column_bytes(self.raw.as_ptr(), 0) };
+        let length = unsafe { sqlite3_column_bytes(self.raw.as_ptr(), column) };
         if length < 0 {
             return Err(self.database.error(length));
         }
@@ -276,7 +321,7 @@ impl Statement<'_> {
         }
         // SAFETY: SQLite guarantees at least `length` bytes until the next
         // step/finalize.  A zero-length blob may have a null pointer.
-        let pointer = unsafe { sqlite3_column_blob(self.raw.as_ptr(), 0) }.cast::<u8>();
+        let pointer = unsafe { sqlite3_column_blob(self.raw.as_ptr(), column) }.cast::<u8>();
         if length == 0 {
             Ok(Vec::new())
         } else if pointer.is_null() {
@@ -419,9 +464,14 @@ impl SqliteByteStore {
                 self.database.exec(b"DROP TABLE opaque_record\0")?;
                 self.database
                     .exec(b"ALTER TABLE opaque_record_v2 RENAME TO opaque_record\0")?;
-                self.database.exec(b"PRAGMA user_version=2\0")?;
+                Self::create_durable_tables(&self.database)?;
+                self.database.exec(b"PRAGMA user_version=3\0")?;
             }
-            2 => {}
+            2 => {
+                Self::create_durable_tables(&self.database)?;
+                self.database.exec(b"PRAGMA user_version=3\0")?;
+            }
+            3 => {}
             _ => {
                 return Err(StoreError::Sqlite {
                     code: version,
@@ -430,6 +480,12 @@ impl SqliteByteStore {
             }
         }
         transaction.commit()
+    }
+
+    fn create_durable_tables(database: &Database) -> Result<(), StoreError> {
+        database.exec(b"CREATE TABLE IF NOT EXISTS durable_seed (slot INTEGER PRIMARY KEY CHECK(slot=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864)) WITHOUT ROWID\0")?;
+        database.exec(b"CREATE TABLE IF NOT EXISTS durable_log (height INTEGER PRIMARY KEY CHECK(height>=1), record BLOB NOT NULL CHECK(length(record)<=67108864), tag BLOB NOT NULL CHECK(length(tag)<=4096))\0")?;
+        database.exec(b"CREATE TABLE IF NOT EXISTS durable_checkpoint (height INTEGER PRIMARY KEY CHECK(height>=1), bytes BLOB NOT NULL CHECK(length(bytes)<=67108864))\0")
     }
 
     fn validate_bound(bytes: &[u8]) -> Result<(), StoreError> {
@@ -526,6 +582,283 @@ impl SqliteByteStore {
     }
 }
 
+
+/// The durable log interface: a seed, an append-only log of opaque
+/// `(record, tag)` entries at consecutive heights from 1, and opaque
+/// checkpoints keyed by height. Lean owns every byte's meaning, the chain and
+/// the MAC; this store only enforces "append `h + 1` while the head is `h`".
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableEntry {
+    pub height: u64,
+    pub record: Vec<u8>,
+    pub tag: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurableRead {
+    pub head: u64,
+    pub base: Option<(Vec<u8>, Option<(u64, Vec<u8>)>)>,
+    pub entries: Vec<DurableEntry>,
+}
+
+const CHECKPOINTS_RETAINED: i64 = 2;
+
+impl SqliteByteStore {
+    fn refuse_retired_image(&self) -> Result<(), StoreError> {
+        if self.select_record()?.is_some() {
+            Err(StoreError::RetiredImage)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn durable_seed(&self) -> Result<Option<Vec<u8>>, StoreError> {
+        let statement = self
+            .database
+            .prepare(b"SELECT bytes FROM durable_seed WHERE slot=1\0")?;
+        match statement.step()? {
+            SQLITE_ROW => Ok(Some(statement.column_blob()?)),
+            _ => Ok(None),
+        }
+    }
+
+    fn durable_head(&self) -> Result<u64, StoreError> {
+        let statement = self
+            .database
+            .prepare(b"SELECT COALESCE(MAX(height),0) FROM durable_log\0")?;
+        if statement.step()? != SQLITE_ROW {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        Ok(statement.column_int64(0) as u64)
+    }
+
+    fn durable_entry(&self, height: u64) -> Result<Option<DurableEntry>, StoreError> {
+        let statement = self
+            .database
+            .prepare(b"SELECT record, tag FROM durable_log WHERE height=?1\0")?;
+        statement.bind_int64(1, height as i64)?;
+        match statement.step()? {
+            SQLITE_ROW => Ok(Some(DurableEntry {
+                height,
+                record: statement.column_blob_at(0)?,
+                tag: statement.column_blob_at(1)?,
+            })),
+            _ => Ok(None),
+        }
+    }
+
+    /// Install the seed once. The same seed again is `AlreadyPresent`; a
+    /// different seed, or any seed over an existing log, is a conflict.
+    pub fn durable_init(&self, seed: &[u8]) -> Result<PublishStatus, StoreError> {
+        Self::validate_bound(seed)?;
+        self.database.exec(b"BEGIN IMMEDIATE\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        self.refuse_retired_image()?;
+        match self.durable_seed()? {
+            Some(current) if current == seed => {
+                transaction.commit()?;
+                return Ok(PublishStatus::AlreadyPresent);
+            }
+            Some(_) => return Err(StoreError::Conflict),
+            None => {}
+        }
+        if self.durable_head()? != 0 {
+            return Err(StoreError::Conflict);
+        }
+        let statement = self
+            .database
+            .prepare(b"INSERT INTO durable_seed(slot,bytes) VALUES(1,?1)\0")?;
+        statement.bind_blob(seed)?;
+        if statement.step()? != SQLITE_DONE {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        drop(statement);
+        transaction.commit()?;
+        Ok(PublishStatus::Installed)
+    }
+
+    /// One consistent read: the head, optionally the seed and the latest
+    /// checkpoint, and every entry at `from` or above.
+    pub fn durable_read(&self, from: u64, with_base: bool) -> Result<DurableRead, StoreError> {
+        self.database.exec(b"BEGIN DEFERRED\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        self.refuse_retired_image()?;
+        let seed = self.durable_seed()?.ok_or(StoreError::Missing)?;
+        let head = self.durable_head()?;
+        let base = if with_base {
+            let statement = self.database.prepare(
+                b"SELECT height, bytes FROM durable_checkpoint ORDER BY height DESC LIMIT 1\0",
+            )?;
+            let checkpoint = match statement.step()? {
+                SQLITE_ROW => Some((
+                    statement.column_int64(0) as u64,
+                    statement.column_blob_at(1)?,
+                )),
+                _ => None,
+            };
+            Some((seed, checkpoint))
+        } else {
+            None
+        };
+        let mut entries = Vec::new();
+        {
+            let statement = self.database.prepare(
+                b"SELECT height, record, tag FROM durable_log WHERE height>=?1 ORDER BY height\0",
+            )?;
+            statement.bind_int64(1, from.max(1) as i64)?;
+            while statement.step()? == SQLITE_ROW {
+                entries.push(DurableEntry {
+                    height: statement.column_int64(0) as u64,
+                    record: statement.column_blob_at(1)?,
+                    tag: statement.column_blob_at(2)?,
+                });
+            }
+        }
+        transaction.commit()?;
+        Ok(DurableRead {
+            head,
+            base,
+            entries,
+        })
+    }
+
+    /// Append entry `height` iff the head is `height - 1`. The identical entry
+    /// already at `height` is `AlreadyPresent`; anything else is a conflict.
+    pub fn durable_append(
+        &self,
+        height: u64,
+        record: &[u8],
+        tag: &[u8],
+    ) -> Result<PublishStatus, StoreError> {
+        self.durable_append_with_hook(height, record, tag, |_| {})
+    }
+
+    pub fn durable_append_with_hook<F>(
+        &self,
+        height: u64,
+        record: &[u8],
+        tag: &[u8],
+        mut hook: F,
+    ) -> Result<PublishStatus, StoreError>
+    where
+        F: FnMut(PublishPhase),
+    {
+        Self::validate_bound(record)?;
+        if height == 0 || tag.len() > 4096 {
+            return Err(StoreError::Conflict);
+        }
+        self.database.exec(b"BEGIN IMMEDIATE\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        hook(PublishPhase::Begun);
+        self.refuse_retired_image()?;
+        if self.durable_seed()?.is_none() {
+            return Err(StoreError::Missing);
+        }
+        if let Some(existing) = self.durable_entry(height)? {
+            if existing.record == record && existing.tag == tag {
+                transaction.commit()?;
+                hook(PublishPhase::Committed);
+                return Ok(PublishStatus::AlreadyPresent);
+            }
+            return Err(StoreError::Conflict);
+        }
+        if self.durable_head()? != height - 1 {
+            return Err(StoreError::Conflict);
+        }
+        let statement = self
+            .database
+            .prepare(b"INSERT INTO durable_log(height,record,tag) VALUES(?1,?2,?3)\0")?;
+        statement.bind_int64(1, height as i64)?;
+        statement.bind_blob_at(2, record)?;
+        statement.bind_blob_at(3, tag)?;
+        if statement.step()? != SQLITE_DONE {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        drop(statement);
+        hook(PublishPhase::Inserted);
+        transaction.commit()?;
+        hook(PublishPhase::Committed);
+        Ok(PublishStatus::Installed)
+    }
+
+    /// Store a checkpoint at `height` (at most the head), replacing one at the
+    /// same height (a key rotation re-seals), and keep only the latest two.
+    pub fn durable_checkpoint(&self, height: u64, bytes: &[u8]) -> Result<(), StoreError> {
+        Self::validate_bound(bytes)?;
+        self.database.exec(b"BEGIN IMMEDIATE\0")?;
+        let transaction = Transaction {
+            store: self,
+            active: true,
+        };
+        self.refuse_retired_image()?;
+        if height == 0 || height > self.durable_head()? {
+            return Err(StoreError::Conflict);
+        }
+        let statement = self.database.prepare(
+            b"INSERT INTO durable_checkpoint(height,bytes) VALUES(?1,?2) ON CONFLICT(height) DO UPDATE SET bytes=excluded.bytes\0",
+        )?;
+        statement.bind_int64(1, height as i64)?;
+        statement.bind_blob_at(2, bytes)?;
+        if statement.step()? != SQLITE_DONE {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        drop(statement);
+        let prune = self.database.prepare(
+            b"DELETE FROM durable_checkpoint WHERE height NOT IN (SELECT height FROM durable_checkpoint ORDER BY height DESC LIMIT ?1)\0",
+        )?;
+        prune.bind_int64(1, CHECKPOINTS_RETAINED)?;
+        if prune.step()? != SQLITE_DONE {
+            return Err(self.database.error(SQLITE_DONE));
+        }
+        drop(prune);
+        transaction.commit()
+    }
+}
+
+/// The read file Lean parses: big-endian u64 head; u64 base flag (0/1); when
+/// 1, the seed blob, a u64 checkpoint flag and, when 1, its u64 height and
+/// blob; a u64 entry count; per entry u64 height, record blob, tag blob.
+/// A blob is a u64 length and its bytes.
+pub fn encode_durable_read(read: &DurableRead) -> Vec<u8> {
+    fn blob(out: &mut Vec<u8>, bytes: &[u8]) {
+        out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        out.extend_from_slice(bytes);
+    }
+    let mut out = Vec::new();
+    out.extend_from_slice(&read.head.to_be_bytes());
+    match &read.base {
+        None => out.extend_from_slice(&0u64.to_be_bytes()),
+        Some((seed, checkpoint)) => {
+            out.extend_from_slice(&1u64.to_be_bytes());
+            blob(&mut out, seed);
+            match checkpoint {
+                None => out.extend_from_slice(&0u64.to_be_bytes()),
+                Some((height, bytes)) => {
+                    out.extend_from_slice(&1u64.to_be_bytes());
+                    out.extend_from_slice(&height.to_be_bytes());
+                    blob(&mut out, bytes);
+                }
+            }
+        }
+    }
+    out.extend_from_slice(&(read.entries.len() as u64).to_be_bytes());
+    for entry in &read.entries {
+        out.extend_from_slice(&entry.height.to_be_bytes());
+        blob(&mut out, &entry.record);
+        blob(&mut out, &entry.tag);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,6 +892,57 @@ mod tests {
         );
         assert_eq!(reopened.read().unwrap(), larger);
         drop(reopened);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn fresh_root(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "dregg-durable-{label}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn durable_log_appends_only_at_the_head() {
+        let root = fresh_root("append");
+        let store = SqliteByteStore::open(&root).unwrap();
+        assert!(matches!(store.durable_append(1, b"r", b"t"), Err(StoreError::Missing)));
+        assert_eq!(store.durable_init(b"seed").unwrap(), PublishStatus::Installed);
+        assert_eq!(store.durable_init(b"seed").unwrap(), PublishStatus::AlreadyPresent);
+        assert!(matches!(store.durable_init(b"other"), Err(StoreError::Conflict)));
+        assert!(matches!(store.durable_append(2, b"r", b"t"), Err(StoreError::Conflict)));
+        assert_eq!(store.durable_append(1, b"r1", b"t1").unwrap(), PublishStatus::Installed);
+        assert_eq!(store.durable_append(1, b"r1", b"t1").unwrap(), PublishStatus::AlreadyPresent);
+        assert!(matches!(store.durable_append(1, b"r1", b"tX"), Err(StoreError::Conflict)));
+        assert_eq!(store.durable_append(2, b"r2", b"t2").unwrap(), PublishStatus::Installed);
+        assert!(matches!(store.durable_checkpoint(3, b"c"), Err(StoreError::Conflict)));
+        store.durable_checkpoint(1, b"c1").unwrap();
+        store.durable_checkpoint(2, b"c2").unwrap();
+        store.durable_append(3, b"r3", b"t3").unwrap();
+        store.durable_checkpoint(3, b"c3").unwrap();
+        let read = store.durable_read(2, true).unwrap();
+        assert_eq!(read.head, 3);
+        assert_eq!(read.base, Some((b"seed".to_vec(), Some((3, b"c3".to_vec())))));
+        assert_eq!(read.entries.iter().map(|e| e.height).collect::<Vec<_>>(), vec![2, 3]);
+        let tail = store.durable_read(4, false).unwrap();
+        assert_eq!((tail.head, tail.base, tail.entries.len()), (3, None, 0));
+        drop(store);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retired_whole_image_store_refuses_the_durable_log() {
+        let root = fresh_root("retired");
+        let store = SqliteByteStore::open(&root).unwrap();
+        store.publish(b"DREGG.DURABLE.IMAGE whole image").unwrap();
+        assert!(matches!(store.durable_init(b"seed"), Err(StoreError::RetiredImage)));
+        assert!(matches!(store.durable_read(1, true), Err(StoreError::RetiredImage)));
+        assert!(matches!(store.durable_append(1, b"r", b"t"), Err(StoreError::RetiredImage)));
+        drop(store);
         fs::remove_dir_all(root).unwrap();
     }
 }

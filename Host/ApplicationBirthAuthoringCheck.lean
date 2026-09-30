@@ -25,7 +25,7 @@ private def operator : NativeHost.Config := {
   tariff := ⟨3, 2, 1, 0, 99, 0⟩
   genesisHeight := 10
   expectedSeed := ⟨0⟩
-  storage := ⟨"", ""⟩
+  storage := { binary := "", root := "", key := "" }
   signature := ⟨""⟩ }
 
 private def grainOperator : NativeHost.Config :=

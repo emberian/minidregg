@@ -1,5 +1,5 @@
 use minidregg_hyperdocument_link_sqlite_store::{
-    PublishPhase, SqliteLinkStore, StoreError, MAX_RECORD_BYTES,
+    encode_durable_read, PublishPhase, SqliteLinkStore, StoreError, MAX_RECORD_BYTES,
 };
 use std::env;
 use std::fs::{self, File};
@@ -25,7 +25,7 @@ fn read_input(path: &Path) -> Result<Vec<u8>, StoreError> {
 
 fn usage() -> ! {
     eprintln!(
-        "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT"
+        "usage:\n  minidregg-link-sqlite-store read ROOT\n  minidregg-link-sqlite-store read-to ROOT OUTPUT\n  minidregg-link-sqlite-store publish ROOT INPUT\n  minidregg-link-sqlite-store cas ROOT EXPECTED|- INPUT\n  minidregg-link-sqlite-store cas-crash ROOT EXPECTED|- INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-crash ROOT INPUT after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store publish-hold ROOT INPUT READY RELEASE\n  minidregg-link-sqlite-store database-path ROOT\n  minidregg-link-sqlite-store durable-init ROOT SEED\n  minidregg-link-sqlite-store durable-read ROOT FROM 0|1 OUTPUT\n  minidregg-link-sqlite-store durable-append ROOT HEIGHT RECORD TAG\n  minidregg-link-sqlite-store durable-append-crash ROOT HEIGHT RECORD TAG after-begin|after-insert|after-commit\n  minidregg-link-sqlite-store durable-checkpoint ROOT HEIGHT INPUT"
     );
     std::process::exit(2)
 }
@@ -37,6 +37,14 @@ fn crash_phase(name: &str) -> Option<(PublishPhase, i32)> {
         "after-commit" => Some((PublishPhase::Committed, 88)),
         _ => None,
     }
+}
+
+fn parse_height(value: &std::ffi::OsStr) -> Result<u64, StoreError> {
+    value
+        .to_str()
+        .and_then(|text| text.parse::<u64>().ok())
+        .filter(|height| *height <= i64::MAX as u64)
+        .ok_or(StoreError::InvalidPath)
 }
 
 fn run() -> Result<(), StoreError> {
@@ -120,6 +128,51 @@ fn run() -> Result<(), StoreError> {
                 })?
             );
         }
+        ("durable-init", [root, seed]) => {
+            let store = SqliteLinkStore::open(root)?;
+            println!("{:?}", store.durable_init(&read_input(Path::new(seed))?)?);
+        }
+        ("durable-read", [root, from, with_base, output]) => {
+            let from = parse_height(from)?;
+            let with_base = match with_base.to_str() {
+                Some("0") => false,
+                Some("1") => true,
+                _ => usage(),
+            };
+            let store = SqliteLinkStore::open(root)?;
+            fs::write(output, encode_durable_read(&store.durable_read(from, with_base)?))?;
+        }
+        ("durable-append", [root, height, record, tag]) => {
+            let height = parse_height(height)?;
+            let store = SqliteLinkStore::open(root)?;
+            println!(
+                "{:?}",
+                store.durable_append(
+                    height,
+                    &read_input(Path::new(record))?,
+                    &read_input(Path::new(tag))?
+                )?
+            );
+        }
+        ("durable-append-crash", [root, height, record, tag, phase]) => {
+            let Some((target, exit_code)) = phase.to_str().and_then(crash_phase) else {
+                usage()
+            };
+            let height = parse_height(height)?;
+            let store = SqliteLinkStore::open(root)?;
+            let record = read_input(Path::new(record))?;
+            let tag = read_input(Path::new(tag))?;
+            let _ = store.durable_append_with_hook(height, &record, &tag, |observed| {
+                if observed == target {
+                    std::process::exit(exit_code);
+                }
+            })?;
+        }
+        ("durable-checkpoint", [root, height, input]) => {
+            let height = parse_height(height)?;
+            let store = SqliteLinkStore::open(root)?;
+            store.durable_checkpoint(height, &read_input(Path::new(input))?)?;
+        }
         ("database-path", [root]) => {
             let store = SqliteLinkStore::open(root)?;
             println!("{}", store.database_path().display());
@@ -137,6 +190,7 @@ fn main() -> ExitCode {
             ExitCode::from(match error {
                 StoreError::Missing => 3,
                 StoreError::Conflict => 4,
+                StoreError::RetiredImage => 5,
                 _ => 1,
             })
         }

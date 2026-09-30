@@ -49,10 +49,12 @@ theorem Reservation.receipt_in_verified {config : Config}
       reservation.old.receipts ++ [reservation.receipt] :=
   NativeHostReplay.extendExact_receipts reservation.old reservation.readback
 
-theorem Reservation.postBytes_exact {config : Config}
+theorem Reservation.postRecord_exact {config : Config}
     (reservation : Reservation config) :
-    reservation.verified.opened.durable.bytes = reservation.readback.physicalBytes :=
-  NativeHostReplay.extendExact_physicalBytes reservation.old reservation.readback
+    reservation.readback.appended.entry.record =
+      DurableCheckpointCodec.recordFrame.encode
+        (DurableReceiver.IntentRecord.ofIntent reservation.readback.derived.intent) :=
+  NativeHostReplay.extendExact_physicalRecord reservation.old reservation.readback
 
 /-- Every projected coordinate is selected from the exact claimed post-image
 or from the source ingress admitted by the same one-shot claim. The raw SPK
@@ -89,11 +91,10 @@ lease: the host must fence the generation and recheck before exposure. -/
 def Reservation.withFreshTip {config : Config} {α : Type}
     (reservation : Reservation config) (handoff : List UInt8 → IO α) :
     IO (Except String α) := do
-  let .ok (some current) ← config.storage.transport.read
+  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+      reservation.readback.appended.next.image.accepted.length reservation.readback.appended.entry
     | return .error "lifecycle claim physical tip unavailable before handoff"
-  if exact : current.toByteArray == reservation.readback.physicalBytes.toByteArray then
-    have _currentExact : current = reservation.readback.physicalBytes :=
-      (DurableReceiverIO.byteArray_beq_exact _ _).mp exact
+  if current then
     return .ok (← handoff reservation.projection.canonicalBytes)
   else return .error "lifecycle claim physical tip changed before handoff"
 
@@ -121,24 +122,12 @@ def receiveVerified (config : Config) {target : Durable}
   let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
-  | .exact kind ready preparedEq readback readbackExact =>
-      let candidate := NativeHostReplay.exactCandidate old derived ready
-      match validated : validateLoaded config candidate with
+  | .exact kind appended =>
+      match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"lifecycle claim post-image validation: {detail}"
-      | .ok after =>
-          if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
-            let proof : NativeHostReplay.ExactReadback config old :=
-              { derived := derived
-                ready := ready
-                prepared := preparedEq
-                physicalBytes := readback
-                exactBytes := readbackExact
-                after := after
-                validated := validated
-                afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+      | .ok ⟨proof, proofDerived⟩ =>
             return .reserved ⟨target, old, ingress, admitted,
-              proof, admitted.toDerived_intent, kind⟩
-          else return .uncertain "lifecycle claim validated successor bytes changed"
+              proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind⟩
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ =>

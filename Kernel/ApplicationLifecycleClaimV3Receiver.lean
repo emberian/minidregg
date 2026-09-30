@@ -43,10 +43,12 @@ def Reservation.receipt {config : Config} (reservation : Reservation config) :
     old.opened.durable.image.accepted.length + 1,
     imageBoundary config candidate.image⟩
 
-theorem Reservation.postBytes_exact {config : Config}
+theorem Reservation.postRecord_exact {config : Config}
     (reservation : Reservation config) :
-    reservation.verified.opened.durable.bytes = reservation.readback.physicalBytes :=
-  NativeHostReplay.extendExact_physicalBytes reservation.old reservation.readback
+    reservation.readback.appended.entry.record =
+      DurableCheckpointCodec.recordFrame.encode
+        (DurableReceiver.IntentRecord.ofIntent reservation.readback.derived.intent) :=
+  NativeHostReplay.extendExact_physicalRecord reservation.old reservation.readback
 
 def Reservation.projection {config : Config} (reservation : Reservation config) :
     ApplicationLifecycleClaimV3Projection.Committed :=
@@ -76,11 +78,10 @@ def Reservation.withFreshTip {config : Config} {α : Type}
     IO (Except String α) := do
   unless reservation.confirmation == .installed && reservation.freshCasWinner do
     return .error "launch-bound claim was not freshly installed"
-  let .ok (some current) ← config.storage.transport.read
+  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+      reservation.readback.appended.next.image.accepted.length reservation.readback.appended.entry
     | return .error "launch-bound claim physical tip unavailable before handoff"
-  if exact : current.toByteArray == reservation.readback.physicalBytes.toByteArray then
-    have _currentExact : current = reservation.readback.physicalBytes :=
-      (DurableReceiverIO.byteArray_beq_exact _ _).mp exact
+  if current then
     return .ok (← handoff reservation.projection.canonicalBytes)
   else return .error "launch-bound claim physical tip changed before handoff"
 
@@ -106,24 +107,12 @@ def receiveVerified (config : Config) {target : Durable}
     config.storage.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
-  | .exact kind ready preparedEq readback readbackExact =>
-      let candidate := NativeHostReplay.exactCandidate old derived ready
-      match validated : validateLoaded config candidate with
+  | .exact kind appended =>
+      match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"launch-bound claim post-image: {detail}"
-      | .ok after =>
-          if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
-            let proof : NativeHostReplay.ExactReadback config old :=
-              { derived := derived
-                ready := ready
-                prepared := preparedEq
-                physicalBytes := readback
-                exactBytes := readbackExact
-                after := after
-                validated := validated
-                afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+      | .ok ⟨proof, proofDerived⟩ =>
             return .reserved ⟨target, old, ingress, admitted,
-              proof, admitted.toDerived_intent, kind, freshCasWinner⟩
-          else return .uncertain "launch-bound claim successor bytes changed"
+              proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind, freshCasWinner⟩
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ =>

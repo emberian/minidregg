@@ -107,34 +107,6 @@ def seedIdentity (seed : DurableReceiver.Seed) : Digest :=
 def imageBoundary (config : Config) (image : DurableReceiver.Image) : Digest :=
   NativeHostCodec.imageBoundary config.deployment.domain config.profile.semantics image
 
-/-- The same source-owned image commitment from bytes already certified as the
-canonical encoding of a durable image. This saves a second whole-image encode
-at a receiving step; it does not skip or replace the full boundary hash. -/
-def imageBoundaryCanonical (config : Config) (canonicalBytes : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.IMAGE-BOUNDARY/v1".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
-      (config.deployment.domain, config.profile.semantics, canonicalBytes))).digest
-
-theorem imageBoundaryCanonical_encode (config : Config) (image : DurableReceiver.Image) :
-    imageBoundaryCanonical config (DurableReceiverCodec.encode image) =
-      imageBoundary config image := by
-  rfl
-
-/-- `Loaded.canonical` is minted by strict durable decoding or checked advance;
-the physical caller cannot supply unrelated bytes to this optimization. -/
-theorem imageBoundaryCanonical_loaded (config : Config) (durable : Durable) :
-    imageBoundaryCanonical config durable.bytes = imageBoundary config durable.image := by
-  calc
-    imageBoundaryCanonical config durable.bytes =
-        imageBoundaryCanonical config (DurableReceiverCodec.encode durable.image) :=
-      congrArg (imageBoundaryCanonical config) durable.canonical.symm
-    _ = imageBoundary config durable.image := imageBoundaryCanonical_encode config durable.image
-
-/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_encode
-/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_loaded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_loaded
-
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length
 
@@ -175,7 +147,14 @@ def need {α : Type} (detail : String) : Option α → Except String α
 def check (condition : Bool) (detail : String) : Except String Unit :=
   if condition then .ok () else .error detail
 
-def validateLoaded (config : Config) (durable : Durable) : Except String (Opened config) := do
+/-- Everything `validateLoaded` derives from one loaded image. -/
+structure Validated (config : Config) (durable : Durable) where
+  directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
+  authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot
+  pins : FactoryPins
+
+def validateParts (config : Config) (durable : Durable) :
+    Except String (Validated config durable) := do
   if config.grainBirthTariff.isSome then
     let _ ← config.grainBirthTariffValue
   if let some key := config.completionCustodianKey then
@@ -203,6 +182,21 @@ def validateLoaded (config : Config) (durable : Durable) : Except String (Opened
       policyId := ⟨config.deployment.factoryId⟩
       policyAddress := factoryHead.address
       tariff := config.tariff }
-  pure ⟨durable, directory, authority, pins⟩
+  pure ⟨directory, authority, pins⟩
+
+def validateLoaded (config : Config) (durable : Durable) : Except String (Opened config) :=
+  (validateParts config durable).map fun parts =>
+    ⟨durable, parts.directory, parts.authority, parts.pins⟩
+
+/-- Validation wraps exactly the image it was given. -/
+theorem validateLoaded_durable {config : Config} {durable : Durable} {opened : Opened config}
+    (validated : validateLoaded config durable = .ok opened) : opened.durable = durable := by
+  unfold validateLoaded at validated
+  cases parts : validateParts config durable with
+  | error detail => simp [parts, Except.map] at validated
+  | ok value =>
+      simp only [parts, Except.map, Except.ok.injEq] at validated
+      subst validated
+      rfl
 
 end Minidregg.Kernel.NativeHost

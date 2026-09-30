@@ -25,19 +25,22 @@ structure Candidate (config : Config) (opened : Opened config) (index : Nat) whe
   prior : Opened config
   record : DurableReceiver.IntentRecord
   atIndex : opened.durable.image.accepted[index]? = some record
-  priorBytesExact : prior.durable.bytes = DurableReceiverCodec.encode (prefixImage opened index)
+  priorImageExact : prior.durable.image = prefixImage opened index
 
 def select (config : Config) (opened : Opened config) (index : Nat) :
     Except String (Candidate config opened index) := do
   match found : opened.durable.image.accepted[index]? with
   | none => .error "historical record index unavailable"
-  | some record => do
-      let bytes := DurableReceiverCodec.encode (prefixImage opened index)
-      let loaded ← DurableReceiverIO.loadBytes rootBytes bytes
-      let prior ← validateLoaded config loaded
-      if exact : prior.durable.bytes = bytes then
-        return ⟨prior, record, found, exact⟩
-      else .error "historical prefix bytes changed"
+  | some record =>
+      match built : DurableReceiverIO.loadImage rootBytes (prefixImage opened index) with
+      | .error detail => .error detail
+      | .ok loaded =>
+          match validated : validateLoaded config loaded with
+          | .error detail => .error detail
+          | .ok prior =>
+              .ok ⟨prior, record, found,
+                (congrArg DurableReceiverIO.Loaded.image (validateLoaded_durable validated)).trans
+                  (DurableReceiverIO.loadImage_image built)⟩
 
 /-- The same canonical intent-record stream used by the native replay
 verifier compares all writes, guards, ten charge lanes, nullifiers and event. -/

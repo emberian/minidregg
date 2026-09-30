@@ -59,8 +59,7 @@ structure Candidate (config : Config) (opened : Opened config)
   recordExact : selected.record =
     DurableReceiver.IntentRecord.ofIntent accepted.intent
   after : Opened config
-  afterBytes : after.durable.bytes =
-    DurableReceiverCodec.encode (NativeHistorySelection.prefixImage opened (index + 1))
+  afterImage : after.durable.image = NativeHistorySelection.prefixImage opened (index + 1)
   projectionExact : source.physical.report.claim =
     projection selected after source accepted
 
@@ -83,21 +82,20 @@ def select (config : Config) (opened : Opened config)
         have recordExact : selected.record =
             DurableReceiver.IntentRecord.ofIntent accepted.intent :=
           (NativeHistorySelection.recordMatches_iff _ _).mp matched
-        let bytes := DurableReceiverCodec.encode
-          (NativeHistorySelection.prefixImage opened (index + 1))
-        let loaded ← match DurableReceiverIO.loadBytes rootBytes bytes with
+        let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+        let loaded ← match DurableReceiverIO.loadImage rootBytes prefixAfter with
           | .error _ => return .error "selected claim post-prefix unavailable"
           | .ok loaded => pure loaded
         let after ← match validateLoaded config loaded with
           | .error _ => return .error "selected claim post-prefix invalid"
           | .ok after => pure after
-        if afterBytes : after.durable.bytes = bytes then
+        if afterImage : after.durable.image = prefixAfter then
           if projectionExact : source.physical.report.claim =
               projection selected after source accepted then
             return .ok ⟨index, selected, claimBytes, accepted,
-              recordExact, after, afterBytes, projectionExact⟩
+              recordExact, after, afterImage, projectionExact⟩
           else return .error "physical report differs from original claim projection"
-        else return .error "selected claim post-prefix bytes changed"
+        else return .error "selected claim post-prefix image changed"
       else return .error "selected claim full intent differs"
     else return .error "selected claim ingress differs"
   else return .error "physical report has no claim receipt"

@@ -26,8 +26,7 @@ structure Candidate (config : Config) (opened : Opened config)
   indexExact : index + 1 = receipt.acceptedCount
   selected : NativeHistorySelection.Candidate config opened index
   after : Opened config
-  afterBytes : after.durable.bytes = DurableReceiverCodec.encode
-    (NativeHistorySelection.prefixImage opened (index + 1))
+  afterImage : after.durable.image = NativeHistorySelection.prefixImage opened (index + 1)
   ingress : ApplicationLifecycleCompletionV2Ingress.Ingress
   ingressExact : selected.record.event.canonicalBytes = ingress.canonicalBytes
   accepted : ApplicationLifecycleCompletionV2Admission.Candidate config selected.prior ingress
@@ -94,15 +93,14 @@ def select (config : Config) (opened : Opened config)
       let selected ← match NativeHistorySelection.select config opened index with
         | .error detail => return .error detail
         | .ok selected => pure selected
-      let afterBytesSource := DurableReceiverCodec.encode
-        (NativeHistorySelection.prefixImage opened (index + 1))
-      let loaded ← match DurableReceiverIO.loadBytes rootBytes afterBytesSource with
+      let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
+      let loaded ← match DurableReceiverIO.loadImage rootBytes prefixAfter with
         | .error _ => return .error "selected completed-create post-prefix unavailable"
         | .ok loaded => pure loaded
       let after ← match validateLoaded config loaded with
         | .error _ => return .error "selected completed-create post-prefix invalid"
         | .ok after => pure after
-      if afterBytes : after.durable.bytes = afterBytesSource then
+      if afterImage : after.durable.image = prefixAfter then
         let ingressSelected ← match decodeSelected selected.record.event.canonicalBytes with
           | .error detail => return .error detail
           | .ok selected => pure selected
@@ -131,7 +129,7 @@ def select (config : Config) (opened : Opened config)
                         if boundary : imageBoundary config after.durable.image =
                             receipt.imageBoundary then
                           return .ok ⟨receipt, custody, priorExact, index, indexExact,
-                            selected, after, afterBytes, ingress, ingressExact,
+                            selected, after, afterImage, ingress, ingressExact,
                             accepted, recordExact, created, choice, appExact,
                             volumeExact, custodyExact, transaction, event, boundary⟩
                         else return .error "completed-create post-image boundary differs"
@@ -143,7 +141,7 @@ def select (config : Config) (opened : Opened config)
             else return .error "selected completion was not a create action"
           else return .error "selected completion did not create a volume"
         else return .error "selected completion full intent differs"
-      else return .error "selected completed-create post-prefix bytes changed"
+      else return .error "selected completed-create post-prefix image changed"
     else return .error "completed-create receipt has zero accepted count"
 
 end Minidregg.Kernel.ApplicationLifecycleCreatedHistory

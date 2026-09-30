@@ -39,19 +39,15 @@ abbrev Context := ResourceObservationAdmission.Context
 
 variable {deployment : Deployment} {durable : Durable}
 
-/-- Hash the canonical bytes retained by the loaded image. Re-encoding its
-journal for every observed grant adds work without changing the commitment. -/
+/-- The image commitment of the loaded image. -/
 def loadedImageBoundary (deployment : Deployment) (semantics : Digest)
     (durable : Durable) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.IMAGE-BOUNDARY/v1".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
-      (deployment.domain, semantics, durable.bytes))).digest
+  NativeHostCodec.imageBoundary deployment.domain semantics durable.image
 
 theorem loadedImageBoundary_exact (deployment : Deployment) (semantics : Digest)
     (durable : Durable) :
     loadedImageBoundary deployment semantics durable =
-      NativeHostCodec.imageBoundary deployment.domain semantics durable.image := by
-  simp only [loadedImageBoundary, NativeHostCodec.imageBoundary, durable.canonical]
+      NativeHostCodec.imageBoundary deployment.domain semantics durable.image := rfl
 
 private def refused : String := "observation refused"
 

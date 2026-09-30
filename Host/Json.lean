@@ -1281,7 +1281,7 @@ private def birth (path : String) (json : Lean.Json)
   let nativeConfig : NativeHost.Config := {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
-    storage := ⟨"", ""⟩, signature := ⟨""⟩,
+    storage := { binary := "", root := "", key := "" }, signature := ⟨""⟩,
     grainBirthTariff := grainBirthTariff }
   let profile ← BirthRuntimeProfile.select nativeConfig deployed
   unless source.expectedSemantics = profile.semantics do
@@ -1384,7 +1384,7 @@ def applicationBirthContext (path specField : String) (json : Lean.Json)
   let nativeConfig : NativeHost.Config := {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
-    storage := ⟨"", ""⟩, signature := ⟨""⟩, grainBirthTariff := grainBirthTariff }
+    storage := { binary := "", root := "", key := "" }, signature := ⟨""⟩, grainBirthTariff := grainBirthTariff }
   let profile ← BirthRuntimeProfile.select nativeConfig deployed
   unless source.expectedSemantics = profile.semantics do
     throw s!"{path}.genesis.expectedSemantics: does not match the source-derived native profile"

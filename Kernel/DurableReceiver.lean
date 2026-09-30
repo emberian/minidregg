@@ -255,15 +255,6 @@ theorem Image.outside_support (rootBytes : List UInt8 → Digest) (image : Image
     simp [Seed.snapshot, Seed.lookup_missing image.seed.cells cellId absent.1]
   next => simp at restored
 
-/-- Statement before proof: appending one accepted intent to a represented
-image represents EXACTLY the existing executor's complete next snapshot. -/
-def ExactAppend : Prop :=
-  ∀ (rootBytes : List UInt8 → Digest) (image : Image)
-    (before next : DataSnapshot rootBytes) (intent : DataIntent rootBytes),
-    image.restore rootBytes = some before →
-    DurableDataIntent.execute .complete before intent = .accepted next →
-    (image.append intent).restore rootBytes = some next
-
 theorem replay_append (rootBytes : List UInt8 → Digest)
     (before : DataSnapshot rootBytes) (left right : List IntentRecord) :
     replay rootBytes before (left ++ right) =
@@ -277,34 +268,6 @@ theorem replay_append (rootBytes : List UInt8 → Digest)
       | some intent =>
           cases executed : DurableDataIntent.execute .complete before intent <;>
             simp [executed, ih]
-
-theorem exactAppend : ExactAppend := by
-  intro rootBytes image before next intent restored accepted
-  unfold Image.restore at restored ⊢
-  simp only [Image.append]
-  split at restored
-  next valid =>
-    simp only [valid, ↓reduceIte, replay_append, restored, Option.bind_some]
-    simp [replay, accepted]
-  next invalid => simp at restored
-
-/-- A ready image carries the semantic fact used by the physical CAS driver.
-No independent post image, root, or journal can be substituted. -/
-structure Ready (rootBytes : List UInt8 → Digest) (image : Image)
-    (before : DataSnapshot rootBytes) (intent : DataIntent rootBytes) where
-  next : DataSnapshot rootBytes
-  executed : DurableDataIntent.execute .complete before intent = .accepted next
-  restored : (image.append intent).restore rootBytes = some next
-
-/-- The receiver calls the shared executor. It never retries a stale prepared
-post image after a failed CAS: it reloads and calls this function again. -/
-def prepare {rootBytes : List UInt8 → Digest} (image : Image)
-    (before : DataSnapshot rootBytes) (represented : image.restore rootBytes = some before)
-    (intent : DataIntent rootBytes) :
-    Sum (Ready rootBytes image before intent) (Outcome rootBytes) :=
-  match executed : DurableDataIntent.execute .complete before intent with
-  | .accepted next => .inl ⟨next, executed, exactAppend rootBytes image before next intent represented executed⟩
-  | outcome => .inr outcome
 
 namespace Witness
 
@@ -326,11 +289,6 @@ theorem inhabited_acceptance :
   · rfl
   · decide
 
-theorem accepted_append_reopens :
-    (image.append intent).restore lengthRoot =
-      some (DataSnapshot.install (seed.snapshot lengthRoot) intent) :=
-  exactAppend lengthRoot image _ _ intent seed_represents inhabited_acceptance
-
 theorem acceptance_premises_inhabited :
     ∃ (stored : Image) (initial next : DataSnapshot lengthRoot)
       (acceptedIntent : DataIntent lengthRoot),
@@ -351,9 +309,5 @@ end Witness
 
 end Minidregg.Kernel.DurableReceiver
 
-/-- info: 'Minidregg.Kernel.DurableReceiver.exactAppend' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.exactAppend
 /-- info: 'Minidregg.Kernel.DurableReceiver.Image.outside_support' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.Image.outside_support
-/-- info: 'Minidregg.Kernel.DurableReceiver.Witness.accepted_append_reopens' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableReceiver.Witness.accepted_append_reopens

@@ -56,10 +56,11 @@ theorem Permit.receipt_in_verified {config : Config} (permit : Permit config) :
 
 /-- The permit's retained post-image is exactly the physical CAS readback,
 not a later journal suffix or an asserted digest. -/
-theorem Permit.postBytes_exact {config : Config} (permit : Permit config) :
-    permit.verified.opened.durable.bytes = permit.readback.physicalBytes :=
-  NativeHostReplay.extendExact_physicalBytes
-    permit.old permit.readback
+theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
+    permit.readback.appended.entry.record =
+      DurableCheckpointCodec.recordFrame.encode
+        (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
+  NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
 
 /-- A distinct wire frame ensures the physical host cannot confuse a checked
 candidate with an actually committed dispatch permit. The host accepts this
@@ -88,11 +89,10 @@ is not a lease or cancellation barrier against later turns, and it does not
 lock out concurrent writers after the read. -/
 def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
     (handoff : List UInt8 → IO α) : IO (Except String α) := do
-  let .ok (some current) ← config.storage.transport.read
+  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+      permit.readback.appended.next.image.accepted.length permit.readback.appended.entry
     | return .error "dispatch physical tip unavailable before handoff"
-  if exact : current.toByteArray == permit.readback.physicalBytes.toByteArray then
-    have _currentExact : current = permit.readback.physicalBytes :=
-      (DurableReceiverIO.byteArray_beq_exact _ _).mp exact
+  if current then
     return .ok (← handoff permit.canonicalBytes)
   else return .error "dispatch physical tip changed before handoff"
 
@@ -124,24 +124,12 @@ def receiveVerified (config : Config) {target : Durable}
   let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
-  | .exact kind ready preparedEq readback readbackExact =>
-      let candidate := NativeHostReplay.exactCandidate old derived ready
-      match validated : validateLoaded config candidate with
+  | .exact kind appended =>
+      match NativeHostReplay.ExactReadback.ofAppended old derived appended with
       | .error detail => return .uncertain s!"dispatch post-image validation: {detail}"
-      | .ok after =>
-          if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
-            let proof : NativeHostReplay.ExactReadback config old :=
-              { derived := derived
-                ready := ready
-                prepared := preparedEq
-                physicalBytes := readback
-                exactBytes := readbackExact
-                after := after
-                validated := validated
-                afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+      | .ok ⟨proof, proofDerived⟩ =>
             return .permitted ⟨target, old, ingress, admitted,
-              proof, admitted.toDerived_intent, kind⟩
-          else return .uncertain "dispatch validated successor bytes changed"
+              proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), kind⟩
   | .ordinary ordinary =>
       match ordinary with
       | .confirmed _ _ =>

@@ -42,11 +42,13 @@ def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     permit.old.opened.durable.image.accepted.length + 1,
-    imageBoundaryCanonical config candidate.bytes⟩
+    imageBoundary config candidate.image⟩
 
-theorem Permit.postBytes_exact {config : Config} (permit : Permit config) :
-    permit.verified.opened.durable.bytes = permit.readback.physicalBytes :=
-  NativeHostReplay.extendExact_physicalBytes permit.old permit.readback
+theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
+    permit.readback.appended.entry.record =
+      DurableCheckpointCodec.recordFrame.encode
+        (DurableReceiver.IntentRecord.ofIntent permit.readback.derived.intent) :=
+  NativeHostReplay.extendExact_physicalRecord permit.old permit.readback
 
 private def permitCodec : LawfulCodec
     (ApplicationAgentLifetimeDispatchProjection.Paid × NativeHostCodec.Receipt) :=
@@ -68,11 +70,10 @@ private def Permit.canonicalBytes {config : Config} (permit : Permit config) : L
 fences are still checked by the runtime before fd3 delivery. -/
 def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
     (handoff : List UInt8 → IO α) : IO (Except String α) := do
-  let .ok (some current) ← config.storage.transport.read
+  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+      permit.readback.appended.next.image.accepted.length permit.readback.appended.entry
     | return .error "lifetime dispatch physical tip unavailable before handoff"
-  if exact : current.toByteArray == permit.readback.physicalBytes.toByteArray then
-    have _currentExact : current = permit.readback.physicalBytes :=
-      (DurableReceiverIO.byteArray_beq_exact _ _).mp exact
+  if current then
     return .ok (← handoff permit.canonicalBytes)
   else return .error "lifetime dispatch physical tip changed before handoff"
 
@@ -102,25 +103,13 @@ def receiveVerified (config : Config) {target : Durable}
   let (fresh, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh
     config.storage.transport ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
-  | .exact kind ready preparedEq readback readbackExact =>
+  | .exact kind appended =>
       if freshInstalled : fresh = true then
-        let candidate := NativeHostReplay.exactCandidate old derived ready
-        match validated : validateLoaded config candidate with
+        match NativeHostReplay.ExactReadback.ofAppended old derived appended with
         | .error detail => return .uncertain s!"lifetime dispatch post-image validation: {detail}"
-        | .ok after =>
-            if afterExact : after.durable.bytes.toByteArray == candidate.bytes.toByteArray then
-              let proof : NativeHostReplay.ExactReadback config old :=
-                { derived := derived
-                  ready := ready
-                  prepared := preparedEq
-                  physicalBytes := readback
-                  exactBytes := readbackExact
-                  after := after
-                  validated := validated
-                  afterExact := (DurableReceiverIO.byteArray_beq_exact _ _).mp afterExact }
+        | .ok ⟨proof, proofDerived⟩ =>
               return .permitted ⟨target, old, ingress, admitted, projection,
-                proof, admitted.toDerived_intent, fresh, freshInstalled, kind⟩
-            else return .uncertain "lifetime dispatch validated successor bytes changed"
+                proof, ((congrArg NativeHostReplay.Derived.intent proofDerived).trans admitted.toDerived_intent), fresh, freshInstalled, kind⟩
       else return .uncertain "lifetime dispatch exact readback without fresh CAS winner"
   | .ordinary ordinary =>
       match ordinary with

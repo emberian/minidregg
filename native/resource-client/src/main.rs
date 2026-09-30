@@ -154,6 +154,7 @@ usage:
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
   mini bootstrap --host HOST --config OPERATOR.json --source GENESIS.json --dir DEPLOYMENT
+  mini audit --host HOST --config PINNED.json
   mini author --host HOST --config CONFIG.json --kind KIND --input INPUT.json --output OUTPUT.bin
   mini current-application-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
   mini current-session-intent --host HOST --config CONFIG.json --socket SOCKET --source SOURCE.json --dir NEW-PRIVATE-DIR
@@ -668,8 +669,23 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     create_public(path, bytes)
 }
 
+/// The Store's checkpoint/log MAC key: 32 bytes of operating-system
+/// randomness, mode 0600, beside the pinned configuration. One per Store; it
+/// authenticates only that Store's checkpoints and log tags. It is never
+/// printed, copied into another artifact, or committed.
+fn checkpoint_key(path: &Path) -> Result<()> {
+    let mut key = [0u8; 32];
+    File::open("/dev/urandom")
+        .and_then(|mut source| source.read_exact(&mut key))
+        .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
+    let result = create_private(path, &key);
+    key.fill(0);
+    result
+}
+
 fn bootstrap(host: &Path, config: &Path, source: &Path, directory: &Path) -> Result<()> {
     create_dir(directory)?;
+    checkpoint_key(&directory.join("checkpoint.key"))?;
     let source_copy = directory.join("genesis-source.json");
     let operator_copy = directory.join("operator-config.json");
     let source_bin = directory.join("genesis-source.bin");
@@ -2257,6 +2273,18 @@ fn run(mut args: Args) -> Result<()> {
             {
                 Err("consumer-worker requires Unix sockets".to_owned())
             }
+        }
+        "audit" => {
+            if SOCKET.get().is_some() {
+                return Err("audit requires direct Host/Main CLI".to_owned());
+            }
+            let host = path(args.required("host")?);
+            let config = path(args.required("config")?);
+            args.finish()?;
+            let output = process(&host, &config, &[OsStr::new("audit")])?;
+            io::stdout()
+                .write_all(&output.stdout)
+                .map_err(|e| format!("cannot print host output: {e}"))
         }
         "profile" | "describe" => {
             let command = args.command.clone();

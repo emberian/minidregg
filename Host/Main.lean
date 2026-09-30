@@ -512,6 +512,11 @@ structure Settings where
   storageBinary : String
   storageRoot : String
   signatureBinary : String
+  /-- The Store's checkpoint/log MAC key file (32 bytes, mode 0600), generated
+  by `mini bootstrap` beside the pinned configuration; one per Store. -/
+  checkpointKey : Option String := none
+  /-- Checkpoint cadence in accepted records (default 64). -/
+  checkpointEvery : Option Nat := none
   fnGateway : Option GatewayPinSettings := none
   fnPoll : Option FnPollServiceSettings := none
   fnReplyPoll : Option FnReplyPollServiceSettings := none
@@ -537,7 +542,11 @@ def Settings.config (settings : Settings) : NativeHost.Config where
     settings.tariffPerInitialPayloadByte, settings.collector, settings.asset⟩
   genesisHeight := settings.genesisHeight
   expectedSeed := ⟨settings.expectedSeed⟩
-  storage := ⟨settings.storageBinary, settings.storageRoot⟩
+  storage :=
+    { binary := settings.storageBinary
+      root := settings.storageRoot
+      key := settings.checkpointKey.getD ""
+      checkpointEvery := settings.checkpointEvery.getD 64 }
   signature := ⟨settings.signatureBinary⟩
   fnGateway := settings.fnGateway.map GatewayPinSettings.pin
   grainBirthTariff := settings.grainBirthTariff.map fun tariff =>
@@ -775,8 +784,8 @@ def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UI
       | .error detail => pure (255, failure "observation" detail)
   | _ => throw (IO.userError "unsupported native host operation")
 
-/-- Session state is poisoned on any physical read, decode, prefix, or replay
-failure. A new process must revalidate the entire history before serving again. -/
+/-- Session state is poisoned on any physical read, chain, tag or replay
+failure. A new process must reopen from the MAC'd checkpoint before serving. -/
 def sessionCurrent (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (NativeHostSession.Session config) := do
@@ -789,6 +798,27 @@ def sessionCurrent (config : NativeHost.Config)
   | .ok current =>
       state.set (some current)
       return current
+
+/-- The genesis-walked history for the walk-provenance families, computed on
+first use and extended by re-admission afterwards (`NativeHostSession.walked`). -/
+def sessionWalked (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) :
+    IO (NativeHostSession.Walked config) := do
+  let current ← sessionCurrent config state
+  match ← NativeHostSession.walked config current with
+  | .error detail =>
+      state.set none
+      throw (IO.userError detail)
+  | .ok walked =>
+      state.set (some { current with walked := some walked })
+      return walked
+
+def sessionSetWalked {config : NativeHost.Config}
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    {target : NativeHost.Durable} (verified : NativeHostReplay.Verified config target) :
+    IO Unit := do
+  if let some current ← state.get then
+    state.set (some { current with walked := some ⟨target, verified⟩ })
 
 def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
@@ -814,7 +844,8 @@ def sessionExactConfirmed (config : NativeHost.Config)
     (kind : DurableReceiverIO.Confirmation) {target : NativeHost.Durable}
     (verified : NativeHostReplay.Verified config target)
     (receipt : NativeHostCodec.Receipt) : IO NativeHostCodec.Outcome := do
-  state.set (some ⟨target, verified⟩)
+  if let some current ← state.get then
+    state.set (some { current with walked := some ⟨target, verified⟩ })
   return .confirmed kind receipt
 
 /-- The special receiver accepts raw strict selected-release ingress, not a
@@ -860,7 +891,7 @@ completion require separate host custody and current claim validation. -/
 def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let some _ := ApplicationLifecycleBeginV3Ingress.codec.decode payload
     | return .refused "application-lifecycle-begin".toUTF8.toList
         "fresh BEGIN requires canonical launch-bound v3 ingress".toUTF8.toList
@@ -868,7 +899,7 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     session.verified payload
   match result with
     | .confirmed confirmed =>
-        state.set (some ⟨_, confirmed.verified⟩)
+        sessionSetWalked state confirmed.verified
         return .confirmed confirmed.confirmation confirmed.receipt
     | .rejected _ =>
         return .refused "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
@@ -879,7 +910,7 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
 def applicationLifecycleBeginLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result := if (ApplicationLifecycleBeginV3Ingress.codec.decode payload).isSome then
       (ApplicationLifecycleV3Lookup.beginVerified session.verified payload).mapError fun
         | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
@@ -903,7 +934,7 @@ def applicationLifecycleBeginLookupSession (config : NativeHost.Config)
 def applicationLifecycleClaimLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result := if (ApplicationLifecycleClaimV3Ingress.codec.decode payload).isSome then
       (ApplicationLifecycleV3Lookup.claimVerified session.verified payload).mapError fun
         | .malformed => ApplicationLifecycleV2Lookup.Error.malformed
@@ -930,7 +961,7 @@ launch or kill a process. -/
 def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let some _ := ApplicationLifecycleCompletionV2Ingress.codec.decode payload
     | return .refused "application-lifecycle-completion".toUTF8.toList
         "fresh completion requires canonical launch-bound v2 ingress".toUTF8.toList
@@ -938,7 +969,7 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
     session.verified payload
   match result with
   | .confirmed confirmed =>
-      state.set (some ⟨_, confirmed.verified⟩)
+      sessionSetWalked state confirmed.verified
       return .confirmed confirmed.confirmation confirmed.receipt
   | .rejected detail =>
       return .refused "application-lifecycle-completion".toUTF8.toList
@@ -952,7 +983,7 @@ history. It never performs a physical completion or process effect. -/
 def applicationLifecycleCompletionLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result := if (ApplicationLifecycleCompletionV2Ingress.codec.decode payload).isSome then
       (ApplicationLifecycleCompletionV2Lookup.verified session.verified payload).mapError fun
         | .malformed => ApplicationLifecycleCompletionLookup.Error.malformed
@@ -977,7 +1008,7 @@ verified physical tip before returning its original receipt. -/
 def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← FnConsumerNamespaceReceiver.receiveVerified session.verified payload
   let outcome ← match result with
   | .confirmed kind receipt =>
@@ -997,7 +1028,7 @@ def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
 def fnConsumerNamespaceLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode payload
     | return .refused "fn-consumer-namespace".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
@@ -1011,7 +1042,7 @@ observation. It never implies that an external fn delivery is complete. -/
 def fnSelectedPollSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← FnSelectedPollReceiver.receiveVerified session.verified payload
   let outcome ← match result with
   | .confirmed kind receipt =>
@@ -1028,7 +1059,7 @@ def fnSelectedPollSubmitSession (config : NativeHost.Config)
 def fnSelectedPollLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let some ingress := FnSelectedPollCoverage.ingressCodec.decode payload
     | return .refused "fn-selected-poll".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
@@ -1041,7 +1072,7 @@ def fnSelectedPollLookupSession (config : NativeHost.Config)
 def fnEmptyPollSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← FnEmptyPollReceiverV2.receiveVerified session.verified payload
   let outcome ← match result with
   | .confirmed kind receipt =>
@@ -1058,7 +1089,7 @@ def fnEmptyPollSubmitSession (config : NativeHost.Config)
 def fnEmptyPollLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let some ingress := FnEmptyPollProgressV2.ingressCodec.decode payload
     | return .refused "fn-empty-poll-v2".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
@@ -1193,12 +1224,12 @@ with separately signed current app, manifest and ticket reads before one CAS. -/
 def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← ApplicationGrainSessionEnrollmentReceiver.receiveVerified
     session.verified payload
   let outcome : NativeHostCodec.Outcome ← match result with
     | .confirmed confirmed => do
-        state.set (some ⟨_, confirmed.verified⟩)
+        sessionSetWalked state confirmed.verified
         pure (.confirmed confirmed.confirmation confirmed.receipt)
     | .historical receipt => pure (.confirmed .replayed receipt)
     | .rejected detail => pure (.refused "application-session-enrollment".toUTF8.toList
@@ -1220,7 +1251,7 @@ def applicationSessionEnrollmentLookupSession (config : NativeHost.Config)
   unless ingress.canonicalBytes.toByteArray == payload.toByteArray do
     return .refused "application-session-enrollment".toUTF8.toList
       "noncanonical ingress".toUTF8.toList
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   match ApplicationGrainSessionEnrollmentReceiver.lookupVerified session.verified ingress with
   | none => return .absent
   | some (.ok receipt) => return .confirmed .replayed receipt
@@ -1234,7 +1265,7 @@ app delegation before one CAS and verifies the recorded readback. -/
 def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← ApplicationAgentLifetimeGrantReceiver.receiveVerified
     session.verified payload
   let outcome : NativeHostCodec.Outcome := match result with
@@ -1253,7 +1284,7 @@ It returns its receipt only and cannot grant a later agent dispatch. -/
 def agentLifetimeGrantLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   match ApplicationAgentLifetimeGrantLookup.lookupVerified session.verified payload with
   | .error _ =>
       return .refused "application-agent-lifetime-grant".toUTF8.toList
@@ -1267,7 +1298,7 @@ permit or replays an application effect. -/
 def applicationDispatchLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   match ApplicationDispatchLookup.lookupVerified session.verified payload with
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
@@ -1285,7 +1316,7 @@ recover a fresh physical delivery permit or replay an external effect. -/
 def applicationAgentDispatchLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   match ApplicationDispatchAgentLookup.lookupVerified session.verified payload with
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
@@ -1303,7 +1334,7 @@ fresh paid delivery permit. -/
 def applicationAgentLifetimeDispatchLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   match ApplicationAgentLifetimeDispatchLookup.lookupVerified session.verified payload with
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
@@ -1375,13 +1406,13 @@ def dispatchSession (config : NativeHost.Config)
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, failure "prepare" detail)
   | 2 =>
-      let session ← sessionCurrent config state
+      let session ← sessionWalked config state
       let result ← match callCodec.decode payload with
         | none => pure (NativeHostCodec.Outcome.refused "wire".toUTF8.toList
             "noncanonical or unsupported native host call".toUTF8.toList)
         | some call =>
-            NativeHost.submitVerifiedLoadedWith config session.verified call
-              (sessionConfirmed config state) (sessionExactConfirmed config state)
+            NativeHost.submitLoadedWith config session.verified.opened call
+              (sessionConfirmed config state)
       return (2, outcomeCodec.encode (NativeHost.publicSubmissionOutcome result))
   | 3 =>
       let opened ← sessionOpened config state
@@ -1462,7 +1493,7 @@ def dispatchSession (config : NativeHost.Config)
       return (77, outcomeCodec.encode
         (← applicationAgentLifetimeDispatchLookupSession config state payload))
   | 36 =>
-      let session ← sessionCurrent config state
+      let session ← sessionWalked config state
       match ApplicationDispatchAuthoring.prepareRequestVerified config session.verified payload with
       | .ok plan => return (36, ApplicationDispatchAuthoring.planCodec.encode plan)
       | .error detail => return (255, failure "application-dispatch-author" detail)
@@ -1498,7 +1529,7 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
         | throw (IO.userError "noncanonical agent reserve author request")
       unless request.matchesFixed approved do
         throw (IO.userError "agent reserve request differs from operator pin")
-      let session ← sessionCurrent config state
+      let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationDispatchAgentPaidAuthoring.prepareReserveVerified
           config session.verified request
@@ -1530,7 +1561,7 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
         | throw (IO.userError "noncanonical paid agent dispatch author request")
       unless request.fixed.matchesFixed approved do
         throw (IO.userError "paid agent request differs from operator pin")
-      let session ← sessionCurrent config state
+      let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationDispatchAgentPaidAuthoring.preparePaidVerified
           config session.verified request
@@ -1573,7 +1604,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode payload
         | throw (IO.userError "noncanonical lifetime reserve request")
       requireOneLifetimeDispatchPin approved request.matchesFixed
-      let session ← sessionCurrent config state
+      let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.prepareReserveVerified
           config session.verified request
@@ -1605,7 +1636,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
           payload
         | throw (IO.userError "noncanonical lifetime paid dispatch request")
       requireOneLifetimeDispatchPin approved request.fixed.matchesFixed
-      let session ← sessionCurrent config state
+      let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.preparePaidVerified
           config session.verified request
@@ -1671,14 +1702,14 @@ delivery without replaying an HTTP effect. Other outcomes carry no permit. -/
 def dispatchApplicationSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← ApplicationDispatchReceiver.receiveVerified config session.verified payload
   match result with
   | .permitted permit =>
       let handed ← permit.withFreshTip fun committedBytes =>
         writeSessionFrame output 34 committedBytes
       match handed with
-      | .ok _ => state.set (some ⟨_, permit.verified⟩)
+      | .ok _ => sessionSetWalked state permit.verified
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
@@ -1702,14 +1733,14 @@ receipt-only; neither result is a lease across an external fd3 delivery. -/
 def dispatchAgentSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← ApplicationDispatchAgentReceiver.receiveVerified config session.verified payload
   match result with
   | .permitted permit =>
       let handed ← permit.withFreshTip fun committedBytes =>
         writeSessionFrame output 46 committedBytes
       match handed with
-      | .ok _ => state.set (some ⟨_, permit.verified⟩)
+      | .ok _ => sessionSetWalked state permit.verified
       | .error detail =>
           writeSessionFrame output 46 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
@@ -1734,7 +1765,7 @@ resend a physical effect. -/
 def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let result ← ApplicationAgentLifetimeDispatchReceiver.receiveVerified
     config session.verified payload
   match result with
@@ -1742,7 +1773,7 @@ def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
       let handed ← permit.withFreshTip fun committedBytes =>
         writeSessionFrame output 76 committedBytes
       match handed with
-      | .ok _ => state.set (some ⟨_, permit.verified⟩)
+      | .ok _ => sessionSetWalked state permit.verified
       | .error detail =>
           writeSessionFrame output 76 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
@@ -1767,7 +1798,7 @@ proof that the external process has started. -/
 def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let some _ := ApplicationLifecycleClaimV3Ingress.codec.decode payload
     | writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
@@ -1784,17 +1815,17 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
             let handed ← reservation.withFreshTip fun committedBytes =>
               writeSessionFrame output 26 committedBytes
             match handed with
-            | .ok _ => state.set (some ⟨_, reservation.verified⟩)
+            | .ok _ => sessionSetWalked state reservation.verified
             | .error detail =>
                 writeSessionFrame output 26 <| outcomeCodec.encode <|
                   NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
           else
-            state.set (some ⟨_, reservation.verified⟩)
+            sessionSetWalked state reservation.verified
             writeSessionFrame output 26 <| outcomeCodec.encode <|
               NativeHost.publicSubmissionOutcome
                 (.confirmed .replayed reservation.receipt)
       | .recoveredAfterUncertainResponse | .replayed =>
-          state.set (some ⟨_, reservation.verified⟩)
+          sessionSetWalked state reservation.verified
           writeSessionFrame output 26 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome
               (.confirmed .replayed reservation.receipt)
@@ -3060,7 +3091,7 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
   let key : FnConsumerFrontierCore.Key :=
     ⟨gateway.application, scope, binding, gateway.subject, gateway.target,
       gateway.capability⟩
-  let session ← sessionCurrent config state
+  let session ← sessionWalked config state
   let cursor ← IO.ofExcept (session.verified.frontierCursor key)
   let registration ← match session.verified.frontier.registrations.find?
       (fun original => original.ingress.spec.consumerNamespace == key.namespace) with
@@ -3141,7 +3172,7 @@ def fnFrontierPrepareSession (config : NativeHost.Config)
       service.controlPath
     unless afterPosition == position && after.committedAck == before.committedAck do
       throw (IO.userError "fn frontier local ACK changed during poll")
-    IO.ofExcept (FnConsumerFrontierPlan.prepare config session.opened
+    IO.ofExcept (FnConsumerFrontierPlan.prepare config session.verified.opened
       selected empty cursorBytes reportBytes sourceBytes)
 
 def selectedFnNewPaths (paths : List String) : IO Unit := do
@@ -4396,9 +4427,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
     providerFromReserveCall providerIds reserveCall
   let some (.confirmed _ anchor) := outcomeCodec.decode outcomeBytes
     | throw (IO.userError "provider continuity outcome is not canonical confirmation")
-  discard <| sessionOpened config state
-  let some current ← state.get
-    | throw (IO.userError "provider continuity session invalidated")
+  let current ← sessionWalked config state
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
   let checkedBoundary := (NativeHost.imageBoundary config current.target.image).value
   let checkedCount := current.target.image.accepted.length
@@ -4915,7 +4944,11 @@ def run (arguments : List String) : IO UInt32 := do
           unless source.deployment == config.deployment && source.federation == config.federation &&
               source.tariff == config.tariff && source.genesisHeight == config.genesisHeight do
             throw (IO.userError "genesis source and operator runtime manifest differ")
-          let pinned := { settings with expectedSeed := (NativeHost.seedIdentity built.seed).value }
+          let keyPath := settings.checkpointKey.getD
+            ((System.FilePath.mk configOutput).parent.getD "." / "checkpoint.key").toString
+          let pinned := { settings with
+            expectedSeed := (NativeHost.seedIdentity built.seed).value
+            checkpointKey := some keyPath }
           let genesis := DurableReceiverCodec.encode built.image
           discard <| IO.ofExcept <| do
             let loaded ← DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes genesis
@@ -5193,7 +5226,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let some custody := settings.completionManagement
                               | return ((255 : UInt8), failure "application-lifecycle-completion-author"
                                   "completion management pin is not configured")
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
                               (← ApplicationLifecycleCompletionOperator.prepareRequestVerified
                                 pinnedConfig session.verified custody.pin payload)
@@ -5216,7 +5249,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let some custody := settings.residentBeginManagement
                               | return ((255 : UInt8), failure "application-lifecycle-resident-begin-author"
                                   "resident BEGIN management pin is not configured")
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationLifecycleBeginOperator.prepareRequestVerified
                                 pinnedConfig session.verified custody.pin payload
@@ -5239,7 +5272,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let some custody := settings.residentClaimManagement
                               | return ((255 : UInt8), failure "application-lifecycle-claim-author"
                                   "resident claim management pin is not configured")
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationLifecycleClaimOperator.prepareRequestVerified
                                 pinnedConfig session.verified custody.pin payload
@@ -5262,7 +5295,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let some custody := settings.residentBeginManagement
                               | return ((255 : UInt8), failure "application-lifecycle-launch-begin-author"
                                   "resident BEGIN management pin is not configured")
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let bytes ← if let some request :=
                                 ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
                               if request.kind == .stop then do
@@ -5304,7 +5337,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let some custody := settings.residentClaimManagement
                               | return ((255 : UInt8), failure "application-lifecycle-launch-claim-author"
                                   "resident claim management pin is not configured")
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationLifecycleLaunchClaimAuthoring.prepareRequestVerified
                                 pinnedConfig session.verified custody.pin payload
@@ -5327,7 +5360,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let some custody := settings.completionManagement
                               | return ((255 : UInt8), failure "application-lifecycle-launch-completion-author"
                                   "completion management pin is not configured")
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
                               (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestVerified
                                 pinnedConfig session.verified custody.pin payload)
@@ -5347,7 +5380,7 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "launch completion ingress exceeds host frame bound")
                             return ((71 : UInt8), ingress)
                         | 74 =>
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationAgentLifetimeGrantAuthoring.prepareRequestLoaded
                                 session.verified payload
@@ -5361,7 +5394,7 @@ def run (arguments : List String) : IO UInt32 := do
                                 planBytes
                               | throw (IO.userError "noncanonical agent lifetime grant plan")
                             let signatures ← decodeSignatures signaturesBytes
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let ingress ← IO.ofExcept <|
                               ApplicationAgentLifetimeGrantAuthoring.assembleCurrent
                                 session.verified plan signatures
@@ -5369,7 +5402,7 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "agent lifetime grant ingress exceeds host frame bound")
                             return ((75 : UInt8), ingress)
                         | 82 =>
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationGrainSessionEnrollmentAuthoring.prepareRequestVerified
                                 pinnedConfig session.verified payload
@@ -5383,7 +5416,7 @@ def run (arguments : List String) : IO UInt32 := do
                                 planBytes
                               | throw (IO.userError "noncanonical session enrollment plan")
                             let signatures ← decodeSignatures signaturesBytes
-                            let session ← sessionCurrent pinnedConfig state
+                            let session ← sessionWalked pinnedConfig state
                             let ingress ← IO.ofExcept <|
                               ApplicationGrainSessionEnrollmentAuthoring.assembleCurrent
                                 pinnedConfig session.verified plan signatures
@@ -5434,6 +5467,11 @@ def run (arguments : List String) : IO UInt32 := do
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
           pure 0
+      | "audit", [] =>
+          withPinnedSignature config fun pinnedConfig => do
+            let count ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+            IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
+            pure 0
       | "prepare", [input, output] =>
           let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
           writeBytes output (signingPlanCodec.encode plan)
@@ -5610,7 +5648,7 @@ def run (arguments : List String) : IO UInt32 := do
             let bytes ← readBoundedBytes input maxFrame
             let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
               | throw (IO.userError "noncanonical launch-bound v2 completion ingress")
-            let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
+            let session ← IO.ofExcept (← NativeHostSession.startWalked pinnedConfig)
             let result ← NativeHostReplay.admitCompletionV2Verified session.verified ingress
             let (status, detail) := match result with
               | .ok _ => ("admitted", "")
