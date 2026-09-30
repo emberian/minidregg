@@ -482,6 +482,102 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok opened => return enrollmentLookupLoaded config opened bytes
 
+/-! ## The pay cell (lane P2): session operations 103–107
+
+One plan/assembly/submission/lookup quartet serves both pay command families;
+the command frame (`DREGG/PAY/BOOK/v1` or `DREGG/PAY/ASSIGN/v1`) selects the
+receiver. -/
+
+/-- The signing plan for a pay command on one opened image.  It discloses no
+pay decision; a signer key that the authority cell does not hold is refused. -/
+def payPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PayCellDomain.SigningPlan := do
+  let height := logicalHeight config opened.durable
+  let header ← match PayBookReceiver.commandCodec.decode commandBytes with
+    | some command =>
+        PayBookReceiver.signingHeader config.deployment config.profile
+          ⟨config.federation, height⟩ opened.durable command
+    | none =>
+        match PayAssignmentReceiver.commandCodec.decode commandBytes with
+        | some command =>
+            PayAssignmentReceiver.signingHeader config.deployment config.profile
+              ⟨config.federation, height⟩ opened.durable command
+        | none => .error "noncanonical pay command"
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+/-- Assembly transports one detached signature; submission rechecks it, the
+current law, the exact pay and authority roots and the whole decision. -/
+def payAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "pay signature must be 64 bytes"
+  let header ← need "noncanonical pay header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  if (PayBookReceiver.commandCodec.decode plan.commandBytes).isSome then
+    pure (PayBookReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+  else if (PayAssignmentReceiver.commandCodec.decode plan.commandBytes).isSome then
+    pure (PayAssignmentReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+  else .error "noncanonical pay plan command"
+
+def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  let ambient := logicalHeight config opened.durable
+  if (PayBookReceiver.decodeIngress bytes).isSome then
+    match ← PayBookReceiver.receiveLoaded config.deployment config.profile
+        ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
+    | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+    | .rejected reason => return refused "pay-book" s!"{repr reason}"
+    | .transactionConflict => return refused "replay" "transaction identity conflict"
+    | .durableRejected reason => return refused "durable" s!"{repr reason}"
+    | .contention => return .contention
+    | .unavailable detail => return .unavailable detail.toUTF8.toList
+    | .uncertain detail => return .uncertain detail.toUTF8.toList
+  else
+    match ← PayAssignmentReceiver.receiveLoaded config.deployment config.profile
+        ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
+    | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+    | .rejected reason => return refused "pay-assign" s!"{repr reason}"
+    | .transactionConflict => return refused "replay" "transaction identity conflict"
+    | .durableRejected reason => return refused "durable" s!"{repr reason}"
+    | .contention => return .contention
+    | .unavailable detail => return .unavailable detail.toUTF8.toList
+    | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of either pay family.  Absence never
+submits fresh work. -/
+def payLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) : Outcome :=
+  let found : Option (Except Unit (Digest × Digest)) :=
+    match PayBookReceiver.decodeIngress bytes with
+    | some ingress =>
+        (PayBookReceiver.replay config.deployment.domain config.profile.semantics opened.durable
+          ingress).map (fun result => result.map fun receipt => (receipt.transactionId, receipt.eventId))
+    | none =>
+        match PayAssignmentReceiver.decodeIngress bytes with
+        | some ingress =>
+            (PayAssignmentReceiver.replay config.deployment.domain config.profile.semantics
+              opened.durable ingress).map
+              (fun result => result.map fun receipt => (receipt.transactionId, receipt.eventId))
+        | none => some (.error ())
+  match PayBookReceiver.decodeIngress bytes, PayAssignmentReceiver.decodeIngress bytes, found with
+  | none, none, _ => refused "pay" "noncanonical signed ingress"
+  | _, _, some (.ok (transactionId, eventId)) =>
+      match historicalReceipt config opened.durable transactionId eventId with
+      | some original => .confirmed .replayed original
+      | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+  | _, _, some (.error _) => refused "replay" "transaction identity conflict"
+  | _, _, none => .absent
+
+/-- The public view of the pay cell (no assignment map). -/
+def payViewLoaded (config : Config) (opened : Opened config) : Except String PayCellDomain.View := do
+  let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
+  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
+    | .present before => pure before.payload.root
+    | .absent => .error "factory unavailable"
+  pure ⟨pay.cell.root, opened.authority.snapshot.cell.root, factoryRoot,
+    PayCell.tariffOf pay.cell.logical, PayCell.clockOf pay.cell.logical,
+    PayCell.nextFree pay.cell.logical, PayCellDomain.bookRows pay.cell.logical⟩
+
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
