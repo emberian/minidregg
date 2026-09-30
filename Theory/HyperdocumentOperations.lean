@@ -2,7 +2,8 @@
 # Theory.HyperdocumentOperations -- first-order accepted content effects
 
 The action grammar below is the sole source of Hyperdocument content patches.
-Declarations are first-order data.  They derive one exact typed write list,
+Declarations are first-order data.  They derive one guarded `Store.Patch`
+(every write guarded by its exact expected prior value, absence included),
 footprint, effect digest, request, eager nullifier, and canonical post through
 `AcceptedCellEffect`; no callback supplies a post-state or semantic decision.
 
@@ -19,6 +20,7 @@ open IndexedProgram
 open TypedAuthorization
 open Hyperdocument
 open HyperdocumentOperationIntent
+open Minidregg.Theory.Store (Op Patch)
 
 set_option autoImplicit false
 
@@ -104,45 +106,48 @@ def Action.document : Action -> DocumentId
   | .mark payload => payload.document
   | .annotate payload => payload.document
 
-/-! ## Exact typed writes -/
+/-! ## Exact guarded writes -/
 
-structure ExactWrite (space : Namespace) where
-  key : Key space
-  expected : Option (Value space)
-  replacement : Value space
+/-- The guarded operation installing `replacement` at `key` when the address
+holds exactly `expected`: an overwrite guarded by the present value, or an
+allocation guarded by absence.  This is the one guarded-write primitive,
+`Store.Op`; there is no document-local write type. -/
+def guardedSet (space : Namespace) (key : Key space)
+    (expected : Option (Value space)) (replacement : Value space) : Op layout :=
+  match expected with
+  | some before => .write space key before replacement
+  | none => .allocate space key replacement
 
-structure PackedWrite where
-  space : Namespace
-  write : ExactWrite space
+@[simp] theorem guardedSet_address (space : Namespace) (key : Key space)
+    (expected : Option (Value space)) (replacement : Value space) :
+    (guardedSet space key expected replacement).address = ⟨space, key⟩ := by
+  cases expected <;> rfl
 
-def PackedWrite.address (write : PackedWrite) : Address :=
-  ⟨write.space, write.write.key⟩
+@[simp] theorem guardedSet_writeAddress (space : Namespace) (key : Key space)
+    (expected : Option (Value space)) (replacement : Value space) :
+    (guardedSet space key expected replacement).writeAddress? = some ⟨space, key⟩ := by
+  cases expected <;> rfl
 
-def PackedWrite.toFieldWrite (write : PackedWrite) :
-    CellState.FieldWrite cellSchema where
-  field := write.address
-  value := some write.write.replacement
+@[simp] theorem guardedSet_apply (store : Store.Store layout) (space : Namespace)
+    (key : Key space) (expected : Option (Value space)) (replacement : Value space) :
+    (guardedSet space key expected replacement).apply store =
+      store.set ⟨space, key⟩ (some replacement) := by
+  cases expected <;> rfl
 
 def createWrites (operation : OperationId) (author : PrincipalRef)
-    (payload : CreatePayload) : List PackedWrite :=
-  [ ⟨.documents,
-      { key := payload.documentId
-        expected := none
-        replacement :=
-          { rootElement := payload.rootElementId
-            schema := payload.schema
-            createdBy := author
-            createdAt := operation } }⟩,
-    ⟨.elements,
-      { key := payload.rootElementId
-        expected := none
-        replacement :=
-          { document := payload.documentId
-            parent := none
-            body := payload.rootBody
-            createdBy := author
-            createdAt := operation
-            tombstonedAt := none } }⟩ ]
+    (payload : CreatePayload) : Patch layout :=
+  [ guardedSet .documents payload.documentId none
+      { rootElement := payload.rootElementId
+        schema := payload.schema
+        createdBy := author
+        createdAt := operation },
+    guardedSet .elements payload.rootElementId none
+      { document := payload.documentId
+        parent := none
+        body := payload.rootBody
+        createdBy := author
+        createdAt := operation
+        tombstonedAt := none } ]
 
 def editAtomRecord (operation : OperationId)
     (payload : EditAtomPayload) : AtomRecord :=
@@ -154,11 +159,9 @@ def editAtomRecord (operation : OperationId)
               else payload.before.tombstonedAt }
 
 def editAtomWrites (operation : OperationId)
-    (payload : EditAtomPayload) : List PackedWrite :=
-  [ ⟨.atoms,
-      { key := payload.atomId
-        expected := some payload.before
-        replacement := editAtomRecord operation payload }⟩ ]
+    (payload : EditAtomPayload) : Patch layout :=
+  [ guardedSet .atoms (payload.atomId) (some payload.before)
+      (editAtomRecord operation payload) ]
 
 def linkRecord (operation : OperationId) (author : PrincipalRef)
     (payload : LinkPayload) : LinkRecord :=
@@ -171,11 +174,9 @@ def linkRecord (operation : OperationId) (author : PrincipalRef)
     tombstonedAt := none }
 
 def linkWrites (operation : OperationId) (author : PrincipalRef)
-    (payload : LinkPayload) : List PackedWrite :=
-  [ ⟨.links,
-      { key := payload.id
-        expected := none
-        replacement := linkRecord operation author payload }⟩ ]
+    (payload : LinkPayload) : Patch layout :=
+  [ guardedSet .links (payload.id) (none)
+      (linkRecord operation author payload) ]
 
 def transclusionRecord (operation : OperationId) (author : PrincipalRef)
     (payload : TranscludePayload) : TransclusionRecord :=
@@ -197,15 +198,11 @@ def transclusionForwardLink (operation : OperationId) (author : PrincipalRef)
     tombstonedAt := none }
 
 def transcludeWrites (operation : OperationId) (author : PrincipalRef)
-    (payload : TranscludePayload) : List PackedWrite :=
-  [ ⟨.transclusions,
-      { key := payload.id
-        expected := none
-        replacement := transclusionRecord operation author payload }⟩,
-    ⟨.links,
-      { key := payload.forwardLinkId
-        expected := none
-        replacement := transclusionForwardLink operation author payload }⟩ ]
+    (payload : TranscludePayload) : Patch layout :=
+  [ guardedSet .transclusions (payload.id) (none)
+      (transclusionRecord operation author payload),
+    guardedSet .links (payload.forwardLinkId) (none)
+      (transclusionForwardLink operation author payload) ]
 
 def markRecord (operation : OperationId) (author : PrincipalRef)
     (payload : MarkPayload) : MarkRecord :=
@@ -219,11 +216,9 @@ def markRecord (operation : OperationId) (author : PrincipalRef)
     tombstonedAt := none }
 
 def markWrites (operation : OperationId) (author : PrincipalRef)
-    (payload : MarkPayload) : List PackedWrite :=
-  [ ⟨.marks,
-      { key := payload.id
-        expected := none
-        replacement := markRecord operation author payload }⟩ ]
+    (payload : MarkPayload) : Patch layout :=
+  [ guardedSet .marks (payload.id) (none)
+      (markRecord operation author payload) ]
 
 def annotationRecord (operation : OperationId) (author : PrincipalRef)
     (payload : AnnotatePayload) : AnnotationRecord :=
@@ -236,11 +231,9 @@ def annotationRecord (operation : OperationId) (author : PrincipalRef)
     tombstonedAt := none }
 
 def annotateWrites (operation : OperationId) (author : PrincipalRef)
-    (payload : AnnotatePayload) : List PackedWrite :=
-  [ ⟨.annotations,
-      { key := payload.id
-        expected := none
-        replacement := annotationRecord operation author payload }⟩ ]
+    (payload : AnnotatePayload) : Patch layout :=
+  [ guardedSet .annotations (payload.id) (none)
+      (annotationRecord operation author payload) ]
 
 /-! ## Canonical declaration, intent and request -/
 
@@ -276,8 +269,9 @@ def Declaration.operationId (config : Config) (declaration : Declaration) :
   HyperdocumentOperationIntent.operationId
     config.intentAddressing declaration.intent
 
-def Action.packedWrites (operation : OperationId) (author : PrincipalRef) :
-    Action → List PackedWrite
+/-- The one guarded patch of an action. -/
+def Action.ops (operation : OperationId) (author : PrincipalRef) :
+    Action → Patch layout
   | .create payload => createWrites operation author payload
   | .editAtom payload => editAtomWrites operation payload
   | .link payload => linkWrites operation author payload
@@ -285,36 +279,12 @@ def Action.packedWrites (operation : OperationId) (author : PrincipalRef) :
   | .mark payload => markWrites operation author payload
   | .annotate payload => annotateWrites operation author payload
 
-def Declaration.packedWrites (config : Config)
-    (declaration : Declaration) : List PackedWrite :=
-  let operation := declaration.operationId config
-  let author := declaration.intent.author
-  declaration.action.packedWrites operation author
-
-def Declaration.fieldWrites (config : Config)
-    (declaration : Declaration) : List (CellState.FieldWrite cellSchema) :=
-  (declaration.packedWrites config).map PackedWrite.toFieldWrite
-
+/-- The declaration's guarded patch.  Its expected pre-root is
+`intent.expectedContentRoot`, the index of the `ValidatedPatch` that accepts
+it. -/
 def Declaration.patch (config : Config) (declaration : Declaration) :
-    CellState.Patch cellSchema Digest where
-  expectedPreRoot := declaration.intent.expectedContentRoot
-  fieldFootprint :=
-    (declaration.fieldWrites config).map CellState.FieldWrite.field |>.toFinset
-  resourceFootprint := ∅
-  fieldWrites := declaration.fieldWrites config
-  resourceWrites := []
-
-@[simp] theorem Declaration.patch_namedFields
-    (config : Config) (declaration : Declaration) :
-    (declaration.patch config).namedFields =
-      (declaration.patch config).fieldFootprint :=
-  rfl
-
-@[simp] theorem Declaration.patch_namedResources
-    (config : Config) (declaration : Declaration) :
-    (declaration.patch config).namedResources =
-      (declaration.patch config).resourceFootprint := by
-  simp [Declaration.patch, CellState.Patch.namedResources]
+    Patch layout :=
+  declaration.action.ops (declaration.operationId config) declaration.intent.author
 
 def Declaration.effectDigest (config : Config)
     (declaration : Declaration) : Digest :=
@@ -355,17 +325,8 @@ structure Declaration.Canonical (config : Config)
 
 /-! ## Exact pre-state and stable-range validity -/
 
-def PackedWrite.ExpectedAt
-    (pre : CellState.LogicalState cellSchema) (write : PackedWrite) : Prop :=
-  pre.fields write.address = write.write.expected
-
-def Declaration.ExpectedAt (config : Config)
-    (pre : CellState.LogicalState cellSchema)
-    (declaration : Declaration) : Prop :=
-  ∀ write, write ∈ declaration.packedWrites config → write.ExpectedAt pre
-
 def storedPointPresentInDocument
-    (pre : CellState.LogicalState cellSchema)
+    (pre : Store.Store layout)
     (document : DocumentId) (point : StablePoint) : Prop :=
   ∃ run,
     lookup pre .runs point.run = some run ∧
@@ -380,7 +341,7 @@ def storedPointPresentInDocument
 `StableRanges.HyperdocumentAdapter` realization.  It does not define endpoint
 transport or a second range calculus. -/
 structure StoredRangeValidAt
-    (pre : CellState.LogicalState cellSchema)
+    (pre : Store.Store layout)
     (document : DocumentId) (range : StableRange) : Prop where
   realizationStoredExact :
     (StableRanges.HyperdocumentAdapter.realizeRange range).stored = range
@@ -388,7 +349,7 @@ structure StoredRangeValidAt
   finish : storedPointPresentInDocument pre document range.finish
 
 def Action.RangesValidAt
-    (pre : CellState.LogicalState cellSchema)
+    (pre : Store.Store layout)
     (action : Action) : Prop :=
   match action with
   | .link payload =>
@@ -403,23 +364,27 @@ def Action.RangesValidAt
         StoredRangeValidAt pre payload.document range
   | _ => True
 
-/-- Complete semantic validation at the exact canonical pre-cell.  Generic
-`CellState.validate` alone does not check expected old values or ranges. -/
+/-- Complete semantic validation at the exact canonical pre-cell: the root,
+address uniqueness, the guards, and the stored ranges.  Generic
+`CellState.validate` checks the root and guards but not ranges. -/
 structure ValidOperation
     {M : Hyperdocument.Materializer Digest}
     (config : Config) (pre : Hyperdocument.Cell M)
     (declaration : Declaration) where
   canonical : declaration.Canonical config
   preRootExact : declaration.intent.expectedContentRoot = pre.root
-  writesUnique :
-    ((declaration.packedWrites config).map PackedWrite.address).Nodup
-  expectedExact : declaration.ExpectedAt config pre.logical
+  /-- Each address is written at most once, so every write's replacement is
+  the value its address holds after the patch. -/
+  writesUnique : ((declaration.patch config).map Op.address).Nodup
+  /-- Every guard holds at the store its prefix produced: each expected prior
+  value, absence included, is exact. -/
+  guardsValid : Patch.ValidFrom pre.logical (declaration.patch config)
   rangesValid : declaration.action.RangesValidAt pre.logical
 
 /-- Stored endpoints depend on the source-owned run and atom namespaces.
 Changing unrelated content does not alter their meaning. -/
 theorem StoredRangeValidAt.of_lookup_eq
-    {before after : CellState.LogicalState cellSchema}
+    {before after : Store.Store layout}
     {document : DocumentId} {range : StableRange}
     (valid : StoredRangeValidAt before document range)
     (runs : ∀ key, lookup after .runs key = lookup before .runs key)
@@ -432,7 +397,7 @@ theorem StoredRangeValidAt.of_lookup_eq
     simpa only [storedPointPresentInDocument, runs, atoms] using valid.finish
 
 theorem Action.RangesValidAt.of_lookup_eq
-    {before after : CellState.LogicalState cellSchema} {action : Action}
+    {before after : Store.Store layout} {action : Action}
     (valid : action.RangesValidAt before)
     (runs : ∀ key, lookup after .runs key = lookup before .runs key)
     (atoms : ∀ key, lookup after .atoms key = lookup before .atoms key) :
@@ -458,7 +423,8 @@ theorem ValidOperation.ranges_post
     {M : Hyperdocument.Materializer Digest}
     {config : Config} {pre : Hyperdocument.Cell M} {declaration : Declaration}
     (valid : ValidOperation config pre declaration)
-    (validated : CellState.ValidatedPatch M pre (declaration.patch config)) :
+    {expectedPreRoot : Digest}
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot (declaration.patch config)) :
     declaration.action.RangesValidAt validated.apply.logical := by
   cases actionExact : declaration.action with
   | create payload => trivial
@@ -468,16 +434,9 @@ theorem ValidOperation.ranges_post
       apply valid.rangesValid.of_lookup_eq
       all_goals
         intro key
-        apply validated.field_frame
-        simp [Declaration.patch, Declaration.fieldWrites, Declaration.packedWrites,
-          actionExact, Action.packedWrites, linkWrites, transcludeWrites, markWrites,
-          annotateWrites, PackedWrite.toFieldWrite, PackedWrite.address]
-        all_goals
-          repeat' apply And.intro
-          all_goals
-            intro equal
-            have impossible := congrArg Sigma.fst equal
-            cases impossible
+        apply Patch.run_frame
+        simp [Declaration.patch, actionExact, Action.ops, linkWrites, transcludeWrites,
+          markWrites, annotateWrites, Patch.writeFootprint]
 
 def authenticatedObjectHead
     {M : CredentialAuthorityState.Materializer}
@@ -503,7 +462,7 @@ def sealedOnly : DisclosureDecision Unit Unit (fun _ => Unit) -> Prop
 def family
     {M : Hyperdocument.Materializer Digest}
     (config : Config) (pre : Hyperdocument.Cell M) :
-    SemanticEffectFamily cellSchema M Nat where
+    SemanticEffectFamily layout M Nat where
   Declaration := Declaration
   declarationCodec := config.declarationCodec
   pre := pre
@@ -567,7 +526,8 @@ def accept
       (CredentialAuthorityState.authState projection authorityPre)
       (declaration.toRequest config))
     (validated : CellState.ValidatedPatch
-      MDoc documentPre (declaration.patch config)) :
+      MDoc documentPre (declaration.toRequest config).preStateRoot
+      (declaration.patch config)) :
     Accepted config projection authorityPre documentPre portal declaration where
   principal := principal
   semantic := semantic
@@ -577,7 +537,6 @@ def accept
       preStateBound := rfl
       requestBound := rfl
       effectsDigestBound := rfl
-      preRootBound := semantic.preRootExact
       modeEvidence := ⟨semantic⟩
       validated := validated
       postcondition := ⟨validated.resultAt, semantic.ranges_post validated⟩
@@ -654,27 +613,32 @@ def Accepted.causalPreimage
 
 /-! ## Exact post containment and receipt projection -/
 
-theorem applyFieldWrites_member_of_nodup
-    (writes : List (CellState.FieldWrite cellSchema))
-    (fields : CellState.FieldStore cellSchema)
-    (nodup : (writes.map CellState.FieldWrite.field).Nodup)
-    (write : CellState.FieldWrite cellSchema) (member : write ∈ writes) :
-    CellState.applyFieldWrites writes fields write.field = write.value := by
-  induction writes generalizing fields with
+/-- In a patch that writes each address at most once, every guarded write's
+replacement is the value its address holds after the run. -/
+theorem run_guardedSet_of_nodup (patch : Patch layout) (store : Store.Store layout)
+    (nodup : (patch.map Op.address).Nodup)
+    {space : Namespace} {key : Key space}
+    {expected : Option (Value space)} {replacement : Value space}
+    (member : guardedSet space key expected replacement ∈ patch) :
+    Patch.run store patch ⟨space, key⟩ = some replacement := by
+  induction patch generalizing store with
   | nil => simp at member
   | cons head tail induction =>
       simp only [List.map_cons, List.nodup_cons] at nodup
-      simp only [List.mem_cons] at member
-      rw [CellState.applyFieldWrites]
-      rcases member with rfl | member
-      · rw [CellState.applyFieldWrites_frame]
-        · simpa [CellState.FieldStore.read] using
-            (CellState.FieldStore.read_assign_self fields write.field write.value)
-        · simpa using nodup.1
-      · exact induction (fields.assign head.field head.value)
-          nodup.2 member
+      rw [Patch.run_cons]
+      rcases List.mem_cons.mp member with same | member
+      · subst same
+        rw [Patch.run_frame]
+        · simp
+        · intro written
+          apply nodup.1
+          have accessed := Patch.writeFootprint_subset_accessFootprint tail written
+          simpa [Patch.accessFootprint] using accessed
+      · exact induction (head.apply store) nodup.2 member
 
-theorem Accepted.post_contains_fieldWrite
+/-- Every guarded write of an accepted declaration is installed in the canonical
+post. -/
+theorem Accepted.post_contains_guardedSet
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
@@ -683,17 +647,12 @@ theorem Accepted.post_contains_fieldWrite
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
     (accepted : Accepted config projection authorityPre documentPre portal declaration)
-    (write : CellState.FieldWrite cellSchema)
-    (member : write ∈ declaration.fieldWrites config) :
-    accepted.accepted.prepared.post.logical.fields write.field = write.value := by
-  have writesUnique :
-      ((declaration.fieldWrites config).map
-        CellState.FieldWrite.field).Nodup := by
-    simpa [Declaration.fieldWrites, List.map_map, Function.comp_def,
-      PackedWrite.toFieldWrite] using accepted.semantic.writesUnique
-  exact applyFieldWrites_member_of_nodup
-    (declaration.fieldWrites config) documentPre.logical.fields
-    writesUnique write member
+    {space : Namespace} {key : Key space}
+    {expected : Option (Value space)} {replacement : Value space}
+    (member : guardedSet space key expected replacement ∈ declaration.patch config) :
+    lookup accepted.accepted.prepared.post.logical space key = some replacement :=
+  run_guardedSet_of_nodup (declaration.patch config) documentPre.logical
+    accepted.semantic.writesUnique member
 
 theorem Accepted.post_contains_link
     {MDoc : Hyperdocument.Materializer Digest}
@@ -707,20 +666,9 @@ theorem Accepted.post_contains_link
     (payload : LinkPayload) (actionExact : declaration.action = .link payload) :
     lookup accepted.accepted.prepared.post.logical .links payload.id =
       some (linkRecord (declaration.operationId config)
-        declaration.intent.author payload) := by
-  have contains := accepted.post_contains_fieldWrite
-    (PackedWrite.toFieldWrite
-      ⟨.links,
-        { key := payload.id
-          expected := none
-          replacement := linkRecord (declaration.operationId config)
-            declaration.intent.author payload }⟩)
-    (by
-      unfold Declaration.fieldWrites Declaration.packedWrites
-      apply List.mem_map_of_mem
-      rw [actionExact]
-      simp [Action.packedWrites, linkWrites])
-  exact contains
+        declaration.intent.author payload) :=
+  accepted.post_contains_guardedSet (space := .links) (expected := none)
+    (by rw [Declaration.patch, actionExact]; simp [Action.ops, linkWrites])
 
 theorem Accepted.post_contains_transclusion
     {MDoc : Hyperdocument.Materializer Digest}
@@ -735,20 +683,9 @@ theorem Accepted.post_contains_transclusion
     (actionExact : declaration.action = .transclude payload) :
     lookup accepted.accepted.prepared.post.logical .transclusions payload.id =
       some (transclusionRecord (declaration.operationId config)
-        declaration.intent.author payload) := by
-  have contains := accepted.post_contains_fieldWrite
-    (PackedWrite.toFieldWrite
-      ⟨.transclusions,
-        { key := payload.id
-          expected := none
-          replacement := transclusionRecord (declaration.operationId config)
-            declaration.intent.author payload }⟩)
-    (by
-      unfold Declaration.fieldWrites Declaration.packedWrites
-      apply List.mem_map_of_mem
-      rw [actionExact]
-      simp [Action.packedWrites, transcludeWrites])
-  exact contains
+        declaration.intent.author payload) :=
+  accepted.post_contains_guardedSet (space := .transclusions) (expected := none)
+    (by rw [Declaration.patch, actionExact]; simp [Action.ops, transcludeWrites])
 
 theorem Accepted.post_contains_transclusion_forward_link
     {MDoc : Hyperdocument.Materializer Digest}
@@ -763,20 +700,9 @@ theorem Accepted.post_contains_transclusion_forward_link
     (actionExact : declaration.action = .transclude payload) :
     lookup accepted.accepted.prepared.post.logical .links payload.forwardLinkId =
       some (transclusionForwardLink (declaration.operationId config)
-        declaration.intent.author payload) := by
-  have contains := accepted.post_contains_fieldWrite
-    (PackedWrite.toFieldWrite
-      ⟨.links,
-        { key := payload.forwardLinkId
-          expected := none
-          replacement := transclusionForwardLink (declaration.operationId config)
-            declaration.intent.author payload }⟩)
-    (by
-      unfold Declaration.fieldWrites Declaration.packedWrites
-      apply List.mem_map_of_mem
-      rw [actionExact]
-      simp [Action.packedWrites, transcludeWrites])
-  exact contains
+        declaration.intent.author payload) :=
+  accepted.post_contains_guardedSet (space := .links) (expected := none)
+    (by rw [Declaration.patch, actionExact]; simp [Action.ops, transcludeWrites])
 
 /-- Runtime/display receipt projection only.  History evidence must retain
 `accepted.accepted` itself through `AcceptedCellEffectHistory`. -/
@@ -804,12 +730,10 @@ def Accepted.receiptEvent
     accepted.accepted.toReceiptEvent.request = declaration.toRequest config :=
   rfl
 
-/-- info: 'Minidregg.Theory.HyperdocumentOperations.Declaration.patch_namedFields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Declaration.patch_namedFields
 /-- info: 'Minidregg.Theory.HyperdocumentOperations.ValidOperation.ranges_post' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ValidOperation.ranges_post
-/-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_fieldWrite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_fieldWrite
+/-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_guardedSet' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_guardedSet
 /-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_link' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_link
 /-- info: 'Minidregg.Theory.HyperdocumentOperations.Accepted.post_contains_transclusion' depends on axioms: [propext, Classical.choice, Quot.sound] -/
