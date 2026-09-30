@@ -3,15 +3,18 @@
 This benchmark intentionally preserves the deployed authority split instead
 of inventing one native semantic controller.
 
-`scripts/ForwardLinkSemanticBenchmark.lean` measures the actual computable
-four-slot production content-page path:
+`scripts/ForwardLinkSemanticBenchmark.lean` (schema v2) measures the actual
+computable path on the deployed content cell
+(`HyperdocumentCell.contentMaterializer`, one `StoreCodec` cell per document):
 
-- canonical bounded link-entry submission bytes;
-- `Page.admitInsert` validation;
-- typed-patch validation, logical installation, and the Lean cSHAKE page root;
-- exact state-codec reopen;
-- canonical semantic link lookup; and
-- retained physical cross-page route lookup.
+- canonical link-entry submission bytes;
+- guarded-patch validity of the link allocation at the pre-store;
+- validation, logical installation, and the Lean cSHAKE cell root;
+- exact store-codec reopen; and
+- canonical semantic link lookup.
+
+The v1 stages `validate_insert`, `reopen_page_codec` and
+`physical_page_route_query` measured the deleted four-slot page and are gone.
 
 `native/hyperdocument-link-store/src/bin/forward_link_e2e_bench.rs` measures
 the actual opaque `LocalLinkStore` path. Stage, install, restarted read, exact
@@ -22,7 +25,7 @@ response is deliberately ignored before the restarted reader observes the
 The combined runner first builds the existing `LinkEndpointController`,
 `PageDurableWeld`, `LocalFileStore`, and `ClientLocalFileCutover` proof joins,
 then runs both timed surfaces. Those proof modules establish the exact
-read-result and bounded-page correspondences. They do not prove the Rust
+read-result and deployed-cell correspondences. They do not prove the Rust
 filesystem implementation refines the Lean model.
 
 Run locally with:
