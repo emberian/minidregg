@@ -1406,12 +1406,12 @@ def dispatchSession (config : NativeHost.Config)
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, failure "prepare" detail)
   | 2 =>
-      let session ← sessionWalked config state
+      let session ← sessionCurrent config state
       let result ← match callCodec.decode payload with
         | none => pure (NativeHostCodec.Outcome.refused "wire".toUTF8.toList
             "noncanonical or unsupported native host call".toUTF8.toList)
         | some call =>
-            NativeHost.submitLoadedWith config session.verified.opened call
+            NativeHost.submitLoadedWith config session.opened call
               (sessionConfirmed config state)
       return (2, outcomeCodec.encode (NativeHost.publicSubmissionOutcome result))
   | 3 =>
@@ -1883,9 +1883,12 @@ partial def serveSession (config : NativeHost.Config)
   else if operation == 26 then
     dispatchLifecycleClaimSubmitSession config state payload output
   else
+    let started ← IO.monoMsNow
     let (responseOperation, responsePayload) ←
       dispatchSession config state meteringProfile fnDispatch operation payload
     writeSessionFrame output responseOperation responsePayload
+    if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
+      IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
   serveSession config state meteringProfile fnDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
