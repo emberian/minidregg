@@ -1,24 +1,37 @@
 /-
-# Source-owned mutations of canonical typed content pages
+# Source-owned mutations of the canonical hyperdocument content cell
 
-The transaction receiver supplies authenticated author and operation identity.
-The command contains edits, never proposed pages or authority decisions. Exact
-old atom records guard replacement; payloads remain bytes in the canonical
-Hyperdocument schema. The bounded page is the existing content materializer,
-not a host-side blob store. Authorization and current installed Pred evaluation
-belong to the enclosing ResourceTransaction receiver.
+A content cell is one `Store` over `Hyperdocument.layout` at the declared
+`HyperdocumentCell.contentWire` (DATAMODEL B1); the cell's identifier is the
+document's identity (`documentOf`).  The transaction receiver supplies
+authenticated author and operation identity.  The command contains edits,
+never proposed stores or authority decisions: each action lowers to guarded
+`Store.Op`s at the store its prefix produced, so exact old atom records guard
+replacement and every creation is an allocation at a fresh address.  The
+patch is then validated by the kernel validator at the cell's own root.
+
+There is no capacity: a document holds any number of records (the retired
+four-slot page refused the seventeenth).  Cross-page routing is gone with the
+page; a link's target is the canonical `LinkTarget`.  One-document-per-cell is
+the registry's `ContentLaw`, which every final cell runs.  Authorization and
+current installed Pred evaluation belong to the enclosing ResourceTransaction
+receiver.
+
+Command grammar v2 (`DREGG/CONTENT/MUTATE` ++ [2]): links carry `LinkTarget`.
+Version-1 commands (whose links carried the retired `ForwardTarget`) refuse
+to decode (`v1_command_refused`).
 -/
-import Compiler.HyperdocumentContentPageMaterializer
+import Compiler.HyperdocumentCell
 import Compiler.ResourceBirthCodec
 
 namespace Minidregg.Kernel.ContentResource
 
 open Minidregg.Compiler
 open Minidregg.Compiler.HyperdocumentCodec
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
 open Minidregg.Theory.CellState
+open Minidregg.Theory.Store (Op Patch)
 open Minidregg.Theory.Hyperdocument
 open Minidregg.Theory.HyperdocumentOperations
 open Minidregg.Theory.IndexedProgram
@@ -26,19 +39,28 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
+abbrev ContentStore := Store.Store Hyperdocument.layout
+abbrev ContentCell := Materialized HyperdocumentCell.contentMaterializer
+
+/-- A content cell's document is named by the cell's identifier. -/
+def documentOf (target : Nat) : DocumentId := ⟨⟨target⟩⟩
+
+/-- Neutral content genesis: the empty document cell. -/
+def initialStore : ContentStore := 0
+
 inductive Action where
   | createDocument (rootElement : ElementId) (schema : Digest) (body : ElementBody)
   | createAtom (atom : AtomId) (kind : AtomKind) (payload : List UInt8)
   | editAtom (edit : EditAtomPayload)
-  | link (link : LinkId) (source : Option StableRange) (target : ForwardTarget)
+  | link (link : LinkId) (source : Option StableRange) (target : LinkTarget)
       (relation : Digest)
   | createRun (runId : RunId) (atoms : List AtomId)
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
 abbrev ActionWire := Sum (ElementId × Digest × ElementBody)
   (Sum (AtomId × AtomKind × List UInt8)
     (Sum EditAtomPayload
-      (Sum (LinkId × Option StableRange × ForwardTarget × Digest) (RunId × List AtomId))))
+      (Sum (LinkId × Option StableRange × LinkTarget × Digest) (RunId × List AtomId))))
 
 def actionWireStream : StreamCodec ActionWire :=
   StreamCodec.sum
@@ -51,7 +73,7 @@ def actionWireStream : StreamCodec ActionWire :=
         (StreamCodec.sum
           (StreamCodec.product (identifierStream .v1 .link)
             (StreamCodec.product (StreamCodec.option storedStableRangeStream)
-              (StreamCodec.product forwardTargetStream digestStream)))
+              (StreamCodec.product linkTargetStream digestStream)))
           (StreamCodec.product (identifierStream .v1 .run)
             (StreamCodec.list (identifierStream .v1 .atom))))))
 
@@ -79,14 +101,14 @@ def actionStream : StreamCodec Action :=
 
 structure Command where
   actions : List Action
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap (StreamCodec.list actionStream) Command.actions
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
-/-- Action grammar version; independent of the content page storage epoch. -/
-def commandVersion : Nat := 1
+/-- Action grammar version; independent of the content cell's storage wire. -/
+def commandVersion : Nat := 2
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -114,55 +136,54 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
+/-- A version-1 command frame refuses to decode. -/
+theorem v1_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ 1 :: payload) = none := by
+  let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [1]
+  have lengthExact : commandFrame.length = oldFrame.length := by
+    simp [commandFrame, oldFrame]
+  have different : oldFrame ≠ commandFrame := by decide +kernel
+  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
+    simp [rawCommandCodec, lengthExact, different]
+  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+
 inductive Reject where
-  | missingPage
-  | invalidPage
   | emptyActions
   | duplicateAddress
-  | full
   | staleAtom
   | wrongDocument
-  | invalidPost
   | invalidPatch
   | invalidRun
   | invalidSourceRange
   deriving DecidableEq, Repr
 
-def insert (page : Page) (entry : Entry) : Except Reject Page :=
-  match page.admitInsert entry with
-  | .ok post => .ok post.val
-  | .error .invalidPage => .error .invalidPage
-  | .error .duplicateAddress => .error .duplicateAddress
-  | .error .full => .error .full
+/-! ## Lowering actions to guarded operations -/
 
-def replaceSlot (old replacement : Entry) (slot : Option Entry) : Option Entry :=
-  if slot = some old then some replacement else slot
+/-- The running store and the guarded operations emitted so far. -/
+abbrev Progress := ContentStore × Patch Hyperdocument.layout
 
-theorem unrelated_slot_unchanged (old replacement entry : Entry) (other : entry ≠ old) :
-    replaceSlot old replacement (some entry) = some entry := by
-  simp [replaceSlot, other]
+/-- Allocate one fresh record; a present address is a duplicate. -/
+def allocate (progress : Progress) (space : Namespace) (key : Key space)
+    (value : Value space) : Except Reject Progress :=
+  if progress.1 ⟨space, key⟩ = none then
+    .ok (progress.1.set ⟨space, key⟩ (some value),
+      progress.2 ++ [.allocate space key value])
+  else .error .duplicateAddress
 
-/-- The slot is selected by exact canonical address and old record, not by a
-caller-supplied physical index. All other entries remain byte-for-byte intact. -/
-def replaceAtom (page : Page) (atom : AtomId) (before after : AtomRecord) :
-    Except Reject Page :=
-  let old := Entry.atom atom before
-  let replacement := Entry.atom atom after
-  if before.document ≠ page.document ∨ after.document ≠ page.document then
+/-- The slot is selected by exact canonical address and old record, never by
+a caller-supplied index.  Every other record is framed. -/
+def replaceAtom (document : DocumentId) (progress : Progress) (atom : AtomId)
+    (before after : AtomRecord) : Except Reject Progress :=
+  if before.document ≠ document ∨ after.document ≠ document then
     .error .wrongDocument
-  else if ¬page.Contains old then .error .staleAtom
+  else if (show Option AtomRecord from progress.1 ⟨.atoms, atom⟩) ≠ some before then
+    .error .staleAtom
   else
-    let replace := replaceSlot old replacement
-    .ok { page with
-      slot0 := replace page.slot0
-      slot1 := replace page.slot1
-      slot2 := replace page.slot2
-      slot3 := replace page.slot3
-      overflow := page.overflow.map fun entry => if entry = old then replacement else entry }
+    .ok (progress.1.set ⟨.atoms, atom⟩ (some after),
+      progress.2 ++ [.write .atoms atom before after])
 
-/-- Executable membership checker for the existing canonical stored-point law. -/
-def pointCheck (pre : LogicalState Hyperdocument.cellSchema) (document : DocumentId)
-    (point : StablePoint) : Bool :=
+/-- Executable membership checker for the canonical stored-point law. -/
+def pointCheck (pre : ContentStore) (document : DocumentId) (point : StablePoint) : Bool :=
   match Hyperdocument.lookup pre .runs point.run with
   | none => false
   | some run => decide (run.document = document) &&
@@ -173,8 +194,7 @@ def pointCheck (pre : LogicalState Hyperdocument.cellSchema) (document : Documen
           | none => false
           | some atom => decide (atom.document = document)
 
-theorem pointCheck_iff (pre : LogicalState Hyperdocument.cellSchema)
-    (document : DocumentId) (point : StablePoint) :
+theorem pointCheck_iff (pre : ContentStore) (document : DocumentId) (point : StablePoint) :
     pointCheck pre document point = true ↔
       storedPointPresentInDocument pre document point := by
   cases runFound : Hyperdocument.lookup pre .runs point.run with
@@ -186,190 +206,253 @@ theorem pointCheck_iff (pre : LogicalState Hyperdocument.cellSchema)
       cases atomFound : Hyperdocument.lookup pre .atoms atomId <;>
         simp [pointCheck, storedPointPresentInDocument, runFound, neighbor, atomFound]
 
-def rangeCheck (page : Page) (range : StableRange) : Bool :=
-  pointCheck page.toCanonicalState page.document range.start &&
-    pointCheck page.toCanonicalState page.document range.finish
+def rangeCheck (pre : ContentStore) (document : DocumentId) (range : StableRange) : Bool :=
+  pointCheck pre document range.start && pointCheck pre document range.finish
 
-theorem rangeCheck_sound (page : Page) (range : StableRange)
-    (checked : rangeCheck page range = true) :
-    StoredRangeValidAt page.toCanonicalState page.document range := by
-  have endpoints : pointCheck page.toCanonicalState page.document range.start = true ∧
-      pointCheck page.toCanonicalState page.document range.finish = true := by
-    simpa [rangeCheck] using checked
-  exact ⟨rfl, (pointCheck_iff _ _ _).mp endpoints.1,
-    (pointCheck_iff _ _ _).mp endpoints.2⟩
+theorem rangeCheck_sound (pre : ContentStore) (document : DocumentId) (range : StableRange)
+    (checked : rangeCheck pre document range = true) :
+    StoredRangeValidAt pre document range := by
+  simp only [rangeCheck, Bool.and_eq_true] at checked
+  exact ⟨rfl, (pointCheck_iff _ _ _).mp checked.1, (pointCheck_iff _ _ _).mp checked.2⟩
 
-def runAtomsCheck (page : Page) (atoms : List AtomId) : Bool :=
+def runAtomsCheck (pre : ContentStore) (document : DocumentId) (atoms : List AtomId) : Bool :=
   decide atoms.Nodup && atoms.all (fun atomId =>
-    match Hyperdocument.lookup page.toCanonicalState .atoms atomId with
+    match Hyperdocument.lookup pre .atoms atomId with
     | none => false
-    | some atom => decide (atom.document = page.document))
+    | some atom => decide (atom.document = document))
 
-def step (author : PrincipalRef) (operation : OperationId) (page : Page) :
-    Action → Except Reject Page
+def step (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (progress : Progress) : Action → Except Reject Progress
   | .createDocument root schema body => do
-      let post ← insert page (.document page.document
-        ⟨root, schema, author, operation⟩)
-      insert post (.element root ⟨page.document, none, body, author, operation, none⟩)
+      let next ← allocate progress .documents document ⟨root, schema, author, operation⟩
+      allocate next .elements root ⟨document, none, body, author, operation, none⟩
   | .createAtom atom kind payload =>
-      insert page (.atom atom ⟨page.document, kind, payload, author, operation, none⟩)
+      allocate progress .atoms atom ⟨document, kind, payload, author, operation, none⟩
   | .editAtom edit =>
-      replaceAtom page edit.atomId edit.before (editAtomRecord operation edit)
+      replaceAtom document progress edit.atomId edit.before (editAtomRecord operation edit)
   | .link link source target relation =>
-      if source.all (rangeCheck page) then
-        insert page (.link link ⟨page.document, source, target, relation, author, operation, none⟩)
+      if source.all (rangeCheck progress.1 document) then
+        allocate progress .links link
+          ⟨document, source, target, relation, author, operation, none⟩
       else .error .invalidSourceRange
   | .createRun runId atoms =>
-      if runAtomsCheck page atoms then
-        insert page (.run runId ⟨page.document, atoms, author, operation, none⟩)
+      if runAtomsCheck progress.1 document atoms then
+        allocate progress .runs runId ⟨document, atoms, author, operation, none⟩
       else .error .invalidRun
 
+def run (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (pre : ContentStore) (command : Command) : Except Reject Progress :=
+  command.actions.foldlM (step author operation document) (pre, [])
+
+/-! ## The emitted patch executes exactly -/
+
+/-- The invariant of a run from `pre`: the emitted patch is valid at `pre`
+and runs to the progress store. -/
+def Executes (pre : ContentStore) (progress : Progress) : Prop :=
+  Patch.ValidFrom pre progress.2 ∧ Patch.run pre progress.2 = progress.1
+
+private theorem executes_append (pre : ContentStore) (progress : Progress)
+    (op : Op Hyperdocument.layout) (holds : Executes pre progress)
+    (enabled : op.Enabled progress.1) :
+    Executes pre (op.apply progress.1, progress.2 ++ [op]) := by
+  obtain ⟨valid, ran⟩ := holds
+  refine ⟨?_, ?_⟩
+  · rw [Patch.validFrom_append, ran]
+    exact ⟨valid, enabled, trivial⟩
+  · rw [Patch.run_append, ran]
+    rfl
+
+theorem allocate_executes (pre : ContentStore) (progress next : Progress)
+    (space : Namespace) (key : Key space) (value : Value space)
+    (holds : Executes pre progress)
+    (accepted : allocate progress space key value = .ok next) : Executes pre next := by
+  unfold allocate at accepted
+  split at accepted
+  · rename_i fresh
+    cases accepted
+    exact executes_append pre progress (.allocate space key value) holds
+      ⟨by simp, fresh⟩
+  · cases accepted
+
+theorem replaceAtom_executes (pre : ContentStore) (document : DocumentId)
+    (progress next : Progress) (atom : AtomId) (before after : AtomRecord)
+    (holds : Executes pre progress)
+    (accepted : replaceAtom document progress atom before after = .ok next) :
+    Executes pre next := by
+  unfold replaceAtom at accepted
+  split at accepted
+  · cases accepted
+  · split at accepted
+    · cases accepted
+    · rename_i present
+      cases accepted
+      exact executes_append pre progress (.write .atoms atom before after) holds
+        ⟨rfl, not_not.mp present⟩
+
+theorem step_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (pre : ContentStore) (progress next : Progress) (action : Action)
+    (holds : Executes pre progress)
+    (accepted : step author operation document progress action = .ok next) :
+    Executes pre next := by
+  cases action with
+  | createDocument root schema body =>
+      simp only [step] at accepted
+      cases first : allocate progress .documents document ⟨root, schema, author, operation⟩ with
+      | error reason => simp [first, bind, Except.bind] at accepted
+      | ok middle =>
+          simp only [first, bind, Except.bind] at accepted
+          exact allocate_executes pre middle next _ _ _
+            (allocate_executes pre progress middle _ _ _ holds first) accepted
+  | createAtom atom kind payload =>
+      exact allocate_executes pre progress next _ _ _ holds accepted
+  | editAtom edit =>
+      exact replaceAtom_executes pre document progress next _ _ _ holds accepted
+  | link link source target relation =>
+      simp only [step] at accepted
+      split at accepted
+      · exact allocate_executes pre progress next _ _ _ holds accepted
+      · cases accepted
+  | createRun runId atoms =>
+      simp only [step] at accepted
+      split at accepted
+      · exact allocate_executes pre progress next _ _ _ holds accepted
+      · cases accepted
+
+theorem foldlM_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (pre : ContentStore) (actions : List Action) (progress next : Progress)
+    (holds : Executes pre progress)
+    (accepted : actions.foldlM (step author operation document) progress = .ok next) :
+    Executes pre next := by
+  induction actions generalizing progress with
+  | nil =>
+      simp only [List.foldlM_nil, pure, Except.pure, Except.ok.injEq] at accepted
+      exact accepted ▸ holds
+  | cons action rest induction =>
+      simp only [List.foldlM_cons, bind, Except.bind] at accepted
+      cases stepped : step author operation document progress action with
+      | error reason => simp [stepped] at accepted
+      | ok middle =>
+          simp only [stepped] at accepted
+          exact induction middle
+            (step_executes author operation document pre progress middle action holds stepped)
+            accepted
+
+/-- An accepted run emits a patch valid at `pre` whose run is its post. -/
+theorem run_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (pre : ContentStore) (command : Command) (next : Progress)
+    (accepted : run author operation document pre command = .ok next) :
+    Patch.ValidFrom pre next.2 ∧ Patch.run pre next.2 = next.1 :=
+  foldlM_executes author operation document pre command.actions (pre, []) next
+    ⟨trivial, rfl⟩ accepted
+
 theorem accepted_link_source_stored (author : PrincipalRef) (operation : OperationId)
-    (page post : Page) (linkId : LinkId) (source : StableRange)
-    (target : ForwardTarget) (relation : Digest)
-    (accepted : step author operation page (.link linkId (some source) target relation) =
-      .ok post) : StoredRangeValidAt page.toCanonicalState page.document source := by
-  by_cases checked : rangeCheck page source = true
-  · exact rangeCheck_sound page source checked
+    (document : DocumentId) (progress next : Progress) (linkId : LinkId)
+    (source : StableRange) (target : LinkTarget) (relation : Digest)
+    (accepted : step author operation document progress
+      (.link linkId (some source) target relation) = .ok next) :
+    StoredRangeValidAt progress.1 document source := by
+  by_cases checked : rangeCheck progress.1 document source = true
+  · exact rangeCheck_sound progress.1 document source checked
   · simp [step, checked] at accepted
 
-def run (author : PrincipalRef) (operation : OperationId) (page : Page)
-    (command : Command) : Except Reject Page :=
-  command.actions.foldlM (step author operation) page
-
-/-- Identity and physical page routing never change through content edits. -/
-def Frame (before after : Page) : Prop :=
-  after.contentDomain = before.contentDomain ∧ after.document = before.document ∧
-    after.pageNumber = before.pageNumber
-
-instance frameDecidable (before after : Page) : Decidable (Frame before after) := by
-  unfold Frame
-  infer_instance
-
-theorem replaceAtom_preserves_frame (page post : Page) (atom : AtomId)
-    (before after : AtomRecord)
-    (accepted : replaceAtom page atom before after = .ok post) : Frame page post := by
-  unfold replaceAtom at accepted
-  dsimp only at accepted
-  split at accepted
-  · contradiction
-  · split at accepted
-    · contradiction
-    · cases accepted
-      exact ⟨rfl, rfl, rfl⟩
-
-structure PreparedPage (author : PrincipalRef) (operation : OperationId)
-    (before : Page) (command : Command) where
-  private mk ::
-  post : Page
-  beforeValid : before.Valid
-  postValid : post.Valid
-  framed : Frame before post
-  nonempty : command.actions ≠ []
-  computed : run author operation before command = .ok post
-
-def preparePage (author : PrincipalRef) (operation : OperationId)
-    (before : Page) (command : Command) :
-    Except Reject (PreparedPage author operation before command) :=
-  if beforeValid : before.Valid then
-    if nonempty : command.actions ≠ [] then
-      match computed : run author operation before command with
-      | .error reason => .error reason
-      | .ok post =>
-        if valid : post.Valid ∧ Frame before post then
-          .ok ⟨post, beforeValid, valid.1, valid.2, nonempty, computed⟩
-        else .error .invalidPost
-    else .error .emptyActions
-  else .error .invalidPage
-
-abbrev ContentCell := Materialized HyperdocumentContentPageMaterializer.materializer
-
-def patch (pre : ContentCell) (post : Page) :
-    Patch HyperdocumentContentPageMaterializer.schema Digest where
-  expectedPreRoot := pre.root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [⟨(), some post⟩]
-  resourceWrites := []
-
-theorem patch_applies_exactly (pre : ContentCell) (post : Page)
-    (validated : ValidatedPatch HyperdocumentContentPageMaterializer.materializer pre
-      (patch pre post)) :
-    validated.apply.logical = stateOfOption (some post) := by
-  have page : pageAt validated.apply.logical = some post := by
-    change (applyFieldWrites (patch pre post).fieldWrites pre.logical.fields) () = some post
-    simp [patch, applyFieldWrites, FieldStore.assign]
-    rfl
-  exact (state_ext validated.apply.logical).trans (congrArg stateOfOption page)
+/-! ## Preparation on the cell -/
 
 structure PreparedCell (author : PrincipalRef) (operation : OperationId)
-    (pre : ContentCell) (command : Command) where
+    (document : DocumentId) (pre : ContentCell) (command : Command) where
   private mk ::
-  before : Page
-  beforeExact : pageAt pre.logical = some before
-  post : Page
-  beforeValid : before.Valid
-  postValid : post.Valid
-  framed : Frame before post
+  progress : Progress
   nonempty : command.actions ≠ []
-  computed : run author operation before command = .ok post
-  validated : ValidatedPatch HyperdocumentContentPageMaterializer.materializer pre (patch pre post)
-  postExact : validated.apply.logical = stateOfOption (some post)
+  computed : run author operation document pre.logical command = .ok progress
+  validated : ValidatedPatch HyperdocumentCell.contentMaterializer pre pre.root progress.2
 
-def prepareCell (author : PrincipalRef) (operation : OperationId)
+def PreparedCell.post {author : PrincipalRef} {operation : OperationId} {document : DocumentId}
+    {pre : ContentCell} {command : Command}
+    (prepared : PreparedCell author operation document pre command) : ContentCell :=
+  prepared.validated.apply
+
+/-- The validated post is exactly the store the action run computed. -/
+theorem PreparedCell.post_exact {author : PrincipalRef} {operation : OperationId}
+    {document : DocumentId} {pre : ContentCell} {command : Command}
+    (prepared : PreparedCell author operation document pre command) :
+    prepared.post.logical = prepared.progress.1 :=
+  (run_executes author operation document pre.logical command _ prepared.computed).2
+
+def prepareCell (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (pre : ContentCell) (command : Command) :
-    Except Reject (PreparedCell author operation pre command) :=
-  match present : pageAt pre.logical with
-  | none => .error .missingPage
-  | some before => do
-    let prepared ← preparePage author operation before command
-    match validate HyperdocumentContentPageMaterializer.materializer pre (patch pre prepared.post) with
-    | .rejected _ => .error .invalidPatch
-    | .accepted validated =>
-      .ok ⟨before, present, prepared.post, prepared.beforeValid, prepared.postValid,
-        prepared.framed, prepared.nonempty, prepared.computed, validated,
-        patch_applies_exactly pre prepared.post validated⟩
+    Except Reject (PreparedCell author operation document pre command) :=
+  if nonempty : command.actions ≠ [] then
+    match computed : run author operation document pre.logical command with
+    | .error reason => .error reason
+    | .ok progress =>
+        match validate HyperdocumentCell.contentMaterializer pre pre.root progress.2 with
+        | .rejected _ => .error .invalidPatch
+        | .accepted validated => .ok ⟨progress, nonempty, computed, validated⟩
+  else .error .emptyActions
 
-/-- Birth contains no user-authored history; ordinary authorized commands add
-content afterward. This is exactly the canonical registry's content birth shape. -/
-def initialPage (domain : Digest) (target : Nat) : Page where
-  contentDomain := domain
-  document := ⟨⟨target⟩⟩
-  pageNumber := 0
-  slot0 := none
-  slot1 := none
-  slot2 := none
-  slot3 := none
+/-- Completeness: an accepted run always validates at the cell's own root, so
+`invalidPatch` is unreachable for commands the lowering accepts. -/
+theorem prepareCell_ok_of_run (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (pre : ContentCell) (command : Command) (progress : Progress)
+    (nonempty : command.actions ≠ [])
+    (computed : run author operation document pre.logical command = .ok progress) :
+    ∃ prepared, prepareCell author operation document pre command = .ok prepared := by
+  obtain ⟨validated, accepted⟩ := validate_accepts HyperdocumentCell.contentMaterializer pre
+    pre.root progress.2 rfl (run_executes author operation document _ command progress computed).1
+  unfold prepareCell
+  rw [dif_pos nonempty]
+  split
+  · rename_i reason other
+    rw [computed] at other
+    cases other
+  · rename_i result other
+    rw [computed] at other
+    cases other
+    rw [accepted]
+    exact ⟨_, rfl⟩
 
-theorem initialPage_valid (domain : Digest) (target : Nat) :
-    (initialPage domain target).Valid := by
-  simp [Page.Valid, Page.addresses, Page.entries, initialPage]
+theorem empty_command_rejected (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (pre : ContentCell) :
+    prepareCell author operation document pre ⟨[]⟩ = .error .emptyActions := by
+  simp [prepareCell]
+
+/-- Exact old-record mismatch refuses a write, even for an authorized caller. -/
+theorem replaceAtom_stale (document : DocumentId) (progress : Progress) (atom : AtomId)
+    (before after : AtomRecord)
+    (localBefore : before.document = document) (localAfter : after.document = document)
+    (missing : (show Option AtomRecord from progress.1 ⟨.atoms, atom⟩) ≠ some before) :
+    replaceAtom document progress atom before after = .error .staleAtom := by
+  simp [replaceAtom, localBefore, localAfter, missing]
 
 /-- Different payload bytes have different canonical encodings. Hash equality
 still needs the materializer's explicit pair-scoped collision premise. -/
-theorem atom_payload_encoding_distinct (atom : AtomId) (before after : AtomRecord)
+theorem atom_payload_encoding_distinct (before after : AtomRecord)
     (different : before.payload ≠ after.payload) :
-    entryStream.encode (.atom atom before) ≠ entryStream.encode (.atom atom after) := by
+    atomRecordStream.encode before ≠ atomRecordStream.encode after := by
   intro same
-  have equal : Entry.atom atom before = Entry.atom atom after := by
-    apply HyperdocumentContentPageMaterializer.lawfulCodec_encode_injective entryStream.toLawful
-    exact same
-  have records : before = after := by cases equal; rfl
-  exact different (congrArg AtomRecord.payload records)
+  have equal : before = after :=
+    Hyperdocument.lawfulCodec_encode_injective atomRecordStream.toLawful same
+  exact different (congrArg AtomRecord.payload equal)
 
-def payloadBytes : Entry → Nat
-  | .atom _ record => record.payload.length
-  | .element _ record => match record.body with
-      | .opaque _ payload => payload.length
+/-! ## Policy view -/
+
+def payloadBytesAt (store : ContentStore) : Store.Address Hyperdocument.layout → Nat
+  | ⟨.atoms, atom⟩ =>
+      match Hyperdocument.lookup store .atoms atom with
+      | some record => record.payload.length
+      | none => 0
+  | ⟨.elements, element⟩ =>
+      match Hyperdocument.lookup store .elements element with
+      | some ⟨_, _, .opaque _ payload, _, _, _⟩ => payload.length
       | _ => 0
   | _ => 0
 
-def contentPayloadBytes (page : Page) : Nat := (page.entries.map payloadBytes).sum
+def contentPayloadBytes (store : ContentStore) : Nat :=
+  store.support.sum (payloadBytesAt store)
 
 /-- Count the entire committed encoding, including typed references, authors,
 identifiers and framing. A large link cannot evade a content-size policy. -/
-def contentBytes (page : Page) : Nat :=
-  (stateCodec.encode (stateOfOption (some page))).length
+def contentBytes (store : ContentStore) : Nat :=
+  (HyperdocumentCell.contentMaterializer.codec.encode store).length
 
 def Action.tag : Action → Nat
   | .createDocument .. => 0
@@ -382,13 +465,13 @@ def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
 
 /-- Source-derived policy inputs count actual committed bytes; no content or
-identity is reduced to a scalar identifier. Full typed pages remain observable. -/
-def project (before after : Page) (command : Command) : List (String × Int) :=
+identity is reduced to a scalar identifier. -/
+def project (before after : ContentStore) (command : Command) : List (String × Int) :=
   [("content/bytes/before", contentBytes before),
    ("content/bytes/after", contentBytes after),
    ("content/bytes/delta", (contentBytes after : Int) - contentBytes before),
-   ("content/entries/before", before.entries.length),
-   ("content/entries/after", after.entries.length),
+   ("content/entries/before", before.support.card),
+   ("content/entries/after", after.support.card),
    ("content/operations", command.actions.length),
    ("content/payload-bytes/before", contentPayloadBytes before),
    ("content/payload-bytes/after", contentPayloadBytes after),
@@ -401,33 +484,17 @@ def project (before after : Page) (command : Command) : List (String × Int) :=
       | .editAtom edit => edit.tombstone
       | _ => false).length)]
 
-/-- Exact old-record mismatch refuses a write, even for an authorized caller. -/
-theorem replaceAtom_stale (page : Page) (atom : AtomId) (before after : AtomRecord)
-    (localBefore : before.document = page.document)
-    (localAfter : after.document = page.document)
-    (missing : ¬page.Contains (.atom atom before)) :
-    replaceAtom page atom before after = .error .staleAtom := by
-  simp [replaceAtom, localBefore, localAfter, missing]
-
-theorem empty_command_rejected (author : PrincipalRef) (operation : OperationId)
-    (before : Page) (valid : before.Valid) :
-    preparePage author operation before ⟨[]⟩ = .error .emptyActions := by
-  simp [preparePage, valid]
-
-theorem prepared_preserves_identity {author : PrincipalRef} {operation : OperationId}
-    {pre : ContentCell} {command : Command}
-    (prepared : PreparedCell author operation pre command) :
-    prepared.post.contentDomain = prepared.before.contentDomain ∧
-    prepared.post.document = prepared.before.document ∧
-    prepared.post.pageNumber = prepared.before.pageNumber := prepared.framed
-
 /-- info: 'Minidregg.Kernel.ContentResource.command_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms command_roundtrip
-/-- info: 'Minidregg.Kernel.ContentResource.patch_applies_exactly' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms patch_applies_exactly
+/-- info: 'Minidregg.Kernel.ContentResource.v1_command_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v1_command_refused
+/-- info: 'Minidregg.Kernel.ContentResource.run_executes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms run_executes
+/-- info: 'Minidregg.Kernel.ContentResource.PreparedCell.post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedCell.post_exact
+/-- info: 'Minidregg.Kernel.ContentResource.prepareCell_ok_of_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms prepareCell_ok_of_run
 /-- info: 'Minidregg.Kernel.ContentResource.atom_payload_encoding_distinct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms atom_payload_encoding_distinct
-/-- info: 'Minidregg.Kernel.ContentResource.prepared_preserves_identity' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms prepared_preserves_identity
 
 end Minidregg.Kernel.ContentResource
