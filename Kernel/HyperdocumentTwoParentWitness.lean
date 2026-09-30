@@ -620,8 +620,7 @@ noncomputable def mergeCapabilityAdmissible :
         HyperdocumentMerge.Declaration.toRequest] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := principal.selfNotRevoked
@@ -723,8 +722,7 @@ noncomputable def eventCapabilityAdmissible :
         HyperdocumentVersionEffects.Declaration.toRequest] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := principal.selfNotRevoked

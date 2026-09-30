@@ -52,6 +52,10 @@ def policyAddressEntry (policy : InitialPolicy) : Entry CredentialAuthorityState
 def policyEntries (policy : InitialPolicy) : List (Entry CredentialAuthorityState.layout) :=
   [policyEpochEntry policy, policyRevisionEntry policy, policyAddressEntry policy]
 
+/-- A born cell's room, recorded in the append-only `parent` plane. -/
+def parentEntry (row : Nat × Nat) : Entry CredentialAuthorityState.layout :=
+  ⟨⟨.parent, row.1⟩, row.2⟩
+
 def issueDeclaration (preRoot : Digest) (nullifier : Nat) (grant : AuthorityGrant) :
     IssueDeclaration grant.kind where
   capability := grant.capability.head
@@ -61,7 +65,8 @@ def issueDeclaration (preRoot : Digest) (nullifier : Nat) (grant : AuthorityGran
 def entries {registry : TypeRegistry Digest} (descriptor : Descriptor registry) :
     List (Entry CredentialAuthorityState.layout) :=
   descriptor.initialPolicies.flatMap policyEntries ++
-    descriptor.grants.map grantEntry ++ descriptor.grants.map grantRegistrationEntry
+    descriptor.grants.map grantEntry ++ descriptor.grants.map grantRegistrationEntry ++
+    descriptor.parentRows.map parentEntry
 
 /-- The batch patch: every entry a guarded assignment at the canonical pre-cell. -/
 def patch {registry : TypeRegistry Digest} {M : CellState.Materializer CredentialAuthorityState.layout Digest}
@@ -91,6 +96,8 @@ structure BatchEvidence {registry : TypeRegistry Digest}
   ancestryEmpty : ∀ grant ∈ descriptor.grants, grant.capability.ancestry = []
   issue : ∀ grant ∈ descriptor.grants,
     IssueEvidence pre (issueDeclaration pre.root descriptor.authorityNullifier grant)
+  /-- A born cell has no recorded parent yet: the plane is append-only. -/
+  parentsFresh : ∀ row ∈ descriptor.parentRows, pre.logical ⟨.parent, row.1⟩ = none
 
 /-- Every entry of an evidenced batch is assignable at the pre-cell: policy and
 grant records are RAM and each grant's key is not yet registered. -/
@@ -101,11 +108,14 @@ theorem BatchEvidence.entries_assignable {registry : TypeRegistry Digest}
     ∀ entry ∈ entries descriptor, Assignable pre.logical entry.1 := by
   intro entry member
   simp only [entries, List.mem_append, List.mem_flatMap, List.mem_map] at member
-  rcases member with (⟨policy, _, inPolicy⟩ | ⟨grant, _, rfl⟩) | ⟨grant, grantMember, rfl⟩
+  rcases member with ((⟨policy, _, inPolicy⟩ | ⟨grant, _, rfl⟩) | ⟨grant, grantMember, rfl⟩) |
+      ⟨row, rowMember, rfl⟩
   · simp only [policyEntries, List.mem_cons, List.not_mem_nil, or_false] at inPolicy
     rcases inPolicy with rfl | rfl | rfl <;> exact assignable_of_ram _ _ rfl
   · exact assignable_of_ram _ _ rfl
   · exact assignable_of_absent _ _ (evidence.issue grant grantMember).selfUnregistered
+  · exact assignable_of_absent _ _
+      (by simpa [parentEntry] using congrArg Option.isSome (evidence.parentsFresh row rowMember))
 
 /-- Satisfiable pole: an evidenced batch patch is valid at its own pre. -/
 theorem BatchEvidence.valid {registry : TypeRegistry Digest}
@@ -149,7 +159,7 @@ theorem BatchEvidence.installs_grant {registry : TypeRegistry Digest}
     (post pre descriptor evidence).logical (grantField grant) = some grant.capability := by
   rw [post_logical]
   exact setAll_member _ (entries descriptor) evidence.writes_distinct (grantEntry grant)
-      (by simp only [entries, List.mem_append, List.mem_map]; exact Or.inl (Or.inr ⟨grant, member, rfl⟩))
+      (by simp only [entries, List.mem_append, List.mem_map]; exact Or.inl (Or.inl (Or.inr ⟨grant, member, rfl⟩)))
 
 /-- **Birth registers.**  Each grant's own revocation key is in the post-cell's
 `registered` plane, allocated by the batch patch itself. -/
@@ -162,7 +172,24 @@ theorem BatchEvidence.registers_grant {registry : TypeRegistry Digest}
       some () := by
   rw [post_logical]
   exact setAll_member _ (entries descriptor) evidence.writes_distinct (grantRegistrationEntry grant)
-      (by simp only [entries, List.mem_append, List.mem_map]; exact Or.inr ⟨grant, member, rfl⟩)
+      (by simp only [entries, List.mem_append, List.mem_map]; exact Or.inl (Or.inr ⟨grant, member, rfl⟩))
+
+/-- **Birth records the room.**  Every item born in a room has its
+`cell ↦ room` row in the post-cell's `parent` plane, written by the same batch
+patch that installs the birth's grants. -/
+theorem BatchEvidence.records_parent {registry : TypeRegistry Digest}
+    {M : CellState.Materializer CredentialAuthorityState.layout Digest}
+    {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
+    (evidence : BatchEvidence pre descriptor)
+    {item : BirthItem registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) :
+    (post pre descriptor evidence).logical ⟨.parent, item.create.cellId⟩ = some room := by
+  rw [post_logical]
+  exact setAll_member _ (entries descriptor) evidence.writes_distinct
+    (parentEntry (item.create.cellId, room))
+    (by
+      simp only [entries, List.mem_append, List.mem_map]
+      exact Or.inr ⟨_, Descriptor.mem_parentRows member inRoom, rfl⟩)
 
 /-- Refuting pole: a birth whose grant key is already registered has no
 evidence; a capability identifier is registered once, ever. -/
@@ -191,19 +218,19 @@ theorem BatchEvidence.installs_policy {registry : TypeRegistry Digest}
       (policyEpochEntry policy)
       (by
         simp only [entries, List.mem_append]
-        exact Or.inl (Or.inl (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩)))
+        exact Or.inl (Or.inl (Or.inl (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩))))
   · rw [post_logical]
     exact setAll_member _ (entries descriptor) evidence.writes_distinct
       (policyRevisionEntry policy)
       (by
         simp only [entries, List.mem_append]
-        exact Or.inl (Or.inl (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩)))
+        exact Or.inl (Or.inl (Or.inl (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩))))
   · rw [post_logical]
     exact setAll_member _ (entries descriptor) evidence.writes_distinct
       (policyAddressEntry policy)
       (by
         simp only [entries, List.mem_append]
-        exact Or.inl (Or.inl (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩)))
+        exact Or.inl (Or.inl (Or.inl (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩))))
 
 theorem post_frame {registry : TypeRegistry Digest} {M : CellState.Materializer CredentialAuthorityState.layout Digest}
     (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry)
@@ -232,7 +259,8 @@ def Postcondition {registry : TypeRegistry Digest} (descriptor : Descriptor regi
         state ⟨.policyRevision, policy.policyId⟩ = some (0 : PolicyRevision) ∧
         state ⟨.policyAddress, (policy.policyId, 0)⟩ = some policy.address) ∧
     (∀ grant ∈ descriptor.grants,
-      state ⟨.registered, .capability grant.capability.head.id⟩ = some ())
+      state ⟨.registered, .capability grant.capability.head.id⟩ = some ()) ∧
+    (∀ row ∈ descriptor.parentRows, state ⟨.parent, row.1⟩ = some row.2)
 
 theorem BatchEvidence.postcondition {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.layout Digest}
@@ -241,7 +269,47 @@ theorem BatchEvidence.postcondition {registry : TypeRegistry Digest}
     Postcondition descriptor (post pre descriptor evidence).logical :=
   ⟨fun grant member => evidence.installs_grant grant member,
     fun policy member => evidence.installs_policy policy member,
-    fun grant member => evidence.registers_grant grant member⟩
+    fun grant member => evidence.registers_grant grant member,
+    fun row member => by
+      rw [post_logical]
+      exact setAll_member _ (entries descriptor) evidence.writes_distinct (parentEntry row)
+        (by
+          simp only [entries, List.mem_append, List.mem_map]
+          exact Or.inr ⟨row, member, rfl⟩)⟩
+
+/-- **`birth_parent_recorded`.** Whatever final state satisfies an accepted
+birth's postcondition holds the born cell's room in its `parent` plane. -/
+theorem birth_parent_recorded {registry : TypeRegistry Digest}
+    {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
+    (final : Postcondition descriptor state)
+    {item : BirthItem registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) :
+    state ⟨.parent, item.create.cellId⟩ = some room :=
+  final.2.2.2 _ (Descriptor.mem_parentRows member inRoom)
+
+/-- Refuting pole: a birth into a room cannot drop the room row from the final
+post. -/
+theorem no_final_parent_erasure {registry : TypeRegistry Digest}
+    {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
+    {item : BirthItem registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room)
+    (missing : state ⟨.parent, item.create.cellId⟩ ≠ some room) :
+    ¬Postcondition descriptor state :=
+  fun final => missing (birth_parent_recorded final member inRoom)
+
+/-- Refuting pole: a cell that already has a recorded parent cannot be born
+again into a room; the plane is append-only. -/
+theorem no_batch_of_reparented_cell {registry : TypeRegistry Digest}
+    {M : CellState.Materializer CredentialAuthorityState.layout Digest}
+    {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
+    {item : BirthItem registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room)
+    {old : Nat} (recorded : pre.logical ⟨.parent, item.create.cellId⟩ = some old) :
+    IsEmpty (BatchEvidence pre descriptor) :=
+  ⟨fun evidence => by
+    have fresh := evidence.parentsFresh _ (Descriptor.mem_parentRows member inRoom)
+    rw [recorded] at fresh
+    cases fresh⟩
 
 theorem no_final_grant_erasure {registry : TypeRegistry Digest}
     {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
@@ -254,7 +322,7 @@ theorem no_final_registration_erasure {registry : TypeRegistry Digest}
     {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
     {grant : AuthorityGrant} (member : grant ∈ descriptor.grants)
     (missing : state ⟨.registered, .capability grant.capability.head.id⟩ ≠ some ()) :
-    ¬Postcondition descriptor state := fun final => missing (final.2.2 grant member)
+    ¬Postcondition descriptor state := fun final => missing (final.2.2.1 grant member)
 
 theorem no_final_policy_erasure {registry : TypeRegistry Digest}
     {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
@@ -450,4 +518,12 @@ def accept {registry : TypeRegistry Digest} {M : CellState.Materializer Credenti
 /-- info: 'Minidregg.Theory.ResourceBirthAuthority.no_batch_of_registered_grant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.no_batch_of_registered_grant
 
+/-- info: 'Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.records_parent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.records_parent
+/-- info: 'Minidregg.Theory.ResourceBirthAuthority.birth_parent_recorded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.birth_parent_recorded
+/-- info: 'Minidregg.Theory.ResourceBirthAuthority.no_final_parent_erasure' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.no_final_parent_erasure
+/-- info: 'Minidregg.Theory.ResourceBirthAuthority.no_batch_of_reparented_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.no_batch_of_reparented_cell
 end Minidregg.Theory.ResourceBirthAuthority

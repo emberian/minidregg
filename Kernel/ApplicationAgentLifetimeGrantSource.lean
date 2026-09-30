@@ -228,7 +228,7 @@ def Ready.birth (_ready : Ready domain spec operation) :
     BirthItem CanonicalCellRegistry.registry :=
   ⟨⟨spec.grant.source.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
       bornCell ContentResource.initialStore⟩,
-    .object, spec.grant.approval.issuer⟩
+    .object, spec.grant.approval.issuer, none⟩
 
 def Ready.initializedCell (ready : Ready domain spec operation) :
     PackedCell CanonicalCellRegistry.registry := bornCell ready.page

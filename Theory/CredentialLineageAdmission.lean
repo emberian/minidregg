@@ -145,7 +145,8 @@ theorem delegationShape_iff_components {kind : ResourceKind}
     DelegationShape request child parent parentage ↔
       child.Attenuates parent parentage ∧ parent.holder = .subject request.subject ∧
       child.holder ≠ .bearer ∧ request.verb = delegateVerb kind ∧
-      child.scope.targets = .explicit {request.target} ∧
+      (child.scope.targets = .explicit {request.target} ∨
+        child.scope.targets = .under request.target.value) ∧
       parent.scope.Covers parentage request ∧
       parent.notBefore ≤ request.height ∧ request.height ≤ parent.notAfter ∧
       parent.policyId = request.policyId ∧ parent.policyEpoch = request.policyEpoch := by

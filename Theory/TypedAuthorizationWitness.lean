@@ -67,7 +67,7 @@ def authState : AuthState where
   policyEpoch := fun _ => 0
   policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
-  parent := fun _ => none
+  parent := Parentage.empty
 
 /-- One complete request, quoting the state's policy epoch exactly. -/
 def request : Request .object where
@@ -193,8 +193,7 @@ theorem capability_admissible : capability.Admissible authState request where
       cost := by decide }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := by simp [capability, authState]
@@ -287,9 +286,9 @@ theorem authorized_isEmpty_of_staleEpoch :
 
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_nonempty' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorized_nonempty
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_admissible' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_admissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capability_admissible
-/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_offTarget' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_offTarget' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_offTarget
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_not_admissible_expired' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capability_not_admissible_expired

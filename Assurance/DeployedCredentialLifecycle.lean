@@ -447,8 +447,8 @@ theorem child_admissible_for_use :
           cost := by simp [childCapability, childScope, useRequest, adminRequest] }
       validFrom := by simp [childCapability, useRequest, adminRequest]
       validUntil := by simp [childCapability, useRequest, adminRequest]
-      policyId := by simp [childCapability, rootCapability, useRequest, adminRequest]
-      policyEpoch := by
+      requestLaw := by
+        refine ⟨by simp [childCapability, rootCapability, useRequest, adminRequest], ?_⟩
         simpa [childCapability, rootCapability, useRequest, adminRequest] using
           attenuated_policy_epoch_two.symm
       policyCurrent := by

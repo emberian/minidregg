@@ -427,8 +427,7 @@ def capabilityAdmissibleCheck {kind : ResourceKind} (cap : Capability kind)
    scopeCoversCheck cap.scope state.parent request,
    decide (cap.notBefore ≤ request.height),
    decide (request.height ≤ cap.notAfter),
-   decide (cap.policyId = request.policyId),
-   decide (cap.policyEpoch = request.policyEpoch),
+   decide (cap.scope.targets.RequestLaw cap.policyId cap.policyEpoch request),
    decide (cap.policyEpoch = state.policyEpoch cap.policyId),
    decide (cap.issuerEpoch = state.issuerEpoch cap.issuer),
    decide (RevocationKey.capability cap.id ∉ state.revoked),
@@ -442,8 +441,7 @@ theorem Capability.admissible_iff_components {kind : ResourceKind}
       cap.scope.Covers state.parent request ∧
       cap.notBefore ≤ request.height ∧
       request.height ≤ cap.notAfter ∧
-      cap.policyId = request.policyId ∧
-      cap.policyEpoch = request.policyEpoch ∧
+      cap.scope.targets.RequestLaw cap.policyId cap.policyEpoch request ∧
       cap.policyEpoch = state.policyEpoch cap.policyId ∧
       cap.issuerEpoch = state.issuerEpoch cap.issuer ∧
       RevocationKey.capability cap.id ∉ state.revoked ∧
@@ -454,11 +452,11 @@ theorem Capability.admissible_iff_components {kind : ResourceKind}
   constructor
   · intro admitted
     exact ⟨admitted.holder, admitted.scope, admitted.validFrom,
-      admitted.validUntil, admitted.policyId, admitted.policyEpoch,
+      admitted.validUntil, admitted.requestLaw,
       admitted.policyCurrent, admitted.issuerCurrent,
       admitted.selfNotRevoked, admitted.ancestorNotRevoked,
       admitted.channelNotRevoked⟩
-  · rintro ⟨holder, scope, validFrom, validUntil, policyId, policyEpoch,
+  · rintro ⟨holder, scope, validFrom, validUntil, requestLaw,
       policyCurrent, issuerCurrent, selfNotRevoked,
       ancestorNotRevoked, channelNotRevoked⟩
     exact
@@ -466,8 +464,7 @@ theorem Capability.admissible_iff_components {kind : ResourceKind}
         scope := scope
         validFrom := validFrom
         validUntil := validUntil
-        policyId := policyId
-        policyEpoch := policyEpoch
+        requestLaw := requestLaw
         policyCurrent := policyCurrent
         issuerCurrent := issuerCurrent
         selfNotRevoked := selfNotRevoked

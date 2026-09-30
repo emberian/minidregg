@@ -56,7 +56,10 @@ structure DelegationShape {kind : ResourceKind} (request : Request kind)
   grantor : parent.holder = .subject request.subject
   recipient : child.holder ≠ .bearer
   delegate : request.verb = delegateVerb kind
-  target : child.scope.targets = .explicit {request.target}
+  /-- The child names exactly the requested cell, or — a room invite — is
+  `under` the requested cell. -/
+  target : child.scope.targets = .explicit {request.target} ∨
+    child.scope.targets = .under request.target.value
   parentScope : parent.scope.Covers parentage request
   validFrom : parent.notBefore ≤ request.height
   validUntil : request.height ≤ parent.notAfter
@@ -77,12 +80,20 @@ theorem DelegationShape.requires_delegate_verb {kind : ResourceKind}
     delegateVerb kind ∈ parent.scope.verbs := by
   simpa only [shape.delegate] using shape.parentScope.verb
 
+/-- A delegated child reaches nothing outside the requested cell's subtree:
+whatever it covers is the requested cell or a cell under it. -/
 theorem DelegationShape.no_other_target {kind : ResourceKind}
     {request : Request kind} {child parent : Capability kind} {parentage : Parentage}
     (shape : DelegationShape request child parent parentage)
     (target : ResourceId kind) (member : child.scope.targets.Covers parentage target) :
-    target = request.target := by
-  simpa only [shape.target, TargetSet.Covers, Finset.mem_singleton] using member
+    (TargetSet.under request.target.value : TargetSet kind).Covers parentage target := by
+  rcases shape.target with named | invite
+  · rw [named] at member
+    have same : target = request.target := Finset.mem_singleton.mp member
+    subst same
+    exact Parentage.Descends.refl _
+  · rw [invite] at member
+    exact member
 
 /-! ## 1. An exact canonical request word underneath every deployment digest -/
 

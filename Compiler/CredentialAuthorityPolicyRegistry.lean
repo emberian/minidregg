@@ -195,12 +195,14 @@ theorem capabilityCheck_eq_of_capability_reads_eq (left right : Snapshot)
     (domain : left.domain = right.domain)
     (same : ∀ readKind identifier, readCapability left.cell readKind identifier =
       readCapability right.cell readKind identifier)
+    (parents : ∀ cell, left.cell.logical ⟨.parent, cell⟩ = right.cell.logical ⟨.parent, cell⟩)
     {kind : ResourceKind} (capability : Capability kind) (commitment : Digest) :
     capabilityCheck left capability commitment =
       capabilityCheck right capability commitment := by
   unfold capabilityCheck
   rw [same kind capability.id, CredentialAuthorityDomain.Snapshot.authState_parent,
-    CredentialAuthorityDomain.Snapshot.authState_parent]
+    CredentialAuthorityDomain.Snapshot.authState_parent,
+    CredentialAuthorityState.parentageOf_congr parents]
   cases readCapability right.cell kind capability.id with
   | none => rfl
   | some stored =>

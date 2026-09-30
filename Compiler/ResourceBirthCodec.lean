@@ -127,9 +127,10 @@ def birthItemStream (registry : TypeRegistry Digest) :
     StreamCodec (BirthItem registry) :=
   StreamCodec.xmap
     (StreamCodec.product (createRequestStream registry)
-      (StreamCodec.product resourceKindStream subjectIdStream))
-    (fun item => (item.create, item.resourceKind, item.owner))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
+      (StreamCodec.product resourceKindStream
+        (StreamCodec.product subjectIdStream (StreamCodec.option StreamCodec.nat))))
+    (fun item => (item.create, item.resourceKind, item.owner, item.parent))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
     (by intro item; rfl)
 
 def authorityGrantStream : StreamCodec AuthorityGrant where
@@ -219,18 +220,25 @@ def descriptorStream (registry : TypeRegistry Digest) :
   StreamCodec.xmap (descriptorTupleStream registry)
     descriptorTuple descriptorOfTuple (by intro descriptor; rfl)
 
-def descriptorFrame : List UInt8 := [68,82,69,71,71,47,66,73,82,84,72,3]
+/-- `DREGG/BIRTH` + version. Version 4: every birth item carries its room
+(`parent : Option Nat`). A version-3 frame (items without a room) refuses to
+decode (`v3_descriptor_refused`); it is never read as a root birth. -/
+def descriptorFrame : List UInt8 := [68,82,69,71,71,47,66,73,82,84,72,4]
 
 def framedDescriptorCodec (registry : TypeRegistry Digest) :
     LawfulCodec (Descriptor registry) where
   encode descriptor := descriptorFrame ++ (descriptorStream registry).encode descriptor
   decode
-    | 68 :: 82 :: 69 :: 71 :: 71 :: 47 :: 66 :: 73 :: 82 :: 84 :: 72 :: 3 :: payload =>
+    | 68 :: 82 :: 69 :: 71 :: 71 :: 47 :: 66 :: 73 :: 82 :: 84 :: 72 :: 4 :: payload =>
         (descriptorStream registry).toLawful.decode payload
     | _ => none
   decode_encode := by
     intro descriptor
     simpa [descriptorFrame] using (descriptorStream registry).toLawful.decode_encode descriptor
+
+theorem v3_descriptor_refused (registry : TypeRegistry Digest) (payload : List UInt8) :
+    (framedDescriptorCodec registry).decode
+      ([68,82,69,71,71,47,66,73,82,84,72,3] ++ payload) = none := rfl
 
 def descriptorCodec (registry : TypeRegistry Digest) :
     LawfulCodec (Descriptor registry) := strictCodec (framedDescriptorCodec registry)
@@ -730,4 +738,6 @@ end DirectoryImage
 /-- info: 'Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.bytes_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.LifecycleSlot.bytes_exact
 
+/-- info: 'Minidregg.Compiler.ResourceBirthCodec.v3_descriptor_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.ResourceBirthCodec.v3_descriptor_refused
 end Minidregg.Compiler.ResourceBirthCodec

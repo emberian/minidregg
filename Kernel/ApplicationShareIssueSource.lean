@@ -185,7 +185,7 @@ def Ready.birth (_ready : Ready domain spec operation) :
     BirthItem CanonicalCellRegistry.registry :=
   ⟨⟨spec.ticket.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
       bornCell ContentResource.initialStore⟩,
-    .object, spec.issuer⟩
+    .object, spec.issuer, none⟩
 
 /-- The initialized physical cell is never a second birth item. It is the
 one source-derived final post chosen by the special issue intent after native

@@ -99,7 +99,7 @@ provenance; these are what the definitional unfolding used to give. -/
   rw [snapshot.authStateExact]; rfl
 
 theorem Snapshot.authState_parent (snapshot : Snapshot) :
-    snapshot.authState.parent = CredentialAuthorityState.noParents := by
+    snapshot.authState.parent = CredentialAuthorityState.parentageOf snapshot.cell.logical := by
   rw [snapshot.authStateExact]; rfl
 
 @[simp] theorem Snapshot.authState_roots (snapshot : Snapshot) :

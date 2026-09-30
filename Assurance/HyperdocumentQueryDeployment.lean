@@ -260,7 +260,7 @@ def authState : AuthState where
   -- Both positive reads select the initial revision of this closed authority fixture.
   policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
-  parent := fun _ => none
+  parent := Parentage.empty
 
 def issuer : IssuerId := ⟨91004⟩
 def subject : SubjectId := ⟨91005⟩
@@ -342,8 +342,7 @@ theorem capability_admissible : capability.Admissible authState request where
         QueryDeclaration.toRequest, envelope] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := by simp [authState]
@@ -502,8 +501,7 @@ theorem capability_admissible : capability.Admissible authState request where
         QueryDeclaration.toRequest, envelope] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := by simp [authState]

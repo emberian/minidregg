@@ -383,8 +383,7 @@ theorem namedCapabilityAdmissible :
         HyperdocumentOperations.Declaration.toRequest] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := principal.selfNotRevoked

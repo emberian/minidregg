@@ -336,6 +336,11 @@ structure BirthItem (registry : TypeRegistry Digest) where
   create : CreateRequest (CellId := Nat) registry
   resourceKind : ResourceKind
   owner : SubjectId
+  /-- The room the cell is born in (`--in R`), or `none` for a root cell. The
+  receiving controller requires the room to be a present cell, and the birth's
+  authority batch records `create.cellId ↦ room` in the append-only `parent`
+  plane, so `under R` covers the new cell from its first height. -/
+  parent : Option Nat
 
 /-- Full canonical capability content, not a grant bit or host permissions map.
 The authority adapter validates and installs these exact stored capabilities. -/
@@ -412,6 +417,18 @@ def Descriptor.createRequests {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) : List (CreateRequest (CellId := Nat) registry) :=
   descriptor.births.map BirthItem.create ++ descriptor.auxiliaryCreates
 
+/-- The parent rows a birth records: `(born cell, room)` for every item born
+in a room. -/
+def Descriptor.parentRows {registry : TypeRegistry Digest}
+    (descriptor : Descriptor registry) : List (Nat × Nat) :=
+  descriptor.births.filterMap fun item => item.parent.map fun room => (item.create.cellId, room)
+
+theorem Descriptor.mem_parentRows {registry : TypeRegistry Digest}
+    {descriptor : Descriptor registry} {item : BirthItem registry} {room : Nat}
+    (member : item ∈ descriptor.births) (inRoom : item.parent = some room) :
+    (item.create.cellId, room) ∈ descriptor.parentRows :=
+  List.mem_filterMap.mpr ⟨item, member, by simp [inRoom]⟩
+
 def Descriptor.registeredAccounts {registry : TypeRegistry Digest}
     (descriptor : Descriptor registry) : List CanonicalResourceKernel.AccountId :=
   descriptor.births.filterMap fun item =>
@@ -445,11 +462,17 @@ def Descriptor.FeeBound {registry : TypeRegistry Digest}
 
 /-- A resource capability governs the resource's actual kind and selects its
 target-derived initial policy. More detailed holder/issuer/role bounds remain
-source-owned factory-template checks. -/
+source-owned factory-template checks.
+
+The owner grant of a born cell names the cell alone (`explicit`) or the
+cell as a room (`under`, the cell and everything later born into it). The cell
+is fresh, so at birth both cover exactly the cell
+(`TypedAuthorization.Parentage.under_fresh_covers_only_self`). -/
 def AuthorityGrant.NativeForBirth {registry : TypeRegistry Digest}
     (grant : AuthorityGrant) (item : BirthItem registry) : Prop :=
   grant.kind = item.resourceKind ∧
-    grant.capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} ∧
+    (grant.capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} ∨
+      grant.capability.head.scope.targets = .under item.create.cellId) ∧
     grant.capability.head.policyId.value = item.create.cellId ∧
     grant.capability.head.policyEpoch = 0
 

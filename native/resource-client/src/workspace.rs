@@ -715,7 +715,14 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
         }
         "delegate" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
-            if obj.len() != 6
+            // Optional `"room": true`: a room invite, whose child is `under` the
+            // named resource instead of the resource alone.
+            let room_invite = match obj.get("room") {
+                None => false,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => return Err("delegate proposal room must be a boolean".into()),
+            };
+            if obj.len() != 6 + usize::from(obj.contains_key("room"))
                 || ["name", "recipient", "verbs", "maxCost"]
                     .iter()
                     .any(|field| !obj.contains_key(*field))
@@ -764,12 +771,25 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
             if member(&capability, "kind")? != kind || member(head, "id")? != parent_id {
                 return Err("signed capability head differs from selected parent reference".into());
             }
-            let targets = head
-                .get("targets")
-                .and_then(Value::as_array)
-                .ok_or("parent capability lacks targets")?;
-            if !targets.iter().any(|value| value.as_str() == Some(target)) {
-                return Err("parent capability does not cover named target".into());
+            // A scope is exactly one of `targets` (explicit) or `room` (`under R`).
+            // Whether a room scope covers the target depends on the parent chain
+            // in the authority cell; the Host decides that at submission.
+            match (head.get("targets"), head.get("room")) {
+                (Some(targets), None) => {
+                    let targets = targets
+                        .as_array()
+                        .ok_or("parent capability targets are not a list")?;
+                    if !targets.iter().any(|value| value.as_str() == Some(target)) {
+                        return Err("parent capability does not cover named target".into());
+                    }
+                }
+                (None, Some(room)) => {
+                    decimal(
+                        room.as_str().ok_or("parent capability room is not decimal")?,
+                        "parent capability room",
+                    )?;
+                }
+                _ => return Err("parent capability scope must be exactly one of targets or room".into()),
             }
             let parent_verbs = head
                 .get("verbs")
@@ -837,13 +857,18 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 .and_then(Value::as_str)
                 .ok_or("signed resource view lacks page root")?;
             field_decimal(target_root, "delegation target root")?;
-            let child = json!({"id":child_id,"root":member(head,"root")?,"parent":parent_id,
+            let mut child = json!({"id":child_id,"root":member(head,"root")?,"parent":parent_id,
                 "issuer":member(head,"issuer")?,"holder":{"type":"subject","subject":recipient},
                 "targets":[target],"verbs":selected_verbs,"maxCost":maximum,
                 "notBefore":child_before,"notAfter":parent_after,
                 "issuerEpoch":member(head,"issuerEpoch")?,"policyId":member(head,"policyId")?,
                 "policyEpoch":member(head,"policyEpoch")?,"ancestors":ancestors,
                 "channels":head.get("channels").ok_or("parent capability lacks channels")?});
+            if room_invite {
+                let scope = child.as_object_mut().ok_or("child capability is not an object")?;
+                scope.remove("targets");
+                scope.insert("room".into(), json!(target));
+            }
             delegation = Some(json!({"recipient":recipient,"kind":kind,"target":target,
                 "childCapability":child_id,"reservation":reservation.request_digest,
                 "domain":member(&policy,"domain")?,"name":member(&request,"name")?}));
@@ -1146,8 +1171,15 @@ fn create(
     name_value: &str,
     storage: &str,
     predicate_path: &Path,
+    room_name: Option<&str>,
 ) -> Result<()> {
     validate_name(name_value)?;
+    // `--in ROOM`: the new resource is born in the room a workspace reference
+    // names. The Host refuses a room that is not a present resource cell.
+    let room = match room_name {
+        Some(room_name) => Some(member(&reference(root, room_name)?, "target")?.to_string()),
+        None => None,
+    };
     if !matches!(storage, "content" | "declared") {
         return Err("supported resource storage is content or declared".into());
     }
@@ -1161,9 +1193,12 @@ fn create(
     let request_path = root
         .join("sources")
         .join(format!("create-{name_value}.request.json"));
-    let requested_core = json!({"type":"minidregg-workspace-create-request-v1",
+    let mut requested_core = json!({"type":"minidregg-workspace-create-request-v1",
         "name":name_value,"storage":storage,"predicate":predicate,"context":context,
         "subject":member(workspace,"subject")?});
+    if let Some(room) = &room {
+        requested_core["room"] = json!(room);
+    }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
         let nonce = member(&saved, "nonce")?;
@@ -1208,7 +1243,7 @@ fn create(
         .join("sources")
         .join(format!("create-{name_value}.json"));
     let nonce = member(&request, "nonce")?;
-    let expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+    let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
                 "resources":[{"kind":"object","storage":storage,
@@ -1219,6 +1254,9 @@ fn create(
                 "sourceCapabilities":context["sourceCapabilities"],
                 "funding":context["funding"],"feePayer":context["feePayer"]},
             "grants":context["grants"]});
+    if let Some(room) = &room {
+        expected_source["birth"]["resources"][0]["room"] = json!(room);
+    }
     let source = if source_path.exists() {
         let saved = bounded_json(&source_path)?;
         if saved != expected_source {
@@ -1447,8 +1485,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = os_string(args.required("name")?, "resource name")?;
             let storage = os_string(args.required("storage")?, "storage")?;
             let predicate = path(args.required("predicate")?);
+            let room = match args.optional("in") {
+                Some(value) => Some(os_string(value, "room name")?),
+                None => None,
+            };
             args.finish()?;
-            create(&root, &workspace, &name, &storage, &predicate)
+            create(&root, &workspace, &name, &storage, &predicate, room.as_deref())
         }
         "recover" => {
             let attempt = path(args.required("attempt")?);

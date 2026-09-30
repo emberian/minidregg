@@ -58,6 +58,10 @@ inductive AuthorityPlane where
   registered (and may later revoke).  This replaces the former "stored
   `false` in the revocation plane" encoding of "registered, not revoked". -/
   | registered
+  /-- Append-only room parentage: `cell ↦ room` records the room a cell was
+  born in. Written once, by the birth that creates `cell`, and never rewritten
+  or removed, so `under R` coverage only grows. -/
+  | parent
   deriving DecidableEq, Repr
 
 /-- The key of each plane: the identifiers that name one record in it. -/
@@ -71,6 +75,7 @@ def AuthorityPlane.Key : AuthorityPlane → Type
   | .subjectKey => SubjectId × Epoch
   | .revoked => RevocationKey
   | .registered => RevocationKey
+  | .parent => Nat
 
 instance AuthorityPlane.keyDecEq : (plane : AuthorityPlane) → DecidableEq plane.Key
   | .capability _ => inferInstanceAs (DecidableEq CapabilityId)
@@ -82,6 +87,7 @@ instance AuthorityPlane.keyDecEq : (plane : AuthorityPlane) → DecidableEq plan
   | .subjectKey => inferInstanceAs (DecidableEq (SubjectId × Epoch))
   | .revoked => inferInstanceAs (DecidableEq RevocationKey)
   | .registered => inferInstanceAs (DecidableEq RevocationKey)
+  | .parent => inferInstanceAs (DecidableEq Nat)
 
 /-- A stored lineage is data: the head capability followed by its parent,
 grandparent, and so on.  Validity is a separate Lean proposition below. -/
@@ -108,6 +114,7 @@ def AuthorityPlane.Value : AuthorityPlane → Type
   | .subjectKey => CredentialSigningKey.KeyRecord
   | .revoked => Unit
   | .registered => Unit
+  | .parent => Nat
 
 instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq plane.Value
   | .capability kind => inferInstanceAs (DecidableEq (StoredCapability kind))
@@ -119,6 +126,7 @@ instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq pl
   | .subjectKey => inferInstanceAs (DecidableEq CredentialSigningKey.KeyRecord)
   | .revoked => inferInstanceAs (DecidableEq Unit)
   | .registered => inferInstanceAs (DecidableEq Unit)
+  | .parent => inferInstanceAs (DecidableEq Nat)
 
 /-- The mutation discipline of each plane.  The revocation and registration
 planes are presence-only and append-only: once present, a key stays present
@@ -129,6 +137,7 @@ Every other plane is RAM, guarded by its exact prior value. -/
 def AuthorityPlane.discipline : AuthorityPlane → Discipline
   | .revoked => .appendOnly
   | .registered => .appendOnly
+  | .parent => .appendOnly
   | _ => .ram
 
 /-- The authority layout. -/
@@ -347,10 +356,50 @@ dependent finitely-supported map, so no deployment universe, key list or
 caller-selected filter participates.  A key the plane holds is in the set, and
 nothing else is. -/
 
-/-- The authority cell records no room parents; the system cell's parent
-projection is not threaded into this projection yet. With no parent recorded,
-`TargetSet.under` covers nothing and explicit-under-room narrowing is refused. -/
-def noParents : Parentage := fun _ => none
+/-- No recorded parents: every `under R` covers only `R` itself. -/
+def noParents : Parentage := Parentage.empty
+
+/-- The cell an address contributes to the parent plane's support. -/
+def parentKeyAt : Address layout → Finset Nat
+  | ⟨.parent, cell⟩ => {cell}
+  | _ => ∅
+
+/-- The cells with a recorded parent: exactly the `parent` plane's support. -/
+def parentKeys (logical : Store layout) : Finset Nat :=
+  logical.support.biUnion parentKeyAt
+
+theorem mem_parentKeys_iff (logical : Store layout) (cell : Nat) :
+    cell ∈ parentKeys logical ↔ (logical ⟨.parent, cell⟩).isSome = true := by
+  constructor
+  · intro member
+    obtain ⟨⟨plane, stored⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
+    cases plane <;> simp [parentKeyAt] at contributes
+    have same : cell = stored := Finset.mem_singleton.mp contributes
+    subst same
+    exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
+  · intro present
+    exact Finset.mem_biUnion.mpr ⟨⟨.parent, cell⟩,
+      DFinsupp.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
+      Finset.mem_singleton_self cell⟩
+
+/-- The parent projection of one authority store: its `parent` plane, with
+the plane's own finite support. -/
+def parentageOf (logical : Store layout) : Parentage where
+  parentOf cell := logical ⟨.parent, cell⟩
+  support := parentKeys logical
+  supported cell recorded :=
+    (mem_parentKeys_iff logical cell).mpr (Option.isSome_iff_ne_none.mpr recorded)
+
+/-- The parent projection reads the `parent` plane and nothing else. -/
+theorem parentageOf_congr {left right : Store layout}
+    (same : ∀ cell, left ⟨.parent, cell⟩ = right ⟨.parent, cell⟩) :
+    parentageOf left = parentageOf right := by
+  unfold parentageOf
+  congr 1
+  · funext cell
+    exact same cell
+  · ext cell
+    rw [mem_parentKeys_iff, mem_parentKeys_iff, same]
 
 /-- The key an address contributes to the revoked set: its own key on the
 `revoked` plane, nothing on any other plane. -/
@@ -390,7 +439,7 @@ def authState {M : Materializer} (pre : Cell M) : AuthState where
   policyEpoch := policyEpochAt pre
   policyRevision := policyRevisionAt pre
   subjectKeyEpoch := subjectKeyEpochAt pre
-  parent := noParents
+  parent := parentageOf pre.logical
 
 @[simp] theorem authState_capabilityRoot {M : Materializer} (pre : Cell M) :
     (authState pre).capabilityRoot = pre.root := rfl
@@ -666,4 +715,8 @@ theorem keyStanding_revoked_permanent {M N : Materializer} (pre : Cell M) (post 
 #guard_msgs (whitespace := lax) in #print axioms keyStanding_subjectKey_frame
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.keyStanding_revoked_permanent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms keyStanding_revoked_permanent
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.parentageOf_congr' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.parentageOf_congr
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_parentKeys_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.mem_parentKeys_iff
 end Minidregg.Theory.CredentialAuthorityState
