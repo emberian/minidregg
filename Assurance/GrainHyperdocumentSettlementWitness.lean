@@ -5,8 +5,8 @@ The generic grain boundary is useful only if an accepted deployed-schema turn
 can actually cross it.  This module reuses the concrete genesis-to-link
 Hyperdocument witness: its accepted link effect becomes the sole incidence of
 a `TypedCellHyperedge`, its verified causal link node becomes the proposal
-branch, its current credential admission is retained, and its accepted sparse
-event-log post supplies the focused sparse plane.
+branch, its current credential admission is retained, and its accepted event-log
+post supplies the focused sparse plane.
 
 The receipt uses the finite scoped-field adapter.  Its sixteen binding cells
 are a deterministic projection of the accepted settlement, exact request,
@@ -40,7 +40,7 @@ noncomputable section
 
 /-! ## The accepted Hyperdocument effect as one typed incidence -/
 
-abbrev S := Hyperdocument.cellSchema
+abbrev S := Hyperdocument.layout
 abbrev M := Genesis.documentMaterializer
 abbrev Portal := Genesis.permissivePortal
 abbrev Incidence := Unit
@@ -52,7 +52,7 @@ def projection : AuthorizationProjection S where
 /-- No authorization, declaration, outcome, patch, or disclosure is rebuilt:
 the leg retains the already accepted concrete `.link` operation. -/
 noncomputable def linkLeg :
-    Leg (S := S) (M := M) Portal
+    Leg (L := S) (M := M) Portal
       (projection.project genesisPost.logical) genesisPost where
   Nullifier := Nat
   family := HyperdocumentOperations.family config genesisPost
@@ -67,10 +67,10 @@ noncomputable def declaration : Declaration S M Portal projection Incidence wher
   pre := genesisPost
   apex := linkAccepted.accepted.prepared.post.root
   legs := fun _ => linkLeg
-  composition := { fieldMode := .canonical, order := [()] }
+  composition := { mode := .canonical, order := [()] }
 
 def law : ResourceLaw S M Portal Unit Int where
-  stateDelta := fun _ _ _ _ _ => 0
+  stateDelta := fun _ _ _ _ => 0
 
 theorem shapeValid : declaration.ShapeValid where
   orderComplete := by
@@ -80,38 +80,34 @@ theorem shapeValid : declaration.ShapeValid where
       cases incidence
       change () ∈ [()]
       decide
-  resourcesDisjoint := by
-    intro left right different
-    exact absurd (Subsingleton.elim left right) different
-  fieldsValid := trivial
+  modeValid := trivial
 
-theorem jointPatchAccepted :
-    Nonempty (CellState.ValidatedPatch M declaration.pre
-      declaration.jointPatch) := by
-  generalize exactOutcome : CellState.validate M declaration.pre
-    declaration.jointPatch = outcome
-  cases outcome with
-  | accepted validated => exact ⟨validated⟩
-  | rejected reason =>
-      unfold CellState.validate at exactOutcome
-      rw [dif_pos (show declaration.jointPatch.expectedPreRoot =
-        declaration.pre.root from rfl)] at exactOutcome
-      rw [dif_pos (show declaration.jointPatch.fieldFootprint =
-        declaration.jointPatch.namedFields from rfl)] at exactOutcome
-      rw [dif_pos (show declaration.jointPatch.resourceFootprint =
-        declaration.jointPatch.namedResources from rfl)] at exactOutcome
-      cases exactOutcome
+/-- The one-leg joint patch is exactly the accepted link patch. -/
+theorem jointPatch_exact : declaration.jointPatch = linkLeg.patch := by
+  simp [Declaration.jointPatch, Declaration.legPatch, declaration]
 
-noncomputable def jointValidated :
-    CellState.ValidatedPatch M declaration.pre declaration.jointPatch :=
-  Classical.choice jointPatchAccepted
+/-- The joint patch validates at the common pre-root: it is the accepted link
+patch, which the link's own validation already found valid there. -/
+theorem jointValidated :
+    CellState.ValidatedPatch M declaration.pre declaration.pre.root declaration.jointPatch :=
+  (CellState.validate_accepts M declaration.pre declaration.pre.root declaration.jointPatch rfl
+    (by rw [jointPatch_exact]; exact linkLeg.patch_valid)).elim fun validated _ => validated
 
 theorem jointPostExact :
     jointValidated.apply = linkAccepted.accepted.prepared.post := by
   apply CellState.Materialized.ext
+  rw [CellState.ValidatedPatch.apply_logical, jointPatch_exact]
   rfl
 
-/-- A real `TypedCellHyperedge.Commit` over the deployed Hyperdocument schema. -/
+/-- The accepted link patch writes the link's address. -/
+theorem linkFieldWritten :
+    (⟨.links, linkId⟩ : Hyperdocument.Address) ∈ Store.Patch.writeFootprint linkLeg.patch := by
+  simp [Leg.patch, linkLeg, HyperdocumentOperations.family,
+    HyperdocumentOperations.Declaration.patch, HyperdocumentOperations.Action.ops,
+    HyperdocumentOperations.linkWrites, Store.Patch.writeFootprint,
+    HyperdocumentOperations.guardedSet_writeAddress, linkDeclaration, linkAction, linkPayload]
+
+/-- A real `TypedCellHyperedge.Commit` over the deployed Hyperdocument layout. -/
 noncomputable def commit : Commit law declaration where
   shape := shapeValid
   validated := jointValidated
@@ -119,11 +115,11 @@ noncomputable def commit : Commit law declaration where
     change jointValidated.apply.root =
       linkAccepted.accepted.prepared.post.root
     exact congrArg CellState.Materialized.root jointPostExact
-  fieldsPreserved := by
-    intro incidence field _present
+  outcomesPreserved := by
+    intro incidence address _present
     cases incidence
-    change jointValidated.apply.logical.fields field =
-      linkAccepted.accepted.prepared.post.logical.fields field
+    change jointValidated.apply.logical address =
+      linkAccepted.accepted.prepared.post.logical address
     rw [jointPostExact]
   postconditions := by
     intro incidence
@@ -184,20 +180,18 @@ def proposalBranch : BranchHistory base where
   simp [history_exact]
 
 abbrev SparseLayout := HyperdocumentEventLog.Sparse.layout
-abbrev SparseMaterializer := eventRepresentation.sparseMaterializer
+abbrev SparseMaterializer := eventMaterializer
 
-def sparseState : Unit ->
-    Minidregg.Kernel.SparseAuthenticatedState.Materialized SparseMaterializer :=
-  fun _ => eventAccepted.sparse.post
+def sparseState : Unit -> CellState.Materialized SparseMaterializer :=
+  fun _ => eventAccepted.accepted.prepared.post
 
 def focus : StateFocus S SparseLayout SparseMaterializer Unit sparseState where
-  fields := declaration.jointPatch.fieldFootprint
-  resources := declaration.jointPatch.resourceFootprint
+  addresses := Store.Patch.writeFootprint declaration.jointPatch
   sparsePlanes := {()}
 
 /-- A built `FocusCut`: exact current content root, exact accepted proposal
 effect, exact finite typed footprints, and an accepted sparse event-log plane. -/
-def cut : FocusCut (L := SparseLayout)
+def cut : FocusCut (SL := SparseLayout)
     (sparseMaterializer := SparseMaterializer) (Plane := Unit)
     (sparseState := sparseState) base declaration where
   canonical := canonicalBranch
@@ -208,8 +202,7 @@ def cut : FocusCut (L := SparseLayout)
     intro incidence
     cases incidence
     rfl
-  fieldsExact := rfl
-  resourcesExact := rfl
+  addressesExact := rfl
 
 /-- Successful settlement retains the typed commit and the exact current proof
 authority of the already accepted link request. -/
@@ -232,19 +225,9 @@ def currentCapability :
   linkCapabilityAdmissible
 
 @[simp] theorem focused_link_field_present :
-    (⟨.links, linkId⟩ : Hyperdocument.Address) ∈ cut.focus.fields := by
-  rw [cut.fieldsExact]
-  change (⟨.links, linkId⟩ : Hyperdocument.Address) ∈
-    (linkDeclaration.patch config).fieldFootprint
-  simp [HyperdocumentOperations.Declaration.patch,
-    HyperdocumentOperations.Declaration.fieldWrites,
-    HyperdocumentOperations.Declaration.packedWrites,
-    HyperdocumentOperations.Action.packedWrites,
-    HyperdocumentOperations.linkWrites,
-    HyperdocumentOperations.PackedWrite.toFieldWrite,
-    HyperdocumentOperations.PackedWrite.address,
-    linkDeclaration, linkAction, linkPayload]
-  exact Finset.mem_singleton_self _
+    (⟨.links, linkId⟩ : Hyperdocument.Address) ∈ cut.focus.addresses := by
+  rw [cut.addressesExact, jointPatch_exact]
+  exact linkFieldWritten
 
 @[simp] theorem accepted_post_contains_link :
     lookup settlement.post.logical .links linkId =
@@ -256,7 +239,7 @@ def currentCapability :
   exact link_post_contains_forward
 
 @[simp] theorem focused_sparse_plane_exact :
-    cut.focus.sparseRootAt () = eventAccepted.sparse.post.root :=
+    cut.focus.sparseRootAt () = eventAccepted.accepted.prepared.post.root :=
   rfl
 
 /-! ## Finite receipt, with a derived header -/
@@ -285,8 +268,8 @@ def headerCells
   | 11 => linkNode.entryId.value
   | 12 => linkNode.preimage.historyDomain.value
   | 13 => cut.focus.sparseRootAt () |>.value
-  | 14 => declaration.jointPatch.fieldFootprint.card
-  | _ => declaration.jointPatch.resourceFootprint.card
+  | 14 => (Store.Patch.writeFootprint declaration.jointPatch).card
+  | _ => (Store.Patch.allocationFootprint declaration.jointPatch).card
 
 noncomputable def receipt :
     ScopedCanonicalReceipt settlement scalarizer headerCells :=
@@ -331,7 +314,7 @@ theorem staleBase_not_pre : staleBase.stateRoot ≠ declaration.pre.root := by
 /-- A caller cannot present the empty stale branch as the current canonical
 head of this exact declaration. -/
 theorem stale_canonical_rejected :
-    ¬ ∃ staleCut : FocusCut (L := SparseLayout)
+    ¬ ∃ staleCut : FocusCut (SL := SparseLayout)
         (sparseMaterializer := SparseMaterializer) (Plane := Unit)
         (sparseState := sparseState) staleBase declaration,
       staleCut.canonical = staleCanonicalBranch := by
@@ -354,29 +337,19 @@ noncomputable def conflictingDeclaration :
   pre := genesisPost
   apex := linkAccepted.accepted.prepared.post.root
   legs := fun _ => linkLeg
-  composition := { fieldMode := .disjoint, order := [false, true] }
+  composition := { mode := .disjoint, order := [false, true] }
 
 def conflictingLaw : ResourceLaw S M Portal Unit Int where
-  stateDelta := fun _ _ _ _ _ => 0
+  stateDelta := fun _ _ _ _ => 0
 
 theorem linkFieldInFootprint (side : Bool) :
     (⟨.links, linkId⟩ : Hyperdocument.Address) ∈
-      (conflictingDeclaration.legPatch side).fieldFootprint := by
-  change (⟨.links, linkId⟩ : Hyperdocument.Address) ∈
-    (linkDeclaration.patch config).fieldFootprint
-  simp [HyperdocumentOperations.Declaration.patch,
-    HyperdocumentOperations.Declaration.fieldWrites,
-    HyperdocumentOperations.Declaration.packedWrites,
-    HyperdocumentOperations.Action.packedWrites,
-    HyperdocumentOperations.linkWrites,
-    HyperdocumentOperations.PackedWrite.toFieldWrite,
-    HyperdocumentOperations.PackedWrite.address,
-    linkDeclaration, linkAction, linkPayload]
-  exact Finset.mem_singleton_self _
+      Store.Patch.writeFootprint (conflictingDeclaration.legPatch side) :=
+  linkFieldWritten
 
 def duplicateWriteConflict :
     MergeConflict conflictingDeclaration false true :=
-  .field rfl (⟨.links, linkId⟩ : Hyperdocument.Address)
+  .address rfl (⟨.links, linkId⟩ : Hyperdocument.Address)
     (linkFieldInFootprint false) (linkFieldInFootprint true)
 
 /-- The colliding declaration has no typed commit: the conflict is a real
