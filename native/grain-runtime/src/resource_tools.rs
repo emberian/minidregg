@@ -392,16 +392,16 @@ pub(super) fn plan_content_birth(
         .ok_or("signed tool challenge height absent")?;
     crate::decimal(height, "signed tool challenge height")?;
     if parent_view.get("height").and_then(Value::as_str) != Some(height)
-        || parent_view.get("imageBoundary").and_then(Value::as_str)
-            != tool_view.get("imageBoundary").and_then(Value::as_str)
+        || parent_view.get("worldRoot").and_then(Value::as_str)
+            != tool_view.get("worldRoot").and_then(Value::as_str)
     {
         return Err("tool and parent observations have different signed height or image".into());
     }
-    let image_boundary = tool_view
-        .get("imageBoundary")
+    let world_root = tool_view
+        .get("worldRoot")
         .and_then(Value::as_str)
-        .ok_or("signed tool challenge imageBoundary absent")?;
-    crate::decimal(image_boundary, "signed tool challenge imageBoundary")?;
+        .ok_or("signed tool challenge worldRoot absent")?;
+    crate::decimal(world_root, "signed tool challenge worldRoot")?;
     let born = BornResource {
         name: format!("{}-{ordinal}", family.name),
         kind: "object".into(),
@@ -631,7 +631,7 @@ pub(super) fn read_resource_with(
     let expected_content = if read.fn_inbox_summary {
         view.get("entries").is_some_and(Value::is_array)
     } else {
-        view.get("page").is_some_and(Value::is_object)
+        view.get("cell").is_some_and(Value::is_object)
     };
     if view.get("type").and_then(Value::as_str) != Some(expected_type) || !expected_content {
         return Err("native resource query returned the wrong view shape".into());
@@ -782,7 +782,7 @@ mod tests {
         };
         let peer = |root: &str| {
             json!({"authorityRoot":"123","targetRoot":root,"height":"20",
-            "imageBoundary":"456",
+            "worldRoot":"456",
             "grain":{"generation":"1","status":"3","remaining":"97","reserved":"3"}})
         };
         let (intent, born) =
@@ -824,7 +824,7 @@ mod tests {
             plan_content_birth(&family, &tool, "7001", 50, 2, &peer("111"), &stale_parent).is_err()
         );
         stale_parent["height"] = json!("20");
-        stale_parent["imageBoundary"] = json!("457");
+        stale_parent["worldRoot"] = json!("457");
         assert!(
             plan_content_birth(&family, &tool, "7001", 50, 2, &peer("111"), &stale_parent).is_err()
         );

@@ -35,7 +35,7 @@ const MAX_AUTHOR_JSON: u64 = 22 * 1024 * 1024;
 const REPORT_BOUND: usize = 12_102_759;
 const PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-LAUNCH-COMPLETION-OPERATOR-PLAN/v1";
 const INGRESS_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v2";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v2";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v3";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -256,7 +256,7 @@ fn receipt(value: &Value) -> io::Result<ExactReceipt> {
         text(value, "transactionId")?,
         text(value, "eventId")?,
         text(value, "acceptedCount")?,
-        text(value, "imageBoundary")?,
+        text(value, "worldRoot")?,
     )
 }
 
@@ -390,13 +390,13 @@ fn inspect_original(
             transaction_id: begin_receipt.transaction_id(),
             event_id: begin_receipt.event_id(),
             accepted_count: begin_receipt.accepted_count(),
-            image_boundary: begin_receipt.image_boundary(),
+            world_root: begin_receipt.world_root(),
         },
         ReceiptFields {
             transaction_id: claim_receipt.transaction_id(),
             event_id: claim_receipt.event_id(),
             accepted_count: claim_receipt.accepted_count(),
-            image_boundary: claim_receipt.image_boundary(),
+            world_root: claim_receipt.world_root(),
         },
     )?;
     target.check_marker(claim_dir)?;
@@ -896,7 +896,7 @@ fn assemble_completion(
         "currentAuthorityRoot",
         "currentAppRoot",
         "currentPackageRoot",
-        "imageBoundary",
+        "worldRoot",
         "height",
     ] {
         if !decimal(text(&view, name)?) {
@@ -1029,12 +1029,12 @@ fn same_receipt(left: &ExactReceipt, right: &ExactReceipt) -> bool {
     left.transaction_id() == right.transaction_id()
         && left.event_id() == right.event_id()
         && left.accepted_count() == right.accepted_count()
-        && left.image_boundary() == right.image_boundary()
+        && left.world_root() == right.world_root()
 }
 
 fn receipt_json(value: &ExactReceipt) -> Value {
     json!({"transactionId":value.transaction_id(), "eventId":value.event_id(),
-        "acceptedCount":value.accepted_count(), "imageBoundary":value.image_boundary()})
+        "acceptedCount":value.accepted_count(), "worldRoot":value.world_root()})
 }
 
 /// The first definite op38 or recovered op39 receipt becomes the durable

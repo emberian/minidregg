@@ -328,7 +328,7 @@ mod tests {
             transaction_id: "6".into(),
             event_id: "7".into(),
             accepted_count: "8".into(),
-            image_boundary: "9".into(),
+            world_root: "9".into(),
         };
         let claim = CommittedLaunchClaim {
             committed: b"committed".to_vec(),
@@ -348,7 +348,7 @@ mod tests {
             transaction_id: "10".into(),
             event_id: "11".into(),
             accepted_count: "12".into(),
-            image_boundary: "13".into(),
+            world_root: "13".into(),
         };
         let observation = json!({
             "nonce":"1", "unit":hex(b"mini-spk-a5-g4.service"),

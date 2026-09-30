@@ -277,7 +277,7 @@ pub(crate) struct SourceReceiptPin {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 impl SourceReceiptPin {
@@ -286,7 +286,7 @@ impl SourceReceiptPin {
             &self.transaction_id,
             &self.event_id,
             &self.accepted_count,
-            &self.image_boundary,
+            &self.world_root,
         ]
         .iter()
         .all(|value| canonical_native_nat(value))
@@ -1857,7 +1857,7 @@ mod tests {
             "bodyHex":"3c68313e4769745765623c2f68313e",
             "responseSha256":"aa".repeat(32),
             "committedReceipt":{"transactionId":"1","eventId":"2",
-                "acceptedCount":"3","imageBoundary":"4"}});
+                "acceptedCount":"3","worldRoot":"4"}});
         let shown = present_lifetime_http(&raw).unwrap();
         assert_eq!(shown["bodyText"], "<h1>GitWeb</h1>");
         assert_eq!(shown["bodyBytes"], 15);
@@ -2182,7 +2182,7 @@ mod tests {
             transaction_id: "123456789012345678901234567890".into(),
             event_id: "234567890123456789012345678901".into(),
             accepted_count: count.into(),
-            image_boundary: "345678901234567890123456789012".into(),
+            world_root: "345678901234567890123456789012".into(),
         };
         LifetimeRoutePin {
             name: "shared-app".into(),
@@ -2392,7 +2392,7 @@ mod tests {
         changed["http"]["headers"][0]["generated"] = json!(true);
         assert!(verify(&changed, &plan).is_err());
         let mut changed = plan.clone();
-        changed["bindings"]["grantIssueReceipt"]["imageBoundary"] = json!("1");
+        changed["bindings"]["grantIssueReceipt"]["worldRoot"] = json!("1");
         assert!(verify(&source, &changed).is_err());
         let mut changed = plan.clone();
         changed["context"]["parentGeneration"] = json!("8");
@@ -2425,7 +2425,7 @@ mod tests {
             }
         });
         let receipt = json!({"transactionId":"71","eventId":"72",
-            "acceptedCount":"15","imageBoundary":"73"});
+            "acceptedCount":"15","worldRoot":"73"});
         let mut paid = reserve.clone();
         paid["type"] = json!("application-agent-lifetime-paid-plan-v3");
         paid["reserveIndex"] = json!("14");

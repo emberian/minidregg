@@ -84,7 +84,7 @@ for route in bob-web hermes-a hermes-b; do
   # retained parent and target reads; Mini checks again when preparing/submitting.
   jq -e --slurpfile parent "$EVIDENCE/$route-parent/challenge.json" '
     .domain == $parent[0].domain and .semantics == $parent[0].semantics and
-    .imageBoundary == $parent[0].imageBoundary and
+    .worldRoot == $parent[0].worldRoot and
     .signing[0].authorityRoot == $parent[0].signing[0].authorityRoot' \
     "$EVIDENCE/$route-owner/challenge.json" >/dev/null || fail "current authority changed; retain attempt"
   jq -n --slurpfile cap "$EVIDENCE/$route-parent/head.json" \
@@ -95,7 +95,7 @@ for route in bob-web hermes-a hermes-b; do
     $cap[0].head as $p | $current[0] as $c |
     {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
-        expectedTargetRoot:$resource[0].page.root,parentId:$p.id,target:"8401",
+        expectedTargetRoot:$resource[0].cell.root,parentId:$p.id,target:"8401",
         expectedPreRoot:$c.signing[0].authorityRoot,
         child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
           targets:["8401"],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
@@ -108,7 +108,7 @@ for route in bob-web hermes-a hermes-b; do
     "$EVIDENCE/$route-delegate/outcome.json" >/dev/null || fail "delegation not freshly confirmed"
   query "$route-observe" "$subject" "$child" "$key" "$((nonce + 4))" resource
   jq -e --slurpfile before "$EVIDENCE/$route-owner/view.json" \
-    '.page.root == $before[0].page.root' "$EVIDENCE/$route-observe/view.json" >/dev/null || fail "app state changed during delegation"
+    '.cell.root == $before[0].cell.root' "$EVIDENCE/$route-observe/view.json" >/dev/null || fail "app state changed during delegation"
   jq -cn --arg route "$route" --arg subject "$subject" --arg child "$child" \
     --slurpfile receipt "$EVIDENCE/$route-delegate/outcome.json" \
     '{route:$route,subject:$subject,app:"8401",capability:$child,verbs:["observe"],receipt:$receipt[0]}' \

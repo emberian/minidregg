@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 const PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-LAUNCH-COMPLETION-OPERATOR-PLAN/v1";
 const INGRESS_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-COMPLETION-INGRESS/v2";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v2";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v3";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -119,7 +119,7 @@ impl FixedLaunchCompletionSigners {
             || !decimal(text(view, "currentAuthorityRoot")?)
             || !decimal(text(view, "currentAppRoot")?)
             || !decimal(text(view, "currentPackageRoot")?)
-            || !decimal(text(view, "imageBoundary")?)
+            || !decimal(text(view, "worldRoot")?)
             || !decimal(text(view, "height")?)
         {
             return Err(invalid(
@@ -167,7 +167,7 @@ pub(crate) struct ConfirmedLaunchCompletion {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 /// Historical evidence only. This cannot authorize a second physical launch.
@@ -196,7 +196,7 @@ pub(crate) fn checked_receipt(
         transaction_id: receipt("transactionId")?,
         event_id: receipt("eventId")?,
         accepted_count: receipt("acceptedCount")?,
-        image_boundary: receipt("imageBoundary")?,
+        world_root: receipt("worldRoot")?,
     };
     if !later_decimal(&confirmed.accepted_count, prior_accepted_count) {
         return Err(invalid(
@@ -560,7 +560,7 @@ mod tests {
             "signedReportHex":hex(evidence.report),
             "app":"5", "descriptorRoot":"8", "volumeIdHex":"aa",
             "currentAuthorityRoot":"1", "currentAppRoot":"2",
-            "currentPackageRoot":"3", "imageBoundary":"4", "height":"5",
+            "currentPackageRoot":"3", "worldRoot":"4", "height":"5",
             "slots":[],
         });
         assert!(fixed.checked_slots(&view, &evidence).is_ok());
@@ -605,7 +605,7 @@ mod tests {
             "type":"confirmed", "confirmation":"installed",
             "transactionId":"1", "eventId":"2",
             "acceptedCount":"340282366920938463463374607431768211456",
-            "imageBoundary":"3",
+            "worldRoot":"3",
         });
         assert!(checked_receipt(&view, "installed", prior).is_ok());
         assert!(checked_receipt(&view, "replayed", prior).is_err());
@@ -644,7 +644,7 @@ mod tests {
             transaction_id: "5".into(),
             event_id: "6".into(),
             accepted_count: "7".into(),
-            image_boundary: "8".into(),
+            world_root: "8".into(),
         };
         let claim = CommittedLaunchClaim {
             committed: b"committed".to_vec(),
@@ -664,7 +664,7 @@ mod tests {
             transaction_id: "9".into(),
             event_id: "10".into(),
             accepted_count: "11".into(),
-            image_boundary: "12".into(),
+            world_root: "12".into(),
         };
         let report = b"signed report";
         let request = b"request";

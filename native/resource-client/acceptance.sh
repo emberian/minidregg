@@ -37,7 +37,7 @@ receipt_field() {
 }
 
 page_root() {
-  jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$1"
+  jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$1"
 }
 
 challenge_field() {
@@ -195,7 +195,7 @@ TARGET_ROOT=$(page_root "$EVIDENCE/query-before/view.json")
 AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/query-before/challenge.json")
-jq -e '.page.entries == []' "$EVIDENCE/query-before/view.json" >/dev/null
+jq -e '.cell.entries == []' "$EVIDENCE/query-before/view.json" >/dev/null
 
 cat >"$EVIDENCE/content-intent.json" <<EOF
 {
@@ -268,7 +268,7 @@ jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/content-attempt/retry-0001.json" >/dev/null
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/content-attempt/retry-0002.json" >/dev/null
-for field in transactionId eventId acceptedCount imageBoundary; do
+for field in transactionId eventId acceptedCount worldRoot; do
   first_value=$(receipt_field "$EVIDENCE/content-attempt/retry-0001.json" "$field")
   second_value=$(receipt_field "$EVIDENCE/content-attempt/retry-0002.json" "$field")
   test "$first_value" = "$second_value"
@@ -285,13 +285,13 @@ EOF
 "$MINI" query --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/query-after.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-after" >"$EVIDENCE/query-after.stdout"
-jq -e '[.page.entries[].type] | sort == ["document", "element"]' \
+jq -e '[.cell.entries[].type] | sort == ["document", "element"]' \
   "$EVIDENCE/query-after/view.json" >/dev/null
 CONTENT_ROOT=$(page_root "$EVIDENCE/query-after/view.json")
 test "$TARGET_ROOT" != "$CONTENT_ROOT"
 CONTENT_HEIGHT=$(challenge_field "$EVIDENCE/query-after/challenge.json" height)
-CONTENT_BOUNDARY=$(challenge_field "$EVIDENCE/query-after/challenge.json" imageBoundary)
-CONTENT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/content-attempt/retry-0001.json" imageBoundary)
+CONTENT_BOUNDARY=$(challenge_field "$EVIDENCE/query-after/challenge.json" worldRoot)
+CONTENT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/content-attempt/retry-0001.json" worldRoot)
 test "$CONTENT_HEIGHT" = "12"
 test "$CONTENT_BOUNDARY" = "$CONTENT_RECEIPT_BOUNDARY"
 
@@ -310,9 +310,9 @@ SCALAR_ROOT=$(page_root "$EVIDENCE/query-scalar-before/view.json")
 JOINT_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/query-scalar-before/challenge.json")
-jq -e '(.page.entries | length) == 1 and
-  .page.entries[0].key.type == "object" and .page.entries[0].key.resource == "601" and
-  .page.entries[0].key.field == "1" and .page.entries[0].value == "0"' \
+jq -e '(.cell.entries | length) == 1 and
+  .cell.entries[0].key.type == "object" and .cell.entries[0].key.resource == "601" and
+  .cell.entries[0].key.field == "1" and .cell.entries[0].value == "0"' \
   "$EVIDENCE/query-scalar-before/view.json" >/dev/null
 
 cat >"$EVIDENCE/joint-intent.json" <<EOF
@@ -391,10 +391,10 @@ EOF
   --intent "$EVIDENCE/query-joint-before-retry.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-joint-before-retry" >"$EVIDENCE/query-joint-before-retry.stdout"
 JOINT_BEFORE_RETRY_BOUNDARY=$(challenge_field \
-  "$EVIDENCE/query-joint-before-retry/challenge.json" imageBoundary)
+  "$EVIDENCE/query-joint-before-retry/challenge.json" worldRoot)
 JOINT_BEFORE_RETRY_HEIGHT=$(challenge_field \
   "$EVIDENCE/query-joint-before-retry/challenge.json" height)
-JOINT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" imageBoundary)
+JOINT_RECEIPT_BOUNDARY=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" worldRoot)
 test "$JOINT_BEFORE_RETRY_HEIGHT" = "13"
 test "$JOINT_BEFORE_RETRY_BOUNDARY" = "$JOINT_RECEIPT_BOUNDARY"
 
@@ -405,7 +405,7 @@ JOINT_CALL_HASH_AFTER=$(shasum -a 256 "$EVIDENCE/joint-attempt/call.bin" | awk '
 test "$JOINT_CALL_HASH_BEFORE" = "$JOINT_CALL_HASH_AFTER"
 jq -e '.type == "confirmed" and .confirmation == "replayed" and .acceptedCount == "3"' \
   "$EVIDENCE/joint-attempt/retry-0001.json" >/dev/null
-for field in transactionId eventId acceptedCount imageBoundary; do
+for field in transactionId eventId acceptedCount worldRoot; do
   first_value=$(receipt_field "$EVIDENCE/joint-attempt/outcome.json" "$field")
   second_value=$(receipt_field "$EVIDENCE/joint-attempt/retry-0001.json" "$field")
   test "$first_value" = "$second_value"
@@ -422,13 +422,13 @@ EOF
 "$MINI" query --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/query-content-final.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-content-final" >"$EVIDENCE/query-content-final.stdout"
-jq -e '[.page.entries[].type] | sort == ["atom", "document", "element"]' \
+jq -e '[.cell.entries[].type] | sort == ["atom", "document", "element"]' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null
-jq -e '[.page.entries[] | select(.type == "atom" and .id == "7001" and .payload == "68656c6c6f")] | length == 1' \
+jq -e '[.cell.entries[] | select(.type == "atom" and .id == "7001" and .payload == "68656c6c6f")] | length == 1' \
   "$EVIDENCE/query-content-final/view.json" >/dev/null
 CONTENT_FINAL_ROOT=$(page_root "$EVIDENCE/query-content-final/view.json")
 test "$CONTENT_ROOT" != "$CONTENT_FINAL_ROOT"
-CONTENT_FINAL_BOUNDARY=$(challenge_field "$EVIDENCE/query-content-final/challenge.json" imageBoundary)
+CONTENT_FINAL_BOUNDARY=$(challenge_field "$EVIDENCE/query-content-final/challenge.json" worldRoot)
 CONTENT_FINAL_HEIGHT=$(challenge_field "$EVIDENCE/query-content-final/challenge.json" height)
 test "$CONTENT_FINAL_BOUNDARY" = "$JOINT_BEFORE_RETRY_BOUNDARY"
 test "$CONTENT_FINAL_HEIGHT" = "$JOINT_BEFORE_RETRY_HEIGHT"
@@ -444,11 +444,11 @@ EOF
 "$MINI" query --host "$HOST" --config "$CONFIG" \
   --intent "$EVIDENCE/query-scalar-final.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-scalar-final" >"$EVIDENCE/query-scalar-final.stdout"
-jq -e '[.page.entries[] | select(.key.type == "object" and .key.resource == "601" and .key.field == "0" and .value == "1")] | length == 1' \
+jq -e '[.cell.entries[] | select(.key.type == "object" and .key.resource == "601" and .key.field == "0" and .value == "1")] | length == 1' \
   "$EVIDENCE/query-scalar-final/view.json" >/dev/null
 SCALAR_FINAL_ROOT=$(page_root "$EVIDENCE/query-scalar-final/view.json")
 test "$SCALAR_ROOT" != "$SCALAR_FINAL_ROOT"
-SCALAR_FINAL_BOUNDARY=$(challenge_field "$EVIDENCE/query-scalar-final/challenge.json" imageBoundary)
+SCALAR_FINAL_BOUNDARY=$(challenge_field "$EVIDENCE/query-scalar-final/challenge.json" worldRoot)
 SCALAR_FINAL_HEIGHT=$(challenge_field "$EVIDENCE/query-scalar-final/challenge.json" height)
 test "$SCALAR_FINAL_BOUNDARY" = "$JOINT_BEFORE_RETRY_BOUNDARY"
 test "$SCALAR_FINAL_HEIGHT" = "$JOINT_BEFORE_RETRY_HEIGHT"

@@ -27,7 +27,7 @@ fn receipt(directory: &Path) -> Result<Value> {
         serde_json::from_slice(&private_bytes(&directory.join("receipt.json"), 4096)?)
             .map_err(|error| format!("invalid accepted lifetime receipt: {error}"))?;
     let mut exact = serde_json::Map::new();
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let decimal = field(&value, name)?;
         if decimal.is_empty()
             || decimal.len() > 80
@@ -561,7 +561,7 @@ fn paid_sealed(directory: &Path) -> Result<(PaidPin, Vec<u8>)> {
 
 fn four_fields(value: &Value) -> Result<Value> {
     let mut fields = serde_json::Map::new();
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let decimal = field(value, name)?;
         if decimal.is_empty()
             || decimal.len() > 80
@@ -792,10 +792,10 @@ mod tests {
     #[test]
     fn paid_plan_requires_original_grant_and_reserve_receipts() {
         let grant = json!({"transactionId":"1","eventId":"2",
-            "acceptedCount":"3","imageBoundary":"4"});
+            "acceptedCount":"3","worldRoot":"4"});
         let reserve = json!({"bindings":{"grantIssueReceipt":grant}});
         let accepted = json!({"transactionId":"5","eventId":"6",
-            "acceptedCount":"7","imageBoundary":"8"});
+            "acceptedCount":"7","worldRoot":"8"});
         assert!(initial_bindings(&reserve, &grant, &accepted).is_ok());
         let mut wrong = grant.clone();
         wrong["eventId"] = json!("9");
@@ -824,9 +824,9 @@ mod tests {
     #[test]
     fn committed_permit_must_match_both_historical_receipts_and_http() {
         let reserve_receipt = json!({"transactionId":"1","eventId":"2",
-            "acceptedCount":"3","imageBoundary":"4"});
+            "acceptedCount":"3","worldRoot":"4"});
         let grant_receipt = json!({"transactionId":"5","eventId":"6",
-            "acceptedCount":"7","imageBoundary":"8"});
+            "acceptedCount":"7","worldRoot":"8"});
         let pinned = PaidPin {
             reserve: PathBuf::new(),
             grant: PathBuf::new(),
@@ -851,7 +851,7 @@ mod tests {
             "grant":{"issueReceipt":grant_receipt},
             "request":{"canonicalHex":"abcd"},
             "dispatchReceipt":{"transactionId":"9","eventId":"10",
-                "acceptedCount":"11","imageBoundary":"12"},
+                "acceptedCount":"11","worldRoot":"12"},
         });
         let plan = json!({"canonicalHttpHex":"abcd"});
         assert!(validate_committed(&inspection, &committed, &pinned, &plan).is_ok());

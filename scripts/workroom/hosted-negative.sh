@@ -56,10 +56,10 @@ deny_query b-unrelated 10 7003 98 "$PROVISION/tool-b.key" 65001
 deny_query a-unrelated 8 7803 96 "$PROVISION/tool.key" 65002
 query b-workroom 10 8001 98 "$PROVISION/tool-b.key" 65003
 query a-workroom 8 8001 96 "$PROVISION/tool.key" 65004
-expected=$(jq -er '.page.root' "$PROVISION/b-content-read/view.json")
+expected=$(jq -er '.cell.root' "$PROVISION/b-content-read/view.json")
 for label in b-workroom a-workroom; do
   jq -e --arg root "$expected" \
-    '.page.document == "8001" and .page.entries == [] and .page.root == $root' \
+    '.cell.document == "8001" and .cell.entries == [] and .cell.root == $root' \
     "$EVIDENCE/$label/view.json" >/dev/null
 done
 printf '%s\n' "$EVIDENCE/a-workroom/view.json" "$EVIDENCE/b-workroom/view.json"

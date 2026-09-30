@@ -111,9 +111,9 @@ submit() {
 }
 query b-parent-born 9 7803 111 "$EVIDENCE/controller-b.key" 64001 resource
 query b-tool-born 10 7804 121 "$EVIDENCE/tool-b.key" 64002 resource
-jq -e '.page.grain == {task:"7803",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7803",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
   "$EVIDENCE/b-parent-born/view.json" >/dev/null
-jq -e '.page.grain == {task:"7804",generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7804",generation:"0",status:"0",remaining:"50",reserved:"0"}' \
   "$EVIDENCE/b-tool-born/view.json" >/dev/null
 
 # Prove the actual born policies match source-authored owner/worker profiles.
@@ -139,7 +139,7 @@ for role in parent tool; do
 done
 
 SEMANTICS=$(jq -er '.semantics' "$EVIDENCE/operator-profile.json")
-root=$(jq -er '.page.root' "$EVIDENCE/b-parent-born/view.json")
+root=$(jq -er '.cell.root' "$EVIDENCE/b-parent-born/view.json")
 authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/b-parent-born/challenge.json")
 jq -n --arg semantics "$SEMANTICS" --arg root "$root" --arg authority "$authority" \
   '{subject:"9",nonce:"64100",purpose:{type:"prepare",draft:{type:"delegate-source",
@@ -154,14 +154,14 @@ jq -n --arg semantics "$SEMANTICS" --arg root "$root" --arg authority "$authorit
   >"$EVIDENCE/b-parent-witness-intent.json"
 submit b-parent-witness "$EVIDENCE/controller-b.key"
 query b-parent-delegated 10 7803 113 "$EVIDENCE/tool-b.key" 64102 resource
-test "$(jq -er '.page.root' "$EVIDENCE/b-parent-delegated/view.json")" = "$root"
+test "$(jq -er '.cell.root' "$EVIDENCE/b-parent-delegated/view.json")" = "$root"
 
 # Owner 7 gives tool 10 two children on exactly the same content cell.
 for grant in write read; do
   if [ "$grant" = write ]; then child=97 nonce=64200 verbs='["observe","mutate"]'; else
     child=98 nonce=64210 verbs='["observe"]'; fi
   query "owner-before-b-$grant" 7 8001 89 "$EVIDENCE/controller.key" "$nonce" resource
-  root=$(jq -er '.page.root' "$EVIDENCE/owner-before-b-$grant/view.json")
+  root=$(jq -er '.cell.root' "$EVIDENCE/owner-before-b-$grant/view.json")
   authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/owner-before-b-$grant/challenge.json")
   jq -n --arg semantics "$SEMANTICS" --arg root "$root" --arg authority "$authority" \
     --arg child "$child" --arg nonce "$nonce" --argjson verbs "$verbs" \
@@ -178,7 +178,7 @@ for grant in write read; do
   submit "b-content-$grant" "$EVIDENCE/controller.key"
 done
 query b-content-read 10 8001 98 "$EVIDENCE/tool-b.key" 64220 resource
-jq -e '.page.document == "8001" and .page.entries == []' \
+jq -e '.cell.document == "8001" and .cell.entries == []' \
   "$EVIDENCE/b-content-read/view.json" >/dev/null
 
 # Both controllers will use one persistent Mini host started by the deployment

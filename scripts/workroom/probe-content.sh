@@ -40,7 +40,7 @@ confirmed() {
 }
 
 query_workroom before 50000
-jq -e '.page.document == "8001" and .page.entries == []' \
+jq -e '.cell.document == "8001" and .cell.entries == []' \
   "$EVIDENCE/before/view.json" >/dev/null
 
 # The note text is untrusted user content. Shell only encodes its fixed bytes;
@@ -54,7 +54,7 @@ jq -n --slurpfile view "$EVIDENCE/before/view.json" \
   '{subject:"8",nonce:"50001",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"8",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
       nonce:"50002",targets:[{kind:"object",target:"8001",capability:"95",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].page.root,
+        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
           kind:{type:"text"},payload:$payload}]}}]}}},
     grants:[{kind:"object",target:"8001",capability:"95"}]}' \
@@ -64,7 +64,7 @@ jq -n --slurpfile view "$EVIDENCE/before/view.json" \
   --dir "$EVIDENCE/create-attempt" >"$EVIDENCE/create.stdout"
 confirmed "$EVIDENCE/create-attempt/outcome.json"
 query_workroom created 50003
-jq -e --arg payload "$NOTE_INITIAL_HEX" '.page.entries | length == 1 and
+jq -e --arg payload "$NOTE_INITIAL_HEX" '.cell.entries | length == 1 and
   .[0].type == "atom" and .[0].kind.type == "text" and .[0].payload == $payload' \
   "$EVIDENCE/created/view.json" >/dev/null
 
@@ -74,9 +74,9 @@ jq -n --slurpfile view "$EVIDENCE/created/view.json" \
   '{subject:"8",nonce:"50004",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"8",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
       nonce:"50005",targets:[{kind:"object",target:"8001",capability:"95",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].page.root,
+        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"editAtom",atom:"7401",
-          before:($view[0].page.entries[0] |
+          before:($view[0].cell.entries[0] |
             {document,kind,payload,createdBy,createdAt,tombstonedAt}),
           kind:{type:"text"},payload:$payload,tombstone:false}]}}]}}},
     grants:[{kind:"object",target:"8001",capability:"95"}]}' \
@@ -86,7 +86,7 @@ jq -n --slurpfile view "$EVIDENCE/created/view.json" \
   --dir "$EVIDENCE/edit-attempt" >"$EVIDENCE/edit.stdout"
 confirmed "$EVIDENCE/edit-attempt/outcome.json"
 query_workroom edited 50006
-jq -e --arg payload "$NOTE_FINAL_HEX" '.page.entries | length == 1 and
+jq -e --arg payload "$NOTE_FINAL_HEX" '.cell.entries | length == 1 and
   .[0].type == "atom" and .[0].kind.type == "text" and .[0].payload == $payload' \
   "$EVIDENCE/edited/view.json" >/dev/null
 printf '%s\n' "$EVIDENCE/edited/view.json"

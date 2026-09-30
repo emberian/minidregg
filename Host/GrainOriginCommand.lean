@@ -77,7 +77,7 @@ def scopeJson (prepared : GrainOriginPreparation.Prepared) : Lean.Json :=
      ("transactionId", toJson (toString scope.originalReceipt.transactionId.value)),
      ("eventId", toJson (toString scope.originalReceipt.eventId.value)),
      ("acceptedCount", toJson (toString scope.acceptedCount)),
-     ("imageBoundary", toJson (toString scope.originalReceipt.imageBoundary.value)),
+     ("worldRoot", toJson (toString scope.originalReceipt.worldRoot.value)),
      ("packageLength", toJson scope.packageLength),
      ("packageDigest", toJson (Json.encodeHex scope.packageDigest)),
      ("prefixLength", toJson scope.prefixLength),

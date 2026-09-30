@@ -20,11 +20,11 @@ hash() { shasum -a 256 "$1" | awk '{print $1}'; }
 confirmed() {
   jq -e '.type == "confirmed" and
     (.confirmation == "installed" or .confirmation == "replayed") and
-    all(.transactionId, .eventId, .acceptedCount, .imageBoundary;
+    all(.transactionId, .eventId, .acceptedCount, .worldRoot;
       type == "string" and test("^(0|[1-9][0-9]*)$"))' "$1" >/dev/null
 }
 receipt_fields() {
-  jq -e 'all(.transactionId, .eventId, .acceptedCount, .imageBoundary;
+  jq -e 'all(.transactionId, .eventId, .acceptedCount, .worldRoot;
     type == "string" and test("^(0|[1-9][0-9]*)$"))' "$1" >/dev/null
 }
 selected_poll() {
@@ -56,7 +56,7 @@ recipient_receipt() {
           '.transactionId == $first[0].transactionId and
            .eventId == $first[0].eventId and
            .acceptedCount == $first[0].acceptedCount and
-           .imageBoundary == $first[0].imageBoundary' "$outcome" >/dev/null || {
+           .worldRoot == $first[0].worldRoot' "$outcome" >/dev/null || {
           echo 'recipient lookup changed original receipt' >&2; exit 2;
         }
       fi
@@ -161,7 +161,7 @@ prepare)
      .atom == $atom and .sourceResource == $resource and
      .selectedFile == "atom-payload.bin" and
      .signedQuery == "selected/signed-observation.bin" and
-     (.receipt | all(.transactionId, .eventId, .acceptedCount, .imageBoundary;
+     (.receipt | all(.transactionId, .eventId, .acceptedCount, .worldRoot;
        type == "string" and test("^(0|[1-9][0-9]*)$")))' \
     "$(field exportResult)" >/dev/null || {
       echo 'GitWeb export manifest differs from selected atom/version' >&2; exit 2;
@@ -194,10 +194,10 @@ prepare)
   od -An -tx1 -v "$(field selectedFile)" | tr -d ' \n' >"$STATE/selected-payload.hex"
   jq -e --arg atom "$(decimal sourceAtom)" \
     --rawfile bytes "$STATE/selected-payload.hex" \
-    '[.page.entries[] | select(.type == "atom" and .id == $atom and .payload == $bytes)] | length == 1' \
+    '[.cell.entries[] | select(.type == "atom" and .id == $atom and .payload == $bytes)] | length == 1' \
     "$STATE/source-view.json" >/dev/null || { echo 'current Mini atom differs from GitWeb export' >&2; exit 2; }
   jq -e --arg root "$(jq -er '.sourceRoot' "$(field exportResult)")" \
-    '.page.root == $root' "$STATE/source-view.json" >/dev/null || {
+    '.cell.root == $root' "$STATE/source-view.json" >/dev/null || {
       echo 'source page root differs from accepted GitWeb export' >&2; exit 2;
     }
   # Request is source-owned JSON shape; no release codec is encoded here.
@@ -366,7 +366,7 @@ verify)
   od -An -tx1 -v "$STATE/packet.bin" | tr -d ' \n' >"$STATE/packet.hex"
   ATOM=$(jq -er '.transactionId' "$STATE/recipient-confirmed.json")
   jq -e --arg atom "$ATOM" --rawfile payload "$STATE/packet.hex" \
-    '[.page.entries[] | select(.type == "atom" and .id == $atom and
+    '[.cell.entries[] | select(.type == "atom" and .id == $atom and
       .kind.type == "inlineObject" and .kind.schema == "11" and
       .tombstonedAt == null and .payload == $payload)] | length == 1' \
     "$STATE/$readback_name/view.json" >/dev/null || {

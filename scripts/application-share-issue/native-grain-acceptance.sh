@@ -125,15 +125,15 @@ jq -n '{subject:"8",nonce:"85990",purpose:{type:"query",kind:"object",
   --intent "$EVIDENCE/tool-before-reserve-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-before-reserve" \
   >"$EVIDENCE/tool-before-reserve.stdout"
-jq -e '.page.grain.status == "1" and .page.grain.remaining == "38" and
-  .page.grain.reserved == "0"' "$EVIDENCE/tool-before-reserve/view.json" >/dev/null
+jq -e '.cell.grain.status == "1" and .cell.grain.remaining == "38" and
+  .cell.grain.reserved == "0"' "$EVIDENCE/tool-before-reserve/view.json" >/dev/null
 jq -n --slurpfile read "$EVIDENCE/tool-before-reserve/view.json" \
   --slurpfile challenge "$EVIDENCE/tool-before-reserve/challenge.json" \
   '{grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
       schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-      expectedTargetRoot:$read[0].page.root,
+      expectedTargetRoot:$read[0].cell.root,
       context:{operationId:"85991",payload:"grain share ticket reserve"},
-      before:($read[0].page.grain | {generation,status,remaining,reserved}),
+      before:($read[0].cell.grain | {generation,status,remaining,reserved}),
       operation:{type:"reserve",amount:"3"},publications:[]},
     grants:[{kind:"object",target:"7902",capability:"81"}],intentNonce:"85991"}' \
   >"$EVIDENCE/tool-reserve-intent.json"
@@ -151,7 +151,7 @@ jq -n '{subject:"8",nonce:"85992",purpose:{type:"query",kind:"object",
   --intent "$EVIDENCE/tool-reserved-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-reserved" \
   >"$EVIDENCE/tool-reserved.stdout"
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "3"' \
+jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "3"' \
   "$EVIDENCE/tool-reserved/view.json" >/dev/null
 jq -n '{subject:"8",nonce:"85993",purpose:{type:"query",kind:"object",
     target:"7901",view:"resource"},
@@ -161,10 +161,10 @@ jq -n '{subject:"8",nonce:"85993",purpose:{type:"query",kind:"object",
   --intent "$EVIDENCE/parent-ready-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/parent-ready" \
   >"$EVIDENCE/parent-ready.stdout"
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
+jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-ready/view.json" >/dev/null
 jq -e --slurpfile parent "$EVIDENCE/parent-ready/challenge.json" \
-  '.height == $parent[0].height and .imageBoundary == $parent[0].imageBoundary' \
+  '.height == $parent[0].height and .worldRoot == $parent[0].worldRoot' \
   "$EVIDENCE/tool-reserved/challenge.json" >/dev/null
 
 jq -n --arg package "$PACKAGE_ROOT" --arg interface "$INTERFACE_ROOT" \
@@ -326,8 +326,8 @@ jq -n '{subject:"8",nonce:"86002",purpose:{type:"query",kind:"object",
   --intent "$EVIDENCE/tool-after-issue-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/tool-after-issue" \
   >"$EVIDENCE/tool-after-issue.stdout"
-jq -e '.page.grain.status == "1" and .page.grain.remaining == "35" and
-  .page.grain.reserved == "0"' "$EVIDENCE/tool-after-issue/view.json" >/dev/null
+jq -e '.cell.grain.status == "1" and .cell.grain.remaining == "35" and
+  .cell.grain.reserved == "0"' "$EVIDENCE/tool-after-issue/view.json" >/dev/null
 jq -n '{subject:"8",nonce:"86003",purpose:{type:"query",kind:"object",
     target:"7901",view:"resource"},
     grants:[{kind:"object",target:"7901",capability:"73"}]}' \
@@ -336,7 +336,7 @@ jq -n '{subject:"8",nonce:"86003",purpose:{type:"query",kind:"object",
   --intent "$EVIDENCE/parent-after-issue-intent.json" --key "$KEY" \
   --view resource --dir "$EVIDENCE/parent-after-issue" \
   >"$EVIDENCE/parent-after-issue.stdout"
-jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
+jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
   "$EVIDENCE/parent-after-issue/view.json" >/dev/null
 if "$MINI" grain-share-issue-submit --socket "$SOCKET" --attempt "$EVIDENCE/issue" \
     >"$EVIDENCE/second-submit.stdout" 2>"$EVIDENCE/second-submit.stderr"; then
@@ -353,7 +353,7 @@ jq -n '{subject:"8",nonce:"85100",purpose:{type:"query",kind:"object",
 "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/ticket-read-intent.json" --key "$KEY" --view resource \
   --dir "$EVIDENCE/ticket-read" >"$EVIDENCE/ticket-read.stdout"
-jq -e '.page.document == "8500" and (.page.entries | length) == 1' \
+jq -e '.cell.document == "8500" and (.cell.entries | length) == 1' \
   "$EVIDENCE/ticket-read/view.json" >/dev/null
 stop_service
 start_service serve-operator reopened-operator
@@ -361,9 +361,9 @@ start_service serve-operator reopened-operator
   >"$EVIDENCE/lookup.stdout"
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/issue/lookup-0000.outcome.json" >/dev/null
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$EVIDENCE/issue/submit.outcome.json" >"$EVIDENCE/issue/original-receipt.json"
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$EVIDENCE/issue/lookup-0000.outcome.json" >"$EVIDENCE/issue/recovered-receipt.json"
 cmp "$EVIDENCE/issue/original-receipt.json" "$EVIDENCE/issue/recovered-receipt.json"
 "$STORE_BINARY" read-to "$STORE" "$EVIDENCE/after-lookup-image.bin"

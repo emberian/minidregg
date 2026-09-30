@@ -403,7 +403,7 @@ mod tests {
         let response = json!({"type":"dispatch-reserved-v2",
             "fixedRequestHex":body_hex,"contextHex":"00",
             "reserveReceipt":{"transactionId":"1","eventId":"2",
-                "acceptedCount":"3","imageBoundary":"4"}});
+                "acceptedCount":"3","worldRoot":"4"}});
         let (mut writer, mut reader) = UnixStream::pair().unwrap();
         let response_for_writer = response.clone();
         let send = thread::spawn(move || write_frame(&mut writer, &response_for_writer));

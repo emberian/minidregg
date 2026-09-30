@@ -352,14 +352,14 @@ pub(super) fn preflight_prepare(config: &InstallConfig) -> io::Result<()> {
             "transactionId":begin.transaction_id,
             "eventId":begin.event_id,
             "acceptedCount":begin.accepted_count,
-            "imageBoundary":begin.image_boundary,
+            "worldRoot":begin.world_root,
         },
         "claim":{
             "physicalBegin":claim.physical_begin,
             "transactionId":claim.transaction_id,
             "eventId":claim.event_id,
             "acceptedCount":claim.accepted_count,
-            "imageBoundary":claim.image_boundary,
+            "worldRoot":claim.world_root,
         },
     });
     write_new(
@@ -457,7 +457,7 @@ pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
         transaction_id: field(saved_begin, "transactionId")?,
         event_id: field(saved_begin, "eventId")?,
         accepted_count: field(saved_begin, "acceptedCount")?,
-        image_boundary: field(saved_begin, "imageBoundary")?,
+        world_root: field(saved_begin, "worldRoot")?,
     };
     let saved_claim = stage
         .get("claim")
@@ -476,7 +476,7 @@ pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
         transaction_id: field(saved_claim, "transactionId")?,
         event_id: field(saved_claim, "eventId")?,
         accepted_count: field(saved_claim, "acceptedCount")?,
-        image_boundary: field(saved_claim, "imageBoundary")?,
+        world_root: field(saved_claim, "worldRoot")?,
     };
     if claim.physical_begin.operation_id != begin.authorization_operation_id
         || claim.physical_begin.transaction_id != claim.transaction_id
@@ -521,8 +521,8 @@ pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
         || receipt.get("eventId").and_then(Value::as_str) != Some(claim.event_id.as_str())
         || receipt.get("acceptedCount").and_then(Value::as_str)
             != Some(claim.accepted_count.as_str())
-        || receipt.get("imageBoundary").and_then(Value::as_str)
-            != Some(claim.image_boundary.as_str())
+        || receipt.get("worldRoot").and_then(Value::as_str)
+            != Some(claim.world_root.as_str())
     {
         return Err(invalid(
             "v3 INSTALL retained source claim inspection differs",
@@ -688,7 +688,7 @@ pub(super) fn preflight_complete(config: &InstallConfig) -> io::Result<()> {
                 "transactionId":completed.transaction_id,
                 "eventId":completed.event_id,
                 "acceptedCount":completed.accepted_count,
-                "imageBoundary":completed.image_boundary,
+                "worldRoot":completed.world_root,
             }
         }))?,
     )?;

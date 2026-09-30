@@ -263,7 +263,7 @@ fn init(
             let receipt = record
                 .get("receipt")
                 .ok_or("enrollment lacks admitted receipt")?;
-            for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+            for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
                 field_decimal(member(receipt, field)?, field)?;
             }
             Ok::<_, String>((subject.to_owned(), key, bytes))
@@ -413,7 +413,7 @@ fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -
     {
         return Err("delegated reference lacks confirmed admission receipt".into());
     }
-    for field in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for field in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         field_decimal(member(receipt, field)?, field)?;
     }
     import(
@@ -651,7 +651,7 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                     }
                 }
                 authority = Some(current_authority);
-                let current_image = member(&challenge, "imageBoundary")?.to_owned();
+                let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
                     if previous != &current_image {
                         return Err("target reads have different image boundaries".into());
@@ -661,7 +661,7 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 let target = member(&reference, "target")?;
                 let kind = member(&reference, "kind")?;
                 let root_value = view
-                    .get("page")
+                    .get("cell")
                     .and_then(|page| page.get("root"))
                     .and_then(Value::as_str)
                     .ok_or("signed resource view lacks page root")?;
@@ -759,10 +759,10 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
             parent_ref["observeCapability"] = json!(parent_id);
             let (capability, cap_challenge, _) =
                 signed_view(root, workspace, &parent_ref, "capability")?;
-            let image = member(&resource_challenge, "imageBoundary")?;
+            let image = member(&resource_challenge, "worldRoot")?;
             let authority = signed_authority_root(&resource_challenge)?;
             for challenge in [&policy_challenge, &cap_challenge] {
-                if member(challenge, "imageBoundary")? != image
+                if member(challenge, "worldRoot")? != image
                     || signed_authority_root(challenge)? != authority
                 {
                     return Err(
@@ -844,7 +844,7 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 .get("childCapability")
                 .ok_or("namespace omitted delegated capability")?;
             let target_root = resource
-                .get("page")
+                .get("cell")
                 .and_then(|page| page.get("root"))
                 .and_then(Value::as_str)
                 .ok_or("signed resource view lacks page root")?;
@@ -1585,7 +1585,7 @@ mod tests {
             br#"{"type":"minidregg-delegated-reference-v1",
             "recipient":"8","kind":"object","target":"600","capability":"63",
             "receipt":{"type":"confirmed","confirmation":"installed",
-                "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"}}"#,
+                "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}}"#,
         )
         .unwrap();
         assert!(import_delegated(&root, &json!({"subject":"7"}), "shared", &path).is_err());

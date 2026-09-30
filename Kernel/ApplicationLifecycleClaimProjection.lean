@@ -30,7 +30,7 @@ structure Committed where
   appPhysicalRoot : Digest
   packagePhysicalRoot : Digest
   authorityPhysicalRoot : Digest
-  postImageBoundary : Digest
+  postWorldRoot : Digest
   deriving DecidableEq
 
 def committedStream : StreamCodec Committed :=
@@ -47,13 +47,13 @@ def committedStream : StreamCodec Committed :=
     (fun value => (value.source, value.originalTransaction,
       value.originalEvent, value.originalNullifier, value.claimReceipt,
       value.claimNullifier, value.appPhysicalRoot, value.packagePhysicalRoot,
-      value.authorityPhysicalRoot, value.postImageBoundary))
+      value.authorityPhysicalRoot, value.postWorldRoot))
     (fun (source, originalTransaction, originalEvent, originalNullifier,
           claimReceipt, claimNullifier, appPhysicalRoot, packagePhysicalRoot,
-          authorityPhysicalRoot, postImageBoundary) =>
+          authorityPhysicalRoot, postWorldRoot) =>
       ⟨source, originalTransaction, originalEvent, originalNullifier,
         claimReceipt, claimNullifier, appPhysicalRoot, packagePhysicalRoot,
-        authorityPhysicalRoot, postImageBoundary⟩)
+        authorityPhysicalRoot, postWorldRoot⟩)
     (by intro value; cases value; rfl)
 
 private def frame : List UInt8 :=

@@ -390,7 +390,7 @@ fn receipt(value: &Value) -> Result<Value> {
         return Err("enrollment outcome did not confirm native acceptance".into());
     }
     let mut fields = serde_json::Map::new();
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let value = field(value, name)?;
         if value.is_empty()
             || value.len() > 80
@@ -556,7 +556,7 @@ mod tests {
     #[test]
     fn receipt_requires_a_positive_canonical_accepted_count() {
         let mut value = json!({"type":"confirmed","confirmation":"installed",
-            "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"});
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
         assert_eq!(
             field(&receipt(&value).unwrap(), "acceptedCount").unwrap(),
             "3"

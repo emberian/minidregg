@@ -460,7 +460,7 @@ pub fn complete(config_path: &Path) -> io::Result<()> {
             "transactionId":receipt.transaction_id,
             "eventId":receipt.event_id,
             "acceptedCount":receipt.accepted_count,
-            "imageBoundary":receipt.image_boundary,
+            "worldRoot":receipt.world_root,
             "rawSha256":package.raw_sha256,
         }))?,
     )?;

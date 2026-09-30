@@ -167,7 +167,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       DeclaredResourceController.commandCodec.encode (source.grainCommand tariff)⟩
   let signedBirth : SigningPlan :=
     ⟨config.deployment.domain, profile.semantics,
-      NativeHost.imageBoundary config opened.durable.image, height,
+      NativeHost.worldRoot config opened.durable.image, height,
       .birth finalized request.sourceCapabilities, branches ++ observations⟩
   let context : ApplicationShareIssueDelegation.Context config.deployment opened.durable :=
     ⟨birth.prepared.pre.directory, birth.prepared.pre.authority⟩

@@ -18,7 +18,7 @@
 +                      "--config", mini_b, "--intent", L / "b-before-revoke-query.json",
 +                      "--key", a.mini_b_custody_key or a.mini_custody_key,
 +                      "--view", "resource", "--dir", L / "b-before-revoke"])
-+            target_root = self.json("b-before-revoke/view.json")["page"]["root"]
++            target_root = self.json("b-before-revoke/view.json")["cell"]["root"]
 +            authority_root = self.json("b-before-revoke/challenge.json")["signing"][0]["authorityRoot"]
 +            revoke = {"subject": str(b_subject), "nonce": "830102", "purpose": {
 +                "type": "prepare", "draft": {"type": "revoke-source", "command": {

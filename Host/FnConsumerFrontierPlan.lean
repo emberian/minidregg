@@ -173,7 +173,7 @@ private def receiptJson (receipt : NativeHostCodec.Receipt) : Lean.Json :=
     [("transactionId", toJson (Nat.repr receipt.transactionId.value)),
      ("eventId", toJson (Nat.repr receipt.eventId.value)),
      ("acceptedCount", toJson (Nat.repr receipt.acceptedCount)),
-     ("imageBoundary", toJson (Nat.repr receipt.imageBoundary.value))]
+     ("worldRoot", toJson (Nat.repr receipt.worldRoot.value))]
 
 /-- Display only. Custody still has to compare the complete approved scope,
 gateway, selected release, and exact signing header before signing. -/

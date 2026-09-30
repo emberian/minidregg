@@ -152,8 +152,8 @@ case "$1" in
       esac
     done
     mkdir -p "$dir"
-    printf '%s\n' '{"page":{"root":"200","grain":{"task":"7103","generation":"2","status":"3","remaining":"5","reserved":"5"}}}' > "$dir/view.json"
-    printf '%s\n' '{"signing":[{"authorityRoot":"300"}],"imageBoundary":"400"}' > "$dir/challenge.json"
+    printf '%s\n' '{"cell":{"root":"200","grain":{"task":"7103","generation":"2","status":"3","remaining":"5","reserved":"5"}}}' > "$dir/view.json"
+    printf '%s\n' '{"signing":[{"authorityRoot":"300"}],"worldRoot":"400"}' > "$dir/challenge.json"
     ;;
   *) exit 40 ;;
 esac
@@ -208,12 +208,12 @@ esac
     fs::write(directory.join("submit.outcome.bin"), b"outcome").unwrap();
     fs::write(
         directory.join("submit.outcome.json"),
-        br#"{"type":"confirmed","confirmation":"installed","transactionId":"11","eventId":"12","acceptedCount":"13","imageBoundary":"300"}"#,
+        br#"{"type":"confirmed","confirmation":"installed","transactionId":"11","eventId":"12","acceptedCount":"13","worldRoot":"300"}"#,
     )
     .unwrap();
     fs::write(
         directory.join("receipt.json"),
-        br#"{"transactionId":"11","eventId":"12","acceptedCount":"13","imageBoundary":"300","reserveIndex":"12"}"#,
+        br#"{"transactionId":"11","eventId":"12","acceptedCount":"13","worldRoot":"300","reserveIndex":"12"}"#,
     )
     .unwrap();
     fs::write(
@@ -225,7 +225,7 @@ esac
         transaction_id: "11".into(),
         event_id: "12".into(),
         accepted_count: "13".into(),
-        image_boundary: "300".into(),
+        world_root: "300".into(),
     };
     let mut runtime = Runtime::open(config, root.join("config.json")).unwrap();
     runtime.journal.dispatch_attempt = Some(DispatchAttempt {
@@ -353,8 +353,8 @@ if [ "$command" = query ]; then
     reserved=3
     remaining=7
   fi
-  printf '{"page":{"root":"100","grain":{"task":"%s","generation":"%s","status":"%s","remaining":"%s","reserved":"%s"}}}\n' "$task" "$generation" "$status" "$remaining" "$reserved" > "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300"}' > "$dir/challenge.json"
+  printf '{"cell":{"root":"100","grain":{"task":"%s","generation":"%s","status":"%s","remaining":"%s","reserved":"%s"}}}\n' "$task" "$generation" "$status" "$remaining" "$reserved" > "$dir/view.json"
+  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300"}' > "$dir/challenge.json"
   exit 0
 fi
 [ "$command" = submit ] || exit 40
@@ -370,7 +370,7 @@ elif grep -q '"type": "disconnect"' "$intent"; then
   before=$(cat "$state/dispatch-status")
   [ "$before" = 3 ] && printf 5 > "$state/dispatch-status" || printf 0 > "$state/dispatch-status"
 fi
-printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
+printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
 "#
     .replace("__STATE__", state.to_str().unwrap());
     fs::write(&mini, script).unwrap();

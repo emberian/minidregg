@@ -91,7 +91,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
      ("currentAppRoot", decimal source.currentAppRoot.value),
      ("currentPackageRoot", decimal source.currentPackageRoot.value),
-     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("worldRoot", decimal plan.invocation.worldRoot.value),
      ("height", decimal plan.invocation.height),
      ("slots", .arr <| (plan.invocation.slots ++
        [plan.packageObservationSlot]).toArray.map slotJson)]

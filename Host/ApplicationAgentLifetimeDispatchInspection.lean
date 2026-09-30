@@ -27,7 +27,7 @@ private def receiptJson (receipt : NativeHostCodec.Receipt) : Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value),
    ("eventId", decimal receipt.eventId.value),
    ("acceptedCount", decimal receipt.acceptedCount),
-   ("imageBoundary", decimal receipt.imageBoundary.value)]
+   ("worldRoot", decimal receipt.worldRoot.value)]
 
 def inspect (bytes : List UInt8) : Except String Json := do
   let some (paid, receipt) :=
@@ -99,7 +99,7 @@ def inspect (bytes : List UInt8) : Except String Json := do
         ("sessionRoot", decimal base.sessionRoot.value),
         ("ticketRoot", decimal base.ticketRoot.value),
         ("enrollmentRoot", decimal base.enrollmentRoot.value),
-        ("boundary", decimal base.currentImageBoundary.value)]),
+        ("boundary", decimal base.currentWorldRoot.value)]),
      ("parent", .mkObj
        [("task", decimal parent.task),
         ("generation", signed parent.generation),

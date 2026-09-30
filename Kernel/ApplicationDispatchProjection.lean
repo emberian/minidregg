@@ -37,7 +37,7 @@ structure Candidate where
   issueEvent : Digest
   dispatchTransaction : Digest
   dispatchEvent : Digest
-  currentImageBoundary : Digest
+  currentWorldRoot : Digest
   physicalRequestDigest : Digest
   deriving DecidableEq
 
@@ -72,7 +72,7 @@ def ofDispatchAt {config : Config} {opened : Opened config}
     issueEvent := admitted.prior.evidence.eventId
     dispatchTransaction := pending.transactionId
     dispatchEvent := pending.event.eventId
-    currentImageBoundary := imageBoundary config opened.durable.image
+    currentWorldRoot := worldRoot config opened.durable.image
     physicalRequestDigest := requestDigest dispatch.request }
 
 /-- Event21 projects the same base app identity and rights from its distinct
@@ -98,7 +98,7 @@ def ofAgentDispatchAt {config : Config} {opened : Opened config}
     issueEvent := admitted.issue.evidence.eventId
     dispatchTransaction := pending.transactionId
     dispatchEvent := pending.event.eventId
-    currentImageBoundary := imageBoundary config opened.durable.image
+    currentWorldRoot := worldRoot config opened.durable.image
     physicalRequestDigest := requestDigest dispatch.request }
 
 def candidateStream : StreamCodec Candidate :=
@@ -122,15 +122,15 @@ def candidateStream : StreamCodec Candidate :=
       value.ticketResource, value.ticketRoot, value.enrollmentResource,
       value.enrollmentRoot, value.authorityRoot, value.appRoot, value.sessionRoot,
       value.issueTransaction, value.issueEvent, value.dispatchTransaction,
-      value.dispatchEvent, value.currentImageBoundary, value.physicalRequestDigest))
+      value.dispatchEvent, value.currentWorldRoot, value.physicalRequestDigest))
     (fun (dispatch, effectiveBits, sessionFingerprint, ticketResource, ticketRoot,
           enrollmentResource, enrollmentRoot, authorityRoot, appRoot, sessionRoot,
           issueTransaction, issueEvent, dispatchTransaction, dispatchEvent,
-          currentImageBoundary, physicalRequestDigest) =>
+          currentWorldRoot, physicalRequestDigest) =>
       ⟨dispatch, effectiveBits, sessionFingerprint, ticketResource, ticketRoot,
         enrollmentResource, enrollmentRoot, authorityRoot, appRoot, sessionRoot,
         issueTransaction, issueEvent, dispatchTransaction, dispatchEvent,
-        currentImageBoundary, physicalRequestDigest⟩)
+        currentWorldRoot, physicalRequestDigest⟩)
     (by intro value; cases value; rfl)
 
 def codec : LawfulCodec Candidate :=

@@ -29,7 +29,7 @@ EOF
   --intent "$ROOT/gateway-before-denial.json" --key "$ROOT/custody.key" \
   --view resource --dir "$ROOT/gateway-before-denial" \
   >"$ROOT/gateway-before-denial.stdout"
-TARGET_ROOT=$(jq -er '.page.root' "$ROOT/gateway-before-denial/view.json")
+TARGET_ROOT=$(jq -er '.cell.root' "$ROOT/gateway-before-denial/view.json")
 AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$ROOT/gateway-before-denial/challenge.json")
 BEFORE_HEIGHT=$(jq -er '.height' "$ROOT/gateway-before-denial/challenge.json")
 
@@ -61,7 +61,7 @@ fi
   --view resource --dir "$ROOT/gateway-after-denial" \
   >"$ROOT/gateway-after-denial.stdout"
 AFTER_HEIGHT=$(jq -er '.height' "$ROOT/gateway-after-denial/challenge.json")
-AFTER_ROOT=$(jq -er '.page.root' "$ROOT/gateway-after-denial/view.json")
+AFTER_ROOT=$(jq -er '.cell.root' "$ROOT/gateway-after-denial/view.json")
 if [ "$BEFORE_HEIGHT" != "$AFTER_HEIGHT" ] || [ "$TARGET_ROOT" != "$AFTER_ROOT" ]; then
   echo "refusal changed Store height or target root" >&2
   exit 1

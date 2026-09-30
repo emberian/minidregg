@@ -168,7 +168,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("processGeneration", signed source.processGeneration),
      ("processIdentityHex", hex source.processIdentity),
      ("imageIdentityHex", hex source.imageIdentity),
-     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("worldRoot", decimal plan.invocation.worldRoot.value),
      ("height", decimal plan.invocation.height),
      ("selectedCommandDigest", match ingress.start with
        | none => Json.null
@@ -207,7 +207,7 @@ def inspectStopPlan (bytes : List UInt8) : Except String Json := do
           [("transactionId", decimal witness.receipt.transactionId.value),
            ("eventId", decimal witness.receipt.eventId.value),
            ("acceptedCount", decimal witness.receipt.acceptedCount),
-           ("imageBoundary", decimal witness.receipt.imageBoundary.value)]),
+           ("worldRoot", decimal witness.receipt.worldRoot.value)]),
         ("generation", signed witness.generation),
         ("unitHex", hex witness.unit),
         ("imageHex", hex witness.image),

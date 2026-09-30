@@ -18,7 +18,7 @@ use std::path::Path;
 const MAX_FRAME: usize = 12_102_760;
 const STOP_PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-STOP-OPERATOR-PLAN/v2";
 const BEGIN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v2";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v3";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -162,7 +162,7 @@ fn checked_plan<'a>(
         || text(base, "snapshotManifest")? != fixed.snapshot_manifest
         || text(base, "managementSubject")? != fixed.management_subject
         || !decimal(text(base, "authorizationOperationId")?)
-        || !decimal(text(base, "imageBoundary")?)
+        || !decimal(text(base, "worldRoot")?)
         || !decimal(text(base, "height")?)
         || base.get("selectedCommandDigest") != Some(&Value::Null)
         || base.get("priorCreate") != Some(&Value::Null)
@@ -285,7 +285,7 @@ pub(crate) fn submit_once(
         text(&result, "transactionId")?,
         text(&result, "eventId")?,
         text(&result, "acceptedCount")?,
-        text(&result, "imageBoundary")?,
+        text(&result, "worldRoot")?,
     )?;
     Ok(AcceptedStopBegin {
         stop_plan: plan,

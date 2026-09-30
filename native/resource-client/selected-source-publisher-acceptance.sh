@@ -81,7 +81,7 @@ jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/owner-publish/source-lookup-000.json" >/dev/null
 jq -e '.type == "confirmed" and .confirmation == "replayed"' \
   "$EVIDENCE/owner-publish/source-proof-lookup-000.json" >/dev/null
-for field in transactionId eventId acceptedCount imageBoundary; do
+for field in transactionId eventId acceptedCount worldRoot; do
   original=$(jq -er --arg field "$field" '.[$field]' "$EVIDENCE/drop-native-outcome.json")
   retained=$(jq -er --arg field "$field" '.[$field]' \
     "$EVIDENCE/owner-publish/source-proof-lookup-000.json")

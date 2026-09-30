@@ -200,7 +200,7 @@ fn exact_receipt(value: &Value) -> Result<Value> {
         return Err("agent reserve confirmation is not accepted history".into());
     }
     let mut receipt = serde_json::Map::new();
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let value = field(value, name)?;
         if value.is_empty()
             || value.len() > 80
@@ -826,7 +826,7 @@ mod tests {
     #[test]
     fn confirmed_receipt_requires_all_four_canonical_fields() {
         let good = json!({"type":"confirmed","transactionId":"10","eventId":"20",
-            "confirmation":"installed","acceptedCount":"1","imageBoundary":"30"});
+            "confirmation":"installed","acceptedCount":"1","worldRoot":"30"});
         assert_eq!(exact_receipt(&good).unwrap()["reserveIndex"], "0");
         assert_eq!(
             previous_decimal("100000000000000000000000").unwrap(),
@@ -894,7 +894,7 @@ mod tests {
         assert!(!directory.join("submit.frame").exists());
         let inspected = json!({"context":{"canonicalHex":"aa"}});
         let receipt = json!({"transactionId":"1","eventId":"2",
-            "acceptedCount":"3","imageBoundary":"4","reserveIndex":"2"});
+            "acceptedCount":"3","worldRoot":"4","reserveIndex":"2"});
         retain_json(&directory.join("plan-inspected.json"), &inspected).unwrap();
         retain_json(&directory.join("receipt.json"), &receipt).unwrap();
         let anchor = PayerAnchor {

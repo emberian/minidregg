@@ -645,8 +645,8 @@ fn matched_v3(
         dispatch_event: permit.receipt().event_id.clone(),
         session_fingerprint: digest_nat(field(view, "sessionFingerprint")?)?,
         principal: unhex32(field(identity, "principalHex")?)?,
-        before_image_boundary: field(current, "boundary")?.into(),
-        after_image_boundary: permit.receipt().image_boundary.clone(),
+        before_world_root: field(current, "boundary")?.into(),
+        after_world_root: permit.receipt().world_root.clone(),
         accepted_count: permit.receipt().accepted_count.clone(),
         effective_bits: bits,
         app_path_and_query: path_and_query,
@@ -880,7 +880,7 @@ mod tests {
             transaction_id: "1".into(),
             event_id: "2".into(),
             accepted_count: "3".into(),
-            image_boundary: "4".into(),
+            world_root: "4".into(),
         };
         let reply = http_reply_v3(
             response,
@@ -976,7 +976,7 @@ mod tests {
             transaction_id: "11".into(),
             event_id: "12".into(),
             accepted_count: "13".into(),
-            image_boundary: "14".into(),
+            world_root: "14".into(),
         };
         let reply = http_reply_v3(
             response,

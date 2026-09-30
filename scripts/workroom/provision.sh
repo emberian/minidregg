@@ -169,9 +169,9 @@ query_task controller-born 7 "$WORKROOM_PARENT_TASK" 71 "$EVIDENCE/controller.ke
 query_task tool-born 8 "$WORKROOM_TOOL_TASK" 81 "$EVIDENCE/tool.key" 30002
 query_task publication-born 7 7003 91 "$EVIDENCE/controller.key" 30009
 query_task workroom-born 7 8001 89 "$EVIDENCE/controller.key" 30010
-jq -e --arg task "$WORKROOM_PARENT_TASK" '.page.grain == {task:$task,generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+jq -e --arg task "$WORKROOM_PARENT_TASK" '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"100",reserved:"0"}' \
   "$EVIDENCE/controller-born/view.json" >/dev/null
-jq -e --arg task "$WORKROOM_TOOL_TASK" '.page.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+jq -e --arg task "$WORKROOM_TOOL_TASK" '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"50",reserved:"0"}' \
   "$EVIDENCE/tool-born/view.json" >/dev/null
 
 for name in controller tool; do
@@ -206,7 +206,7 @@ done
 # Parent witness authority is a distinct delegated child grant held by the
 # tool identity. The source-authored parent rule permits that subject only the
 # pinned-generation witness no-op; the tool owns its own spendable task.
-PARENT_ROOT=$(jq -er '.page.root' "$EVIDENCE/controller-born/view.json")
+PARENT_ROOT=$(jq -er '.cell.root' "$EVIDENCE/controller-born/view.json")
 PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/controller-born/challenge.json")
 cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF
 {"subject":"7","nonce":"31000","purpose":{"type":"prepare","draft":{
@@ -226,9 +226,9 @@ EOF
   --dir "$EVIDENCE/delegation-attempt" >"$EVIDENCE/delegation.stdout"
 confirmed "$EVIDENCE/delegation-attempt/outcome.json"
 query_task delegated-parent 8 "$WORKROOM_PARENT_TASK" 73 "$EVIDENCE/tool.key" 31002
-test "$(jq -er '.page.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
 
-PUBLICATION_ROOT=$(jq -er '.page.root' "$EVIDENCE/publication-born/view.json")
+PUBLICATION_ROOT=$(jq -er '.cell.root' "$EVIDENCE/publication-born/view.json")
 PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/delegated-parent/challenge.json")
 cat >"$EVIDENCE/publication-delegation.json" <<EOF
 {"subject":"7","nonce":"31010","purpose":{"type":"prepare","draft":{
@@ -248,7 +248,7 @@ EOF
   --dir "$EVIDENCE/publication-delegation-attempt" >"$EVIDENCE/publication-delegation.stdout"
 confirmed "$EVIDENCE/publication-delegation-attempt/outcome.json"
 query_task delegated-publication 8 7003 93 "$EVIDENCE/tool.key" 31012
-test "$(jq -er '.page.root' "$EVIDENCE/delegated-publication/view.json")" = "$PUBLICATION_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/delegated-publication/view.json")" = "$PUBLICATION_ROOT"
 
 # Reads use a separate observe-only sibling grant. The MCP reader cannot use
 # the publication mutation authority or select an arbitrary target.
@@ -273,11 +273,11 @@ EOF
   >"$EVIDENCE/publication-read-delegation.stdout"
 confirmed "$EVIDENCE/publication-read-delegation-attempt/outcome.json"
 query_task delegated-read 8 7003 94 "$EVIDENCE/tool.key" 31022
-test "$(jq -er '.page.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATION_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/delegated-read/view.json")" = "$PUBLICATION_ROOT"
 
 # The workroom is a real empty content page. A tool mutation grant and a
 # separate observe-only read grant are delegated from its owner capability.
-WORKROOM_ROOT=$(jq -er '.page.root' "$EVIDENCE/workroom-born/view.json")
+WORKROOM_ROOT=$(jq -er '.cell.root' "$EVIDENCE/workroom-born/view.json")
 WORKROOM_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
   "$EVIDENCE/delegated-read/challenge.json")
 cat >"$EVIDENCE/workroom-delegation.json" <<EOF
@@ -299,7 +299,7 @@ EOF
   >"$EVIDENCE/workroom-delegation.stdout"
 confirmed "$EVIDENCE/workroom-delegation-attempt/outcome.json"
 query_task delegated-workroom 8 8001 95 "$EVIDENCE/tool.key" 31032
-test "$(jq -er '.page.root' "$EVIDENCE/delegated-workroom/view.json")" = "$WORKROOM_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/delegated-workroom/view.json")" = "$WORKROOM_ROOT"
 
 WORKROOM_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
   "$EVIDENCE/delegated-workroom/challenge.json")
@@ -322,7 +322,7 @@ EOF
   >"$EVIDENCE/workroom-read-delegation.stdout"
 confirmed "$EVIDENCE/workroom-read-delegation-attempt/outcome.json"
 query_task workroom-read 8 8001 96 "$EVIDENCE/tool.key" 31042
-test "$(jq -er '.page.root' "$EVIDENCE/workroom-read/view.json")" = "$WORKROOM_ROOT"
+test "$(jq -er '.cell.root' "$EVIDENCE/workroom-read/view.json")" = "$WORKROOM_ROOT"
 
 # The provider lane fills `commands` and starts its own Hermes runtime. No
 # application database is provisioned: notes live in the Mini content cell.

@@ -450,7 +450,7 @@ fn source_context(
         .ok_or("signed tool height absent")?;
     crate::decimal(height, "signed tool height")?;
     if parent_view.get("height").and_then(Value::as_str) != Some(height)
-        || parent_view.get("imageBoundary") != tool_view.get("imageBoundary")
+        || parent_view.get("worldRoot") != tool_view.get("worldRoot")
     {
         return Err("tool and parent observations have different signed height or image".into());
     }
@@ -777,7 +777,7 @@ mod tests {
             current_birth_host_sha256: None,
         };
         let view = json!({"targetRoot":"41","authorityRoot":"42","height":"9",
-            "imageBoundary":"8","grain":{"generation":"1","status":"1",
+            "worldRoot":"8","grain":{"generation":"1","status":"1",
             "remaining":"20","reserved":"11"}});
         let (source, members) =
             plan_application_birth(&app(), &tool, "2", 77, 1, &view, &view).unwrap();

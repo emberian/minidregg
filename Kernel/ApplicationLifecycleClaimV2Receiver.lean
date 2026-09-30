@@ -38,7 +38,7 @@ def Reservation.receipt {config : Config} (reservation : Reservation config) :
   ⟨reservation.readback.derived.intent.transactionId,
     reservation.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    imageBoundary config candidate.image⟩
+    worldRoot config candidate.image⟩
 
 theorem Reservation.postBytes_exact {config : Config}
     (reservation : Reservation config) :
@@ -65,7 +65,7 @@ def Reservation.projection {config : Config} (reservation : Reservation config) 
           tip.snapshot.model.roots ⟨source.begin.source.packageManifest⟩
         authorityPhysicalRoot :=
           tip.snapshot.model.roots ⟨config.deployment.authorityCellId⟩
-        postImageBoundary := reservation.receipt.imageBoundary }
+        postWorldRoot := reservation.receipt.worldRoot }
     descriptor := reservation.ingress.originalBegin.descriptor }
 
 /-- The full descriptor root is the signed package digest. This is only a

@@ -162,7 +162,7 @@ exec 3>"$EVIDENCE/first-input.fifo"
 printf 'attach soft\n' >&3
 wait_journal '.connection == "soft" and .pending == null'
 query_publication before-publish 51001
-BEFORE_ROOT=$(jq -er '.page.root' "$EVIDENCE/before-publish/view.json")
+BEFORE_ROOT=$(jq -er '.cell.root' "$EVIDENCE/before-publish/view.json")
 printf 'hermes first\n' >&3
 tick=0
 until [ -f "$READY" ]; do
@@ -190,7 +190,7 @@ ATTEMPT=$(jq -er '.publicationReceipts[0].attempt' "$STATE/journal.json")
 jq -e '.type == "confirmed" and .confirmation == "installed"' \
   "$ATTEMPT/outcome.json" >/dev/null
 query_publication after-publish 51002
-AFTER_ROOT=$(jq -er '.page.root' "$EVIDENCE/after-publish/view.json")
+AFTER_ROOT=$(jq -er '.cell.root' "$EVIDENCE/after-publish/view.json")
 [ "$AFTER_ROOT" != "$BEFORE_ROOT" ]
 : >"$RELEASE"
 wait_journal '.connection == "detached" and .child == null and .pending == null and
@@ -205,7 +205,7 @@ FAULT_ID=$(jq -ser '[.[] | select(.grain.task == "7001" and
 jq -e '.type == "confirmed" and .confirmation == "installed"' \
   "$STATE/attempt-$(printf '%016d' "$FAULT_ID")/outcome.json" >/dev/null
 query_parent after-interrupt 52001
-jq -e '.page.grain == {task:"7001",generation:"2",status:"5",
+jq -e '.cell.grain == {task:"7001",generation:"2",status:"5",
   remaining:"97",reserved:"3"}' "$EVIDENCE/after-interrupt/view.json" >/dev/null
 test "$(stat -c %a "$WORK/.hermes/state.db")" = 600
 exec 3>&-
@@ -216,7 +216,7 @@ CONNECT_PID=
   >"$EVIDENCE/reconcile-parent.stdout" 2>"$EVIDENCE/reconcile-parent.stderr"
 wait_journal '.parentHold == null'
 query_parent after-audited-settle 52002
-jq -e '.page.grain == {task:"7001",generation:"2",status:"0",
+jq -e '.cell.grain == {task:"7001",generation:"2",status:"0",
   remaining:"99",reserved:"0"}' \
   "$EVIDENCE/after-audited-settle/view.json" >/dev/null
 "$GRAIN" admin "$ADMIN" 'reconcile effects' \
@@ -248,18 +248,18 @@ grep -F -- '--mode lookup' "$EVIDENCE/observed-retry-command.txt" >/dev/null
 TRANSACTION=$(jq -er '.publicationReceipts[0].transactionId' "$STATE/journal.json")
 EVENT=$(jq -er '.publicationReceipts[0].eventId' "$STATE/journal.json")
 ACCEPTED_COUNT=$(jq -er '.publicationReceipts[0].acceptedCount' "$STATE/journal.json")
-IMAGE_BOUNDARY=$(jq -er '.publicationReceipts[0].imageBoundary' "$STATE/journal.json")
+WORLD_ROOT=$(jq -er '.publicationReceipts[0].worldRoot' "$STATE/journal.json")
 jq -e --arg tx "$TRANSACTION" --arg event "$EVENT" \
-  --arg count "$ACCEPTED_COUNT" --arg boundary "$IMAGE_BOUNDARY" '
+  --arg count "$ACCEPTED_COUNT" --arg boundary "$WORLD_ROOT" '
   .method == "session/prompt" and
   (.params.prompt[0].text | contains("transactionId=" + $tx)) and
   (.params.prompt[0].text | contains("eventId=" + $event)) and
   (.params.prompt[0].text | contains("acceptedCount=" + $count)) and
-  (.params.prompt[0].text | contains("imageBoundary=" + $boundary)) and
+  (.params.prompt[0].text | contains("worldRoot=" + $boundary)) and
   (.params.prompt[0].text | contains("publicationTargetIds=7003"))' \
   "$SECOND" >/dev/null
 query_publication after-report 51003
-[ "$(jq -er '.page.root' "$EVIDENCE/after-report/view.json")" = "$AFTER_ROOT" ]
+[ "$(jq -er '.cell.root' "$EVIDENCE/after-report/view.json")" = "$AFTER_ROOT" ]
 jq -se '[.[] | .grain.publications // [] | select(length > 0)] | length == 1' \
   "$STATE"/source-*.json >/dev/null
 test "$(find "$ATTEMPT" -maxdepth 1 -name 'retry-*.json' -type f | wc -l | tr -d ' ')" -ge 1

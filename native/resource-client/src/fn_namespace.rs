@@ -338,7 +338,7 @@ fn receipt(value: &Value) -> Result<Value> {
         return Err("fn namespace original Mini receipt is not confirmed".into());
     }
     let mut fields = serde_json::Map::new();
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         let number = member(value, name)?;
         if !canonical_decimal(number) {
             return Err(format!("fn namespace receipt {name} is not canonical"));
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn receipt_requires_four_canonical_fields() {
         let accepted = json!({"type":"confirmed","transactionId":"1","eventId":"2",
-            "acceptedCount":"3","imageBoundary":"4"});
+            "acceptedCount":"3","worldRoot":"4"});
         assert_eq!(receipt(&accepted).unwrap()["eventId"], "2");
         let mut malformed = accepted.clone();
         malformed["eventId"] = json!("02");
@@ -723,7 +723,7 @@ mod tests {
             "signingAuthorityRoot":"17","signingHeaderHex":"010203"});
         retain_json(&state.join("plan.json"), &inspection).unwrap();
         let host = root.join("host.sh");
-        let script = format!("#!/bin/sh\nif [ \"$2\" != inspect ]; then exit 1; fi\nif [ \"$3\" = fn-consumer-namespace-plan ]; then cp '{}' \"$5\"; else printf '%s\\n' '{{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"imageBoundary\":\"4\"}}' > \"$5\"; fi\n", state.join("plan.json").display());
+        let script = format!("#!/bin/sh\nif [ \"$2\" != inspect ]; then exit 1; fi\nif [ \"$3\" = fn-consumer-namespace-plan ]; then cp '{}' \"$5\"; else printf '%s\\n' '{{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}}' > \"$5\"; fi\n", state.join("plan.json").display());
         fs::write(&host, script).unwrap();
         fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
         let socket = root.join("operator.sock");

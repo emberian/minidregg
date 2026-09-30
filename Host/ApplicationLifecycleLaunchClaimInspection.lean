@@ -92,8 +92,8 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
        plan.originalBeginReceipt.transactionId.value),
      ("originalBeginEventId", decimal plan.originalBeginReceipt.eventId.value),
      ("originalBeginAcceptedCount", decimal plan.originalBeginReceipt.acceptedCount),
-     ("originalBeginImageBoundary", decimal
-       plan.originalBeginReceipt.imageBoundary.value),
+     ("originalBeginWorldRoot", decimal
+       plan.originalBeginReceipt.worldRoot.value),
      ("descriptorHex", hex begin.descriptor.canonicalBytes),
      ("descriptorRoot", decimal begin.descriptor.root.value),
      ("volumeIdHex", hex <| ApplicationLifecycleLaunchBinding.volumeIdBytes
@@ -110,8 +110,8 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
      ("currentAppRoot", decimal source.currentAppRoot.value),
      ("currentPackageRoot", decimal source.currentPackageRoot.value),
-     ("currentImageBoundary", decimal source.currentImageBoundary.value),
-     ("imageBoundary", decimal plan.invocation.imageBoundary.value),
+     ("currentWorldRoot", decimal source.currentWorldRoot.value),
+     ("worldRoot", decimal plan.invocation.worldRoot.value),
      ("height", decimal plan.invocation.height),
      ("slots", .arr <| (plan.invocation.slots ++
        [plan.appObservationSlot, plan.packageObservationSlot]).toArray.map slotJson)]

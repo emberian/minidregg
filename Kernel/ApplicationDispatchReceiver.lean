@@ -46,7 +46,7 @@ def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    imageBoundary config candidate.image⟩
+    worldRoot config candidate.image⟩
 
 theorem Permit.receipt_in_verified {config : Config} (permit : Permit config) :
     permit.verified.receipts =

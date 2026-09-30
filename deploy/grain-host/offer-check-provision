@@ -167,7 +167,7 @@ for i in "${!names[@]}"; do
   jq -e --arg count "$expected" \
     '.type == "confirmed" and .confirmation == "installed" and .acceptedCount == $count and
      (.transactionId | type == "string") and (.eventId | type == "string") and
-     (.imageBoundary | type == "string")' "$dir/outcome.json" >/dev/null ||
+     (.worldRoot | type == "string")' "$dir/outcome.json" >/dev/null ||
     fail "retained native $name receipt is not the expected confirmation"
   inspect_same outcome "$dir/outcome.bin" "$dir/outcome.json"
 done
@@ -179,8 +179,8 @@ for item in 'controller-born:7801' 'tool-born:7802' \
     existing "$dir/$artifact"
   done
   jq -e --arg task "$task" \
-    '.type == "resource" and .page.grain.task == $task and
-     .page.grain.generation == "0" and .page.grain.status == "0"' \
+    '.type == "resource" and .cell.grain.task == $task and
+     .cell.grain.generation == "0" and .cell.grain.status == "0"' \
     "$dir/view.json" >/dev/null || fail "retained born grain $task differs"
   inspect_same view-resource "$dir/view.bin" "$dir/view.json"
 done
@@ -190,7 +190,7 @@ for item in 'delegated-workroom:8' 'workroom-read:8' 'b-content-read:10'; do
   for artifact in signed-observation.bin observation-signatures.bin challenge.json view.bin view.json; do
     existing "$dir/$artifact"
   done
-  jq -e '.type == "resource" and .page.document == "8001"' \
+  jq -e '.type == "resource" and .cell.document == "8001"' \
     "$dir/view.json" >/dev/null || fail "retained content $name view differs"
   jq -e --arg subject "$subject" '.subject == $subject' \
     "$dir/intent.json" >/dev/null || fail "retained content $name signer differs"

@@ -93,7 +93,7 @@ pub(crate) struct ReceiptFields<'a> {
     pub transaction_id: &'a str,
     pub event_id: &'a str,
     pub accepted_count: &'a str,
-    pub image_boundary: &'a str,
+    pub world_root: &'a str,
 }
 
 fn same_receipt(source: &Value, retained: ReceiptFields<'_>) -> io::Result<()> {
@@ -101,7 +101,7 @@ fn same_receipt(source: &Value, retained: ReceiptFields<'_>) -> io::Result<()> {
         ("transactionId", retained.transaction_id),
         ("eventId", retained.event_id),
         ("acceptedCount", retained.accepted_count),
-        ("imageBoundary", retained.image_boundary),
+        ("worldRoot", retained.world_root),
     ] {
         let value = field(source, name)?;
         if !decimal(value) || value != expected {
@@ -192,7 +192,7 @@ impl StopTarget {
         {
             return Err(invalid("STOP running receipt count differs from index"));
         }
-        for name in ["transactionId", "eventId", "imageBoundary"] {
+        for name in ["transactionId", "eventId", "worldRoot"] {
             if !decimal(field(receipt, name)?) {
                 return Err(invalid("STOP running receipt digest noncanonical"));
             }
@@ -442,7 +442,7 @@ fn retained_receipt(value: &Value) -> io::Result<ExactReceipt> {
         field(value, "transactionId")?,
         field(value, "eventId")?,
         field(value, "acceptedCount")?,
-        field(value, "imageBoundary")?,
+        field(value, "worldRoot")?,
     )
 }
 
@@ -451,7 +451,7 @@ fn receipt_fields(receipt: &ExactReceipt) -> ReceiptFields<'_> {
         transaction_id: receipt.transaction_id(),
         event_id: receipt.event_id(),
         accepted_count: receipt.accepted_count(),
-        image_boundary: receipt.image_boundary(),
+        world_root: receipt.world_root(),
     }
 }
 
@@ -584,9 +584,9 @@ mod tests {
             "retainedPlanHex":hex(plan),
             "freshCommittedFrameHex":hex(committed),
             "beginReceiptHex":"01",
-            "beginReceipt":{"transactionId":LARGE_DIGEST,"eventId":"11","acceptedCount":"12","imageBoundary":"13"},
+            "beginReceipt":{"transactionId":LARGE_DIGEST,"eventId":"11","acceptedCount":"12","worldRoot":"13"},
             "claimReceiptHex":"02",
-            "claimReceipt":{"transactionId":"20","eventId":"21","acceptedCount":"22","imageBoundary":LARGE_DIGEST},
+            "claimReceipt":{"transactionId":"20","eventId":"21","acceptedCount":"22","worldRoot":LARGE_DIGEST},
             "runningIndex":"4",
             "runningReceiptHex":"03",
             "plan":{
@@ -602,7 +602,7 @@ mod tests {
                         "transactionId":LARGE_DIGEST,
                         "eventId":"21",
                         "acceptedCount":"5",
-                        "imageBoundary":LARGE_DIGEST
+                        "worldRoot":LARGE_DIGEST
                     },
                     "generation":"6",
                     "unitHex":hex(b"mini-spk-a8401-g6.service"),
@@ -637,13 +637,13 @@ mod tests {
                 transaction_id: LARGE_DIGEST,
                 event_id: "11",
                 accepted_count: "12",
-                image_boundary: "13",
+                world_root: "13",
             },
             ReceiptFields {
                 transaction_id: "20",
                 event_id: "21",
                 accepted_count: "22",
-                image_boundary: LARGE_DIGEST,
+                world_root: LARGE_DIGEST,
             },
         )
     }
@@ -681,7 +681,7 @@ mod tests {
         );
         assert!(checked(plan, b"other", begin, &view).is_err());
         assert!(checked(plan, committed, b"other", &view).is_err());
-        view["claimReceipt"]["imageBoundary"] = json!("24");
+        view["claimReceipt"]["worldRoot"] = json!("24");
         assert!(checked(plan, committed, begin, &view).is_err());
 
         let volume_id = "a".repeat(64);
@@ -782,13 +782,13 @@ mod tests {
             "transactionId":LARGE_DIGEST,
             "eventId":"1",
             "acceptedCount":"2",
-            "imageBoundary":LARGE_DIGEST,
+            "worldRoot":LARGE_DIGEST,
         }))
         .unwrap();
         assert_eq!(receipt.transaction_id(), LARGE_DIGEST);
         assert!(retained_receipt(&json!({
             "transactionId":"01", "eventId":"1", "acceptedCount":"2",
-            "imageBoundary":"3"
+            "worldRoot":"3"
         }))
         .is_err());
         fs::remove_dir_all(dir).unwrap();

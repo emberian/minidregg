@@ -74,11 +74,11 @@ for route in bob-web alice-api hermes-a hermes-b; do
   query "$route-descriptor-born" "$owner" "$descriptor" \
     "$descriptor_cap" "$owner_key" "$((nonce + 201))"
   jq -e --arg t "$session" '
-    ([.page.entries[] | select(.key.type == "object" and
+    ([.cell.entries[] | select(.key.type == "object" and
       .key.resource == $t)] | length) == 4' \
     "$EVIDENCE/$route-session-born/view.json" >/dev/null
   jq -e --arg d "$descriptor" '
-    .page.document == $d and .page.entries == []' \
+    .cell.document == $d and .cell.entries == []' \
     "$EVIDENCE/$route-descriptor-born/view.json" >/dev/null
   jq -cn --arg route "$route" --arg owner "$owner" \
     --arg session "$session" --arg descriptor "$descriptor" \
@@ -92,14 +92,14 @@ for route in bob-web alice-api hermes-a hermes-b; do
      descriptor:$descriptor,sessionViewSha256:$sessionViewSha,
      descriptorViewSha256:$descriptorViewSha,
      birthReceipt:($receipt[0] |
-       {acceptedCount,transactionId,eventId,imageBoundary})}' \
+       {acceptedCount,transactionId,eventId,worldRoot})}' \
     >>"$EVIDENCE/additional-sessions.jsonl"
 done
 query additional-session-tool-after 8 7902 81 \
   "$EVIDENCE/workroom/tool.key" 49000
 # Settling the final hard reservation returns the attached tool to status 1.
-jq -e '.page.grain.status == "1" and .page.grain.reserved == "0" and
-  (.page.grain.remaining | tonumber > 0)' \
+jq -e '.cell.grain.status == "1" and .cell.grain.reserved == "0" and
+  (.cell.grain.remaining | tonumber > 0)' \
   "$EVIDENCE/additional-session-tool-after/view.json" >/dev/null
 jq -s '{type:"mini-spk-additional-session-births-v1",sessions:.}' \
   "$EVIDENCE/additional-sessions.jsonl" \

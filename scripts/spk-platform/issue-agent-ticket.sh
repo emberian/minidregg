@@ -129,10 +129,10 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
     (.sessionBirthOutcome | type == "string" and startswith("/")) and
     (.appBirthReceipt | type == "object" and
       has("transactionId") and has("eventId") and
-      has("acceptedCount") and has("imageBoundary")) and
+      has("acceptedCount") and has("worldRoot")) and
     (.sessionBirthReceipt | type == "object" and
       has("transactionId") and has("eventId") and
-      has("acceptedCount") and has("imageBoundary"))
+      has("acceptedCount") and has("worldRoot"))
     ' "$SCOPE" >/dev/null || fail "candidate scope differs from A/B allocation"
   APP_OUTCOME=$(jq -er .appBirthOutcome "$SCOPE")
   SESSION_OUTCOME=$(jq -er .sessionBirthOutcome "$SCOPE")
@@ -166,13 +166,13 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
   jq -e --slurpfile scope "$SCOPE" '
     .type == "confirmed" and
     (.confirmation == "installed" or .confirmation == "replayed") and
-    {transactionId,eventId,acceptedCount,imageBoundary} ==
+    {transactionId,eventId,acceptedCount,worldRoot} ==
       $scope[0].appBirthReceipt' "$APP_OUTCOME" >/dev/null ||
     fail "accepted app birth receipt absent or changed"
   jq -e --slurpfile scope "$SCOPE" '
     .type == "confirmed" and
     (.confirmation == "installed" or .confirmation == "replayed") and
-    {transactionId,eventId,acceptedCount,imageBoundary} ==
+    {transactionId,eventId,acceptedCount,worldRoot} ==
       $scope[0].sessionBirthReceipt' "$SESSION_OUTCOME" >/dev/null ||
     fail "accepted session birth receipt absent or changed"
   jq -e '

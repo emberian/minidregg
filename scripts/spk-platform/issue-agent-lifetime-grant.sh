@@ -133,7 +133,7 @@ if [ "$#" -eq 12 ] && [ "$1" = prepare ]; then
     fail "event22 lookup refused; no event27 plan attempted"
   jq -e --slurpfile anchor "$ISSUE/receipt-anchor.json" '
     .type == "confirmed" and .confirmation == "replayed" and
-    {transactionId,eventId,acceptedCount,imageBoundary} == $anchor[0].receipt
+    {transactionId,eventId,acceptedCount,worldRoot} == $anchor[0].receipt
     ' "$DIR/event22-lookup.json" >/dev/null || fail "event22 receipt differs"
   COUNT=$(jq -er .receipt.acceptedCount "$ISSUE/receipt-anchor.json")
   printf '%s' "$COUNT" | grep -Eq '^[1-9][0-9]{0,14}$' ||

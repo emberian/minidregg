@@ -71,7 +71,7 @@ theorem Selected.admitted_record {config : Config} {origin tip : Opened config}
         originalReceipt =
           ⟨derived.intent.transactionId, derived.intent.event.eventId,
             selected.before.durable.image.accepted.length + 1,
-            imageBoundary config next.image⟩ := by
+            worldRoot config next.image⟩ := by
   obtain ⟨derived, matched, next, advanced, validated, receipt⟩ := selected.selectedAdmitted
   exact ⟨derived, matched, derived.admission,
     (recordMatches_iff selected.record derived.intent).mp matched,

@@ -158,14 +158,14 @@ fn checked_receipt(value: &Value) -> Result<()> {
     {
         return Err("latest Mini result is not a confirmed receipt".into());
     }
-    for key in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for key in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         decimal(value, key)?;
     }
     Ok(())
 }
 
 fn receipt_fields(value: &Value) -> Result<()> {
-    for key in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for key in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         decimal(value, key)?;
     }
     Ok(())
@@ -190,7 +190,7 @@ fn recipient_receipt(state: &Path) -> Result<Value> {
         let value = read_json(&path)?;
         if checked_receipt(&value).is_ok() {
             if let Some(first) = &original {
-                for key in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+                for key in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
                     if first.get(key) != value.get(key) {
                         return Err("recipient lookup changed original Mini receipt".into());
                     }
@@ -277,7 +277,7 @@ fn prepare(config: &Value, state: &Path) -> Result<()> {
     let payload_hex = hex(&bounded(&payload, 1_000_000)?);
     let atom = decimal(config, "sourceAtom")?;
     let entries = view
-        .pointer("/page/entries")
+        .pointer("/cell/entries")
         .and_then(Value::as_array)
         .ok_or("signed current source view has no content entries")?;
     if entries
@@ -750,7 +750,7 @@ fn verify(config: &Value, state: &Path, transport_only: bool) -> Result<()> {
     let packet = hex(&bounded(&state.join("packet.bin"), MAX_FILE)?);
     let atom = decimal(&receipt, "transactionId")?;
     let entries = view
-        .pointer("/page/entries")
+        .pointer("/cell/entries")
         .and_then(Value::as_array)
         .ok_or("signed recipient view has no content entries")?;
     if entries
@@ -908,7 +908,7 @@ mod tests {
         let attempt = state.join("recipient-attempt");
         fs::DirBuilder::new().mode(0o700).create(&attempt).unwrap();
         let confirmed = json!({"type":"confirmed","confirmation":"installed",
-            "transactionId":"2","eventId":"3","acceptedCount":"4","imageBoundary":"5"});
+            "transactionId":"2","eventId":"3","acceptedCount":"4","worldRoot":"5"});
         put_json(&attempt.join("request-0000.outcome.json"), &confirmed).unwrap();
         assert_eq!(recipient_receipt(&state).unwrap(), confirmed);
         put_json(
@@ -919,7 +919,7 @@ mod tests {
         assert!(recipient_receipt(&state).is_err());
         fs::remove_file(attempt.join("request-0001.outcome.json")).unwrap();
         let conflicting = json!({"type":"confirmed","confirmation":"replayed",
-            "transactionId":"2","eventId":"3","acceptedCount":"4","imageBoundary":"6"});
+            "transactionId":"2","eventId":"3","acceptedCount":"4","worldRoot":"6"});
         put_json(&attempt.join("request-0001.outcome.json"), &conflicting).unwrap();
         assert!(recipient_receipt(&state)
             .unwrap_err()

@@ -102,11 +102,11 @@ query_intent() {
 query_intent "$before_nonce" "$output/before-intent.json"
 mini_call query --host "$host" --config "$config" --intent "$output/before-intent.json" \
   --key "$key" --view resource --dir "$output/before" >"$output/before.stdout"
-jq -e --arg atom "$atom" '.page.root | type == "string"' "$output/before/view.json" >/dev/null
+jq -e --arg atom "$atom" '.cell.root | type == "string"' "$output/before/view.json" >/dev/null
 jq -e --arg atom "$atom" \
-  '.page.entries | all(.[]; .type != "atom" or .id != $atom)' \
+  '.cell.entries | all(.[]; .type != "atom" or .id != $atom)' \
   "$output/before/view.json" >/dev/null || die "selected AtomId already exists"
-root=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$output/before/view.json")
+root=$(jq -er '.cell.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$output/before/view.json")
 authority=$(jq -er '.signing[0].authorityRoot | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$output/before/challenge.json")
 jq -n --arg subject "$subject" --arg observe "$observe_nonce" \
   --arg command "$command_nonce" --arg authority "$authority" \

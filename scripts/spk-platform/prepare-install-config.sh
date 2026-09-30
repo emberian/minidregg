@@ -269,16 +269,16 @@ for outcome in "$BASE_OUTCOME" "$UPGRADE/base-outcome.json" \
     (.transactionId|type == "string" and test("^(0|[1-9][0-9]*)$")) and
     (.eventId|type == "string" and test("^(0|[1-9][0-9]*)$")) and
     (.acceptedCount|type == "string" and test("^[1-9][0-9]*$")) and
-    (.imageBoundary|type == "string" and test("^(0|[1-9][0-9]*)$"))' \
+    (.worldRoot|type == "string" and test("^(0|[1-9][0-9]*)$"))' \
     "$outcome" >/dev/null
 done
 jq -e '.confirmation == "replayed"' "$UPGRADE/base-outcome.json" >/dev/null
 jq -e '.confirmation == "replayed"' "$UPGRADE/successor-outcome.json" >/dev/null
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' "$BASE_OUTCOME" \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' "$BASE_OUTCOME" \
   >"$UPGRADE/original-receipt.json"
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$UPGRADE/base-outcome.json" >"$UPGRADE/base-receipt.json"
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$UPGRADE/successor-outcome.json" >"$UPGRADE/successor-receipt.json"
 cmp "$UPGRADE/original-receipt.json" "$UPGRADE/base-receipt.json"
 cmp "$UPGRADE/original-receipt.json" "$UPGRADE/successor-receipt.json"

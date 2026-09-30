@@ -30,7 +30,7 @@ private def receiptJson (receipt : NativeHostCodec.Receipt) : Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value),
    ("eventId", decimal receipt.eventId.value),
    ("acceptedCount", decimal receipt.acceptedCount),
-   ("imageBoundary", decimal receipt.imageBoundary.value)]
+   ("worldRoot", decimal receipt.worldRoot.value)]
 
 private def envelopeSignature
     (slot : SigningSlot) (bytes : List UInt8) : Except String (List UInt8) := do

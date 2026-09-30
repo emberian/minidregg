@@ -345,7 +345,7 @@ pub(crate) struct ConfirmedCompletion {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 /// A durable submit marker precedes the one op38 send. A lost reply remains
@@ -432,7 +432,7 @@ fn submit_completion_inner(
         transaction_id: field("transactionId")?,
         event_id: field("eventId")?,
         accepted_count: field("acceptedCount")?,
-        image_boundary: field("imageBoundary")?,
+        world_root: field("worldRoot")?,
     };
     if let Some(journal) = journal {
         journal
@@ -641,7 +641,7 @@ mod tests {
         let mut trailing = plan.clone();
         trailing.push(0);
         assert!(reply_payload(&trailing, 44).is_err());
-        let outcome = frame(38, b"DREGG/NATIVE-HOST/OUTCOME/v2");
+        let outcome = frame(38, b"DREGG/NATIVE-HOST/OUTCOME/v3");
         assert!(reply_payload(&outcome, 44).is_err());
         assert_eq!(reply_payload(&outcome, 38).unwrap(), &outcome[5..]);
     }

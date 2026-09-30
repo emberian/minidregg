@@ -1,7 +1,7 @@
 /-
 Shared source-owned host configuration and structural validation. Semantic
 history verification imports this module; ordinary host APIs import the verifier.
-There is one profile, one image-boundary commitment, and one validation path.
+There is one profile, one world-root commitment, and one validation path.
 -/
 import Compiler.NativeHostCodec
 import Compiler.GrainResourceBirthController
@@ -104,36 +104,9 @@ def seedIdentity (seed : DurableReceiver.Seed) : Digest :=
   (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.GENESIS/v1".toUTF8.toList
     (DurableReceiverCodec.seedStream.encode seed)).digest
 
-def imageBoundary (config : Config) (image : DurableReceiver.Image) : Digest :=
-  NativeHostCodec.imageBoundary config.deployment.domain config.profile.semantics image
-
-/-- The same source-owned image commitment from bytes already certified as the
-canonical encoding of a durable image. This saves a second whole-image encode
-at a receiving step; it does not skip or replace the full boundary hash. -/
-def imageBoundaryCanonical (config : Config) (canonicalBytes : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.IMAGE-BOUNDARY/v1".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
-      (config.deployment.domain, config.profile.semantics, canonicalBytes))).digest
-
-theorem imageBoundaryCanonical_encode (config : Config) (image : DurableReceiver.Image) :
-    imageBoundaryCanonical config (DurableReceiverCodec.encode image) =
-      imageBoundary config image := by
-  rfl
-
-/-- `Loaded.canonical` is minted by strict durable decoding or checked advance;
-the physical caller cannot supply unrelated bytes to this optimization. -/
-theorem imageBoundaryCanonical_loaded (config : Config) (durable : Durable) :
-    imageBoundaryCanonical config durable.bytes = imageBoundary config durable.image := by
-  calc
-    imageBoundaryCanonical config durable.bytes =
-        imageBoundaryCanonical config (DurableReceiverCodec.encode durable.image) :=
-      congrArg (imageBoundaryCanonical config) durable.canonical.symm
-    _ = imageBoundary config durable.image := imageBoundaryCanonical_encode config durable.image
-
-/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_encode
-/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_loaded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_loaded
+/-- The world root of an image under this deployment (`NativeHostCodec.worldRoot`). -/
+def worldRoot (config : Config) (image : DurableReceiver.Image) : Digest :=
+  NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics image
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length

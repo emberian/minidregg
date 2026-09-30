@@ -567,7 +567,7 @@ fn plan(mut args: Args) -> Result<()> {
     )?;
     pinned(&view_json, "type", "resource")?;
     let factory_root = view_json
-        .get("page")
+        .get("cell")
         .and_then(|page| page.get("root"))
         .and_then(Value::as_str)
         .ok_or("signed factory view lacks root")?;
@@ -796,7 +796,7 @@ fn confirmed(value: &Value) -> Result<()> {
     {
         return Err("enrollment outcome is not a confirmed admitted key".into());
     }
-    for field_name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for field_name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         decimal(field(value, field_name)?, field_name)?;
     }
     Ok(())
@@ -809,7 +809,7 @@ fn result(directory: &Path, pin: &Pin, receipt: &Value) -> Result<()> {
         "transactionId":field(receipt,"transactionId")?,
         "eventId":field(receipt,"eventId")?,
         "acceptedCount":field(receipt,"acceptedCount")?,
-        "imageBoundary":field(receipt,"imageBoundary")?
+        "worldRoot":field(receipt,"worldRoot")?
     });
     let value = json!({"type":"minidregg-participant-enrollment-result-v1",
         "subject":pin.subject,"keyId":pin.key_id,"publicKey":pin.public_key,
@@ -1004,7 +1004,7 @@ mod tests {
         assert!(confirmed(&json!({"type":"confirmed","confirmation":"absent"})).is_err());
         assert!(
             confirmed(&json!({"type":"confirmed","confirmation":"replayed",
-            "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"}))
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"}))
             .is_ok()
         );
     }
@@ -1031,9 +1031,9 @@ mod tests {
             command: vec![],
         };
         let installed = json!({"type":"confirmed","confirmation":"installed",
-            "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"});
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
         let replayed = json!({"type":"confirmed","confirmation":"replayed",
-            "transactionId":"1","eventId":"2","acceptedCount":"3","imageBoundary":"4"});
+            "transactionId":"1","eventId":"2","acceptedCount":"3","worldRoot":"4"});
         result(&root, &pin, &installed).unwrap();
         result(&root, &pin, &replayed).unwrap();
         assert_eq!(

@@ -177,7 +177,7 @@ impl VerifiedSettlementV3 {
                 transaction_id: "2".repeat(64),
                 event_id: "3".repeat(64),
                 accepted_count: "13".into(),
-                image_boundary: "14".into(),
+                world_root: "14".into(),
             },
         }
     }
@@ -517,7 +517,7 @@ impl LifetimeReverseClient {
                 &reply.reserve_receipt.transaction_id,
                 &reply.reserve_receipt.event_id,
                 &reply.reserve_receipt.accepted_count,
-                &reply.reserve_receipt.image_boundary,
+                &reply.reserve_receipt.world_root,
             ]
             .into_iter()
             .all(|value| decimal(value))
@@ -751,7 +751,7 @@ mod tests {
                 transaction_id: "1".into(),
                 event_id: "2".into(),
                 accepted_count: "5".into(),
-                image_boundary: "3".into(),
+                world_root: "3".into(),
             },
             request_bytes: vec![1],
             plan_bytes: vec![2],
@@ -794,7 +794,7 @@ mod tests {
             "reservePlanHex":"02", "contextHex":"03", "reserveIndex":"4",
             "effectiveWorkerWallSeconds":"1500",
             "reserveReceipt":{"transactionId":"9","eventId":"10",
-                "acceptedCount":"5","imageBoundary":"11"}
+                "acceptedCount":"5","worldRoot":"11"}
         });
         let parsed: ReservedReply = serde_json::from_value(response.clone()).unwrap();
         assert_eq!(parsed.reserve_plan_hex, "02");
@@ -820,7 +820,7 @@ mod tests {
             transaction_id: "11".into(),
             event_id: "12".into(),
             accepted_count: "13".into(),
-            image_boundary: "14".into(),
+            world_root: "14".into(),
         };
         let expected_receipt = receipt.clone();
         let server = thread::spawn(move || {
@@ -928,7 +928,7 @@ mod tests {
             transaction_id: "11".into(),
             event_id: "12".into(),
             accepted_count: "13".into(),
-            image_boundary: "14".into(),
+            world_root: "14".into(),
         };
         let expected = receipt.clone();
         let server = thread::spawn(move || {

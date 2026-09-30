@@ -42,7 +42,7 @@ def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     permit.old.opened.durable.image.accepted.length + 1,
-    imageBoundaryCanonical config candidate.bytes⟩
+    worldRoot config candidate.image⟩
 
 theorem Permit.postBytes_exact {config : Config} (permit : Permit config) :
     permit.verified.opened.durable.bytes = permit.readback.physicalBytes :=

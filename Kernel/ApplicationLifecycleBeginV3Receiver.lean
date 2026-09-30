@@ -37,7 +37,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     confirmed.old.opened.durable.image.accepted.length + 1,
-    imageBoundary config candidate.image⟩
+    worldRoot config candidate.image⟩
 
 theorem Confirmed.postBytes_exact {config : Config} (confirmed : Confirmed config) :
     confirmed.verified.opened.durable.bytes = confirmed.readback.physicalBytes :=

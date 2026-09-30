@@ -54,7 +54,7 @@ case "$command" in
         '{page:{root:"100",entries:[{type:"atom",id:"7401",kind:{type:"text"},
           payload:$payload,tombstonedAt:null}]}}' >"$directory/view.json"
     else
-      printf '%s\n' '{"page":{"root":"99","entries":[]}}' >"$directory/view.json"
+      printf '%s\n' '{"cell":{"root":"99","entries":[]}}' >"$directory/view.json"
     fi
     printf '%s\n' '{"signing":[{"authorityRoot":"42"}]}' >"$directory/challenge.json"
     printf 'signed-query\n' >"$directory/signed-observation.bin"
@@ -87,13 +87,13 @@ case "$command" in
         printf '%s\n' '{"type":"uncertain"}' >"$(printf '%s/retry-%04d.json' "$directory" "$index")"
         exit 1
       fi
-      printf '%s\n' '{"type":"confirmed","confirmation":"installed","transactionId":"1","eventId":"2","acceptedCount":"1","imageBoundary":"3"}' >"$(printf '%s/retry-%04d.json' "$directory" "$index")"
+      printf '%s\n' '{"type":"confirmed","confirmation":"installed","transactionId":"1","eventId":"2","acceptedCount":"1","worldRoot":"3"}' >"$(printf '%s/retry-%04d.json' "$directory" "$index")"
     elif [ "$mode" = lookup ]; then
     printf 'lookup\n' >>"$MOCK_LOOKUPS"
     if [ "${MOCK_ABSENT:-0}" = 1 ]; then
       printf '%s\n' '{"type":"absent"}' >"$(printf '%s/retry-%04d.json' "$directory" "$index")"
     else
-      printf '%s\n' '{"type":"confirmed","confirmation":"replayed","transactionId":"1","eventId":"2","acceptedCount":"1","imageBoundary":"3"}' >"$(printf '%s/retry-%04d.json' "$directory" "$index")"
+      printf '%s\n' '{"type":"confirmed","confirmation":"replayed","transactionId":"1","eventId":"2","acceptedCount":"1","worldRoot":"3"}' >"$(printf '%s/retry-%04d.json' "$directory" "$index")"
     fi
     else exit 2
     fi

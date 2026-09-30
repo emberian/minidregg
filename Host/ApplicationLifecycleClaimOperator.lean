@@ -116,7 +116,7 @@ def prepareVerified (config : Config) {target : Durable}
       currentAuthorityRoot := opened.authority.snapshot.cell.root
       currentAppRoot := appCell.payload.root
       currentPackageRoot := packageCell.payload.root
-      currentImageBoundary := NativeHostCodec.imageBoundary config.deployment.domain
+      currentWorldRoot := NativeHostCodec.worldRoot config.deployment.domain
         config.profile.semantics opened.durable.image
       appObserveCapability := pin.appObserveCapability
       packageObserveCapability := pin.packageObserveCapability

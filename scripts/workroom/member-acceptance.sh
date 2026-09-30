@@ -130,7 +130,7 @@ deny_submit() {
 }
 delegate() {
   label=$1 child=$2 verb=$3 query_label=$4 nonce=$5
-  root=$(jq -er '.page.root' "$EVIDENCE/$query_label/view.json")
+  root=$(jq -er '.cell.root' "$EVIDENCE/$query_label/view.json")
   authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/$query_label/challenge.json")
   jq -n --arg root "$root" --arg authority "$authority" --arg child "$child" \
     --arg verb "$verb" --arg nonce "$nonce" \
@@ -159,9 +159,9 @@ make_edit() {
           capability:$capability,
           observeCapability:(if $subject == "9" then "98" else null end),
           schemaVersion:"1",
-          expectedTargetRoot:$view[0].page.root,
+          expectedTargetRoot:$view[0].cell.root,
           payload:{type:"content",actions:[{type:"editAtom",atom:"7401",
-            before:($view[0].page.entries[0] |
+            before:($view[0].cell.entries[0] |
               {document,kind,payload,createdBy,createdAt,tombstonedAt}),
             kind:{type:"text"},payload:$payload,tombstone:false}]}}]}}},
       grants:[{kind:"object",target:"8001",
@@ -185,8 +185,8 @@ query owner-after-mutate 7 8001 89 "$OWNER_KEY" 60004
 delegate member-read 98 observe owner-after-mutate 60005
 query member-before 9 8001 98 "$SECOND_KEY" 60007
 query first-before 8 8001 96 "$FIRST_KEY" 60008
-test "$(jq -er '.page.root' "$EVIDENCE/member-before/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/first-before/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/member-before/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/first-before/view.json")"
 deny_query member-unrelated 9 7003 98 "$SECOND_KEY" 60009
 deny_query first-unrelated 8 "${WORKROOM_MEMBER_TASK:-7503}" 96 "$FIRST_KEY" 60010
 
@@ -196,7 +196,7 @@ jq -n --slurpfile view "$EVIDENCE/first-before/view.json" \
   '{subject:"8",nonce:"60100",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"8",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
       nonce:"60101",targets:[{kind:"object",target:"8001",capability:"95",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].page.root,
+        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
           kind:{type:"text"},payload:$payload}]}}]}}},
     grants:[{kind:"object",target:"8001",capability:"95"}]}' \
@@ -212,8 +212,8 @@ deny_submit member-stale "$SECOND_KEY" 'Minidregg.Kernel.DeclaredResourceControl
 fi
 if [ "$RESUME" != split ]; then
 query after-stale 9 8001 98 "$SECOND_KEY" 60109
-test "$(jq -er '.page.root' "$EVIDENCE/after-stale/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/after-first-edit/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/after-stale/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/after-first-edit/view.json")"
 fi
 if [ "$RESUME" != split ]; then
 make_edit member-edit 9 97 after-stale "$third" 60110
@@ -223,7 +223,7 @@ query first-sees-member 8 8001 96 "$FIRST_KEY" 60112
 make_edit first-edit-again 8 95 first-sees-member "$fourth" 60113
 submit first-edit-again "$FIRST_KEY"
 query member-sees-final 9 8001 98 "$SECOND_KEY" 60115
-jq -e --arg payload "$fourth" '.page.entries | length == 1 and
+jq -e --arg payload "$fourth" '.cell.entries | length == 1 and
   .[0].type == "atom" and .[0].kind.type == "text" and .[0].payload == $payload' \
   "$EVIDENCE/member-sees-final/view.json" >/dev/null
 
@@ -231,7 +231,7 @@ jq -e --arg payload "$fourth" '.page.entries | length == 1 and
 # observations supply the target and authority roots for each source command.
 revoke() {
   label=$1 child=$2 observed=$3 nonce=$4
-  root=$(jq -er '.page.root' "$EVIDENCE/$observed/view.json")
+  root=$(jq -er '.cell.root' "$EVIDENCE/$observed/view.json")
   authority=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/$observed/challenge.json")
   jq -n --arg child "$child" --arg root "$root" --arg authority "$authority" \
     --arg nonce "$nonce" \
@@ -254,6 +254,6 @@ query owner-after-revoke 7 8001 89 "$OWNER_KEY" 60126
 make_edit member-revoked-edit 9 97 owner-after-revoke "$third" 60123
 deny_submit member-revoked-edit "$SECOND_KEY" 'observation refused'
 query first-after-revoke 8 8001 96 "$FIRST_KEY" 60125
-test "$(jq -er '.page.root' "$EVIDENCE/first-after-revoke/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/owner-after-revoke/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/first-after-revoke/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/owner-after-revoke/view.json")"
 printf '%s\n' "$EVIDENCE/owner-after-revoke/view.json"

@@ -56,8 +56,8 @@ jq -e '.type == "refused" and .phase == "61646d697373696f6e" and .detail == "726
 jq -e '.grain.task == "7902" and .grain.context.operationId == "43000" and
   .grain.operation == {type:"reserve",amount:"5"} and
   .grain.before == {generation:"0",status:"0",remaining:"50",reserved:"0"}' "$T/intent.json" >/dev/null || fail 'not the paused-tool reserve'
-jq -e '.page.grain == {task:"7902",generation:"0",status:"0",remaining:"50",reserved:"0"}' "$BASE/app-reserve-before/view.json" >/dev/null || fail 'pre-reserve read differs'
-jq -e '.page.grain == {task:"7901",generation:"0",status:"0",remaining:"100",reserved:"0"}' "$BASE/workroom/delegated-parent/view.json" >/dev/null || fail 'parent is not paused'
+jq -e '.cell.grain == {task:"7902",generation:"0",status:"0",remaining:"50",reserved:"0"}' "$BASE/app-reserve-before/view.json" >/dev/null || fail 'pre-reserve read differs'
+jq -e '.cell.grain == {task:"7901",generation:"0",status:"0",remaining:"100",reserved:"0"}' "$BASE/workroom/delegated-parent/view.json" >/dev/null || fail 'parent is not paused'
 jq -e '.subject == "8" and .grants == [{kind:"object",target:"7901",capability:"73"}]' "$BASE/workroom/delegated-parent/intent.json" >/dev/null || fail 'parent witness grant differs'
 [ "$(sha "$HOST")" = 2c28356f8c59dc5ec4d17c594ed718bca3f73f336790c8eb30bb395557f28bf7 ] || fail 'Host changed'
 [ "$(sha "$MINI")" = a339b384f9a6c15d9c3f64e5df243b230da7e5a50d0b252cafbbcd94ad8e47ee ] || fail 'Mini changed'
@@ -111,15 +111,15 @@ cat >"$P/attach-and-reserve.txt" <<'EOF'
 # The integrated workroom left both parent and tool paused. The birth source
 # needs a reserved hard parent witness and a separately reserved hard tool.
 query app-parent-attach-recovery-before 7 7901 71 "$EVIDENCE/workroom/controller.key" 43401
-jq -e '.page.grain == {task:"7901",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7901",generation:"0",status:"0",remaining:"100",reserved:"0"}' \
   "$EVIDENCE/app-parent-attach-recovery-before/view.json" >/dev/null
 jq -n --slurpfile read "$EVIDENCE/app-parent-attach-recovery-before/view.json" \
   --slurpfile challenge "$EVIDENCE/app-parent-attach-recovery-before/challenge.json" '
   {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
     schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-    expectedTargetRoot:$read[0].page.root,
+    expectedTargetRoot:$read[0].cell.root,
     context:{operationId:"43400",payload:"r3 app parent hard attach"},
-    before:($read[0].page.grain | {generation,status,remaining,reserved}),
+    before:($read[0].cell.grain | {generation,status,remaining,reserved}),
     operation:{type:"attach",soft:false},publications:[]},
    grants:[{kind:"object",target:"7901",capability:"71"}],intentNonce:"43400"}' \
   >"$EVIDENCE/app-parent-attach-recovery-intent.json"
@@ -130,16 +130,16 @@ jq -n --slurpfile read "$EVIDENCE/app-parent-attach-recovery-before/view.json" \
   >"$EVIDENCE/app-parent-attach-recovery.stdout"
 confirmed "$EVIDENCE/app-parent-attach-recovery-attempt/outcome.json"
 query app-parent-attached-recovery 7 7901 71 "$EVIDENCE/workroom/controller.key" 43402
-jq -e '.page.grain == {task:"7901",generation:"1",status:"1",remaining:"100",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7901",generation:"1",status:"1",remaining:"100",reserved:"0"}' \
   "$EVIDENCE/app-parent-attached-recovery/view.json" >/dev/null
 query app-parent-reserve-recovery-before 7 7901 71 "$EVIDENCE/workroom/controller.key" 43411
 jq -n --slurpfile read "$EVIDENCE/app-parent-reserve-recovery-before/view.json" \
   --slurpfile challenge "$EVIDENCE/app-parent-reserve-recovery-before/challenge.json" '
   {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
     schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-    expectedTargetRoot:$read[0].page.root,
+    expectedTargetRoot:$read[0].cell.root,
     context:{operationId:"43410",payload:"r3 app parent witness reserve"},
-    before:($read[0].page.grain | {generation,status,remaining,reserved}),
+    before:($read[0].cell.grain | {generation,status,remaining,reserved}),
     operation:{type:"reserve",amount:"1"},publications:[]},
    grants:[{kind:"object",target:"7901",capability:"71"}],intentNonce:"43410"}' \
   >"$EVIDENCE/app-parent-reserve-recovery-intent.json"
@@ -150,19 +150,19 @@ jq -n --slurpfile read "$EVIDENCE/app-parent-reserve-recovery-before/view.json" 
   >"$EVIDENCE/app-parent-reserve-recovery.stdout"
 confirmed "$EVIDENCE/app-parent-reserve-recovery-attempt/outcome.json"
 query app-parent-reserved-recovery 8 7901 73 "$EVIDENCE/workroom/tool.key" 43412
-jq -e '.page.grain == {task:"7901",generation:"1",status:"3",remaining:"99",reserved:"1"}' \
+jq -e '.cell.grain == {task:"7901",generation:"1",status:"3",remaining:"99",reserved:"1"}' \
   "$EVIDENCE/app-parent-reserved-recovery/view.json" >/dev/null
 # The refused reserve43000 did not mutate the paused tool. Use fresh IDs.
 query app-tool-attach-recovery-before 8 7902 81 "$EVIDENCE/workroom/tool.key" 43501
-jq -e '.page.grain == {task:"7902",generation:"0",status:"0",remaining:"50",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7902",generation:"0",status:"0",remaining:"50",reserved:"0"}' \
   "$EVIDENCE/app-tool-attach-recovery-before/view.json" >/dev/null
 jq -n --slurpfile read "$EVIDENCE/app-tool-attach-recovery-before/view.json" \
   --slurpfile challenge "$EVIDENCE/app-tool-attach-recovery-before/challenge.json" '
   {grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
     schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-    expectedTargetRoot:$read[0].page.root,
+    expectedTargetRoot:$read[0].cell.root,
     context:{operationId:"43500",payload:"r3 app tool hard attach"},
-    before:($read[0].page.grain | {generation,status,remaining,reserved}),
+    before:($read[0].cell.grain | {generation,status,remaining,reserved}),
     operation:{type:"attach",soft:false},publications:[]},
    grants:[{kind:"object",target:"7902",capability:"81"}],intentNonce:"43500"}' \
   >"$EVIDENCE/app-tool-attach-recovery-intent.json"
@@ -173,14 +173,14 @@ jq -n --slurpfile read "$EVIDENCE/app-tool-attach-recovery-before/view.json" \
   >"$EVIDENCE/app-tool-attach-recovery.stdout"
 confirmed "$EVIDENCE/app-tool-attach-recovery-attempt/outcome.json"
 query app-tool-attached-recovery 8 7902 81 "$EVIDENCE/workroom/tool.key" 43502
-jq -e '.page.grain == {task:"7902",generation:"1",status:"1",remaining:"50",reserved:"0"}' \
+jq -e '.cell.grain == {task:"7902",generation:"1",status:"1",remaining:"50",reserved:"0"}' \
   "$EVIDENCE/app-tool-attached-recovery/view.json" >/dev/null
 reserve_tool app-reserve-recovery 43510 5
 EOF
 cat >"$P/remaining-check.txt" <<'EOF'
 jq -e --slurpfile initial "$EVIDENCE/app-tool-attach-recovery-before/view.json" '
-  .page.grain.remaining == ((($initial[0].page.grain.remaining | tonumber) - 9) | tostring) and
-  .page.grain.reserved == "0"' \
+  .cell.grain.remaining == ((($initial[0].cell.grain.remaining | tonumber) - 9) | tostring) and
+  .cell.grain.reserved == "0"' \
 EOF
 sync -f "$P/session-function.txt"
 sync -f "$P/attach-and-reserve.txt"
@@ -201,7 +201,7 @@ awk -v session="$P/session-function.txt" -v attach="$P/attach-and-reserve.txt" \
   index($0, "worker-bare-post/challenge.json") {
     gsub(/worker-bare-post/, "tool-born"); oldHeight++; print; next
   }
-  index($0, ".page.grain.remaining == \"38\" and .page.grain.reserved == \"0\"") {
+  index($0, ".cell.grain.remaining == \"38\" and .cell.grain.reserved == \"0\"") {
     while ((getline line < remainingFile) > 0) print line
     close(remainingFile); remaining++; next
   }

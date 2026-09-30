@@ -21,7 +21,7 @@ def main : IO Unit := do
   let historical : Package :=
     ⟨current.domain, current.semantics, current.genesisPin, [1, 2],
       ⟨current.originalReceipt.transactionId, current.originalReceipt.eventId,
-        1, current.originalReceipt.imageBoundary⟩, [3, 4]⟩
+        1, current.originalReceipt.worldRoot⟩, [3, 4]⟩
   let historicalBytes := historicalPackageCodec.encode historical
   require (decodeChecked historicalBytes == .ok historical)
     "historical first-event evidence did not decode"

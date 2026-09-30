@@ -539,7 +539,7 @@ struct PublicationReceipt {
     transaction_id: String,
     event_id: String,
     accepted_count: String,
-    image_boundary: String,
+    world_root: String,
     /// Set only after a later ACP prompt has completed with a verified report.
     reported: bool,
 }
@@ -844,7 +844,7 @@ struct BornResourceRecord {
     transaction_id: String,
     event_id: String,
     accepted_count: String,
-    image_boundary: String,
+    world_root: String,
     #[serde(default)]
     reported: bool,
 }
@@ -860,7 +860,7 @@ fn same_publication_confirmation(a: &PublicationReceipt, b: &PublicationReceipt)
         && a.transaction_id == b.transaction_id
         && a.event_id == b.event_id
         && a.accepted_count == b.accepted_count
-        && a.image_boundary == b.image_boundary
+        && a.world_root == b.world_root
 }
 
 fn current_publication_receipt<'a>(
@@ -897,7 +897,7 @@ fn publication_receipt_json(record: &PublicationReceipt) -> Value {
         "transactionId":record.transaction_id,
         "eventId":record.event_id,
         "acceptedCount":record.accepted_count,
-        "imageBoundary":record.image_boundary,
+        "worldRoot":record.world_root,
         "publicationTargetIds":record.targets,
     })
 }
@@ -910,7 +910,7 @@ fn birth_receipt_json(record: &BornResourceRecord) -> Value {
             "bornResources":record.pending.members(),
             "birthReceipt":{"operationId":record.pending.operation_id.to_string(),
             "transactionId":record.transaction_id,"eventId":record.event_id,
-            "acceptedCount":record.accepted_count,"imageBoundary":record.image_boundary}});
+            "acceptedCount":record.accepted_count,"worldRoot":record.world_root}});
     }
     json!({"type":"confirmed-mini-resource-birth-v1",
         "scope":"historical-accepted-transition",
@@ -918,7 +918,7 @@ fn birth_receipt_json(record: &BornResourceRecord) -> Value {
         "target":record.pending.born.target,
         "birthReceipt":{"operationId":record.pending.operation_id.to_string(),
         "transactionId":record.transaction_id,"eventId":record.event_id,
-        "acceptedCount":record.accepted_count,"imageBoundary":record.image_boundary}})
+        "acceptedCount":record.accepted_count,"worldRoot":record.world_root}})
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -968,7 +968,7 @@ struct ReserveAnchor {
     transaction_id: String,
     event_id: String,
     accepted_count: String,
-    image_boundary: String,
+    world_root: String,
 }
 
 impl ReserveAnchor {
@@ -988,7 +988,7 @@ impl ReserveAnchor {
             transaction_id: field("transactionId")?,
             event_id: field("eventId")?,
             accepted_count: field("acceptedCount")?,
-            image_boundary: field("imageBoundary")?,
+            world_root: field("worldRoot")?,
         })
     }
 }
@@ -3368,8 +3368,8 @@ impl Runtime {
                 || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
                 || receipt.get("acceptedCount").and_then(Value::as_str)
                     != Some(anchor.accepted_count.as_str())
-                || receipt.get("imageBoundary").and_then(Value::as_str)
-                    != Some(anchor.image_boundary.as_str())
+                || receipt.get("worldRoot").and_then(Value::as_str)
+                    != Some(anchor.world_root.as_str())
                 || receipt.get("reserveIndex").and_then(Value::as_str)
                     != lifetime.reserve_index.as_deref()
             {
@@ -3475,8 +3475,8 @@ impl Runtime {
                 || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
                 || receipt.get("acceptedCount").and_then(Value::as_str)
                     != Some(anchor.accepted_count.as_str())
-                || receipt.get("imageBoundary").and_then(Value::as_str)
-                    != Some(anchor.image_boundary.as_str())
+                || receipt.get("worldRoot").and_then(Value::as_str)
+                    != Some(anchor.world_root.as_str())
                 || receipt.get("reserveIndex").and_then(Value::as_str)
                     != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
             {
@@ -4187,8 +4187,8 @@ impl Runtime {
             || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
             || receipt.get("acceptedCount").and_then(Value::as_str)
                 != Some(anchor.accepted_count.as_str())
-            || receipt.get("imageBoundary").and_then(Value::as_str)
-                != Some(anchor.image_boundary.as_str())
+            || receipt.get("worldRoot").and_then(Value::as_str)
+                != Some(anchor.world_root.as_str())
             || receipt.get("reserveIndex").and_then(Value::as_str)
                 != Some(previous_accepted_index(&anchor.accepted_count)?.as_str())
         {
@@ -4201,7 +4201,7 @@ impl Runtime {
             .ok_or("lifetime hold disappeared")?;
         hold.reserve_attempt = Some(directory.clone());
         hold.reserve_confirmed = true;
-        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_boundary = Some(anchor.world_root.clone());
         hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
         hold.reserve_source_sha256 = Some(sha256_file(&source_path)?);
         hold.reserve_outcome_path = Some(directory.join("submit.outcome.bin"));
@@ -4597,8 +4597,8 @@ impl Runtime {
             || receipt.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
             || receipt.get("acceptedCount").and_then(Value::as_str)
                 != Some(anchor.accepted_count.as_str())
-            || receipt.get("imageBoundary").and_then(Value::as_str)
-                != Some(anchor.image_boundary.as_str())
+            || receipt.get("worldRoot").and_then(Value::as_str)
+                != Some(anchor.world_root.as_str())
         {
             return Err("v2 reserve custody receipt differs from original native outcome".into());
         }
@@ -4616,7 +4616,7 @@ impl Runtime {
             .ok_or("v2 reserve hold disappeared")?;
         hold.reserve_attempt = Some(directory.clone());
         hold.reserve_confirmed = true;
-        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_boundary = Some(anchor.world_root.clone());
         hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
         hold.reserve_source_sha256 = Some(sha256_file(&source_path)?);
         hold.reserve_outcome_path = Some(directory.join("submit.outcome.bin"));
@@ -5019,7 +5019,7 @@ impl Runtime {
                     "transactionId":reserve_receipt.get("transactionId"),
                     "eventId":reserve_receipt.get("eventId"),
                     "acceptedCount":reserve_receipt.get("acceptedCount"),
-                    "imageBoundary":reserve_receipt.get("imageBoundary"),
+                    "worldRoot":reserve_receipt.get("worldRoot"),
                 }),
                 signed_post_purse_physical_root: &post_purse_root,
             },
@@ -5223,7 +5223,7 @@ impl Runtime {
                     "transactionId": receipt.get("transactionId"),
                     "eventId": receipt.get("eventId"),
                     "acceptedCount": receipt.get("acceptedCount"),
-                    "imageBoundary": receipt.get("imageBoundary"),
+                    "worldRoot": receipt.get("worldRoot"),
                 }))
         {
             return Err("paid plan differs from exact confirmed reserve".into());
@@ -5737,7 +5737,7 @@ impl Runtime {
             ("transaction ID", &exact_receipt.transaction_id),
             ("event ID", &exact_receipt.event_id),
             ("accepted count", &exact_receipt.accepted_count),
-            ("image boundary", &exact_receipt.image_boundary),
+            ("world root", &exact_receipt.world_root),
         ] {
             decimal(value, label)?;
             if value.len() > 80 {
@@ -6636,7 +6636,7 @@ impl Runtime {
             transaction_id: field("transactionId")?,
             event_id: field("eventId")?,
             accepted_count: field("acceptedCount")?,
-            image_boundary: field("imageBoundary")?,
+            world_root: field("worldRoot")?,
             reported: false,
         }))
     }
@@ -6821,7 +6821,7 @@ impl Runtime {
             transaction_id: field("transactionId")?,
             event_id: field("eventId")?,
             accepted_count: field("acceptedCount")?,
-            image_boundary: field("imageBoundary")?,
+            world_root: field("worldRoot")?,
             reported: false,
         }))
     }
@@ -7081,14 +7081,14 @@ impl Runtime {
                 return Err("exact publication lookup changed its confirmed receipt".into());
             }
             lines.push(format!(
-                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} imageBoundary={} publicationTargetIds={}",
+                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} worldRoot={} publicationTargetIds={}",
                 if record.session_id == session_id { "current" } else { "prior" },
                 record.prompt_operation_id,
                 record.operation_id,
                 record.transaction_id,
                 record.event_id,
                 record.accepted_count,
-                record.image_boundary,
+                record.world_root,
                 record.targets.join(",")
             ));
             ids.push(record.operation_id);
@@ -7130,7 +7130,7 @@ impl Runtime {
                 || observed.transaction_id != record.transaction_id
                 || observed.event_id != record.event_id
                 || observed.accepted_count != record.accepted_count
-                || observed.image_boundary != record.image_boundary
+                || observed.world_root != record.world_root
             {
                 return Err("exact resource birth lookup changed its confirmed receipt".into());
             }
@@ -7153,14 +7153,14 @@ impl Runtime {
                 )
             };
             lines.push(format!(
-                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} imageBoundary={} {}",
+                "originSession={} promptOperationId={} toolOperationId={} transactionId={} eventId={} acceptedCount={} worldRoot={} {}",
                 if record.pending.session_id == session_id { "current" } else { "prior" },
                 record.pending.prompt_operation_id,
                 record.pending.operation_id,
                 record.transaction_id,
                 record.event_id,
                 record.accepted_count,
-                record.image_boundary,
+                record.world_root,
                 member_summary,
             ));
             ids.push(record.pending.operation_id);
@@ -7296,8 +7296,8 @@ impl Runtime {
                         .arg(&reference.birth.event_id)
                         .arg("--accepted-count")
                         .arg(&reference.birth.accepted_count)
-                        .arg("--image-boundary")
-                        .arg(&reference.birth.image_boundary)
+                        .arg("--world-root")
+                        .arg(&reference.birth.world_root)
                         .arg("--dir")
                         .arg(
                             self.config
@@ -7329,8 +7329,8 @@ impl Runtime {
                         .arg(&reference.issue.event_id)
                         .arg("--accepted-count")
                         .arg(&reference.issue.accepted_count)
-                        .arg("--image-boundary")
-                        .arg(&reference.issue.image_boundary)
+                        .arg("--world-root")
+                        .arg(&reference.issue.world_root)
                         .arg("--dir")
                         .arg(
                             self.config
@@ -7392,15 +7392,15 @@ impl Runtime {
         )
         .map_err(|e| e.to_string())?;
         let grain = view
-            .pointer("/page/grain")
+            .pointer("/cell/grain")
             .ok_or("signed resource view has no grain")?;
         if grain.get("task").and_then(Value::as_str) != Some(authority.task.as_str()) {
             return Err("signed resource view names another task".into());
         }
         Ok(
-            json!({"grain":grain, "targetRoot":view.pointer("/page/root"),
+            json!({"grain":grain, "targetRoot":view.pointer("/cell/root"),
             "authorityRoot":challenge.pointer("/signing/0/authorityRoot"),
-            "imageBoundary":challenge.get("imageBoundary"),
+            "worldRoot":challenge.get("worldRoot"),
             "height":challenge.get("height")}),
         )
     }
@@ -7721,9 +7721,9 @@ impl Runtime {
             return Err("reserve has no confirmed native receipt".into());
         }
         let boundary = receipt
-            .get("imageBoundary")
+            .get("worldRoot")
             .and_then(Value::as_str)
-            .ok_or("confirmed reserve lacks image boundary")?
+            .ok_or("confirmed reserve lacks world root")?
             .to_owned();
         let provider_evidence = if matches!(slot, AuthoritySlot::Provider | AuthoritySlot::Dispatch)
         {
@@ -9366,7 +9366,7 @@ impl Runtime {
                 return Err("retained provider reserve evidence is not a regular file".into());
             }
         }
-        if hold.reserve_boundary.as_deref() != Some(anchor.image_boundary.as_str())
+        if hold.reserve_boundary.as_deref() != Some(anchor.world_root.as_str())
             || Some(sha256_file(&call)?.as_str()) != hold.reserve_call_sha256.as_deref()
             || Some(sha256_file(outcome)?.as_str()) != hold.reserve_outcome_sha256.as_deref()
         {
@@ -9423,14 +9423,14 @@ impl Runtime {
             || observed.get("eventId").and_then(Value::as_str) != Some(anchor.event_id.as_str())
             || observed.get("acceptedCount").and_then(Value::as_str)
                 != Some(anchor.accepted_count.as_str())
-            || observed.get("imageBoundary").and_then(Value::as_str)
-                != Some(anchor.image_boundary.as_str())
+            || observed.get("worldRoot").and_then(Value::as_str)
+                != Some(anchor.world_root.as_str())
         {
             return Err("native continuity anchor differs from retained reserve receipt".into());
         }
         decimal(
             result
-                .get("checkedImageBoundary")
+                .get("checkedWorldRoot")
                 .and_then(Value::as_str)
                 .ok_or("continuity checked boundary absent")?,
             "continuity checked boundary",
@@ -11291,7 +11291,7 @@ impl Runtime {
                     .pointer("/provenance/birthReceipt/type")
                     .and_then(Value::as_str)
                     != Some("confirmed")
-                || ["transactionId", "eventId", "acceptedCount", "imageBoundary"]
+                || ["transactionId", "eventId", "acceptedCount", "worldRoot"]
                     .iter()
                     .any(|field| {
                         result
@@ -14260,8 +14260,8 @@ impl Runtime {
                 .and_then(Value::as_str)
                 .ok_or("v2 receipt accepted count absent")?
                 .into(),
-            image_boundary: original
-                .get("imageBoundary")
+            world_root: original
+                .get("worldRoot")
                 .and_then(Value::as_str)
                 .ok_or("v2 receipt boundary absent")?
                 .into(),
@@ -14270,7 +14270,7 @@ impl Runtime {
             &anchor.transaction_id,
             &anchor.event_id,
             &anchor.accepted_count,
-            &anchor.image_boundary,
+            &anchor.world_root,
         ] {
             decimal(field, "recovered v2 reserve receipt")?;
         }
@@ -14365,7 +14365,7 @@ impl Runtime {
             .ok_or("v2 recovered hold disappeared")?;
         hold.reserve_attempt = Some(directory.clone());
         hold.reserve_confirmed = true;
-        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_boundary = Some(anchor.world_root.clone());
         hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
         hold.reserve_source_sha256 = attempt.reserve_v2_source_sha256.clone();
         let outcome = directory.join("submit.outcome.bin");
@@ -14514,8 +14514,8 @@ impl Runtime {
                 .and_then(Value::as_str)
                 .ok_or("v3 receipt count absent")?
                 .into(),
-            image_boundary: receipt
-                .get("imageBoundary")
+            world_root: receipt
+                .get("worldRoot")
                 .and_then(Value::as_str)
                 .ok_or("v3 receipt boundary absent")?
                 .into(),
@@ -14524,7 +14524,7 @@ impl Runtime {
             &anchor.transaction_id,
             &anchor.event_id,
             &anchor.accepted_count,
-            &anchor.image_boundary,
+            &anchor.world_root,
         ] {
             decimal(field, "v3 reserve receipt")?;
         }
@@ -14603,7 +14603,7 @@ impl Runtime {
         }
         hold.reserve_attempt = Some(directory.clone());
         hold.reserve_confirmed = true;
-        hold.reserve_boundary = Some(anchor.image_boundary.clone());
+        hold.reserve_boundary = Some(anchor.world_root.clone());
         hold.reserve_call_sha256 = Some(sha256_file(&directory.join("call.bin"))?);
         hold.reserve_source_sha256 = Some(lifetime.source_sha256.clone());
         hold.reserve_outcome_path = Some(outcome.clone());
@@ -15235,7 +15235,7 @@ impl Runtime {
             return Err("signed reservation generation differs from confirmed origin".into());
         }
         if !audited
-            && observed.get("imageBoundary").and_then(Value::as_str)
+            && observed.get("worldRoot").and_then(Value::as_str)
                 != hold.reserve_boundary.as_deref()
         {
             return Err("intervening Mini events prevent automatic reservation identity proof; use audited admin reconciliation after reviewing exact attempts".into());
@@ -16822,7 +16822,7 @@ mod tests {
                 transaction_id: "11".into(),
                 event_id: "12".into(),
                 accepted_count: "13".into(),
-                image_boundary: "14".into(),
+                world_root: "14".into(),
             }),
             lifetime_settled_response_sha256: Some("dd".repeat(32)),
             lifetime_settlement: Some(test_lifetime_settlement()),
@@ -16862,7 +16862,7 @@ mod tests {
                     transaction_id: "15".into(),
                     event_id: "16".into(),
                     accepted_count: "17".into(),
-                    image_boundary: "18".into(),
+                    world_root: "18".into(),
                 },
             },
         }
@@ -16940,7 +16940,7 @@ mod tests {
             transaction_id: "11".into(),
             event_id: "12".into(),
             accepted_count: "13".into(),
-            image_boundary: "14".into(),
+            world_root: "14".into(),
         };
         let mut attempt = ApplicationApiAttempt {
             operation_id: 9,
@@ -16979,7 +16979,7 @@ mod tests {
             transaction_id: "11".into(),
             event_id: "12".into(),
             accepted_count: "13".into(),
-            image_boundary: "14".into(),
+            world_root: "14".into(),
         };
         let attempt = ApplicationApiAttempt {
             operation_id: 9,
@@ -17385,7 +17385,7 @@ mod tests {
             transaction_id: "1".into(),
             event_id: "2".into(),
             accepted_count: "3".into(),
-            image_boundary: "4".into(),
+            world_root: "4".into(),
             reported: false,
         };
         let mut journal = Journal::fresh(json!({}));
@@ -17598,8 +17598,8 @@ done
 mkdir -p "$dir"
 if [ "$command" = query ]; then
   status=$(cat "$state/status")
-  printf '{"page":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"3"}}}\n' "$status" > "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300"}' > "$dir/challenge.json"
+  printf '{"cell":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"3"}}}\n' "$status" > "$dir/view.json"
+  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300"}' > "$dir/challenge.json"
   exit 0
 fi
 [ "$command" = submit ] || exit 40
@@ -17612,7 +17612,7 @@ elif grep -q '"type": "settle"' "$intent"; then
 elif grep -q '"type": "disconnect"' "$intent"; then
   printf 0 > "$state/status"
 fi
-printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
+printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
 "#
         .replace("__STATE__", state.to_str().unwrap());
         fs::write(&mini, script).unwrap();
@@ -17699,7 +17699,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             transaction_id: "91".into(),
             event_id: "92".into(),
             accepted_count: "93".into(),
-            image_boundary: "94".into(),
+            world_root: "94".into(),
             reported: false,
         };
         runtime.journal.publication_receipts.push(stale.clone());
@@ -17721,7 +17721,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
         assert_eq!(receipt["transactionId"], "11");
         assert_eq!(receipt["eventId"], "12");
         assert_eq!(receipt["acceptedCount"], "13");
-        assert_eq!(receipt["imageBoundary"], "300");
+        assert_eq!(receipt["worldRoot"], "300");
         assert_eq!(receipt["publicationTargetIds"], json!(["7003"]));
         assert_eq!(runtime.journal.publication_receipts.len(), 2);
         assert_eq!(
@@ -17810,10 +17810,10 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             reserve_anchor: None,
         };
         let current = json!({"grain":{"status":"3","reserved":"3","generation":"4"},
-            "imageBoundary":"accepted-reserve-image"});
+            "worldRoot":"accepted-reserve-image"});
         assert!(provider_reserve_coordinates(&current, &hold));
         let mut replaced = current.clone();
-        replaced["imageBoundary"] = json!("later-same-amount-reserve");
+        replaced["worldRoot"] = json!("later-same-amount-reserve");
         // Intervening provider writes are checked by the native continuity
         // receipt, while these signed fields still bind the held allowance.
         assert!(provider_reserve_coordinates(&replaced, &hold));

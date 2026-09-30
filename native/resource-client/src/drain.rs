@@ -62,7 +62,7 @@ fn confirmed_fields(value: &Value) -> Result<Value> {
         return Err("host upgrade lookup is not confirmed".into());
     }
     let mut fields = serde_json::Map::new();
-    for name in ["acceptedCount", "transactionId", "eventId", "imageBoundary"] {
+    for name in ["acceptedCount", "transactionId", "eventId", "worldRoot"] {
         let field = value
             .get(name)
             .and_then(Value::as_str)
@@ -1584,7 +1584,7 @@ mod tests {
             "socket":utf8_path(&socket).unwrap(), "prepare":"prepare-00000002",
             "callSha256":file_digest(&prepare.join("call.bin")).unwrap(),
             "confirmedFields":{"acceptedCount":"3","transactionId":"123",
-                "eventId":"456","imageBoundary":"789"}
+                "eventId":"456","worldRoot":"789"}
         })).unwrap();
         let pin_value = v2_pin(
             &new_host,
@@ -1646,12 +1646,12 @@ mod tests {
     #[test]
     fn upgrade_receipt_requires_all_four_canonical_fields() {
         let original = json!({"type":"confirmed","acceptedCount":"3", "transactionId":"123",
-            "eventId":"456", "imageBoundary":"789", "confirmation":"replayed"});
+            "eventId":"456", "worldRoot":"789", "confirmation":"replayed"});
         let mut replay = original.clone();
         replay["confirmation"] = json!("accepted");
         let expected = confirmed_fields(&original).unwrap();
         assert!(require_upgraded_receipt(&replay, &expected).is_ok());
-        for field in ["acceptedCount", "transactionId", "eventId", "imageBoundary"] {
+        for field in ["acceptedCount", "transactionId", "eventId", "worldRoot"] {
             let mut changed = replay.clone();
             changed[field] = json!("001");
             assert!(confirmed_fields(&changed).is_err());
@@ -1694,7 +1694,7 @@ mod tests {
         )
         .is_err());
         let value = json!({"type":"confirmed", "acceptedCount":"3",
-            "transactionId":"123", "eventId":"456", "imageBoundary":"789"});
+            "transactionId":"123", "eventId":"456", "worldRoot":"789"});
         create_private(&prepare.join("retry-0001.bin"), b"binary receipt").unwrap();
         write_json_new(&prepare.join("retry-0001.json"), &value).unwrap();
         retain_confirmed_anchor(&pending, &prepare, &prepare.join("retry-0001.json"), &value)
@@ -1704,7 +1704,7 @@ mod tests {
         retain_confirmed_anchor(&pending, &prepare, &prepare.join("retry-0002.json"), &value)
             .unwrap();
         let mut fork = value;
-        fork["imageBoundary"] = json!("790");
+        fork["worldRoot"] = json!("790");
         assert!(retain_confirmed_anchor(
             &pending,
             &prepare,

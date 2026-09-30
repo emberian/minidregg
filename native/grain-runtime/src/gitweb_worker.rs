@@ -748,7 +748,7 @@ mod tests {
             "headers":[{"name":"content-type","value":mime}],
             "bodyHex":hex(&output.stdout[boundary+4..]),
             "committedReceipt":{"transactionId":"1","eventId":"2",
-                "acceptedCount":"3","imageBoundary":"4"}}))
+                "acceptedCount":"3","worldRoot":"4"}}))
     }
 
     #[test]

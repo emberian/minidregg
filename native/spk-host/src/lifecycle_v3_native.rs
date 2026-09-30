@@ -354,7 +354,7 @@ impl FixedLaunchBeginSigners {
             || view.get("selectedCommandDigest")
                 != Some(&selected.map_or(Value::Null, |digest| Value::String(digest.into())))
             || !decimal(text(view, "authorizationOperationId")?)
-            || !decimal(text(view, "imageBoundary")?)
+            || !decimal(text(view, "worldRoot")?)
             || !decimal(text(view, "height")?)
             || !lowercase_hex(text(view, "unsignedIngressHex")?)
             || text(view, "unsignedIngressHex")?.is_empty()
@@ -433,7 +433,7 @@ pub(crate) struct AcceptedLaunchBegin {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 /// Single v3 author/assemble/submit attempt. The request marker is durable
@@ -520,7 +520,7 @@ pub(crate) fn submit_once(
     )?;
     let reply = operator.invoke(22, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 22, b"DREGG/NATIVE-HOST/OUTCOME/v2")?;
+    let outcome = framed_payload(&reply, 22, b"DREGG/NATIVE-HOST/OUTCOME/v3")?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let inspection = operator.tool(
         "inspect",
@@ -552,7 +552,7 @@ pub(crate) fn submit_once(
         transaction_id: receipt("transactionId")?,
         event_id: receipt("eventId")?,
         accepted_count: receipt("acceptedCount")?,
-        image_boundary: receipt("imageBoundary")?,
+        world_root: receipt("worldRoot")?,
     })
 }
 
@@ -701,7 +701,7 @@ mod tests {
             "beforeGeneration":"1", "processGeneration":"2",
             "processIdentityHex":hex(b"mini-spk-a8401-g2.service"),
             "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
-            "imageBoundary":"10", "height":"11",
+            "worldRoot":"10", "height":"11",
             "selectedCommandDigest":null, "priorCreate":null, "slots":[]
         });
         fixed
@@ -771,7 +771,7 @@ mod tests {
             "beforeGeneration":"1", "processGeneration":"2",
             "processIdentityHex":hex(b"mini-spk-a8401-g2.service"),
             "imageIdentityHex":hex(&launch.descriptor().package.image_identity),
-            "imageBoundary":"10", "height":"11",
+            "worldRoot":"10", "height":"11",
             "selectedCommandDigest":"44",
             "priorCreate":{"receiptHex":"abcd","custodyHex":"ef01"}, "slots":[]
         });

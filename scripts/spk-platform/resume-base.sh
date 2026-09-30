@@ -104,15 +104,15 @@ test "$(rg -c -F 'CONFIG="$EVIDENCE/workroom/deployment/pinned-config.json"' "$A
 test "$(rg -c -F 'CONFIG="$ROOT/base/workroom/deployment/pinned-config.json"' "$RUN_SOURCE")" = 1 || fail "handoff continuation marker differs"
 jq -e '.type == "confirmed" and
   (.confirmation == "installed" or .confirmation == "recoveredAfterUncertainResponse") and
-  ([.transactionId,.eventId,.acceptedCount,.imageBoundary] |
+  ([.transactionId,.eventId,.acceptedCount,.worldRoot] |
     all(.[]; type == "string" and test("^(0|[1-9][0-9]*)$")))' \
   "$SUBMIT_RECEIPT" >/dev/null || fail "original submit receipt is not confirmed"
 jq -e '.type == "confirmed" and .confirmation == "replayed" and
-  ([.transactionId,.eventId,.acceptedCount,.imageBoundary] |
+  ([.transactionId,.eventId,.acceptedCount,.worldRoot] |
     all(.[]; type == "string" and test("^(0|[1-9][0-9]*)$")))' \
   "$LOOKUP_RECEIPT" >/dev/null || fail "read-only original-call lookup is not replayed"
-submit_fields=$(jq -Sc '{transactionId,eventId,acceptedCount,imageBoundary}' "$SUBMIT_RECEIPT")
-lookup_fields=$(jq -Sc '{transactionId,eventId,acceptedCount,imageBoundary}' "$LOOKUP_RECEIPT")
+submit_fields=$(jq -Sc '{transactionId,eventId,acceptedCount,worldRoot}' "$SUBMIT_RECEIPT")
+lookup_fields=$(jq -Sc '{transactionId,eventId,acceptedCount,worldRoot}' "$LOOKUP_RECEIPT")
 [ "$submit_fields" = "$lookup_fields" ] || fail "original receipt and replay differ"
 
 [ -d "$ROOT/continuations" ] || mkdir -m 700 "$ROOT/continuations"

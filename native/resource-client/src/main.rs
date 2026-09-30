@@ -203,13 +203,13 @@ usage:
   mini share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
   mini share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini share-issue-lookup --socket OPERATOR-OR-PUBLIC-SOCKET --attempt PREPARED-DIR
-  mini share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
   mini grain-share-issue-plan --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --dir NEW-PRIVATE-DIR
   mini grain-share-issue-prepare --host HOST --config CONFIG.json --socket OPERATOR-SOCKET --request REQUEST.json --approval OPERATOR-PRIVATE-APPROVAL.json --dir NEW-PRIVATE-DIR
   mini grain-share-issue-submit --socket OPERATOR-SOCKET --attempt PREPARED-DIR
   mini grain-share-issue-lookup --socket OPERATOR-SOCKET --attempt PREPARED-DIR
-  mini grain-share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
-  mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --image-boundary BOUNDARY --dir NEW-PRIVATE-DIR
+  mini grain-share-issue-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --ingress EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
+  mini historical-call-receipt-lookup --host HOST --config CONFIG.json --socket PUBLIC-SOCKET --call EXACT.bin --transaction-id TX --event-id EVENT --accepted-count COUNT --world-root BOUNDARY --dir NEW-PRIVATE-DIR
   mini host-command --host HOST --config CONFIG.json --command FN-COMMAND [--arg ARG ...]
   mini consumer-poll --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --dir NEW-ATTEMPT
   mini consumer-ack --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
@@ -1874,7 +1874,7 @@ fn continuity_reply(value: &Value) -> Result<bool> {
     if value.get("providerResourceId").and_then(Value::as_str) == Some("0") {
         return Err("provider continuity reply names no provider resource".into());
     }
-    decimal(value, "checkedImageBoundary")?;
+    decimal(value, "checkedWorldRoot")?;
     decimal(value, "checkedAcceptedCount")?;
     let anchor = value
         .get("anchor")
@@ -1882,7 +1882,7 @@ fn continuity_reply(value: &Value) -> Result<bool> {
     if anchor.get("type").and_then(Value::as_str) != Some("verified-mini-native-prefix-v1") {
         return Err("provider continuity anchor has unexpected type".into());
     }
-    for name in ["transactionId", "eventId", "acceptedCount", "imageBoundary"] {
+    for name in ["transactionId", "eventId", "acceptedCount", "worldRoot"] {
         decimal(anchor, name)?;
     }
     let reason = value
@@ -2559,13 +2559,13 @@ fn run(mut args: Args) -> Result<()> {
             let transaction_id = args.required("transaction-id")?;
             let event_id = args.required("event-id")?;
             let accepted_count = args.required("accepted-count")?;
-            let image_boundary = args.required("image-boundary")?;
+            let world_root = args.required("world-root")?;
             let directory = path(args.required("dir")?);
             args.finish()?;
             let socket = SOCKET
                 .get()
                 .ok_or("share issue receipt lookup requires --socket")?;
-            let expected = [transaction_id, event_id, accepted_count, image_boundary];
+            let expected = [transaction_id, event_id, accepted_count, world_root];
             let fields = expected
                 .iter()
                 .map(|value| {
@@ -2628,13 +2628,13 @@ fn run(mut args: Args) -> Result<()> {
             let transaction_id = args.required("transaction-id")?;
             let event_id = args.required("event-id")?;
             let accepted_count = args.required("accepted-count")?;
-            let image_boundary = args.required("image-boundary")?;
+            let world_root = args.required("world-root")?;
             let directory = path(args.required("dir")?);
             args.finish()?;
             let socket = SOCKET
                 .get()
                 .ok_or("grain share issue receipt lookup requires --socket")?;
-            let expected = [transaction_id, event_id, accepted_count, image_boundary];
+            let expected = [transaction_id, event_id, accepted_count, world_root];
             let fields = expected
                 .iter()
                 .map(|value| {
@@ -2660,13 +2660,13 @@ fn run(mut args: Args) -> Result<()> {
             let transaction_id = args.required("transaction-id")?;
             let event_id = args.required("event-id")?;
             let accepted_count = args.required("accepted-count")?;
-            let image_boundary = args.required("image-boundary")?;
+            let world_root = args.required("world-root")?;
             let directory = path(args.required("dir")?);
             args.finish()?;
             let socket = SOCKET
                 .get()
                 .ok_or("historical call receipt lookup requires --socket")?;
-            let expected = [transaction_id, event_id, accepted_count, image_boundary];
+            let expected = [transaction_id, event_id, accepted_count, world_root];
             let fields = expected
                 .iter()
                 .map(|value| {
@@ -3014,9 +3014,9 @@ mod tests {
     fn continuity_reply_needs_typed_matching_verdict_and_anchor_shape() {
         let mut value = json!({"type":"minidregg-provider-continuity-v1",
             "status":"confirmed", "continuous":true, "providerResourceId":"7",
-            "checkedImageBoundary":"12", "checkedAcceptedCount":"3", "reason":"",
+            "checkedWorldRoot":"12", "checkedAcceptedCount":"3", "reason":"",
             "anchor":{"type":"verified-mini-native-prefix-v1", "transactionId":"1",
-                "eventId":"2", "acceptedCount":"3", "imageBoundary":"4"}});
+                "eventId":"2", "acceptedCount":"3", "worldRoot":"4"}});
         assert!(continuity_reply(&value).unwrap());
         value["status"] = json!("refused");
         value["continuous"] = json!(false);

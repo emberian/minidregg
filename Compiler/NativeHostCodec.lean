@@ -10,6 +10,7 @@ import Kernel.PolicyInstallReceiver
 import Kernel.ResourceBirthReceiver
 import Kernel.CapabilityDelegationReceiver
 import Kernel.CapabilityRevocationReceiver
+import Kernel.WorldRoot
 
 namespace Minidregg.Compiler.NativeHostCodec
 
@@ -21,12 +22,109 @@ open Minidregg.Kernel
 
 set_option autoImplicit false
 
-/-- One source-owned commitment for host receipts and observation challenges.
-No caller chooses a replacement image summary or a digest algorithm. -/
-def imageBoundary (domain semantics : Digest) (image : DurableReceiver.Image) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.IMAGE-BOUNDARY/v1".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.product digestStream bytesStream)).encode
-      (domain, semantics, DurableReceiverCodec.encode image))).digest
+/-! ## The world root (DATAMODEL §3.2/§3.4, step C1)
+
+Receipts, signing plans and observation challenges bind `(worldRoot, height)`.
+The world root is `Kernel.WorldRoot`'s authenticated map over the world's
+slots: the system slot holds the height and the log root (which chains every
+accepted record from a genesis root binding the deployment and the seed), and
+each cell slot holds the cell's current root.  No caller chooses a replacement
+summary or a digest algorithm. -/
+
+/-- The log root before any turn: binds the deployment and the seed. -/
+def logRoot0 (domain semantics : Digest) (seed : DurableReceiver.Seed) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.GENESIS-LOG/v1".toUTF8.toList
+    ((StreamCodec.product digestStream
+      (StreamCodec.product digestStream DurableReceiverCodec.seedStream)).encode
+        (domain, semantics, seed))).digest
+
+/-- The turn digest of an accepted record: cSHAKE over its canonical bytes. -/
+def recordDigest (record : DurableReceiver.IntentRecord) : Digest :=
+  WorldRoot.turnDigestOfBytes (DurableReceiverCodec.intentStream.encode record)
+
+/-- The log root after the image's accepted records. -/
+def logRoot (domain semantics : Digest) (image : DurableReceiver.Image) : Digest :=
+  image.accepted.foldl (fun acc record => WorldRoot.chainDigest acc (recordDigest record))
+    (logRoot0 domain semantics image.seed)
+
+/-- The height: accepted turns since genesis (`Kernel.World.fold_head` from a
+genesis head at 0). -/
+def height (image : DurableReceiver.Image) : Nat := image.accepted.length
+
+/-- What a world slot holds. -/
+inductive Leaf where
+  | system (height : Nat) (logRoot : Digest)
+  | cell (bytes : List UInt8)
+
+/-- A slot's root: the system slot hashes its height and log root; a cell slot
+is the deployed cell root of its current bytes. -/
+def leafRoot : Leaf → Digest
+  | .system height logRoot =>
+      (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.SYSTEM/v1".toUTF8.toList
+        ((StreamCodec.product StreamCodec.nat digestStream).encode (height, logRoot))).digest
+  | .cell bytes => ResourceBirthCodec.rootBytes bytes
+
+/-- The world's entries: the system slot, then every cell the image names. -/
+def worldEntries (domain semantics : Digest) (image : DurableReceiver.Image) :
+    List (WorldRoot.Key × Leaf) :=
+  (.system, .system (height image) (logRoot domain semantics image)) ::
+    image.cellIds.map fun cellId => (.cell cellId.value, .cell (image.currentBytes cellId))
+
+/-- **The world root** of an image, evaluated sparsely. -/
+def worldRoot (domain semantics : Digest) (image : DurableReceiver.Image) : Digest :=
+  WorldRoot.deployedRoot ((worldEntries domain semantics image).map fun e => (e.1, leafRoot e.2))
+
+/-- The world root is A3's two-level `worldRoot` over (slot ↦ leaf root) at the
+deployed scheme. -/
+theorem worldRoot_eq_entryRoot (domain semantics : Digest) (image : DurableReceiver.Image) :
+    worldRoot domain semantics image =
+      WorldRoot.entryRoot WorldRoot.deployed leafRoot (worldEntries domain semantics image) :=
+  (WorldRoot.entryRoot_deployed leafRoot _).symm
+
+/-- **Openings (§3.4).**  When no two of the image's slots share an index path,
+a named cell's current root opens at the world root. -/
+theorem cell_opens (domain semantics : Digest) (image : DurableReceiver.Image)
+    (cellId : DurableDataIntent.CellId) (named : cellId ∈ image.cellIds)
+    (hix : ∀ e ∈ worldEntries domain semantics image,
+      WorldRoot.deployed.ix e.1 = WorldRoot.deployed.ix (.cell cellId.value) → e.1 = .cell cellId.value) :
+    WorldRoot.deployed.verify (worldRoot domain semantics image) (.cell cellId.value)
+      (some (ResourceBirthCodec.rootBytes (image.currentBytes cellId)))
+      (WorldRoot.deployed.opening (Theory.AuthMap.worldSlots leafRoot
+        (WorldRoot.slotsOf WorldRoot.deployed.ix (worldEntries domain semantics image))) (.cell cellId.value)) =
+      true := by
+  have opens := Theory.AuthMap.world_opening WorldRoot.deployed leafRoot
+    (WorldRoot.slotsOf WorldRoot.deployed.ix (worldEntries domain semantics image)) (.cell cellId.value)
+  rw [WorldRoot.lookup_slotsOf _ _ _ hix] at opens
+  have hall : ∀ e ∈ (worldEntries domain semantics image).filter
+      (fun e => decide (e.1 = WorldRoot.Key.cell cellId.value)),
+      e = (.cell cellId.value, .cell (image.currentBytes cellId)) := by
+    intro e he
+    rcases List.mem_filter.mp he with ⟨he, hk⟩
+    simp only [decide_eq_true_eq] at hk
+    simp only [worldEntries, List.mem_cons, List.mem_map] at he
+    rcases he with rfl | ⟨c, _, rfl⟩
+    · simp at hk
+    · simp only [WorldRoot.Key.cell.injEq] at hk
+      have : c = cellId := by cases c; cases cellId; simp_all
+      subst this; rfl
+  have hne : (worldEntries domain semantics image).filter
+      (fun e => decide (e.1 = WorldRoot.Key.cell cellId.value)) ≠ [] := by
+    intro hnil
+    have : ((WorldRoot.Key.cell cellId.value, Leaf.cell (image.currentBytes cellId)) :
+        WorldRoot.Key × Leaf) ∈ (worldEntries domain semantics image).filter
+          (fun e => decide (e.1 = WorldRoot.Key.cell cellId.value)) := by
+      refine List.mem_filter.mpr ⟨?_, by simp⟩
+      simp only [worldEntries, List.mem_cons, List.mem_map]
+      exact Or.inr ⟨cellId, named, rfl⟩
+    rw [hnil] at this
+    simp at this
+  have hone : ((worldEntries domain semantics image).filter
+      fun e => decide (e.1 = WorldRoot.Key.cell cellId.value)).getLast? =
+        some (.cell cellId.value, .cell (image.currentBytes cellId)) := by
+    rw [List.getLast?_eq_getLast hne]
+    exact congrArg some (hall _ (List.getLast_mem hne))
+  rw [hone] at opens
+  simpa [leafRoot, worldRoot_eq_entryRoot, WorldRoot.entryRoot] using opens
 
 def framedRaw {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCodec α :=
     { encode value := frame ++ stream.encode value
@@ -148,7 +246,7 @@ def signingSlotStream : StreamCodec SigningSlot :=
 structure SigningPlan where
   domain : Digest
   semantics : Digest
-  imageBoundary : Digest
+  worldRoot : Digest
   height : Nat
   finalizedDraft : Draft
   slots : List SigningSlot
@@ -158,26 +256,33 @@ def signingPlanStream : StreamCodec SigningPlan :=
     (StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
         (StreamCodec.product draftStream (StreamCodec.list signingSlotStream))))))
-    (fun value => (value.domain, value.semantics, value.imageBoundary, value.height,
+    (fun value => (value.domain, value.semantics, value.worldRoot, value.height,
       value.finalizedDraft, value.slots))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
       wire.2.2.2.2.1, wire.2.2.2.2.2⟩) (by intro value; cases value; rfl)
 
+/-- Version 4: the plan binds the world root, not the whole-image boundary. -/
+def signingPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v4".toUTF8.toList
+
 def signingPlanCodec : LawfulCodec SigningPlan :=
-  framed "DREGG/NATIVE-HOST/SIGNING-PLAN/v3".toUTF8.toList signingPlanStream
+  framed signingPlanFrame signingPlanStream
+
+def retiredSigningPlanFrame : List UInt8 := "DREGG/NATIVE-HOST/SIGNING-PLAN/v3".toUTF8.toList
 
 structure Receipt where
   transactionId : Digest
   eventId : Digest
-  /-- Number of accepted entries through this transaction, not the current tip. -/
+  /-- The height of the world this transaction produced: accepted entries
+  through this transaction, not the current tip. -/
   acceptedCount : Nat
-  imageBoundary : Digest
+  /-- The world root at that height. -/
+  worldRoot : Digest
   deriving DecidableEq, Repr
 
 def receiptStream : StreamCodec Receipt :=
   StreamCodec.xmap (StreamCodec.product digestStream (StreamCodec.product digestStream
     (StreamCodec.product StreamCodec.nat digestStream)))
-    (fun value => (value.transactionId, value.eventId, value.acceptedCount, value.imageBoundary))
+    (fun value => (value.transactionId, value.eventId, value.acceptedCount, value.worldRoot))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
     (by intro value; cases value; rfl)
 
@@ -229,9 +334,9 @@ def outcomeStream : StreamCodec Outcome :=
         (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
 
-/-- Version 2: receipts' image boundaries commit to the store-cell image (one
-authority cell, no catalogue or shards). Version-1 outcomes refuse. -/
-def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v2".toUTF8.toList
+/-- Version 3: receipts bind `(worldRoot, height)`, not the whole-image
+boundary. Version-1 and version-2 outcomes refuse. -/
+def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v3".toUTF8.toList
 
 def outcomeCodec : LawfulCodec Outcome :=
   framed outcomeFrame outcomeStream
@@ -246,6 +351,29 @@ theorem v1_outcome_refused (payload : List UInt8) :
   have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrame ++ payload) = none := by
     simp [framedRaw, lengthExact, different]
   simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+
+def retiredOutcomeFrameV2 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v2".toUTF8.toList
+
+/-- A version-2 outcome frame (receipts carrying the whole-image boundary)
+refuses to decode. -/
+theorem v2_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrameV2 ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrameV2.length := by decide +kernel
+  have different : retiredOutcomeFrameV2 ≠ outcomeFrame := by decide +kernel
+  have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrameV2 ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+
+/-- A version-3 signing plan (binding the whole-image boundary) refuses to
+decode. -/
+theorem v3_signingPlan_refused (payload : List UInt8) :
+    signingPlanCodec.decode (retiredSigningPlanFrame ++ payload) = none := by
+  have lengthExact : signingPlanFrame.length = retiredSigningPlanFrame.length := by decide +kernel
+  have different : retiredSigningPlanFrame ≠ signingPlanFrame := by decide +kernel
+  have raw : (framedRaw signingPlanFrame signingPlanStream).decode
+      (retiredSigningPlanFrame ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [signingPlanCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
 @[simp] theorem call_roundtrip (value : SignedCall) :
     callCodec.decode (callCodec.encode value) = some value := callCodec.decode_encode value
@@ -271,5 +399,13 @@ theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
 
 /-- info: 'Minidregg.Compiler.NativeHostCodec.v1_outcome_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v1_outcome_refused
+/-- info: 'Minidregg.Compiler.NativeHostCodec.v2_outcome_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v2_outcome_refused
+/-- info: 'Minidregg.Compiler.NativeHostCodec.v3_signingPlan_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v3_signingPlan_refused
+/-- info: 'Minidregg.Compiler.NativeHostCodec.worldRoot_eq_entryRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms worldRoot_eq_entryRoot
+/-- info: 'Minidregg.Compiler.NativeHostCodec.cell_opens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cell_opens
 
 end Minidregg.Compiler.NativeHostCodec

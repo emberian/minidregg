@@ -205,7 +205,7 @@ struct SavedStartBegin {
     transaction_id: String,
     event_id: String,
     accepted_count: String,
-    image_boundary: String,
+    world_root: String,
     prior_create: Option<SavedCreatedWitness>,
 }
 
@@ -216,7 +216,7 @@ struct SavedStartClaim {
     transaction_id: String,
     event_id: String,
     accepted_count: String,
-    image_boundary: String,
+    world_root: String,
 }
 
 #[derive(Deserialize)]
@@ -396,7 +396,7 @@ fn load_retained_start(
         &saved.transaction_id,
         &saved.event_id,
         &saved.accepted_count,
-        &saved.image_boundary,
+        &saved.world_root,
     ];
     if original_fields
         .iter()
@@ -433,7 +433,7 @@ fn load_retained_start(
         transaction_id: saved.transaction_id,
         event_id: saved.event_id,
         accepted_count: saved.accepted_count,
-        image_boundary: saved.image_boundary,
+        world_root: saved.world_root,
     };
     let saved_claim = stage.claim;
     if saved_claim.physical_begin.operation_id != begin.authorization_operation_id
@@ -482,8 +482,8 @@ fn load_retained_start(
         || receipt.get("eventId").and_then(Value::as_str) != Some(saved_claim.event_id.as_str())
         || receipt.get("acceptedCount").and_then(Value::as_str)
             != Some(saved_claim.accepted_count.as_str())
-        || receipt.get("imageBoundary").and_then(Value::as_str)
-            != Some(saved_claim.image_boundary.as_str())
+        || receipt.get("worldRoot").and_then(Value::as_str)
+            != Some(saved_claim.world_root.as_str())
     {
         return Err(invalid("retained START source inspection differs"));
     }
@@ -495,7 +495,7 @@ fn load_retained_start(
         transaction_id: saved_claim.transaction_id,
         event_id: saved_claim.event_id,
         accepted_count: saved_claim.accepted_count,
-        image_boundary: saved_claim.image_boundary,
+        world_root: saved_claim.world_root,
     };
     Ok((admitted_bytes, begin, claim))
 }
@@ -522,7 +522,7 @@ fn checked_completion_evidence(
         transaction_id: field(receipt, "transactionId")?,
         event_id: field(receipt, "eventId")?,
         accepted_count: field(receipt, "acceptedCount")?,
-        image_boundary: field(receipt, "imageBoundary")?,
+        world_root: field(receipt, "worldRoot")?,
     };
     if !crate::lifecycle_v3_claim_native::later_decimal(
         &completed.accepted_count,
@@ -563,7 +563,7 @@ fn checked_completion_evidence(
     if source_receipt.transaction_id != completed.transaction_id
         || source_receipt.event_id != completed.event_id
         || source_receipt.accepted_count != completed.accepted_count
-        || source_receipt.image_boundary != completed.image_boundary
+        || source_receipt.world_root != completed.world_root
     {
         return Err(invalid(
             "retained START completion differs from source receipt",
@@ -665,7 +665,7 @@ fn reconcile_prior_start(
                     "transactionId":recovered.receipt.transaction_id,
                     "eventId":recovered.receipt.event_id,
                     "acceptedCount":recovered.receipt.accepted_count,
-                    "imageBoundary":recovered.receipt.image_boundary,
+                    "worldRoot":recovered.receipt.world_root,
                 },
             }))?,
         )?;
@@ -697,7 +697,7 @@ fn reconcile_prior_start(
                 "transactionId":receipt.transaction_id,
                 "eventId":receipt.event_id,
                 "acceptedCount":receipt.accepted_count,
-                "imageBoundary":receipt.image_boundary,
+                "worldRoot":receipt.world_root,
             })),
             "physicalState":physical_label,
             "noRelaunch":true,
@@ -1130,7 +1130,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "transactionId":begin.transaction_id,
             "eventId":begin.event_id,
             "acceptedCount":begin.accepted_count,
-            "imageBoundary":begin.image_boundary,
+            "worldRoot":begin.world_root,
             "priorCreate":begin.prior_create.as_ref().map(|prior| json!({
                 "receiptHex":prior.receipt_hex,
                 "custodyHex":prior.custody_hex,
@@ -1141,7 +1141,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             "transactionId":claim.transaction_id,
             "eventId":claim.event_id,
             "acceptedCount":claim.accepted_count,
-            "imageBoundary":claim.image_boundary,
+            "worldRoot":claim.world_root,
         },
     });
     // After this fsync a restarted supervisor can look up only the retained
@@ -1213,7 +1213,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 "transactionId":_receipt.transaction_id,
                 "eventId":_receipt.event_id,
                 "acceptedCount":_receipt.accepted_count,
-                "imageBoundary":_receipt.image_boundary,
+                "worldRoot":_receipt.world_root,
             },
         }))?,
     )?;
@@ -1385,7 +1385,7 @@ mod tests {
         let evidence = serde_json::to_vec(&json!({
             "type":"confirmed", "confirmation":"installed",
             "transactionId":"7", "eventId":"8", "acceptedCount":"10",
-            "imageBoundary":"11",
+            "worldRoot":"11",
         }))
         .unwrap();
         write_new(&dir, "op38-outcome.json", &evidence).unwrap();
@@ -1394,7 +1394,7 @@ mod tests {
             "evidenceSha256":format!("{:x}", Sha256::digest(&evidence)),
             "completionReceipt":{
                 "transactionId":"7", "eventId":"8",
-                "acceptedCount":"10", "imageBoundary":"11",
+                "acceptedCount":"10", "worldRoot":"11",
             },
         });
         assert_eq!(

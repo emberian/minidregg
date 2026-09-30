@@ -142,7 +142,7 @@ minidregg-host CONFIG.json lookup CALL.bin OUTCOME.bin
 
 `INTENT.bin` uses `NativeObservationCodec.intentCodec`. It names the subject,
 nonce, preparation draft, and explicit observation capabilities for the actual
-read set. The public challenge contains protocol metadata, exact image boundary
+read set. The public challenge contains protocol metadata, exact world root
 and canonical signing headers. Sign each header externally, then assemble the
 detached signatures into `SIGNED.bin`. Current capability authority and compiled
 resource policies must permit every required observation before preparation
@@ -151,7 +151,7 @@ returns a plan or state-dependent diagnostics.
 Drafts use `NativeHostCodec.draftCodec`, carrying the existing controller's
 canonical draft/command/declaration. Birth also selects the capabilities for
 the ordered conserved debit legs. A prepared plan contains the finalized
-source command, exact image boundary and logical height, and ordered canonical
+source command, exact world root and logical height, and ordered canonical
 signing headers. The headers contain the complete typed requests and selected
 committed key information. Preparation is neither authority nor acceptance.
 

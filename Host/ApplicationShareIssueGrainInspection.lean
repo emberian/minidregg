@@ -138,7 +138,7 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("request", requestJson plan.request),
      ("domain", decimal plan.birth.domain.value),
      ("semantics", decimal plan.birth.semantics.value),
-     ("imageBoundary", decimal plan.birth.imageBoundary.value),
+     ("worldRoot", decimal plan.birth.worldRoot.value),
      ("height", decimal plan.birth.height),
      ("finalizedGrainBirth", .mkObj
        [("source", hex draft.sourceBytes),

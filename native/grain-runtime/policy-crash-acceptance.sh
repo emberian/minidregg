@@ -200,7 +200,7 @@ CONN_PID=
 wait "$RUN_PID" 2>/dev/null || :
 RUN_PID=
 query_parent after-crash 77001
-jq -e '.page.grain == {task:"7705",generation:"0",status:"0",
+jq -e '.cell.grain == {task:"7705",generation:"0",status:"0",
   remaining:"100",reserved:"0"}' "$EVIDENCE/after-crash/view.json" >/dev/null
 query_policy installed-before-attach 77002
 jq -e '.version == "1"' "$EVIDENCE/installed-before-attach/view.json" >/dev/null
@@ -255,14 +255,14 @@ jq -e --slurpfile original "$POLICY_OUTCOME" \
    .transactionId == $original[0].transactionId and
    .eventId == $original[0].eventId and
    .acceptedCount == $original[0].acceptedCount and
-   .imageBoundary == $original[0].imageBoundary' "$1" >/dev/null
+   .worldRoot == $original[0].worldRoot' "$1" >/dev/null
 printf 'attach soft\n' >&3
 tick=0
 until jq -e '.connection == "soft" and .pending == null' "$STATE/journal.json" >/dev/null 2>&1; do
   tick=$((tick + 1)); [ "$tick" -lt 900 ] || { echo 'reattach timeout' >&2; exit 1; }; sleep 1
 done
 query_parent after-reattach 77003
-jq -e '.page.grain == {task:"7705",generation:"1",status:"2",
+jq -e '.cell.grain == {task:"7705",generation:"1",status:"2",
   remaining:"100",reserved:"0"}' "$EVIDENCE/after-reattach/view.json" >/dev/null
 jq -se '[.[] | select(.grain.task == "7705" and .grain.operation.type == "attach")] |
   length == 1 and .[0].grain.before == {generation:"0",status:"0",

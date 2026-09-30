@@ -80,8 +80,8 @@ chmod 700 "$ROOT/source-verifier"
   --socket "$ROOT/private/mini.sock" > "$ROOT/content-submit.log" 2>&1
 jq -e '.type == "confirmed" and .confirmation == "installed" and .acceptedCount == "2"' \
   "$ROOT/content/retry-0001.json" > /dev/null
-test "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$ROOT/content/retry-0001.json")" = \
-  "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$FIXTURE/content-attempt/retry-0001.json")"
+test "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$ROOT/content/retry-0001.json")" = \
+  "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$FIXTURE/content-attempt/retry-0001.json")"
 
 # Now the configured source path is absent. The same running session still
 # verifies a second, independently signed call against its private snapshot.
@@ -90,8 +90,8 @@ rm "$ROOT/source-verifier"
   --socket "$ROOT/private/mini.sock" > "$ROOT/joint-submit.log" 2>&1
 jq -e '.type == "confirmed" and .confirmation == "installed" and .acceptedCount == "3"' \
   "$ROOT/joint/retry-0001.json" > /dev/null
-test "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$ROOT/joint/retry-0001.json")" = \
-  "$(jq -c '{transactionId,eventId,imageBoundary,acceptedCount}' "$FIXTURE/joint-attempt/outcome.json")"
+test "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$ROOT/joint/retry-0001.json")" = \
+  "$(jq -c '{transactionId,eventId,worldRoot,acceptedCount}' "$FIXTURE/joint-attempt/outcome.json")"
 "$STORE" read-to "$ROOT/store" "$ROOT/physical-after.bin"
 cmp "$ROOT/physical-after.bin" "$FIXTURE/image-joint.bin"
 

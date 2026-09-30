@@ -47,7 +47,7 @@ decimal() {
 
 confirmed() {
   jq -e --arg kind "$2" '.type == "confirmed" and .confirmation == $kind and
-    (all(.transactionId, .eventId, .acceptedCount, .imageBoundary;
+    (all(.transactionId, .eventId, .acceptedCount, .worldRoot;
       type == "string" and test("^(0|[1-9][0-9]*)$")))' "$1" >/dev/null
 }
 
@@ -152,8 +152,8 @@ query_resource() {
 
 query_resource source 8001 before 30001
 query_resource recipient 600 before 30002
-jq -e '.page.entries == []' "$EVIDENCE/source/before/view.json" >/dev/null
-jq -e '.page.entries == []' "$EVIDENCE/recipient/before/view.json" >/dev/null
+jq -e '.cell.entries == []' "$EVIDENCE/source/before/view.json" >/dev/null
+jq -e '.cell.entries == []' "$EVIDENCE/recipient/before/view.json" >/dev/null
 
 query_policy() {
   label=$1 nonce=$2
@@ -177,7 +177,7 @@ jq -n --slurpfile view "$EVIDENCE/source/before/view.json" \
   '{subject:"7",nonce:"30003",purpose:{type:"prepare",draft:{type:"invoke",
     command:{subject:"7",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
       nonce:"30004",targets:[{kind:"object",target:"8001",capability:"61",
-        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].page.root,
+        observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
           kind:{type:"text"},payload:$payload},
           {type:"createAtom",atom:"7402",kind:{type:"text"},payload:$changed}]}}]}}},
@@ -189,7 +189,7 @@ jq -n --slurpfile view "$EVIDENCE/source/before/view.json" \
 confirmed "$EVIDENCE/source/create/outcome.json" installed
 query_resource source 8001 selected 30005
 jq -e --arg payload "$NOTE_HEX" --arg changed "$CHANGED_HEX" \
-  '.page.entries | length == 2 and
+  '.cell.entries | length == 2 and
   any(.[]; .type == "atom" and .id == "7401" and .payload == $payload) and
   any(.[]; .type == "atom" and .id == "7402" and .payload == $changed)' \
   "$EVIDENCE/source/selected/view.json" >/dev/null
@@ -215,7 +215,7 @@ query_policy current-policy 30009
 jq -e '.predicate == {"type":"eq","slot":"request/subject","value":"7"} and
   .version == "1"' "$EVIDENCE/recipient/current-policy/view.json" >/dev/null
 query_resource recipient 600 current 30010
-jq -e '.page.entries == []' "$EVIDENCE/recipient/current/view.json" >/dev/null
+jq -e '.cell.entries == []' "$EVIDENCE/recipient/current/view.json" >/dev/null
 
 # Candidate preparation is a current signed selection, not proof that a
 # source-side publication command was admitted. That stronger journey has a
@@ -257,7 +257,7 @@ build_ingress() {
   root="$EVIDENCE/candidate-$label"
   authority=$(jq -er '.signing[0].authorityRoot' \
     "$EVIDENCE/recipient/$query_label/challenge.json")
-  target=$(jq -er '.page.root' "$EVIDENCE/recipient/$query_label/view.json")
+  target=$(jq -er '.cell.root' "$EVIDENCE/recipient/$query_label/view.json")
   "$HOST" "$RECIPIENT_CONFIG" selected-release-ingress \
     "$root/packet.bin" 61 "$authority" "$target" "$root/ingress.bin"
 }
@@ -318,7 +318,7 @@ confirmed "$ORIGINAL_OUTCOME" installed
 logical_image after-original
 query_resource recipient 600 after-original 30011
 PACKET_HEX=$(od -An -tx1 -v "$EVIDENCE/candidate-original/packet.bin" | tr -d ' \n')
-jq -e --arg packet "$PACKET_HEX" '.page.entries | length == 1 and
+jq -e --arg packet "$PACKET_HEX" '.cell.entries | length == 1 and
   .[0].type == "atom" and .[0].payload == $packet' \
   "$EVIDENCE/recipient/after-original/view.json" >/dev/null
 
@@ -366,10 +366,10 @@ cmp "$EVIDENCE/recipient/after-original-image.bin" \
 jq -e '.type == "absent"' \
   "$EVIDENCE/recipient/wrong-signer-attempt/request-0001.outcome.json" >/dev/null
 query_resource recipient 600 after-negatives 30012
-test "$(jq -er '.page.root' "$EVIDENCE/recipient/after-negatives/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/recipient/after-original/view.json")"
-test "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-negatives/challenge.json")" = \
-  "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-original/challenge.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/recipient/after-negatives/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/recipient/after-original/view.json")"
+test "$(jq -er '.worldRoot' "$EVIDENCE/recipient/after-negatives/challenge.json")" = \
+  "$(jq -er '.worldRoot' "$EVIDENCE/recipient/after-original/challenge.json")"
 
 # The proxy forwards one exact op20 frame, waits for and privately retains its
 # complete native reply, then drops only the client response. A confirmed
@@ -409,7 +409,7 @@ confirmed "$EVIDENCE/recipient/drop-native-outcome.json" installed
 logical_image after-lost
 query_resource recipient 600 after-lost 30014
 LOST_PACKET_HEX=$(od -An -tx1 -v "$EVIDENCE/candidate-lost-reply/packet.bin" | tr -d ' \n')
-jq -e --arg packet "$LOST_PACKET_HEX" '.page.entries |
+jq -e --arg packet "$LOST_PACKET_HEX" '.cell.entries |
   length == 2 and any(.[]; .type == "atom" and .payload == $packet)' \
   "$EVIDENCE/recipient/after-lost/view.json" >/dev/null
 "$MINI" selected-release-lookup --attempt "$EVIDENCE/recipient/lost-attempt" \
@@ -418,10 +418,10 @@ confirmed "$EVIDENCE/recipient/lost-attempt/request-0001.outcome.json" replayed
 logical_image after-lost-lookup
 cmp "$EVIDENCE/recipient/after-lost-image.bin" \
   "$EVIDENCE/recipient/after-lost-lookup-image.bin"
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$EVIDENCE/recipient/drop-native-outcome.json" \
   >"$EVIDENCE/recipient/drop-native-receipt.json"
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
   "$EVIDENCE/recipient/lost-attempt/request-0001.outcome.json" \
   >"$EVIDENCE/recipient/lost-recovered-receipt.json"
 cmp "$EVIDENCE/recipient/drop-native-receipt.json" \
@@ -469,10 +469,10 @@ logical_image after-law-refusal
 cmp "$EVIDENCE/recipient/after-law-image.bin" \
   "$EVIDENCE/recipient/after-law-refusal-image.bin"
 query_resource recipient 600 after-law-refusal 30020
-test "$(jq -er '.page.root' "$EVIDENCE/recipient/after-law-refusal/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/recipient/after-law/view.json")"
-test "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-law-refusal/challenge.json")" = \
-  "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-law/challenge.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/recipient/after-law-refusal/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/recipient/after-law/view.json")"
+test "$(jq -er '.worldRoot' "$EVIDENCE/recipient/after-law-refusal/challenge.json")" = \
+  "$(jq -er '.worldRoot' "$EVIDENCE/recipient/after-law/challenge.json")"
 
 "$MINI" selected-release-lookup --attempt "$EVIDENCE/recipient/original-attempt" \
   --socket "$RECIPIENT_SOCKET" \
@@ -490,23 +490,23 @@ confirmed "$EVIDENCE/recipient/original-attempt/request-0002.outcome.json" repla
 logical_image after-reopen
 cmp "$EVIDENCE/recipient/before-reopen-image.bin" \
   "$EVIDENCE/recipient/after-reopen-image.bin"
-jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' "$ORIGINAL_OUTCOME" \
+jq -S '{transactionId,eventId,acceptedCount,worldRoot}' "$ORIGINAL_OUTCOME" \
   >"$EVIDENCE/recipient/original-receipt.json"
 for lookup in request-0001 request-0002; do
-  jq -S '{transactionId,eventId,acceptedCount,imageBoundary}' \
+  jq -S '{transactionId,eventId,acceptedCount,worldRoot}' \
     "$EVIDENCE/recipient/original-attempt/$lookup.outcome.json" \
     >"$EVIDENCE/recipient/$lookup-receipt.json"
   cmp "$EVIDENCE/recipient/original-receipt.json" \
     "$EVIDENCE/recipient/$lookup-receipt.json"
 done
 query_resource recipient 600 reopened 30021
-test "$(jq -er '.page.root' "$EVIDENCE/recipient/reopened/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/recipient/after-law/view.json")"
-test "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/reopened/challenge.json")" = \
-  "$(jq -er '.imageBoundary' "$EVIDENCE/recipient/after-law/challenge.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/recipient/reopened/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/recipient/after-law/view.json")"
+test "$(jq -er '.worldRoot' "$EVIDENCE/recipient/reopened/challenge.json")" = \
+  "$(jq -er '.worldRoot' "$EVIDENCE/recipient/after-law/challenge.json")"
 query_resource source 8001 source-final 30022
-test "$(jq -er '.page.root' "$EVIDENCE/source/source-final/view.json")" = \
-  "$(jq -er '.page.root' "$EVIDENCE/source/selected/view.json")"
+test "$(jq -er '.cell.root' "$EVIDENCE/source/source-final/view.json")" = \
+  "$(jq -er '.cell.root' "$EVIDENCE/source/selected/view.json")"
 shasum -a 256 "$0" "$HOST" "$MINI" "$STORE_BINARY" "$SIGNATURE_BINARY" \
   "$HERE/selected-release-drop-reply.rs" >"$EVIDENCE/final-input-sha256.txt"
 cmp "$EVIDENCE/input-sha256.txt" "$EVIDENCE/final-input-sha256.txt"
@@ -516,8 +516,8 @@ jq -n --slurpfile original "$ORIGINAL_OUTCOME" \
   --arg proxySha "$(digest_file "$HERE/selected-release-drop-reply.rs")" \
   --arg hostSha "$(digest_file "$HOST")" \
   --arg miniSha "$(digest_file "$MINI")" \
-  --arg sourceRoot "$(jq -er '.page.root' "$EVIDENCE/source/selected/view.json")" \
-  --arg recipientRoot "$(jq -er '.page.root' "$EVIDENCE/recipient/reopened/view.json")" \
+  --arg sourceRoot "$(jq -er '.cell.root' "$EVIDENCE/source/selected/view.json")" \
+  --arg recipientRoot "$(jq -er '.cell.root' "$EVIDENCE/recipient/reopened/view.json")" \
   --arg stableImageSha "$(digest_file "$EVIDENCE/recipient/after-reopen-image.bin")" \
   --arg originalIngressSha "$(digest_file "$EVIDENCE/candidate-original/ingress.bin")" \
   --arg lostIngressSha "$(digest_file "$EVIDENCE/candidate-lost-reply/ingress.bin")" \
@@ -529,9 +529,9 @@ jq -n --slurpfile original "$ORIGINAL_OUTCOME" \
     inputSha256:{script:$scriptSha,proxy:$proxySha,host:$hostSha,mini:$miniSha,
       originalIngress:$originalIngressSha,lostIngress:$lostIngressSha},
     original:($original[0] | {type,confirmation,transactionId,eventId,
-      acceptedCount,imageBoundary}),
+      acceptedCount,worldRoot}),
     lostReplyNative:($lost[0] | {type,confirmation,transactionId,eventId,
-      acceptedCount,imageBoundary}),
+      acceptedCount,worldRoot}),
     checks:["same-key conflict", "wrong signer", "absent lookup no write",
       "lost reply exact lookup", "stale current law", "historical receipt after reopen",
       "complete logical image equality after refusals and reopen"]}' \

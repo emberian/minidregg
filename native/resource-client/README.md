@@ -277,7 +277,7 @@ before sending. If the reply is lost, repeat **lookup op29 only**; no
 automatic resubmit occurs. The first confirmed exact outcome becomes a
 durable four-field receipt anchor, reconstructed from a retained response
 frame if a crash interrupted extraction. Later lookups must match its
-transaction, event, accepted count and image boundary. Native receiving
+transaction, event, accepted count and world root. Native receiving
 rechecks current authority and installed policy; a signed Plan alone is not
 an accepted share or a dispatch grant.
 
@@ -943,7 +943,7 @@ The separate authority journey uses two fresh enrolled signers and the same
 ordinary `mini` JSON interface. Alice installs a source-authored policy,
 delegates a narrower observe/mutate grant to Bob, and later revokes it. Bob's
 write is confirmed under his own key; policy and grant refusals are checked
-against the current image boundary, and his retained call replays its original
+against the current world root, and his retained call replays its original
 receipt after revocation without a new event. Both the initial and installed
 policy records are reconstructed from authorized `view-policy` JSON and
 reauthored to the exact same canonical bytes:

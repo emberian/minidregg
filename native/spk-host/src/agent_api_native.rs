@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const COMMITTED: &[u8] = b"DREGG/APPLICATION/AGENT-DISPATCH-COMMITTED-PERMIT/v2";
-const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v2";
+const OUTCOME: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v3";
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
@@ -117,7 +117,7 @@ pub(crate) struct RetainedReserve {
     pub transaction_id: String,
     pub event_id: String,
     pub accepted_count: String,
-    pub image_boundary: String,
+    pub world_root: String,
 }
 
 /// Concrete BE32 controller custody client. It never receives a private key
@@ -136,7 +136,7 @@ struct ReserveReceipt {
     transaction_id: String,
     event_id: String,
     accepted_count: String,
-    image_boundary: String,
+    world_root: String,
 }
 
 #[derive(Deserialize)]
@@ -341,7 +341,7 @@ impl ReverseCustodyClient {
             transaction_id: reply.reserve_receipt.transaction_id,
             event_id: reply.reserve_receipt.event_id,
             accepted_count: reply.reserve_receipt.accepted_count,
-            image_boundary: reply.reserve_receipt.image_boundary,
+            world_root: reply.reserve_receipt.world_root,
         })
     }
 }
@@ -695,7 +695,7 @@ pub(crate) fn authorize_once(
         &retained.transaction_id,
         &retained.event_id,
         &retained.accepted_count,
-        &retained.image_boundary,
+        &retained.world_root,
     ]
     .iter()
     .any(|v| {
@@ -910,7 +910,7 @@ mod tests {
                         "fixedRequestHex":"aa".repeat(65_536),
                         "contextHex":"bb","reserveIndex":"4",
                         "reserveReceipt":{"transactionId":"71","eventId":"72",
-                            "acceptedCount":"5","imageBoundary":"73"}})
+                            "acceptedCount":"5","worldRoot":"73"}})
                 } else if expected == "sign-payer-v2" {
                     assert_eq!(request["attempt_id"], "41");
                     assert_eq!(request["paid_plan_hex"], "0102");
@@ -1023,7 +1023,7 @@ mod tests {
                     "httpOperationId":"17","reserveOperationId":"53",
                     "fixedRequestHex":"aa","contextHex":"bb","reserveIndex":"4",
                     "reserveReceipt":{"transactionId":"71","eventId":"72",
-                        "acceptedCount":"5","imageBoundary":"73"}});
+                        "acceptedCount":"5","worldRoot":"73"}});
                 let bytes = serde_json::to_vec(&reply).unwrap();
                 stream
                     .write_all(&(bytes.len() as u32).to_be_bytes())
@@ -1075,7 +1075,7 @@ mod tests {
                 transaction_id: "3".into(),
                 event_id: "4".into(),
                 accepted_count: "1".into(),
-                image_boundary: "5".into(),
+                world_root: "5".into(),
             },
             canonical_http_sha256: String::new(),
             attempt_dir: directory.clone(),
