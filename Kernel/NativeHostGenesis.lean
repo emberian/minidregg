@@ -4,11 +4,11 @@
 This is deployment administration, not a public mutation endpoint. The host
 supplies its actual arithmetic/runtime profile and public enrollment records.
 No test signer, private key, fixture identity, existing image, or caller-built
-authority page is accepted. The complete zero-history image is derived here.
+authority cell is accepted. The complete zero-history image is derived here.
 
 Initial funds are exact mint postings against the named asset's issuer well;
 meter allowance remains a separate resource quantity. Admission checks the
-same canonical cell laws and complete physical authority loader used by turns.
+same canonical cell laws and the one-cell authority loader used by turns.
 Key shape/enrollment is checked, not private-key possession or policy liveness.
 A deliberately denying factory policy is valid deployment configuration.
 -/
@@ -106,7 +106,7 @@ def configWireStream : StreamCodec ConfigWire :=
 
 def Config.toWire (config : Config) : ConfigWire :=
   ([config.deployment.domain.value, config.deployment.factoryId,
-    config.deployment.resourceBookId, config.deployment.authorityCatalogueId,
+    config.deployment.resourceBookId, config.deployment.authorityCellId,
     config.federation.value, config.tariff.base, config.tariff.perBirth,
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
@@ -116,12 +116,12 @@ def Config.toWire (config : Config) : ConfigWire :=
    config.enrollments, config.meterAllowance)
 
 def Config.ofWire (wire : ConfigWire) : Option Config := do
-  let [domain, factory, book, catalogue, federation, base, perBirth, perGrant,
+  let [domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
       controlCapability] := wire.1 | none
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
-    { deployment := ⟨⟨domain⟩, factory, book, catalogue⟩
+    { deployment := ⟨⟨domain⟩, factory, book, authority⟩
       federation := ⟨federation⟩
       tariff := ⟨base, perBirth, perGrant, perByte, collector, asset⟩
       expectedSemantics := ⟨semantics⟩
@@ -137,7 +137,9 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
   cases config
   simp [Config.ofWire, Config.toWire]
 
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v1".toUTF8.toList
+/-- Version 2: the fourth deployment coordinate is the one authority cell's
+identifier (it was the retired catalogue's). -/
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v2".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -164,15 +166,21 @@ theorem config_canonical {bytes : List UInt8} {config : Config}
     configCodec.encode config = bytes :=
   ResourceBirthCodec.strictCodec_canonical configRawCodec accepted
 
-/-- The initial physical catalogue has revision one, as produced by the same
-placement constructor used by ordinary authority updates. Key activation uses
-catalogue revision, not height or key epoch. -/
-def initialCatalogueRevision : Nat := 1
+def retiredConfigFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v1".toUTF8.toList
 
-theorem initialCatalogue_revision_exact (domain : Digest)
-    (placement : CredentialAuthorityDomainReceiver.Placement) :
-    (CredentialAuthorityDomainReceiver.placedCatalogue ⟨domain, 0, []⟩ placement).revision =
-      initialCatalogueRevision := rfl
+/-- A version-1 genesis source (naming a catalogue identifier) refuses. -/
+theorem v1_config_refused (payload : List UInt8) :
+    configCodec.decode (retiredConfigFrame ++ payload) = none := by
+  have lengthExact : configFrame.length = retiredConfigFrame.length := by decide +kernel
+  have different : retiredConfigFrame ≠ configFrame := by decide +kernel
+  have raw : configRawCodec.decode (retiredConfigFrame ++ payload) = none := by
+    simp [configRawCodec, lengthExact, different]
+  simp [configCodec, ResourceBirthCodec.strictCodec, raw]
+
+/-- The authority clock at genesis: no operation nullifier has been spent
+(`genesis_revision` below). Key activation uses this clock (the one authority
+cell's spent-nullifier count), not height or key epoch. -/
+def initialAuthorityRevision : Nat := 0
 
 def Config.Valid {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : Prop :=
@@ -184,7 +192,7 @@ def Config.Valid {F : Type} [Field F]
   (config.enrollments.map (·.key.publicKey)).Nodup ∧
   (config.enrollments.map (·.accountId) ++
     [config.deployment.factoryId, config.deployment.resourceBookId,
-     config.deployment.authorityCatalogueId]).Nodup ∧
+     config.deployment.authorityCellId]).Nodup ∧
   config.tariff.asset ∉ config.enrollments.map (·.accountId) ∧
   (config.factoryController.capabilityId ::
     config.enrollments.flatMap (fun enrollment =>
@@ -196,8 +204,8 @@ def Config.Valid {F : Type} [Field F]
     enrollment.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
     enrollment.key.publicKey.length = 32 ∧
     enrollment.key.revoked = false ∧
-    enrollment.key.activeFrom ≤ initialCatalogueRevision ∧
-    initialCatalogueRevision ≤ enrollment.key.activeUntil)
+    enrollment.key.activeFrom ≤ initialAuthorityRevision ∧
+    initialAuthorityRevision ≤ enrollment.key.activeUntil)
 
 instance configValidDecidable {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
@@ -312,18 +320,62 @@ def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
   factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config)
 
+def policyEntries (record : PolicyRecord) : List CredentialAuthorityEffects.Entry :=
+  [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
+   ⟨⟨.policyRevision, record.policyId⟩, (record.version : PolicyRevision)⟩,
+   ⟨⟨.policyAddress, (record.policyId, record.version)⟩, PolicyRecordCodec.digest record⟩]
+
+def keyEntries (key : KeyRecord) : List CredentialAuthorityEffects.Entry :=
+  [⟨⟨.subjectKeyEpoch, ⟨key.subject⟩⟩, key.keyEpoch⟩,
+   ⟨⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩, key⟩]
+
+def capabilityEntry {kind : ResourceKind} (capability : Capability kind) :
+    CredentialAuthorityEffects.Entry :=
+  ⟨⟨.capability kind, capability.id⟩, (⟨capability, []⟩ : CredentialAuthorityState.StoredCapability kind)⟩
+
+/-- Every genesis authority record, as entries of the one authority cell. -/
 def entries {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
-    List CredentialAuthorityPageMaterializer.Entry :=
-  [.issuerEpoch profile.template.issuer config.issuerEpoch,
-   .capability .program ⟨controlCapability profile config, []⟩] ++
-  (policies profile config).map
-    (fun record => .policy record.policyId 0 record.version (PolicyRecordCodec.digest record)) ++
+    List CredentialAuthorityEffects.Entry :=
+  [⟨⟨.issuerEpoch, profile.template.issuer⟩, config.issuerEpoch⟩,
+   capabilityEntry (controlCapability profile config)] ++
+  (policies profile config).flatMap policyEntries ++
   config.enrollments.flatMap (fun enrollment =>
-    [.subjectKey enrollment.key,
-     .capability .account ⟨accountCapability profile config enrollment, []⟩,
-     .capability .program ⟨accountControlCapability profile config enrollment, []⟩,
-     .capability .object ⟨factoryObserveCapability profile config enrollment, []⟩])
+    keyEntries enrollment.key ++
+    [capabilityEntry (accountCapability profile config enrollment),
+     capabilityEntry (accountControlCapability profile config enrollment),
+     capabilityEntry (factoryObserveCapability profile config enrollment)])
+
+/-- The genesis authority store. -/
+def authorityStore {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
+    Store.Store CredentialAuthorityState.layout :=
+  StoreCodec.fromEntries (entries profile config)
+
+theorem entries_not_nullifier {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
+    (entry : CredentialAuthorityEffects.Entry) (member : entry ∈ entries profile config) :
+    entry.1.1 ≠ .nullifier := by
+  simp only [entries, policyEntries, keyEntries, capabilityEntry, List.mem_append, List.mem_cons,
+    List.mem_flatMap, List.not_mem_nil, or_false] at member
+  rcases member with ((rfl | rfl) | ⟨_, _, rfl | rfl | rfl⟩) | ⟨_, _, (rfl | rfl) | rfl | rfl | rfl⟩ <;>
+    exact fun same => by cases same
+
+/-- No operation nullifier is spent at genesis: the authority clock starts at
+`initialAuthorityRevision`. -/
+theorem genesis_revision {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
+    CredentialAuthorityDomain.revisionOf (authorityStore profile config) = initialAuthorityRevision := by
+  unfold CredentialAuthorityDomain.revisionOf initialAuthorityRevision
+  rw [Finset.card_eq_zero, Finset.eq_empty_iff_forall_notMem]
+  intro address member
+  rw [CredentialAuthorityDomain.mem_spent_iff] at member
+  obtain ⟨plane, present⟩ := member
+  have listed : address ∈ (entries profile config).map Sigma.fst := by
+    by_contra outside
+    exact present ((StoreCodec.fromEntries_apply_eq_none_iff _ _).mpr outside)
+  obtain ⟨entry, member, rfl⟩ := List.mem_map.mp listed
+  exact entries_not_nullifier profile config entry member plane
 
 def pins {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : FactoryPins where
@@ -335,13 +387,12 @@ def pins {F : Type} [Field F]
   policyAddress := PolicyRecordCodec.digest (factoryPolicy profile config)
   tariff := config.tariff
 
-def declaredCell (config : Config) (identifier : Nat) (account : Bool) :
+/-- A declared cell holding field 1 of its own object, at zero. -/
+def declaredCell (_config : Config) (identifier : Nat) (account : Bool) :
     PackedCell CanonicalCellRegistry.registry :=
-  let page : DeclaredEffectPageMaterializer.Page :=
-    ⟨config.deployment.domain, identifier % DeclaredEffectPageMaterializer.shardCount,
-      some ⟨.objectField ⟨identifier⟩ ⟨1⟩, 0⟩, none, none, none⟩
-  let payload := materialize DeclaredEffectPageMaterializer.materializer
-    (DeclaredEffectPageMaterializer.stateOfOption (some page))
+  let payload := materialize DeclaredEffectCell.materializer
+    (StoreCodec.fromEntries
+      [⟨(EffectDeclaration.StateKey.objectField ⟨identifier⟩ ⟨1⟩).address, (0 : Int)⟩])
   if account then ⟨.accountMetadata, payload⟩ else ⟨.declaredObject, payload⟩
 
 def baseCells {F : Type} [Field F]
@@ -387,7 +438,7 @@ structure Built {F : Type} [Field F]
   cellLaws : CellListValid config cells
   seed : DurableReceiver.Seed
   exactSeed : seed = ⟨[], physicalCells cells, config.meterAllowance⟩
-  authority : CredentialAuthorityDomainReceiver.Loaded config.deployment.authorityAnchor
+  authority : CredentialAuthorityDomainReceiver.Loaded config.deployment
     (seed.snapshot ResourceBirthCodec.rootBytes)
 
 def Built.image {F : Type} [Field F] {profile : CanonicalRuntimeProfile.Profile F}
@@ -417,7 +468,7 @@ theorem Built.restore {F : Type} [Field F]
 inductive Error where
   | wireEncoding
   | configuration
-  | authorityRouting
+  | authorityEntries
   | cellLaws
   | physicalAuthority
   deriving DecidableEq, Repr
@@ -428,22 +479,15 @@ native write can be requested. -/
 def build {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) : Except Error (Built profile config) := do
   if valid : config.Valid profile then
-    let pages ← match CredentialAuthorityDomain.runEdits config.deployment.domain []
-        ((entries profile config).map fun entry => ⟨none, entry⟩) with
-      | none => .error .authorityRouting
-      | some pages => .ok pages
-    let base := baseCells profile config
-    let cursor := (base.map Prod.fst ++ [config.deployment.authorityCatalogueId]).foldl max 0 + 1
-    let empty : CredentialAuthorityDomain.Catalogue := ⟨config.deployment.domain, 0, []⟩
-    let placement := CredentialAuthorityDomainReceiver.placePages empty pages cursor
-    let catalogue := CredentialAuthorityDomainReceiver.placedCatalogue empty placement
-    let cells := base ++
-      [(config.deployment.authorityCatalogueId,
-        CredentialAuthorityDomainReceiver.catalogueCell catalogue)] ++
-      placement.auxiliaryCreates.map (fun create => (create.cellId, create.cell))
+    if !decide ((entries profile config).map Sigma.fst).Nodup then
+      throw .authorityEntries
+    let authorityCell := materialize CredentialAuthorityCell.materializer (authorityStore profile config)
+    let cells := baseCells profile config ++
+      [(config.deployment.authorityCellId,
+        CredentialAuthorityDomainReceiver.packedCell authorityCell)]
     if cellLaws : CellListValid config cells then
       let seed : DurableReceiver.Seed := ⟨[], physicalCells cells, config.meterAllowance⟩
-      let authority ← match CredentialAuthorityDomainReceiver.load config.deployment.authorityAnchor
+      let authority ← match CredentialAuthorityDomainReceiver.loadDeployment config.deployment
           (seed.snapshot ResourceBirthCodec.rootBytes) with
         | none => .error .physicalAuthority
         | some authority => .ok authority
@@ -495,5 +539,10 @@ def buildBytes {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F
     | some config => .ok config
   let built ← build profile config
   pure ⟨config, built⟩
+
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.genesis_revision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms genesis_revision
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.v1_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v1_config_refused
 
 end Minidregg.Kernel.NativeHostGenesis
