@@ -1,0 +1,6 @@
+workspace read attempt: /home/ember/build/mini-product-20260930/mr-refusals/run/refusals-3/homes/stranger/workspace/attempts/a-298841562689052038015075946774944249236
+refused: unknown-key: this key is not enrolled on this Host (phase observation) (Host refused challenge, reply byte 255)
+  outcome (decoded by the Host): {"detail":"74686973206b6579206973206e6f7420656e726f6c6c6564206f6e207468697320486f7374","phase":"6f62736572766174696f6e","reason":"unknown-key","type":"refused"}
+  encoded: 44524547472f4e41544956452d484f53542f4f5554434f4d452f76320100010bff6f62736572766174696f6e25ff74686973206b6579206973206e6f7420656e726f6c6c6564206f6e207468697320486f7374
+  evidence: /home/ember/build/mini-product-20260930/mr-refusals/run/refusals-3/homes/stranger/refusals/1790793423-challenge-fb26959de22bb253.bin
+  client: host refused challenge: refused: unknown-key: this key is not enrolled on this Host (phase observation); encoded refusal: 44524547472f4e41544956452d484f53542f4f5554434f4d452f76320100010bff6f62736572766174696f6e25ff74686973206b6579206973206e6f7420656e726f6c6c6564206f6e207468697320486f7374
