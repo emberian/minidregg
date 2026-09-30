@@ -158,16 +158,22 @@ def NativeConfig.read (config : NativeConfig) (fromHeight : Nat) (withBase : Boo
         return .error s!"native durable read failed (exit {output.exitCode}): {output.stderr}"
   catch error => pure (.error s!"native durable read unavailable: {error}")
 
-def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry) :
-    IO CasObservation :=
+/-- `crashAt` is a lifecycle-test hook implemented by process exit inside the
+native append transaction. Production `transport` always supplies `none`. -/
+def NativeConfig.append (config : NativeConfig) (height : Nat) (entry : Entry)
+    (crashAt : Option String := none) : IO CasObservation :=
   try
     IO.FS.withTempDir fun directory => do
       let recordPath := directory / "record.bin"
       let tagPath := directory / "tag.bin"
       IO.FS.writeBinFile recordPath entry.record.toByteArray
       IO.FS.writeBinFile tagPath entry.tag.toByteArray
-      return parseCasOutput (← runNative config #["durable-append", config.root.toString,
-        toString height, recordPath.toString, tagPath.toString])
+      let arguments := match crashAt with
+        | none => #["durable-append", config.root.toString, toString height,
+            recordPath.toString, tagPath.toString]
+        | some phase => #["durable-append-crash", config.root.toString, toString height,
+            recordPath.toString, tagPath.toString, phase]
+      return parseCasOutput (← runNative config arguments)
   catch error => pure (.uncertain s!"native append unavailable: {error}")
 
 def NativeConfig.putCheckpoint (config : NativeConfig) (height : Nat) (bytes : List UInt8) :
@@ -202,7 +208,7 @@ def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
   catch error => pure (.error s!"checkpoint MAC key unavailable: {error}")
 
 def NativeConfig.transport (config : NativeConfig) : Transport :=
-  ⟨config.read, config.append, config.putCheckpoint, config.initialize, config.readKey,
+  ⟨config.read, fun height entry => config.append height entry, config.putCheckpoint, config.initialize, config.readKey,
     config.checkpointEvery⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/

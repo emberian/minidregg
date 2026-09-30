@@ -3,7 +3,8 @@
 These are bound durable-intent fixtures, not a claim that their mutations are
 authorized resource effects. Production ResourceBirthController supplies that
 separate accepted-effect join. The probe runs the actual Lean codec/executor,
-native SQLite CAS, process-exit crash hooks, and cold byte readback together.
+native SQLite log (append h+1 only at head h), process-exit crash hooks, the
+MAC chain, checkpoints every three records, and cold reopen together.
 -/
 import Compiler.DurableReceiverIO
 import Compiler.Sp800185Cshake256
@@ -16,6 +17,7 @@ open Minidregg.Kernel.DurableReceiver
 open Minidregg.Compiler
 open Minidregg.Compiler.DurableReceiverCodec
 open Minidregg.Compiler.DurableReceiverIO
+open Minidregg.Compiler.DurableCheckpointCodec
 
 namespace DurableReceiverProbe
 
@@ -90,8 +92,15 @@ def loadExact (transport : Transport) : IO (Loaded rootBytes) := do
   | .ok loaded => return loaded
   | .error detail => throw (IO.userError s!"FAIL reopen: {detail}")
 
+def expectOpenRefused (label : String) (transport : Transport) : IO Unit := do
+  match ← load transport rootBytes with
+  | .ok _ => throw (IO.userError s!"FAIL durable receiver: {label} opened")
+  | .error _ => pure ()
+
 def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
-  let config : NativeConfig := ⟨binary, directory / "store"⟩
+  IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
+  let config : NativeConfig :=
+    { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 3 }
   let transport := config.transport
   match ← bootstrap transport rootBytes seed with
   | .error message => throw (IO.userError message)
@@ -125,19 +134,19 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   expectRejected "meter shortfall refuses" (.durable .insufficientBudget)
     (← receive transport rootBytes unaffordable 3)
   let beforeCrash ← loadExact transport
-  require "all refusals preserve exact image" (beforeCrash.bytes == beforeRefusals.bytes)
+  require "all refusals preserve exact image" (beforeCrash.image == beforeRefusals.image)
 
   let third := twoWrites 17 [111] [222] [31] [32] [3]
   let precommitCrash : Transport :=
-    { transport with cas := fun expected proposed => config.cas expected proposed (some "after-insert") }
+    { transport with append := fun height entry => config.append height entry (some "after-insert") }
   require "precommit process exit is explicit uncertainty"
     (match ← receive precommitCrash rootBytes third 3 with | .uncertain _ => true | _ => false)
-  require "precommit crash preserves whole image" ((← loadExact transport).bytes == beforeCrash.bytes)
+  require "precommit crash preserves whole image" ((← loadExact transport).image == beforeCrash.image)
   let _ ← confirmed "retry after precommit crash" .installed (← receive transport rootBytes third 3)
 
   let fourth := twoWrites 18 [31] [32] [41] [42] [3]
   let lostResponse : Transport :=
-    { transport with cas := fun expected proposed => config.cas expected proposed (some "after-commit") }
+    { transport with append := fun height entry => config.append height entry (some "after-commit") }
   let recovered ← confirmed "lost successful response" .recoveredAfterUncertainResponse
     (← receive lostResponse rootBytes fourth 3)
   require "cold reopen recovers all fields" (recovered.model.history.length == 4 &&
@@ -147,12 +156,12 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
 
   let injected ← IO.mkRef false
   let racing : Transport :=
-    { transport with cas := fun expected proposed => do
+    { transport with append := fun height entry => do
         unless ← injected.get do
           injected.set true
           let _ ← confirmed "concurrent read-cell move" .installed
             (← receive transport rootBytes (moveObserved 19 [3] [33]) 3)
-        transport.cas expected proposed }
+        transport.append height entry }
   expectRejected "CAS conflict reloads and rejects stale read" .staleReadGuard
     (← receive racing rootBytes (twoWrites 20 [41] [42] [51] [52] [3]) 3)
   let raced ← loadExact transport
@@ -162,12 +171,12 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let pinnedCandidate := twoWrites 22 [41] [42] [51] [52] [33]
   let clockInjected ← IO.mkRef false
   let clockRacing : Transport :=
-    { transport with cas := fun expected proposed => do
+    { transport with append := fun height entry => do
         unless ← clockInjected.get do
           clockInjected.set true
           let _ ← confirmed "concurrent journal-only advance" .installed
             (← receive transport rootBytes (advanceJournal 21 [33]) 3)
-        transport.cas expected proposed }
+        transport.append height entry }
   require "pinned admission cannot rebase across journal-only advance"
     (match ← receiveLoaded clockRacing rootBytes raced pinnedCandidate with
       | .contention => true | _ => false)
@@ -178,7 +187,8 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       advanced.snapshot.canonicalBytes ⟨3⟩ == [33] &&
       advanced.image.accepted.length == raced.image.accepted.length + 1)
   require "candidate's ordinary guards remain admissible at the later boundary"
-    (match prepare advanced.image advanced.snapshot advanced.represented pinnedCandidate with
+    (match DurableCheckpoint.prepare advanced.image advanced.baseHeight advanced.base
+        advanced.snapshot advanced.withinLog advanced.resumed pinnedCandidate with
       | .inl _ => true | _ => false)
   let pinned ← confirmed "fresh pinned publication after explicit readmission" .installed
     (← receiveLoaded transport rootBytes advanced pinnedCandidate)
@@ -188,39 +198,79 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let finalImage ← loadExact transport
   let _ ← confirmed "pinned exact historical replay" .replayed
     (← receiveLoaded transport rootBytes finalImage pinnedCandidate)
-  require "pinned replay preserves physical image" ((← loadExact transport).bytes == finalImage.bytes)
+  require "pinned replay preserves physical image" ((← loadExact transport).image == finalImage.image)
 
-  -- The first CAS is exact, but a second valid commit lands before its
-  -- readback. Confirmation must take the full reopened path and return the
-  -- later snapshot, rather than claiming the prepared candidate was the tip.
-  let afterCas : Transport :=
-    { transport with cas := fun expected proposed => do
-        let observation ← transport.cas expected proposed
+  -- The append is exact, but a second valid commit lands before its readback.
+  -- The entry at the appended height is still exactly this attempt's entry.
+  let afterAppend : Transport :=
+    { transport with append := fun height entry => do
+        let observation ← transport.append height entry
         if observation == .installed then
           let _ ← confirmed "later commit before readback" .installed
             (← receive transport rootBytes (advanceJournal 24 [33]) 3)
         return observation }
-  let withLater ← confirmed "concurrent later commit confirmed" .installed
-    (← receiveLoaded afterCas rootBytes finalImage (advanceJournal 23 [33]))
-  require "concurrent readback returns both accepted turns"
-    (withLater.model.history.length == finalImage.snapshot.model.history.length + 2)
+  let _ ← confirmed "exact entry confirmed under a later commit" .installed
+    (← receiveLoaded afterAppend rootBytes finalImage (advanceJournal 23 [33]))
   let afterConcurrent ← loadExact transport
-  require "concurrent readback returns physical latest snapshot"
-    (withLater.model.history.length == afterConcurrent.snapshot.model.history.length)
+  require "both accepted turns durable"
+    (afterConcurrent.snapshot.model.history.length == finalImage.snapshot.model.history.length + 2)
 
-  require "codec rejects trailing bytes" ((decode (afterConcurrent.bytes ++ [0])).isNone)
-  require "codec rejects redundant natural digit"
-    ((decode (afterConcurrent.bytes.take 1 ++ [0] ++ afterConcurrent.bytes.drop 1)).isNone)
+  -- Checkpoints: cadence 3, so the latest persisted checkpoint is past genesis
+  -- and a cold open resumed from it; the resume agrees with the genesis replay.
+  let .ok (some stored) ← transport.read 1 true | throw (IO.userError "FAIL read")
+  let some checkpoint := stored.checkpoint | throw (IO.userError "FAIL no checkpoint written")
+  require "cold open resumed from the latest checkpoint" (afterConcurrent.baseHeight == checkpoint.height && checkpoint.height > 0)
+  let genesisReplay ← match loadImage rootBytes afterConcurrent.image with
+    | .ok loaded => pure loaded
+    | .error detail => throw (IO.userError s!"FAIL genesis replay: {detail}")
+  require "checkpoint resume equals the genesis replay on every cell and the meter"
+    ([1, 2, 3, 4].all (fun cell => afterConcurrent.snapshot.canonicalBytes ⟨cell⟩ ==
+        genesisReplay.snapshot.canonicalBytes ⟨cell⟩) &&
+      afterConcurrent.snapshot.model.available .feeDebit ==
+        genesisReplay.snapshot.model.available .feeDebit &&
+      afterConcurrent.snapshot.model.history.length == genesisReplay.snapshot.model.history.length)
+
+  require "codec rejects trailing bytes"
+    (stored.entries.head?.all fun entry => (recordFrame.decode (entry.record ++ [0])).isNone)
   require "malformed native success is uncertain"
     (match parseCasOutput ⟨0, "Installed\nextra\n", ""⟩ with | .uncertain _ => true | _ => false)
-  let duplicate : Image := { afterConcurrent.image with accepted := afterConcurrent.image.accepted ++ [IntentRecord.ofIntent fourth] }
-  require "recovery rejects duplicate journal append" ((recover rootBytes (encode duplicate)).isNone)
-  let _ ← transport.cas (some afterConcurrent.bytes) [0, 1, 2]
-  require "corrupt image refuses without implicit reset"
-    (match ← receive transport rootBytes fourth 3 with | .unavailable _ => true | _ => false)
-  require "corrupt image remains visible to operator"
-    (match ← transport.read with | .ok (some bytes) => bytes == [0, 1, 2] | _ => false)
-  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite CAS, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response reopen, concurrent guard move, pinned admission refuses journal-only race, concurrent later-commit readback, corruption; final valid image {afterConcurrent.bytes.length} bytes / 9 commits"
+
+  -- Forgeries by a writer without the key. Each is written through the store
+  -- helper itself (it stores opaque bytes), and each refuses to open.
+  let forgedTag : Entry := ⟨recordFrame.encode (IntentRecord.ofIntent (advanceJournal 30 [33])),
+    List.replicate 32 0⟩
+  let head := afterConcurrent.image.accepted.length
+  require "helper accepts the opaque forged entry" ((← transport.append (head + 1) forgedTag) == .installed)
+  expectOpenRefused "log entry with a forged tag" transport
+  require "no implicit reset: the forged entry stays visible"
+    (match ← transport.read (head + 1) false with | .ok (some s) => s.entries == [forgedTag] | _ => false)
+
+  let secondDirectory := directory / "second"
+  IO.FS.createDirAll secondDirectory
+  let second : NativeConfig := { config with root := secondDirectory / "store" }
+  match ← bootstrap second.transport rootBytes seed with
+  | .error message => throw (IO.userError message)
+  | .ok () => pure ()
+  let _ ← confirmed "second store commit" .installed (← receive second.transport rootBytes first 3)
+  let .ok key ← transport.key | throw (IO.userError "FAIL key")
+  let loadedSecond ← loadExact second.transport
+  let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain
+    (DurableCheckpoint.State.ofSnapshot loadedSecond.image loadedSecond.snapshot)
+  let forgedMac := { honest with mac := List.replicate 32 7 }
+  let .ok () ← second.transport.putCheckpoint 1 (checkpointFrame.encode forgedMac)
+    | throw (IO.userError "FAIL store forged checkpoint")
+  expectOpenRefused "checkpoint with a forged MAC" second.transport
+  let rolledBack := sealCheckpoint key rootBytes 1 loadedSecond.chain (DurableCheckpoint.State.ofSeed seed)
+  let .ok () ← second.transport.putCheckpoint 1 (checkpointFrame.encode rolledBack)
+    | throw (IO.userError "FAIL store")
+  let resumedRollback ← loadExact second.transport
+  require "a key-holder's dishonest checkpoint is trusted on open (Q1): it resumes the rolled-back cell"
+    (resumedRollback.snapshot.canonicalBytes ⟨1⟩ == [1])
+  let .ok () ← second.transport.putCheckpoint 1 (checkpointFrame.encode honest)
+    | throw (IO.userError "FAIL store")
+  require "the honest checkpoint resumes the committed cell"
+    ((← loadExact second.transport).snapshot.canonicalBytes ⟨1⟩ == [11])
+  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, forged tag and forged checkpoint MAC refuse to open; {head} commits"
 
 end DurableReceiverProbe
 
