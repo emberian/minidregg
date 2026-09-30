@@ -96,7 +96,7 @@ import Assurance.ReactiveOutboxDelivery  -- the installed reactive outbox become
 import Assurance.AuthenticatedSettlementFinalityWitness  -- concrete authority snapshots witness current, rotated, revoked, and non-conflicting authenticated quorum paths
 import Assurance.DreggNetProviderConsumer  -- a market-bound provider job joins exact lease economics, terminal/refund settlement, retry, and quorum safety
 import Assurance.QuotaGcSettlementWitness  -- an expired unprotected bounded page compacts with exact fee, guards, writes, and no-delete teeth for live/finalized roots
-import Assurance.SelvageV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
+import Assurance.SelvageV0  -- the v0 CAPSTONE: sound + knowledge-sound + binding, one bundle; the commitment is Theory.AuthMap and binding/knowledge are reductions to an exhibited collision (the former BindingCommitment leg was empty at any compressing root; the former 'decided' leg was Iff.rfl and is gone)
 import Assurance.SelvageV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
 import Assurance.PrivateTurn  -- the private-witness TURN model (Lean-authored): public claim binds, private witness hides; [PRIVATE-TURN-air] the Lean constraint system (not the Rust AIR)

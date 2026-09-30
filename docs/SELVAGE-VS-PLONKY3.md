@@ -144,9 +144,11 @@ statement kept compiling beside the true one:
 So the central promise — *one aggregate proves the whole history, sound at deployed depth* —
 is now a chain of Lean terms, not a heuristic, and it is **composed into a single capstone
 theorem** (`Assurance/SelvageV0.loomV0_holds`): a committed chain of kernel receipts, verified at
-one Fiat-Shamir schedule, carries all four guarantees at once — soundness, knowledge-soundness,
-commitment-binding, and decision — the proof term being exactly the four citations, no new
-math. That one theorem is the thing to hand a skeptic; its honest-scope caveat (the soundness
+one Fiat-Shamir schedule, carries three guarantees at once — soundness, knowledge-soundness,
+and commitment-binding — the proof term being exactly the three citations. (Revised 2026-09-30:
+the commitment is `Theory.AuthMap` and binding/knowledge are reductions to an exhibited hash
+collision; the earlier `BindingCommitment` form was empty at every compressing root, and the
+earlier fourth leg, "decision", was `decider_sound`, an `Iff.rfl`, and is no longer counted.) That one theorem is the thing to hand a skeptic; its honest-scope caveat (the soundness
 and knowledge slices are bundled, not yet fused into one deployed transcript — the fusion is
 `[ACC-extract-bind]`/`[FS-ROM]`) is stated in the file, not hidden. **What that claim does NOT yet include, stated
 plainly:** the schedule is proved sound as a *uniform* sample; deriving it from a Fiat-Shamir
