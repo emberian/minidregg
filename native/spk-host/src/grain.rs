@@ -57,10 +57,6 @@ fn unresolved(reason: impl Into<String>) -> io::Error {
     io::Error::other(format!("UNRESOLVED: {}", reason.into()))
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 fn hex64(value: &str) -> bool {
     value.len() == 64
         && value
@@ -361,17 +357,17 @@ fn admitted_application(source: &Path, receipt: &Path) -> io::Result<(LifecycleS
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Placement {
+pub(crate) struct Placement {
     protocol: String,
-    selector: LifecycleSelector,
-    raw_sha256: String,
-    app_uid: u32,
+    pub(crate) selector: LifecycleSelector,
+    pub(crate) raw_sha256: String,
+    pub(crate) app_uid: u32,
     app_gid: u32,
     volume_resource: String,
     volume_mib: u64,
 }
 
-fn load_placement(path: &Path) -> io::Result<Placement> {
+pub(crate) fn load_placement(path: &Path) -> io::Result<Placement> {
     let placement: Placement = serde_json::from_slice(&read_private(path, MAX_JSON)?)?;
     if placement.protocol != "mini-spk-grain-placement-v1" {
         return Err(invalid("grain placement protocol refused"));
@@ -1203,16 +1199,12 @@ pub fn run(args: &[String]) -> io::Result<Value> {
 pub(crate) struct HostView<'a> {
     pub state_root: &'a Path,
     pub operator: PrivateOperator,
-    pub mini_host: &'a Path,
-    pub mini_config: &'a Path,
 }
 
 fn host_view(host: &Host) -> HostView<'_> {
     HostView {
         state_root: &host.profile.state_root,
         operator: host.operator(),
-        mini_host: &host.profile.mini_host,
-        mini_config: &host.profile.mini_config,
     }
 }
 
