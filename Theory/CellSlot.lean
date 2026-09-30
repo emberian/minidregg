@@ -3,13 +3,13 @@
 
 `CellState` describes the state *inside* one already-existing cell.  This
 module supplies the missing outer boundary: a stable registry of heterogeneous
-cell schemas, an absent/present slot for each identifier, and exact logical
+cell layouts, an absent/present slot for each identifier, and exact logical
 create/delete transitions.
 
 The registry does not use `Dynamic`, `unsafeCast`, or an untyped payload.  A
-decoded kind tag selects the exact `CellState.Schema`; only then can its lawful
-logical-state codec decode the payload.  The stored `PackedCell` therefore
-contains a genuinely materialized value of that selected schema.
+decoded kind tag selects the exact `Store.Layout`; only then can its lawful
+store codec decode the payload.  The stored `PackedCell` therefore contains a
+genuinely materialized value of that selected layout.
 
 Deleting a cell does not make its identifier fresh again.  `Directory.used` is
 monotone, while `Directory.slots` may move from present back to absent.  This
@@ -22,7 +22,7 @@ Likewise the transitions below are logical transitions only;
 -/
 import Theory.CausalVersionDag
 import Theory.CellState
-import Theory.DeclaredTurn
+import Theory.EffectDeclaration
 import Theory.Hyperdocument
 
 namespace Minidregg.Theory.CellRegistry
@@ -40,7 +40,7 @@ universe uRoot uCell uPhysical uError
 /-- A deployment registry for heterogeneous cell kinds.
 
 Every kind has a stable one-byte wire tag, a public schema identity/version,
-an exact `CellState.Schema`, and the materializer for that schema.  The reverse
+an exact `Store.Layout`, and the materializer for that layout.  The reverse
 tag law prevents aliases.  The registry supplies codecs; this module never
 manufactures one from countability or choice. -/
 structure TypeRegistry (Root : Type uRoot) where
@@ -50,13 +50,13 @@ structure TypeRegistry (Root : Type uRoot) where
   kindAtTag_tag : forall kind, kindAtTag (tag kind) = some kind
   schemaRef : Kind -> SchemaRef
   schemaRef_injective : Function.Injective schemaRef
-  schema : Kind -> CellState.Schema.{0, 0, 0, 0}
-  materializer : (kind : Kind) -> CellState.Materializer (schema kind) Root
+  layout : Kind -> Store.Layout.{0, 0, 0}
+  materializer : (kind : Kind) -> CellState.Materializer (layout kind) Root
   rootBytes : List UInt8 -> Root
 
-/-! ### The currently deployed Theory-side schema family -/
+/-! ### The currently deployed Theory-side layout family -/
 
-/-- Stable constructors for the three heterogeneous Theory-side cell schemas
+/-- Stable constructors for the three heterogeneous Theory-side cell layouts
 which have crossed the sparse-materializer boundary.  Adding a constructor is
 a wire-format and migration decision, not a runtime registration side effect. -/
 inductive DeployedKind where
@@ -80,11 +80,11 @@ def deployedKindAtTag : UInt8 -> Option DeployedKind
     deployedKindAtTag kind.tag = some kind := by
   cases kind <;> rfl
 
-/-- The dependent schema selected by each stable deployed kind. -/
-def deployedSchema : DeployedKind -> CellState.Schema.{0, 0, 0, 0}
-  | .declaredEffect => DeclaredTurn.effectSchema
-  | .credentialAuthority => CredentialAuthorityState.schema
-  | .hyperdocument => Hyperdocument.cellSchema
+/-- The dependent layout selected by each stable deployed kind. -/
+def deployedLayout : DeployedKind -> Store.Layout.{0, 0, 0}
+  | .declaredEffect => EffectDeclaration.effectLayout
+  | .credentialAuthority => CredentialAuthorityState.layout
+  | .hyperdocument => Hyperdocument.layout
 
 /-- Deployment must provide concrete materializers and stable schema refs for
 all deployed kinds.  In particular, this contract does not import or reuse the
@@ -93,7 +93,7 @@ structure DeployedRegistryConfig (Root : Type uRoot) where
   schemaRef : DeployedKind -> SchemaRef
   schemaRef_injective : Function.Injective schemaRef
   materializer : (kind : DeployedKind) ->
-    CellState.Materializer (deployedSchema kind) Root
+    CellState.Materializer (deployedLayout kind) Root
   rootBytes : List UInt8 -> Root
 
 /-- Realize the deployed heterogeneous family as the generic stable registry. -/
@@ -105,11 +105,11 @@ def deployedRegistry {Root : Type uRoot}
   kindAtTag_tag := deployedKindAtTag_tag
   schemaRef := config.schemaRef
   schemaRef_injective := config.schemaRef_injective
-  schema := deployedSchema
+  layout := deployedLayout
   materializer := config.materializer
   rootBytes := config.rootBytes
 
-/-- A type-safe heterogeneous cell.  Its tag chooses its schema before the
+/-- A type-safe heterogeneous cell.  Its tag chooses its layout before the
 materialized payload can even be typed. -/
 structure PackedCell {Root : Type uRoot} (registry : TypeRegistry Root) where
   kind : registry.Kind
@@ -126,7 +126,7 @@ def bytes (cell : PackedCell registry) : List UInt8 :=
     (registry.materializer cell.kind).codec.encode cell.payload.logical
 
 /-- Decode without a runtime cast: matching `kindAtTag` refines the payload
-type to the exact schema selected by that kind. -/
+type to the exact layout selected by that kind. -/
 def decode : List UInt8 -> Option (PackedCell registry)
   | 68 :: 82 :: 1 :: tag :: payloadBytes =>
       match registry.kindAtTag tag with
@@ -174,7 +174,7 @@ envelope. -/
 def payloadBytes (cell : PackedCell registry) : List UInt8 :=
   cell.payload.bytes
 
-/-- The native schema materializer's root.  The directory root below instead
+/-- The native layout materializer's root.  The directory root below instead
 binds the stable outer kind/version envelope as well. -/
 def payloadRoot (cell : PackedCell registry) : Root :=
   cell.payload.root
