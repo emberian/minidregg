@@ -115,7 +115,7 @@ SECOND_PUBLIC=$(od -An -tx1 -v "$EVIDENCE/second.pub" | tr -d ' \n')
 
 cat >"$EVIDENCE/operator.json" <<EOF
 {"domain":8527,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCatalogueId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
+ "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
  "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
  "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
  "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
@@ -126,7 +126,7 @@ SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
 
 cat >"$EVIDENCE/genesis.json" <<EOF
 {"domain":"8527","factoryId":"10","resourceBookId":"11",
- "authorityCatalogueId":"12","federation":"9","tariffBase":"3",
+ "authorityCellId":"12","federation":"9","tariffBase":"3",
  "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
  "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
  "issuerEpoch":"2","genesisHeight":"10",

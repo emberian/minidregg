@@ -28,19 +28,19 @@ theorem validateLoaded_cellLaw (config : Config) (durable : Durable)
     (present : directory.directory.slots identifier.value = .present cell)
     {opened : Opened config} (accepted : validateLoaded config durable = .ok opened) :
     CanonicalCellRegistry.CellLaw config.deployment identifier.value cell := by
-  by_contra invalid
-  cases deploymentValid : decide config.deployment.Valid <;>
-    cases seedValid : (seedIdentity durable.image.seed == config.expectedSeed) <;>
-    cases authorityLoaded : CredentialAuthorityDomainReceiver.loadDeployment
-        config.deployment durable.snapshot <;>
-    simp only [validateLoaded, check, need, deploymentValid, seedValid,
-      loadedDirectory, authorityLoaded, bind, Except.bind,
-      Bool.false_eq_true, ↓reduceIte] at accepted <;> try cases accepted
-  split_ifs at accepted with cellLaws <;> try cases accepted
-  all_goals
-    have checked := (List.all_eq_true.mp cellLaws) identifier listed
-    rw [present] at checked
-    exact invalid ((CanonicalCellRegistry.cellCheck_iff _ _ _).mp checked)
+  have cellLaws : durable.image.cellIds.all (fun identifier =>
+      match directory.directory.slots identifier.value with
+      | .absent => true
+      | .present cell =>
+          CanonicalCellRegistry.cellCheck config.deployment identifier.value cell) = true := by
+    unfold validateLoaded at accepted
+    simp only [check, need, loadedDirectory, bind, Except.bind] at accepted
+    repeat' split at accepted
+    all_goals try simp_all
+    all_goals (intro x hx; apply_assumption <;> assumption)
+  have checked := (List.all_eq_true.mp cellLaws) identifier listed
+  rw [present] at checked
+  exact (CanonicalCellRegistry.cellCheck_iff _ _ _).mp checked
 
 /-- A malformed but canonically encoded Book cannot enter a successful native
 loaded-image result, at any balance amount or hidden account/asset coordinate. -/

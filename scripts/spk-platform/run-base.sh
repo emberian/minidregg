@@ -111,7 +111,7 @@ jq -n --arg store "$STORE_BINARY" \
   --arg signature "$SIGNATURE_BINARY" \
   --arg completion "$SPK_COMPLETION_PUBLIC" '
   {domain:8501,federation:9,factoryId:10,resourceBookId:11,
-    authorityCatalogueId:12,issuer:5,ownerBudget:100000,lifetime:10000,
+    authorityCellId:12,issuer:5,ownerBudget:100000,lifetime:10000,
     tariffBase:3,tariffPerBirth:2,tariffPerGrant:1,
     tariffPerInitialPayloadByte:1,collector:99,asset:0,
     genesisHeight:10,expectedSeed:0,storageBinary:$store,

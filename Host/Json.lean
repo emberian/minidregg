@@ -713,7 +713,7 @@ private def charge (path : String) (json : Lean.Json) : Result ResourceCost.Char
     | .feeDebit => 8 | .leaseByteBlocks => 9)]?).getD 0
 
 private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesis.Config := do
-  let names := ["domain", "factoryId", "resourceBookId", "authorityCatalogueId", "federation",
+  let names := ["domain", "factoryId", "resourceBookId", "authorityCellId", "federation",
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
@@ -723,7 +723,7 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     deployment := ⟨⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
       ← nat (path ++ ".factoryId") (← field path "factoryId" obj),
       ← nat (path ++ ".resourceBookId") (← field path "resourceBookId" obj),
-      ← nat (path ++ ".authorityCatalogueId") (← field path "authorityCatalogueId" obj)⟩
+      ← nat (path ++ ".authorityCellId") (← field path "authorityCellId" obj)⟩
     federation := ⟨← nat (path ++ ".federation") (← field path "federation" obj)⟩
     tariff := ⟨← nat (path ++ ".tariffBase") (← field path "tariffBase" obj),
       ← nat (path ++ ".tariffPerBirth") (← field path "tariffPerBirth" obj),

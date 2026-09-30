@@ -112,20 +112,15 @@ private def selectedPayload (view : List UInt8) (atom : AtomId) :
     | fail "noncanonical resource cell"
   match cell with
   | ⟨.content, materialized⟩ =>
-      let some page := HyperdocumentContentPageMaterializer.pageAt materialized.logical
-        | fail "content resource has no page"
-      let some record := page.entries.findSome? (fun entry => match entry with
-        | HyperdocumentContentPageMaterializer.Entry.atom atomId record =>
-            if atomId == atom then some record else none
-        | _ => none)
-        | fail "selected atom is absent from the current content page"
+      let some record := Minidregg.Theory.Hyperdocument.lookup materialized.logical .atoms atom
+        | fail "selected atom is absent from the current content cell"
       unless record.tombstonedAt.isNone && !record.payload.isEmpty do
         fail "selected atom is tombstoned or empty"
       pure (materialized.root, record.payload)
   | _ => fail "selected source is not a content resource"
 
 /-- Reads only an exact current atom through the existing signed observation
-gate, then binds its page root and bytes into the canonical owner preimage. -/
+gate, then binds its content cell root and bytes into the canonical owner preimage. -/
 def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (request : Request) : IO (Except String Prepared) := do
   let some signed := NativeObservationCodec.signedCodec.decode request.signedQuery

@@ -50,7 +50,7 @@ def samples : List (Nat × PackedCell registry) :=
   , (25, ⟨.authorityShard, materialize CredentialAuthorityPageMaterializer.materializer
       (CredentialAuthorityPageMaterializer.stateOfOption
         (some (CredentialAuthorityDomain.emptyPage deployment.domain 0)))⟩)
-  , (deployment.authorityCatalogueId,
+  , (deployment.authorityCellId,
       ⟨.authorityCatalogue, materialize CredentialAuthorityDomain.catalogueMaterializer
         (CredentialAuthorityDomain.catalogueState (some ⟨deployment.domain, 0, []⟩))⟩)
   , (deployment.resourceBookId,

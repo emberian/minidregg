@@ -77,7 +77,7 @@ provision() {
   mkdir -m 700 "$root"
   cat >"$root/operator.json" <<EOF
 {"domain":$domain,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCatalogueId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
+ "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
  "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
  "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
  "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE_BINARY",
@@ -87,7 +87,7 @@ EOF
   semantics=$(decimal "$root/profile.json" semantics)
   cat >"$root/genesis.json" <<EOF
 {"domain":"$domain","factoryId":"10","resourceBookId":"11",
- "authorityCatalogueId":"12","federation":"9","tariffBase":"3",
+ "authorityCellId":"12","federation":"9","tariffBase":"3",
  "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
  "collector":"99","asset":"0","expectedSemantics":"$semantics",
  "issuerEpoch":"2","genesisHeight":"10",

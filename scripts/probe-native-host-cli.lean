@@ -99,7 +99,7 @@ def settingsJson (config : NativeHost.Config) : Json := Json.mkObj
    ("federation", toJson config.federation.value),
    ("factoryId", toJson config.deployment.factoryId),
    ("resourceBookId", toJson config.deployment.resourceBookId),
-   ("authorityCatalogueId", toJson config.deployment.authorityCatalogueId),
+   ("authorityCellId", toJson config.deployment.authorityCellId),
    ("issuer", toJson config.template.issuer.value), ("ownerBudget", toJson config.template.ownerBudget),
    ("lifetime", toJson config.template.lifetime), ("tariffBase", toJson config.tariff.base),
    ("tariffPerBirth", toJson config.tariff.perBirth), ("tariffPerGrant", toJson config.tariff.perGrant),
@@ -854,7 +854,7 @@ def run (host verifier store openssl directory : System.FilePath) : IO Unit := d
   for kind in [.account, .program] do
     challengeRefused client s!"content-wrong-kind-{repr kind}"
       (.query ⟨kind, contentId, .resource⟩) [⟨kind, contentId, contentOwner⟩] alice
-  for target in [config.deployment.resourceBookId, config.deployment.authorityCatalogueId] do
+  for target in [config.deployment.resourceBookId, config.deployment.authorityCellId] do
     challengeRefused client s!"internal-role-{target}"
       (.query ⟨.object, target, .resource⟩) [⟨.object, target, taskOwner⟩] alice
   let attachDraft ← joint client alice "attach" 30002 (.attach false) "A shared research room" true

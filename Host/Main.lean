@@ -497,7 +497,7 @@ structure Settings where
   federation : Nat
   factoryId : Nat
   resourceBookId : Nat
-  authorityCatalogueId : Nat
+  authorityCellId : Nat
   issuer : Nat
   ownerBudget : Nat
   lifetime : Nat
@@ -530,7 +530,7 @@ structure Settings where
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
-  deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCatalogueId⟩
+  deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
   template := ⟨⟨settings.issuer⟩, settings.ownerBudget, settings.lifetime⟩
   tariff := ⟨settings.tariffBase, settings.tariffPerBirth, settings.tariffPerGrant,
@@ -698,7 +698,7 @@ def profileDescription (config : NativeHost.Config)
      ("federation", n config.federation.value),
      ("factoryId", n config.deployment.factoryId),
      ("resourceBookId", n config.deployment.resourceBookId),
-     ("authorityCatalogueId", n config.deployment.authorityCatalogueId),
+     ("authorityCellId", n config.deployment.authorityCellId),
      ("fieldModulus", n Minidregg.Compiler.babyBearP),
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("genesisHeight", n config.genesisHeight),

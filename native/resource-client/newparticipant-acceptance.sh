@@ -32,7 +32,7 @@ NEWCOMER_PUBLIC=$(od -An -tx1 -v "$ROOT/newcomer.pub" | tr -d ' \n')
 
 cat >"$ROOT/operator.json" <<EOF
 {"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCatalogueId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
+ "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
  "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
  "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
  "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE",
@@ -43,7 +43,7 @@ SEMANTICS=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9
 
 cat >"$ROOT/genesis.json" <<EOF
 {"domain":"8501","factoryId":"10","resourceBookId":"11",
- "authorityCatalogueId":"12","federation":"9","tariffBase":"3",
+ "authorityCellId":"12","federation":"9","tariffBase":"3",
  "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
  "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
  "issuerEpoch":"2","genesisHeight":"10",

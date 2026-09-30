@@ -97,7 +97,7 @@ def run (alice bob : List UInt8) : IO Unit := do
   let sourceId := PolicySourceCell.physicalId cfg.deployment.domain
     (PolicyRecordCodec.digest (factoryPolicy profile cfg))
   refused "policy-source/catalogue physical collision"
-    { cfg with deployment := { cfg.deployment with authorityCatalogueId := sourceId } }
+    { cfg with deployment := { cfg.deployment with authorityCellId := sourceId } }
   IO.println "PASS native genesis: supplied public keys, source-derived authority/policies/grants, conserved explicit budget, canonical zero-history restore; malformed configuration and physical alias refusal"
 
 end NativeHostGenesisProbe

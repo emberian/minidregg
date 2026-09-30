@@ -33,7 +33,7 @@ private def grainOperator : NativeHost.Config :=
 
 private def genesisWithSemantics (semantics : Nat) : Json := object [
   ("domain", number 8501), ("factoryId", number 10),
-  ("resourceBookId", number 11), ("authorityCatalogueId", number 12),
+  ("resourceBookId", number 11), ("authorityCellId", number 12),
   ("federation", number 9), ("tariffBase", number 3),
   ("tariffPerBirth", number 2), ("tariffPerGrant", number 1),
   ("tariffPerInitialPayloadByte", number 0), ("collector", number 99),
