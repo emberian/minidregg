@@ -5057,6 +5057,7 @@ def run (arguments : List String) : IO UInt32 := do
                         | 94 =>
                             let opened ← sessionOpened pinnedConfig state
                             let outcome ← NativeHost.fleetSubmitLoaded pinnedConfig opened payload
+                              (sessionConfirmed pinnedConfig state)
                             return ((94 : UInt8), outcomeCodec.encode outcome)
                         | 95 =>
                             let opened ← sessionOpened pinnedConfig state

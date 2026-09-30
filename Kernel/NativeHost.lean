@@ -507,12 +507,17 @@ def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
   pure (FleetTurn.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
 
+/-- `confirm` seals the original receipt from the image the caller already
+tracks (a session refreshes by the appended delta); it never substitutes a
+different admission. -/
 def fleetSubmitLoaded (config : Config) (opened : Opened config)
-    (bytes : List UInt8) : IO Outcome := do
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO Outcome := do
   match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile config.tariff
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.storage.transport opened.durable bytes with
-  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   -- The signed header names an authority root older than the loaded one: the
   -- plan was made against an earlier image and nothing moved. That is the
   -- typed contention outcome (re-plan against the new state), decided from the
