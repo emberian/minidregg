@@ -499,6 +499,12 @@ def provisionSubmitLoaded (config : Config) (opened : Opened config)
       config.storage.transport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused "provision-factory-observe" s!"{repr reason}"
+  | .transactionConflict => return refused "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
 /-! ## Fleet turns: plan, assembly, submit, lookup, topic reads, heads -/
 
 /-- Bound on page reads when walking one topic stream (4 events per page). -/
@@ -600,6 +606,14 @@ def provisionLookupLoaded (config : Config) (opened : Opened config)
   | none => refused "provision-factory-observe" "noncanonical signed ingress"
   | some ingress =>
     match ParticipantFactoryProvisioningReceiver.replay config.deployment.domain
+        config.profile.semantics opened.durable ingress with
+    | some (.ok receipt) =>
+        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+        | some original => .confirmed .replayed original
+        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | some (.error _) => refused "replay" "transaction identity conflict"
+    | none => .absent
+
 /-- Receipt-only historical lookup of one retained ingress. Absence never
 submits fresh work. -/
 def fleetLookupLoaded (config : Config) (opened : Opened config)
