@@ -1,0 +1,27 @@
+{"euid":65534,"gid_map":"65534 0 1","pid":2,"probe":"spk-sandbox-probe","uid":65534,"uid_map":"65534 0 1"}
+{"check":"capabilities-all-zero","detail":{"CapAmb":"0000000000000000","CapBnd":"0000000000000000","CapEff":"0000000000000000","CapInh":"0000000000000000","CapPrm":"0000000000000000","NoNewPrivs":"1","Seccomp":"2","Seccomp_filters":"1"},"held":true}
+{"check":"seccomp-filter-active","detail":{"CapAmb":"0000000000000000","CapBnd":"0000000000000000","CapEff":"0000000000000000","CapInh":"0000000000000000","CapPrm":"0000000000000000","NoNewPrivs":"1","Seccomp":"2","Seccomp_filters":"1"},"held":true}
+{"check":"no-new-privs","detail":{"CapAmb":"0000000000000000","CapBnd":"0000000000000000","CapEff":"0000000000000000","CapInh":"0000000000000000","CapPrm":"0000000000000000","NoNewPrivs":"1","Seccomp":"2","Seccomp_filters":"1"},"held":true}
+{"check":"fd-census-self","detail":[{"directory":false,"fd":0,"target":"/dev/null"},{"directory":false,"fd":1,"target":"pipe:[2309454490]"},{"directory":false,"fd":2,"target":"pipe:[2309454490]"},{"directory":false,"fd":3,"target":"socket:[2309454489]"}],"held":true}
+{"check":"fd-census-pid1-no-directory","detail":[{"directory":false,"fd":0,"target":"/dev/null"},{"directory":false,"fd":1,"target":"pipe:[2309454490]"},{"directory":false,"fd":2,"target":"pipe:[2309454490]"},{"directory":false,"fd":8,"target":"anon_inode:[eventfd]"}],"held":true}
+{"check":"dotdot-from-inherited-fd","detail":{"fd4":{"errno":9,"error":"Bad file descriptor (os error 9)"},"fd5":{"errno":9,"error":"Bad file descriptor (os error 9)"},"walked":[]},"held":true}
+{"check":"network-public-connect","detail":{"ipv4":"Err(101)","ipv6":"Err(101)"},"held":true}
+{"check":"network-loopback-only","detail":{"127.0.0.1:1":"Err(111)"},"held":true}
+{"check":"socket-netlink-refused","detail":{"errno":97,"error":"Address family not supported by protocol (os error 97)"},"held":true}
+{"check":"socket-packet-refused","detail":{"errno":97,"error":"Address family not supported by protocol (os error 97)"},"held":true}
+{"check":"socket-vsock-refused","detail":{"errno":97,"error":"Address family not supported by protocol (os error 97)"},"held":true}
+{"check":"mount-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"ptrace-traceme-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"bpf-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"io_uring_setup-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"keyctl-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"open_by_handle_at-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"personality-addr-no-randomize-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"ioctl-tiocsti-high-word-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"unlisted-syscall-refused","detail":{"errno":38,"error":"Function not implemented (os error 38)"},"held":true}
+{"check":"web-app-positive-control","detail":{"fork":true,"image-root-read-only":true,"loopback-listener":true,"thread":true,"tmp-write":true,"var-write":true},"held":true}
+{"check":"userns-unshare-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"userns-clone-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"setns-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"info":"max_user_namespaces","value":"2147483647"}
+{"checks":24,"failures":[],"verdict":"floor-held"}

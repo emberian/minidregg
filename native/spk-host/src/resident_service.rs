@@ -1053,6 +1053,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             return Err(invalid("INSTALL action cannot enter resident START"));
         }
     };
+    let generation: u64 = begin
+        .process_generation
+        .parse()
+        .map_err(|_| invalid("source BEGIN process generation is not decimal"))?;
     let spec = SandboxSpec {
         bwrap: config.bwrap.clone(),
         image_root: package.directory.join("root"),
@@ -1060,6 +1064,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         persistent_var_max_bytes: config.persistent_var_max_bytes,
         argv: command.argv.clone(),
         environ: command.environ.clone(),
+        // Root-private journal directory, one new file per app generation.
+        app_output: config.journal_dir.join(format!(
+            "app-output-r{}-g{generation}.log",
+            config.volume_resource
+        )),
     };
     let prepared =
         PreparedResident::prepare(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256)?;

@@ -6,7 +6,10 @@
 //! operation journal's flock throughout `spawn_bounded` and its Running fsync.
 #![allow(dead_code)] // Staged until the native BEGIN adapter can call it; no public launch path.
 
-use crate::sandbox::open_protected_directory;
+use crate::sandbox::{
+    open_protected_directory, IMAGE_FD, MAX_BWRAP_ARGS, MAX_BWRAP_ARG_BYTES, RPC_FD, SECCOMP_FD,
+    VAR_FD,
+};
 use sha2::{Digest, Sha256};
 use std::ffi::{CString, OsStr};
 use std::fs::File;
@@ -18,7 +21,6 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const MAX_ELF_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_ARG_ENV_BYTES: usize = 128 * 1024;
 const MAX_HANDSHAKE: Duration = Duration::from_secs(10);
 
 fn invalid(message: &'static str) -> io::Error {
@@ -26,29 +28,27 @@ fn invalid(message: &'static str) -> io::Error {
 }
 
 /// Pre-opened app-side descriptors. Sources must be >=10; targets are exactly
-/// fd3 (Cap'n Proto), fd4 (read-only package root), fd5 (bounded /var).
+/// fd3 (Cap'n Proto), fd4 (read-only package root), fd5 (bounded /var), fd6
+/// (sealed seccomp program), and fd1+fd2 (the app's private output pipe).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AppFds {
     pub rpc: RawFd,
     pub image: RawFd,
     pub persistent_var: RawFd,
+    pub seccomp: RawFd,
+    pub output: RawFd,
 }
 
 #[derive(Debug)]
 pub(crate) struct SpawnSpec {
     pub program: PathBuf,
     pub sha256: String,
+    /// bubblewrap's argv after the program. bubblewrap itself runs with an empty
+    /// environment; the app's environment travels as `--setenv` arguments.
     pub args: Vec<String>,
-    pub env: Vec<(String, String)>,
     pub app_uid: u32,
     pub app_gid: u32,
     pub fds: Option<AppFds>,
-}
-
-fn valid_env_key(value: &str) -> bool {
-    let mut chars = value.bytes();
-    matches!(chars.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
-        && chars.all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
 fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
@@ -61,39 +61,30 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
             .sha256
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        || spec.args.len() > 256
-        || spec.env.len() > 128
+        || spec.args.len() > MAX_BWRAP_ARGS
     {
         return Err(invalid("invalid pinned app launch shape"));
     }
-    let bytes: usize = spec.args.iter().map(String::len).sum::<usize>()
-        + spec
-            .env
-            .iter()
-            .map(|(k, v)| k.len() + v.len() + 1)
-            .sum::<usize>();
-    if bytes > MAX_ARG_ENV_BYTES
-        || spec.args.iter().any(|v| v.as_bytes().contains(&0))
-        || spec
-            .env
-            .iter()
-            .any(|(k, v)| !valid_env_key(k) || v.as_bytes().contains(&0))
-    {
-        return Err(invalid("invalid or oversized app argv/environment"));
+    // Bounds derived from the one launch-command profile in `sandbox`.
+    let bytes: usize = spec.args.iter().map(String::len).sum();
+    if bytes > MAX_BWRAP_ARG_BYTES || spec.args.iter().any(|v| v.as_bytes().contains(&0)) {
+        return Err(invalid("invalid or oversized bubblewrap arguments"));
     }
     if let Some(fds) = spec.fds {
-        let sources = [fds.rpc, fds.image, fds.persistent_var];
-        if sources
+        let sources = [fds.rpc, fds.image, fds.persistent_var, fds.seccomp, fds.output];
+        let distinct = sources
             .iter()
-            .any(|fd| *fd < 10 || unsafe { libc::fcntl(*fd, libc::F_GETFD) } < 0)
-            || sources[0] == sources[1]
-            || sources[0] == sources[2]
-            || sources[1] == sources[2]
+            .enumerate()
+            .all(|(i, a)| sources[i + 1..].iter().all(|b| a != b));
+        if !distinct
+            || sources
+                .iter()
+                .any(|fd| *fd < 10 || unsafe { libc::fcntl(*fd, libc::F_GETFD) } < 0)
         {
-            return Err(invalid("invalid fd3/4/5 source mapping"));
+            return Err(invalid("invalid fd1/2/3/4/5/6 source mapping"));
         }
     } else if !test_mode {
-        return Err(invalid("SPK launch requires fd3/4/5"));
+        return Err(invalid("SPK launch requires fd1-6"));
     }
     Ok(())
 }
@@ -214,19 +205,27 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
     if spec.args.first().map(String::as_str) == Some("--mini-spk-test-exit-before-exec") {
         libc::_exit(42);
     }
+    // stdout/stderr never pass through from the launcher: the app's private
+    // output pipe in production, /dev/null for the harmless test ELF.
+    let output = spec.fds.map_or(dev_null, |fds| fds.output);
     if let Some(fds) = spec.fds {
-        for (source, target) in [(fds.rpc, 3), (fds.image, 4), (fds.persistent_var, 5)] {
+        for (source, target) in [
+            (fds.rpc, RPC_FD),
+            (fds.image, IMAGE_FD),
+            (fds.persistent_var, VAR_FD),
+            (fds.seccomp, SECCOMP_FD),
+        ] {
             if libc::dup2(source, target) != target {
                 fail(write_fd);
             }
         }
-        for target in [3, 4, 5] {
+        for target in [RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD] {
             if libc::fcntl(target, libc::F_SETFD, 0) != 0 {
                 fail(write_fd);
             }
         }
     }
-    if libc::dup2(dev_null, 0) != 0 {
+    if libc::dup2(dev_null, 0) != 0 || libc::dup2(output, 1) != 1 || libc::dup2(output, 2) != 2 {
         fail(write_fd);
     }
     if !close_unlisted(keep) {
@@ -359,21 +358,12 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
         .chain(spec.args.iter().map(|arg| arg.as_bytes()))
         .map(|bytes| CString::new(bytes).map_err(|_| invalid("NUL launch argument")))
         .collect::<io::Result<_>>()?;
-    let env_strings: Vec<CString> = spec
-        .env
-        .iter()
-        .map(|(key, value)| {
-            CString::new(format!("{key}={value}")).map_err(|_| invalid("NUL launch environment"))
-        })
-        .collect::<io::Result<_>>()?;
     let mut argv: Vec<*const libc::c_char> = argv_strings.iter().map(|arg| arg.as_ptr()).collect();
     argv.push(std::ptr::null());
-    let mut environ: Vec<*const libc::c_char> =
-        env_strings.iter().map(|value| value.as_ptr()).collect();
-    environ.push(std::ptr::null());
+    let environ: [*const libc::c_char; 1] = [std::ptr::null()];
     let mut keep = vec![executable.as_raw_fd() as u32, write_fd.as_raw_fd() as u32];
     if spec.fds.is_some() {
-        keep.extend([3, 4, 5]);
+        keep.extend([RPC_FD, IMAGE_FD, VAR_FD, SECCOMP_FD].map(|fd| fd as u32));
     }
     keep.sort_unstable();
     keep.dedup();
@@ -505,7 +495,6 @@ mod tests {
             program: harmless_elf(),
             sha256: "0".repeat(64),
             args: vec!["1".into()],
-            env: vec![],
             app_uid: current,
             app_gid: unsafe { libc::getegid() },
             fds: None,
@@ -533,7 +522,6 @@ mod tests {
             program: harmless.clone(),
             sha256: sha(harmless.to_str().unwrap()),
             args: vec!["1".into()],
-            env: vec![],
             app_uid: uid,
             app_gid: unsafe { libc::getegid() },
             fds: None,
@@ -556,13 +544,62 @@ mod tests {
             program: harmless.clone(),
             sha256: sha(harmless.to_str().unwrap()),
             args: vec!["1".into()],
-            env: vec![],
             app_uid: 65534,
             app_gid: 65534,
             fds: None,
         };
         let mut child = spawn_inner(&spec, true).unwrap();
         let status = child.wait().unwrap();
+        assert!(libc::WIFEXITED(status));
+        assert_eq!(libc::WEXITSTATUS(status), 0);
+    }
+
+    #[test]
+    fn gate_bounds_are_the_profile_derived_ones() {
+        let uid = unsafe { libc::geteuid() };
+        let spec = |args: Vec<String>| SpawnSpec {
+            program: "/usr/bin/bwrap".into(),
+            sha256: "0".repeat(64),
+            args,
+            app_uid: uid.max(1),
+            app_gid: 1,
+            fds: None,
+        };
+        let per = MAX_BWRAP_ARG_BYTES / MAX_BWRAP_ARGS;
+        let mut args = vec!["a".repeat(per); MAX_BWRAP_ARGS];
+        args[0].push_str(&"a".repeat(MAX_BWRAP_ARG_BYTES - per * MAX_BWRAP_ARGS));
+        assert!(validate(&spec(args.clone()), true).is_ok());
+        let mut longer = args.clone();
+        longer.push(String::new());
+        assert!(validate(&spec(longer), true).is_err());
+        args[1].push('a');
+        assert!(validate(&spec(args), true).is_err());
+    }
+
+    /// The launched process's stdout and stderr are the gate's choice, never the
+    /// launcher's own (under nextest those are capture pipes, not /dev/null).
+    #[test]
+    fn child_never_inherits_launcher_stdout_or_stderr() {
+        let uid = unsafe { libc::geteuid() };
+        if uid == 0 {
+            return;
+        }
+        let shell = std::fs::canonicalize("/usr/bin/sh").unwrap();
+        let spec = SpawnSpec {
+            program: shell.clone(),
+            sha256: sha(shell.to_str().unwrap()),
+            args: vec![
+                "-c".into(),
+                // The sleep keeps the child alive past the handshake so the exit
+                // status, not the EOF/exit race, carries the verdict.
+                "sleep 1; [ /proc/self/fd/1 -ef /dev/null ] && [ /proc/self/fd/2 -ef /dev/null ]"
+                    .into(),
+            ],
+            app_uid: uid,
+            app_gid: unsafe { libc::getegid() },
+            fds: None,
+        };
+        let status = spawn_inner(&spec, true).unwrap().wait().unwrap();
         assert!(libc::WIFEXITED(status));
         assert_eq!(libc::WEXITSTATUS(status), 0);
     }
@@ -578,7 +615,6 @@ mod tests {
             program: harmless.clone(),
             sha256: sha(harmless.to_str().unwrap()),
             args: vec!["--mini-spk-test-hang-before-exec".into()],
-            env: vec![],
             app_uid: uid,
             app_gid: unsafe { libc::getegid() },
             fds: None,
@@ -607,7 +643,6 @@ mod tests {
             program: harmless.clone(),
             sha256: sha(harmless.to_str().unwrap()),
             args: vec!["--mini-spk-test-exit-before-exec".into()],
-            env: vec![],
             app_uid: uid,
             app_gid: unsafe { libc::getegid() },
             fds: None,

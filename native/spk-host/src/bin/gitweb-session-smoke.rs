@@ -157,7 +157,12 @@ fn run(input: Args, manifest: SpkManifest) -> Result<(), Box<dyn Error>> {
         persistent_var_max_bytes: input.max_var_bytes,
         argv: manifest.continue_command.argv.clone(),
         environ: manifest.continue_command.environ.clone(),
+        // The app never writes to this harness's stdout/stderr.
+        app_output: std::env::temp_dir()
+            .join(format!("spk-app-output-{}.log", std::process::id())),
     })?;
+    println!("app_output={}", std::env::temp_dir()
+        .join(format!("spk-app-output-{}.log", std::process::id())).display());
     println!("app_spawned=continue pid={}", child.process.id());
     let app = App(child.process);
     let rpc: UnixStream = child.rpc;

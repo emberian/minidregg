@@ -36,7 +36,17 @@ different units; a Hermes hard disconnect does not stop the shared app.
 The package root is bound read-only from an open directory fd; a separate
 preallocated ext4 loop filesystem is mounted at `/var`; `/tmp` is a size-limited
 tmpfs. A new user, PID, IPC, UTS, cgroup and network namespace exposes loopback
-but no host interface or route. The jailed root does not bind host `/usr`, Mini
+but no host interface or route. The app runs with every capability dropped
+(`--cap-drop ALL`), cannot create a further user namespace (`--disable-userns`),
+and runs under the seccomp allowlist `native/spk-host/seccomp/resident-web.policy`
+(compiled in-tree and passed as `--seccomp 6`). bubblewrap consumes and closes
+the image, `/var` and seccomp descriptors before exec, so the app holds only
+fds 0-3: `/dev/null`, its private output pipe on 1 and 2, and the fd-3 socket.
+Its stdout/stderr go to a new per-generation file
+`JOURNAL_DIR/app-output-rRESOURCE-gGENERATION.log` (16 MiB kept, the rest
+counted and dropped), never to the resident service's own streams.
+`scripts/spk-platform/sandbox-floor-audit.sh` re-measures all of this inside a
+resident sandbox. The jailed root does not bind host `/usr`, Mini
 keys, Store, control sockets or resolver configuration. The manifest's command
 argv and ordered environment are validated before use. First creation uses the
 selected `action.command`; wake uses `continueCommand`. A failed first creation

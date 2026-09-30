@@ -1,0 +1,110 @@
+# Seccomp policy for a resident SPK web application (spk-host sandbox floor).
+#
+# spk-host compiles this file into a classic-BPF program (native/spk-host/src/seccomp.rs)
+# and hands it to bubblewrap as `--seccomp 6`. bubblewrap installs it as the last step
+# before exec of the app and in the sandbox's pid 1. The program:
+#
+#   1. kills the process if the audit architecture is not the one spk-host was built for
+#      (so i386 `int 0x80` entry on x86_64 cannot bypass the table);
+#   2. on x86_64, refuses every x32-ABI number (bit 0x40000000) with EPERM;
+#   3. applies the rules below in file order; the first rule naming the syscall decides;
+#   4. returns `default` for every syscall this file does not name.
+#
+# Grammar, one rule per line:
+#   default ERRNO
+#   allow NAME...                                    always allowed
+#   deny ERRNO NAME...                               always refused with ERRNO
+#   allow-arg NAME ARG in VALUE... else ERRNO        allowed iff low 32 bits of ARG equal a VALUE
+#   allow-arg NAME ARG notin VALUE... else ERRNO     allowed iff low 32 bits of ARG equal no VALUE
+#   allow-arg NAME ARG clear MASK else ERRNO         allowed iff (low 32 bits of ARG) & MASK == 0
+# ERRNO is one of EPERM, ENOSYS, EAFNOSUPPORT. ARG is 0..5. VALUE/MASK are decimal or 0x hex.
+# allow-arg compares only the LOW 32 bits: use it only where the kernel reads that argument as
+# a 32-bit int (socket family, ioctl request, personality) or where every tested bit lies in
+# the low word (clone flags). A name may appear in exactly one rule. A name absent on this
+# architecture (x86_64-only legacy calls on aarch64) is skipped; an unknown name is an error.
+
+# Unlisted, including syscalls newer than this file: ENOSYS, so libc takes its fallback path.
+default ENOSYS
+
+# --- process memory and threads ---
+allow brk mmap munmap mremap mprotect madvise msync mincore mlock mlock2 munlock mlockall munlockall
+allow get_mempolicy set_mempolicy mbind membarrier rseq
+allow set_tid_address set_robust_list get_robust_list futex futex_waitv
+allow arch_prctl prctl
+allow exit exit_group
+allow execve execveat fork vfork wait4 waitid
+# Threads and children only in the existing namespaces. The mask is CLONE_NEWNS|NEWCGROUP|
+# NEWUTS|NEWIPC|NEWUSER|NEWPID|NEWNET; flags is argument 0 on x86_64 and aarch64.
+allow-arg clone 0 clear 0x7e020000 else EPERM
+# clone3 passes flags in a struct that BPF cannot read. ENOSYS makes glibc fall back to clone.
+deny ENOSYS clone3
+allow getpid getppid gettid getpgid getpgrp getsid setsid setpgid
+allow getuid geteuid getgid getegid getresuid getresgid getgroups
+allow setuid setgid setreuid setregid setresuid setresgid setgroups setfsuid setfsgid
+# capset can only lower the (already empty) permitted set; allowed so a daemon that drops
+# its capabilities on start does not abort.
+allow capget capset
+allow getrlimit setrlimit prlimit64 getrusage
+allow getpriority setpriority sched_yield sched_getaffinity sched_setaffinity sched_getparam
+allow sched_setparam sched_getscheduler sched_setscheduler sched_get_priority_max
+allow sched_get_priority_min sched_rr_get_interval sched_getattr sched_setattr getcpu
+allow ioprio_get ioprio_set pkey_alloc pkey_free pkey_mprotect
+allow uname sysinfo umask times
+# 0 = PER_LINUX, 0xffffffff = query. Refuses ADDR_NO_RANDOMIZE and friends.
+allow-arg personality 0 in 0 0xffffffff else EPERM
+allow seccomp
+
+# --- signals and timers ---
+allow rt_sigaction rt_sigprocmask rt_sigreturn rt_sigpending rt_sigtimedwait rt_sigqueueinfo
+allow rt_tgsigqueueinfo rt_sigsuspend sigaltstack kill tkill tgkill pause
+allow pidfd_open pidfd_send_signal
+allow restart_syscall
+allow nanosleep clock_nanosleep clock_gettime clock_getres gettimeofday time
+allow getitimer setitimer alarm timer_create timer_settime timer_gettime timer_getoverrun timer_delete
+allow timerfd_create timerfd_settime timerfd_gettime signalfd signalfd4 eventfd eventfd2
+
+# --- files ---
+allow read write readv writev pread64 pwrite64 preadv pwritev preadv2 pwritev2 lseek
+allow open openat openat2 creat close close_range
+allow dup dup2 dup3 pipe pipe2 fcntl flock fsync fdatasync sync syncfs sync_file_range
+allow stat fstat lstat newfstatat statx statfs fstatfs
+allow access faccessat faccessat2 readlink readlinkat getdents getdents64 getcwd chdir fchdir
+allow rename renameat renameat2 mkdir mkdirat rmdir link linkat unlink unlinkat symlink symlinkat
+allow mknod mknodat
+allow chmod fchmod fchmodat fchmodat2 chown fchown lchown fchownat
+allow truncate ftruncate fallocate fadvise64 readahead
+allow utime utimes utimensat futimesat
+allow getxattr lgetxattr fgetxattr listxattr llistxattr flistxattr
+allow setxattr lsetxattr fsetxattr removexattr lremovexattr fremovexattr
+allow sendfile copy_file_range splice tee vmsplice memfd_create
+allow inotify_init inotify_init1 inotify_add_watch inotify_rm_watch
+allow poll ppoll select pselect6 epoll_create epoll_create1 epoll_ctl epoll_wait epoll_pwait epoll_pwait2
+allow io_setup io_destroy io_submit io_cancel io_getevents
+allow getrandom
+# TIOCSTI (0x5412) and TIOCLINUX (0x541c) inject input into a terminal. The kernel reads
+# the request as 32 bits, so a high-word variant is refused too.
+allow-arg ioctl 1 notin 0x5412 0x541c else EPERM
+
+# --- sockets: loopback inside the sandbox's own network namespace only ---
+# AF_UNIX = 1, AF_INET = 2, AF_INET6 = 10. Netlink, packet, vsock and the rest are refused.
+allow-arg socket 0 in 1 2 10 else EAFNOSUPPORT
+allow socketpair bind listen accept accept4 connect getsockname getpeername
+allow sendto recvfrom sendmsg recvmsg sendmmsg recvmmsg shutdown setsockopt getsockopt
+
+# --- SysV IPC (the sandbox has a private IPC namespace) ---
+allow shmget shmat shmdt shmctl semget semop semtimedop semctl msgget msgsnd msgrcv msgctl
+allow mq_open mq_unlink mq_timedsend mq_timedreceive mq_notify mq_getsetattr
+
+# --- refused outright: namespaces, mounts, kernel attack surface, cross-process access ---
+deny EPERM unshare setns
+deny EPERM mount umount2 pivot_root chroot move_mount open_tree fsopen fsconfig fsmount fspick mount_setattr
+deny EPERM ptrace process_vm_readv process_vm_writev pidfd_getfd kcmp process_madvise
+deny EPERM bpf perf_event_open userfaultfd
+deny EPERM keyctl add_key request_key
+deny EPERM io_uring_setup io_uring_enter io_uring_register
+deny EPERM open_by_handle_at name_to_handle_at fanotify_init fanotify_mark
+deny EPERM landlock_create_ruleset landlock_add_rule landlock_restrict_self
+deny EPERM init_module finit_module delete_module kexec_load kexec_file_load reboot
+deny EPERM swapon swapoff acct quotactl quotactl_fd syslog vhangup
+deny EPERM settimeofday clock_settime clock_adjtime adjtimex sethostname setdomainname
+deny EPERM iopl ioperm modify_ldt uselib memfd_secret migrate_pages move_pages
