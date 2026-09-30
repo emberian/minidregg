@@ -6,4 +6,4 @@ set -u
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root" || exit 2
 mods=$(ls Host/*.lean | sed "s|/|.|; s|\.lean$||")
-exec "$root/scripts/lane/lb.sh" "$1" Minidregg minidregg-host $mods
+exec "$root/scripts/lane/lb.sh" "$1" Minidregg minidregg-host $mods AxiomCensus

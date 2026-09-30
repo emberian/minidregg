@@ -92,3 +92,8 @@ root = "Host.WorldRootBench"
 [[lean_exe]]
 name = "nock-eval"
 root = "Host.NockEval"
+
+# The tree-wide axiom check (Theory/AssertAxioms.lean's `#assert_axioms_tree`
+# over the umbrella). Built by scripts/lane/ub.sh.
+[[lean_lib]]
+name = "AxiomCensus"

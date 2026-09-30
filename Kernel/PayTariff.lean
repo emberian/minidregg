@@ -18,7 +18,7 @@ tariff; while it is invalid, no deposit index is assigned
 (`PayAssignmentReceiver.assignment_requires_valid_tariff`).
 -/
 import Compiler.ResourceBirthCodec
-import Kernel.AssertAxioms
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.PayTariff
 

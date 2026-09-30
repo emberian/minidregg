@@ -1,0 +1,58 @@
+/-
+# AxiomCensus — the tree-wide axiom check
+
+Imports the umbrella (Minidregg and every Host module except the other exe
+roots, whose `main` collides with Host.Main; the umbrella
+builds as separate targets) and runs `#assert_axioms_tree`: the build fails if
+any package constant rests on `sorryAx` or a declared axiom. Built by
+`scripts/lane/ub.sh`.
+-/
+import Minidregg
+import Host.ApplicationAgentLifetimeDispatchInspection
+import Host.ApplicationAgentLifetimeDispatchPaidInspection
+import Host.ApplicationAgentLifetimeGrantAuthoring
+import Host.ApplicationAgentLifetimeGrantInspection
+import Host.ApplicationAgentLifetimePaidIngressInspection
+import Host.ApplicationCurrentBirthAuthoring
+import Host.ApplicationDispatchAgentInspection
+import Host.ApplicationDispatchAgentPaidInspection
+import Host.ApplicationDispatchInspection
+import Host.ApplicationGrainSessionEnrollmentAuthoring
+import Host.ApplicationGrainSessionEnrollmentInspection
+import Host.ApplicationLifecycleBeginOperator
+import Host.ApplicationLifecycleClaimInspection
+import Host.ApplicationLifecycleClaimOperator
+import Host.ApplicationLifecycleClaimV3Inspection
+import Host.ApplicationLifecycleCompletionAuthoring
+import Host.ApplicationLifecycleCompletionOperator
+import Host.ApplicationLifecycleLaunchBeginAuthoring
+import Host.ApplicationLifecycleLaunchBeginInspection
+import Host.ApplicationLifecycleLaunchClaimAuthoring
+import Host.ApplicationLifecycleLaunchClaimInspection
+import Host.ApplicationLifecycleLaunchCompletionAuthoring
+import Host.ApplicationLifecycleLaunchCompletionInspection
+import Host.ApplicationLifecycleLaunchReportAuthoring
+import Host.ApplicationLifecycleStopClaimInspection
+import Host.ApplicationPermissionSchemaAuthoring
+import Host.ApplicationShareIssueGrainInspection
+import Host.ApplicationSpkLaunchDescriptorAuthoring
+import Host.BirthRuntimeProfile
+import Host.CapabilityInspection
+import Host.CurrentResourceBirthAuthoring
+import Host.FnConsumerFrontierPlan
+import Host.FnConsumerNamespacePlan
+import Host.FnInboxView
+import Host.FnSelectiveReleaseAuthoring
+import Host.FnSelectiveReleaseFnAck
+import Host.FnSelectiveReleaseFnReceiving
+import Host.FnSelectiveReleaseSourceAuthoring
+import Host.GrainOriginCommand
+import Host.GrainOriginPreparation
+import Host.GrainOriginSource
+import Host.Json
+import Host.Main
+import Host.ProviderUsage
+import Host.ProviderUsageAudit
+import Theory.AssertAxioms
+
+#assert_axioms_tree
