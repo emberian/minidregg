@@ -330,32 +330,24 @@ def keystone : Prop :=
 theorem keystone_holds : keystone := by
   refine ⟨⟨sX3, sX5, ?_⟩, ?_, ?_, ?_, ?_⟩ <;> decide
 
-/-! ## §8. Genuine decidability — exercised by `#guard` (silent `native_decide`, confessed).
+/-! ## §8. Genuine decidability — the evaluator and the derived `DecidableEq` decide
+concrete instances beyond §7, as named kernel-checked theorems. -/
 
-Per ATLAS design-law 9, `#guard` is a compiled non-vacuity WITNESS, not a theorem — the theorems
-above (`by decide`, kernel-checked) carry the content; these guards confess that the evaluator and
-the derived `DecidableEq` actually COMPUTE on concrete instances. -/
-
--- The evaluator computes:
-#guard eval demoPred sX3 sX5 = true
-#guard eval demoPred sX5 sX3 = false
-#guard eval (.monotone "x") sX3 sX5 = true
-#guard eval (.monotone "x") sX5 sX3 = false
-#guard eval (.witnessed ⟨"vk-1"⟩) sX3 sX5 = false
-#guard evalWith (fun _ _ _ => true) (.witnessed ⟨"vk-1"⟩) sX3 sX5 = true
+-- The demo step, the monotone tooth and the witnessed escape hatch are the theorems of §7.
 -- fail-closed reads: absent slot ⇒ atom false
-#guard eval (.eq "absent" 0) sX3 sX5 = false
-#guard eval (.le "absent" 99) sX3 sX5 = false
+theorem eval_eq_absent : eval (.eq "absent" 0) sX3 sX5 = false := by decide
+theorem eval_le_absent : eval (.le "absent" 99) sX3 sX5 = false := by decide
 -- write-once: absent old ⇒ first write admitted; changing a set nonzero value ⇒ refused
-#guard eval (.writeOnce "x") ⟨[]⟩ sX5 = true
-#guard eval (.writeOnce "x") sX3 sX5 = false
+theorem eval_writeOnce_first : eval (.writeOnce "x") ⟨[]⟩ sX5 = true := by decide
+theorem eval_writeOnce_change : eval (.writeOnce "x") sX3 sX5 = false := by decide
 -- membership atom, both poles
-#guard eval (.memberOf "x" [3, 5, 7]) sX3 sX5 = true
-#guard eval (.memberOf "x" [1, 2]) sX3 sX5 = false
--- the derived DecidableEq on the AST computes (syntactic equality is decidable):
-#guard decide (demoPred = demoPred) = true
-#guard decide (Pred.eq "x" 5 = Pred.eq "x" 6) = false
-#guard decide (Pred.witnessed ⟨"a"⟩ = Pred.witnessed ⟨"b"⟩) = false
+theorem eval_memberOf_in : eval (.memberOf "x" [3, 5, 7]) sX3 sX5 = true := by decide
+theorem eval_memberOf_out : eval (.memberOf "x" [1, 2]) sX3 sX5 = false := by decide
+-- the derived DecidableEq on the AST decides syntactic equality:
+theorem pred_eq_self : decide (demoPred = demoPred) = true := by decide
+theorem pred_eq_distinct_const : decide (Pred.eq "x" 5 = Pred.eq "x" 6) = false := by decide
+theorem pred_witnessed_distinct :
+    decide (Pred.witnessed ⟨"a"⟩ = Pred.witnessed ⟨"b"⟩) = false := by decide
 
 /-- The derived `DecidableEq Pred` is exercised by the kernel too. -/
 example : (demoPred = demoPred) := by decide
