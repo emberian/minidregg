@@ -43,13 +43,13 @@ namespace CoreJoin
 effect digests, pre-root, public BFV identity, output commitment, and existing
 zero mode pins are projected from the already-authorized computation. -/
 def statementOf
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -66,13 +66,13 @@ def statementOf
 kernel turn.  In particular all three deployment pins remain zero and the
 source effect is sealed. -/
 theorem statementOf_exact
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -140,13 +140,13 @@ theorem statementOf_exact
 statement cannot carry a suite whose codec, suite, and controller identities
 are all assigned. -/
 theorem statementOf_no_boundReflectedChecker
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -190,13 +190,13 @@ def runReflected {Error : Type} (statement : Statement)
 
 /-- The core-specific runner always sends the exact accepted-effect statement. -/
 def runAcceptedReflected
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -379,13 +379,13 @@ priced arithmetic, PCS, CR, ROM, and PoK failures.
 No hiding field occurs: this release-free lane makes no privacy claim. -/
 structure AdmittedReceipt
     {Omega : Type} [Fintype Omega]
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -402,13 +402,13 @@ structure AdmittedReceipt
 namespace AdmittedReceipt
 
 variable {Omega : Type} [Fintype Omega]
-variable {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-variable {M : CellState.Materializer S Digest}
+variable {L : Theory.Store.Layout}
+variable {M : CellState.Materializer L Digest}
 variable {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
   Nullifier : Type}
 variable {dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
   ResourceEffect Footprint Nullifier}
-variable {adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration}
+variable {adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration}
 variable {portal : Portal} {authState : AuthState} {kind : ResourceKind}
 variable {commonRequest : Request kind} {pre : CellState.Materialized M}
 variable {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -449,13 +449,13 @@ reduction laws and a proof that this coin is outside all five failure events.
 The weaker bytes/checker path remains `runReflected`. -/
 def run
     {Omega : Type} [Fintype Omega]
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -476,13 +476,13 @@ def run
 
 theorem run_success_integrity
     {Omega : Type} [Fintype Omega]
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -603,13 +603,13 @@ end CommonGameFamily
 namespace BfvCommonGame
 
 variable {Omega : Type} [Fintype Omega] {Error : Type}
-variable {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-variable {M : CellState.Materializer S Digest}
+variable {L : Theory.Store.Layout}
+variable {M : CellState.Materializer L Digest}
 variable {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
   Nullifier : Type}
 variable {dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
   ResourceEffect Footprint Nullifier}
-variable {adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration}
+variable {adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration}
 variable {portal : Portal} {authState : AuthState} {kind : ResourceKind}
 variable {commonRequest : Request kind} {pre : CellState.Materialized M}
 variable {request : dialect.declaration.Request} {result : dialect.declaration.Result}
