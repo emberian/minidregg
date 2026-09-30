@@ -14,7 +14,8 @@ subject delegation against its own relation, including the terminal root.
 The accepted mutation family establishes authority to create a delegated edge;
 the stored origin alone is not a cryptographic certificate.
 
-`CellState.LogicalState` stores a finite dependent map.  Absent epoch and
+The state is one `Store layout`: one typed namespace ("plane") per kind of
+authority record, keyed by that record's identifiers.  Absent epoch and
 membership entries are read through explicit zero/false defaults below;
 capability absence remains the primitive optional lookup result.  Thus the
 word "sparse" here is representation, not merely vocabulary.
@@ -28,26 +29,50 @@ namespace Minidregg.Theory.CredentialAuthorityState
 open IndexedProgram
 open TypedAuthorization
 open CredentialAuthorityFamily
+open Minidregg.Theory.Store
 
 /-! ## Canonical typed sparse addresses -/
 
-/-- One address space for all authorization-relevant state.  Optional
-capability slots and Boolean set-membership cells give the sparse planes their
-absent value without adding side tables to the cell record. -/
-inductive AuthorityField where
-  | capability (kind : ResourceKind) (id : CapabilityId)
-  | issuerEpoch (issuer : IssuerId)
-  | policyEpoch (policy : PolicyId)
-  | policyRevision (policy : PolicyId)
+/-- One namespace per authorization-relevant state plane.  A capability plane
+is indexed by its resource kind, so a capability for one kind cannot be written
+into another kind's slot. -/
+inductive AuthorityPlane where
+  | capability (kind : ResourceKind)
+  | issuerEpoch
+  | policyEpoch
+  | policyRevision
   /-- Content address of the exact versioned policy source. -/
-  | policyAddress (policy : PolicyId) (revision : PolicyRevision)
-  | subjectKeyEpoch (subject : SubjectId)
+  | policyAddress
+  | subjectKeyEpoch
   /-- Exact signing-key payload at one subject epoch. The current epoch and
   this record are installed atomically by the source-owned physical entry. -/
-  | subjectKey (subject : SubjectId) (epoch : Epoch)
-  | revoked (key : RevocationKey)
-  | nullifier (id : Nat)
+  | subjectKey
+  | revoked
+  | nullifier
   deriving DecidableEq, Repr
+
+/-- The key of each plane: the identifiers that name one record in it. -/
+def AuthorityPlane.Key : AuthorityPlane → Type
+  | .capability _ => CapabilityId
+  | .issuerEpoch => IssuerId
+  | .policyEpoch => PolicyId
+  | .policyRevision => PolicyId
+  | .policyAddress => PolicyId × PolicyRevision
+  | .subjectKeyEpoch => SubjectId
+  | .subjectKey => SubjectId × Epoch
+  | .revoked => RevocationKey
+  | .nullifier => Nat
+
+instance AuthorityPlane.keyDecEq : (plane : AuthorityPlane) → DecidableEq plane.Key
+  | .capability _ => inferInstanceAs (DecidableEq CapabilityId)
+  | .issuerEpoch => inferInstanceAs (DecidableEq IssuerId)
+  | .policyEpoch => inferInstanceAs (DecidableEq PolicyId)
+  | .policyRevision => inferInstanceAs (DecidableEq PolicyId)
+  | .policyAddress => inferInstanceAs (DecidableEq (PolicyId × PolicyRevision))
+  | .subjectKeyEpoch => inferInstanceAs (DecidableEq SubjectId)
+  | .subjectKey => inferInstanceAs (DecidableEq (SubjectId × Epoch))
+  | .revoked => inferInstanceAs (DecidableEq RevocationKey)
+  | .nullifier => inferInstanceAs (DecidableEq Nat)
 
 /-- A stored lineage is data: the head capability followed by its parent,
 grandparent, and so on.  Validity is a separate Lean proposition below. -/
@@ -63,107 +88,107 @@ def strictAncestry {kind : ResourceKind} : List (ParentLink kind) → Prop
 def StoredCapability.IsStrict {kind : ResourceKind} (stored : StoredCapability kind) : Prop :=
   strictAncestry stored.ancestry
 
-/-- Dependent values prevent a capability for one resource kind from being
-written into another kind's slot. -/
-def AuthorityField.Value : AuthorityField → Type
-  | .capability kind _ => StoredCapability kind
-  | .issuerEpoch _ => Epoch
-  | .policyEpoch _ => Epoch
-  | .policyRevision _ => PolicyRevision
-  | .policyAddress _ _ => Digest
-  | .subjectKeyEpoch _ => Epoch
-  | .subjectKey _ _ => CredentialSigningKey.KeyRecord
-  | .revoked _ => Bool
-  | .nullifier _ => Bool
+/-- The value stored in each plane. -/
+def AuthorityPlane.Value : AuthorityPlane → Type
+  | .capability kind => StoredCapability kind
+  | .issuerEpoch => Epoch
+  | .policyEpoch => Epoch
+  | .policyRevision => PolicyRevision
+  | .policyAddress => Digest
+  | .subjectKeyEpoch => Epoch
+  | .subjectKey => CredentialSigningKey.KeyRecord
+  | .revoked => Bool
+  | .nullifier => Bool
 
-/-- The authority schema has no separate resource lane: the typed sparse field
-address already distinguishes every state plane. -/
-def schema : CellState.Schema where
-  Field := AuthorityField
-  FieldType := AuthorityField.Value
-  Resource := Empty
-  ResourceType := Empty.elim
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
+instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq plane.Value
+  | .capability kind => inferInstanceAs (DecidableEq (StoredCapability kind))
+  | .issuerEpoch => inferInstanceAs (DecidableEq Epoch)
+  | .policyEpoch => inferInstanceAs (DecidableEq Epoch)
+  | .policyRevision => inferInstanceAs (DecidableEq PolicyRevision)
+  | .policyAddress => inferInstanceAs (DecidableEq Digest)
+  | .subjectKeyEpoch => inferInstanceAs (DecidableEq Epoch)
+  | .subjectKey => inferInstanceAs (DecidableEq CredentialSigningKey.KeyRecord)
+  | .revoked => inferInstanceAs (DecidableEq Bool)
+  | .nullifier => inferInstanceAs (DecidableEq Bool)
 
-instance : DecidableEq schema.Field := by
-  change DecidableEq AuthorityField
-  infer_instance
+/-- The authority layout.  Every plane is RAM in this model: the effect family
+(`CredentialAuthorityEffects`) guards each write by its exact prior value. -/
+abbrev layout : Layout.{0, 0, 0} where
+  Namespace := AuthorityPlane
+  Key := AuthorityPlane.Key
+  Value := AuthorityPlane.Value
+  discipline := fun _ => .ram
 
-instance : DecidableEq schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
-abbrev Materializer := CellState.Materializer schema Digest
+abbrev Materializer := CellState.Materializer layout Digest
 abbrev Cell (M : Materializer) := CellState.Materialized M
 
 def readCapability {M : Materializer} (pre : Cell M)
     (kind : ResourceKind) (id : CapabilityId) : Option (StoredCapability kind) :=
-  pre.logical.fields (.capability kind id)
+  pre.logical ⟨.capability kind, id⟩
 
 def issuerEpochAt {M : Materializer} (pre : Cell M) (issuer : IssuerId) : Epoch :=
-  (pre.logical.fields (.issuerEpoch issuer)).getD (show Epoch from 0)
+  (pre.logical ⟨.issuerEpoch, issuer⟩).getD (show Epoch from 0)
 
 def policyEpochAt {M : Materializer} (pre : Cell M) (policy : PolicyId) : Epoch :=
-  (pre.logical.fields (.policyEpoch policy)).getD (show Epoch from 0)
+  (pre.logical ⟨.policyEpoch, policy⟩).getD (show Epoch from 0)
 
 def policyRevisionAt {M : Materializer} (pre : Cell M) (policy : PolicyId) : PolicyRevision :=
-  (pre.logical.fields (.policyRevision policy)).getD (show PolicyRevision from 0)
+  (pre.logical ⟨.policyRevision, policy⟩).getD (show PolicyRevision from 0)
 
 /-- Missing sparse policy records resolve to the distinguished zero address;
 production policy admission still requires membership under `pre.root`, so an
 absent record is not silently authorized. -/
 def policyAddressAt {M : Materializer} (pre : Cell M)
     (policy : PolicyId) (epoch : Epoch) : Digest :=
-  (pre.logical.fields (.policyAddress policy epoch)).getD ⟨0⟩
+  (pre.logical ⟨.policyAddress, (policy, epoch)⟩).getD ⟨0⟩
 
 def subjectKeyEpochAt {M : Materializer} (pre : Cell M)
     (subject : SubjectId) : Epoch :=
-  (pre.logical.fields (.subjectKeyEpoch subject)).getD (show Epoch from 0)
+  (pre.logical ⟨.subjectKeyEpoch, subject⟩).getD (show Epoch from 0)
 
 /-- Keyless epochs remain keyless. In particular a missing record is never
 resolved by an external key directory or by the epoch reader's zero default.
 Subject/epoch equality is checked even for arbitrary canonical sparse states;
 the complete page representation additionally forces both from the record. -/
-def currentSigningKey (logical : CellState.LogicalState schema.{0, 0})
+def currentSigningKey (logical : Store layout)
     (subject : SubjectId) : Option CredentialSigningKey.KeyRecord := do
-  let epoch ← logical.fields (.subjectKeyEpoch subject)
-  let key ← logical.fields (.subjectKey subject epoch)
+  let epoch ← logical ⟨.subjectKeyEpoch, subject⟩
+  let key ← logical ⟨.subjectKey, (subject, epoch)⟩
   if key.subject = subject.value ∧ key.keyEpoch = epoch then some key else none
 
-theorem currentSigningKey_no_epoch (logical : CellState.LogicalState schema.{0, 0})
-    (subject : SubjectId) (absent : logical.fields (.subjectKeyEpoch subject) = none) :
+theorem currentSigningKey_no_epoch (logical : Store layout)
+    (subject : SubjectId) (absent : logical ⟨.subjectKeyEpoch, subject⟩ = none) :
     currentSigningKey logical subject = none := by
   simp [currentSigningKey, absent, bind, Option.bind]
 
-theorem currentSigningKey_no_record (logical : CellState.LogicalState schema.{0, 0})
+theorem currentSigningKey_no_record (logical : Store layout)
     (subject : SubjectId) (epoch : Epoch)
-    (current : logical.fields (.subjectKeyEpoch subject) = some epoch)
-    (absent : logical.fields (.subjectKey subject epoch) = none) :
+    (current : logical ⟨.subjectKeyEpoch, subject⟩ = some epoch)
+    (absent : logical ⟨.subjectKey, (subject, epoch)⟩ = none) :
     currentSigningKey logical subject = none := by
   simp [currentSigningKey, current, absent, bind, Option.bind]
 
-theorem currentSigningKey_exact (logical : CellState.LogicalState schema.{0, 0})
+theorem currentSigningKey_exact (logical : Store layout)
     (key : CredentialSigningKey.KeyRecord)
-    (current : logical.fields (.subjectKeyEpoch ⟨key.subject⟩) = some key.keyEpoch)
-    (record : logical.fields (.subjectKey ⟨key.subject⟩ key.keyEpoch) = some key) :
+    (current : logical ⟨.subjectKeyEpoch, ⟨key.subject⟩⟩ = some key.keyEpoch)
+    (record : logical ⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩ = some key) :
     currentSigningKey logical ⟨key.subject⟩ = some key := by
   simp [currentSigningKey, current, record, bind, Option.bind]
 
 theorem currentSigningKey_rejects_mismatch
-    (logical : CellState.LogicalState schema.{0, 0}) (subject : SubjectId)
+    (logical : Store layout) (subject : SubjectId)
     (epoch : Epoch) (key : CredentialSigningKey.KeyRecord)
-    (current : logical.fields (.subjectKeyEpoch subject) = some epoch)
-    (record : logical.fields (.subjectKey subject epoch) = some key)
+    (current : logical ⟨.subjectKeyEpoch, subject⟩ = some epoch)
+    (record : logical ⟨.subjectKey, (subject, epoch)⟩ = some key)
     (mismatch : ¬ (key.subject = subject.value ∧ key.keyEpoch = epoch)) :
     currentSigningKey logical subject = none := by
   simp [currentSigningKey, current, record, mismatch, bind, Option.bind]
 
 def isRevoked {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
-  (pre.logical.fields (.revoked key)).getD false
+  (pre.logical ⟨.revoked, key⟩).getD false
 
 def isNullified {M : Materializer} (pre : Cell M) (id : Nat) : Bool :=
-  (pre.logical.fields (.nullifier id)).getD false
+  (pre.logical ⟨.nullifier, id⟩).getD false
 
 /-! ## Proof-relevant validity of stored lineage -/
 
@@ -238,46 +263,46 @@ typed addresses and require no enumerable universe. -/
 structure ProjectionUniverse where
   revocationKeys : Finset RevocationKey
 
-/-- A schema-owned view of canonical authority fields. A concrete deployment
-fixes this projection with its schema; it is not supplied by a request or a
+/-- A layout-owned view of canonical authority addresses. A concrete deployment
+fixes this projection with its layout; it is not supplied by a request or a
 host authority cache. This lets a bounded physical page retain its own exact
 materialization while sharing the same authorization judgment. -/
-structure StateProjection (S : CellState.Schema) where
-  toCanonicalState : CellState.LogicalState S → CellState.LogicalState schema.{0, 0}
-  revocationKeys : CellState.LogicalState S → Finset RevocationKey
+structure StateProjection (L : Layout.{0, 0, 0}) where
+  toCanonicalState : Store L → Store layout
+  revocationKeys : Store L → Finset RevocationKey
 
 /-- Read the common authorization state from the projected logical fields
 and the actual materialized cell root. No second materializer or synthetic
 encoding of the projected state participates. -/
-def StateProjection.authState {S : CellState.Schema}
-    {M : CellState.Materializer S Digest} (projection : StateProjection S)
+def StateProjection.authState {L : Layout.{0, 0, 0}}
+    {M : CellState.Materializer L Digest} (projection : StateProjection L)
     (pre : CellState.Materialized M) : AuthState :=
   let logical := projection.toCanonicalState pre.logical
   { capabilityRoot := pre.root
     revocationRoot := pre.root
     policyRoot := pre.root
     policyAddress := fun policy epoch =>
-      (show Option Digest from logical.fields (.policyAddress policy epoch)).getD ⟨0⟩
+      (show Option Digest from logical ⟨.policyAddress, (policy, epoch)⟩).getD ⟨0⟩
     revoked := (projection.revocationKeys pre.logical).filter fun key =>
-      (show Option Bool from logical.fields (.revoked key)).getD false
+      (show Option Bool from logical ⟨.revoked, key⟩).getD false
     issuerEpoch := fun issuer =>
-      (logical.fields (.issuerEpoch issuer)).getD (show Epoch from 0)
+      (logical ⟨.issuerEpoch, issuer⟩).getD (show Epoch from 0)
     policyEpoch := fun policy =>
-      (logical.fields (.policyEpoch policy)).getD (show Epoch from 0)
+      (logical ⟨.policyEpoch, policy⟩).getD (show Epoch from 0)
     policyRevision := fun policy =>
-      (logical.fields (.policyRevision policy)).getD (show PolicyRevision from 0)
+      (logical ⟨.policyRevision, policy⟩).getD (show PolicyRevision from 0)
     subjectKeyEpoch := fun subject =>
-      (logical.fields (.subjectKeyEpoch subject)).getD (show Epoch from 0) }
+      (logical ⟨.subjectKeyEpoch, subject⟩).getD (show Epoch from 0) }
 
-/-- The unbounded canonical authority schema is the identity instance of the
+/-- The unbounded canonical authority layout is the identity instance of the
 same state-derived view. Existing clients keep this exact interpretation. -/
 def ProjectionUniverse.stateProjection (domain : ProjectionUniverse) :
-    StateProjection schema.{0, 0} where
+    StateProjection layout where
   toCanonicalState := fun logical => logical
   revocationKeys := fun _ => domain.revocationKeys
 
-@[simp] theorem StateProjection.authState_policyRoot {S : CellState.Schema}
-    {M : CellState.Materializer S Digest} (projection : StateProjection S)
+@[simp] theorem StateProjection.authState_policyRoot {L : Layout.{0, 0, 0}}
+    {M : CellState.Materializer L Digest} (projection : StateProjection L)
     (pre : CellState.Materialized M) :
     (projection.authState pre).policyRoot = pre.root := rfl
 
@@ -297,7 +322,7 @@ def authState {M : Materializer} (domain : ProjectionUniverse)
   subjectKeyEpoch := subjectKeyEpochAt pre
 
 @[simp] theorem authState_identity_projection
-    {M : CellState.Materializer schema.{0, 0} Digest}
+    {M : CellState.Materializer layout Digest}
     (domain : ProjectionUniverse) (pre : Cell M) :
     domain.stateProjection.authState pre = authState domain pre := rfl
 
@@ -351,7 +376,7 @@ theorem not_mem_authState_revoked_of_outside {M : Materializer}
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
-/-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_authState_revoked_iff
 
 end Minidregg.Theory.CredentialAuthorityState
