@@ -155,7 +155,7 @@ def genesisAction : HyperdocumentOperations.Action :=
 def genesisIntent : OperationIntent where
   historyDomain := ⟨15⟩
   document := Genesis.documentId
-  schema := { schemaId := ⟨14⟩, version := 1 }
+  schema := Minidregg.Theory.HyperdocumentOperationIntent.documentSchema
   semanticVersion := 0
   parents := []
   author := Genesis.author

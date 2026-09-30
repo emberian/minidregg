@@ -39,13 +39,19 @@ set_option autoImplicit false
 
 /-- These values are wire pins.  Version 2 is the `DREGG/STORE` frame at each
 kind's declared wire; version-1 cells (countability-selected witness codecs)
-are retired.  Schema id 14 is the id the Hyperdocument causal-family
-witnesses carry as their document schema; those witnesses still name version 1,
-the pre-store wire, and nothing checks the two against each other. -/
+are retired.  Schema id 14 is the document schema every hyperdocument witness
+names (`HyperdocumentOperationIntent.documentSchema`); `documentSchema_deployed`
+checks the two against each other. -/
 def declaredEffectSchemaRef : SchemaRef := ⟨⟨11⟩, 2⟩
 def credentialAuthoritySchemaRef : SchemaRef := ⟨⟨12⟩, 2⟩
 def hyperdocumentContentSchemaRef : SchemaRef := ⟨⟨14⟩, 2⟩
 def hyperdocumentEventSchemaRef : SchemaRef := ⟨⟨15⟩, 2⟩
+
+/-- **Drift gate.**  The document schema every hyperdocument witness names (by
+the one Theory constant) is the deployed content cell's schema ref.  Bumping
+either the wire pin or the witnesses' schema without the other turns this red. -/
+theorem documentSchema_deployed :
+    HyperdocumentOperationIntent.documentSchema = hyperdocumentContentSchemaRef := rfl
 
 theorem schemaRefs_nodup :
     [declaredEffectSchemaRef, credentialAuthoritySchemaRef,
@@ -373,3 +379,5 @@ abbrev PersistenceCeiling (PhysicalState InstallError : Type) :=
 #print axioms rootBytes_collision
 
 end Minidregg.Compiler.DeployedCellRegistry
+/-- info: 'Minidregg.Compiler.DeployedCellRegistry.documentSchema_deployed' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DeployedCellRegistry.documentSchema_deployed

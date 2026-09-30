@@ -38,6 +38,12 @@ structure OperationIntent where
   actionBytes : List UInt8
   deriving DecidableEq, Repr
 
+/-- The deployed hyperdocument document schema: the schema every witness intent
+and version event names.  Its id and version are the deployed content cell's
+schema ref; `Compiler.DeployedCellRegistry.documentSchema_deployed` is the drift
+gate between this constant and the registry's wire pin. -/
+def documentSchema : CausalVersionDag.SchemaRef := { schemaId := ⟨14⟩, version := 2 }
+
 /-- One selected canonical intent codec and abstract digest projection.  The
 digest operation carries no collision-resistance or equality-reflection field. -/
 structure Addressing where

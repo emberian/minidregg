@@ -156,7 +156,7 @@ noncomputable def rightCell : Hyperdocument.Cell hyperdocumentMaterializer :=
 noncomputable def baseRecord : VersionEventRecord where
   historyDomain := ⟨15⟩
   document := documentId
-  schema := { schemaId := ⟨14⟩, version := 1 }
+  schema := Minidregg.Theory.HyperdocumentOperationIntent.documentSchema
   semanticVersion := 0
   operation := baseOperation
   parents := []
@@ -171,7 +171,7 @@ noncomputable def baseId : VersionEventId := ⟨⟨100⟩⟩
 noncomputable def leftRecord : VersionEventRecord where
   historyDomain := ⟨15⟩
   document := documentId
-  schema := { schemaId := ⟨14⟩, version := 1 }
+  schema := Minidregg.Theory.HyperdocumentOperationIntent.documentSchema
   semanticVersion := 1
   operation := leftOperation
   parents := [baseId]
@@ -184,7 +184,7 @@ noncomputable def leftRecord : VersionEventRecord where
 noncomputable def rightRecord : VersionEventRecord where
   historyDomain := ⟨15⟩
   document := documentId
-  schema := { schemaId := ⟨14⟩, version := 1 }
+  schema := Minidregg.Theory.HyperdocumentOperationIntent.documentSchema
   semanticVersion := 1
   operation := rightOperation
   parents := [baseId]
@@ -420,7 +420,7 @@ noncomputable def body : HyperdocumentMerge.Body where
 noncomputable def mergeIntent : HyperdocumentOperationIntent.OperationIntent where
   historyDomain := ⟨15⟩
   document := documentId
-  schema := { schemaId := ⟨14⟩, version := 1 }
+  schema := Minidregg.Theory.HyperdocumentOperationIntent.documentSchema
   semanticVersion := 2
   parents := [leftParent.key, rightParent.key]
   author := author

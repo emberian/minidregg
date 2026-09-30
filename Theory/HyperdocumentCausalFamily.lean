@@ -292,7 +292,7 @@ def action : HyperdocumentOperations.Action :=
 def intent : OperationIntent where
   historyDomain := ⟨15⟩
   document := documentId
-  schema := { schemaId := ⟨14⟩, version := 1 }
+  schema := Minidregg.Theory.HyperdocumentOperationIntent.documentSchema
   semanticVersion := 0
   parents := []
   author := author

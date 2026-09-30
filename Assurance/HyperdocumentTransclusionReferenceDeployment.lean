@@ -345,7 +345,7 @@ def forwardAction : Action := .link forwardPayload
 def forwardIntent : OperationIntent where
   historyDomain := ⟨15⟩
   document := Prior.documentId
-  schema := { schemaId := ⟨14⟩, version := 1 }
+  schema := Minidregg.Theory.HyperdocumentOperationIntent.documentSchema
   semanticVersion := 2
   parents := []
   author := Prior.author
