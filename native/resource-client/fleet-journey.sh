@@ -149,7 +149,7 @@ jq -e --slurpfile s "$OUT/send.json" '(.events | length) == 1 and
 # The existing narrowed-delegation path; reading a topic is the account's
 # observe grant, so a subscriber holds exactly that and nothing more.
 B_SUBJECT=$(jq -er .subject "$OUT/join-b.record.json")
-printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"account","recipient":"%s","verbs":["observe"],"maxCost":"0"}\n' \
+printf '{"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"account","recipient":"%s","verbs":["observe"],"maxCost":"100000"}\n' \
   "$B_SUBJECT" >"$ROOT/observe-grant.json"
 step grant-propose delegate -- "$MINI" workspace --action propose --dir "$ROOT/agent-a" \
   --proposal-id observe-b --request "$ROOT/observe-grant.json"
@@ -195,25 +195,27 @@ refuse receipt-absent receipt -- "$MINI" fleet --action receipt --dir "$ROOT/age
   --transaction 1
 
 # --- cold restart: the journal re-admits every fleet turn ------------------
+# The first request after restart pays the cold open: the service verifies
+# the pinned genesis and re-admits every accepted ingress, fleet turns
+# included, before answering.
 stop_server
-t0=$(now)
 nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   >"$FIX/public/serve-restart.log" 2>&1 </dev/null &
 SERVER_PID=$!
 i=0
-while [ ! -S "$SOCKET" ] && [ "$i" -lt 1200 ]; do
+until grep -q '^mini: serving ' "$FIX/public/serve-restart.log" 2>/dev/null; do
   kill -0 "$SERVER_PID" 2>/dev/null || { echo 'restarted Mini server exited' >&2; exit 1; }
-  i=$((i + 1)); sleep 0.1
+  i=$((i + 1)); [ "$i" -lt 1200 ] || { echo 'restarted Mini server not ready' >&2; exit 1; }
+  sleep 0.1
 done
-printf 'restart\tserve\t%s\tok\n' "$(elapsed "$t0" "$(now)")" >>"$TIMES"
+step receipt-after-cold-open receipt -- "$MINI" fleet --action receipt --dir "$ROOT/agent-a" \
+  --transaction "$TRANSFER_TX"
+jq -e --slurpfile t "$OUT/transfer.json" '.receipt == $t[0].receipt' \
+  "$OUT/receipt-after-cold-open.json" >/dev/null
 step poll-after-restart poll -- "$MINI" fleet --action poll --dir "$ROOT/agent-a" \
   --account account --topic news --since 0
 jq -e --slurpfile p "$OUT/poll-news-0.json" '.events == $p[0].events' \
   "$OUT/poll-after-restart.json" >/dev/null
-step receipt-after-restart receipt -- "$MINI" fleet --action receipt --dir "$ROOT/agent-a" \
-  --transaction "$TRANSFER_TX"
-jq -e --slurpfile t "$OUT/transfer.json" '.receipt == $t[0].receipt' \
-  "$OUT/receipt-after-restart.json" >/dev/null
 stop_server
 
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" >"$OUT/binaries.sha256"

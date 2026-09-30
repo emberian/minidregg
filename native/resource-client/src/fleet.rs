@@ -254,9 +254,16 @@ fn receipt_of(value: &Value) -> Result<Value> {
     Ok(Value::Object(receipt))
 }
 
-fn result(directory: &Path, verb: &str, plan: &Value, outcome: &Value) -> Result<Value> {
+fn result(
+    directory: &Path,
+    verb: &str,
+    plan: &Value,
+    outcome: &Value,
+    superseded: &[PathBuf],
+) -> Result<Value> {
     let command = &plan["command"];
     let value = json!({"type":"minidregg-fleet-turn-result-v1","verb":verb,
+        "replans":superseded.len().to_string(),"supersededAttempts":superseded,
         "confirmation":field(outcome,"confirmation")?,
         "receipt":receipt_of(outcome)?,
         "subject":command["subject"],"payer":command["payer"],"fee":command["fee"],
@@ -288,11 +295,22 @@ fn lookup_exact(agent: &Agent, directory: &Path, ingress: &[u8]) -> Result<Value
     )
 }
 
+/// How many times a turn is re-planned after the Host reports contention.
+const MAX_REPLANS: usize = 8;
+
 /// Plan, sign, assemble and submit one fleet turn in a new private attempt.
 /// The submit marker is durable before the one submission; after it, only the
-/// read-only exact lookup of the same ingress is ever sent.
-fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publication: Value) -> Result<Value> {
-    let (base, _) = tariff(agent)?;
+/// read-only exact lookup of the same ingress is ever sent. `Ok(None)` is the
+/// Host's typed contention: the plan was made against an older image, the
+/// attempt is decided, and nothing moved.
+fn attempt(
+    agent: &Agent,
+    reference: &Value,
+    verb: &str,
+    transfer: &Value,
+    publication: &Value,
+    base: &str,
+) -> Result<(PathBuf, Option<(Value, Value)>)> {
     let (directory, nonce) = workspace::new_attempt(&agent.root)?;
     workspace::make_private_dir(&directory)?;
     let draft = json!({"subject":agent.subject,"payer":field(reference,"target")?,
@@ -313,7 +331,7 @@ fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publicati
     retain_json(&directory.join("account-view.json"), &view)?;
     let plan = invoke(agent, &directory, "plan", 92, &pair(&signed, &draft_bytes)?)?;
     let plan_view = inspect(agent, "fleet-turn-plan", &directory.join("plan.bin"), &directory.join("plan.json"))?;
-    validate_plan(&draft_view, &plan_view, &plan, &base)?;
+    validate_plan(&draft_view, &plan_view, &plan, base)?;
     let header = decode_hex(field(&plan_view, "header")?)?;
     let signing = read_secret(&workspace::member_path(&agent.workspace, "key")?)?;
     let signature = signing.sign(&header).to_bytes();
@@ -337,9 +355,17 @@ fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publicati
             lookup_exact(agent, &directory, &ingress)?
         }
     };
+    if field(&outcome, "type")? == "contention" {
+        retain_json(
+            &directory.join("superseded.json"),
+            &json!({"format":FORMAT,"reason":"contention","ingressSha256":digest(&ingress),
+                "status":"decided-nothing-moved"}),
+        )?;
+        return Ok((directory, None));
+    }
     let outcome = if confirmed(&outcome) {
         outcome
-    } else if matches!(field(&outcome, "type")?, "uncertain" | "contention" | "unavailable") {
+    } else if matches!(field(&outcome, "type")?, "uncertain" | "unavailable") {
         lookup_exact(agent, &directory, &ingress)?
     } else {
         outcome
@@ -357,9 +383,28 @@ fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publicati
             directory.display()
         ));
     }
-    let value = result(&directory, verb, &plan_view, &outcome)?;
-    print_json(&value)?;
-    Ok(value)
+    Ok((directory, Some((plan_view, outcome))))
+}
+
+/// One fleet turn, re-planned in a fresh attempt only after typed contention.
+/// Every superseded attempt is named in the result.
+fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publication: Value) -> Result<Value> {
+    let (base, _) = tariff(agent)?;
+    let mut superseded = Vec::new();
+    for _ in 0..=MAX_REPLANS {
+        let (directory, admitted) = attempt(agent, reference, verb, &transfer, &publication, &base)?;
+        let Some((plan_view, outcome)) = admitted else {
+            eprintln!("fleet {verb}: contention; re-planning against the new image");
+            superseded.push(directory);
+            continue;
+        };
+        let value = result(&directory, verb, &plan_view, &outcome, &superseded)?;
+        print_json(&value)?;
+        return Ok(value);
+    }
+    Err(format!(
+        "fleet {verb} still contended after {MAX_REPLANS} re-plans; each superseded attempt was decided and moved nothing"
+    ))
 }
 
 fn topic_bytes(topic: &str) -> Result<Vec<u8>> {
