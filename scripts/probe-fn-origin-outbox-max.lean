@@ -1,7 +1,7 @@
 /-
 Pure selected-profile size/capacity probe for one prepared R outbox atom.
-The full-size carrier is synthetic; this checks Mini's actual content page
-materializer and codecs, not native fn authorship or receiving admission.
+The full-size carrier is synthetic; this checks Mini's actual content cell
+lowering and codecs, not native fn authorship or receiving admission.
 -/
 import Kernel.FnOriginOutbox
 
@@ -52,9 +52,9 @@ def originOutboxMaxProbe : IO Unit := do
   let content : ContentResource.Command :=
     ⟨[.createAtom (outboxAtom domain semantics prepared) (.inlineObject ⟨10⟩)
       (preparedCodec.encode prepared)]⟩
-  let .ok page := ContentResource.preparePage author operation
-      (ContentResource.initialPage domain 600) content
-    | throw (IO.userError "content page refused maximal prepared R atom")
-  IO.println s!"PASS maximal prepared R outbox: atom={((preparedCodec.encode prepared).length)} command={commandBytes.length} intent={intentBytes.length} page={ContentResource.contentBytes page.post} frame={FnEvidenceCodec.maxHostFrameBytes}"
+  let .ok progress := ContentResource.run author operation (ContentResource.documentOf 600)
+      ContentResource.initialStore content
+    | throw (IO.userError "content cell refused maximal prepared R atom")
+  IO.println s!"PASS maximal prepared R outbox: atom={((preparedCodec.encode prepared).length)} command={commandBytes.length} intent={intentBytes.length} cell={ContentResource.contentBytes progress.1} frame={FnEvidenceCodec.maxHostFrameBytes}"
 
 #eval originOutboxMaxProbe
