@@ -759,6 +759,91 @@ def description (config : NativeHost.Config) : IO Lean.Json := do
   discard <| IO.ofExcept (← NativeHost.openExisting config)
   return descriptionLoaded config
 
+/-- Measurement: time the per-state costs a request pays on this Store. -/
+def storeBench (config : NativeHost.Config) : IO Unit := do
+  let timed {α : Type} (label : String) (action : IO α) : IO α := do
+    let t0 ← IO.monoMsNow
+    let result ← action
+    IO.println s!"{label}: {(← IO.monoMsNow) - t0} ms"
+    return result
+  let durable ← timed "load" do
+    IO.ofExcept (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
+  IO.println s!"records {durable.image.accepted.length} base {durable.baseHeight} cells {durable.image.cellIds.length}"
+  discard <| timed "cellIds x10" do
+    let mut n := 0
+    for _ in [0:10] do n := n + durable.image.cellIds.length
+    pure n
+  discard <| timed "loadDirectory x10" do
+    let mut n := 0
+    for _ in [0:10] do
+      if (CredentialAuthorityDomainReceiver.loadDirectory durable).isSome then n := n + 1
+    pure n
+  discard <| timed "loadDeployment x10" do
+    let mut n := 0
+    for _ in [0:10] do
+      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).isSome then
+        n := n + 1
+    pure n
+  discard <| timed "validateLoaded x10" do
+    let mut n := 0
+    for _ in [0:10] do
+      if (NativeHost.validateLoaded config durable).toOption.isSome then n := n + 1
+    pure n
+  discard <| timed "root rebuild x3" do
+    let mut r := 0
+    for _ in [0:3] do
+      r := r + (DurableReceiverIO.RootCache.ofEntries
+        (DurableReceiverIO.entriesOf durable.image durable.snapshot durable.chain)).root.value % 7
+    pure r
+  let some authority := CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot
+    | throw (IO.userError "no authority")
+  let authorityBytes := durable.snapshot.canonicalBytes ⟨config.deployment.authorityCellId⟩
+  IO.println s!"authority cell bytes {authorityBytes.length}"
+  discard <| timed "authState x10" do
+    let mut n := 0
+    for i in [0:10] do
+      n := n + authority.snapshot.authState.policyEpoch ⟨i⟩ + authority.snapshot.authState.revoked.card
+    pure n
+  discard <| timed "authority rootBytes x10" do
+    let mut n := 0
+    for _ in [0:10] do n := n + (ResourceBirthCodec.rootBytes authorityBytes).value % 3
+    pure n
+  -- Scaling of the authority cell alone: add K synthetic nullifiers.
+  for k in [100, 200, 400, 800, 1600] do
+    let store := (List.range k).foldl (fun (st : Minidregg.Theory.Store.Store
+        Minidregg.Theory.CredentialAuthorityState.layout) i =>
+      Minidregg.Theory.Store.Store.set st ⟨.nullifier, 1000000 + i⟩ (some ())) authority.snapshot.logical
+    let cell := Minidregg.Theory.CellState.materialize CredentialAuthorityCell.materializer store
+    let bytes ← timed s!"K={k} encode" do
+      let t := (← IO.monoMsNow)
+      pure (Minidregg.Theory.CellState.materialize CredentialAuthorityCell.materializer
+        (Minidregg.Theory.Store.Store.set store ⟨.nullifier, t⟩ none)).bytes
+    IO.println s!"K={k} bytes {bytes.length}"
+    discard <| timed s!"K={k} decode+load x3" do
+      let mut n := 0
+      for i in [0:3] do
+        if (CredentialAuthorityDomain.load ⟨config.deployment.domain.value + i⟩ bytes).isSome then n := n + 1
+      pure n
+    discard <| timed s!"K={k} support x3" do
+      let mut n := 0
+      for i in [0:3] do
+        n := n + (Minidregg.Theory.Store.Store.set store ⟨.nullifier, i⟩ none).support.card
+      pure n
+    discard <| timed s!"K={k} authState x3" do
+      let snap : CredentialAuthorityDomain.Snapshot := ⟨config.deployment.domain, cell⟩
+      let mut n := 0
+      for i in [0:3] do n := n + snap.authState.revoked.card + snap.authState.policyEpoch ⟨i⟩
+      pure n
+    discard <| timed s!"K={k} rootBytes" do
+      pure (ResourceBirthCodec.rootBytes bytes).value
+  discard <| timed "head receipt x10" do
+    let mut n := 0
+    for _ in [0:10] do
+      if let some r := durable.image.accepted.getLast? then
+        if (NativeHost.historicalReceipt config durable r.transactionId r.event.eventId).isSome then
+          n := n + 1
+    pure n
+
 def failure (phase detail : String) : List UInt8 :=
   outcomeCodec.encode (.refused phase.toUTF8.toList detail.toUTF8.toList)
 
@@ -786,6 +871,10 @@ def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UI
 
 /-- Session state is poisoned on any physical read, chain, tag or replay
 failure. A new process must reopen from the MAC'd checkpoint before serving. -/
+def phaseTrace (label : String) (started : Nat) : IO Unit := do
+  if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
+    IO.eprintln s!"host-trace {label} {(← IO.monoMsNow) - started} ms"
+
 def sessionCurrent (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (NativeHostSession.Session config) := do
@@ -831,7 +920,9 @@ def sessionConfirmed (config : NativeHost.Config)
     (transactionId eventId : Minidregg.Theory.TypedAuthorization.Digest) :
     IO NativeHostCodec.Outcome := do
   try
+    let t0 ← IO.monoMsNow
     let opened ← sessionOpened config state
+    phaseTrace "confirm refresh" t0
     match NativeHost.historicalReceipt config opened.durable transactionId eventId with
     | none => return .uncertain "original receipt prefix unavailable".toUTF8.toList
     | some receipt => return .confirmed kind receipt
@@ -1401,12 +1492,16 @@ def dispatchSession (config : NativeHost.Config)
       discard <| sessionOpened config state
       return (0, (descriptionLoaded config).compress.toUTF8.toList)
   | 1 =>
+      let t0 ← IO.monoMsNow
       let opened ← sessionOpened config state
+      phaseTrace "op1 refresh" t0
       match ← NativeHost.prepareAuthorizedLoaded config opened payload with
       | .ok plan => return (1, signingPlanCodec.encode plan)
       | .error detail => return (255, failure "prepare" detail)
   | 2 =>
+      let t0 ← IO.monoMsNow
       let session ← sessionCurrent config state
+      phaseTrace "op2 refresh" t0
       let result ← match callCodec.decode payload with
         | none => pure (NativeHostCodec.Outcome.refused "wire".toUTF8.toList
             "noncanonical or unsupported native host call".toUTF8.toList)
@@ -1426,7 +1521,9 @@ def dispatchSession (config : NativeHost.Config)
       | .ok challenge => return (4, NativeObservationCodec.challengeCodec.encode challenge)
       | .error detail => return (255, failure "observation" detail)
   | 5 =>
+      let t0 ← IO.monoMsNow
       let opened ← sessionOpened config state
+      phaseTrace "op5 refresh" t0
       match ← NativeHost.queryLoaded config opened payload with
       | .ok view => return (5, view)
       | .error detail => return (255, failure "observation" detail)
@@ -5469,6 +5566,9 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "bootstrap", [path] =>
           IO.ofExcept (← NativeHost.bootstrap config (← readBytes path))
+          pure 0
+      | "store-bench", [] =>
+          storeBench config
           pure 0
       | "audit", [] =>
           withPinnedSignature config fun pinnedConfig => do
