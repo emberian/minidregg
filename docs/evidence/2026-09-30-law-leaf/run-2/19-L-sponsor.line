@@ -1,0 +1,1 @@
+law board-law board "any [ verb == read, verb == write, all [ verb in {delegate,install,revoke}, subject == 7 ] ]; any [ field 2 monotone, not (verb == write) ]; any [ field 2 in {0,1,2}, not (verb == write) ]"

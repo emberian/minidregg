@@ -2730,6 +2730,16 @@ private def challengeJson (value : Challenge) : Lean.Json := .mkObj
    ("headers", .arr <| value.headers.toArray.map hexJson),
    ("signing", .arr <| value.headers.toArray.map signedHeaderJson)]
 
+/-- The failing clause of a law refusal, as data and as the Host's own rendering
+in the shell's law grammar. -/
+private def lawLeafJson (leaf : LawLeaf) : Lean.Json :=
+  let value : Option Int → Lean.Json := fun
+    | some v => signedDecimal v
+    | none => .null
+  .mkObj [("path", .arr (leaf.path.toArray.map decimal)), ("clause", predicateJson leaf.clause),
+    ("text", .str (LawLeaf.renderClause leaf.clause)), ("before", value leaf.before),
+    ("after", value leaf.after)]
+
 private def outcomeJson : Outcome → Lean.Json
   | .confirmed kind receipt =>
       let confirmation : Lean.Json := match kind with
@@ -2739,8 +2749,11 @@ private def outcomeJson : Outcome → Lean.Json
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
       ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
-  | .refused reason phase detail => .mkObj [("type", "refused"), ("reason", reason.name),
+  | .refused reason phase detail none => .mkObj [("type", "refused"), ("reason", reason.name),
       ("phase", hexJson phase), ("detail", hexJson detail)]
+  | .refused reason phase detail (some leaf) => .mkObj [("type", "refused"), ("reason", reason.name),
+      ("phase", hexJson phase), ("detail", hexJson detail), ("leaf", lawLeafJson leaf),
+      ("explain", .str leaf.render)]
   | .contention => .mkObj [("type", "contention")]
   | .unavailable detail => .mkObj [("type", "unavailable"), ("detail", hexJson detail)]
   | .uncertain detail => .mkObj [("type", "uncertain"), ("detail", hexJson detail)]

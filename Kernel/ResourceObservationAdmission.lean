@@ -174,24 +174,26 @@ def portal (prepared : Prepared context profile wanted marker capability context
 /-- Read admission after the requester's signature has verified. Capability
 failures carry the reason of the component that decided them
 (`sourceCapabilityOnlyEvidenceChecked`); a missing or failing committed law is
-`lawDenied`. -/
+`lawDenied`, and a failing law names its failing clause (`LawLeaf.of`) on the
+very witness states the law was admitted against. -/
 def authorizeChecked (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Except RefusalReason (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
+    Except Refusal (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
   let config := policyConfig prepared
   match sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
       (sourceStore context) marker (step prepared) wanted capability signature with
-  | .error reason => .error reason
+  | .error reason => .error (.of reason)
   | .ok evidence =>
       match config.registry.resolve wanted.policyId wanted.policyRevision with
-      | none => .error .lawDenied
+      | none => .error (Refusal.lawDenied none)
       | some committed =>
           let witness := canonicalWitness profile.compilerProfile.compiler committed
             (step prepared).oldState (step prepared).newState
           match CanonicalPolicyAdmission.admit config context.authority.snapshot.authState wanted
               evidence witness (.policy wanted.policyId wanted.policyRevision)
               prepared.epochExact prepared.revisionExact with
-          | none => .error .lawDenied
+          | none => .error (Refusal.lawDenied
+              (LawLeaf.of committed.record.predicate witness.oldState witness.newState))
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -207,11 +209,12 @@ theorem authorizeChecked_capability_reason
     (reason : RefusalReason)
     (refused : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
       (sourceStore context) marker (step prepared) wanted capability signature = .error reason) :
-    authorizeChecked prepared signature = .error reason := by
+    authorizeChecked prepared signature = .error (.of reason) := by
   simp only [authorizeChecked, refused]
 
 /-- With admissible capability evidence and a resolved committed law, a law
-that does not accept is reported as `lawDenied`. -/
+that does not accept is reported as `lawDenied`, naming the failing clause of
+that law on the same witness states the admission was decided on. -/
 theorem authorizeChecked_lawDenied
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
@@ -227,8 +230,31 @@ theorem authorizeChecked_lawDenied
         (step prepared).oldState (step prepared).newState)
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none) :
-    authorizeChecked prepared signature = .error .lawDenied := by
+    authorizeChecked prepared signature = .error (Refusal.lawDenied
+      (LawLeaf.of committed.record.predicate (step prepared).oldState (step prepared).newState)) := by
   simp only [authorizeChecked, supplied, resolved, denied]
+  rfl
+
+/-- The clause a read refusal names is false on the step the law was
+evaluated on. -/
+theorem authorizeChecked_leaf_fails
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (committed : CommittedPolicy) (leaf : LawLeaf)
+    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
+    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+      some committed)
+    (refused : authorizeChecked prepared signature = .error (Refusal.lawDenied (some leaf))) :
+    committed.record.predicate.subterm leaf.path = some leaf.clause ∧
+      Minidregg.Pred.eval leaf.clause (step prepared).oldState (step prepared).newState = false := by
+  simp only [authorizeChecked, supplied, resolved] at refused
+  split at refused
+  · simp only [Except.error.injEq, Refusal.lawDenied, Refusal.mk.injEq, true_and] at refused
+    obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf refused
+    exact ⟨at_, fails⟩
+  · cases refused
 
 /-- The admitted pole: the law's acceptance is returned unchanged. -/
 theorem authorizeChecked_admitted
@@ -270,7 +296,7 @@ def check (native : CredentialSignatureIO.NativeConfig)
   | .ok signature =>
       if exact : signature.envelopeBytes = envelope then
         match decided : authorizeChecked prepared signature with
-        | .error reason => return .error (.of reason)
+        | .error refusal => return .error refusal
         | .ok authorization =>
             return .ok ⟨signature, exact, authorization, by simp [authorize, decided, Except.toOption]⟩
       else return .error (.of .badSignature)
@@ -307,5 +333,10 @@ theorem checked_current_source (prepared : Prepared context profile wanted marke
     wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId ∧
       wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
   ⟨checked.authorization.policyEpochExact, checked.authorization.policyRevisionExact⟩
+
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorizeChecked_lawDenied' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authorizeChecked_lawDenied
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorizeChecked_leaf_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authorizeChecked_leaf_fails
 
 end Minidregg.Kernel.ResourceObservationAdmission

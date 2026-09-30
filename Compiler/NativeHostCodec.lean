@@ -293,22 +293,25 @@ def confirmationStream : StreamCodec DurableReceiverIO.Confirmation :=
     (by intro value; cases value <;> rfl)
 
 /-- Refusal payload is a named reason from the closed `RefusalReason` set, a
-stable source-selected phase and a diagnostic. It does not contain internal
-snapshots, journals, capability records or intents. -/
+stable source-selected phase, a diagnostic and, for a law refusal, the failing
+clause of the law (`LawLeaf`). It does not contain internal snapshots,
+journals, capability records or intents. -/
 inductive Outcome where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
   | refused (reason : RefusalReason) (phase : List UInt8) (detail : List UInt8)
+      (leaf : Option LawLeaf := none)
   | contention
   | unavailable (detail : List UInt8)
   | uncertain (detail : List UInt8)
   | absent
 
 abbrev OutcomeWire := Sum (DurableReceiverIO.Confirmation × Receipt)
-  (Sum (RefusalReason × List UInt8 × List UInt8) (Sum Bool (Sum (List UInt8) (List UInt8))))
+  (Sum (RefusalReason × List UInt8 × List UInt8 × Option LawLeaf)
+    (Sum Bool (Sum (List UInt8) (List UInt8))))
 
 def Outcome.toWire : Outcome → OutcomeWire
   | .confirmed kind receipt => .inl (kind, receipt)
-  | .refused reason phase detail => .inr (.inl (reason, phase, detail))
+  | .refused reason phase detail leaf => .inr (.inl (reason, phase, detail, leaf))
   | .contention => .inr (.inr (.inl false))
   | .absent => .inr (.inr (.inl true))
   | .unavailable detail => .inr (.inr (.inr (.inl detail)))
@@ -316,7 +319,7 @@ def Outcome.toWire : Outcome → OutcomeWire
 
 def Outcome.ofWire : OutcomeWire → Outcome
   | .inl (kind, receipt) => .confirmed kind receipt
-  | .inr (.inl (reason, phase, detail)) => .refused reason phase detail
+  | .inr (.inl (reason, phase, detail, leaf)) => .refused reason phase detail leaf
   | .inr (.inr (.inl false)) => .contention
   | .inr (.inr (.inl true)) => .absent
   | .inr (.inr (.inr (.inl detail))) => .unavailable detail
@@ -326,13 +329,15 @@ def outcomeStream : StreamCodec Outcome :=
   StreamCodec.xmap
     (StreamCodec.sum (StreamCodec.product confirmationStream receiptStream)
       (StreamCodec.sum (StreamCodec.product RefusalReason.stream
-          (StreamCodec.product bytesStream bytesStream))
+          (StreamCodec.product bytesStream
+            (StreamCodec.product bytesStream (StreamCodec.option LawLeaf.stream))))
         (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
 
 /-- Version 4: receipts bind `(worldRoot, height)` (not the whole-image
-boundary), and a refusal carries its closed `RefusalReason`. Version-1,
-version-2 and version-3 outcomes refuse; none is reinterpreted. -/
+boundary); a refusal carries its closed `RefusalReason` and, for a law
+refusal, the failing clause (`LawLeaf`). Version-1, version-2 and version-3
+outcomes refuse; none is reinterpreted. -/
 def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v4".toUTF8.toList
 
 def outcomeCodec : LawfulCodec Outcome :=
@@ -363,7 +368,9 @@ theorem v2_outcome_refused (payload : List UInt8) :
 
 def retiredOutcomeFrameV3 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v3".toUTF8.toList
 
-/-- A version-3 outcome frame (a refusal without its reason) refuses to decode. -/
+/-- A version-3 outcome frame refuses to decode: wave-c's v3 (a refusal
+without its reason) and P-LAW's v3 (a reason and clause over the whole-image
+receipt) were two shapes under one name; v4 supersedes both. -/
 theorem v3_outcome_refused (payload : List UInt8) :
     outcomeCodec.decode (retiredOutcomeFrameV3 ++ payload) = none := by
   have lengthExact : outcomeFrame.length = retiredOutcomeFrameV3.length := by decide +kernel
@@ -407,10 +414,11 @@ theorem framed_other_frame_refused {α : Type} (frame : List UInt8) (stream : St
     (framed frame stream).decode bytes = none := by
   simp [framed, ResourceBirthCodec.strictCodec, framedRaw, other]
 
-/-- A refusal frame names its reason: distinct reasons give distinct frames. -/
-theorem outcome_refusal_reason_decoded (reason : RefusalReason) (phase detail : List UInt8) :
-    outcomeCodec.decode (outcomeCodec.encode (.refused reason phase detail)) =
-      some (.refused reason phase detail) := outcomeCodec.decode_encode _
+/-- A refusal frame names its reason and its law clause. -/
+theorem outcome_refusal_reason_decoded (reason : RefusalReason) (phase detail : List UInt8)
+    (leaf : Option LawLeaf) :
+    outcomeCodec.decode (outcomeCodec.encode (.refused reason phase detail leaf)) =
+      some (.refused reason phase detail leaf) := outcomeCodec.decode_encode _
 
 theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
     (decoded : outcomeCodec.decode bytes = some value) : outcomeCodec.encode value = bytes :=

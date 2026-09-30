@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-law/run/j13-2/store/sponsor/proposals/board-law/intent.json",
+  "intentSha256": "1bcc6d955d71e09f930c3d8fe278c458aeb5b88e6590cb9e7fdb50f1a79d3681",
+  "proposalId": "board-law",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

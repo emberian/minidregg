@@ -221,7 +221,7 @@ def enrollmentPlanAuthorizedLoaded (config : Config) (opened : Opened config)
       config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok _ => return ((enrollmentPlanLoaded config opened commandBytes).mapError
-      fun detail => ⟨.operationRejected, detail⟩)
+      fun detail => ⟨.operationRejected, detail, none⟩)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
 def enrollmentPlan (config : Config) (signedObservationBytes commandBytes : List UInt8) :
@@ -287,7 +287,7 @@ def provisionPlanAuthorizedLoaded (config : Config) (opened : Opened config)
       config.genesisHeight signed with
   | .error refusal => return .error refusal
   | .ok _ => return ((provisionPlanLoaded config opened commandBytes).mapError
-      fun detail => ⟨.operationRejected, detail⟩)
+      fun detail => { reason := .operationRejected, detail := detail })
 
 /-- Assembly transports one detached sponsor signature; native submission
 rechecks it, the current factory law, the exact old state and the holder. -/
@@ -345,6 +345,21 @@ def challenge (config : Config) (bytes : List UInt8) :
   let opened ← IO.ofExcept (← openExisting config)
   return challengeLoaded config opened bytes
 
+/-- The clause of a target's committed law that an invocation draft would fail,
+evaluated on the same projected step and resolved law that
+`DeclaredResourceController.authorizeLeg` admits at submission
+(`DeclaredResourceController.lawLeaf_fails`). Only the read-authorized
+preparation path consults it, so the requester learns the clause of a law over
+state it may already read. -/
+def invokeLawLeaf (config : Config) (opened : Opened config) : Draft → Option LawLeaf
+  | .invoke bytes => do
+      let command ← DeclaredResourceController.commandCodec.decode bytes
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+      let tuple ← DeclaredResourceController.prepareTuple prepared
+      DeclaredResourceController.firstLawLeaf prepared tuple
+  | _ => none
+
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
@@ -357,8 +372,11 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
   | .error refusal => return .error refusal
   | .ok _ =>
       match signed.challenge.intent.purpose with
-      | .prepare draft => return ((prepareLoaded config opened draft).mapError
-          fun detail => ⟨.operationRejected, detail⟩)
+      | .prepare draft =>
+          match invokeLawLeaf config opened draft with
+          | some leaf => return .error (Refusal.lawDenied (some leaf))
+          | none => return ((prepareLoaded config opened draft).mapError
+              fun detail => ⟨.operationRejected, detail, none⟩)
       | .query _ => return .error (.of .malformed)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
@@ -637,14 +655,14 @@ def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
     (signedObservationBytes draftBytes : List UInt8) :
     IO (Except Refusal FleetTurn.SigningPlan) := do
   let some draft := FleetTurn.commandCodec.decode draftBytes
-    | return .error ⟨.malformed, "noncanonical fleet turn draft"⟩
+    | return .error { reason := .malformed, detail := "noncanonical fleet turn draft" }
   match ← fleetObservedAccount config opened signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, account) =>
       if subject != draft.subject || account != draft.payer then
         return .error (.of .malformed)
       return ((fleetPlanLoaded config opened (fleetFinalize config opened draft)).mapError
-        fun detail => ⟨.operationRejected, detail⟩)
+        fun detail => { reason := .operationRejected, detail := detail })
 
 def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
     Except String (List UInt8) := do
@@ -766,7 +784,7 @@ def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
     (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
     IO (Except Refusal FleetPollView) := do
   if topic.isEmpty || topic.length > FleetTurn.maxTopicBytes then
-    return .error ⟨.malformed, "fleet topic must be 1..64 bytes"⟩
+    return .error { reason := .malformed, detail := "fleet topic must be 1..64 bytes" }
   match ← fleetObservedAccount config opened signedObservationBytes with
   | .error refusal => return .error refusal
   | .ok (subject, payer) =>
@@ -889,29 +907,31 @@ def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
 /-- The outcome frame for a refused signed observation, preparation or
 enrollment plan: it carries the reason of the branch that decided. -/
 def refusalOutcome (phase : String) (refusal : Refusal) : Outcome :=
-  .refused refusal.reason phase.toUTF8.toList refusal.detail.toUTF8.toList
+  .refused refusal.reason phase.toUTF8.toList refusal.detail.toUTF8.toList refusal.leaf
 
 /-- Twin of `public_refusal_uniform`: on the signed requester's own channel the
-decoded frame names exactly the reason the admission path produced (for the
+decoded frame names exactly the reason (and, for a law refusal, the failing
+clause) the admission path produced (for the
 capability branch, `ResourceObservationAdmission.authorizeChecked_capability_reason`). -/
 theorem signedRefusal_carries_reason (phase : String) (refusal : Refusal) :
     outcomeCodec.decode (outcomeCodec.encode (refusalOutcome phase refusal)) =
-      some (.refused refusal.reason phase.toUTF8.toList refusal.detail.toUTF8.toList) :=
+      some (.refused refusal.reason phase.toUTF8.toList refusal.detail.toUTF8.toList refusal.leaf) :=
   outcome_roundtrip _
 
 /-- A fresh mutation need not confer read authority (blind writes and credits
 remain possible). Its preflight/native/semantic refusal therefore exposes no
 state-dependent reason. This is output non-disclosure, not a timing theorem. -/
 def publicSubmissionOutcome : Outcome → Outcome
-  | .refused _ _ _ => refused .undisclosed "admission" "request refused"
+  | .refused .. => refused .undisclosed "admission" "request refused"
   | result => result
 
 /-- Every blind-submission refusal is the same frame, whatever branch refused
 and whatever reason it named, so a submitter without read authority learns
 nothing from it. Its twin for the signed observation channel is
 `signedRefusal_carries_reason`. -/
-theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UInt8) :
-    publicSubmissionOutcome (.refused reason phase detail) =
+theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UInt8)
+    (leaf : Option LawLeaf) :
+    publicSubmissionOutcome (.refused reason phase detail leaf) =
       refused .undisclosed "admission" "request refused" := rfl
 
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do

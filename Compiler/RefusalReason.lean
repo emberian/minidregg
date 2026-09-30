@@ -7,6 +7,13 @@ reason from data. Detail text is fixed per reason on the observation path; it
 carries a controller's typed `Reject` only for `operationRejected`, which is
 reached after the requester's read authority has been established.
 
+A `lawDenied` refusal also carries the clause of the law that failed
+(`LawLeaf`): its path in the committed law, the clause itself and the values
+of its slot in the two views the law read. It is computed by
+`Pred.firstFailingLeaf` on the same projected step the law was evaluated on,
+so it is an explanation of that evaluation, not a second decision
+(`LawLeaf.of_none_iff`, `LawLeaf.of_fails`).
+
 Disclosure order. A requester learns only what it is entitled to learn:
 
 * before its key is selected, only `malformed` or `unknownKey` (enrollment is
@@ -26,6 +33,8 @@ Blind submission keeps its uniform refusal (`undisclosed`); see
 import Compiler.Tower256ConcreteBackend
 import Compiler.CredentialSignatureAdmission
 import Theory.AuthorizationDeclaration
+import Compiler.PolicyRecordCodec
+import Pred.Leaf
 
 namespace Minidregg.Compiler
 
@@ -313,19 +322,242 @@ theorem sample_other_target_noGrant :
 
 end RefusalReason
 
-/-- A named refusal with its display text. -/
+/-! ## The failing clause of a law -/
+
+open Minidregg.Pred in
+/-- The clause a `lawDenied` refusal names: its path from the root of the committed law, the
+clause, and the values its slot had in the old and new views the law read (`none` for a
+clause without a slot, or for an absent slot). -/
+structure LawLeaf where
+  path : List Nat
+  clause : Pred
+  before : Option Int
+  after : Option Int
+  deriving DecidableEq, Repr
+
+namespace LawLeaf
+
+open Minidregg.Pred
+
+/-- The write guard (`request/verb` 2 is `write`, `CredentialAuthorityEntryCodec.verbTag`). -/
+def writeGuard : Pred := .not (.eq "request/verb" 2)
+
+/-- The clause as its author wrote it: a disjunction's write guards are dropped, and a
+guarded single clause is that clause. On a refused write every guard is false, so it is
+never the reason. -/
+def explained : Pred → Pred
+  | .anyL ps =>
+      match ps.toList.filter (· != writeGuard) with
+      | [clause] => if ps.toList.length = 1 then .anyL ps else clause
+      | rest => if rest.length = ps.toList.length then .anyL ps else Pred.any rest
+  | clause => clause
+
+/-- The slot an explained clause reads: an atom's, or a negated atom's. -/
+def slotOf : Pred → Option Slot
+  | .eq s _ | .le s _ | .memberOf s _ | .writeOnce s | .monotone s => some s
+  | .not (.eq s _) | .not (.le s _) | .not (.memberOf s _) | .not (.writeOnce s)
+  | .not (.monotone s) => some s
+  | _ => none
+
+/-- The failing clause of `law` on the step `old → new`; `none` exactly when `eval` accepts. -/
+def of (law : Pred) (old new : State) : Option LawLeaf := do
+  let path ← firstFailingLeaf law old new
+  let clause ← law.subterm path
+  let slot := slotOf (explained clause)
+  pure ⟨path, clause, slot.bind old.get, slot.bind new.get⟩
+
+/-- A law names a clause exactly when it rejects the step. -/
+theorem of_none_iff (law : Pred) (old new : State) :
+    of law old new = none ↔ Minidregg.Pred.eval law old new = true := by
+  rw [← firstFailingLeaf_none_iff_eval]
+  unfold of
+  cases named : firstFailingLeaf law old new with
+  | none => simp
+  | some path =>
+      obtain ⟨clause, found, _, _⟩ := firstFailingLeaf_some_leaf law old new path named
+      simp [found]
+
+/-- The named clause sits in the law at its path, is a leaf, and is false on the same step. -/
+theorem of_fails (law : Pred) (old new : State) (leaf : LawLeaf)
+    (named : of law old new = some leaf) :
+    law.subterm leaf.path = some leaf.clause ∧ leaf.clause.isLeaf = true ∧
+      Minidregg.Pred.eval leaf.clause old new = false := by
+  unfold of at named
+  cases found : firstFailingLeaf law old new with
+  | none => simp [found] at named
+  | some path =>
+      obtain ⟨clause, at_, isLeaf, fails⟩ := firstFailingLeaf_some_leaf law old new path found
+      simp only [found, at_, Option.bind_eq_bind, Option.bind_some, Option.pure_def,
+        Option.some.injEq] at named
+      subst named
+      exact ⟨at_, isLeaf, fails⟩
+
+/-! ### Rendering, in the shell's law grammar
+
+`field N` is `resource/field/N/after`; `field N before|delta` the other views;
+`pair A,B delta`; `subject`, `verb`, `cost` the request slots, with verbs by name
+(`read` 1, `write` 2, `delegate` 3, `install` 4, `revoke` 5: the tags `request/verb`
+carries); any other slot is `slot "…"`. `sealed` is `any []`, `open` is `all []`;
+lists are `[ a, b ]` and a negation is `not (X)`. -/
+
+def renderSlot (slot : Slot) : String :=
+  match slot.splitOn "/" with
+  | ["resource", "field", n, "after"] => s!"field {n}"
+  | ["resource", "field", n, "before"] => s!"field {n} before"
+  | ["resource", "field", n, "delta"] => s!"field {n} delta"
+  | ["resource", "pair", a, b, "delta"] => s!"pair {a},{b} delta"
+  | ["request", "subject"] => "subject"
+  | ["request", "verb"] => "verb"
+  | ["request", "cost"] => "cost"
+  | _ => s!"slot {slot.quote}"
+
+def verbName : Int → String
+  | 1 => "read"
+  | 2 => "write"
+  | 3 => "delegate"
+  | 4 => "install"
+  | 5 => "revoke"
+  | value => toString value
+
+def renderValue (slot : Slot) (value : Int) : String :=
+  if slot = "request/verb" then verbName value else toString value
+
+def renderSet (slot : Slot) (values : List Int) : String :=
+  "{" ++ ",".intercalate (values.map (renderValue slot)) ++ "}"
+
+mutual
+def renderClause : Pred → String
+  | .eq s v => s!"{renderSlot s} == {renderValue s v}"
+  | .le s v => s!"{renderSlot s} <= {renderValue s v}"
+  | .memberOf s xs => s!"{renderSlot s} in {renderSet s xs}"
+  | .writeOnce s => s!"{renderSlot s} writeOnce"
+  | .monotone s => s!"{renderSlot s} monotone"
+  | .witnessed vk => s!"witnessed {vk.id.quote}"
+  | .eqSlots a b => s!"{renderSlot a} == {renderSlot b}"
+  | .leSlots a b => s!"{renderSlot a} <= {renderSlot b}"
+  | .leSlotsOff a b k => s!"{renderSlot a} <= {renderSlot b} + {k}"
+  | .not q => s!"not ({renderClause q})"
+  | .allL .nil => "open"
+  | .anyL .nil => "sealed"
+  | .allL ps => s!"all [ {renderClauses ps} ]"
+  | .anyL ps => s!"any [ {renderClauses ps} ]"
+def renderClauses : PredList → String
+  | .nil => ""
+  | .cons q .nil => renderClause q
+  | .cons q rest => s!"{renderClause q}, {renderClauses rest}"
+end
+
+private def shown : Option Int → String
+  | some value => toString value
+  | none => "absent"
+
+/-- `field 2 monotone (before 2, after 1)`: the clause as its author wrote it, then the
+values its slot had in the two views. -/
+def render (leaf : LawLeaf) : String :=
+  let clause := explained leaf.clause
+  let values := match clause with
+    | .monotone _ | .writeOnce _ =>
+        s!" (before {shown leaf.before}, after {shown leaf.after})"
+    | .eq _ _ | .le _ _ | .memberOf _ _ | .not _ =>
+        if (slotOf clause).isSome then s!" (value {shown leaf.after})" else ""
+    | _ => ""
+  renderClause clause ++ values
+
+/-! ### Wire form
+
+The clause travels as the policy record's own token stream, so the refusal
+names exactly the committed clause, never a paraphrase of it. -/
+
+def predStream : StreamCodec Pred where
+  encode clause := (StreamCodec.list PolicyRecordCodec.tokenStream).encode
+    (PolicyRecordCodec.encodePred clause)
+  decodePrefix bytes := do
+    let (tokens, suffix) ← (StreamCodec.list PolicyRecordCodec.tokenStream).decodePrefix bytes
+    let clause ← PolicyRecordCodec.decodePred tokens
+    pure (clause, suffix)
+  decodePrefix_encode := by
+    intro clause suffix
+    simp [StreamCodec.decodePrefix_encode, PolicyRecordCodec.decodePred_encode]
+
+def stream : StreamCodec LawLeaf :=
+  StreamCodec.xmap
+    (StreamCodec.product (StreamCodec.list StreamCodec.nat)
+      (StreamCodec.product predStream
+        (StreamCodec.product (StreamCodec.option IntStream.intStream)
+          (StreamCodec.option IntStream.intStream))))
+    (fun leaf => (leaf.path, leaf.clause, leaf.before, leaf.after))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
+    (by intro leaf; cases leaf; rfl)
+
+/-! ### The J13 refusal, rendered -/
+
+theorem sample_refused_two_to_one :
+    of LeafSample.boardLaw (LeafSample.before 2) (LeafSample.after 2 1) =
+      some ⟨[0], LeafSample.onWrite (.monotone "resource/field/2/after"), some 2, some 1⟩ := by
+  decide
+
+/-- String rendering does not reduce in the kernel; the compiled evaluator checks it. -/
+theorem sample_refused_rendered_compiled :
+    render ⟨[0], LeafSample.onWrite (.monotone "resource/field/2/after"), some 2, some 1⟩ =
+      "field 2 monotone (before 2, after 1)" := by native_decide
+
+theorem sample_member_rendered_compiled :
+    (of LeafSample.boardLaw (LeafSample.before 2) (LeafSample.after 2 5)).map render =
+      some "field 2 in {0,1,2} (value 5)" := by native_decide
+
+theorem sample_admitted_one_to_two :
+    of LeafSample.boardLaw (LeafSample.before 1) (LeafSample.after 1 2) = none := by decide
+
+theorem sample_sealed :
+    of (Pred.any []) (LeafSample.read 1) (LeafSample.read 1) =
+      some ⟨[], Pred.any [], none, none⟩ := by decide
+
+theorem sample_sealed_rendered_compiled : render ⟨[], Pred.any [], none, none⟩ = "sealed" := by
+  native_decide
+
+/-- A guarded table drops only its guard; `field 0 after` is spelled `field 0`. -/
+theorem sample_table_rendered_compiled :
+    renderClause (explained (Pred.any [.eq "resource/field/0/delta" 0,
+        Pred.all [.eq "resource/field/0/before" 0, .eq "resource/field/0/after" 1],
+        .not (.eq "request/verb" 2)])) =
+      "any [ field 0 delta == 0, all [ field 0 before == 0, field 0 == 1 ] ]" := by
+  native_decide
+
+theorem sample_management_rendered_compiled :
+    renderClause (Pred.any [.eq "request/verb" 1, .eq "request/verb" 2,
+        Pred.all [.memberOf "request/verb" [3, 4, 5], .eq "request/subject" 7]]) =
+      "any [ verb == read, verb == write, all [ verb in {delegate,install,revoke}, subject == 7 ] ]" := by
+  native_decide
+
+end LawLeaf
+
+/-- A named refusal with its display text, and for `lawDenied` the failing clause when the
+deciding site could compute it. -/
 structure Refusal where
   reason : RefusalReason
   detail : String
+  leaf : Option LawLeaf := none
   deriving DecidableEq, Repr
 
 /-- The fixed text for a reason; nothing state-dependent is added. -/
-def Refusal.of (reason : RefusalReason) : Refusal := ⟨reason, reason.describe⟩
+def Refusal.of (reason : RefusalReason) : Refusal := ⟨reason, reason.describe, none⟩
 
-instance : ToString Refusal := ⟨fun refusal => s!"refused: {refusal.reason.name}: {refusal.detail}"⟩
+/-- A law refusal naming its failing clause. -/
+def Refusal.lawDenied (leaf : Option LawLeaf) : Refusal :=
+  ⟨.lawDenied, RefusalReason.lawDenied.describe, leaf⟩
+
+instance : ToString Refusal := ⟨fun refusal => match refusal.leaf with
+  | some leaf => s!"refused: {refusal.reason.name}: {leaf.render}"
+  | none => s!"refused: {refusal.reason.name}: {refusal.detail}"⟩
 
 end Minidregg.Compiler
 
 #print axioms Minidregg.Compiler.RefusalReason.capabilityRefusal_eq_none_iff_admissible
 #print axioms Minidregg.Compiler.RefusalReason.sample_admitted
 #print axioms Minidregg.Compiler.RefusalReason.sample_revoked
+
+/-- info: 'Minidregg.Compiler.LawLeaf.of_fails' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.of_fails
+
+/-- info: 'Minidregg.Compiler.LawLeaf.of_none_iff' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.of_none_iff

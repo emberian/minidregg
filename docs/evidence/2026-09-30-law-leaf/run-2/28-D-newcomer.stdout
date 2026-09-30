@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-law/run/j13-2/homes/newcomer/workspace/proposals/down/intent.json",
+  "intentSha256": "2ebdf5de8bc1f647317bc77154a6a8fd261e14bd8fa321659fa07d037a9ff7ab",
+  "proposalId": "down",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

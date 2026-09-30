@@ -1,0 +1,46 @@
+n	J	who	line	expect	exit	wall_s	verdict	note
+1	S	OPERATOR	bootstrap fresh private Store, sponsor workspace, mini serve	0	0	15.414	ok	
+2	S	OPERATOR	ssh keys, rendered authorized_keys, private sshd on 127.0.0.1:22433	0	0	0.064	ok	
+3	S	newcomer	keygen mini.key	0	0	0.163	ok	
+4	S	OPERATOR	CUSTODY: copy newcomer secret into sponsor home (co-signed enrollment)	0	0	0.008	ok	
+5	S	sponsor	enroll plan newcomer-1 newcomer-1.key	0	0	2.394	ok	
+6	S	sponsor	enroll seal newcomer-1	0	0	0.831	ok	
+7	S	sponsor	enroll submit newcomer-1	0	0	1.030	ok	
+8	S	newcomer	init mini.key 17009279893762011781	0	0	0.152	ok	
+9	S	sponsor	create board declared {"type":"all","predicates":[]}	0	0	3.328	ok	
+10	S	sponsor	delegate grant-b board 17009279893762011781 observe,mutate 50000	0	0	2.814	ok	
+11	S	sponsor	submit grant-b	0	0	2.171	ok	
+12	S	sponsor	publish grant-b	0	0	0.453	ok	
+13	S	sponsor	export grant-b	0	0	0.147	ok	
+14	S	newcomer	import board {"authority":"hint-only","capability":"11230644022455256082","kind":"object","proposalSha256":"70268b16fb2271532ea989bd3d982933ba406dce9930018da81101f76a2c8e2d","receipt":{"acceptedCount":"3","confirmation":"replayed","eventId":"29084001409556967567102444633599048181428697609285959555693370459673305679009","imageBoundary":"58692405126105660470425795866727622600774868649663907256323129282424450567049","transactionId":"31342266291491945365116243697906255383236132768197214096051163681313747805916","type":"confirmed"},"recipient":"17009279893762011781","target":"11737776695897016005","type":"minidregg-delegated-reference-v1"}	0	0	0.154	ok	
+15	S	newcomer	invoke first board create 2 1	0	0	1.070	ok	
+16	S	newcomer	submit first	0	0	1.814	ok	
+17	S	newcomer	read board	0	0	1.006	ok	
+18	S	check	B created field 2 = 1 under the open law	-	-	-	ok	
+19	L	sponsor	law board-law board "any [ verb == read, verb == write, all [ verb in {delegate,install,revoke}, subject == 7 ] ]; any [ field 2 monotone, not (verb == write) ]; any [ field 2 in {0,1,2}, not (verb == write) ]"	0	0	1.356	ok	
+20	L	check	the proposal carries the grammar rendered to Pred JSON	-	-	-	ok	
+21	L	sponsor	submit board-law	0	0	2.070	ok	
+22	L	check	law installed (the Host parsed the grammar's JSON)	-	-	-	ok	
+23	W	newcomer	invoke up board write 2 2 1	0	0	1.166	ok	
+24	W	check	no refusal on the admitted move	-	-	-	ok	
+25	W	newcomer	submit up	0	0	2.291	ok	
+26	W	newcomer	read board	0	0	1.013	ok	
+27	W	check	B's grant still writes after the law change: field 2 = 2	-	-	-	ok	
+28	D	newcomer	invoke down board write 2 1 2	0	0	1.162	ok	
+29	D	newcomer	submit down	3	3	1.348	ok	refused: law-denied: field 2 monotone (before 2, after 1) (Host refused prepare, reply byt
+30	D	check	named law-denied: field 2 monotone (before 2, after 1)	-	-	-	ok	host explain: field 2 monotone (before 2, after 1)
+31	D	newcomer	invoke out board write 2 5 2	0	0	1.733	ok	
+32	D	newcomer	submit out	3	3	1.696	ok	refused: law-denied: field 2 in {0,1,2} (value 5) (Host refused prepare, reply byte 255)
+33	D	check	named law-denied: field 2 in {0,1,2} (value 5)	-	-	-	ok	host explain: field 2 in {0,1,2} (value 5)
+34	D	newcomer	read board	0	0	1.452	ok	
+35	D	check	control: the refused moves wrote nothing, field 2 = 2	-	-	-	ok	
+36	E	sponsor	law seal board sealed	0	0	1.863	ok	
+37	E	check	sealed renders to any []	-	-	-	ok	
+38	E	sponsor	submit seal	0	0	2.750	ok	
+39	E	check	seal installed	-	-	-	ok	
+40	E	sponsor	law repair board open	3	3	1.096	ok	refused: law-denied: sealed (Host refused query, reply byte 255)
+41	E	check	named law-denied: sealed	-	-	-	ok	host explain: sealed
+42	E	newcomer	read board	3	3	1.235	ok	refused: law-denied: sealed (Host refused query, reply byte 255)
+43	E	check	named law-denied: sealed	-	-	-	ok	host explain: sealed
+44	END	OPERATOR	stop sshd	0	0	0.007	ok	
+45	END	OPERATOR	stop the Mini service	0	0	0.136	ok	
