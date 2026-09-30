@@ -14,11 +14,11 @@ The request/result codecs below are lawful countable-carrier witnesses, not a
 stable deployed wire format or codec pin.  Consequently this module closes the
 semantic adapter/patch boundary while leaving codec deployment explicit.
 
-The kernel token validates the patch at the common request's pre-root, which
-is the materialized cell root.  `RootBoundAccepted` additionally binds the
-canonical `Digest` embedding of the note-spend public root to that same root,
-so an accepted spend joins the public root, the common request pre-root, and
-the materialized cell root.  The positive path
+The adapter's `quotedRoot` is the canonical `Digest` embedding of the
+note-spend public root, so the common request carries it and the kernel token
+(validated at the common request's pre-root, the materialized cell root) binds
+it: an accepted spend joins the public root, the common request pre-root, and
+the materialized cell root with no wrapper.  The positive path
 still consumes exactly one common `Authorized` token and is necessarily sealed;
 the computation family has no release carrier.  Proof-suite semantics remain
 conditional on the separately indexed controller admission laws.
@@ -242,6 +242,7 @@ noncomputable def adapter (requestContext : EffectRequestContext) :
   requestDigestBytes := requestDigestBytes
   effectIntentCodec := effectIntentCodec
   effectDigestBytes := effectDigestBytes
+  quotedRoot := fun request => rootDigest request.inputValue.root
   patch := spendPatch
   footprint := fun _ => {spendAddress}
   RealizesResourceEffects := RealizesResourceEffects
@@ -269,27 +270,12 @@ variable {requestContext : EffectRequestContext}
         (request.resourceEffects, request.footprint, request.nullifier)) :=
   rfl
 
-/-! ## The public root is the cell root -/
-
-/-- A concrete accepted note spend whose public note root, embedded as a
-`Digest`, is the root of the cell it is applied to.  The kernel token alone
-binds the common request's pre-root to the cell; this field binds the spend's
-own public root to the same cell. -/
-structure RootBoundAccepted
-    {M : CellState.Materializer layout Digest}
-    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
-    (commonRequest : Request kind) (pre : CellState.Materialized M)
-    (request : SpendRequest) (result : SpendResult) where
-  accepted : Accepted (portal := portal) (authState := authState)
-    (adapter requestContext) commonRequest pre request result
-  publicRootBound : rootDigest request.inputValue.root = pre.root
-
 /-! ## The sole positive construction -/
 
 /-- A concrete note spend enters the common kernel through the existing
 positive constructor.  `authorization` is the only transition-authority
-argument; every other premise is exact data, checked completion, validated
-patch evidence, or the public-root binding. -/
+argument; every other premise is exact data, checked completion, or validated
+patch evidence.  The public-root binding is a consequence (`accepted_preRoot_exact`). -/
 def accept
     {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
@@ -305,15 +291,13 @@ def accept
     (completion : declaration.Completion request result)
     (resourceEffectsExact : request.resourceEffects = [intendedEffect request])
     (eagerNullifierExact : request.nullifier = some request.inputValue.nullifier)
-    (publicRootBound : rootDigest request.inputValue.root = pre.root)
     (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       ((adapter requestContext).patch request result)) :
-    RootBoundAccepted (requestContext := requestContext) (portal := portal)
-      (authState := authState) commonRequest pre request result where
-  accepted := NoteSpendCoreAcceptedCellEffect.accept (adapter requestContext)
+    Accepted (portal := portal) (authState := authState)
+      (adapter requestContext) commonRequest pre request result :=
+  NoteSpendCoreAcceptedCellEffect.accept (adapter requestContext)
     authorization requestBound argsDigestBound effectsDigestBound completion
     resourceEffectsExact eagerNullifierExact validated
-  publicRootBound := publicRootBound
 
 /-! ## Exact patch and kernel bindings -/
 
@@ -322,20 +306,20 @@ theorem accepted_preRoot_exact
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
-    (accepted : RootBoundAccepted (requestContext := requestContext)
-      (portal := portal) (authState := authState) commonRequest pre request result) :
+    (accepted : Accepted (portal := portal) (authState := authState)
+      (adapter requestContext) commonRequest pre request result) :
     pre.root = rootDigest request.inputValue.root :=
-  accepted.publicRootBound.symm
+  (ComputationCellEffect.accepted_quotedRoot_exact accepted.computation.cellEffect).symm
 
 theorem accepted_commonPreRoot_exact
     {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
-    (accepted : RootBoundAccepted (requestContext := requestContext)
-      (portal := portal) (authState := authState) commonRequest pre request result) :
+    (accepted : Accepted (portal := portal) (authState := authState)
+      (adapter requestContext) commonRequest pre request result) :
     commonRequest.preStateRoot = rootDigest request.inputValue.root :=
-  accepted.accepted.computation.cellEffect.preRootBound.trans
+  accepted.computation.cellEffect.preRootBound.trans
     (accepted_preRoot_exact accepted)
 
 theorem accepted_cellValue_exact
@@ -434,8 +418,8 @@ theorem no_accepted_of_preRoot_mismatch
     {request : SpendRequest} {result : SpendResult}
     (mismatch : commonRequest.preStateRoot ≠
       rootDigest request.inputValue.root) :
-    IsEmpty (RootBoundAccepted (requestContext := requestContext) (portal := portal)
-      (authState := authState) commonRequest pre request result) :=
+    IsEmpty (Accepted (portal := portal) (authState := authState)
+      (adapter requestContext) commonRequest pre request result) :=
   ⟨fun accepted => mismatch (accepted_commonPreRoot_exact accepted)⟩
 
 theorem no_accepted_of_resourceEffects_mismatch

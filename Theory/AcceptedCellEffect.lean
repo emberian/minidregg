@@ -482,8 +482,11 @@ variable
 
 /-- Kernel projections for a pure sealed-computation declaration.  The request
 itself owns the nullifier and exact footprint.  The adapter supplies only the
-canonical patch/digest interpretation and an explicit realization relation for
-the request's typed resource effects. -/
+canonical patch/digest interpretation, an explicit realization relation for
+the request's typed resource effects, and `quotedRoot`: the pre-state root the
+computation request itself quotes.  The family's common request carries that
+root, so the kernel token (validated at the common request's root) binds the
+computation's own quoted root to the actual pre-cell. -/
 structure Adapter
     {L : Layout.{u, v, w}}
     (declaration : ComputationDeclaration language mode Relation BridgeName
@@ -496,6 +499,7 @@ structure Adapter
   requestDigestBytes : List UInt8 → Digest
   effectIntentCodec : LawfulCodec (List ResourceEffect × Footprint × Option Nullifier)
   effectDigestBytes : List UInt8 → Digest
+  quotedRoot : declaration.Request → Digest
   patch : declaration.Request → declaration.Result → Patch L
   footprint : Footprint → Finset (Address L)
   RealizesResourceEffects : declaration.Request → declaration.Result →
@@ -545,7 +549,7 @@ def family
   pre := pre
   request := fun request => ⟨adapter.requestContext.kind,
     adapter.requestContext.request (adapter.completeRequestDigest request)
-      (adapter.completeEffectDigest request) pre.root⟩
+      (adapter.completeEffectDigest request) (adapter.quotedRoot request)⟩
   Outcome := fun _ => declaration.Result
   outcomeCodec := fun _ => adapter.resultCodec
   ModeEvidence := fun request result => declaration.Completion request result
@@ -713,6 +717,43 @@ theorem accepted_resource_effects_realized
       (family declaration adapter pre) commonRequest pre request result) :
     adapter.RealizesResourceEffects request result (adapter.patch request result) :=
   adapter.resourceEffectsRealized request result
+
+/-- Every accepted computation's own quoted root is the pre-cell's root: the
+family's common request carries it, and the validated patch is indexed at the
+common request's root. -/
+theorem accepted_quotedRoot_exact
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
+    {declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins}
+    {adapter : Adapter (L := L) declaration}
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      (family declaration adapter pre) commonRequest pre request result) :
+    adapter.quotedRoot request = pre.root :=
+  accepted.request_preStateRoot_exact.symm.trans accepted.preRootBound
+
+/-- Refuting pole: a computation request quoting any other root has no accepted
+effect on `pre`, whatever the common request. -/
+theorem no_accepted_of_quotedRoot_mismatch
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
+    {declaration : ComputationDeclaration language mode Relation BridgeName
+      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
+      OutputCommitment PrivateOutput
+      ResourceEffect Footprint Nullifier ModeEvidencePins}
+    {adapter : Adapter (L := L) declaration}
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : declaration.Request} {result : declaration.Result}
+    (mismatch : adapter.quotedRoot request ≠ pre.root) :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (family declaration adapter pre) commonRequest pre request result) :=
+  ⟨fun accepted => mismatch (accepted_quotedRoot_exact accepted)⟩
 
 end ComputationCellEffect
 
@@ -1003,3 +1044,10 @@ def receiptOfCompletion
 end PrivateCellEffect
 
 end Minidregg.Theory
+
+/-- info: 'Minidregg.Theory.ComputationCellEffect.accepted_quotedRoot_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Theory.ComputationCellEffect.accepted_quotedRoot_exact
+/-- info: 'Minidregg.Theory.ComputationCellEffect.no_accepted_of_quotedRoot_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Theory.ComputationCellEffect.no_accepted_of_quotedRoot_mismatch

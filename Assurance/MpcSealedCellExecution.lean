@@ -58,8 +58,9 @@ def program : Program := ⟨⟨3101⟩⟩
 def relation : Relation := ⟨⟨3102⟩⟩
 
 /-- The semantic input and its mode-native artifact.  `expectedPreRoot` makes
-the canonical cell binding part of the exact computation request; it is bound
-to the actual pre-cell by `RootBoundAccepted.inputRootBound`.  The shares
+the canonical cell binding part of the exact computation request; it is the
+adapter's `quotedRoot`, so every accepted token binds it to the actual pre-cell
+(`accepted_input_root_exact`).  The shares
 are trusted Lean data here; no hiding statement follows from this record. -/
 structure SharedInput where
   sessionId : Digest
@@ -381,6 +382,7 @@ noncomputable def adapter :
   requestDigestBytes := requestDigestBytes
   effectIntentCodec := effectIntentCodec
   effectDigestBytes := effectDigestBytes
+  quotedRoot := fun request => request.inputValue.expectedPreRoot
   patch := sealedPatch
   footprint := fun _ => {completionAddress}
   RealizesResourceEffects := RealizesResourceEffects
@@ -559,39 +561,29 @@ theorem accepted_post_holds_completion :
 
 /-! ## The computation input's quoted root
 
-The kernel token indexes the validated patch at the common request's
-`preStateRoot`, which the family derives from `pre.root`.  The computation
-input's own `expectedPreRoot` is request data; this wrapper binds it to the
-same pre-cell, so an MPC completion computed against one cell state cannot be
+The adapter's `quotedRoot` is the input's `expectedPreRoot`; the family's
+common request carries it and the kernel token is validated at the common
+request's root, so an MPC completion computed against one cell state cannot be
 admitted on another. -/
 
-/-- An accepted sealed MPC effect whose computation input quotes the exact
-pre-root of the cell it is applied to. -/
-structure RootBoundAccepted
+theorem accepted_input_root_exact
     {portal : Portal} {authState : AuthState}
-    (commonRequest : Request .object)
-    (cell : CellState.Materialized materializer)
-    (request : MpcRequest) (result : MpcResult) where
-  computation : ComputationCellEffect.Accepted (portal := portal)
-    (authState := authState) declaration adapter commonRequest cell request result
-  inputRootBound : request.inputValue.expectedPreRoot = cell.root
+    {request : Request .object} {cell : CellState.Materialized materializer}
+    {mpcRequest : MpcRequest} {result : MpcResult}
+    (accepted : ComputationCellEffect.Accepted (portal := portal)
+      (authState := authState) declaration adapter request cell mpcRequest result) :
+    mpcRequest.inputValue.expectedPreRoot = cell.root :=
+  ComputationCellEffect.accepted_quotedRoot_exact accepted.cellEffect
 
-noncomputable def rootBoundAccepted :
-    RootBoundAccepted
-      (portal := Minidregg.Theory.TypedAuthorizationWitness.permissivePortal)
-      (authState := Minidregg.Theory.TypedAuthorizationWitness.authState)
-      commonRequest pre honestRequest honestResult :=
-  ⟨accepted, rfl⟩
-
-/-- Refuting pole: an input quoting any other root admits no root-bound
-acceptance on `pre`, whatever the common request. -/
-theorem no_rootBound_of_input_root_mismatch
+/-- Refuting pole: an input quoting any other root admits no acceptance on
+`pre`, whatever the common request. -/
+theorem no_accepted_of_input_root_mismatch
     {portal : Portal} {authState : AuthState}
     {request : Request .object} {mpcRequest : MpcRequest} {result : MpcResult}
     (mismatch : mpcRequest.inputValue.expectedPreRoot ≠ pre.root) :
-    IsEmpty (RootBoundAccepted (portal := portal) (authState := authState)
-      request pre mpcRequest result) :=
-  ⟨fun candidate => mismatch candidate.inputRootBound⟩
+    IsEmpty (ComputationCellEffect.Accepted (portal := portal) (authState := authState)
+      declaration adapter request pre mpcRequest result) :=
+  ⟨fun candidate => mismatch (accepted_input_root_exact candidate)⟩
 
 /-- A second completion cannot be allocated on the completed cell: the
 append-only allocation guard refuses the same patch at the accepted post. -/
@@ -799,8 +791,8 @@ theorem wrong_output_commitment_rejected :
 #guard_msgs (whitespace := lax) in #print axioms physical_quorum_output_agreement
 /-- info: 'Minidregg.Assurance.MpcSealedCellExecution.wrong_output_commitment_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms wrong_output_commitment_rejected
-/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.no_rootBound_of_input_root_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms no_rootBound_of_input_root_mismatch
+/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.no_accepted_of_input_root_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_input_root_mismatch
 /-- info: 'Minidregg.Assurance.MpcSealedCellExecution.completion_not_reallocated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms completion_not_reallocated
 
