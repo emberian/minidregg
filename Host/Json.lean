@@ -32,6 +32,8 @@ import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
 import Kernel.ParticipantFactoryProvisioning
 import Kernel.FleetTurn
+import Kernel.PayBookReceiver
+import Kernel.PayAssignmentReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -2188,6 +2190,54 @@ private def fleetTurnCommand (json : Lean.Json) : Result (List UInt8) := do
   unless assigned.shapeOk do
     failAt "$" "a fleet turn needs a positive transfer to another account or a 1..64-byte topic event with at most 16384 payload bytes"
   return FleetTurn.commandCodec.encode command
+/-- A pay tariff: every field a canonical decimal string except `mint` and
+`tokenProgram`, which are lowercase hex of the raw 32 bytes. -/
+private def payTariff (path : String) (json : Lean.Json) : Result PayTariff.Tariff := do
+  let obj ← exactObject path ["version", "asset", "mint", "tokenProgram", "decimals",
+    "creditPerAtomic", "maxPerObservation", "minTickSlots"] json
+  pure
+    { version := ← nat s!"{path}.version" (← field path "version" obj)
+      asset := ← nat s!"{path}.asset" (← field path "asset" obj)
+      mint := ← decodeHex s!"{path}.mint" (← field path "mint" obj)
+      tokenProgram := ← decodeHex s!"{path}.tokenProgram" (← field path "tokenProgram" obj)
+      decimals := ← nat s!"{path}.decimals" (← field path "decimals" obj)
+      creditPerAtomic := ← nat s!"{path}.creditPerAtomic" (← field path "creditPerAtomic" obj)
+      maxPerObservation := ← nat s!"{path}.maxPerObservation" (← field path "maxPerObservation" obj)
+      minTickSlots := ← nat s!"{path}.minTickSlots" (← field path "minTickSlots" obj) }
+
+/-- The operator's pay-cell change: deposit rows (hex) appended from
+`bookStart`, and/or a new tariff (`null` for none).  The bytes claim nothing:
+the receiver decides the rows, the tariff version and the authority. -/
+private def payBook (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["sponsor", "control", "nonce", "expectedFactoryRoot",
+    "expectedAuthorityRoot", "expectedPayRoot", "bookStart", "book", "tariff"] json
+  let command : PayBookReceiver.Command :=
+    { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
+      control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot" (← field "$" "expectedFactoryRoot" obj)⟩
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩
+      expectedPayRoot := ⟨← nat "$.expectedPayRoot" (← field "$" "expectedPayRoot" obj)⟩
+      bookStart := ← nat "$.bookStart" (← field "$" "bookStart" obj)
+      book := ← list "$.book" decodeHex (← field "$" "book" obj)
+      tariff := ← optional "$.tariff" payTariff (← field "$" "tariff" obj) }
+  return PayBookReceiver.commandCodec.encode command
+
+/-- A subject's request that book index `index` be bound to `account`. -/
+private def payAssign (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "capability", "account", "index", "nonce",
+    "expectedAuthorityRoot", "expectedPayRoot"] json
+  let command : PayAssignmentReceiver.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      account := ← nat "$.account" (← field "$" "account" obj)
+      index := ← nat "$.index" (← field "$" "index" obj)
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩
+      expectedPayRoot := ⟨← nat "$.expectedPayRoot" (← field "$" "expectedPayRoot" obj)⟩ }
+  return PayAssignmentReceiver.commandCodec.encode command
 
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json)
@@ -2215,6 +2265,8 @@ def author (kind : String) (json : Lean.Json)
   | "participant-key-enrollment" => participantKeyEnrollment json
   | "participant-factory-provisioning" => participantFactoryProvisioning json
   | "fleet-turn" => fleetTurnCommand json
+  | "pay-book" => payBook json
+  | "pay-assign" => payAssign json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2380,6 +2432,62 @@ private def participantKeyRecordJson (key : KeyRecord) : Lean.Json := .mkObj
    ("publicKey", hexJson key.publicKey),
    ("activeFrom", decimal key.activeFrom),
    ("activeUntil", decimal key.activeUntil)]
+
+private def payTariffJson (tariff : PayTariff.Tariff) : Lean.Json := .mkObj
+  [("version", decimal tariff.version), ("asset", decimal tariff.asset),
+   ("mint", hexJson tariff.mint), ("tokenProgram", hexJson tariff.tokenProgram),
+   ("decimals", decimal tariff.decimals), ("creditPerAtomic", decimal tariff.creditPerAtomic),
+   ("maxPerObservation", decimal tariff.maxPerObservation),
+   ("minTickSlots", decimal tariff.minTickSlots),
+   ("valid", .bool (decide tariff.valid))]
+
+private def payBookCommandJson (command : PayBookReceiver.Command) : Lean.Json := .mkObj
+  [("type", "pay-book-v1"),
+   ("canonical", hexJson (PayBookReceiver.commandCodec.encode command)),
+   ("sponsor", decimal command.sponsor.value), ("control", decimal command.control.value),
+   ("nonce", decimal command.nonce),
+   ("expectedFactoryRoot", decimal command.expectedFactoryRoot.value),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
+   ("expectedPayRoot", decimal command.expectedPayRoot.value),
+   ("bookStart", decimal command.bookStart),
+   ("book", .arr (command.book.map hexJson).toArray),
+   ("tariff", match command.tariff with
+     | none => .null
+     | some tariff => payTariffJson tariff)]
+
+private def payAssignCommandJson (command : PayAssignmentReceiver.Command) : Lean.Json := .mkObj
+  [("type", "pay-assign-v1"),
+   ("canonical", hexJson (PayAssignmentReceiver.commandCodec.encode command)),
+   ("subject", decimal command.subject.value), ("capability", decimal command.capability.value),
+   ("account", decimal command.account), ("index", decimal command.index),
+   ("nonce", decimal command.nonce),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
+   ("expectedPayRoot", decimal command.expectedPayRoot.value)]
+
+private def payCommandJson (bytes : List UInt8) : Lean.Json :=
+  match PayBookReceiver.commandCodec.decode bytes with
+  | some command => payBookCommandJson command
+  | none =>
+      match PayAssignmentReceiver.commandCodec.decode bytes with
+      | some command => payAssignCommandJson command
+      | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
+
+/-- The public pay view: roots to pin, tariff, clock, next free index and the
+published deposit book (index order, lowercase hex). -/
+def payViewJson (view : PayCellDomain.View) : Lean.Json := .mkObj
+  [("type", "pay-view-v1"),
+   ("payRoot", decimal view.payRoot.value),
+   ("authorityRoot", decimal view.authorityRoot.value),
+   ("factoryRoot", decimal view.factoryRoot.value),
+   ("tariff", match view.tariff with
+     | none => .null
+     | some tariff => payTariffJson tariff),
+   ("clock", match view.clock with
+     | none => .null
+     | some clock => .mkObj [("slot", decimal clock.slot), ("blockTime", decimal clock.blockTime)]),
+   ("nextFree", decimal view.nextFree),
+   ("bookSize", decimal view.book.length),
+   ("book", .arr (view.book.map hexJson).toArray)]
 
 private def participantKeyCommandJson
     (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj
@@ -2995,6 +3103,20 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let command ← decoded "participant-key-enrollment"
         ParticipantKeyEnrollment.commandCodec bytes
       pure (participantKeyCommandJson command)
+  | "pay-book" => payBookCommandJson <$> decoded "pay-book" PayBookReceiver.commandCodec bytes
+  | "pay-assign" => payAssignCommandJson <$>
+      decoded "pay-assign" PayAssignmentReceiver.commandCodec bytes
+  | "pay-view" => payViewJson <$> decoded "pay-view" PayCellDomain.viewCodec bytes
+  | "pay-plan" => do
+      let plan ← decoded "pay-plan" PayCellDomain.signingPlanCodec bytes
+      pure <| .mkObj
+        [("type", "pay-plan-v1"),
+         ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value),
+         ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("command", payCommandJson plan.commandBytes),
+         ("header", signedHeaderJson plan.header)]
   | "participant-key-enrollment-plan" => do
       let plan ← decoded "participant-key-enrollment-plan"
         ParticipantKeyEnrollment.signingPlanCodec bytes

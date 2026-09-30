@@ -40,6 +40,8 @@ import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
 import Kernel.ParticipantFactoryProvisioningReceiver
 import Kernel.FleetTurnReceiver
+import Kernel.PayBookReceiver
+import Kernel.PayAssignmentReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -721,6 +723,14 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile config.tariff
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (FleetTurnReceiver.intent accepted)
+  | payBook {ingress : PayBookReceiver.DecodedIngress}
+      (accepted : PayBookReceiver.AcceptedChange config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (PayBookReceiver.intent accepted)
+  | payAssignment {ingress : PayAssignmentReceiver.DecodedIngress}
+      (accepted : PayAssignmentReceiver.AcceptedAssignment config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (PayAssignmentReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1520,6 +1530,20 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ParticipantFactoryProvisioningReceiver.intent accepted,
           .participantFactoryProvisioning accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PayBookReceiver.decodeIngress bytes then
+    match ← PayBookReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"pay book refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨PayBookReceiver.intent accepted,
+          .payBook accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PayAssignmentReceiver.decodeIngress bytes then
+    match ← PayAssignmentReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"pay assignment refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨PayAssignmentReceiver.intent accepted,
+          .payAssignment accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

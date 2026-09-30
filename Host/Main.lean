@@ -41,7 +41,9 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 96=private fleet turn plan behind a signed account observation, 97=detached fleet
 assembly, 98=checked fleet turn submit, 99=receipt-only fleet lookup, 100=topic
 poll since a cursor behind a signed account observation, 101=agent fleet head
-behind a signed account observation, 102=exact receipt by transaction id.
+behind a signed account observation, 102=exact receipt by transaction id,
+103=pay command signing plan (either pay family), 104=pay detached assembly,
+105=pay submit, 106=pay receipt-only lookup, 107=public pay-cell view.
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -5205,6 +5207,37 @@ def run (arguments : List String) : IO UInt32 := do
                               ⟨transactionId⟩
                             return ((102 : UInt8), (Minidregg.Host.Json.fleetReceiptLookupJson
                               transactionId receipt).compress.toUTF8.toList)
+                        | 103 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.payPlanLoaded pinnedConfig opened payload)
+                            let bytes := PayCellDomain.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "pay plan exceeds host frame bound")
+                            return ((103 : UInt8), bytes)
+                        | 104 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := PayCellDomain.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical pay plan")
+                            let ingress ← IO.ofExcept (NativeHost.payAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "pay ingress exceeds host frame bound")
+                            return ((104 : UInt8), ingress)
+                        | 105 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.paySubmitLoaded pinnedConfig opened payload
+                            -- A pay submission is blind: its refusal (including the
+                            -- receiver's pre-signature notOwner/bookExhausted/...) is
+                            -- the uniform `undisclosed` frame (MR's rule).
+                            return ((105 : UInt8),
+                              outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
+                        | 106 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
+                            return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 107 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let view ← IO.ofExcept (NativeHost.payViewLoaded pinnedConfig opened)
+                            return ((107 : UInt8), PayCellDomain.viewCodec.encode view)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload

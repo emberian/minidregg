@@ -174,6 +174,8 @@ def sourceComponents : List (List UInt8) :=
      [PolicySourceCell.registryTag.toNat, PolicySourceCell.schemaId,
       PolicySourceCell.wireVersion],
    StoreCodec.frame DeclaredEffectCell.wire,
+   StoreCodec.frame Kernel.PayCell.wire,
+   Kernel.PayCell.idCustomization,
    StoreCodec.rootCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,

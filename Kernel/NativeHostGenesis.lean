@@ -386,6 +386,11 @@ def declaredCell (_config : Config) (identifier : Nat) (account : Bool) :
       [⟨(EffectDeclaration.StateKey.objectField ⟨identifier⟩ ⟨1⟩).address, (0 : Int)⟩])
   if account then ⟨.accountMetadata, payload⟩ else ⟨.declaredObject, payload⟩
 
+/-- The genesis pay cell: the invalid placeholder tariff, the zero clock, an
+empty deposit book and no assignment (`PayCell.genesisStore`). -/
+def payCell : PackedCell CanonicalCellRegistry.registry :=
+  ⟨.pay, materialize Kernel.PayCell.materializer Kernel.PayCell.genesisStore⟩
+
 def baseCells {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     List (Nat × PackedCell CanonicalCellRegistry.registry) :=
@@ -398,7 +403,8 @@ def baseCells {F : Type} [Field F]
     (enrollment.accountId, declaredCell config enrollment.accountId true)) ++
   (policies profile config).map (fun record =>
     (PolicySourceCell.physicalId config.deployment.domain (PolicyRecordCodec.digest record),
-      CanonicalCellRegistry.policySourceCell record))
+      CanonicalCellRegistry.policySourceCell record)) ++
+  [(Kernel.PayCell.physicalId config.deployment.domain, payCell)]
 
 def physicalCells (cells : List (Nat × PackedCell CanonicalCellRegistry.registry)) :
     List (Digest × List UInt8) :=
