@@ -14,13 +14,15 @@ cp $C/genesis-params.example.json /srv/mini/genesis-params.json      # edit: ope
 $C/run.sh init  --manifest $C/manifest.json --params /srv/mini/genesis-params.json --state /srv/mini/store-a
 $C/run.sh start --state /srv/mini/store-a                             # or: run.sh unit ... | systemd
 $C/run.sh sponsor --state /srv/mini/store-a
-$C/journey.sh --state /srv/mini/store-a --out /srv/mini/journey-1     # only on a Store made for it
 $C/run.sh stop  --state /srv/mini/store-a
+# The journey (definition of done) stands up its own fresh Store from the same manifest:
+M7_REFERENCE=/srv/mini/other-build/provenance.json \
+  native/resource-client/journey.sh $C/manifest.json /srv/mini/journey-1
 ```
 
 `/srv/mini/...` stands for any directory the operator chooses. No script
-writes outside `--out`, `--state` or the journey `--out`, except the toolchain
-managers' own caches (below).
+writes outside `--out`, `--state` or the journey's run root, except the
+toolchain managers' own caches (below).
 
 ## 1. Build (`build.sh`)
 
@@ -54,10 +56,11 @@ that can find the versioned one) for the Store helper.
 | `OUT/bin/mini` | client (`native/resource-client`) |
 | `OUT/bin/minidregg-link-sqlite-store` | Store helper (`native/hyperdocument-link-sqlite-store`) |
 | `OUT/bin/minidregg-credential-signature-verifier` | Ed25519 verifier helper (`native/credential-signature-verifier`) |
-| `OUT/run.sh`, `OUT/journey.sh`, `OUT/lib.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive |
+| `OUT/run.sh`, `OUT/lib.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive |
 | `OUT/source.tar` | the exact source archive |
-| `OUT/SHA256SUMS` | `sha256sum` lines for everything above, relative to `OUT` |
-| `OUT/manifest.json` | see below |
+| `OUT/provenance.json` | source, toolchains, relative binary paths and hashes, timings (below) |
+| `OUT/SHA256SUMS` | `sha256sum` lines for everything above and `logs/source-files.sha256`, relative to `OUT` |
+| `OUT/manifest.json` | the journey-format manifest (below) |
 | `OUT/logs/` | build log, per-step logs, `source-files.sha256` (every archived file) |
 | `OUT/work/` | extracted source, Lean/cargo build trees, mathlib cache. Not needed at run time; the Host build evidence is `OUT/work/host-build/`. |
 
@@ -66,27 +69,48 @@ Rust binaries are built with `--remap-path-prefix` for the source tree
 where the operator unpacked the source or keeps the registry. The Host's bytes
 do not contain build paths.
 
-**`manifest.json`** (`minidregg-candidate-manifest-v1`):
+**`manifest.json`** is the format `native/resource-client/journey.sh` reads:
+absolute paths plus SHA-256 pins, one entry per role, and `candidate` naming
+the provenance file.
 
 ```json
-{"type": "minidregg-candidate-manifest-v1",
+{"host": "/abs/OUT/bin/minidregg-host", "mini": "/abs/OUT/bin/mini",
+ "store": "/abs/OUT/bin/minidregg-link-sqlite-store",
+ "verifier": "/abs/OUT/bin/minidregg-credential-signature-verifier",
+ "candidate": "/abs/OUT/provenance.json",
+ "sha256": {"host": "<64 hex>", "mini": "...", "store": "...", "verifier": "...", "candidate": "..."}}
+```
+
+Every consumer (`run.sh`, `journey.sh`,
+`native/resource-client/newparticipant-from-manifest.sh`) refuses a file whose
+SHA-256 differs from its pin. Because the paths are absolute, the candidate is
+used where it was built; moving it means rebuilding or rewriting `manifest.json`
+(the pins, and `provenance.json`, stay valid).
+
+**`provenance.json`** (`minidregg-candidate-provenance-v1`):
+
+```json
+{"type": "minidregg-candidate-provenance-v1",
  "source": {"commit": "<40 hex>", "archive": "source.tar", "archiveSha256": "<64 hex>",
-            "origin": "git-archive-HEAD | supplied-archive", "fileListSha256": "<sha of logs/source-files.sha256>"},
+            "origin": "git-archive-HEAD | supplied-archive",
+            "fileList": "logs/source-files.sha256", "fileListSha256": "<64 hex>"},
  "target": "x86_64-linux",
  "toolchains": {"leanToolchain": "...", "lean": "...", "lake": "...", "mathlibRev": "...",
                 "rustToolchain": "...", "rustc": "...", "cargo": "...", "cc": "...", "rustflags": "..."},
- "binaries": {"host":     {"path": "bin/minidregg-host", "sha256": "..."},
-              "mini":     {"path": "bin/mini", "sha256": "..."},
-              "store":    {"path": "bin/minidregg-link-sqlite-store", "sha256": "..."},
-              "verifier": {"path": "bin/minidregg-credential-signature-verifier", "sha256": "..."}},
+ "binaries": {"host": {"path": "bin/minidregg-host", "sha256": "..."}, "mini": {...},
+              "store": {...}, "verifier": {...}},
  "hostBuildManifest": {"path": "work/host-build/manifest.txt", "sha256": "..."},
  "seconds": {"leanPackagesAndMathlibCache": 0, "nativeHost": 0, "rust": 0, "total": 0},
  "builtUtc": "..."}
 ```
 
-Paths are relative to the manifest's directory. Every consumer (`run.sh`,
-`journey.sh`, `native/resource-client/newparticipant-acceptance.sh`) resolves
-the four binaries through the manifest and refuses one whose SHA-256 differs.
+Paths here are relative to `OUT`.
+
+**Reproducing.** Two builds from archives with the same compiled inputs, in
+different directories, yield the same four SHA-256s (measured: see
+`docs/evidence/2026-09-30-candidate/`). The journey's M7 step
+(`native/resource-client/journey.d/m7.sh`) checks exactly that against a
+reference build named by `M7_REFERENCE` (or `.m7Reference` in the manifest).
 
 ## 2. Processes
 
@@ -264,7 +288,7 @@ Everything is created owner-only (`umask 077`, directories `0700`).
 
 | path | written by | content |
 | --- | --- | --- |
-| `state.json` | init | `minidregg-candidate-state-v1`: absolute manifest path, Host SHA-256, pinned-config SHA-256, creation time. Every later command re-checks the Host and helper hashes against it. |
+| `state.json` | init | `minidregg-candidate-state-v1`: absolute manifest path, Host SHA-256, pinned-config SHA-256, creation time. Every later command re-checks the manifest pins, this Host pin, and the helper paths in the pinned config. |
 | `genesis-params.json` | init | copy of the operator's params (schema below) |
 | `keys/sponsor.key`, `keys/sponsor.pub`, `keys/sponsor.pub.hex` | `mini keygen` | the genesis sponsor's key (format in §8) |
 | `operator.json` | init | Host operator config (schema below) |

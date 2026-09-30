@@ -4,7 +4,8 @@
 #   bin/mini                                    participant/operator client
 #   bin/minidregg-link-sqlite-store             durable Store helper
 #   bin/minidregg-credential-signature-verifier Ed25519 verifier helper
-# plus SHA256SUMS and manifest.json (source commit, toolchains, hashes).
+# plus provenance.json (source commit, toolchains, hashes), SHA256SUMS, and
+# manifest.json: the journey-format manifest (absolute paths + SHA-256 pins).
 #
 # usage: deploy/candidate/build.sh --out NEW_DIR [--source-archive SOURCE.tar]
 #
@@ -142,18 +143,16 @@ grep -q '^usage:' "$out/logs/usage-verifier.txt" || candidate_die "verifier did 
 file "$out"/bin/* > "$out/logs/file-types.txt"
 
 # 7. The operator scripts travel with the binaries, from the same archive.
-for script in run.sh journey.sh lib.sh; do
+for script in run.sh lib.sh; do
   install -m 0555 "$src/deploy/candidate/$script" "$out/$script"
 done
 for document in INTERFACES.md genesis-params.example.json; do
   install -m 0444 "$src/deploy/candidate/$document" "$out/$document"
 done
 
-# 8. Hashes and manifest. Paths in the manifest are relative to its directory.
-(cd "$out" && sha256sum bin/minidregg-host bin/mini bin/minidregg-link-sqlite-store \
-  bin/minidregg-credential-signature-verifier run.sh journey.sh lib.sh INTERFACES.md \
-  genesis-params.example.json source.tar) > "$out/SHA256SUMS"
-sum_of() { grep "  $1\$" "$out/SHA256SUMS" | cut -d ' ' -f 1; }
+# 8. Provenance (relative paths, toolchains, timings) and the journey-format
+# manifest (absolute paths + SHA-256 pins) that every consumer reads.
+sha_of() { candidate_sha256 "$out/$1"; }
 host_build_manifest_sha=$(candidate_sha256 "$out/work/host-build/manifest.txt")
 jq -n \
   --arg commit "$commit" --arg archive "$archive_sha" --arg origin "$source_origin" \
@@ -162,16 +161,16 @@ jq -n \
   --arg rustPin "$rust_pin" --arg rustc "$rustc_version" --arg cargo "$cargo_version" \
   --arg cc "$cc_version" --arg rustflags "remap source=/minidregg, CARGO_HOME=/cargo" \
   --arg mathlib "$(jq -r '.packages[] | select(.name == "mathlib") | .rev' "$src/lake-manifest.json")" \
-  --arg host "$(sum_of bin/minidregg-host)" --arg mini "$(sum_of bin/mini)" \
-  --arg store "$(sum_of bin/minidregg-link-sqlite-store)" \
-  --arg verifier "$(sum_of bin/minidregg-credential-signature-verifier)" \
+  --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
+  --arg store "$(sha_of bin/minidregg-link-sqlite-store)" \
+  --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
   --arg hostManifest "$host_build_manifest_sha" \
   --argjson tCache "$((t_cache - t_lean))" --argjson tHost "$((t_host - t_cache))" \
   --argjson tRust "$((t_rust - t_host))" --argjson tTotal "$(( $(date +%s) - t_start ))" \
   --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  '{type: "minidregg-candidate-manifest-v1",
+  '{type: "minidregg-candidate-provenance-v1",
     source: {commit: $commit, archive: "source.tar", archiveSha256: $archive,
-             origin: $origin, fileListSha256: $files},
+             origin: $origin, fileList: "logs/source-files.sha256", fileListSha256: $files},
     target: "x86_64-linux",
     toolchains: {leanToolchain: $leanPin, lean: $lean, lake: $lake, mathlibRev: $mathlib,
                  rustToolchain: $rustPin, rustc: $rustc, cargo: $cargo, cc: $cc,
@@ -182,6 +181,20 @@ jq -n \
                verifier: {path: "bin/minidregg-credential-signature-verifier", sha256: $verifier}},
     hostBuildManifest: {path: "work/host-build/manifest.txt", sha256: $hostManifest},
     seconds: {leanPackagesAndMathlibCache: $tCache, nativeHost: $tHost, rust: $tRust, total: $tTotal},
-    builtUtc: $built}' > "$out/manifest.json"
+    builtUtc: $built}' > "$out/provenance.json"
+(cd "$out" && sha256sum bin/minidregg-host bin/mini bin/minidregg-link-sqlite-store \
+  bin/minidregg-credential-signature-verifier provenance.json run.sh lib.sh INTERFACES.md \
+  genesis-params.example.json source.tar logs/source-files.sha256) > "$out/SHA256SUMS"
+jq -n --arg dir "$out" \
+  --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
+  --arg store "$(sha_of bin/minidregg-link-sqlite-store)" \
+  --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
+  --arg candidate "$(sha_of provenance.json)" \
+  '{host: ($dir + "/bin/minidregg-host"), mini: ($dir + "/bin/mini"),
+    store: ($dir + "/bin/minidregg-link-sqlite-store"),
+    verifier: ($dir + "/bin/minidregg-credential-signature-verifier"),
+    candidate: ($dir + "/provenance.json"),
+    sha256: {host: $host, mini: $mini, store: $store, verifier: $verifier, candidate: $candidate}}' \
+  > "$out/manifest.json"
 stamp "done: $out/manifest.json"
 cat "$out/SHA256SUMS"

@@ -24,32 +24,36 @@ candidate_sha256() {
 }
 
 # candidate_resolve MANIFEST
-# Sets CANDIDATE_DIR, HOST, MINI, STORE, VERIFIER to absolute paths after
-# checking every binary against the SHA-256 recorded in the manifest.
+# MANIFEST is the journey-format manifest build.sh writes (see INTERFACES.md):
+# absolute "host" "mini" "store" "verifier" "candidate" paths and a "sha256"
+# map. Sets CANDIDATE_MANIFEST, CANDIDATE_DIR, CANDIDATE_PROVENANCE, HOST, MINI,
+# STORE, VERIFIER after checking every file against its pinned SHA-256.
 candidate_resolve() {
   manifest=$(candidate_abs "$1")
   [ -f "$manifest" ] || candidate_die "manifest not found: $manifest"
-  jq -e '.type == "minidregg-candidate-manifest-v1"' "$manifest" >/dev/null \
-    || candidate_die "not a minidregg-candidate-manifest-v1: $manifest"
   CANDIDATE_MANIFEST=$manifest
   CANDIDATE_DIR=$(CDPATH='' cd -- "$(dirname -- "$manifest")" && pwd -P)
-  for role in host mini store verifier; do
-    relative=$(jq -er --arg role "$role" '.binaries[$role].path' "$manifest") \
-      || candidate_die "manifest lacks binaries.$role.path"
-    expected=$(jq -er --arg role "$role" '.binaries[$role].sha256' "$manifest") \
-      || candidate_die "manifest lacks binaries.$role.sha256"
-    case "$relative" in /*|*..*) candidate_die "binary path must be relative and inside the candidate: $relative" ;; esac
-    binary="$CANDIDATE_DIR/$relative"
-    [ -f "$binary" ] && [ -x "$binary" ] || candidate_die "not an executable file: $binary"
-    actual=$(candidate_sha256 "$binary")
-    [ "$actual" = "$expected" ] || candidate_die "SHA-256 mismatch for $role: $binary is $actual, manifest says $expected"
+  for role in host mini store verifier candidate; do
+    path=$(jq -er --arg role "$role" '.[$role] | select(type == "string" and startswith("/"))' "$manifest") \
+      || candidate_die "manifest .$role must be an absolute path"
+    expected=$(jq -er --arg role "$role" '.sha256[$role] | select(type == "string" and test("^[0-9a-f]{64}$"))' "$manifest") \
+      || candidate_die "manifest .sha256.$role must be a SHA-256"
+    [ -f "$path" ] || candidate_die "not a file: $path"
+    actual=$(candidate_sha256 "$path")
+    [ "$actual" = "$expected" ] || candidate_die "SHA-256 mismatch for $role: $path is $actual, manifest pins $expected"
     case "$role" in
-      host) HOST=$binary ;;
-      mini) MINI=$binary ;;
-      store) STORE=$binary ;;
-      verifier) VERIFIER=$binary ;;
+      host) HOST=$path ;;
+      mini) MINI=$path ;;
+      store) STORE=$path ;;
+      verifier) VERIFIER=$path ;;
+      candidate) CANDIDATE_PROVENANCE=$path ;;
     esac
   done
+  for binary in "$HOST" "$MINI" "$STORE" "$VERIFIER"; do
+    [ -x "$binary" ] || candidate_die "not executable: $binary"
+  done
+  jq -e '.type == "minidregg-candidate-provenance-v1"' "$CANDIDATE_PROVENANCE" >/dev/null \
+    || candidate_die "manifest .candidate is not a minidregg-candidate-provenance-v1"
 }
 
 # candidate_state STATE_DIR
