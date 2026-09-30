@@ -12,6 +12,7 @@ namespace Minidregg.Assurance.CredentialDelegationLineageWitness
 open Minidregg.Theory
 open CellState TypedAuthorization CredentialAuthorityFamily
 open CredentialAuthorityState CredentialLineageAdmission
+open Minidregg.Theory.Store
 
 set_option autoImplicit false
 
@@ -69,21 +70,19 @@ def unmarkedStored : StoredCapability .object :=
 def strictStored : StoredCapability .object :=
   ⟨{child with holder := .subject alice}, [⟨parent, .strict⟩]⟩
 
-def logical : LogicalState schema where
-  fields := ((0 : FieldStore schema).write (.capability .object parent.id) parentStored).write
-    (.capability .object child.id) delegatedStored
-  resources := fun resource => nomatch resource
+def logical : Store layout :=
+  ((0 : Store layout).set ⟨.capability .object, parent.id⟩ (some parentStored)).set
+    ⟨.capability .object, child.id⟩ (some delegatedStored)
 
 def pre (M : Materializer) : Cell M := materialize M logical
 
 theorem parent_present (M : Materializer) :
     readCapability (pre M) .object parent.id = some parentStored := by
-  change (((0 : FieldStore schema).write (.capability .object parent.id) parentStored).write
-    (.capability .object child.id) delegatedStored) (.capability .object parent.id) =
-      some parentStored
-  rw [FieldStore.write_other _
-    (show AuthorityField.capability .object child.id ≠ .capability .object parent.id by decide)]
-  exact FieldStore.write_self _ _ _
+  change logical ⟨.capability .object, parent.id⟩ = some parentStored
+  rw [logical, Store.set_ne _ _ _ _
+    (show (⟨.capability .object, parent.id⟩ : Address layout) ≠
+      ⟨.capability .object, child.id⟩ by decide), Store.set_eq]
+  rfl
 
 theorem explicit_transfer_shape : DelegationShape request child parent := by decide
 
@@ -100,13 +99,16 @@ theorem explicit_transfer_accepted (M : Materializer) :
     ⟨explicit_transfer_valid, explicit_transfer_anchored M⟩
 
 def rotatedPre (M : Materializer) : Cell M :=
-  materialize M {logical with fields := logical.fields.write (.subjectKeyEpoch alice) (show Epoch from 1)}
+  materialize M (logical.set ⟨.subjectKeyEpoch, alice⟩ (some (show Epoch from 1)))
 
 theorem grantor_rotation_preserves_capability_reads (M : Materializer)
     (kind : ResourceKind) (identifier : CapabilityId) :
     readCapability (pre M) kind identifier =
       readCapability (rotatedPre M) kind identifier := by
-  simp [pre, rotatedPre, readCapability, materialize]
+  change logical ⟨.capability kind, identifier⟩ =
+    (logical.set ⟨.subjectKeyEpoch, alice⟩ (some (show Epoch from 1)))
+      ⟨.capability kind, identifier⟩
+  rw [Store.set_ne _ _ _ _ (by simp)]
 
 theorem grantor_rotation_keeps_historical_lineage (M : Materializer) :
     storedLineageCheck (rotatedPre M) delegatedStored = true := by
@@ -157,7 +159,7 @@ theorem substituted_parent_refused (M : Materializer) :
   contradiction
 
 def emptyPre (M : Materializer) : Cell M :=
-  materialize M ⟨0, fun resource => nomatch resource⟩
+  materialize M 0
 
 theorem orphaned_transfer_refused (M : Materializer) :
     storedLineageCheck (emptyPre M) delegatedStored = false := by

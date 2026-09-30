@@ -21,7 +21,7 @@ open TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y z
+universe u v w y z
 
 /-! ## One family-generic argument address -/
 
@@ -33,9 +33,9 @@ The argument need not be the entire declaration.  Fields already represented
 independently in `TypedAuthorization.Request` should not be redundantly forced
 into `argsDigest`. -/
 structure DeclarationAddressing
-    {S : CellState.Schema.{u, v, w, x}}
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier) where
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier) where
   Argument : Type z
   argumentCodec : LawfulCodec Argument
   arguments : family.Declaration → Argument
@@ -47,9 +47,9 @@ structure DeclarationAddressing
 /-- The common special case where the selected argument is the entire semantic
 declaration.  This reuses the family's authoritative codec. -/
 def wholeDeclarationAddressing
-    {S : CellState.Schema.{u, v, w, x}}
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier)
     (digestBytes : List UInt8 → Digest)
     (exact : ∀ declaration, (family.request declaration).2.argsDigest =
       digestBytes (family.declarationCodec.encode declaration)) : DeclarationAddressing family where
@@ -60,18 +60,18 @@ def wholeDeclarationAddressing
   argsDigestExact := exact
 
 def DeclarationAddressing.digest
-    {S : CellState.Schema.{u, v, w, x}}
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     (addressing : DeclarationAddressing family)
     (declaration : family.Declaration) : Digest :=
   addressing.digestBytes
     (addressing.argumentCodec.encode (addressing.arguments declaration))
 
 @[simp] theorem DeclarationAddressing.digest_eq
-    {S : CellState.Schema.{u, v, w, x}}
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     (addressing : DeclarationAddressing family)
     (declaration : family.Declaration) :
     addressing.digest declaration =
@@ -80,9 +80,9 @@ def DeclarationAddressing.digest
   rfl
 
 @[simp] theorem DeclarationAddressing.decode_arguments_encode
-    {S : CellState.Schema.{u, v, w, x}}
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     (addressing : DeclarationAddressing family)
     (declaration : family.Declaration) :
     addressing.argumentCodec.decode
@@ -94,9 +94,9 @@ def DeclarationAddressing.digest
 selected arguments, not entire declarations: a projection may intentionally
 forget request-envelope fields which have their own common-request slots. -/
 structure DeclarationAddressing.BindingPremise
-    {S : CellState.Schema.{u, v, w, x}}
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     (addressing : DeclarationAddressing family)
     (left right : addressing.Argument) : Prop where
   reflectsArgument : addressing.digestBytes (addressing.argumentCodec.encode left) =
@@ -108,25 +108,23 @@ structure DeclarationAddressing.BindingPremise
 /-- There is one admission token. The addressing argument is checked source
 metadata, not an additional acceptance gate or a wrapper that callers can drop. -/
 abbrev Bound
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     (_addressing : DeclarationAddressing family)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     (request : Request kind) (pre : CellState.Materialized M)
     (declaration : family.Declaration)
-    (outcome : family.Outcome declaration) : Type (max u v w x y z) :=
+    (outcome : family.Outcome declaration) : Type (max u v w y z) :=
   AcceptedCellEffect (portal := portal) (authState := authState)
     family request pre declaration outcome
 
 namespace Bound
 
 variable
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {addressing : DeclarationAddressing family}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} {pre : CellState.Materialized M}
@@ -152,7 +150,6 @@ theorem argsDigestBound
     request.preStateRoot = pre.root :=
   bound.preRootBound
 
-omit [DecidableEq S.Field] [DecidableEq S.Resource] in
 theorem argument_eq_of_same_digest
     {left right : family.Declaration}
     (binding : addressing.BindingPremise (addressing.arguments left)
@@ -166,10 +163,9 @@ end Bound
 /-- A mismatched common argument digest cannot be hidden by an otherwise valid
 accepted effect. -/
 theorem no_bound_of_args_mismatch
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {addressing : DeclarationAddressing family}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} {pre : CellState.Materialized M}
@@ -187,14 +183,13 @@ def computationAddressing
     {Relation BridgeName CanonicalInput SemanticInput InputSourceWitness
       InputTargetWitness OutputCommitment PrivateOutput ResourceEffect Footprint
       Nullifier ModeEvidencePins : Type z}
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : Minidregg.Theory.ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier
       ModeEvidencePins)
-    (adapter : Minidregg.Theory.ComputationCellEffect.Adapter (S := S) declaration)
+    (adapter : Minidregg.Theory.ComputationCellEffect.Adapter (L := L) declaration)
     (pre : CellState.Materialized M) :
     DeclarationAddressing
       (Minidregg.Theory.ComputationCellEffect.family (M := M) declaration adapter pre) :=
@@ -207,14 +202,13 @@ def ofComputationAccepted
     {Relation BridgeName CanonicalInput SemanticInput InputSourceWitness
       InputTargetWitness OutputCommitment PrivateOutput ResourceEffect Footprint
       Nullifier ModeEvidencePins : Type z}
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : Minidregg.Theory.ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier
       ModeEvidencePins)
-    (adapter : Minidregg.Theory.ComputationCellEffect.Adapter (S := S) declaration)
+    (adapter : Minidregg.Theory.ComputationCellEffect.Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : declaration.Request} {result : declaration.Result}

@@ -21,6 +21,7 @@ open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
 open Minidregg.Theory.CellState
+open Minidregg.Theory.Store
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 
@@ -40,68 +41,56 @@ def recordStream : StreamCodec PolicyRecord where
     intro record suffix
     simp [bytesStream.decodePrefix_encode, PolicyRecordCodec.decode_encode]
 
-def schema : CellState.Schema.{0, 0, 0, 0} where
-  Field := Unit
-  FieldType := fun _ => PolicyRecord
-  Resource := Empty
-  ResourceType := Empty.elim
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
+/-- One ROM address holding the source record.  The record is installed when
+the cell is born (`stateOfOption`, through the lifecycle allocator); no guarded
+operation can write it afterwards (`Store.Op.no_enabled_rom_write`). -/
+abbrev layout : Store.Layout.{0, 0, 0} where
+  Namespace := Unit
+  Key := fun _ => Unit
+  Value := fun _ => PolicyRecord
+  discipline := fun _ => .rom
 
-instance : DecidableEq schema.Field := inferInstanceAs (DecidableEq Unit)
-instance : DecidableEq schema.Resource := fun resource => resource.elim
+/-- The sole address of a policy source cell. -/
+def recordAddress : Address layout := ⟨(), ()⟩
 
-def stateOfOption : Option PolicyRecord → LogicalState schema
-  | none => { fields := 0, resources := fun resource => nomatch resource }
-  | some record =>
-      { fields := (0 : FieldStore schema).write () record
-        resources := fun resource => nomatch resource }
+def stateOfOption : Option PolicyRecord → Store layout
+  | none => 0
+  | some record => (0 : Store layout).set recordAddress (some record)
 
-def recordAt (state : LogicalState schema) : Option PolicyRecord := state.fields ()
+def recordAt (state : Store layout) : Option PolicyRecord := state recordAddress
 
 @[simp] theorem recordAt_stateOfOption (record : Option PolicyRecord) :
     recordAt (stateOfOption record) = record := by
-  cases record <;> rfl
+  cases record <;> simp [recordAt, stateOfOption]
 
-theorem state_ext (state : LogicalState schema) :
+theorem state_ext (state : Store layout) :
     state = stateOfOption (recordAt state) := by
-  cases state with
-  | mk fields resources =>
-      have resourcesExact : resources = fun resource => nomatch resource := by
-        funext resource
-        exact Empty.elim resource
-      cases present : fields () with
-      | none =>
-          have fieldsExact : fields = (0 : FieldStore schema) := by
-            apply DFinsupp.ext
-            intro field
-            cases field
-            simpa using present
-          rw [fieldsExact, resourcesExact]
-          rfl
-      | some record =>
-          have fieldsExact : fields = (0 : FieldStore schema).write () record := by
-            apply DFinsupp.ext
-            intro field
-            cases field
-            simp [present]
-          rw [fieldsExact, resourcesExact]
-          rfl
+  apply DFinsupp.ext
+  rintro ⟨⟨⟩, ⟨⟩⟩
+  cases present : state recordAddress with
+  | none => simp [recordAt, stateOfOption, present]
+  | some record => simp [recordAt, stateOfOption, present]
+
+/-- No valid patch changes a policy source cell's record: the namespace is ROM. -/
+theorem record_immutable (state : Store layout) (patch : Patch layout)
+    (valid : Patch.ValidFrom state patch) :
+    recordAt (Patch.run state patch) = recordAt state :=
+  Patch.rom_preserved state patch recordAddress valid rfl
 
 def payloadStream := StreamCodec.product StreamCodec.nat (StreamCodec.option recordStream)
 
 def wireFrame : List UInt8 := "DREGG/POLICY/SOURCE".toUTF8.toList
 
-def encode (state : LogicalState schema) : List UInt8 :=
+def encode (state : Store layout) : List UInt8 :=
   wireFrame ++ payloadStream.encode (wireVersion, recordAt state)
 
-def decodeRaw (bytes : List UInt8) : Option (LogicalState schema) :=
+def decodeRaw (bytes : List UInt8) : Option (Store layout) :=
   if bytes.take wireFrame.length = wireFrame then do
     let (version, record) ← payloadStream.toLawful.decode (bytes.drop wireFrame.length)
     if version = wireVersion then some (stateOfOption record) else none
   else none
 
-@[simp] theorem decodeRaw_encode (state : LogicalState schema) :
+@[simp] theorem decodeRaw_encode (state : Store layout) :
     decodeRaw (encode state) = some state := by
   have decoded := payloadStream.toLawful.decode_encode (wireVersion, recordAt state)
   change payloadStream.toLawful.decode
@@ -109,15 +98,15 @@ def decodeRaw (bytes : List UInt8) : Option (LogicalState schema) :=
       some (wireVersion, recordAt state) at decoded
   simp [decodeRaw, encode, decoded, ← state_ext state]
 
-def decode (bytes : List UInt8) : Option (LogicalState schema) := do
+def decode (bytes : List UInt8) : Option (Store layout) := do
   let state ← decodeRaw bytes
   if encode state = bytes then some state else none
 
-@[simp] theorem decode_encode (state : LogicalState schema) :
+@[simp] theorem decode_encode (state : Store layout) :
     decode (encode state) = some state := by
   simp [decode]
 
-theorem decode_canonical {bytes : List UInt8} {state : LogicalState schema}
+theorem decode_canonical {bytes : List UInt8} {state : Store layout}
     (accepted : decode bytes = some state) : encode state = bytes := by
   unfold decode at accepted
   cases raw : decodeRaw bytes with
@@ -143,7 +132,7 @@ theorem wrong_version_refused (version : Nat) (record : Option PolicyRecord)
     some (version, record) at decoded
   simp [decode, decodeRaw, decoded, different]
 
-def stateCodec : LawfulCodec (LogicalState schema) where
+def stateCodec : LawfulCodec (Store layout) where
   encode := encode
   decode := decode
   decode_encode := decode_encode
@@ -154,7 +143,7 @@ def idCustomization : List UInt8 := [68, 82, 69, 71, 71, 46, 80, 79, 76, 73, 67,
 def rootBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash rootCustomization bytes).digest
 
-def materializer : Materializer schema Digest where
+def materializer : Materializer layout Digest where
   codec := stateCodec
   rootBytes := rootBytes
 
