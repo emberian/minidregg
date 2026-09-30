@@ -1,0 +1,17 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": {
+    "childCapability": "14809259662556240426",
+    "domain": "8501",
+    "kind": "object",
+    "name": "shared",
+    "recipient": "11033321548135836207",
+    "reservation": "9833528bcc382c5087237be5818ab59062f2b053f01d3d543745059378e69d33",
+    "target": "12014773799689856118"
+  },
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor/proposals/grant-newcomer/intent.json",
+  "intentSha256": "1f6eb912c8f2939aaff73c2efc320c6bb5ec1be1ac1d020317c4365e5d72be4a",
+  "proposalId": "grant-newcomer",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

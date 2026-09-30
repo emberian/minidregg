@@ -1,0 +1,157 @@
+# Shell journey, 2026-09-30
+
+The bake-off journey J0–J8 with every participant step typed into `mini shell`
+over ssh. RAN on persvati from branch `m4-shell` at `b105bd7`, by
+`native/resource-client/shell-journey.sh` into a fresh run directory
+(`run/journey-3` in the lane's private clone). Result: **J0–J8 PASS; 89 of 89
+rows ok.**
+
+## What ran
+
+- Service: the pinned Host `minidregg-host-e22d16b-r3` (sha256 `7239…e3db2`)
+  behind the pinned client's `mini serve` (`mini-0007925`, `3e9c…4513d`), with
+  the SQLite Store helper (`ad03…e193f`) and Ed25519 verifier (`c840…0892b`)
+  from `helpers-durable-copy`. Fresh Store and genesis from
+  `newparticipant-acceptance.sh`. Hashes: `log/binaries.sha256`.
+- Shell: `mini` built from `b105bd7` (sha256 `8984df31…95b9`), installed as the
+  forced command's client. It is the pinned client's source plus the shell
+  module and the HostDecision hooks; the resource-client diff between
+  `0007925` and the branch base `abe988d` is the bootstrap script and one line
+  in `selected_exchange.rs`.
+- Entrance: a private `sshd` (OpenSSH 10.0p2) on 127.0.0.1:22422 with its own
+  host key and `sshd/authorized_keys`: four `restrict,pty,command="…"` lines
+  rendered by `deploy/shell/render-shell-key`, one per participant key
+  (sponsor, newcomer, third, stranger). `sshd/sshd.log` holds 56 `Accepted
+  publickey` lines, one per shell row. The system sshd and `~/.ssh` were not
+  touched. `StrictModes no` because `/home/ember/build` is group-writable.
+- Rows: 56 shell sessions (54 one-verb sessions via `SSH_ORIGINAL_COMMAND`,
+  one script on stdin, one interactive session on a real pty driven by
+  keystrokes including Tab), 26 named checks over retained output, 7 operator
+  rows.
+
+## Operator rows (what a friend could not do)
+
+1. J0 bootstrap, and the private sshd.
+2. J1 and J5: copying the newcomer's (and third's) secret key into the
+   sponsor's session home. `enroll plan` and `enroll seal` sign with the
+   sponsor key and the newcomer key in one process; that is the current
+   enrollment contract, and lane M3 owns removing it. The newcomer generated
+   its own key in its own session (`keygen mini.key`) and the public key
+   appears in no genesis or config file (row 7).
+3. J6 service stop and reopen (the shell has no service verbs; the Host
+   operator owns the service).
+4. End: stop sshd, stop the service (cmdline-checked; `log/cleanup.txt`: no
+   process names the run directory afterwards).
+
+## Refusals
+
+Every expected refusal exited 3 with a first line decoded by the Host's own
+`inspect outcome`, e.g.
+
+    refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+
+The enrolled key with no grant (third) is refused at `query`; the unenrolled
+key (stranger) at `challenge`. The Host gives both the same phase and detail,
+as the bake-off found. `refusals/` holds the Host's decoding of the two J8
+newcomer refusals; the exact frames stay in the session home.
+
+## Files
+
+`log/NN-J-who.{line,stdout,stderr,exit,timing}` per row, `log/steps.tsv`,
+`log/checks.log`, `log/verdicts.txt`, `log/NN-J4-newcomer-tty.{keys,stdout}`
+(the interactive transcript), `journey.out` (the printed run). Private keys
+and the Store are not copied.
+
+## Step table
+
+| n | J | who | line | expect | exit | wall s | verdict | note |
+|---|---|---|---|---|---|---|---|---|
+| 1 | J0 | OPERATOR | `bootstrap fresh private Store, sponsor workspace, mini serve (pinned client)` | 0 | 0 | 49.215 | ok |  |
+| 2 | J0 | OPERATOR | `ssh keys, rendered authorized_keys, private sshd on 127.0.0.1:22422` | 0 | 0 | 0.308 | ok |  |
+| 3 | J0 | sponsor | `whoami` | 0 | 0 | 0.201 | ok |  |
+| 4 | J0 | check | `sponsor session is subject 7` | - | - | - | ok |  |
+| 5 | J0 | sponsor | `read factory` | 0 | 0 | 1.372 | ok |  |
+| 6 | J1 | newcomer | `keygen mini.key` | 0 | 0 | 0.210 | ok |  |
+| 7 | J1 | check | `newcomer public key appears in no genesis/config file` | - | - | - | ok |  |
+| 8 | J1 | OPERATOR | `CUSTODY: copy newcomer secret into sponsor home (enroll plan+seal sign with both keys i...` | 0 | 0 | 0.013 | ok |  |
+| 9 | J1 | sponsor | `enroll plan newcomer-1 newcomer-1.key` | 0 | 0 | 3.853 | ok |  |
+| 10 | J1 | sponsor | `enroll seal newcomer-1` | 0 | 0 | 1.059 | ok |  |
+| 11 | J1 | sponsor | `enroll submit newcomer-1` | 0 | 0 | 1.448 | ok |  |
+| 12 | J1 | check | `submit returned an admitted-key-only enrollment result` | - | - | - | ok |  |
+| 13 | J1 | sponsor | `enroll lookup newcomer-1` | 0 | 0 | 1.182 | ok |  |
+| 14 | J1 | check | `lookup returns the same receipt as submit` | - | - | - | ok |  |
+| 15 | J1 | check | `enrolled public key is the newcomer's own` | - | - | - | ok |  |
+| 16 | J1 | newcomer | `init mini.key 11033321548135836207` | 0 | 0 | 0.207 | ok |  |
+| 17 | J1 | newcomer | `whoami` | 0 | 0 | 0.201 | ok |  |
+| 18 | J1 | check | `newcomer session is subject 11033321548135836207` | - | - | - | ok |  |
+| 19 | J2 | sponsor | `create shared declared {"type":"all","predicates":[]}` | 0 | 0 | 5.930 | ok |  |
+| 20 | J2 | sponsor | `refs` | 0 | 0 | 0.248 | ok |  |
+| 21 | J2 | check | `sponsor holds reference shared (target 12014773799689856118)` | - | - | - | ok |  |
+| 22 | J2 | sponsor | `describe shared` | 0 | 0 | 1.462 | ok |  |
+| 23 | J2 | check | `law is all[] at version 0` | - | - | - | ok |  |
+| 24 | J3 | sponsor | `delegate grant-newcomer shared 11033321548135836207 observe,mutate 50000` | 0 | 0 | 4.448 | ok |  |
+| 25 | J3 | sponsor | `submit grant-newcomer` | 0 | 0 | 3.726 | ok |  |
+| 26 | J3 | check | `delegation installed` | - | - | - | ok |  |
+| 27 | J3 | sponsor | `publish grant-newcomer` | 0 | 0 | 0.700 | ok |  |
+| 28 | J3 | sponsor | `export grant-newcomer` | 0 | 0 | 0.187 | ok |  |
+| 29 | J3 | check | `exported reference is addressed to the newcomer` | - | - | - | ok |  |
+| 30 | J3 | check | `signed child capability: holder newcomer, verbs observe+mutate only` | - | - | - | ok |  |
+| 31 | J3 | newcomer | `import shared {"authority":"hint-only","capability":"14809259662556240426","kind":"obje...` | 0 | 0 | 0.202 | ok |  |
+| 32 | J3 | newcomer | `refs` | 0 | 0 | 0.189 | ok |  |
+| 33 | J4 | newcomer | `read shared` | 0 | 0 | 1.637 | ok |  |
+| 34 | J4 | check | `field 2 absent before the write` | - | - | - | ok |  |
+| 35 | J4 | newcomer | `invoke first-action shared create 2 1` | 0 | 0 | 1.870 | ok |  |
+| 36 | J4 | newcomer | `submit first-action` | 0 | 0 | 2.996 | ok |  |
+| 37 | J4 | check | `write installed` | - | - | - | ok |  |
+| 38 | J4 | newcomer | `(script) whoami;read shared;` | 0 | 0 | 1.582 | ok |  |
+| 39 | J4 | check | `script-mode read back: field 2 = 1` | - | - | - | ok |  |
+| 40 | J4 | newcomer | `(tty)  r e a \t s h \t \r h i s \t \r e x i t \r` | 0 | 0 | 16.025 | ok |  |
+| 41 | J4 | check | `tty: Tab completed 'read shared' and the Host answered field 2 = 1` | - | - | - | ok |  |
+| 42 | J5 | third | `keygen mini.key` | 0 | 0 | 0.183 | ok |  |
+| 43 | J5 | OPERATOR | `CUSTODY: copy third secret into sponsor home for the co-signed enrollment` | 0 | 0 | 0.007 | ok |  |
+| 44 | J5 | sponsor | `enroll plan third-1 third-1.key` | 0 | 0 | 4.186 | ok |  |
+| 45 | J5 | sponsor | `enroll seal third-1` | 0 | 0 | 1.225 | ok |  |
+| 46 | J5 | sponsor | `enroll submit third-1` | 0 | 0 | 2.987 | ok |  |
+| 47 | J5 | third | `init mini.key 17768843426024353880` | 0 | 0 | 0.178 | ok |  |
+| 48 | J5 | third | `import stolen object 12014773799689856118 14809259662556240426` | 0 | 0 | 0.192 | ok |  |
+| 49 | J5 | third | `read stolen` | 3 | 3 | 2.209 | ok | refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255) |
+| 50 | J5 | third | `invoke third-write stolen create 3 1` | 3 | 3 | 3.013 | ok | refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255) |
+| 51 | J5 | third | `import owner object 12014773799689856118 15518483405656782045` | 0 | 0 | 0.629 | ok |  |
+| 52 | J5 | third | `read owner` | 3 | 3 | 2.712 | ok | refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255) |
+| 53 | J5 | stranger | `keygen mini.key` | 0 | 0 | 0.274 | ok |  |
+| 54 | J5 | stranger | `init mini.key 4242424242` | 0 | 0 | 0.266 | ok |  |
+| 55 | J5 | stranger | `import stolen object 12014773799689856118 14809259662556240426` | 0 | 0 | 0.253 | ok |  |
+| 56 | J5 | stranger | `read stolen` | 3 | 3 | 0.928 | ok | refused: phase "observation" detail "observation refused" (Host refused challenge, reply byte 255) |
+| 57 | J5 | stranger | `invoke stranger-write stolen create 3 1` | 3 | 3 | 0.998 | ok | refused: phase "observation" detail "observation refused" (Host refused challenge, reply byte 255) |
+| 58 | J5 | newcomer | `read shared` | 0 | 0 | 1.500 | ok |  |
+| 59 | J5 | check | `control: newcomer still reads field 2 = 1` | - | - | - | ok |  |
+| 60 | J6 | OPERATOR | `stop the service and reopen the same Store (pinned mini serve)` | 0 | 0 | 0.386 | ok |  |
+| 61 | J6 | sponsor | `enroll lookup newcomer-1` | 0 | 0 | 4.457 | ok |  |
+| 62 | J6 | check | `enrollment receipt recovered unchanged` | - | - | - | ok |  |
+| 63 | J6 | newcomer | `read shared` | 0 | 0 | 1.581 | ok |  |
+| 64 | J6 | check | `J4 value recovered: field 2 = 1` | - | - | - | ok |  |
+| 65 | J6 | newcomer | `retry first-action` | 0 | 0 | 0.604 | ok |  |
+| 66 | J6 | check | `exact retry returns the original receipt, replayed` | - | - | - | ok |  |
+| 67 | J6 | newcomer | `history` | 0 | 0 | 0.164 | ok |  |
+| 68 | J7 | sponsor | `law law-v2 shared {"type":"not","predicate":{"type":"any","predicates":[]}}` | 0 | 0 | 1.723 | ok |  |
+| 69 | J7 | sponsor | `submit law-v2` | 0 | 0 | 2.470 | ok |  |
+| 70 | J7 | check | `law installed as record 6: the J6 retry caused no second effect` | - | - | - | ok |  |
+| 71 | J7 | sponsor | `describe shared` | 0 | 0 | 1.455 | ok |  |
+| 72 | J7 | check | `law is not(any[]) at version 1` | - | - | - | ok |  |
+| 73 | J7 | newcomer | `invoke after-law-v2 shared write 2 7 1` | 0 | 0 | 1.442 | ok |  |
+| 74 | J7 | newcomer | `submit after-law-v2` | 0 | 0 | 2.870 | ok |  |
+| 75 | J7 | check | `newcomer's existing grant still writes` | - | - | - | ok |  |
+| 76 | J7 | newcomer | `read shared` | 0 | 0 | 1.379 | ok |  |
+| 77 | J7 | check | `field 2 = 7` | - | - | - | ok |  |
+| 78 | J8 | sponsor | `law lockout shared {"type":"any","predicates":[]}` | 0 | 0 | 1.474 | ok |  |
+| 79 | J8 | sponsor | `submit lockout` | 0 | 0 | 3.104 | ok |  |
+| 80 | J8 | check | `deny-all installed` | - | - | - | ok |  |
+| 81 | J8 | newcomer | `read shared` | 3 | 3 | 1.513 | ok | refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255) |
+| 82 | J8 | newcomer | `invoke after-lock shared write 2 8 7` | 3 | 3 | 1.465 | ok | refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255) |
+| 83 | J8 | sponsor | `read shared` | 3 | 3 | 1.398 | ok | refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255) |
+| 84 | J8 | sponsor | `law repair shared {"type":"all","predicates":[]}` | 3 | 3 | 1.449 | ok | refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255) |
+| 85 | J8 | check | `each refused frame is retained with the Host's own decoding` | - | - | - | ok |  |
+| 86 | J8 | newcomer | `lookup after-law-v2` | 0 | 0 | 0.581 | ok |  |
+| 87 | J8 | check | `historical lookup still answers, replayed` | - | - | - | ok |  |
+| 88 | END | OPERATOR | `stop sshd` | 0 | 0 | 0.009 | ok |  |
+| 89 | END | OPERATOR | `stop the Mini service` | 0 | 0 | 0.147 | ok |  |

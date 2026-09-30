@@ -1,0 +1,31 @@
+/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor/sources/create-shared.current/intent.bin
+{
+  "acceptedCount": "2",
+  "confirmation": "installed",
+  "eventId": "23676274005382196835637173092596750466282565475280639178303996579091557872830",
+  "imageBoundary": "27591097132961295408206978792651239153191684202016229466509547978956293311406",
+  "transactionId": "32835230514168629848686313310348829249520041420611646514189363011888559063304",
+  "type": "confirmed"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "9762879004133049132",
+  "kind": "object",
+  "name": "shared",
+  "observeCapability": "15518483405656782045",
+  "operationCapability": "15518483405656782045",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "2",
+      "confirmation": "installed",
+      "eventId": "23676274005382196835637173092596750466282565475280639178303996579091557872830",
+      "imageBoundary": "27591097132961295408206978792651239153191684202016229466509547978956293311406",
+      "transactionId": "32835230514168629848686313310348829249520041420611646514189363011888559063304",
+      "type": "confirmed"
+    },
+    "reservationDigest": "a197fbc376c0d9b978358a7de25ed3a8dd6bec297ac02dfbad3cea82a15b616b",
+    "reservationRecord": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/namespace/request-a197fbc376c0d9b978358a7de25ed3a8dd6bec297ac02dfbad3cea82a15b616b.json"
+  },
+  "target": "12014773799689856118",
+  "type": "minidregg-participant-reference-v1"
+}

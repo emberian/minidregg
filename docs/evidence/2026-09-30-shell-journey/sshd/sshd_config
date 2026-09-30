@@ -1,0 +1,17 @@
+Port 22422
+ListenAddress 127.0.0.1
+HostKey /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/host_ed25519
+AuthorizedKeysFile /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys
+PidFile /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/sshd.pid
+AllowUsers ember
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM no
+StrictModes no
+PermitTTY yes
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+PermitUserEnvironment no
+LogLevel VERBOSE

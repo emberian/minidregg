@@ -1,0 +1,34 @@
+mini shell: workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace. help lists verbs; every decision is the Host's.
+[Kmini> [Kmini> r[Kmini> re[Kmini> rea[Kmini> read [Kmini> read s[Kmini> read sh[Kmini> read shared 
+workspace read attempt: /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace/attempts/a-302368291218808790187979065940154440022
+{
+  "balances": [],
+  "page": {
+    "effectDomain": "8501",
+    "entries": [
+      {
+        "key": {
+          "field": "1",
+          "resource": "12014773799689856118",
+          "type": "object"
+        },
+        "value": "0"
+      },
+      {
+        "key": {
+          "field": "2",
+          "resource": "12014773799689856118",
+          "type": "object"
+        },
+        "value": "1"
+      }
+    ],
+    "root": "74087508000016819322893180502426493568492433628605962922804772629298949176204",
+    "shardNumber": "6"
+  },
+  "type": "resource"
+}
+[Kmini> [Kmini> h[Kmini> hi[Kmini> his[Kmini> history 
+# local retained evidence, oldest first; authority: discovery-only
+attempt	first-action	confirmed installed acceptedCount=4 tx=35181668966871798041198699653821074061373341703753291447049744152129341270483 (outcome.json of 1 outcome files)
+[Kmini> [Kmini> e[Kmini> ex[Kmini> exi[Kmini> exit

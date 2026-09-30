@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor/proposals/lockout/intent.json",
+  "intentSha256": "158b481e26d5ce510482b3a07a20369797b34cae4c5400540d53dcfe69a59b72",
+  "proposalId": "lockout",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

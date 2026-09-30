@@ -1,0 +1,6 @@
+workspace read attempt: /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger/workspace/attempts/a-195713615090030436682595673116080460677
+refused: phase "observation" detail "observation refused" (Host refused challenge, reply byte 255)
+  outcome (decoded by the Host): {"detail":"6f62736572766174696f6e2072656675736564","phase":"6f62736572766174696f6e","type":"refused"}
+  encoded: 44524547472f4e41544956452d484f53542f4f5554434f4d452f763101000bff6f62736572766174696f6e13ff6f62736572766174696f6e2072656675736564
+  evidence: /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger/refusals/1790747233-challenge-e123be52a4aaf75e.bin
+  client: host refused challenge; encoded refusal: 44524547472f4e41544956452d484f53542f4f5554434f4d452f763101000bff6f62736572766174696f6e13ff6f62736572766174696f6e2072656675736564

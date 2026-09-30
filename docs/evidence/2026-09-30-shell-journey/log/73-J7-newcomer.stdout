@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace/proposals/after-law-v2/intent.json",
+  "intentSha256": "1529c8df5329d003509342b37ea2148ee6dc994ca8d1b969a0beb92cb5c5777c",
+  "proposalId": "after-law-v2",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
