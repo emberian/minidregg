@@ -86,3 +86,9 @@ root = "Host.WorldFoldBench"
 [[lean_exe]]
 name = "world-root-bench"
 root = "Host.WorldRootBench"
+
+# The compiled Theory.Nock interpreter behind a CLI (stdin: jam of [subject formula];
+# see Host/NockEval.lean). Driven by the nockvm differential harness. Not part of the umbrella gate.
+[[lean_exe]]
+name = "nock-eval"
+root = "Host.NockEval"
