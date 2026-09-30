@@ -5033,6 +5033,16 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome := NativeHost.enrollmentLookupLoaded
                               pinnedConfig opened payload
                             return ((89 : UInt8), outcomeCodec.encode outcome)
+                        | 94 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.provisionSubmitLoaded
+                              pinnedConfig opened payload
+                            return ((94 : UInt8), outcomeCodec.encode outcome)
+                        | 95 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.provisionLookupLoaded
+                              pinnedConfig opened payload
+                            return ((95 : UInt8), outcomeCodec.encode outcome)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload
@@ -5410,6 +5420,25 @@ def run (arguments : List String) : IO UInt32 := do
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "participant enrollment ingress exceeds host frame bound")
                             return ((87 : UInt8), ingress)
+                        | 92 =>
+                            let (observationBytes, commandBytes) ← splitPair payload
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (← NativeHost.provisionPlanAuthorizedLoaded
+                              pinnedConfig opened observationBytes commandBytes)
+                            let bytes := ParticipantFactoryProvisioning.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "participant provisioning plan exceeds host frame bound")
+                            return ((92 : UInt8), bytes)
+                        | 93 =>
+                            let (planBytes, sponsorSignature) ← splitPair payload
+                            let some plan := ParticipantFactoryProvisioning.signingPlanCodec.decode
+                                planBytes
+                              | throw (IO.userError "noncanonical participant provisioning plan")
+                            let ingress ← IO.ofExcept (NativeHost.provisionAssemble plan
+                              sponsorSignature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "participant provisioning ingress exceeds host frame bound")
+                            return ((93 : UInt8), ingress)
                         | 48 | 49 | 58 | 59 =>
                             let some custody := settings.agentDispatchFixed
                               | return ((255 : UInt8), failure "application-agent-dispatch-author"

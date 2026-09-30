@@ -30,6 +30,7 @@ import Host.ApplicationGrainSessionEnrollmentInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
+import Kernel.ParticipantFactoryProvisioning
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -2116,6 +2117,24 @@ private def participantKeyEnrollment (json : Lean.Json) : Result (List UInt8) :=
       key := ← keyRecord "$.key" (← field "$" "key" obj) }
   return ParticipantKeyEnrollment.commandCodec.encode command
 
+/-- Source-owned authoring for a factory-observation provisioning request.
+These bytes name a holder and a fresh identifier; they do not claim that the
+holder is enrolled, that the identifier is fresh, or that the sponsor may act. -/
+private def participantFactoryProvisioning (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["sponsor", "control", "nonce",
+    "expectedFactoryRoot", "expectedAuthorityRoot", "holder", "capability"] json
+  let command : ParticipantFactoryProvisioning.Command :=
+    { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
+      control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot"
+        (← field "$" "expectedFactoryRoot" obj)⟩
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩
+      holder := ⟨← nat "$.holder" (← field "$" "holder" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩ }
+  return ParticipantFactoryProvisioning.commandCodec.encode command
+
 /-- Encode an operator's chosen issue, role and capability selectors. -/
 private def sessionEnrollmentRequest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$"
@@ -2158,6 +2177,7 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "participant-key-enrollment" => participantKeyEnrollment json
+  | "participant-factory-provisioning" => participantFactoryProvisioning json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2323,6 +2343,18 @@ private def participantKeyCommandJson
    ("expectedFactoryRoot", decimal command.expectedFactoryRoot.value),
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
    ("key", participantKeyRecordJson command.key)]
+
+private def participantProvisioningCommandJson
+    (command : ParticipantFactoryProvisioning.Command) : Lean.Json := .mkObj
+  [("type", "participant-factory-provisioning-v1"),
+   ("canonical", hexJson (ParticipantFactoryProvisioning.commandCodec.encode command)),
+   ("sponsor", decimal command.sponsor.value),
+   ("control", decimal command.control.value),
+   ("nonce", decimal command.nonce),
+   ("expectedFactoryRoot", decimal command.expectedFactoryRoot.value),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
+   ("holder", decimal command.holder.value),
+   ("capability", decimal command.capability.value)]
 
 private def planJson (plan : SigningPlan) : Lean.Json := .mkObj
   [("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
@@ -2912,6 +2944,33 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("sponsorEnvelope", hexJson parsed.ingress.sponsorEnvelope),
          ("possessionSignature", hexJson parsed.ingress.possessionSignature),
          ("possessionSignatureLength", decimal parsed.ingress.possessionSignature.length),
+         ("signatureVerified", .bool false)]
+  | "participant-factory-provisioning" => do
+      let command ← decoded "participant-factory-provisioning"
+        ParticipantFactoryProvisioning.commandCodec bytes
+      pure (participantProvisioningCommandJson command)
+  | "participant-factory-provisioning-plan" => do
+      let plan ← decoded "participant-factory-provisioning-plan"
+        ParticipantFactoryProvisioning.signingPlanCodec bytes
+      let some command := ParticipantFactoryProvisioning.commandCodec.decode plan.commandBytes
+        | failAt "participant-factory-provisioning-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "participant-factory-provisioning-plan-v1"),
+         ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value),
+         ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("command", participantProvisioningCommandJson command),
+         ("sponsorHeader", signedHeaderJson plan.sponsorHeader)]
+  | "participant-factory-provisioning-ingress" => do
+      let some parsed := ParticipantFactoryProvisioning.decodeIngress bytes
+        | failAt "participant-factory-provisioning-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "participant-factory-provisioning-ingress-v1"),
+         ("canonical", hexJson bytes),
+         ("commandBytes", hexJson parsed.ingress.commandBytes),
+         ("command", participantProvisioningCommandJson parsed.command),
+         ("sponsorEnvelope", hexJson parsed.ingress.sponsorEnvelope),
          ("signatureVerified", .bool false)]
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do

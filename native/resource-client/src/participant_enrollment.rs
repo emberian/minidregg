@@ -14,7 +14,7 @@ const PLAN_KIND: &str = "participant-key-enrollment-plan";
 const INGRESS_KIND: &str = "participant-key-enrollment-ingress";
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 
-fn json_private(path: &Path) -> Result<Value> {
+pub(crate) fn json_private(path: &Path) -> Result<Value> {
     serde_json::from_slice(&private_bytes(path, 256 * 1024)?).map_err(|error| {
         format!(
             "invalid private enrollment JSON {}: {error}",
@@ -23,7 +23,7 @@ fn json_private(path: &Path) -> Result<Value> {
     })
 }
 
-fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
+pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     let path = PathBuf::from(field(value, key)?);
     if !path.is_absolute() {
         return Err(format!("enrollment {key} must be absolute"));
@@ -31,7 +31,7 @@ fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn decimal(value: &str, label: &str) -> Result<()> {
+pub(crate) fn decimal(value: &str, label: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 80
         || value.starts_with('0') && value != "0"
@@ -54,7 +54,7 @@ fn identity_name(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn key(path: &Path) -> Result<SigningKey> {
+pub(crate) fn key(path: &Path) -> Result<SigningKey> {
     let mut bytes: [u8; 32] = private_bytes(path, 32)?
         .try_into()
         .map_err(|_| "enrollment key must contain exactly 32 raw bytes")?;
@@ -63,7 +63,7 @@ fn key(path: &Path) -> Result<SigningKey> {
     Ok(signing)
 }
 
-fn nonce() -> Result<String> {
+pub(crate) fn nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
@@ -71,7 +71,7 @@ fn nonce() -> Result<String> {
     Ok(u128::from_be_bytes(bytes).to_string())
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
     let length: u32 = first
         .len()
         .try_into()
@@ -85,7 +85,7 @@ fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
+pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
         [byte @ (255 | 254), encoded @ ..] => {
             note_host_decision(HostDecision::RefusedFrame {
@@ -98,20 +98,18 @@ fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
             ))
         }
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!(
-            "enrollment op{operation} returned an invalid frame"
-        )),
+        _ => Err(format!("Host op{operation} returned an invalid frame")),
     }
 }
 
-fn save_json(path: &Path, value: &Value) -> Result<()> {
+pub(crate) fn save_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
     sync_directory_ancestors(path.parent().ok_or("enrollment file lacks parent")?)
 }
 
-fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
     if path.exists() {
         if bounded(path, LIMIT)? != bytes {
             return Err(format!(
@@ -125,7 +123,7 @@ fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
     sync_directory_ancestors(path.parent().ok_or("enrollment file lacks parent")?)
 }
 
-fn save_json_staged(path: &Path, value: &Value) -> Result<()> {
+pub(crate) fn save_json_staged(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     retain_exact(path, &bytes)
@@ -163,7 +161,7 @@ fn retained_request(directory: &Path, expected: &Value) -> Result<Value> {
     Ok(request)
 }
 
-fn transform(
+pub(crate) fn transform(
     host: &Path,
     socket: &Path,
     config: &Path,
@@ -201,7 +199,7 @@ fn transform(
     retain_exact(output, body)
 }
 
-fn inspect(
+pub(crate) fn inspect(
     host: &Path,
     socket: &Path,
     config: &Path,
@@ -214,14 +212,19 @@ fn inspect(
         .map_err(|error| format!("invalid enrollment Host inspection: {error}"))
 }
 
-fn retained_frame(directory: &Path, stem: &str, frame: &[u8], operation: u8) -> Result<Vec<u8>> {
+pub(crate) fn retained_frame(
+    directory: &Path,
+    stem: &str,
+    frame: &[u8],
+    operation: u8,
+) -> Result<Vec<u8>> {
     retain_exact(&directory.join(format!("{stem}.frame")), frame)?;
     let body = reply(frame, operation)?.to_vec();
     retain_exact(&directory.join(format!("{stem}.bin")), &body)?;
     Ok(body)
 }
 
-fn staged_invoke(
+pub(crate) fn staged_invoke(
     host: &Path,
     socket: &Path,
     config: &Path,
@@ -233,7 +236,7 @@ fn staged_invoke(
     let frame_path = directory.join(format!("{stem}.frame"));
     let frame = if frame_path.exists() {
         let retained = bounded(&frame_path, transport::HOST_MAX_FRAME)?;
-        if operation == 86 {
+        if operation == 86 || operation == 92 {
             let current =
                 session_invoke(host, socket, config, operation, payload).map_err(|error| {
                     format!("retained enrollment plan is stale; start a new request with a new --name label: {error}")
@@ -252,7 +255,7 @@ fn staged_invoke(
     retained_frame(directory, stem, &frame, operation)
 }
 
-fn pinned(value: &Value, key: &str, expected: &str) -> Result<()> {
+pub(crate) fn pinned(value: &Value, key: &str, expected: &str) -> Result<()> {
     if field(value, key)? != expected {
         return Err(format!("enrollment {key} pin changed"));
     }
@@ -362,6 +365,123 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         plan,
         command,
     })
+}
+
+/// A sponsor-signed factory resource observation retained under `directory`.
+/// Returns the exact signed observation and the factory and authority roots it
+/// observed. Every Host frame is retained before its body is used.
+pub(crate) struct FactoryObservation<'a> {
+    pub(crate) host: &'a Path,
+    pub(crate) socket: &'a Path,
+    pub(crate) config: &'a Path,
+    pub(crate) directory: &'a Path,
+    pub(crate) sponsor: &'a str,
+    pub(crate) nonce: &'a str,
+    pub(crate) factory: &'a str,
+    pub(crate) observe: &'a str,
+}
+
+pub(crate) fn signed_factory_observation(
+    input: &FactoryObservation<'_>,
+    signing: &SigningKey,
+) -> Result<(Vec<u8>, String, String)> {
+    let query = json!({"subject":input.sponsor,"nonce":input.nonce,
+        "purpose":{"type":"query","kind":"object","target":input.factory,"view":"resource"},
+        "grants":[{"kind":"object","target":input.factory,"capability":input.observe}]});
+    save_json_staged(&input.directory.join("query.json"), &query)?;
+    transform(
+        input.host,
+        input.socket,
+        input.config,
+        7,
+        Some("intent"),
+        &input.directory.join("query.json"),
+        &input.directory.join("query.bin"),
+    )?;
+    let query_bytes = private_bytes(&input.directory.join("query.bin"), LIMIT)?;
+    let observation = input.directory.join("observation");
+    match fs::DirBuilder::new().mode(0o700).create(&observation) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            drain::private_dir(&observation)?;
+        }
+        Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
+    }
+    let challenge = staged_invoke(
+        input.host,
+        input.socket,
+        input.config,
+        &observation,
+        "challenge",
+        4,
+        &query_bytes,
+    )?;
+    let challenge_json = inspect(
+        input.host,
+        input.socket,
+        input.config,
+        "challenge",
+        &observation.join("challenge.bin"),
+        &observation.join("challenge.json"),
+    )?;
+    let headers = challenge_headers(&challenge_json)?;
+    if headers.is_empty() {
+        return Err("factory observation has no signing header".into());
+    }
+    let signatures = sign_headers(signing, &headers);
+    save_json_staged(&observation.join("signatures.json"), &signatures)?;
+    transform(
+        input.host,
+        input.socket,
+        input.config,
+        9,
+        None,
+        &observation.join("signatures.json"),
+        &observation.join("signatures.bin"),
+    )?;
+    let signature_bytes = private_bytes(&observation.join("signatures.bin"), 4096)?;
+    let signed = staged_invoke(
+        input.host,
+        input.socket,
+        input.config,
+        &observation,
+        "signed-observation",
+        10,
+        &pair(&challenge, &signature_bytes)?,
+    )?;
+    let _view = staged_invoke(
+        input.host,
+        input.socket,
+        input.config,
+        &observation,
+        "view",
+        5,
+        &signed,
+    )?;
+    let view_json = inspect(
+        input.host,
+        input.socket,
+        input.config,
+        "view-resource",
+        &observation.join("view.bin"),
+        &observation.join("view.json"),
+    )?;
+    pinned(&view_json, "type", "resource")?;
+    let factory_root = view_json
+        .get("page")
+        .and_then(|page| page.get("root"))
+        .and_then(Value::as_str)
+        .ok_or("signed factory view lacks root")?;
+    decimal(factory_root, "factory root")?;
+    let authority_root = challenge_json
+        .get("signing")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(|first| first.get("authorityRoot"))
+        .and_then(Value::as_str)
+        .ok_or("signed factory challenge lacks authority root")?;
+    decimal(authority_root, "authority root")?;
+    Ok((signed, factory_root.to_owned(), authority_root.to_owned()))
 }
 
 fn plan(mut args: Args) -> Result<()> {
@@ -491,102 +611,21 @@ fn plan(mut args: Args) -> Result<()> {
     )?;
     retain_exact(&directory.join("config.json"), &config_bytes)?;
     let retained_config = directory.join("config.json");
-    let query = json!({"subject":sponsor,"nonce":field(&request,"nonce")?,
-        "purpose":{"type":"query","kind":"object","target":factory_target,"view":"resource"},
-        "grants":[{"kind":"object","target":factory_target,"capability":observe}]});
-    save_json_staged(&directory.join("query.json"), &query)?;
-    transform(
-        &host,
-        &public_socket,
-        &retained_config,
-        7,
-        Some("intent"),
-        &directory.join("query.json"),
-        &directory.join("query.bin"),
+    let (signed, factory_root, authority_root) = signed_factory_observation(
+        &FactoryObservation {
+            host: &host,
+            socket: &public_socket,
+            config: &retained_config,
+            directory: &directory,
+            sponsor: &sponsor,
+            nonce: field(&request, "nonce")?,
+            factory: &factory_target,
+            observe: &observe,
+        },
+        &sponsor_signing,
     )?;
-    let query_bytes = private_bytes(&directory.join("query.bin"), LIMIT)?;
-    let observation = directory.join("observation");
-    match fs::DirBuilder::new().mode(0o700).create(&observation) {
-        Ok(()) => (),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            drain::private_dir(&observation)?;
-        }
-        Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
-    }
-    let challenge = staged_invoke(
-        &host,
-        &public_socket,
-        &retained_config,
-        &observation,
-        "challenge",
-        4,
-        &query_bytes,
-    )?;
-    let challenge_json = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        "challenge",
-        &observation.join("challenge.bin"),
-        &observation.join("challenge.json"),
-    )?;
-    let headers = challenge_headers(&challenge_json)?;
-    if headers.is_empty() {
-        return Err("factory observation has no signing header".into());
-    }
-    let signatures = sign_headers(&sponsor_signing, &headers);
-    save_json_staged(&observation.join("signatures.json"), &signatures)?;
-    transform(
-        &host,
-        &public_socket,
-        &retained_config,
-        9,
-        None,
-        &observation.join("signatures.json"),
-        &observation.join("signatures.bin"),
-    )?;
-    let signature_bytes = private_bytes(&observation.join("signatures.bin"), 4096)?;
-    let signed = staged_invoke(
-        &host,
-        &public_socket,
-        &retained_config,
-        &observation,
-        "signed-observation",
-        10,
-        &pair(&challenge, &signature_bytes)?,
-    )?;
-    let _view = staged_invoke(
-        &host,
-        &public_socket,
-        &retained_config,
-        &observation,
-        "view",
-        5,
-        &signed,
-    )?;
-    let view_json = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        "view-resource",
-        &observation.join("view.bin"),
-        &observation.join("view.json"),
-    )?;
-    pinned(&view_json, "type", "resource")?;
-    let factory_root = view_json
-        .get("page")
-        .and_then(|page| page.get("root"))
-        .and_then(Value::as_str)
-        .ok_or("signed factory view lacks root")?;
-    decimal(factory_root, "factory root")?;
-    let authority_root = challenge_json
-        .get("signing")
-        .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(|first| first.get("authorityRoot"))
-        .and_then(Value::as_str)
-        .ok_or("signed factory challenge lacks authority root")?;
-    decimal(authority_root, "authority root")?;
+    let factory_root = factory_root.as_str();
+    let authority_root = authority_root.as_str();
     let command_source = json!({"sponsor":sponsor,"control":control,
         "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
         "expectedAuthorityRoot":authority_root,
@@ -797,7 +836,7 @@ fn outcome(directory: &Path, pin: &Pin, stem: &str, frame: &[u8], operation: u8)
     Ok(value)
 }
 
-fn confirmed(value: &Value) -> Result<()> {
+pub(crate) fn confirmed(value: &Value) -> Result<()> {
     if field(value, "type")? != "confirmed"
         || !matches!(field(value, "confirmation")?, "installed" | "replayed")
     {
