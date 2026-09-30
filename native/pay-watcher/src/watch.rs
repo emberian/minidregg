@@ -103,12 +103,20 @@ fn pretty(value: &Value) -> Vec<u8> {
     bytes
 }
 
-/// The retained receipts: one file per credited signature, named by the signature as base58
-/// (Solana's spelling) or as 128 hex digits. Both decode to the 64 raw bytes, which is the only
-/// thing compared. Dotfiles are ignored silently; any other name is reported and ignored (a
-/// lost receipt costs one kernel refusal of a resubmission, never a second credit).
-pub fn load_receipts(dir: &Path) -> Result<(BTreeSet<Sig>, Vec<Event>), String> {
-    let mut sigs = BTreeSet::new();
+/// One retained receipt: a transfer the kernel has decided, named by the same pair its
+/// nullifier binds (`"soltx:" ‖ signature ‖ address`, PAY §10). One transaction can pay two
+/// book addresses, and a receipt for one of them must not stop the other from being read.
+pub type Receipt = (Sig, Key);
+
+/// The retained receipts: one directory entry per decided transfer, named
+/// `SIGNATURE.ADDRESS`, each part as base58 (Solana's spelling) or as lowercase hex of the raw
+/// bytes (128 and 64 digits). Only the bytes are compared. The entry's contents are the
+/// writer's (the client makes each one a symlink to the attempt that decided it); only the
+/// name is read here. Dotfiles are ignored silently; any other name, including a bare
+/// signature, is reported and ignored (a lost receipt costs one kernel refusal of a
+/// resubmission, never a second credit).
+pub fn load_receipts(dir: &Path) -> Result<(BTreeSet<Receipt>, Vec<Event>), String> {
+    let mut receipts = BTreeSet::new();
     let mut events = Vec::new();
     let entries =
         std::fs::read_dir(dir).map_err(|e| format!("receipts {}: {e}", dir.display()))?;
@@ -122,20 +130,30 @@ pub fn load_receipts(dir: &Path) -> Result<(BTreeSet<Sig>, Vec<Event>), String> 
         if name.starts_with('.') {
             continue;
         }
-        match unhex::<64>(&name).or_else(|| unbase58::<64>(&name)) {
-            Some(sig) => {
-                sigs.insert(sig);
+        match receipt_name(&name) {
+            Some(receipt) => {
+                receipts.insert(receipt);
             }
             None => events.push(Event::of(
                 Reason::IgnoredReceiptName,
                 None,
                 None,
                 None,
-                format!("receipt name is neither a base58 nor a hex 64-byte signature: {name}"),
+                format!(
+                    "receipt name is not SIGNATURE.ADDRESS (64-byte signature, 32-byte address, \
+                     each base58 or hex): {name}"
+                ),
             )),
         }
     }
-    Ok((sigs, events))
+    Ok((receipts, events))
+}
+
+fn receipt_name(name: &str) -> Option<Receipt> {
+    let (signature, address) = name.split_once('.')?;
+    let signature = unhex::<64>(signature).or_else(|| unbase58::<64>(signature))?;
+    let address = unhex::<32>(address).or_else(|| unbase58::<32>(address))?;
+    Some((signature, address))
 }
 
 /// The finalized tip every endpoint has reached: the least finalized slot across endpoints,
@@ -429,7 +447,7 @@ fn view_index(
 pub fn run(
     cfg: &Config,
     transports: &[&dyn Transport],
-    receipts: &BTreeSet<Sig>,
+    receipts: &BTreeSet<Receipt>,
     cursor: &Cursor,
 ) -> Result<Report, Refusal> {
     if transports.len() < cfg.min_endpoints {
@@ -449,9 +467,16 @@ pub fn run(
 
     for entry in &cfg.book {
         let idx = Some(entry.index);
+        // The receipts for THIS address: a transfer decided for another book row is not one
+        // decided here, even when the transaction is the same.
+        let retained: BTreeSet<Sig> = receipts
+            .iter()
+            .filter(|(_, address)| *address == entry.address)
+            .map(|(signature, _)| *signature)
+            .collect();
         let views: Vec<(&str, Result<IndexView, Refusal>)> = transports
             .iter()
-            .map(|t| (t.label(), view_index(*t, cfg, entry, receipts, tip, cursor)))
+            .map(|t| (t.label(), view_index(*t, cfg, entry, &retained, tip, cursor)))
             .collect();
 
         let refusals: Vec<Event> = views
@@ -478,7 +503,7 @@ pub fn run(
             .flat_map(|(_, v)| v.outcomes.keys().copied())
             .collect();
         // Signatures whose agreed outcome is a permanent decision (see `Cursor`).
-        let mut settled: BTreeSet<Sig> = receipts.clone();
+        let mut settled: BTreeSet<Sig> = retained.clone();
         for sig in sigs {
             let answers: Vec<Option<&Outcome>> =
                 views.iter().map(|(_, v)| v.outcomes.get(&sig)).collect();

@@ -3,7 +3,7 @@
 
 Every vector is a directory:
   config.json        the watcher config (receiptsDir = receipts)
-  receipts/          retained receipts, one file per credited signature
+  receipts/          retained receipts, one entry per decided transfer, SIGNATURE.ADDRESS (hex)
   endpoints/a, /b    one fixture endpoint each (file naming: transport::fixture_key)
   expect.json        exit code, observation count, and the event reasons that must appear
 
@@ -669,7 +669,7 @@ def main():
     vector("retained", "pay-2 has a retained receipt (named in hex) and is not fetched; the newer "
            "pay-3 and the OLDER unreceipted pay-1 are both emitted",
            {"exit": 0, "observations": 2, "reasons": ["alreadyRetained"]},
-           endpoints=same(retained), receipts=[PAY2.hex()])
+           endpoints=same(retained), receipts=[PAY2.hex() + "." + key("book 0").hex()])
 
     def same_signature():
         ep = Endpoint().base(accounts=((BOOK0, [ATA0B, ATA0]),))

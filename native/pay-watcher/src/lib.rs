@@ -24,4 +24,4 @@ pub mod watch;
 pub use config::{Asset, BookEntry, Config, Enrol};
 pub use model::{Clock, Event, EventKind, MemoError, Observation, Reason, Refusal};
 pub use transport::{CurlTransport, FixtureTransport, Transport};
-pub use watch::{cursor_json, load_cursor, load_receipts, run, Cursor, Report};
+pub use watch::{cursor_json, load_cursor, load_receipts, run, Cursor, Receipt, Report};

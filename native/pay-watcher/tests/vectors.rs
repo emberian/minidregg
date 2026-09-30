@@ -231,9 +231,57 @@ fn a_retained_signature_is_not_fetched_and_does_not_stop_paging() {
         .filter(|n| !n.starts_with('.'))
         .collect();
     assert_eq!(receipts.len(), 1);
-    assert_eq!(hex(&e.signature.unwrap()), receipts[0]);
+    let address = r.observations[0].address;
+    assert_eq!(format!("{}.{}", hex(&e.signature.unwrap()), hex(&address)), receipts[0]);
     // Fetching the retained pay-2 would have hit a missing fixture and refused `transport`.
     assert!(!r.refused(), "{:?}", r.events);
+}
+
+/// The refuting pole of the receipt key: the same signature retained for ANOTHER address is
+/// not a receipt here. One transaction can pay two book rows; a receipt for one must not skip
+/// the other, or its credit is never read again (the P1 finding (A) failure, moved to receipts).
+#[test]
+fn a_receipt_for_the_same_signature_at_another_address_does_not_skip_the_fetch() {
+    let dir = scratch("receipt-other-address");
+    let vector = dir.join("vector");
+    copy_dir(&fixture("retained"), &vector);
+    let receipts_dir = vector.join("receipts");
+    let original: Vec<String> = std::fs::read_dir(&receipts_dir)
+        .unwrap()
+        .map(|d| d.unwrap().file_name().into_string().unwrap())
+        .filter(|n| !n.starts_with('.'))
+        .collect();
+    assert_eq!(original.len(), 1);
+    let (signature, _) = original[0].split_once('.').unwrap();
+    std::fs::remove_file(receipts_dir.join(&original[0])).unwrap();
+    std::fs::write(receipts_dir.join(format!("{signature}.{}", hex(&[7u8; 32]))), b"").unwrap();
+    let cfg = Config::load(&vector.join("config.json")).unwrap();
+    let owned: Vec<FixtureTransport> = ["a", "b"]
+        .iter()
+        .map(|e| FixtureTransport::new(vector.join("endpoints").join(e)))
+        .collect();
+    let transports: Vec<&dyn Transport> = owned.iter().map(|t| t as &dyn Transport).collect();
+    let (receipts, events) = load_receipts(&cfg.receipts_dir).unwrap();
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(receipts.len(), 1);
+    let report = run(&cfg, &transports, &receipts, &Default::default()).unwrap();
+    // pay-2 was fetched: the fixture has no answer for it, so the index refuses `transport`.
+    assert!(report.events.iter().all(|e| e.reason != Reason::AlreadyRetained));
+    assert!(report.events.iter().any(|e| e.reason == Reason::Transport && e.index == Some(0)));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_bare_signature_is_not_a_receipt() {
+    let dir = scratch("receipt-bare-signature");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(hex(&[1u8; 64])), b"").unwrap();
+    std::fs::write(dir.join(format!("{}.{}", hex(&[1u8; 64]), hex(&[2u8; 32]))), b"").unwrap();
+    let (receipts, events) = load_receipts(&dir).unwrap();
+    assert_eq!(receipts.into_iter().collect::<Vec<_>>(), vec![([1u8; 64], [2u8; 32])]);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].reason, Reason::IgnoredReceiptName);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -555,10 +603,14 @@ fn the_cursor_moves_only_over_settled_listings() {
     let dir = scratch("cursor-receipts");
     let vector = dir.join("vector");
     copy_dir(&fixture("enrol-happy"), &vector);
-    let enrol: Vec<[u8; 64]> =
-        first.observations.iter().filter(|o| o.index == 0).map(|o| o.signature).collect();
-    for s in &enrol[..2] {
-        std::fs::write(vector.join("receipts").join(hex(s)), b"").unwrap();
+    let enrol: Vec<([u8; 64], [u8; 32])> = first
+        .observations
+        .iter()
+        .filter(|o| o.index == 0)
+        .map(|o| (o.signature, o.address))
+        .collect();
+    for (s, a) in &enrol[..2] {
+        std::fs::write(vector.join("receipts").join(format!("{}.{}", hex(s), hex(a))), b"").unwrap();
     }
     let cfg = Config::load(&vector.join("config.json")).unwrap();
     let owned: Vec<FixtureTransport> = ["a", "b"]
@@ -568,7 +620,7 @@ fn the_cursor_moves_only_over_settled_listings() {
     let transports: Vec<&dyn Transport> = owned.iter().map(|t| t as &dyn Transport).collect();
     let (receipts, _) = load_receipts(&cfg.receipts_dir).unwrap();
     let second = run(&cfg, &transports, &receipts, &Cursor::new()).unwrap();
-    assert_eq!(second.cursor.values().collect::<Vec<_>>(), vec![&enrol[1]]);
+    assert_eq!(second.cursor.values().collect::<Vec<_>>(), vec![&enrol[1].0]);
     assert_eq!(second.observations.iter().filter(|o| o.index == 0).count(), 3);
     let _ = std::fs::remove_dir_all(dir);
 }
