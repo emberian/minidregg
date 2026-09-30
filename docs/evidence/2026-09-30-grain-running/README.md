@@ -75,3 +75,15 @@ INSTALL completion, per-generation START completion and STOP receipt anchor, res
 Binaries: Host `minidregg-host-m6e` `f045a79e…73bc` (branch Lean, incremental builds from the e22d16b r3
 baseline); `spk-host` `09ea24b8…5fb0` (branch Rust at `a5bd4c0`); client `mini-0007925` `3e9cb1ca…513d`;
 helpers `ad03aede…193f`, `c8400412…892b`; bwrap 0.11.0 `7bbffeb1…12d5`.
+
+## Caveat: the volumes were not fresh (RAN, found after the run)
+
+The Store was fresh; the host's root volumes for apps 9101 and 9201 were not. The debug Store m6-r2 on the
+same host created them (registrations dated 03:18 and 03:36; m6-r4 ran from 06:5x). Mini derives the volume
+ID from (deployment domain, app) only, both Stores used the provisioner's fixed domain 8501 and the same app
+IDs, and the root registration binds the host's deployment/host IDs but no Store identity. So `grain install`
+verified and adopted the existing registrations (same volume ID `ad61fa4d…9afd` for 9201 in both), and B's
+first START ran its create action on a `/var` where ntfy had already run. Nothing refused. The persistence
+proof above is unaffected (message `bHMSTsvnMFIu` was published and polled within m6-r4). A per-deployment
+unique domain (or binding the genesis identity into the volume ID or the root registration) is required
+before two Stores may share a host.
