@@ -24,7 +24,7 @@ shift 2
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BIN=${BIN:-/opt/minidregg-m6-20260930/bin}
 SPK=${SPK:-/home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk}
-HOST=${GRAIN_HOST:-$BIN/minidregg-host-m6d}
+HOST=${GRAIN_HOST:-$BIN/minidregg-host-m6e}
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 BWRAP=${BWRAP:-/usr/bin/bwrap}
@@ -366,6 +366,8 @@ enroll() (
     "$EV/$label-enroll-app-$nonce/view.json")
   N=$EV/$label-enroll-g$gen
   [ ! -s "$N/receipt.json" ] || exit 0
+  # Every signed command consumes its nonce: derive them per generation.
+  nonce=$((nonce + gen * 10))
   # A definite refusal committed nothing; keep it for audit and plan afresh.
   if [ -s "$N/submit.outcome.json" ] &&
       jq -e '.type == "refused"' "$N/submit.outcome.json" >/dev/null; then
@@ -424,6 +426,16 @@ enroll() (
   [ -s "$N/receipt.json" ]
 )
 
+# http_post LABEL APP PATH BODY: one authenticated publish through the route.
+http_post() (
+  label=$1 app=$2 path=$3 body=$4 kind=api
+  dir=$RUN/host/apps/$app/routes/owner-$kind
+  curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
+    -H "Host: grain.test" -H "Authorization: Bearer $(cat "$dir/api.token")" \
+    -H "Content-Type: text/plain" --data-binary "$body" \
+    -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
+)
+
 # One authenticated request through the resident's route: the resident asks
 # Mini to author, sign and admit it (op36/37/34), then delivers it over fd3.
 http_get() (
@@ -476,16 +488,21 @@ run_phase() {
     share-b) step share-b share b 9201 9210 9220 3211 62000 api ;;
     share-b2) step share-b2 share b 9201 9210 9230 3211 64000 api ;;
     enroll-b3) step enroll-b3 enroll b 9201 9210 9230 3211 66000 ;;
+    enroll-b4) step enroll-b4 enroll b 9201 9210 9230 3211 67000 ;;
     start-b2) step start-b2 "$SPK_HOST" grain start "$PROFILE" 9201 ;;
     enroll-b2) step enroll-b2 enroll b 9201 9210 9230 3211 65000 ;;
     get-b2) step get-b2 http_get get-b2-body 9201 /v1/health ;;
     status-b) step status-b "$SPK_HOST" grain status "$PROFILE" 9201 ;;
+    status-a2) step status-a2 "$SPK_HOST" grain status "$PROFILE" 9101 ;;
+    status-b2) step status-b2 "$SPK_HOST" grain status "$PROFILE" 9201 ;;
     start-b) step start-b "$SPK_HOST" grain start "$PROFILE" 9201 ;;
     stop-b) step stop-b "$SPK_HOST" grain stop "$PROFILE" 9201 ;;
     enroll-a) step enroll-a enroll a 9101 9110 9120 3111 53000 ;;
     enroll-a2) step enroll-a2 enroll a 9101 9110 9120 3111 54000 ;;
     enroll-b) step enroll-b enroll b 9201 9210 9220 3211 63000 ;;
     get-a) step get-a http_get get-a-body 9101 /v1/health ;;
+    post-a) step post-a http_post post-a-body 9101 /m6grain "published at generation 2, before STOP" ;;
+    poll-a2) step poll-a2 http_get poll-a2-body 9101 "/m6grain/json?poll=1&since=all" ;;
     get-a2) step get-a2 http_get get-a2-body 9101 /v1/health ;;
     get-b) step get-b http_get get-b-body 9201 /v1/health ;;
     start-a) step start-a "$SPK_HOST" grain start "$PROFILE" 9101 ;;
@@ -503,9 +520,10 @@ case "$MODE" in
   stop-services) stop_services ;;
   all)
     for phase in store services workroom profile birth-a install-a share-a start-a \
-        enroll-a get-a stop-a start-a2 enroll-a2 get-a2 birth-b install-b share-b \
-        start-b enroll-b get-b status-a status-b stop-b stop-a2; do
+        enroll-a get-a post-a stop-a start-a2 enroll-a2 get-a2 poll-a2 birth-b install-b \
+        share-b start-b enroll-b get-b status-a status-b stop-b stop-a2 status-a2 status-b2; do
       run_phase "$phase"
-    done ;;
+    done
+    step stop-services stop_services ;;
   *) usage ;;
 esac

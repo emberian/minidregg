@@ -229,11 +229,12 @@ def prepareVerified (config : Config) {target : Durable}
       constructed.manifestRoot != manifestCell.payload.root ||
       constructed.ticketRoot != ticketCell.payload.root then
     throw "enrollment authoring differs from shared native construction"
-  let .ok prepared := DeclaredResourceController.prepare
+  let prepared ← match DeclaredResourceController.prepare
       config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
-      opened.durable command
-    | throw "enrollment joint preparation refused"
+      opened.durable command with
+    | .ok prepared => pure prepared
+    | .error reason => throw s!"enrollment joint preparation refused: {repr reason}"
   let invocation ← NativeHost.prepareLoaded config opened
     (.invoke (DeclaredResourceController.commandCodec.encode command))
   if invocation.finalizedDraft !=
