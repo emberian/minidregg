@@ -168,6 +168,33 @@ theorem assignAll_writeFootprint (store : Store layout) (entries : List Entry) :
       ext address
       simp [Patch.writeFootprint, eq_comm]
 
+/-- Installing entries frames every address none of them names. -/
+theorem setAll_frame (store : Store layout) (entries : List Entry) (address : Address layout)
+    (outside : address ∉ entries.map Sigma.fst) :
+    setAll store entries address = store address := by
+  induction entries generalizing store with
+  | nil => rfl
+  | cons entry rest ih =>
+      simp only [List.map_cons, List.mem_cons, not_or] at outside
+      simp only [setAll]
+      rw [ih _ outside.2]
+      exact Store.set_ne _ _ _ _ outside.1
+
+/-- In a batch with pairwise distinct addresses, every entry is installed
+exactly. -/
+theorem setAll_member (store : Store layout) (entries : List Entry)
+    (distinct : (entries.map Sigma.fst).Nodup) (entry : Entry) (member : entry ∈ entries) :
+    setAll store entries entry.1 = some entry.2 := by
+  induction entries generalizing store with
+  | nil => simp at member
+  | cons first rest ih =>
+      have pieces := List.nodup_cons.mp distinct
+      rcases List.mem_cons.mp member with same | inRest
+      · subst same
+        simp only [setAll]
+        rw [setAll_frame _ rest _ pieces.1, Store.set_eq]
+      · exact ih _ pieces.2 inRest
+
 /-- Every family below writes exactly two entries: its authority record and its
 operation nullifier. -/
 theorem setAll_pair_first (store : Store layout) (first second : Entry)
@@ -1344,6 +1371,8 @@ theorem revoke_nullifier_exact
 #guard_msgs (whitespace := lax) in #print axioms assignAll_valid
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.assignAll_refused_of_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms assignAll_refused_of_changed
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.setAll_member' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms setAll_member
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.rotation_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rotation_post_exact
 
