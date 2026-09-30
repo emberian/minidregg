@@ -186,6 +186,16 @@ def payloadRoot (cell : PackedCell registry) : Root :=
 
 end PackedCell
 
+/-- Packed cells are compared by their lawful canonical envelope; the codec's
+`decode_encode` makes the envelope injective.  A store layout whose values are
+packed cells takes its value equality from here. -/
+instance PackedCell.instDecidableEq {Root : Type uRoot} {registry : TypeRegistry Root} :
+    DecidableEq (PackedCell registry) := fun left right =>
+  decidable_of_iff
+    ((PackedCell.codec registry).encode left = (PackedCell.codec registry).encode right)
+    ⟨fun same => Hyperdocument.lawfulCodec_encode_injective _ same,
+      fun same => same ▸ rfl⟩
+
 /-! ## Absent/present slots and canonical roots -/
 
 /-- A registry slot has exactly two logical states.  Retirement is not a third

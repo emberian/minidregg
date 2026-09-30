@@ -458,14 +458,6 @@ open Minidregg.Theory.Store
 
 variable (registry : TypeRegistry Digest)
 
-/-- Packed cells are compared by their lawful canonical envelope; the codec's
-`decode_encode` makes the envelope injective. -/
-instance packedCellDecidableEq : DecidableEq (PackedCell registry) := fun left right =>
-  decidable_of_iff
-    ((PackedCell.codec registry).encode left = (PackedCell.codec registry).encode right)
-    ⟨fun same => Hyperdocument.lawfulCodec_encode_injective _ same,
-      fun same => same ▸ rfl⟩
-
 /-- One RAM address holding the lifecycle slot: absent is fresh, `some none` is
 retired, `some (some cell)` is live. -/
 abbrev layout : Store.Layout.{0, 0, 0} where
