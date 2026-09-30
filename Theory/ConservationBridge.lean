@@ -34,6 +34,52 @@ open Minidregg.Theory.Conservation
 
 set_option autoImplicit false
 
+universe u v w
+
+/-! ## The value view of a store namespace
+
+`Theory.Conservation` is stated over an abstract value view `S → (K →₀ G)`.
+For the one store (`Theory.Store`) that view is a single reader: fix a
+namespace whose values form an additive group and read it with absence as `0`.
+Absence stays a value of the representation (`none`); only this view, which
+conservation is a statement about, identifies it with `0`. -/
+
+section StoreView
+
+open Minidregg.Theory.Store
+
+variable {L : Layout.{u, v, w}}
+
+/-- The namespace `space` of a store as a finitely supported value vector,
+absence read as `0`. -/
+noncomputable def valueView (space : L.Namespace) [AddCommGroup (L.Value space)]
+    (store : Store L) : L.Key space →₀ L.Value space :=
+  (finsuppAddEquivDFinsupp (ι := L.Key space) (M := L.Value space)).symm
+    ((DFinsupp.comapDomain (Sigma.mk space) sigma_mk_injective store).mapRange
+      (fun _ (o : Option (L.Value space)) => o.getD 0) (fun _ => rfl))
+
+@[simp] theorem valueView_apply (space : L.Namespace) [AddCommGroup (L.Value space)]
+    (store : Store L) (key : L.Key space) :
+    valueView space store key = (store ⟨space, key⟩).getD 0 := by
+  simp [valueView]
+
+/-- The frame law, read through the value view: a patch changes the view only
+at keys in its write footprint. -/
+theorem valueView_run_frame (space : L.Namespace) [AddCommGroup (L.Value space)]
+    (store : Store L) (patch : Patch L) (key : L.Key space)
+    (outside : (⟨space, key⟩ : Address L) ∉ Patch.writeFootprint patch) :
+    valueView space (Patch.run store patch) key = valueView space store key := by
+  rw [valueView_apply, valueView_apply, Patch.run_frame store patch _ outside]
+
+/-- The delta of a patch is supported inside its write footprint. -/
+theorem delta_valueView_frame (space : L.Namespace) [AddCommGroup (L.Value space)]
+    (store : Store L) (patch : Patch L) (key : L.Key space)
+    (outside : (⟨space, key⟩ : Address L) ∉ Patch.writeFootprint patch) :
+    delta (valueView space) store (Patch.run store patch) key = 0 := by
+  rw [delta_apply, valueView_run_frame space store patch key outside, sub_self]
+
+end StoreView
+
 /-! ## The canonical resource `Book` -/
 
 section Book
@@ -184,6 +230,28 @@ where
       obtain ⟨op, _, rfl⟩ := List.mem_map.mp hv
       exact posting_mem_ker _ _ _ _
 
+/-! ### The Book cell as a store
+
+The Book cell stores one `Book` at `bookAddress`; its value view is the balance
+vector of the book it holds (absence is the empty book).  An accepted batch
+conserves as a statement about the pre- and post-cell stores themselves. -/
+
+/-- The value view of a Book cell's store. -/
+noncomputable def bookStoreValue (store : Minidregg.Theory.Store.Store layout) :
+    AccountId × AssetId →₀ ℤ :=
+  bookValue (logicalBook store)
+
+theorem acceptedBatch_conserves
+    {M : Minidregg.Theory.CellState.Materializer layout
+      Minidregg.Theory.TypedAuthorization.Digest}
+    {pre : Minidregg.Theory.CellState.Materialized M} {batch : Batch}
+    (accepted : AcceptedBatch pre batch) :
+    ConservesBetween bookStoreValue pre.logical accepted.post.logical := by
+  change ConservesBetween bookValue (logicalBook pre.logical)
+    (logicalBook accepted.post.logical)
+  rw [accepted.post_logicalBook]
+  exact batch_conserves _ _
+
 /-! ### Poles (§4.1) -/
 
 /-- Satisfiable pole: a balanced two-account transfer on the witness book has
@@ -244,6 +312,7 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.EffectDeclaration
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.DeclaredActionLowering
+open Minidregg.Theory.Store
 
 abbrev BalanceKey := ResourceId .account × Digest
 
@@ -253,17 +322,16 @@ theorem accountBalance_injective :
   cases h
   rfl
 
-/-- The `accountBalance` namespace of a declared-effect cell, absence read as `0`. -/
-noncomputable def effectValue (fields : FieldStore DeclaredTurn.effectSchema.{0, 0}) :
-    BalanceKey →₀ ℤ :=
-  (finsuppAddEquivDFinsupp (ι := BalanceKey) (M := ℤ)).symm
-    ((DFinsupp.comapDomain _ accountBalance_injective fields).mapRange
-      (fun _ (o : Option ℤ) => o.getD 0) (fun _ => rfl))
+/-- The balance keys of a declared-effect cell: the store's value view at its
+one namespace, restricted along the injective `accountBalance` key. -/
+noncomputable def effectValue (store : Store effectLayout) : BalanceKey →₀ ℤ :=
+  Finsupp.comapDomain (fun k : BalanceKey => StateKey.accountBalance k.1 k.2)
+    (valueView (L := effectLayout) () store) accountBalance_injective.injOn
 
-@[simp] theorem effectValue_apply (fields : FieldStore DeclaredTurn.effectSchema.{0, 0})
-    (k : BalanceKey) : effectValue fields k = balance fields k.1 k.2 := by
-  simp [effectValue, balance, scalarAt]
-  rfl
+@[simp] theorem effectValue_apply (store : Store effectLayout)
+    (k : BalanceKey) : effectValue store k = balance store k.1 k.2 := by
+  rw [effectValue, Finsupp.comapDomain_apply]
+  exact valueView_apply (L := effectLayout) () store _
 
 /-- The vector a posting list denotes. -/
 noncomputable def postingVector (ps : List Posting) : BalanceKey →₀ ℤ :=
@@ -326,7 +394,7 @@ theorem declaration_vector_mem_ker {kind : ResourceKind} {target : ResourceId ki
 (`run_balance`, restated as one vector equation). -/
 theorem declaration_run_delta {kind : ResourceKind} {target : ResourceId kind}
     (declaration : DeclaredActionLowering.Declaration target)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
+    (fields post : Store effectLayout)
     (run : declaration.run fields = some post) :
     delta effectValue fields post = postingVector declaration.postings := by
   ext k
@@ -337,7 +405,7 @@ theorem declaration_run_delta {kind : ResourceKind} {target : ResourceId kind}
 declared run conserves. -/
 theorem declaration_run_conserves {kind : ResourceKind} {target : ResourceId kind}
     (declaration : DeclaredActionLowering.Declaration target)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
+    (fields post : Store effectLayout)
     (run : declaration.run fields = some post) :
     ConservesBetween effectValue fields post := by
   unfold ConservesBetween
@@ -364,7 +432,7 @@ theorem declaration_postingSum_zero {kind : ResourceKind} {target : ResourceId k
 
 theorem postingVector_supported {kind : ResourceKind} {target : ResourceId kind}
     (declaration : DeclaredActionLowering.Declaration target) :
-    SupportedIn (balanceAccounts declaration.patch.fieldFootprint)
+    SupportedIn (balanceAccounts (Patch.writeFootprint declaration.patch))
       (postingVector declaration.postings) := by
   classical
   apply supportedIn_list_sum
@@ -375,15 +443,15 @@ theorem postingVector_supported {kind : ResourceKind} {target : ResourceId kind}
 /-- **Corollary: `Accepted.conserves`**, from the delta equation plus the
 support bridge. -/
 theorem accepted_conserves {kind : ResourceKind} {target : ResourceId kind}
-    {M : Materializer DeclaredTurn.effectSchema.{0, 0} Digest}
+    {M : Materializer effectLayout Digest}
     {portal : Portal} {authState : AuthState} {context : RequestContext}
     {pre : Materialized M} {declaration : DeclaredActionLowering.Declaration target}
     (accepted : DeclaredActionLowering.Accepted portal authState context pre declaration)
     (resource : Digest) :
-    (∑ account ∈ balanceAccounts declaration.patch.fieldFootprint,
-      (balance accepted.cellEffect.prepared.post.logical.fields account resource -
-        balance pre.logical.fields account resource)) = 0 := by
-  have d : delta effectValue pre.logical.fields accepted.cellEffect.prepared.post.logical.fields =
+    (∑ account ∈ balanceAccounts (Patch.writeFootprint declaration.patch),
+      (balance accepted.cellEffect.prepared.post.logical account resource -
+        balance pre.logical account resource)) = 0 := by
+  have d : delta effectValue pre.logical accepted.cellEffect.prepared.post.logical =
       postingVector declaration.postings := by
     ext k
     rw [delta_apply, effectValue_apply, effectValue_apply, postingVector_apply]
@@ -397,28 +465,29 @@ theorem accepted_conserves {kind : ResourceKind} {target : ResourceId kind}
 
 /-! ### Refutable pole: a raw balance write, with the admission premise removed -/
 
-/-- A raw guarded write to an `accountBalance` key, as the unadmitted checker
-would apply it. -/
+/-- A raw guarded write to an `accountBalance` key, as the unadmitted
+lowering would emit it: the one guarded `Store.Op` adding `m`. -/
 def rawBalanceWrite (account : ResourceId .account) (resource : Digest)
-    (expected : Option Int) (m : Int) : CheckedWrite where
-  key := .accountBalance account resource
-  expected := expected
-  replacement := some (expected.getD 0 + m)
+    (expected : Option Int) (m : Int) : Op effectLayout :=
+  guardedSet (.accountBalance account resource) expected (expected.getD 0 + m)
 
 /-- The raw write, when its guard passes, changes one coordinate by `m`. -/
 theorem rawBalanceWrite_not_conserves (account : ResourceId .account) (resource : Digest)
     (expected : Option Int) (m : Int) (nonzero : m ≠ 0)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
-    (run : runCheckedWrites [rawBalanceWrite account resource expected m] fields = some post) :
-    ¬ ConservesBetween effectValue fields post := by
+    (fields : Store effectLayout)
+    (valid : Patch.ValidFrom fields [rawBalanceWrite account resource expected m]) :
+    ¬ ConservesBetween effectValue fields
+      (Patch.run fields [rawBalanceWrite account resource expected m]) := by
   classical
-  have d : delta effectValue fields post = single (account, resource) m := by
+  have d : delta effectValue fields
+      (Patch.run fields [rawBalanceWrite account resource expected m]) =
+        single (account, resource) m := by
     ext k
     rw [delta_apply, effectValue_apply, effectValue_apply]
-    rw [runCheckedWrites_balance _ fields post run k.1 k.2]
+    rw [patch_run_balance _ fields valid k.1 k.2]
     simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, add_zero,
-      CheckedWrite.balanceDelta, rawBalanceWrite, Option.getD_some, Finsupp.single_apply,
-      StateKey.accountBalance.injEq]
+      rawBalanceWrite, guardedSet_balanceDelta, Finsupp.single_apply,
+      StateKey.accountBalance.injEq, add_sub_cancel_left]
     by_cases h : (account, resource) = k
     · subst h
       simp
@@ -465,7 +534,7 @@ theorem abs_actions_sum_apply_le (maxDelta : ℤ) (zeroLe : 0 ≤ maxDelta)
 `maxDelta` times the number of actions, when every move is within `maxDelta`. -/
 theorem declaration_run_delta_bounded {kind : ResourceKind} {target : ResourceId kind}
     (declaration : DeclaredActionLowering.Declaration target)
-    (fields post : FieldStore DeclaredTurn.effectSchema.{0, 0})
+    (fields post : Store effectLayout)
     (run : declaration.run fields = some post) (maxDelta : ℤ) (zeroLe : 0 ≤ maxDelta)
     (bounded : ∀ s d r se de amount,
       Action.move s d r se de amount ∈ declaration.actions → |amount| ≤ maxDelta)
@@ -478,12 +547,18 @@ end Declared
 
 /-! ## Axiom pins -/
 
+/-- info: 'Minidregg.Theory.ConservationBridge.delta_valueView_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms delta_valueView_frame
+/-- info: 'Minidregg.Theory.ConservationBridge.effectValue_apply' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms effectValue_apply
 /-- info: 'Minidregg.Theory.ConservationBridge.batch_delta_mem_ker' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms batch_delta_mem_ker
 /-- info: 'Minidregg.Theory.ConservationBridge.applyPosting_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms applyPosting_conserves
 /-- info: 'Minidregg.Theory.ConservationBridge.batch_conservation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms batch_conservation
+/-- info: 'Minidregg.Theory.ConservationBridge.acceptedBatch_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedBatch_conserves
 /-- info: 'Minidregg.Theory.ConservationBridge.witness_transfer_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms witness_transfer_conserves
 /-- info: 'Minidregg.Theory.ConservationBridge.creditOnly_not_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
