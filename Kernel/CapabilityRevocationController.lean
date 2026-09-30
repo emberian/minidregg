@@ -117,14 +117,11 @@ def declaration {kind : ResourceKind} (domain semantics : Digest) (command : Com
 
 def declarationStream : StreamCodec RevokeDeclaration :=
   StreamCodec.xmap
-    (StreamCodec.product (StreamCodec.sum capabilityIdStream channelIdStream)
+    (StreamCodec.product CredentialAuthorityCell.revocationKeyStream
       (StreamCodec.product digestStream StreamCodec.nat))
-    (fun declaration => ((match declaration.key with
-      | .capability key => .inl key | .channel key => .inr key),
-      declaration.expectedPreRoot, declaration.operationNullifier))
-    (fun (key, root, marker) => ⟨(match key with
-      | .inl key => .capability key | .inr key => .channel key), root, marker⟩)
-    (by intro declaration; cases declaration with | mk key root marker => cases key <;> rfl)
+    (fun declaration => (declaration.key, declaration.expectedPreRoot, declaration.operationNullifier))
+    (fun (key, root, marker) => ⟨key, root, marker⟩)
+    (by intro declaration; cases declaration; rfl)
 
 def declarationCodec : LawfulCodec RevokeDeclaration :=
   ResourceBirthCodec.strictCodec declarationStream.toLawful

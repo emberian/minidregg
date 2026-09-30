@@ -203,7 +203,6 @@ def Config.Valid {F : Type} [Field F]
   (∀ enrollment ∈ config.enrollments,
     enrollment.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
     enrollment.key.publicKey.length = 32 ∧
-    enrollment.key.revoked = false ∧
     enrollment.key.activeFrom ≤ initialAuthorityRevision ∧
     initialAuthorityRevision ≤ enrollment.key.activeUntil)
 
@@ -325,9 +324,12 @@ def policyEntries (record : PolicyRecord) : List CredentialAuthorityEffects.Entr
    ⟨⟨.policyRevision, record.policyId⟩, (record.version : PolicyRevision)⟩,
    ⟨⟨.policyAddress, (record.policyId, record.version)⟩, PolicyRecordCodec.digest record⟩]
 
+/-- A genesis signing key: its current epoch, its record, and the registration
+of its key version, exactly as enrollment writes them. -/
 def keyEntries (key : KeyRecord) : List CredentialAuthorityEffects.Entry :=
   [⟨⟨.subjectKeyEpoch, ⟨key.subject⟩⟩, key.keyEpoch⟩,
-   ⟨⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩, key⟩]
+   ⟨⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩, key⟩,
+   CredentialAuthorityEffects.registrationEntry (CredentialAuthorityState.signingKeyRevocation key)]
 
 def capabilityEntry {kind : ResourceKind} (capability : Capability kind) :
     CredentialAuthorityEffects.Entry :=
@@ -368,7 +370,7 @@ theorem entries_not_nullifier {F : Type} [Field F]
     CredentialAuthorityEffects.registrationEntry, List.mem_append, List.mem_cons,
     List.mem_flatMap, List.not_mem_nil, or_false] at member
   rcases member with ((rfl | rfl | rfl) | ⟨_, _, rfl | rfl | rfl⟩) |
-      ⟨_, _, (((rfl | rfl) | rfl | rfl) | rfl | rfl) | rfl | rfl⟩ <;>
+      ⟨_, _, (((rfl | rfl | rfl) | rfl | rfl) | rfl | rfl) | rfl | rfl⟩ <;>
     exact fun same => by cases same
 
 /-- No operation nullifier is spent at genesis: the authority clock starts at

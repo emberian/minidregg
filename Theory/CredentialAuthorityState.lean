@@ -216,6 +216,69 @@ def isNullified {M : Materializer} (pre : Cell M) (id : Nat) : Bool :=
 def isRegistered {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
   (pre.logical ⟨.registered, key⟩).isSome
 
+/-! ## Key standing: one source
+
+A revocation key's standing is read from the two append-only presence planes
+of the one cell and from nothing else.  For signing keys this replaces the
+retired `KeyRecord.revoked` flag, which sat inside an overwritable RAM value. -/
+
+/-- The revocation key of one signing-key version. -/
+def signingKeyRevocation (key : CredentialSigningKey.KeyRecord) : RevocationKey :=
+  .signingKey ⟨key.subject⟩ key.keyEpoch
+
+inductive KeyStanding where
+  | live
+  | unregistered
+  | revoked
+  deriving DecidableEq, Repr
+
+/-- The standing of a key in one cell.  This is THE signer check: the settlement
+model (`AuthenticatedSettlementFinality.CurrentSigner`) and the host's signature
+admission (`CredentialSignatureAdmission.select`) both call it. -/
+def keyStanding {M : Materializer} (pre : Cell M) (key : RevocationKey) : KeyStanding :=
+  if isRevoked pre key then .revoked
+  else if isRegistered pre key then .live
+  else .unregistered
+
+theorem keyStanding_live_iff {M : Materializer} (pre : Cell M) (key : RevocationKey) :
+    keyStanding pre key = .live ↔
+      isRegistered pre key = true ∧ isRevoked pre key = false := by
+  unfold keyStanding
+  cases isRevoked pre key <;> cases isRegistered pre key <;> simp
+
+theorem keyStanding_unregistered {M : Materializer} (pre : Cell M) (key : RevocationKey)
+    (unregistered : isRegistered pre key = false) :
+    keyStanding pre key ≠ .live := by
+  rw [ne_eq, keyStanding_live_iff, unregistered]
+  simp
+
+theorem keyStanding_revoked {M : Materializer} (pre : Cell M) (key : RevocationKey)
+    (revoked : isRevoked pre key = true) :
+    keyStanding pre key = .revoked := by
+  simp [keyStanding, revoked]
+
+/-- **One source.**  Two cells that agree on a key's `registered` and `revoked`
+entries give it the same standing, whatever else they hold -- in particular
+whatever signing-key records, epochs or capabilities. -/
+theorem keyStanding_eq_of_planes {M N : Materializer} (left : Cell M) (right : Cell N)
+    (key : RevocationKey)
+    (registered : left.logical ⟨.registered, key⟩ = right.logical ⟨.registered, key⟩)
+    (revoked : left.logical ⟨.revoked, key⟩ = right.logical ⟨.revoked, key⟩) :
+    keyStanding left key = keyStanding right key := by
+  unfold keyStanding isRevoked isRegistered
+  rw [registered, revoked]
+
+/-- A signing-key record carries no standing: overwriting or freeing any record
+of the `subjectKey` plane leaves every key's standing unchanged. -/
+theorem keyStanding_subjectKey_frame {M N : Materializer} (pre : Cell M) (post : Cell N)
+    (slot : SubjectId × Epoch) (record : Option CredentialSigningKey.KeyRecord)
+    (written : post.logical = pre.logical.set ⟨.subjectKey, slot⟩ record)
+    (key : RevocationKey) :
+    keyStanding post key = keyStanding pre key :=
+  keyStanding_eq_of_planes post pre key
+    (by rw [written]; exact Store.set_ne _ _ _ _ (by intro same; cases same))
+    (by rw [written]; exact Store.set_ne _ _ _ _ (by intro same; cases same))
+
 /-! ## Proof-relevant validity of stored lineage -/
 
 /-- Every stored edge retains its explicit origin and its matching static
@@ -567,6 +630,25 @@ theorem register_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey
         validated.apply.logical ⟨.registered, key⟩ = some () :=
   presence_allocate_accepted M pre .registered rfl key () fresh
 
+/-- Once revoked, a key stays revoked under every accepted history: its standing
+can never return to `live`.  (`revocation_monotone` on the append-only plane.) -/
+theorem keyStanding_revoked_permanent {M N : Materializer} (pre : Cell M) (post : Cell N)
+    {patch : Patch layout} (executes : Patch.Executes pre.logical patch post.logical)
+    (key : RevocationKey) (revoked : keyStanding pre key = .revoked) :
+    keyStanding post key = .revoked := by
+  have present : pre.logical ⟨.revoked, key⟩ = some () := by
+    unfold keyStanding at revoked
+    cases hr : isRevoked pre key
+    · cases hg : isRegistered pre key <;> simp [hr, hg] at revoked
+    · simp only [isRevoked, Option.isSome_iff_exists] at hr
+      obtain ⟨value, present⟩ := hr
+      exact present.trans (congrArg some (Subsingleton.elim (α := Unit) value ()))
+  apply keyStanding_revoked
+  have kept := revocation_monotone executes key present
+  show (post.logical ⟨.revoked, key⟩).isSome = true
+  rw [kept]
+  rfl
+
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -594,4 +676,12 @@ theorem register_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_revokedKeys_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_revokedKeys_iff
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.keyStanding_live_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms keyStanding_live_iff
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.keyStanding_eq_of_planes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms keyStanding_eq_of_planes
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.keyStanding_subjectKey_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms keyStanding_subjectKey_frame
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.keyStanding_revoked_permanent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms keyStanding_revoked_permanent
 end Minidregg.Theory.CredentialAuthorityState

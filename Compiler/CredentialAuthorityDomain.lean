@@ -21,8 +21,9 @@ Everything a consumer reads is read from the cell:
 
 Preparation is the guarded patch on that one cell, validated by the kernel
 validator at the cell's own root.  A policy update retires the superseded
-revision's address in the same patch; a signing-key rotation retires the
-superseded record.  Nothing here authorizes: the surrounding semantic family
+revision's address in the same patch.  Signing keys are installed by
+enrollment (`ParticipantKeyEnrollment`) and genesis, each registering the key
+version in the `registered` plane.  Nothing here authorizes: the surrounding semantic family
 supplies authorization.
 
 Retired: `LOOM/AUTH/DOMAIN` catalogue cells, `LOOM/AUTH/POLICYPAGE` shards and
@@ -519,74 +520,6 @@ theorem revision_advances
 
 end PreparedPolicyAndNullifier
 
-/-! ### Signing-key installation -/
-
-/-- Free the superseded key record when the epoch changes. -/
-def retireSigningKey (logical : Store layout) (key : CredentialSigningKey.KeyRecord) :
-    Patch layout :=
-  match currentSigningKey logical ⟨key.subject⟩ with
-  | some old =>
-      if old.keyEpoch = key.keyEpoch then []
-      else [.free .subjectKey (⟨key.subject⟩, old.keyEpoch) old]
-  | none => []
-
-def signingKeyEntries (key : CredentialSigningKey.KeyRecord) : List Entry :=
-  [⟨⟨.subjectKeyEpoch, ⟨key.subject⟩⟩, key.keyEpoch⟩,
-   ⟨⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩, key⟩]
-
-def signingKeyPatch (logical : Store layout) (key : CredentialSigningKey.KeyRecord) :
-    Patch layout :=
-  let retire := retireSigningKey logical key
-  retire ++ assignAll (Patch.run logical retire) (signingKeyEntries key)
-
-theorem retireSigningKey_valid (logical : Store layout) (key : CredentialSigningKey.KeyRecord) :
-    Patch.ValidFrom logical (retireSigningKey logical key) := by
-  unfold retireSigningKey
-  cases current : currentSigningKey logical ⟨key.subject⟩ with
-  | none => trivial
-  | some old =>
-      simp only
-      split
-      · trivial
-      · refine ⟨⟨rfl, ?_⟩, trivial⟩
-        unfold currentSigningKey at current
-        cases epoch : logical ⟨.subjectKeyEpoch, ⟨key.subject⟩⟩ <;>
-          simp [epoch, bind, Option.bind] at current
-        rename_i epochValue
-        cases record : logical ⟨.subjectKey, (⟨key.subject⟩, epochValue)⟩ <;>
-          simp [record] at current
-        rename_i stored
-        obtain ⟨⟨_, sameEpoch⟩, rfl⟩ := current
-        rw [sameEpoch]
-        exact record
-
-theorem signingKeyPatch_valid (logical : Store layout) (key : CredentialSigningKey.KeyRecord) :
-    Patch.ValidFrom logical (signingKeyPatch logical key) := by
-  unfold signingKeyPatch
-  rw [Patch.validFrom_append]
-  refine ⟨retireSigningKey_valid logical key, ?_⟩
-  apply CredentialAuthorityEffects.assignAll_valid
-  exact ⟨Or.inl rfl, Or.inl rfl, trivial⟩
-
-/-- After installation the record is the subject's current signing key. -/
-theorem signingKeyPatch_current (logical : Store layout) (key : CredentialSigningKey.KeyRecord) :
-    currentSigningKey (Patch.run logical (signingKeyPatch logical key)) ⟨key.subject⟩ =
-      some key := by
-  apply currentSigningKey_exact
-  · simp only [signingKeyPatch, Patch.run_append, run_assignAll, signingKeyEntries, setAll]
-    rw [Store.set_ne _ _ _ _ (sigma_ne (by decide)), Store.set_eq]; rfl
-  · simp only [signingKeyPatch, Patch.run_append, run_assignAll, signingKeyEntries, setAll]
-    rw [Store.set_eq]; rfl
-
-def prepareSigningKey (snapshot : Snapshot) (key : CredentialSigningKey.KeyRecord) :
-    Option (Prepared snapshot (signingKeyPatch snapshot.logical key)) :=
-  prepare snapshot (signingKeyPatch snapshot.logical key)
-
-/-- Satisfiable pole: every signing-key installation prepares. -/
-theorem prepareSigningKey_isSome (snapshot : Snapshot) (key : CredentialSigningKey.KeyRecord) :
-    (prepareSigningKey snapshot key).isSome :=
-  (prepare_valid_iff snapshot _).mpr (signingKeyPatch_valid snapshot.logical key)
-
 /-! ## Worked instance (both poles) -/
 
 namespace Witness
@@ -637,8 +570,6 @@ end Witness
 #guard_msgs (whitespace := lax) in #print axioms PreparedPolicyAndNullifier.retired_address_absent
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.preparePolicyAndNullifier_used_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms preparePolicyAndNullifier_used_refused
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.signingKeyPatch_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms signingKeyPatch_current
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.mem_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Snapshot.mem_revoked_iff
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Witness.update_prepares' depends on axioms: [propext, Classical.choice, Quot.sound] -/

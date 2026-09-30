@@ -189,6 +189,10 @@ structure Capability (kind : ResourceKind) where
 inductive RevocationKey where
   | capability (id : CapabilityId)
   | channel (id : ChannelId)
+  /-- One signing-key version: a subject's key at one key epoch.  Its standing
+  (registered, revoked) lives in the authority cell's presence planes; the key
+  record itself carries no revocation flag. -/
+  | signingKey (subject : SubjectId) (epoch : Epoch)
   deriving DecidableEq, Repr
 
 /-- The authorization-relevant projection of current state.  Epoch comparisons

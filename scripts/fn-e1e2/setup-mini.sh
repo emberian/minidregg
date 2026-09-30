@@ -94,15 +94,13 @@ cat >"$ROOT/genesis.json" <<EOF
   "factoryPredicate":{"type":"all","predicates":[]},
   "enrollments":[{
     "key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"$GATEWAY_SUBJECT",
-           "publicKey":"$PUBLIC_KEY","activeFrom":"0","activeUntil":"1000000",
-           "revoked":false},
+           "publicKey":"$PUBLIC_KEY","activeFrom":"0","activeUntil":"1000000"},
     "accountId":"$GATEWAY_SUBJECT","spendCapabilityId":"41","controlCapabilityId":"51",
     "factoryObserveCapabilityId":"54","initialBalance":"100",
     "accountPredicate":{"type":"all","predicates":[]}
   },{
     "key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"$ORDINARY_SUBJECT",
-           "publicKey":"$ORDINARY_PUBLIC_KEY","activeFrom":"0","activeUntil":"1000000",
-           "revoked":false},
+           "publicKey":"$ORDINARY_PUBLIC_KEY","activeFrom":"0","activeUntil":"1000000"},
     "accountId":"$ORDINARY_SUBJECT","spendCapabilityId":"42","controlCapabilityId":"52",
     "factoryObserveCapabilityId":"55","initialBalance":"100",
     "accountPredicate":{"type":"all","predicates":[]}

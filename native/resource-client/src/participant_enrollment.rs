@@ -585,7 +585,7 @@ fn plan(mut args: Args) -> Result<()> {
         "expectedAuthorityRoot":authority_root,
         "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
             "subject":reservation.ids["subject"],"publicKey":public_key,
-            "activeFrom":"0","activeUntil":u64::MAX.to_string(),"revoked":false}});
+            "activeFrom":"0","activeUntil":u64::MAX.to_string()}});
     save_json_staged(&directory.join("source.json"), &command_source)?;
     transform(
         &host,

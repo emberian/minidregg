@@ -145,11 +145,15 @@ def declarationCodec : LawfulCodec Declaration :=
 def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.key, command.expectedAuthorityRoot, marker domain semantics command⟩
 
-/-- Enrollment allocates a fresh subject's key epoch and key record, and the
-operation nullifier: three allocations, each enabled only at an absent address. -/
+/-- Enrollment allocates a fresh subject's key epoch and key record, registers
+the key version's revocation key in the append-only `registered` plane, and
+spends the operation nullifier: four allocations, each enabled only at an
+absent address.  The registration is what makes the key a live signer
+(`CredentialAuthorityState.keyStanding`). -/
 def Declaration.patch (d : Declaration) : Patch CredentialAuthorityState.layout :=
   [.allocate .subjectKeyEpoch ⟨d.key.subject⟩ d.key.keyEpoch,
    .allocate .subjectKey (⟨d.key.subject⟩, d.key.keyEpoch) d.key,
+   .allocate .registered (CredentialAuthorityState.signingKeyRevocation d.key) (),
    .allocate .nullifier d.operationNullifier ()]
 
 structure Mode {M : Materializer} (pre : Cell M) (d : Declaration) : Type where
@@ -157,6 +161,7 @@ structure Mode {M : Materializer} (pre : Cell M) (d : Declaration) : Type where
   subjectAbsent : (show Option Epoch from pre.logical ⟨.subjectKeyEpoch, ⟨d.key.subject⟩⟩) = none
   keyAbsent : (show Option KeyRecord from
     pre.logical ⟨.subjectKey, (⟨d.key.subject⟩, d.key.keyEpoch)⟩) = none
+  keyUnregistered : isRegistered pre (CredentialAuthorityState.signingKeyRevocation d.key) = false
   fresh : isNullified pre d.operationNullifier = false
 
 /-- The key record stored at one authority address satisfies `check`; every
@@ -233,7 +238,7 @@ def family (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
 
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable | staleAuthority
-  | subjectExists | keyIdExists | publicKeyExists | malformedKey | replayedMarker
+  | subjectExists | keyIdExists | publicKeyExists | keyVersionRegistered | malformedKey | replayedMarker
   | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
@@ -262,7 +267,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   publicKeyFresh : allKeys authority.snapshot.logical
     (fun key => key.publicKey != command.key.publicKey) = true
   keyShape : command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
-    command.key.publicKey.length = 32 ∧ command.key.revoked = false ∧
+    command.key.publicKey.length = 32 ∧
     command.key.activeFrom ≤ authority.snapshot.revision + 1 ∧
     authority.snapshot.revision + 1 ≤ command.key.activeUntil ∧
     command.key.subject ≠ command.sponsor.value
@@ -288,10 +293,11 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                 (fun key => key.publicKey != command.key.publicKey) then
               if keyShape : command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
                   command.key.publicKey.length = 32 ∧
-                  command.key.revoked = false ∧
                   command.key.activeFrom ≤ snapshot.revision + 1 ∧
                   snapshot.revision + 1 ≤ command.key.activeUntil ∧
                   command.key.subject ≠ command.sponsor.value then
+               if keyUnregistered : isRegistered snapshot.cell
+                   (CredentialAuthorityState.signingKeyRevocation command.key) = false then
                 if fresh : isNullified snapshot.cell d.operationNullifier = false then
                   match validate AuthorityMaterializer snapshot.cell snapshot.cell.root d.patch with
                   | .rejected _ => throw .validation
@@ -303,12 +309,13 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                       let candidate : Candidate (family deployment snapshot profile.semantics ambient command)
                           snapshot.cell d () :=
                         { preStateBound := rfl
-                          modeEvidence := ⟨rootExact, subjectAbsent, keyAbsent, fresh⟩
+                          modeEvidence := ⟨rootExact, subjectAbsent, keyAbsent, keyUnregistered, fresh⟩
                           validated := validated
                           postcondition := validated.resultAt }
                       pure ⟨directory, authority, factory, candidate, source,
                         subjectFresh, keyIdFresh, publicKeyFresh, keyShape⟩
                 else throw .replayedMarker
+               else throw .keyVersionRegistered
               else throw .malformedKey
             else throw .publicKeyExists
           else throw .keyIdExists

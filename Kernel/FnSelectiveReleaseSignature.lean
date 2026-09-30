@@ -64,7 +64,8 @@ structure Selected (config : NativeHost.Config) (opened : NativeHost.Opened conf
   keyEpoch : key.keyEpoch = release.owner.epoch
   algorithm : key.algorithm = CredentialSignatureAdmission.ed25519Algorithm
   publicKeyLength : key.publicKey.length = 32
-  active : key.revoked = false ∧
+  active : CredentialAuthorityState.keyStanding opened.authority.snapshot.cell
+      (CredentialAuthorityState.signingKeyRevocation key) = .live ∧
     key.activeFrom ≤ opened.authority.snapshot.revision ∧
     opened.authority.snapshot.revision ≤ key.activeUntil
   policyHeadValue : Minidregg.Theory.PolicyInstall.Head
@@ -113,7 +114,8 @@ def select (config : NativeHost.Config) (opened : NativeHost.Opened config)
             if keyEpoch : key.keyEpoch = release.owner.epoch then
               if algorithm : key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
                   key.publicKey.length = 32 then
-                if active : key.revoked = false ∧
+                if active : CredentialAuthorityState.keyStanding opened.authority.snapshot.cell
+                      (CredentialAuthorityState.signingKeyRevocation key) = .live ∧
                     key.activeFrom ≤ opened.authority.snapshot.revision ∧
                     opened.authority.snapshot.revision ≤ key.activeUntil then
                   match policyHead : CredentialAuthorityDomain.headAt

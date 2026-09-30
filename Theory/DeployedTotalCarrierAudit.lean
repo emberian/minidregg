@@ -62,7 +62,7 @@ def totalAuthorityStateOf (marked : Nat -> Bool) :
   | ⟨.subjectKey, (subject, epoch)⟩ =>
       show CredentialSigningKey.KeyRecord from
         { keyId := 0, keyEpoch := epoch, algorithm := 0, subject := subject.value,
-          publicKey := [], activeFrom := 0, activeUntil := 0, revoked := false }
+          publicKey := [], activeFrom := 0, activeUntil := 0 }
   | ⟨.revoked, _⟩ => show Unit from ()
   | ⟨.nullifier, _⟩ => show Unit from ()
   | ⟨.registered, _⟩ => show Unit from ()

@@ -680,15 +680,14 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
 
 private def keyRecord (path : String) (json : Lean.Json) : Result KeyRecord := do
   let obj ← exactObject path ["keyId", "keyEpoch", "algorithm", "subject", "publicKey",
-    "activeFrom", "activeUntil", "revoked"] json
+    "activeFrom", "activeUntil"] json
   pure ⟨← nat (path ++ ".keyId") (← field path "keyId" obj),
     ← nat (path ++ ".keyEpoch") (← field path "keyEpoch" obj),
     ← nat (path ++ ".algorithm") (← field path "algorithm" obj),
     ← nat (path ++ ".subject") (← field path "subject" obj),
     ← decodeHex (path ++ ".publicKey") (← field path "publicKey" obj),
     ← nat (path ++ ".activeFrom") (← field path "activeFrom" obj),
-    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj),
-    ← bool (path ++ ".revoked") (← field path "revoked" obj)⟩
+    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj)⟩
 
 private def enrollment (path : String) (json : Lean.Json) : Result NativeHostGenesis.Enrollment := do
   let obj ← exactObject path ["key", "accountId", "spendCapabilityId", "controlCapabilityId",
@@ -2294,7 +2293,7 @@ private def participantKeyRecordJson (key : KeyRecord) : Lean.Json := .mkObj
    ("algorithm", decimal key.algorithm), ("subject", decimal key.subject),
    ("publicKey", hexJson key.publicKey),
    ("activeFrom", decimal key.activeFrom),
-   ("activeUntil", decimal key.activeUntil), ("revoked", .bool key.revoked)]
+   ("activeUntil", decimal key.activeUntil)]
 
 private def participantKeyCommandJson
     (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj

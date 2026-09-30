@@ -47,6 +47,8 @@ def revocationKeyStream : StreamCodec RevocationKey where
   encode
     | .capability capability => 0 :: capabilityIdStream.encode capability
     | .channel channel => 1 :: channelIdStream.encode channel
+    | .signingKey subject epoch =>
+        2 :: (StreamCodec.product subjectIdStream StreamCodec.nat).encode (subject, epoch)
   decodePrefix
     | 0 :: bytes => do
         let (capability, suffix) <- capabilityIdStream.decodePrefix bytes
@@ -54,12 +56,18 @@ def revocationKeyStream : StreamCodec RevocationKey where
     | 1 :: bytes => do
         let (channel, suffix) <- channelIdStream.decodePrefix bytes
         some (.channel channel, suffix)
+    | 2 :: bytes => do
+        let ((subject, epoch), suffix) <-
+          (StreamCodec.product subjectIdStream StreamCodec.nat).decodePrefix bytes
+        some (.signingKey subject epoch, suffix)
     | _ => none
   decodePrefix_encode := by
     intro key suffix
     cases key with
     | capability capability => simp [capabilityIdStream.decodePrefix_encode]
     | channel channel => simp [channelIdStream.decodePrefix_encode]
+    | signingKey subject epoch =>
+        simp [(StreamCodec.product subjectIdStream StreamCodec.nat).decodePrefix_encode]
 
 /-- One tag byte per plane. -/
 def planeTag : AuthorityPlane → UInt8
@@ -137,9 +145,9 @@ def keyCodecId : AuthorityPlane → String
   | .policyAddress => "policy-id/nat x nat"
   | .subjectKeyEpoch => "subject-id/nat"
   | .subjectKey => "subject-id/nat x nat"
-  | .revoked => "revocation-key/tagged-v1"
+  | .revoked => "revocation-key/tagged-v2"
   | .nullifier => "nat/base255"
-  | .registered => "revocation-key/tagged-v1"
+  | .registered => "revocation-key/tagged-v2"
 
 def valueCodecId : AuthorityPlane → String
   | .capability _ => "stored-capability/v1"
@@ -148,7 +156,7 @@ def valueCodecId : AuthorityPlane → String
   | .policyRevision => "nat/base255"
   | .policyAddress => "digest/nat"
   | .subjectKeyEpoch => "nat/base255"
-  | .subjectKey => "signing-key-record/v1"
+  | .subjectKey => "signing-key-record/v2"
   | .revoked => "unit/presence"
   | .nullifier => "unit/presence"
   | .registered => "unit/presence"
@@ -160,7 +168,7 @@ def planes : List AuthorityPlane :=
 
 /-- The authority layout on the wire. -/
 def wire : Wire layout where
-  name := "minidregg/credential-authority/v1"
+  name := "minidregg/credential-authority/v2"
   namespaces := planes
   namespaces_complete := by
     intro plane

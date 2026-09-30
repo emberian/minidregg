@@ -9,6 +9,12 @@ verification remain executable boundaries, not axioms of this record.
 Activation bounds are authority-registry epochs, not wall-clock timestamps.
 The authority schema keys this record by its subject and exact key epoch;
 the controller separately requires that epoch to be current.
+
+The record has no revocation field.  Whether a key version is registered or
+revoked is read from the authority cell's append-only `registered` and
+`revoked` planes at `RevocationKey.signingKey subject epoch`
+(`CredentialAuthorityState.keyStanding`): a guarded write to this record can
+never un-revoke a key.
 -/
 import Theory.TypedAuthorization
 
@@ -24,7 +30,6 @@ structure KeyRecord where
   publicKey : List UInt8
   activeFrom : Nat
   activeUntil : Nat
-  revoked : Bool
   deriving DecidableEq, Repr
 
 /-- Used only by the existing logical materializer witness's value-tree

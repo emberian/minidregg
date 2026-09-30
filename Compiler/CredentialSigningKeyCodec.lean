@@ -16,7 +16,7 @@ open Minidregg.Theory.IndexedProgram
 
 set_option autoImplicit false
 
-abbrev KeyRecordTuple := Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat × Bool
+abbrev KeyRecordTuple := Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat
 
 def keyRecordTupleStream : StreamCodec KeyRecordTuple :=
   StreamCodec.product StreamCodec.nat
@@ -24,16 +24,15 @@ def keyRecordTupleStream : StreamCodec KeyRecordTuple :=
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat
           (StreamCodec.product bytesStream
-            (StreamCodec.product StreamCodec.nat
-              (StreamCodec.product StreamCodec.nat StreamCodec.bool))))))
+            (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
 
 def toTuple (key : KeyRecord) : KeyRecordTuple :=
   (key.keyId, key.keyEpoch, key.algorithm, key.subject, key.publicKey,
-    key.activeFrom, key.activeUntil, key.revoked)
+    key.activeFrom, key.activeUntil)
 
 def ofTuple : KeyRecordTuple → KeyRecord
-  | (keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil, revoked) =>
-      { keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil, revoked }
+  | (keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil) =>
+      { keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil }
 
 @[simp] theorem ofTuple_toTuple (key : KeyRecord) : ofTuple (toTuple key) = key := by
   cases key
