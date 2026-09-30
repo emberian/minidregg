@@ -1,6 +1,7 @@
 {
   "description": "the POST balance of the watched account is for another mint",
   "exit": 3,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "wrongMint"

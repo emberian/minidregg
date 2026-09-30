@@ -56,7 +56,7 @@ pub fn rpc_result(resp: Value) -> Result<Value, Refusal> {
 /// | `getSlot` | `[{commitment}]` | `getSlot/finalized.json` |
 /// | `getBlockTime` | `[slot]` | `getBlockTime/<slot>.json` |
 /// | `getTokenAccountsByOwner` | `[owner, {mint}, {encoding, commitment}]` | `getTokenAccountsByOwner/<owner>.<mint>.json` |
-/// | `getSignaturesForAddress` | `[account, {commitment, limit, before?}]` | `getSignaturesForAddress/<account>.json`, or `<account>.before.<signature>.json` for a later page |
+/// | `getSignaturesForAddress` | `[account, {commitment, limit, before?, until?}]` | `getSignaturesForAddress/<account>[.before.<signature>][.until.<signature>].json` |
 /// | `getTransaction` | `[signature, {encoding, commitment, maxSupportedTransactionVersion}]` | `getTransaction/<signature>.json` |
 ///
 /// Keys and signatures are the base58 text the watcher sent. Each file holds a whole JSON-RPC
@@ -113,13 +113,15 @@ pub fn fixture_key(method: &str, params: &Value) -> Result<String, String> {
             if o.get("limit").and_then(Value::as_u64).is_none() {
                 return Err("getSignaturesForAddress without a limit".into());
             }
-            match o.get("before") {
-                None => Ok(format!("getSignaturesForAddress/{account}.json")),
-                Some(b) => {
-                    let b = b.as_str().ok_or("`before` not a string")?;
-                    Ok(format!("getSignaturesForAddress/{account}.before.{b}.json"))
+            let mut name = format!("getSignaturesForAddress/{account}");
+            for bound in ["before", "until"] {
+                if let Some(b) = o.get(bound) {
+                    let b = b.as_str().ok_or_else(|| format!("`{bound}` not a string"))?;
+                    name.push_str(&format!(".{bound}.{b}"));
                 }
             }
+            name.push_str(".json");
+            Ok(name)
         }
         "getTransaction" => {
             let sig = text(0)?;

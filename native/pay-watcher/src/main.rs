@@ -5,8 +5,10 @@
 //! `/usr/bin/curl` through a private spool (`--spool`, default `--out`). Fixture mode: each
 //! `--rpc-fixture DIR` is one endpoint answered from files (see `transport::fixture_key`).
 //!
-//! Writes `DIR/observations.json` and `DIR/events.json` (each atomically) and prints one
-//! summary line on stdout; every event is also one line on stderr.
+//! Writes `DIR/observations.json` and `DIR/events.json` (each atomically), then, when the
+//! config has an `enrol` row, the advanced enrollment cursor to `enrol.cursorFile` (read at
+//! start; absent = page the whole history). Prints one summary line on stdout; every event is
+//! also one line on stderr.
 //!
 //! Exit: 0 = written, nothing refused; 3 = written, at least one refusal (the observations
 //! that were emitted are still sound); 2 = nothing written (usage, config, receipts, or no
@@ -17,7 +19,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use minidregg_pay_watcher::transport::{CurlTransport, FixtureTransport, Transport};
-use minidregg_pay_watcher::{load_receipts, run, Config};
+use minidregg_pay_watcher::{cursor_json, load_cursor, load_receipts, run, Config, Cursor};
 
 struct Args {
     config: PathBuf,
@@ -64,6 +66,14 @@ fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::rename(&tmp, &dest).map_err(|e| format!("{}: {e}", dest.display()))
 }
 
+fn split_path(path: &Path) -> Result<(&Path, &str), String> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("cursor file {} has no file name", path.display()))?;
+    Ok((path.parent().unwrap_or(Path::new(".")), name))
+}
+
 fn main() -> ExitCode {
     match real_main() {
         Ok(code) => code,
@@ -101,11 +111,20 @@ fn real_main() -> Result<ExitCode, String> {
     }
     let transports: Vec<&dyn Transport> = owned.iter().map(|b| b.as_ref()).collect();
     let (receipts, receipt_events) = load_receipts(&cfg.receipts_dir)?;
-    let mut report = run(&cfg, &transports, &receipts).map_err(|r| r.to_string())?;
+    let cursor = match &cfg.enrol {
+        Some(e) => load_cursor(&e.cursor_file)?,
+        None => Cursor::new(),
+    };
+    let mut report = run(&cfg, &transports, &receipts, &cursor).map_err(|r| r.to_string())?;
     report.events.splice(0..0, receipt_events);
 
     write_atomic(&args.out, "observations.json", &report.observations_json())?;
     write_atomic(&args.out, "events.json", &report.events_json())?;
+    // Last: a crash before this line leaves the old cursor, which re-derives the same run.
+    if let Some(e) = &cfg.enrol {
+        let (dir, name) = split_path(&e.cursor_file)?;
+        write_atomic(dir, name, &cursor_json(&report.cursor))?;
+    }
     for e in &report.events {
         eprintln!("{}", e.to_json());
     }
