@@ -1,26 +1,26 @@
 /-
-# Assurance.HyperdocumentLinkPageDurableWeld -- accepted link to bounded bytes
+# Assurance.HyperdocumentLinkPageDurableWeld -- accepted link to deployed cell bytes
 
-The logical link-publication witness and the bounded production page codecs
-previously met only by informal correspondence.  This module closes that
-weld for one real accepted forward-link turn:
+The logical link-publication witness and the deployed store-cell codecs meet
+here for one real accepted forward-link turn:
 
-* the exact `LinkRecord` in the accepted semantic content post is retained by
-  a bounded content-page entry;
-* the exact accepted `VersionEventRecord` is re-addressed by the production
-  cSHAKE event scheme and retained by a bounded event-page entry;
-* empty bounded pages advance through ordinary validated typed patches;
-* the resulting canonical page bytes and Lean-computed cSHAKE roots are the
-  two payloads of one authority-guarded `DurableDataIntent`.
+* the exact `LinkRecord` in the accepted semantic content post is the record
+  the deployed content cell (`HyperdocumentCell.contentMaterializer`) holds;
+* the exact accepted `VersionEventRecord` is re-addressed by the deployed
+  cSHAKE event scheme (`HyperdocumentCell.eventScheme`) and held by the
+  deployed event-log cell;
+* the empty cells advance through ordinary validated guarded patches;
+* the resulting canonical `StoreCodec` bytes and Lean-computed cSHAKE roots are
+  the two payloads of one authority-guarded `DurableDataIntent`.
 
 No hash injectivity is asserted.  Root-to-state reasoning is exposed only
-through the two existing pair-scoped collision premises.  The durable model
-is still logical: physical storage and sync remain an explicit implementation
-refinement boundary at the end of the file.
+through the two pair-scoped collision premises.  The durable model is still
+logical: physical storage and sync remain an explicit implementation
+refinement boundary at the end of the file.  (Formerly this welded to the
+four-slot content and event pages, which are deleted.)
 -/
 import Assurance.HyperdocumentLinkPublicationWitness
-import Compiler.HyperdocumentContentPageMaterializer
-import Compiler.HyperdocumentEventPageMaterializer
+import Compiler.HyperdocumentCell
 import Kernel.DurableDataIntent
 import Mathlib.Data.Nat.Pairing
 
@@ -67,287 +67,147 @@ abbrev eventKey :=
 
 end Publication
 
-/-! ## Exact bounded content delta -/
+/-! ## Exact content delta on the deployed content cell -/
 
-def boundedForwardLink :
-    HyperdocumentContentPageMaterializer.ForwardLink where
-  sourceDocument :=
-    HyperdocumentLinkPublicationWitness.linkPayload.sourceDocument
-  source := HyperdocumentLinkPublicationWitness.linkPayload.source
-  target := .external [0x68, 0x74, 0x74, 0x70, 0x73] [0x65, 0x78]
-    [0x2f, 0x6c, 0x6f, 0x6f, 0x6d]
-  relation := HyperdocumentLinkPublicationWitness.linkPayload.relation
-  author := HyperdocumentLinkPublicationWitness.Genesis.author
-  operation :=
-    HyperdocumentLinkPublicationWitness.linkDeclaration.operationId
-      HyperdocumentLinkPublicationWitness.config
-  tombstonedAt := none
+abbrev ContentStore := Store.Store Hyperdocument.layout
+abbrev EventStore := HyperdocumentEventLog.Sparse.Store
 
-@[simp] theorem boundedForwardLink_toCanonical :
-    boundedForwardLink.toCanonical = Publication.record := by
-  rfl
+def linkAddress : Hyperdocument.Address := ⟨.links, Publication.linkId⟩
 
-def contentEntry : HyperdocumentContentPageMaterializer.Entry :=
-  .link Publication.linkId boundedForwardLink
+def contentPreStore : ContentStore := 0
 
-def contentPrePage : HyperdocumentContentPageMaterializer.Page where
-  contentDomain := HyperdocumentLinkPublicationWitness.linkIntent.historyDomain
-  document := HyperdocumentLinkPublicationWitness.Genesis.documentId
-  pageNumber := 0
-  slot0 := none
-  slot1 := none
-  slot2 := none
-  slot3 := none
-
-def contentPostPage : HyperdocumentContentPageMaterializer.Page where
-  contentDomain := contentPrePage.contentDomain
-  document := contentPrePage.document
-  pageNumber := contentPrePage.pageNumber
-  slot0 := some contentEntry
-  slot1 := none
-  slot2 := none
-  slot3 := none
-
-theorem contentPrePage_valid : contentPrePage.Valid := by
-  simp [HyperdocumentContentPageMaterializer.Page.Valid,
-    HyperdocumentContentPageMaterializer.Page.addresses,
-    HyperdocumentContentPageMaterializer.Page.entries, contentPrePage]
-
-theorem contentPostPage_valid : contentPostPage.Valid := by
-  constructor
-  · simp [HyperdocumentContentPageMaterializer.Page.addresses,
-      HyperdocumentContentPageMaterializer.Page.entries, contentPostPage,
-      contentEntry]
-  · simp [HyperdocumentContentPageMaterializer.Page.entries, contentPostPage,
-      contentEntry, HyperdocumentContentPageMaterializer.Entry.LocalTo,
-      boundedForwardLink, contentPrePage,
-      HyperdocumentLinkPublicationWitness.linkPayload]
+def contentPostStore : ContentStore :=
+  contentPreStore.set linkAddress (some Publication.record)
 
 @[simp] theorem accepted_content_post_exact :
     Hyperdocument.lookup Publication.contentPost.logical .links
         Publication.linkId =
-      Hyperdocument.lookup contentPostPage.toCanonicalState .links
-        Publication.linkId := by
+      Hyperdocument.lookup contentPostStore .links Publication.linkId := by
   rw [HyperdocumentLinkPublicationWitness.link_post_contains_forward]
-  simp [Hyperdocument.lookup,
-    HyperdocumentContentPageMaterializer.Page.toCanonicalState,
-    HyperdocumentContentPageMaterializer.Page.entries, contentPostPage,
-    contentEntry, HyperdocumentContentPageMaterializer.Entry.install,
-    Publication.record]
+  simp only [Hyperdocument.lookup, contentPostStore, linkAddress, Store.Store.set_eq]
   rfl
 
-def contentPreCell :
-    Materialized HyperdocumentContentPageMaterializer.materializer :=
-  CellState.materialize HyperdocumentContentPageMaterializer.materializer
-    (HyperdocumentContentPageMaterializer.stateOfOption (some contentPrePage))
+def contentPreCell : Materialized HyperdocumentCell.contentMaterializer :=
+  CellState.materialize HyperdocumentCell.contentMaterializer contentPreStore
 
-def contentPostCell :
-    Materialized HyperdocumentContentPageMaterializer.materializer :=
-  CellState.materialize HyperdocumentContentPageMaterializer.materializer
-    (HyperdocumentContentPageMaterializer.stateOfOption (some contentPostPage))
+def contentPostCell : Materialized HyperdocumentCell.contentMaterializer :=
+  CellState.materialize HyperdocumentCell.contentMaterializer contentPostStore
 
-def contentPatch : CellState.Patch
-    HyperdocumentContentPageMaterializer.schema Digest where
-  expectedPreRoot := contentPreCell.root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := some contentPostPage }]
-  resourceWrites := []
+def contentPatch : Store.Patch Hyperdocument.layout :=
+  [.allocate .links Publication.linkId Publication.record]
 
 theorem contentPatch_accepted :
     ∃ validated : CellState.ValidatedPatch
-        HyperdocumentContentPageMaterializer.materializer contentPreCell
+        HyperdocumentCell.contentMaterializer contentPreCell contentPreCell.root
         contentPatch,
-      CellState.validate HyperdocumentContentPageMaterializer.materializer
-        contentPreCell contentPatch =
-          CellState.ValidationOutcome.accepted validated := by
-  unfold CellState.validate
-  rw [dif_pos (show contentPatch.expectedPreRoot = contentPreCell.root from rfl)]
-  rw [dif_pos (show contentPatch.fieldFootprint = contentPatch.namedFields by
-    decide)]
-  rw [dif_pos (show contentPatch.resourceFootprint = contentPatch.namedResources by
-    decide)]
-  exact ⟨_, rfl⟩
+      CellState.validate HyperdocumentCell.contentMaterializer
+        contentPreCell contentPreCell.root contentPatch =
+          CellState.ValidationOutcome.accepted validated :=
+  CellState.validate_accepts _ _ _ _ rfl ⟨⟨by decide, rfl⟩, trivial⟩
 
 theorem content_accepted_post_exact
     (validated : CellState.ValidatedPatch
-      HyperdocumentContentPageMaterializer.materializer contentPreCell
+      HyperdocumentCell.contentMaterializer contentPreCell contentPreCell.root
       contentPatch) :
     validated.apply = contentPostCell := by
   apply CellState.Materialized.ext
-  change
-    { fields := CellState.applyFieldWrites contentPatch.fieldWrites
-        contentPreCell.logical.fields
-      resources := CellState.applyResourceWrites contentPatch.resourceWrites
-        contentPreCell.logical.resources } =
-      HyperdocumentContentPageMaterializer.stateOfOption
-        (some contentPostPage)
-  congr 1
-  apply DFinsupp.ext
-  intro field
-  cases field
-  simp [CellState.applyFieldWrites, contentPatch, contentPreCell,
-    HyperdocumentContentPageMaterializer.stateOfOption,
-    CellState.FieldStore.assign]
-
-/-! ## Exact bounded event delta -/
-
-def eventEntry : HyperdocumentEventPageMaterializer.Entry where
-  key := deriveVersionEventId
-    HyperdocumentEventPageMaterializer.eventPreimageCodec
-    HyperdocumentEventPageMaterializer.eventDerivation Publication.eventRecord
-  record := Publication.eventRecord
-
-def eventPrePage : HyperdocumentEventPageMaterializer.Page where
-  historyDomain := Publication.eventRecord.historyDomain
-  document := Publication.eventRecord.document
-  pageNumber := 0
-  slot0 := none
-  slot1 := none
-  slot2 := none
-  slot3 := none
-
-def eventPostPage : HyperdocumentEventPageMaterializer.Page where
-  historyDomain := eventPrePage.historyDomain
-  document := eventPrePage.document
-  pageNumber := eventPrePage.pageNumber
-  slot0 := some eventEntry
-  slot1 := none
-  slot2 := none
-  slot3 := none
-
-theorem eventPrePage_valid : eventPrePage.Valid := by
-  constructor
-  · intro entry member
-    simp [HyperdocumentEventPageMaterializer.Page.entries, eventPrePage] at member
-  · simp [HyperdocumentEventPageMaterializer.Page.entries, eventPrePage]
-
-theorem eventPostPage_valid : eventPostPage.Valid := by
-  constructor
-  · intro entry member
-    have exactEntry : entry = eventEntry := by
-      simpa [HyperdocumentEventPageMaterializer.Page.entries, eventPostPage,
-        _root_.id] using member
-    subst entry
-    exact ⟨rfl, rfl, HyperdocumentLinkPublicationWitness.linkWellFormed,
-      deriveVersionEventId_address_exact
-        HyperdocumentEventPageMaterializer.eventPreimageCodec
-        HyperdocumentEventPageMaterializer.eventDerivation
-        Publication.eventRecord⟩
-  · simp [HyperdocumentEventPageMaterializer.Page.entries, eventPostPage,
-      eventEntry]
-
-@[simp] theorem bounded_event_post_contains_exact_record :
-    eventPostPage.toSparseStore .events eventEntry.key =
-      some Publication.eventRecord := by
-  simp [HyperdocumentEventPageMaterializer.Page.toSparseStore,
-    HyperdocumentEventPageMaterializer.Page.entries, eventPostPage,
-    HyperdocumentEventPageMaterializer.installEntry, eventEntry,
-    _root_.id]
   rfl
 
+/-! ## Exact event delta on the deployed event-log cell -/
+
+/-- The deployed cSHAKE key of the accepted event. -/
+def eventKey : VersionEventId :=
+  deriveVersionEventId HyperdocumentCell.eventPreimageStream.toLawful
+    HyperdocumentCell.eventDerivation Publication.eventRecord
+
+/-- The deployed key is the event scheme's address of the event's causal
+preimage: exactly what the registry's event-history law checks. -/
+theorem eventKey_addressed :
+    eventKey.digest =
+      HyperdocumentCell.eventScheme.address Publication.eventRecord.toCausalPreimage :=
+  deriveVersionEventId_address_exact _ _ _
+
+def eventPreStore : EventStore := 0
+
+def eventPostStore : EventStore :=
+  eventPreStore.set (HyperdocumentEventLog.Sparse.eventAddress eventKey)
+    (some Publication.eventRecord)
+
+@[simp] theorem deployed_event_post_contains_exact_record :
+    eventPostStore (HyperdocumentEventLog.Sparse.eventAddress eventKey) =
+      some Publication.eventRecord :=
+  Store.Store.set_eq _ _ _
+
 @[simp] theorem accepted_event_post_contains_exact_record :
-    Publication.eventPost.logical.fields
-      ⟨HyperdocumentEventLog.Sparse.Namespace.events, Publication.eventKey⟩ =
-        some Publication.eventRecord :=
+    Publication.eventPost.logical
+        (HyperdocumentEventLog.Sparse.eventAddress Publication.eventKey) =
+      some Publication.eventRecord :=
   HyperdocumentLinkPublicationWitness.event_post_contains_link_event
 
-/-- The semantic event-log post and bounded production page retain the same
-accepted record.  The physical page deliberately uses its cSHAKE-derived key;
-the old witness event store used a transparent test address. -/
-theorem accepted_event_to_bounded_exact :
-    Publication.eventPost.logical.fields
-        ⟨HyperdocumentEventLog.Sparse.Namespace.events, Publication.eventKey⟩ =
-      eventPostPage.toSparseStore .events eventEntry.key := by
+/-- The semantic event-log post and the deployed log cell retain the same
+accepted record.  The deployed cell uses its cSHAKE-derived key; the witness
+event store uses a transparent test address. -/
+theorem accepted_event_to_deployed_exact :
+    Publication.eventPost.logical
+        (HyperdocumentEventLog.Sparse.eventAddress Publication.eventKey) =
+      eventPostStore (HyperdocumentEventLog.Sparse.eventAddress eventKey) := by
   rw [accepted_event_post_contains_exact_record,
-    bounded_event_post_contains_exact_record]
+    deployed_event_post_contains_exact_record]
 
-def eventPreCell :
-    Materialized HyperdocumentEventPageMaterializer.materializer :=
-  CellState.materialize HyperdocumentEventPageMaterializer.materializer
-    (HyperdocumentEventPageMaterializer.stateOfOption (some eventPrePage))
+def eventPreCell : Materialized HyperdocumentCell.eventMaterializer :=
+  CellState.materialize HyperdocumentCell.eventMaterializer eventPreStore
 
-def eventPostCell :
-    Materialized HyperdocumentEventPageMaterializer.materializer :=
-  CellState.materialize HyperdocumentEventPageMaterializer.materializer
-    (HyperdocumentEventPageMaterializer.stateOfOption (some eventPostPage))
+def eventPostCell : Materialized HyperdocumentCell.eventMaterializer :=
+  CellState.materialize HyperdocumentCell.eventMaterializer eventPostStore
 
-def eventPatch : CellState.Patch HyperdocumentEventPageMaterializer.schema
-    Digest where
-  expectedPreRoot := eventPreCell.root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := some eventPostPage }]
-  resourceWrites := []
+def eventPatch : HyperdocumentEventLog.Sparse.Patch :=
+  [.allocate .events eventKey Publication.eventRecord]
 
 theorem eventPatch_accepted :
     ∃ validated : CellState.ValidatedPatch
-        HyperdocumentEventPageMaterializer.materializer eventPreCell eventPatch,
-      CellState.validate HyperdocumentEventPageMaterializer.materializer
-        eventPreCell eventPatch = CellState.ValidationOutcome.accepted validated := by
-  unfold CellState.validate
-  rw [dif_pos (show eventPatch.expectedPreRoot = eventPreCell.root from rfl)]
-  rw [dif_pos (show eventPatch.fieldFootprint = eventPatch.namedFields by decide)]
-  rw [dif_pos (show eventPatch.resourceFootprint = eventPatch.namedResources by
-    decide)]
-  exact ⟨_, rfl⟩
+        HyperdocumentCell.eventMaterializer eventPreCell eventPreCell.root eventPatch,
+      CellState.validate HyperdocumentCell.eventMaterializer
+        eventPreCell eventPreCell.root eventPatch =
+          CellState.ValidationOutcome.accepted validated :=
+  CellState.validate_accepts _ _ _ _ rfl ⟨⟨by decide, rfl⟩, trivial⟩
 
 theorem event_accepted_post_exact
     (validated : CellState.ValidatedPatch
-      HyperdocumentEventPageMaterializer.materializer eventPreCell eventPatch) :
+      HyperdocumentCell.eventMaterializer eventPreCell eventPreCell.root eventPatch) :
     validated.apply = eventPostCell := by
   apply CellState.Materialized.ext
-  change
-    { fields := CellState.applyFieldWrites eventPatch.fieldWrites
-        eventPreCell.logical.fields
-      resources := CellState.applyResourceWrites eventPatch.resourceWrites
-        eventPreCell.logical.resources } =
-      HyperdocumentEventPageMaterializer.stateOfOption (some eventPostPage)
-  congr 1
-  apply DFinsupp.ext
-  intro field
-  cases field
-  simp [CellState.applyFieldWrites, eventPatch, eventPreCell,
-    HyperdocumentEventPageMaterializer.stateOfOption,
-    CellState.FieldStore.assign]
+  rfl
 
-/-! ## Exact page frames and Lean cSHAKE roots -/
+/-! ## Exact store frames and Lean cSHAKE roots -/
 
 def contentPreBytes : List UInt8 := contentPreCell.bytes
 def contentPostBytes : List UInt8 := contentPostCell.bytes
 def eventPreBytes : List UInt8 := eventPreCell.bytes
 def eventPostBytes : List UInt8 := eventPostCell.bytes
 
-@[simp] theorem contentPostBytes_exact :
-    contentPostBytes =
-      HyperdocumentContentPageMaterializer.wireFrame ++
-        1 :: HyperdocumentContentPageMaterializer.pageStream.encode
-          contentPostPage := rfl
+theorem contentPostBytes_exact :
+    contentPostBytes = StoreCodec.encode HyperdocumentCell.contentWire contentPostStore :=
+  rfl
 
-@[simp] theorem eventPostBytes_exact :
-    eventPostBytes =
-      HyperdocumentEventPageMaterializer.wireFrame ++
-        1 :: HyperdocumentEventPageMaterializer.pageStream.encode
-          eventPostPage := rfl
+theorem eventPostBytes_exact :
+    eventPostBytes = StoreCodec.encode HyperdocumentCell.eventWire eventPostStore :=
+  rfl
 
-@[simp] theorem contentPostRoot_exact :
+theorem contentPostRoot_exact :
     contentPostCell.root =
-      (Sp800185Cshake256.hash
-        HyperdocumentContentPageMaterializer.rootCustomization
-        contentPostBytes).digest := rfl
+      (Sp800185Cshake256.hash StoreCodec.rootCustomization contentPostBytes).digest :=
+  rfl
 
-@[simp] theorem eventPostRoot_exact :
+theorem eventPostRoot_exact :
     eventPostCell.root =
-      (Sp800185Cshake256.hash
-        HyperdocumentEventPageMaterializer.rootCustomization
-        eventPostBytes).digest := rfl
+      (Sp800185Cshake256.hash StoreCodec.rootCustomization eventPostBytes).digest :=
+  rfl
 
-/-! ## One authority-guarded durable page intent -/
+/-! ## One authority-guarded durable intent -/
 
-/-- The two page codecs have disjoint outer wire frames.  The durable snapshot
-uses the decoder result to select the same root function used by the page's
-own materializer.  Non-page bytes are authority bytes and use their own
-cSHAKE customization. -/
+/-- Store-cell bytes (either deployed wire) use the store root; other bytes
+are authority bytes and use their own cSHAKE customization, paired with their
+length so the stale-authority tooth below needs no collision premise. -/
 def authorityRootCustomization : List UInt8 :=
   [76, 79, 79, 77, 46, 72, 68, 79, 67, 46, 65, 85, 84, 72, 46, 82, 79, 79,
     84, 47, 118, 49]
@@ -358,62 +218,38 @@ def authorityRootBytes (bytes : List UInt8) : Digest :=
     bytes.length⟩
 
 def rootBytes (bytes : List UInt8) : Digest :=
-  match HyperdocumentContentPageMaterializer.stateCodec.decode bytes with
-  | some _ => HyperdocumentContentPageMaterializer.rootBytes bytes
-  | none =>
-      match HyperdocumentEventPageMaterializer.stateCodec.decode bytes with
-      | some _ => HyperdocumentEventPageMaterializer.rootBytes bytes
-      | none => authorityRootBytes bytes
+  if (HyperdocumentCell.contentMaterializer.codec.decode bytes).isSome ∨
+      (HyperdocumentCell.eventMaterializer.codec.decode bytes).isSome then
+    StoreCodec.rootBytes bytes
+  else authorityRootBytes bytes
 
-@[simp] theorem rootBytes_content_encode
-    (state : LogicalState HyperdocumentContentPageMaterializer.schema) :
-    rootBytes (HyperdocumentContentPageMaterializer.stateCodec.encode state) =
-      HyperdocumentContentPageMaterializer.rootBytes
-        (HyperdocumentContentPageMaterializer.stateCodec.encode state) := by
+@[simp] theorem rootBytes_content_encode (store : ContentStore) :
+    rootBytes (HyperdocumentCell.contentMaterializer.codec.encode store) =
+      StoreCodec.rootBytes (HyperdocumentCell.contentMaterializer.codec.encode store) := by
   unfold rootBytes
-  rw [HyperdocumentContentPageMaterializer.stateCodec.decode_encode]
+  rw [if_pos (Or.inl (by rw [HyperdocumentCell.contentMaterializer.codec.decode_encode]; rfl))]
 
-@[simp] theorem content_decoder_rejects_event_encode
-    (state : LogicalState HyperdocumentEventPageMaterializer.schema) :
-    HyperdocumentContentPageMaterializer.stateCodec.decode
-      (HyperdocumentEventPageMaterializer.stateCodec.encode state) = none := by
-  simp [HyperdocumentContentPageMaterializer.stateCodec,
-    HyperdocumentContentPageMaterializer.decodeState,
-    HyperdocumentEventPageMaterializer.stateCodec,
-    HyperdocumentEventPageMaterializer.wireFrame]
-
-@[simp] theorem rootBytes_event_encode
-    (state : LogicalState HyperdocumentEventPageMaterializer.schema) :
-    rootBytes (HyperdocumentEventPageMaterializer.stateCodec.encode state) =
-      HyperdocumentEventPageMaterializer.rootBytes
-        (HyperdocumentEventPageMaterializer.stateCodec.encode state) := by
-  simp [rootBytes]
+@[simp] theorem rootBytes_event_encode (store : EventStore) :
+    rootBytes (HyperdocumentCell.eventMaterializer.codec.encode store) =
+      StoreCodec.rootBytes (HyperdocumentCell.eventMaterializer.codec.encode store) := by
+  unfold rootBytes
+  rw [if_pos (Or.inr (by rw [HyperdocumentCell.eventMaterializer.codec.decode_encode]; rfl))]
 
 @[simp] theorem contentPreRoot_bound :
-    rootBytes contentPreBytes = contentPreCell.root := by
-  simpa [contentPreBytes, contentPreCell] using
-    (rootBytes_content_encode
-      (HyperdocumentContentPageMaterializer.stateOfOption
-        (some contentPrePage)))
+    rootBytes contentPreBytes = contentPreCell.root :=
+  rootBytes_content_encode contentPreStore
 
 @[simp] theorem contentPostRoot_bound :
-    rootBytes contentPostBytes = contentPostCell.root := by
-  simpa [contentPostBytes, contentPostCell] using
-    (rootBytes_content_encode
-      (HyperdocumentContentPageMaterializer.stateOfOption
-        (some contentPostPage)))
+    rootBytes contentPostBytes = contentPostCell.root :=
+  rootBytes_content_encode contentPostStore
 
 @[simp] theorem eventPreRoot_bound :
-    rootBytes eventPreBytes = eventPreCell.root := by
-  simpa [eventPreBytes, eventPreCell] using
-    (rootBytes_event_encode
-      (HyperdocumentEventPageMaterializer.stateOfOption (some eventPrePage)))
+    rootBytes eventPreBytes = eventPreCell.root :=
+  rootBytes_event_encode eventPreStore
 
 @[simp] theorem eventPostRoot_bound :
-    rootBytes eventPostBytes = eventPostCell.root := by
-  simpa [eventPostBytes, eventPostCell] using
-    (rootBytes_event_encode
-      (HyperdocumentEventPageMaterializer.stateOfOption (some eventPostPage)))
+    rootBytes eventPostBytes = eventPostCell.root :=
+  rootBytes_event_encode eventPostStore
 
 def contentCellId : CellId := ⟨920⟩
 def eventCellId : CellId := ⟨921⟩
@@ -480,16 +316,15 @@ def nullifier : StableNullifier where
     (HyperdocumentLinkPublicationWitness.linkDeclaration.operationId
       HyperdocumentLinkPublicationWitness.config).digest
   canonicalBytes :=
-    HyperdocumentEventPageMaterializer.eventPreimageCodec.encode
+    HyperdocumentCell.eventPreimageStream.encode
       HyperdocumentLinkPublicationWitness.linkAccepted.causalPreimage
 
 def durableEvent : StableEvent where
   codecVersion := 1
   domain := HyperdocumentLinkPublicationWitness.linkIntent.historyDomain
-  eventId := eventEntry.key.digest
+  eventId := eventKey.digest
   canonicalBytes :=
-    HyperdocumentEventPageMaterializer.versionEventRecordCodec.encode
-      Publication.eventRecord
+    HyperdocumentCell.versionEventRecordStream.encode Publication.eventRecord
 
 def intent : DataIntent rootBytes where
   transactionId := ⟨923⟩
@@ -568,16 +403,16 @@ def intent : DataIntent rootBytes where
 @[simp] theorem installed_content_root :
     (DataSnapshot.install before intent).model.roots contentCellId =
       contentPostCell.root := by
-  simp [DataSnapshot.install, Snapshot.install, Snapshot.lookupPost, intent,
+  simp only [DataSnapshot.install, Snapshot.install, intent,
     contentWrite, eventWrite, contentCellId, eventCellId]
-  simpa [contentPostBytes] using contentPostRoot_bound
+  simp [Snapshot.lookupPost]
 
 @[simp] theorem installed_event_root :
     (DataSnapshot.install before intent).model.roots eventCellId =
       eventPostCell.root := by
-  simp [DataSnapshot.install, Snapshot.install, Snapshot.lookupPost, intent,
+  simp only [DataSnapshot.install, Snapshot.install, intent,
     contentWrite, eventWrite, contentCellId, eventCellId]
-  simpa [eventPostBytes] using eventPostRoot_bound
+  simp [Snapshot.lookupPost]
 
 /-! ## Executable stale/mismatch teeth -/
 
@@ -597,13 +432,26 @@ def staleBefore : DataSnapshot rootBytes where
   canonicalBytes := staleBeforeBytes
   coherent := fun _ => rfl
 
+/-- Bytes whose first byte is not the store magic's are authority bytes. -/
+theorem rootBytes_of_first_byte (first : UInt8) (rest : List UInt8) (other : first ≠ 68) :
+    rootBytes (first :: rest) = authorityRootBytes (first :: rest) := by
+  unfold rootBytes
+  rw [if_neg]
+  rintro (content | event)
+  · rw [show HyperdocumentCell.contentMaterializer.codec.decode (first :: rest) = none from
+      StoreCodec.decode_other_first_byte HyperdocumentCell.contentWire first rest other] at content
+    cases content
+  · rw [show HyperdocumentCell.eventMaterializer.codec.decode (first :: rest) = none from
+      StoreCodec.decode_other_first_byte HyperdocumentCell.eventWire first rest other] at event
+    cases event
+
 @[simp] theorem rootBytes_authority_exact :
-    rootBytes authorityBytes = authorityRootBytes authorityBytes := by
-  rfl
+    rootBytes authorityBytes = authorityRootBytes authorityBytes :=
+  rootBytes_of_first_byte 76 _ (by decide)
 
 @[simp] theorem rootBytes_staleAuthority_exact :
-    rootBytes staleAuthorityBytes = authorityRootBytes staleAuthorityBytes := by
-  rfl
+    rootBytes staleAuthorityBytes = authorityRootBytes staleAuthorityBytes :=
+  rootBytes_of_first_byte 76 _ (by decide)
 
 @[simp] theorem staleBefore_authority_root :
     staleBefore.model.roots authorityCellId =
@@ -628,15 +476,35 @@ theorem concrete_authority_roots_differ :
   rw [staleBefore_authority_root]
   simpa using concrete_authority_roots_differ
 
+/-- The root-collision premise for one pair of stores under one materializer. -/
+def PairBindingPremise {L : Store.Layout.{0, 0, 0}} (M : CellState.Materializer L Digest)
+    (left right : Store.Store L) : Prop :=
+  M.rootOf left = M.rootOf right → left = right
+
 structure ContentPairSecurityCeiling : Prop where
-  binding : HyperdocumentContentPageMaterializer.PairBindingPremise
+  binding : PairBindingPremise HyperdocumentCell.contentMaterializer
     contentPreCell.logical contentPostCell.logical
   rootsDifferent : contentPreCell.root ≠ contentPostCell.root
 
 structure EventPairSecurityCeiling : Prop where
-  binding : HyperdocumentEventPageMaterializer.PairBindingPremise
+  binding : PairBindingPremise HyperdocumentCell.eventMaterializer
     eventPreCell.logical eventPostCell.logical
   rootsDifferent : eventPreCell.root ≠ eventPostCell.root
+
+/-- The binding premise suffices for the root inequality: the two content
+stores differ at the link address. -/
+theorem ContentPairSecurityCeiling.ofBinding
+    (binding : PairBindingPremise HyperdocumentCell.contentMaterializer
+      contentPreCell.logical contentPostCell.logical) :
+    ContentPairSecurityCeiling where
+  binding := binding
+  rootsDifferent := by
+    intro equal
+    have stores := binding equal
+    have atLink := congrArg (fun store : ContentStore => store linkAddress) stores
+    simp only [contentPreCell, contentPostCell, CellState.materialize_logical,
+      contentPostStore, contentPreStore, Store.Store.set_eq, Store.Store.zero_apply] at atLink
+    cases atLink
 
 def mismatchedContentWrite : DataWrite :=
   { contentWrite with expectedPre := rootBytes contentPostBytes }
@@ -692,7 +560,7 @@ def mismatchedIntent : DataIntent rootBytes where
       mismatchedIntent.erase.rootsMatchCheck before.model = false := by
     simp [DurableCommitProtocol.Intent.rootsMatchCheck, mismatchedIntent,
       DataIntent.erase, mismatchedContentWrite, contentWrite, eventWrite]
-    simpa [contentPostBytes] using expectedMismatch
+    simpa using expectedMismatch
   have durableRejected :
       mismatchedIntent.erase.preflight before.model =
         .error .stalePreRoot := by
@@ -700,7 +568,10 @@ def mismatchedIntent : DataIntent rootBytes where
     simp [rootsFailed]
     simp [mismatchedIntent, mismatchedContentWrite, contentWrite, eventWrite,
       contentCellId, eventCellId]
-  simp [DataIntent.preflight, guardsReady, durableRejected]
+  unfold DataIntent.preflight
+  rw [guardsReady]
+  simp only [Bool.not_true, Bool.false_eq_true, if_false]
+  rw [if_neg (by simp [mismatchedIntent]), durableRejected]
 
 /-- The event pair has the same deliberately local security boundary.  It is
 recorded even though stale-content rejection above needs only the content
