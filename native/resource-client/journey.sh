@@ -16,6 +16,8 @@
 #   K4     one resource holds 32 fields and reads them back (list item 2)
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
+#   J12    PLACE §2.2/§2.4: two friends co-write a document through `mini shell`
+#   J12C   PLACE §2.4: a transclusion across rooms (journey.d/j12c.sh)
 #
 # MANIFEST (JSON; paths absolute):
 #   {"host": ..., "mini": ..., "store": ..., "verifier": ...,
@@ -23,7 +25,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in m3 m4 m5 m6 m7): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in m3 m4 m5 m6 m7 j12 j12c): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -106,7 +108,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 M3 M4 M5 M6 M7)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 M3 M4 M5 M6 M7 J12 J12C)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -124,6 +126,8 @@ TITLE[M4]="J1-J8 through the shell over ssh"
 TITLE[M5]="Hermes does J4 through the client; killed, restarts, resolves"
 TITLE[M6]="a grain: INSTALL -> START -> reachable over http"
 TITLE[M7]="candidate built from portable interfaces reproduces hashes"
+TITLE[J12]="two friends co-write a document through the shell, with refusals"
+TITLE[J12C]="a quote (transclusion) across rooms: four grants, four outcomes"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
 # rule; keeps NAME.{cmd,out,err,rc,wall} in the current step dir; returns rc.
@@ -695,6 +699,8 @@ step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions 
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
+step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
+step_J12C() { hook j12c "B quotes a range of commons/wall into lab/paper; C (commons only) is refused no-grant reading the quote; A reads the quoted bytes; A's doc follow is refused no-grant (PLACE §2.4)" shell; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
 
 # ---------------------------------------------------------------- run
@@ -715,6 +721,8 @@ run_step M4 J0
 run_step M5 J0
 run_step M6 J0
 run_step M7 J0
+run_step J12 J0
+run_step J12C J0
 
 stop_server || echo "journey: could not stop the service cleanly" >&2
 trap - EXIT
