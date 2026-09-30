@@ -20,10 +20,11 @@ namespace Minidregg.Theory.ResourceCost
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CanonicalTransition
+open Minidregg.Theory.Store
 
 set_option autoImplicit false
 
-universe u v w x y z
+universe u v w y z
 
 /-! ## The additive resource algebra -/
 
@@ -281,23 +282,21 @@ theorem WordLayout.encode?_none_of_overflow
 
 /-- A Lean-owned metering semantics for canonical prepared turns.  Both the
 static bound and exact charge are functions of the exact indexed turn.  Memory
-touches are pinned to the canonical typed field/resource footprints. -/
+touches are pinned to the canonical typed address footprint. -/
 structure PreparedCostSemantics
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    (M : CellState.Materializer S Root) (pre : CellState.Materialized M)
+    {L : Layout.{u, v, w}} {Root : Type y}
+    (M : CellState.Materializer L Root) (pre : CellState.Materialized M)
     (Nullifier : Type z) where
   upper : PreparedTurn M pre Nullifier -> Charge
   exact : PreparedTurn M pre Nullifier -> Charge
   exact_le_upper : forall turn, exact turn <= upper turn
   memoryTouches_exact : forall turn,
     exact turn .memoryTouches =
-      turn.delta.fieldFootprint.card + turn.delta.resourceFootprint.card
+      turn.delta.footprint.card
 
 def PreparedCostSemantics.quote
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root} {pre : CellState.Materialized M}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root} {pre : CellState.Materialized M}
     {Nullifier : Type z}
     (semantics : PreparedCostSemantics M pre Nullifier)
     (turn : PreparedTurn M pre Nullifier) : Quote where
@@ -309,20 +308,18 @@ def PreparedCostSemantics.quote
 integration seam for semantic objects (such as flat hyperedges) whose exact
 charge is naturally derived only after their own acceptance proof exists. -/
 structure BoundedPreparedTurn
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root} {pre : CellState.Materialized M}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root} {pre : CellState.Materialized M}
     {Nullifier : Type z}
     (turn : PreparedTurn M pre Nullifier) where
   quote : Quote
   memoryTouches_exact :
     quote.exact .memoryTouches =
-      turn.delta.fieldFootprint.card + turn.delta.resourceFootprint.card
+      turn.delta.footprint.card
 
 def PreparedCostSemantics.bounded
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root} {pre : CellState.Materialized M}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root} {pre : CellState.Materialized M}
     {Nullifier : Type z}
     (semantics : PreparedCostSemantics M pre Nullifier)
     (turn : PreparedTurn M pre Nullifier) : BoundedPreparedTurn turn where
@@ -354,9 +351,8 @@ theorem ChargeReceipt.exact_delta {available : Charge} {quote : Quote}
 visible only in the funded constructor; blocked, semantic rejection, and
 over-budget refusal all preserve the exact pre-cell and budget. -/
 inductive SettledDecision
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    (M : CellState.Materializer S Root)
+    {L : Layout.{u, v, w}} {Root : Type y}
+    (M : CellState.Materializer L Root)
     (Blocked Reject Nullifier : Type z)
     (pre : CellState.Materialized M)
     (semantics : PreparedCostSemantics M pre Nullifier)
@@ -369,9 +365,8 @@ inductive SettledDecision
       (receipt : ChargeReceipt available (semantics.quote turn))
 
 def SettledDecision.ofDecision
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root}
     {Blocked Reject Nullifier : Type z} {pre : CellState.Materialized M}
     (semantics : PreparedCostSemantics M pre Nullifier) (available : Charge) :
     Decision M Blocked Reject Nullifier pre ->
@@ -390,9 +385,8 @@ def SettledDecision.ofDecision
             (semantics.exact turn) available).mpr funded))
 
 def SettledDecision.logicalPost
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root}
     {Blocked Reject Nullifier : Type z} {pre : CellState.Materialized M}
     {semantics : PreparedCostSemantics M pre Nullifier} {available : Charge} :
     SettledDecision M Blocked Reject Nullifier pre semantics available ->
@@ -403,9 +397,8 @@ def SettledDecision.logicalPost
   | .admitted turn _ => turn.post
 
 def SettledDecision.remaining
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root}
     {Blocked Reject Nullifier : Type z} {pre : CellState.Materialized M}
     {semantics : PreparedCostSemantics M pre Nullifier} {available : Charge} :
     SettledDecision M Blocked Reject Nullifier pre semantics available -> Charge
@@ -415,9 +408,8 @@ def SettledDecision.remaining
   | .admitted _ receipt => receipt.remaining
 
 @[simp] theorem SettledDecision.blocked_atomic
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root}
     {Blocked Reject Nullifier : Type z} {pre : CellState.Materialized M}
     {semantics : PreparedCostSemantics M pre Nullifier} {available : Charge}
     (reason : Blocked) :
@@ -430,9 +422,8 @@ def SettledDecision.remaining
   ⟨rfl, rfl⟩
 
 @[simp] theorem SettledDecision.rejected_atomic
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root}
     {Blocked Reject Nullifier : Type z} {pre : CellState.Materialized M}
     {semantics : PreparedCostSemantics M pre Nullifier} {available : Charge}
     (reason : Reject) :
@@ -445,9 +436,8 @@ def SettledDecision.remaining
   ⟨rfl, rfl⟩
 
 @[simp] theorem SettledDecision.overBudget_atomic
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root}
     {Blocked Reject Nullifier : Type z} {pre : CellState.Materialized M}
     {semantics : PreparedCostSemantics M pre Nullifier} {available : Charge}
     (turn : PreparedTurn M pre Nullifier)
@@ -462,9 +452,8 @@ def SettledDecision.remaining
 
 /-- An admitted decision exposes exactly the canonical post and exact debit. -/
 theorem SettledDecision.admitted_exact
-    {S : CellState.Schema.{u, v, w, x}} {Root : Type y}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Root}
+    {L : Layout.{u, v, w}} {Root : Type y}
+    {M : CellState.Materializer L Root}
     {Blocked Reject Nullifier : Type z} {pre : CellState.Materialized M}
     {semantics : PreparedCostSemantics M pre Nullifier} {available : Charge}
     (turn : PreparedTurn M pre Nullifier)

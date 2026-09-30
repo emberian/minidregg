@@ -18,46 +18,39 @@ construction path.
 -/
 import Theory.CanonicalTransition
 import Theory.PrivateComputationDeclaration
+import Theory.TypedAuthorization
 
 namespace Minidregg.Theory
 
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CanonicalTransition
+open Minidregg.Theory.Store
 
-universe u v w x y z
+universe u v w y z
 
 /-! ## Source-derived postconditions -/
 
 /-- The produced part of a patch has its exact source-derived result in a
-candidate post. Unrelated fields and packages remain unconstrained here, so
+candidate post: every address the patch writes holds the value the patch's run
+from `pre` gives it. Unwritten addresses remain unconstrained here, so
 independent effects can compose. Families with additional post invariants
 must retain those invariants alongside this relation in `Postcondition`.
 
-This uses the existing canonical write interpretation. It is not an alternate
+This uses the one patch interpretation, `Patch.run`. It is not an alternate
 executor, a supplied Boolean, or equality of whole states. -/
-def CellState.Patch.ResultAt
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    (pre : CellState.LogicalState S) (patch : CellState.Patch S Digest)
-    (post : CellState.LogicalState S) : Prop :=
-  (∀ field ∈ patch.fieldFootprint,
-    post.fields field =
-      CellState.applyFieldWrites patch.fieldWrites pre.fields field) ∧
-  (∀ resource ∈ patch.resourceFootprint,
-    post.resources resource =
-      CellState.applyResourceWrites patch.resourceWrites pre.resources resource)
+def Store.Patch.ResultAt {L : Layout.{u, v, w}}
+    (pre : Store L) (patch : Patch L) (post : Store L) : Prop :=
+  ∀ address ∈ Patch.writeFootprint patch, post address = Patch.run pre patch address
 
 /-- A verifier-minted canonical patch always realizes its own produced
 result. The same relation can later be required at a jointly composed post. -/
-theorem CellState.ValidatedPatch.resultAt
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {pre : CellState.Materialized M}
-    {patch : CellState.Patch S Digest}
-    (validated : CellState.ValidatedPatch M pre patch) :
-    patch.ResultAt pre.logical validated.apply.logical := by
-  exact ⟨fun _ _ => rfl, fun _ _ => rfl⟩
+theorem CellState.ValidatedPatch.resultAt {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {pre : CellState.Materialized M}
+    {expectedPreRoot : Digest} {patch : Patch L}
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
+    patch.ResultAt pre.logical validated.apply.logical :=
+  fun _ _ => rfl
 
 /-! ## Independent disclosure decisions -/
 
@@ -136,8 +129,8 @@ the exact types of evidence and release authority for each declaration/outcome.
 This is trusted Lean semantics, not a callback ABI: an implementation may
 produce candidate data, but it cannot replace these indices or projections. -/
 structure SemanticEffectFamily
-    (S : CellState.Schema.{u, v, w, x})
-    (M : CellState.Materializer S Digest) (Nullifier : Type y) where
+    (L : Layout.{u, v, w})
+    (M : CellState.Materializer L Digest) (Nullifier : Type y) where
   Declaration : Type z
   declarationCodec : LawfulCodec Declaration
   /-- The exact canonical cell read by this family's trusted semantics.
@@ -154,9 +147,9 @@ structure SemanticEffectFamily
   establish these same obligations. The registered source family fixes this
   relation; an incoming host request cannot choose it. -/
   Postcondition : (declaration : Declaration) → Outcome declaration →
-    CellState.LogicalState S → Prop
+    Store L → Prop
   effectDigest : Declaration → Digest
-  patch : (declaration : Declaration) → Outcome declaration → CellState.Patch S Digest
+  patch : (declaration : Declaration) → Outcome declaration → Patch L
   nullifier : (declaration : Declaration) → Outcome declaration → Option Nullifier
   Release : (declaration : Declaration) → Outcome declaration → Type z
   DeclassificationAuthority : (declaration : Declaration) →
@@ -174,24 +167,26 @@ structure SemanticEffectFamily
 /-- The sole positive semantic join. The complete common authorization request
 equals the family-selected source request, and the actual pre-cell equals the
 family's canonical pre-cell. Digest and root checks remain explicit as well.
-The validated patch determines the
-post-cell and both footprints; there are no independently supplied versions. -/
+The validated patch is quoted at the
+request's pre-state root, so the root check is the patch validation itself; it
+determines the post-cell and the footprint, and there are no independently
+supplied versions. -/
 structure AcceptedCellEffect
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     (request : Request kind) (pre : CellState.Materialized M)
     (declaration : family.Declaration)
-    (outcome : family.Outcome declaration) : Type (max u v w x y z) where
+    (outcome : family.Outcome declaration) : Type (max u v w y z) where
   authorization : Authorized portal authState request
   preStateBound : pre = family.pre
   requestBound : (⟨kind, request⟩ : PackedEffectRequest) = family.request declaration
   effectsDigestBound : request.effectsDigest = family.effectDigest declaration
-  preRootBound : request.preStateRoot = pre.root
   modeEvidence : family.ModeEvidence declaration outcome
-  validated : CellState.ValidatedPatch M pre (family.patch declaration outcome)
+  /-- The family patch, validated against `pre` at the root the request quotes. -/
+  validated : CellState.ValidatedPatch M pre request.preStateRoot
+    (family.patch declaration outcome)
   postcondition : family.Postcondition declaration outcome validated.apply.logical
   disclosure : DisclosureDecision (family.Release declaration outcome)
     (family.DeclassificationAuthority declaration outcome)
@@ -201,13 +196,20 @@ structure AcceptedCellEffect
 namespace AcceptedCellEffect
 
 variable
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} {pre : CellState.Materialized M}
     {declaration : family.Declaration} {outcome : family.Outcome declaration}
+
+/-- The request's pre-state root is the pre-cell's root: the validated patch
+was quoted at it. -/
+theorem preRootBound
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome) :
+    request.preStateRoot = pre.root :=
+  accepted.validated.preRoot_bound
 
 /-- All request projections inherit exact equality; no digest reflection or
 collision-resistance premise is used. -/
@@ -365,18 +367,11 @@ def prepared
     accepted.prepared.preRoot = request.preStateRoot :=
   accepted.preRootBound.symm
 
-@[simp] theorem prepared_fieldFootprint
+@[simp] theorem prepared_footprint
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome) :
-    accepted.prepared.delta.fieldFootprint =
-      (family.patch declaration outcome).fieldFootprint :=
-  rfl
-
-@[simp] theorem prepared_resourceFootprint
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome) :
-    accepted.prepared.delta.resourceFootprint =
-      (family.patch declaration outcome).resourceFootprint :=
+    accepted.prepared.delta.footprint =
+      Patch.writeFootprint (family.patch declaration outcome) :=
   rfl
 
 @[simp] theorem prepared_nullifier
@@ -385,48 +380,24 @@ def prepared
     accepted.prepared.nullifier = family.nullifier declaration outcome :=
   rfl
 
-/-- Canonical field-frame fact inherited from the one validated patch. -/
-theorem field_frame
+/-- The frame of the one validated patch: no address outside the family
+patch's write footprint changes. -/
+theorem frame
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome)
-    (field : S.Field)
-    (outside : field ∉ (family.patch declaration outcome).fieldFootprint) :
-    accepted.prepared.post.logical.fields field = pre.logical.fields field :=
-  accepted.prepared.delta.fieldFrame field (by
-    simpa only [prepared_fieldFootprint] using outside)
+    (address : Address L)
+    (outside : address ∉ Patch.writeFootprint (family.patch declaration outcome)) :
+    accepted.prepared.post.logical address = pre.logical address :=
+  accepted.prepared.delta.frame address outside
 
-/-- Canonical resource-frame fact inherited from the one validated patch. -/
-theorem resource_frame
+/-- Any changed address is in the exact family patch footprint. -/
+theorem changed_only_declared
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome)
-    (resource : S.Resource)
-    (outside : resource ∉ (family.patch declaration outcome).resourceFootprint) :
-    accepted.prepared.post.logical.resources resource =
-      pre.logical.resources resource :=
-  accepted.prepared.delta.resourceFrame resource (by
-    simpa only [prepared_resourceFootprint] using outside)
-
-/-- Any changed field is in the exact family patch footprint. -/
-theorem field_changed_only_declared
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome)
-    (field : S.Field)
-    (changed : accepted.prepared.post.logical.fields field ≠
-      pre.logical.fields field) :
-    field ∈ (family.patch declaration outcome).fieldFootprint := by
-  simpa only [prepared_fieldFootprint] using
-    accepted.prepared.delta.field_changed_only_declared field changed
-
-/-- Any changed resource package is in the exact family patch footprint. -/
-theorem resource_changed_only_declared
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      family request pre declaration outcome)
-    (resource : S.Resource)
-    (changed : accepted.prepared.post.logical.resources resource ≠
-      pre.logical.resources resource) :
-    resource ∈ (family.patch declaration outcome).resourceFootprint := by
-  simpa only [prepared_resourceFootprint] using
-    accepted.prepared.delta.resource_changed_only_declared resource changed
+    (address : Address L)
+    (changed : accepted.prepared.post.logical address ≠ pre.logical address) :
+    address ∈ Patch.writeFootprint (family.patch declaration outcome) :=
+  accepted.prepared.delta.changed_only_declared address changed
 
 end AcceptedCellEffect
 
@@ -436,11 +407,10 @@ end AcceptedCellEffect
 private: the only public creation path below consumes `AcceptedCellEffect`.
 This record is a projection and is not a second admission judgment. -/
 structure ReceiptEvent
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier) :
-    Type (max u v w x y z) where
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier) :
+    Type (max u v w y z) where
   private mk ::
   kind : ResourceKind
   request : Request kind
@@ -453,8 +423,7 @@ structure ReceiptEvent
   effectDigest : Digest
   preRoot : Digest
   postRoot : Digest
-  fieldFootprint : Finset S.Field
-  resourceFootprint : Finset S.Resource
+  footprint : Finset (Address L)
   requestBound : (⟨kind, request⟩ : PackedEffectRequest) = family.request declaration
   canonicalPreRootBound : preRoot = family.pre.root
   effectsDigestBound : request.effectsDigest = effectDigest
@@ -464,10 +433,9 @@ structure ReceiptEvent
 /-- Accepted effects alone project receipt events.  In particular, a bare mode
 proof or private completion cannot augment an unrelated committed receipt. -/
 def AcceptedCellEffect.toReceiptEvent
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} {pre : CellState.Materialized M}
     {declaration : family.Declaration} {outcome : family.Outcome declaration}
@@ -483,8 +451,7 @@ def AcceptedCellEffect.toReceiptEvent
   effectDigest := family.effectDigest declaration
   preRoot := pre.root
   postRoot := accepted.prepared.postRoot
-  fieldFootprint := accepted.prepared.delta.fieldFootprint
-  resourceFootprint := accepted.prepared.delta.resourceFootprint
+  footprint := accepted.prepared.delta.footprint
   requestBound := accepted.requestBound
   canonicalPreRootBound := congrArg CellState.Materialized.root accepted.preStateBound
   effectsDigestBound := accepted.effectsDigestBound
@@ -492,10 +459,9 @@ def AcceptedCellEffect.toReceiptEvent
   requestPreRootBound := accepted.preRootBound
 
 @[simp] theorem AcceptedCellEffect.toReceiptEvent_postRoot
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} {pre : CellState.Materialized M}
     {declaration : family.Declaration} {outcome : family.Outcome declaration}
@@ -519,8 +485,7 @@ itself owns the nullifier and exact footprint.  The adapter supplies only the
 canonical patch/digest interpretation and an explicit realization relation for
 the request's typed resource effects. -/
 structure Adapter
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {L : Layout.{u, v, w}}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
@@ -531,38 +496,33 @@ structure Adapter
   requestDigestBytes : List UInt8 → Digest
   effectIntentCodec : LawfulCodec (List ResourceEffect × Footprint × Option Nullifier)
   effectDigestBytes : List UInt8 → Digest
-  patch : declaration.Request → declaration.Result → CellState.Patch S Digest
-  fieldFootprint : Footprint → Finset S.Field
-  resourceFootprint : Footprint → Finset S.Resource
+  patch : declaration.Request → declaration.Result → Patch L
+  footprint : Footprint → Finset (Address L)
   RealizesResourceEffects : declaration.Request → declaration.Result →
-    CellState.Patch S Digest → Prop
+    Patch L → Prop
   resourceEffectsRealized : ∀ request result,
     RealizesResourceEffects request result (patch request result)
-  fieldFootprintExact : ∀ request result,
-    (patch request result).fieldFootprint = fieldFootprint request.footprint
-  resourceFootprintExact : ∀ request result,
-    (patch request result).resourceFootprint = resourceFootprint request.footprint
+  footprintExact : ∀ request result,
+    Patch.writeFootprint (patch request result) = footprint request.footprint
 
 /-- The argument digest is structurally computed from the lawful encoding of
 the entire core request. -/
 def Adapter.completeRequestDigest
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {L : Layout.{u, v, w}}
     {declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins}
-    (adapter : Adapter (S := S) declaration) (request : declaration.Request) : Digest :=
+    (adapter : Adapter (L := L) declaration) (request : declaration.Request) : Digest :=
   adapter.requestDigestBytes (adapter.requestCodec.encode request)
 
 /-- The effect digest is structurally computed from the lawful encoding of the
 exact typed resource effects, declared footprint, and eager nullifier. -/
 def Adapter.completeEffectDigest
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {L : Layout.{u, v, w}}
     {declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins}
-    (adapter : Adapter (S := S) declaration) (request : declaration.Request) : Digest :=
+    (adapter : Adapter (L := L) declaration) (request : declaration.Request) : Digest :=
   adapter.effectDigestBytes <|
     adapter.effectIntentCodec.encode
       (request.resourceEffects, request.footprint, request.nullifier)
@@ -571,16 +531,15 @@ def Adapter.completeEffectDigest
 empty.  Mode evidence is the exact release-free completion; the eager
 nullifier is projected from the request rather than supplied by another path. -/
 def family
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
       ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     (pre : CellState.Materialized M) :
-    SemanticEffectFamily.{u, v, w, x, z, z} S M Nullifier where
+    SemanticEffectFamily.{u, v, w, z, z} L M Nullifier where
   Declaration := declaration.Request
   declarationCodec := adapter.requestCodec
   pre := pre
@@ -608,13 +567,12 @@ def family
 already forces the entire request, including `argsDigest`; the repeated
 equation below is retained only for existing source consumers. -/
 structure Accepted
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     (commonRequest : Request kind) (pre : CellState.Materialized M)
     (request : declaration.Request) (result : declaration.Result) where
@@ -624,15 +582,14 @@ structure Accepted
 
 /-- There is no value in the release carrier of a pure computation family. -/
 theorem family_no_release
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     {pre : CellState.Materialized M}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
       ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     (request : declaration.Request) (result : declaration.Result)
     (release : (family (M := M) declaration adapter pre).Release request result) : False :=
   nomatch release
@@ -640,14 +597,13 @@ theorem family_no_release
 /-- The positive kernel join for sealed computation.  Disclosure is fixed to
 `.sealed`; callers cannot supply a decision or a release-bearing witness. -/
 def accept
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
       ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : declaration.Request} {result : declaration.Result}
@@ -656,9 +612,9 @@ def accept
       (family declaration adapter pre).request request)
     (argsDigestBound : commonRequest.argsDigest = adapter.completeRequestDigest request)
     (effectsDigestBound : commonRequest.effectsDigest = adapter.completeEffectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : declaration.Completion request result)
-    (validated : CellState.ValidatedPatch M pre (adapter.patch request result)) :
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request result)) :
     Accepted (portal := portal) (authState := authState)
       declaration adapter commonRequest pre request result where
   cellEffect := {
@@ -666,7 +622,6 @@ def accept
     preStateBound := rfl
     requestBound := requestBound
     effectsDigestBound := effectsDigestBound
-    preRootBound := preRootBound
     modeEvidence := completion
     validated := validated
     postcondition := validated.resultAt
@@ -677,14 +632,13 @@ def accept
 
 /-- Every accepted pure computation is sealed by construction. -/
 theorem accepted_disclosure_sealed
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
       ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : declaration.Request} {result : declaration.Result}
@@ -698,13 +652,12 @@ theorem accepted_disclosure_sealed
 
 /-- The authoritative wrapper therefore cannot carry or select a release. -/
 theorem Accepted.disclosure_sealed
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : declaration.Request} {result : declaration.Result}
@@ -713,49 +666,30 @@ theorem Accepted.disclosure_sealed
     accepted.cellEffect.disclosure = .sealed :=
   accepted_disclosure_sealed declaration adapter accepted.cellEffect
 
-@[simp] theorem accepted_field_footprint
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+@[simp] theorem accepted_footprint
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
       ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : declaration.Request} {result : declaration.Result}
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       (family declaration adapter pre) commonRequest pre request result) :
-    accepted.prepared.delta.fieldFootprint = adapter.fieldFootprint request.footprint := by
-  exact adapter.fieldFootprintExact request result
-
-@[simp] theorem accepted_resource_footprint
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    (declaration : ComputationDeclaration language mode Relation BridgeName
-      CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
-      OutputCommitment PrivateOutput
-      ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
-    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
-    {commonRequest : Request kind} {pre : CellState.Materialized M}
-    {request : declaration.Request} {result : declaration.Result}
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
-      (family declaration adapter pre) commonRequest pre request result) :
-    accepted.prepared.delta.resourceFootprint = adapter.resourceFootprint request.footprint := by
-  exact adapter.resourceFootprintExact request result
+    accepted.prepared.delta.footprint = adapter.footprint request.footprint :=
+  adapter.footprintExact request result
 
 @[simp] theorem accepted_nullifier
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
       ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : declaration.Request} {result : declaration.Result}
@@ -765,14 +699,13 @@ theorem Accepted.disclosure_sealed
   rfl
 
 theorem accepted_resource_effects_realized
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
     (declaration : ComputationDeclaration language mode Relation BridgeName
       CanonicalInput SemanticInput InputSourceWitness InputTargetWitness
       OutputCommitment PrivateOutput
       ResourceEffect Footprint Nullifier ModeEvidencePins)
-    (adapter : Adapter (S := S) declaration)
+    (adapter : Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : declaration.Request} {result : declaration.Result}
@@ -804,7 +737,7 @@ variable
 kernel projections for one concrete ZK, MPC, or FHE declaration.  The mode is
 retained in `privateDeclaration`; no cross-mode coercion is introduced. -/
 structure Adapter
-    {S : CellState.Schema.{u, v, w, x}}
+    {L : Layout.{u, v, w}}
     (Nullifier : Type y) where
   requestContext : EffectRequestContext
   requestDigestBytes : List UInt8 → Digest
@@ -812,7 +745,7 @@ structure Adapter
   outcomeCodec : LawfulCodec privateDeclaration.Outcome
   effectDigest : privateDeclaration.Request → Digest
   patch : (request : privateDeclaration.Request) →
-    privateDeclaration.Outcome → CellState.Patch S Digest
+    privateDeclaration.Outcome → Patch L
   nullifier : (request : privateDeclaration.Request) →
     privateDeclaration.Outcome → Option Nullifier
 
@@ -820,7 +753,7 @@ structure Adapter
 separate adapter from the release-capable one: sealed acceptance must not ask
 an application to manufacture a release-bearing `Outcome`. -/
 structure ComputationAdapter
-    {S : CellState.Schema.{u, v, w, x}}
+    {L : Layout.{u, v, w}}
     (Nullifier : Type y) where
   requestContext : EffectRequestContext
   requestDigestBytes : List UInt8 → Digest
@@ -828,7 +761,7 @@ structure ComputationAdapter
   outcomeCodec : LawfulCodec privateDeclaration.ComputationOutcome
   effectDigest : privateDeclaration.Request → Digest
   patch : (request : privateDeclaration.Request) →
-    privateDeclaration.ComputationOutcome → CellState.Patch S Digest
+    privateDeclaration.ComputationOutcome → Patch L
   nullifier : (request : privateDeclaration.Request) →
     privateDeclaration.ComputationOutcome → Option Nullifier
 
@@ -851,12 +784,11 @@ def DisclosureAllowed
 encrypted-RNS/FHE modes.  Existing private completion is its exact mode
 evidence; the kernel patch remains a separate, validated semantic projection. -/
 def family
-    {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {L : Layout.{u, v, w}} {M : CellState.Materializer L Digest}
     {Nullifier : Type y} [DecidableEq Release]
-    (adapter : Adapter (S := S) privateDeclaration Nullifier)
+    (adapter : Adapter (L := L) privateDeclaration Nullifier)
     (pre : CellState.Materialized M) :
-    SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier where
+    SemanticEffectFamily.{u, v, w, y, z} L M Nullifier where
   Declaration := privateDeclaration.Request
   declarationCodec := adapter.requestCodec
   pre := pre
@@ -884,12 +816,11 @@ def family
 completion, not release completion.  Both release carriers are empty, making a
 reveal or declassification constructor uninhabited at this semantic boundary. -/
 def sealedFamily
-    {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {L : Layout.{u, v, w}} {M : CellState.Materializer L Digest}
     {Nullifier : Type y}
-    (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier)
+    (adapter : ComputationAdapter (L := L) privateDeclaration Nullifier)
     (pre : CellState.Materialized M) :
-    SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier where
+    SemanticEffectFamily.{u, v, w, y, z} L M Nullifier where
   Declaration := privateDeclaration.Request
   declarationCodec := adapter.requestCodec
   pre := pre
@@ -917,11 +848,10 @@ def sealedFamily
 
 /-- The sealed family has no release value to authorize or disclose. -/
 theorem sealedFamily_no_release
-    {S : CellState.Schema.{u, v, w, x}} {M : CellState.Materializer S Digest}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
+    {L : Layout.{u, v, w}} {M : CellState.Materializer L Digest}
     {Nullifier : Type y}
     {pre : CellState.Materialized M}
-    (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier)
+    (adapter : ComputationAdapter (L := L) privateDeclaration Nullifier)
     (request : privateDeclaration.Request)
     (outcome : privateDeclaration.ComputationOutcome)
     (release : (sealedFamily (M := M) privateDeclaration adapter pre).Release
@@ -961,11 +891,10 @@ theorem disclosureOfCompletion_allowed
 authorization and canonical patch.  This is the first private positive path;
 there is intentionally no adapter from a completion to a prior commit. -/
 def acceptCompletion
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
     [DecidableEq Release]
-    (adapter : Adapter (S := S) privateDeclaration Nullifier)
+    (adapter : Adapter (L := L) privateDeclaration Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : privateDeclaration.Request} {outcome : privateDeclaration.Outcome}
@@ -973,16 +902,15 @@ def acceptCompletion
     (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
       (family privateDeclaration adapter pre).request request)
     (effectsDigestBound : commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : privateDeclaration.Completion request outcome)
-    (validated : CellState.ValidatedPatch M pre (adapter.patch request outcome)) :
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request outcome)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
       (family (M := M) privateDeclaration adapter pre) commonRequest pre request outcome where
   authorization := authorization
   preStateBound := rfl
   requestBound := requestBound
   effectsDigestBound := effectsDigestBound
-  preRootBound := preRootBound
   modeEvidence := completion
   validated := validated
   postcondition := validated.resultAt
@@ -993,11 +921,10 @@ def acceptCompletion
 authorization, mode evidence, digest/root bindings, and the exact canonical
 patch are still required; only the release projection is omitted. -/
 def acceptCompletionSealed
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
     [DecidableEq Release]
-    (adapter : Adapter (S := S) privateDeclaration Nullifier)
+    (adapter : Adapter (L := L) privateDeclaration Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : privateDeclaration.Request} {outcome : privateDeclaration.Outcome}
@@ -1005,16 +932,15 @@ def acceptCompletionSealed
     (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
       (family privateDeclaration adapter pre).request request)
     (effectsDigestBound : commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : privateDeclaration.Completion request outcome)
-    (validated : CellState.ValidatedPatch M pre (adapter.patch request outcome)) :
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request outcome)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
       (family (M := M) privateDeclaration adapter pre) commonRequest pre request outcome where
   authorization := authorization
   preStateBound := rfl
   requestBound := requestBound
   effectsDigestBound := effectsDigestBound
-  preRootBound := preRootBound
   modeEvidence := completion
   validated := validated
   postcondition := validated.resultAt
@@ -1026,10 +952,9 @@ retaining any release evidence.  The resulting family makes disclosure
 uninhabited except for `.sealed`; a later reveal must be a separate authorized
 effect. -/
 def acceptComputationSealed
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : ComputationAdapter (S := S) privateDeclaration Nullifier)
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : ComputationAdapter (L := L) privateDeclaration Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : privateDeclaration.Request}
@@ -1038,9 +963,9 @@ def acceptComputationSealed
     (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
       (sealedFamily privateDeclaration adapter pre).request request)
     (effectsDigestBound : commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : privateDeclaration.ComputationCompletion request outcome)
-    (validated : CellState.ValidatedPatch M pre (adapter.patch request outcome)) :
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request outcome)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
       (sealedFamily (M := M) privateDeclaration adapter pre)
       commonRequest pre request outcome where
@@ -1048,7 +973,6 @@ def acceptComputationSealed
   preStateBound := rfl
   requestBound := requestBound
   effectsDigestBound := effectsDigestBound
-  preRootBound := preRootBound
   modeEvidence := completion
   validated := validated
   postcondition := validated.resultAt
@@ -1058,11 +982,10 @@ def acceptComputationSealed
 /-- Private receipt evidence is reachable only through the common accepted
 cell-effect token. -/
 def receiptOfCompletion
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
+    {L : Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
     [DecidableEq Release]
-    (adapter : Adapter (S := S) privateDeclaration Nullifier)
+    (adapter : Adapter (L := L) privateDeclaration Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : privateDeclaration.Request} {outcome : privateDeclaration.Outcome}
@@ -1070,12 +993,12 @@ def receiptOfCompletion
     (requestBound : (⟨kind, commonRequest⟩ : PackedEffectRequest) =
       (family privateDeclaration adapter pre).request request)
     (effectsDigestBound : commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : privateDeclaration.Completion request outcome)
-    (validated : CellState.ValidatedPatch M pre (adapter.patch request outcome)) :
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request outcome)) :
     ReceiptEvent (M := M) (family (M := M) privateDeclaration adapter pre) :=
   (acceptCompletion privateDeclaration adapter authorization requestBound effectsDigestBound
-    preRootBound completion validated).toReceiptEvent
+    completion validated).toReceiptEvent
 
 end PrivateCellEffect
 
