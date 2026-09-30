@@ -139,7 +139,7 @@ def Prepared.wanted (_prepared : Prepared context profile federation height pin 
   gatewayRequest federation context.authority.snapshot.authState height proposal
 
 def project (prepared : Prepared context profile federation height pin proposal)
-    (logical : LogicalState (CanonicalCellRegistry.schema prepared.observed.before.kind)) :
+    (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (signingBytes proposal) ++
@@ -244,7 +244,7 @@ def checkOpened (config : NativeHost.Config) (opened : NativeHost.Opened config)
       envelope.length ≤ 4096 &&
       proposal.expectedAuthorityRoot ==
         opened.durable.snapshot.model.roots
-          config.deployment.authorityAnchor.catalogueCellId do
+          (CredentialAuthorityDomainReceiver.cellIdOf config.deployment) do
     return .error "fn consumer gateway testimony refused"
   let some pin := config.fnGateway
     | return .error "fn consumer gateway testimony refused"
