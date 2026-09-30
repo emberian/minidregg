@@ -163,6 +163,7 @@ def sign_and_submit(host, kind, command, signer, ops):
 PAY_OPS, OBSERVE_OPS = (103, 104, 105), (108, 109, 110)
 
 def row(name, expected, observed, ok):
+    observed = " ".join(str(observed).split())   # a Lean repr may wrap; keep one TSV line
     ROWS.append((name, expected, observed, "PASS" if ok else "FAIL"))
     print(f"{'PASS' if ok else 'FAIL'}\t{name}\t{observed}", file=sys.stderr)
 
