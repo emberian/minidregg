@@ -9,11 +9,11 @@ routing of entry groups to pages and no second view of the same store.
 A `Snapshot` is the deployment's domain digest together with that one cell.
 Everything a consumer reads is read from the cell:
 
-* the revocation universe is the keys of the `revoked` and `registered`
-  planes in the cell's finite support, so no caller-authored list can omit a
-  live revocation (`mem_revoked_iff`), and a registered, unrevoked key is in
-  the universe (`mem_revocationUniverse_iff`), which is how families read
-  registration;
+* the revocation universe is derived from the cell's finite support: the
+  keys of the `revoked` and `registered` planes and every key a stored
+  capability names (`mem_revocationUniverse_iff`), so no caller-authored list
+  can omit a live revocation (`mem_revoked_iff`), and a registered or issued,
+  unrevoked key is in the universe, which is how families read registration;
 * the authority clock (`Snapshot.revision`) is the number of spent operation
   nullifiers.  The nullifier plane is append-only, so the clock never runs
   backwards under any valid patch (`revision_monotone`) and every accepted
@@ -61,52 +61,90 @@ namespace Snapshot
 
 def logical (snapshot : Snapshot) : Store layout := snapshot.cell.logical
 
-/-- Every supported registration address contributes its key. -/
-def registeredAt : Address layout → Finset RevocationKey
+/-- The revocation keys a stored capability names: its own, its ancestors'
+and its channels'. -/
+def capabilityKeys {kind : ResourceKind} (stored : StoredCapability kind) :
+    Finset RevocationKey :=
+  insert (.capability stored.head.id)
+    ((stored.head.ancestors.image RevocationKey.capability) ∪
+      (stored.head.channels.image RevocationKey.channel))
+
+/-- The revocation keys one address of a store contributes: a revoked or
+registered key, or every key a stored capability names. -/
+def keysAt (store : Store layout) : Address layout → Finset RevocationKey
+  | ⟨.revoked, key⟩ => {key}
   | ⟨.registered, key⟩ => {key}
+  | ⟨.capability kind, identifier⟩ =>
+      match store ⟨.capability kind, identifier⟩ with
+      | some stored => capabilityKeys (kind := kind) stored
+      | none => ∅
   | _ => ∅
 
-/-- The keys the cell registers. -/
-def registeredKeys (snapshot : Snapshot) : Finset RevocationKey :=
-  snapshot.cell.logical.support.biUnion registeredAt
+def revocationKeysOf (store : Store layout) : Finset RevocationKey :=
+  store.support.biUnion (keysAt store)
 
 /-- The revocation universe is derived from the cell's own support: every
-revoked key and every registered key. -/
+revoked key, every registered key, and every key a stored capability names
+(the retired shard universe held exactly these). -/
 def revocationUniverse (snapshot : Snapshot) : ProjectionUniverse :=
-  ⟨CanonicalAuthorityProjection.revocationKeys snapshot.cell ∪ registeredKeys snapshot⟩
+  ⟨revocationKeysOf snapshot.logical⟩
 
-theorem mem_registeredKeys_iff (snapshot : Snapshot) (key : RevocationKey) :
-    key ∈ registeredKeys snapshot ↔ isRegistered snapshot.cell key = true := by
-  constructor
-  · rw [registeredKeys, Finset.mem_biUnion]
-    rintro ⟨⟨plane, stored⟩, supported, contributes⟩
-    cases plane <;> simp [registeredAt] at contributes
-    have same : key = stored := Finset.mem_singleton.mp contributes
-    subst same
-    have present := DFinsupp.mem_support_iff.mp supported
-    simp only [isRegistered, Option.isSome_iff_ne_none]
-    exact present
-  · intro registered
-    rw [registeredKeys, Finset.mem_biUnion]
-    refine ⟨⟨.registered, key⟩, ?_, Finset.mem_singleton_self key⟩
-    rw [DFinsupp.mem_support_iff]
-    simpa [isRegistered, Option.isSome_iff_ne_none] using registered
+theorem mem_revocationKeysOf {store : Store layout} {address : Address layout}
+    (present : store address ≠ none) {key : RevocationKey}
+    (member : key ∈ keysAt store address) : key ∈ revocationKeysOf store :=
+  Finset.mem_biUnion.mpr ⟨address, DFinsupp.mem_support_iff.mpr present, member⟩
 
+/-- The universe is exactly: revoked, registered, or named by a stored
+capability. -/
 theorem mem_revocationUniverse_iff (snapshot : Snapshot) (key : RevocationKey) :
     key ∈ snapshot.revocationUniverse.revocationKeys ↔
-      isRevoked snapshot.cell key = true ∨ isRegistered snapshot.cell key = true := by
-  change key ∈ CanonicalAuthorityProjection.revocationKeys snapshot.cell ∪
-    registeredKeys snapshot ↔ _
-  rw [Finset.mem_union, mem_registeredKeys_iff, CanonicalAuthorityProjection.mem_revocationKeys_iff]
+      isRevoked snapshot.cell key = true ∨ isRegistered snapshot.cell key = true ∨
+        ∃ (kind : ResourceKind) (identifier : CapabilityId) (stored : StoredCapability kind),
+          readCapability snapshot.cell kind identifier = some stored ∧
+            key ∈ capabilityKeys stored := by
   constructor
-  · rintro (supported | registered)
-    · left
-      have present := DFinsupp.mem_support_iff.mp supported
-      simpa [isRevoked, Option.isSome_iff_ne_none] using present
-    · exact Or.inr registered
-  · rintro (revoked | registered)
-    · exact Or.inl (CanonicalAuthorityProjection.supported_of_isRevoked snapshot.cell key revoked)
-    · exact Or.inr registered
+  · intro member
+    obtain ⟨⟨plane, stored⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
+    have present := DFinsupp.mem_support_iff.mp supported
+    cases plane with
+    | revoked =>
+        have same : key = stored := Finset.mem_singleton.mp contributes
+        subst same
+        exact Or.inl (by simpa [isRevoked, Option.isSome_iff_ne_none] using present)
+    | registered =>
+        have same : key = stored := Finset.mem_singleton.mp contributes
+        subst same
+        exact Or.inr (Or.inl (by simpa [isRegistered, Option.isSome_iff_ne_none] using present))
+    | capability kind =>
+        right; right
+        simp only [keysAt] at contributes
+        cases read : snapshot.logical ⟨.capability kind, stored⟩ with
+        | none => rw [read] at contributes; cases contributes
+        | some capability =>
+            rw [read] at contributes
+            exact ⟨kind, stored, capability, read, contributes⟩
+    | _ => cases contributes
+  · rintro (revoked | registered | ⟨kind, identifier, stored, read, named⟩)
+    · apply mem_revocationKeysOf (address := ⟨.revoked, key⟩)
+        (by simpa [isRevoked, Option.isSome_iff_ne_none] using revoked)
+      exact Finset.mem_singleton_self key
+    · apply mem_revocationKeysOf (address := ⟨.registered, key⟩)
+        (by simpa [isRegistered, Option.isSome_iff_ne_none] using registered)
+      exact Finset.mem_singleton_self key
+    · have present : snapshot.logical ⟨.capability kind, identifier⟩ = some stored := read
+      apply mem_revocationKeysOf (address := ⟨.capability kind, identifier⟩)
+        (by rw [present]; simp)
+      simp only [keysAt, present]
+      exact named
+
+/-- Every key a stored capability names is in the universe: issuance makes a
+capability's own key (and its ancestors' and channels') revocable. -/
+theorem mem_revocationUniverse_of_stored (snapshot : Snapshot) {kind : ResourceKind}
+    {identifier : CapabilityId} {stored : StoredCapability kind}
+    (read : readCapability snapshot.cell kind identifier = some stored)
+    {key : RevocationKey} (named : key ∈ capabilityKeys stored) :
+    key ∈ snapshot.revocationUniverse.revocationKeys :=
+  (snapshot.mem_revocationUniverse_iff key).mpr (Or.inr (Or.inr ⟨kind, identifier, stored, read, named⟩))
 
 def authState (snapshot : Snapshot) : AuthState :=
   CredentialAuthorityState.authState snapshot.revocationUniverse snapshot.cell
@@ -114,11 +152,11 @@ def authState (snapshot : Snapshot) : AuthState :=
 /-- Projected revocation membership is exactly the cell's read. -/
 theorem mem_revoked_iff (snapshot : Snapshot) (key : RevocationKey) :
     key ∈ snapshot.authState.revoked ↔ isRevoked snapshot.cell key = true := by
-  rw [authState, CredentialAuthorityState.mem_authState_revoked_iff, mem_revocationUniverse_iff]
+  rw [authState, CredentialAuthorityState.mem_authState_revoked_iff]
   constructor
   · exact And.right
   · intro revoked
-    exact ⟨Or.inl revoked, revoked⟩
+    exact ⟨(snapshot.mem_revocationUniverse_iff key).mpr (Or.inl revoked), revoked⟩
 
 end Snapshot
 
@@ -719,6 +757,8 @@ end Witness
 #guard_msgs (whitespace := lax) in #print axioms preparePolicyAndNullifier_used_refused
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.signingKeyPatch_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms signingKeyPatch_current
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.mem_revocationUniverse_of_stored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Snapshot.mem_revocationUniverse_of_stored
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.mem_revocationUniverse_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Snapshot.mem_revocationUniverse_iff
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.mem_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
