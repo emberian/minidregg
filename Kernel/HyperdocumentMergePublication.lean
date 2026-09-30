@@ -100,7 +100,7 @@ def derivedEventDeclaration
   rfl
 
 /-- The actual accepted event-log incidence for one exact merge.  This reuses
-the existing version-event family and sparse event-log representation; only
+the existing version-event family and sparse event-log MLog; only
 the source adapter is merge-specific. -/
 structure EventAccepted
     {MDoc : Hyperdocument.Materializer Digest}
@@ -114,7 +114,7 @@ structure EventAccepted
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     (merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration)
-    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
+    (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store)
     (eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config)
     (eventPortal : Portal) (expectedLogRoot : Digest) : Type _ where
@@ -126,17 +126,13 @@ structure EventAccepted
       principal merge.semantic.objectCapability).Admissible
     (CredentialAuthorityState.authState projection authorityPre)
     ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig)
-  sparse : Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend representation.sparseMaterializer
-    (Minidregg.Kernel.HyperdocumentVersionEffects.sparsePre representation store)
-    ((derivedEventDeclaration merge expectedLogRoot).stored eventConfig
-      inputs.eventWellFormed)
   accepted : AcceptedCellEffect
     (portal := eventPortal)
     (authState := CredentialAuthorityState.authState projection authorityPre)
-    (Minidregg.Kernel.HyperdocumentVersionEffects.family representation eventConfig
-      (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store))
+    (Minidregg.Kernel.HyperdocumentVersionEffects.family MLog eventConfig
+      (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store))
     ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig)
-    (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store)
+    (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store)
     (derivedEventDeclaration merge expectedLogRoot) ()
 
 def acceptEvent
@@ -151,7 +147,7 @@ def acceptEvent
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
@@ -161,29 +157,28 @@ def acceptEvent
         merge.principal merge.semantic.objectCapability).Admissible
       (CredentialAuthorityState.authState projection authorityPre)
       ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig))
-    (fresh : store Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events
-      ((derivedEventDeclaration merge expectedLogRoot).key eventConfig) = none)
+    (fresh : store (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
+      ((derivedEventDeclaration merge expectedLogRoot).key eventConfig)) = none)
+    (domainExact : (derivedEventDeclaration merge expectedLogRoot).record.historyDomain =
+      eventConfig.historyDomain)
     (authorization : Authorized eventPortal
       (CredentialAuthorityState.authState projection authorityPre)
       ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig))
-    (validated : CellState.ValidatedPatch representation.cellMaterializer
-      (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store)
+    (validated : CellState.ValidatedPatch MLog
+      (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store)
+      ((derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig).preStateRoot
       ((derivedEventDeclaration merge expectedLogRoot).patch eventConfig)) :
-    EventAccepted merge representation store eventConfig eventPortal
+    EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot where
   inputs := inputs
   principal := merge.principal
   namedCapabilityAdmissible := namedCapabilityAdmissible
-  sparse := Minidregg.Kernel.HyperdocumentEventLog.Sparse.accept
-    ((derivedEventDeclaration merge expectedLogRoot).stored eventConfig
-      inputs.eventWellFormed) fresh
   accepted :=
     { authorization := authorization
       preStateBound := rfl
       requestBound := rfl
       effectsDigestBound := rfl
-      preRootBound := validated.preRoot_bound
-      modeEvidence := ⟨⟨inputs.eventWellFormed, fresh⟩⟩
+      modeEvidence := ⟨⟨inputs.eventWellFormed, fresh, domainExact⟩⟩
       validated := validated
       postcondition := validated.resultAt
       disclosure := .sealed
@@ -201,24 +196,23 @@ def acceptEvent
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    (event : EventAccepted merge representation store eventConfig eventPortal
+    (event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot) :
-    event.accepted.prepared.post.logical.fields
-      ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
-        (derivedEventDeclaration merge expectedLogRoot).key eventConfig⟩ =
+    event.accepted.prepared.post.logical
+      (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
+        ((derivedEventDeclaration merge expectedLogRoot).key eventConfig)) =
       some (derivedEventDeclaration merge expectedLogRoot).record := by
-  change CellState.applyFieldWrites
-    [(derivedEventDeclaration merge expectedLogRoot).fieldWrite eventConfig]
-    (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store).logical.fields
-    ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
-      (derivedEventDeclaration merge expectedLogRoot).key eventConfig⟩ =
+  change Minidregg.Theory.Store.Patch.run store
+    [(derivedEventDeclaration merge expectedLogRoot).appendOp eventConfig]
+    (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
+      ((derivedEventDeclaration merge expectedLogRoot).key eventConfig)) =
       some (derivedEventDeclaration merge expectedLogRoot).record
-  simp [CellState.applyFieldWrites, CellState.FieldStore.assign,
-    Minidregg.Kernel.HyperdocumentVersionEffects.Declaration.fieldWrite]
+  simp [Minidregg.Kernel.HyperdocumentVersionEffects.Declaration.appendOp,
+    Minidregg.Theory.Store.Op.apply, Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress]
   rfl
 
 theorem EventAccepted.pre_fresh
@@ -233,15 +227,37 @@ theorem EventAccepted.pre_fresh
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    (event : EventAccepted merge representation store eventConfig eventPortal
+    (event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot) :
-    store Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events
-      ((derivedEventDeclaration merge expectedLogRoot).key eventConfig) = none :=
-  event.sparse.pre_fresh
+    store (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
+      ((derivedEventDeclaration merge expectedLogRoot).key eventConfig)) = none :=
+  event.accepted.modeEvidence.down.fresh
+
+/-- Every accepted merge event names the log's history domain. -/
+theorem EventAccepted.domain_exact
+    {MDoc : Hyperdocument.Materializer Digest}
+    {MAuth : CredentialAuthorityState.Materializer}
+    {history : CausalVersionDag.History (scheme := scheme)
+      (family := causalFamily) anchor}
+    {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
+    {projection : CredentialAuthorityState.ProjectionUniverse}
+    {authorityPre : CredentialAuthorityState.Cell MAuth}
+    {documentPre : Hyperdocument.Cell MDoc}
+    {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
+    {merge : MergeAccepted history mergeConfig projection authorityPre
+      documentPre mergePortal mergeDeclaration}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
+    {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
+    {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
+    {eventPortal : Portal} {expectedLogRoot : Digest}
+    (event : EventAccepted merge MLog store eventConfig eventPortal
+      expectedLogRoot) :
+    mergeDeclaration.intent.historyDomain = eventConfig.historyDomain :=
+  event.accepted.modeEvidence.down.domainExact
 
 /-! ## One two-incidence merge publication -/
 
@@ -260,20 +276,16 @@ def cells
     (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
-    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
+    (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (mergePortal eventPortal : Portal)
     (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.CellFamily Incidence where
-  schema
-    | .content => Hyperdocument.cellSchema
-    | .eventLog => Minidregg.Kernel.HyperdocumentEventLog.cellSchema
-  fieldDecidableEq incidence := by
-    cases incidence <;> infer_instance
-  resourceDecidableEq incidence := by
-    cases incidence <;> infer_instance
+  storeLayout
+    | .content => Hyperdocument.layout
+    | .eventLog => Minidregg.Kernel.HyperdocumentEventLog.Sparse.layout
   materializer
     | .content => documentMaterializer
-    | .eventLog => representation.cellMaterializer
+    | .eventLog => MLog
   portal
     | .content => mergePortal
     | .eventLog => eventPortal
@@ -295,15 +307,15 @@ def declaration
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     (merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    (_event : EventAccepted merge representation store eventConfig eventPortal
+    (_event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.Declaration
-      (cells projection authorityPre MDoc representation mergePortal eventPortal
+      (cells projection authorityPre MDoc MLog mergePortal eventPortal
         contentCellId eventCellId) where
   header :=
     { domain := mergeConfig.requestDomain
@@ -311,7 +323,7 @@ def declaration
       apex := header.apex }
   pre
     | .content => documentPre
-    | .eventLog => Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store
+    | .eventLog => Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store
   legs
     | .content =>
         { Nullifier := Nat
@@ -322,8 +334,8 @@ def declaration
           outcome := () }
     | .eventLog =>
         { Nullifier := Nat
-          family := Minidregg.Kernel.HyperdocumentVersionEffects.family representation eventConfig
-            (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store)
+          family := Minidregg.Kernel.HyperdocumentVersionEffects.family MLog eventConfig
+            (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store)
           kind := .object
           request :=
             (derivedEventDeclaration merge expectedLogRoot).toRequest eventConfig
@@ -342,11 +354,11 @@ def acceptedLegs
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     (merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    (event : EventAccepted merge representation store eventConfig eventPortal
+    (event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot)
     (header : Header) (contentCellId eventCellId : Digest) :
     (declaration merge event header contentCellId eventCellId).AcceptedLegs
@@ -365,11 +377,11 @@ def zeroResourceLaw
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     (merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    (event : EventAccepted merge representation store eventConfig eventPortal
+    (event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.ResourceLaw
@@ -381,12 +393,12 @@ theorem cellIds_injective
     (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
-    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
+    (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (mergePortal eventPortal : Portal)
     {contentCellId eventCellId : Digest}
     (distinct : contentCellId ≠ eventCellId) :
     Function.Injective
-      (cells projection authorityPre documentMaterializer representation
+      (cells projection authorityPre documentMaterializer MLog
         mergePortal eventPortal contentCellId eventCellId).cellId := by
   intro left right equal
   cases left <;> cases right
@@ -407,11 +419,11 @@ theorem aggregate_zero
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     (merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    (event : EventAccepted merge representation store eventConfig eventPortal
+    (event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.aggregateDelta
@@ -432,11 +444,11 @@ def commit
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     (merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    (event : EventAccepted merge representation store eventConfig eventPortal
+    (event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot)
     (header : Header) (contentCellId eventCellId : Digest)
     (domainExact : eventConfig.requestDomain = mergeConfig.requestDomain)
@@ -450,7 +462,7 @@ def commit
     Minidregg.Kernel.MultiCellHyperedge.Commit
       (zeroResourceLaw merge event header contentCellId eventCellId)
       (acceptedLegs merge event header contentCellId eventCellId) boundary where
-  cellIdsDistinct := cellIds_injective projection authorityPre MDoc representation
+  cellIdsDistinct := cellIds_injective projection authorityPre MDoc MLog
     mergePortal eventPortal cellIdsDistinct
   sharedDomain := by
     intro incidence
@@ -474,11 +486,11 @@ def commit
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    {event : EventAccepted merge representation store eventConfig eventPortal
+    {event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot}
     {header : Header} {contentCellId eventCellId : Digest}
     {domainExact : eventConfig.requestDomain = mergeConfig.requestDomain}
@@ -506,11 +518,11 @@ def commit
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    {event : EventAccepted merge representation store eventConfig eventPortal
+    {event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot}
     {header : Header} {contentCellId eventCellId : Digest}
     {domainExact : eventConfig.requestDomain = mergeConfig.requestDomain}
@@ -523,15 +535,15 @@ def commit
       (acceptedLegs merge event header contentCellId eventCellId) jointInput} :
     ((commit merge event header contentCellId eventCellId domainExact
       cellIdsDistinct boundary jointInput jointCommitExact jointEvidence).post
-        .eventLog).logical.fields
-      ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
-        (derivedEventDeclaration merge expectedLogRoot).key eventConfig⟩ =
+        .eventLog).logical
+      (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
+        ((derivedEventDeclaration merge expectedLogRoot).key eventConfig)) =
       some (derivedEventDeclaration merge expectedLogRoot).record :=
   event.post_contains
 
 /-! ## Conflict-preserving publication teeth -/
 
-def ConflictFreeState (state : CellState.LogicalState cellSchema) : Prop :=
+def ConflictFreeState (state : Minidregg.Theory.Store.Store layout) : Prop :=
   ∀ id, lookup state .conflicts id = none
 
 theorem commit_conflict_retained
@@ -546,11 +558,11 @@ theorem commit_conflict_retained
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    {event : EventAccepted merge representation store eventConfig eventPortal
+    {event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot}
     {header : Header} {contentCellId eventCellId : Digest}
     {domainExact : eventConfig.requestDomain = mergeConfig.requestDomain}
@@ -572,21 +584,14 @@ theorem commit_conflict_retained
       (plan.conflictId mergeConfig (mergeDeclaration.operationId mergeConfig)) =
       some (plan.conflictRecord (mergeDeclaration.operationId mergeConfig)) := by
   rw [commit_content_post_exact]
-  let conflictWrite : Minidregg.Theory.HyperdocumentOperations.PackedWrite :=
-    ⟨.conflicts,
-      { key := plan.conflictId mergeConfig
-          (mergeDeclaration.operationId mergeConfig)
-        expected := none
-        replacement := plan.conflictRecord
-          (mergeDeclaration.operationId mergeConfig) }⟩
-  have present : conflictWrite ∈ mergeDeclaration.packedWrites mergeConfig := by
-    unfold Minidregg.Kernel.HyperdocumentMerge.Declaration.packedWrites
-    apply List.mem_append_left
-    apply List.mem_flatMap.2
-    refine ⟨plan, planPresent, ?_⟩
-    simp [conflictWrite,
-      Minidregg.Kernel.HyperdocumentMerge.FieldPlan.packedWrites, sourcesExact]
-  exact merge.post_contains_write conflictWrite present
+  apply merge.post_contains_guardedSet (space := .conflicts)
+    (key := plan.conflictId mergeConfig (mergeDeclaration.operationId mergeConfig))
+    (expected := none)
+  unfold Minidregg.Kernel.HyperdocumentMerge.Declaration.patch
+  apply List.mem_append_left
+  apply List.mem_flatMap.2
+  refine ⟨plan, planPresent, ?_⟩
+  simp [Minidregg.Kernel.HyperdocumentMerge.FieldPlan.ops, sourcesExact]
 
 theorem commit_conflict_cannot_be_erased
     {MDoc : Hyperdocument.Materializer Digest}
@@ -600,11 +605,11 @@ theorem commit_conflict_cannot_be_erased
     {mergePortal : Portal} {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : MergeAccepted history mergeConfig projection authorityPre
       documentPre mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
-    {event : EventAccepted merge representation store eventConfig eventPortal
+    {event : EventAccepted merge MLog store eventConfig eventPortal
       expectedLogRoot}
     {header : Header} {contentCellId eventCellId : Digest}
     {domainExact : eventConfig.requestDomain = mergeConfig.requestDomain}
@@ -641,6 +646,8 @@ theorem commit_conflict_cannot_be_erased
 #guard_msgs (whitespace := lax) in #print axioms EventAccepted.post_contains
 /-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.EventAccepted.pre_fresh' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms EventAccepted.pre_fresh
+/-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.EventAccepted.domain_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms EventAccepted.domain_exact
 /-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms commit
 /-- info: 'Minidregg.Kernel.HyperdocumentMergePublication.commit_content_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
