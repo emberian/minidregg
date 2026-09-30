@@ -46,7 +46,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y z q r
+universe u v w y z q r
   uSemantics uClauseInput uClauseQuery uClauseReply uClauseOutcome
   uClauseEvidence uPhysical uStep
 
@@ -56,10 +56,9 @@ section Lifecycle
 
 variable
     {U : FirstOrderUniverse.{q, r}}
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {Condition Continuation BreakReason : Type}
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     {manifest : Manifest}
