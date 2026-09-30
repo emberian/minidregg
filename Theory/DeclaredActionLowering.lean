@@ -530,8 +530,8 @@ def declarationCodec {kind : ResourceKind} (target : ResourceId kind) :
   decode_encode := by
     intro declaration
     simp only [List.all_eq_true, List.mem_replicate, beq_iff_eq,
-      forall_eq, List.length_replicate, Nat.add_sub_cancel]
-    simpa using declarationOfCode_code declaration
+      List.length_replicate, Nat.add_sub_cancel]
+    simp
 
 /-! ## The sole semantic lowering -/
 

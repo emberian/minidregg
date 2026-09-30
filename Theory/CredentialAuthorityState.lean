@@ -372,7 +372,7 @@ theorem not_mem_authState_revoked_of_outside {M : Materializer}
     (domain : ProjectionUniverse) (pre : Cell M) (key : RevocationKey)
     (outside : key ∉ domain.revocationKeys) :
     key ∉ (authState domain pre).revoked := by
-  simpa [mem_authState_revoked_iff, outside]
+  simp [mem_authState_revoked_iff, outside]
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
