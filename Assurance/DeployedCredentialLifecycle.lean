@@ -1,24 +1,29 @@
 /-
 # Assurance.DeployedCredentialLifecycle -- one deployed credential story
 
-This module joins the concrete deployed authority registry, the bounded
-credential-authority page, the canonical authority effect families, token
-transport, and guarded durable data installation in one closed witness.
+This module joins the deployed authority cell (`CredentialAuthorityCell`, the
+one store cell of the authority domain), the canonical authority effect
+families, token transport, and guarded durable data installation in one closed
+witness.
 
 The logical story is complete: a root capability is issued, strictly
 attenuated, used as a token, revoked, and made stale by a policy-epoch
-rotation. The public bounded page independently pins generation three while
-preserving current policy revision two. The durable use intent carries its
-payload and observes the exact canonical authority-cell root read-only.
+rotation.  Every step is the validated patch of its family at the exact post of
+the previous one, starting from a built pre-cell.  The revoked channel ends
+registered present AND revoked present, and neither presence can be erased.
+The refusing poles are stated at the validator: replaying a spent operation
+nullifier and erasing a registration are both rejected with the exact failing
+operation.  The durable use intent carries its payload and observes the exact
+authority-cell root read-only.
 
-Three deployment ceilings remain deliberately visible.  The full sparse
-authority cell still uses the countability-selected codec and byte-length root;
-the real bounded page is not yet its production shard layout.  The portal
-below is an inhabitation verifier, not a signature or membership security
-claim.  Durable execution is a model until a physical handler inhabits the
-existing `ImplementationRefinement` simulation boundary.
+Two deployment ceilings remain deliberately visible.  The portal below is an
+inhabitation verifier, not a signature or membership security claim.  Root
+movement of the authority cell is conditional on the pair-scoped cSHAKE256
+no-collision premise (`CredentialAuthorityCell.PairBindingPremise`), never on a
+global injection into 256 bits.  Durable execution is a model until a physical
+handler inhabits the existing `ImplementationRefinement` simulation boundary.
 -/
-import Compiler.CredentialAuthorityPageMaterializer
+import Compiler.CredentialAuthorityCell
 import Compiler.DeployedCellRegistry
 import Kernel.CanonicalPolicyRegistry
 import Theory.CredentialAuthorityEffects
@@ -26,7 +31,6 @@ import Theory.CredentialAuthorityEffects
 namespace Minidregg.Assurance.DeployedCredentialLifecycle
 
 open Minidregg.Compiler
-open Minidregg.Compiler.CredentialAuthorityPageMaterializer
 open Minidregg.Kernel
 open Minidregg.Kernel.CanonicalPolicyRegistry
 open Minidregg.Kernel.DurableCommitProtocol
@@ -36,68 +40,81 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.CredentialAuthorityEffects
 open Minidregg.Theory.CredentialAuthorityFamily
 open Minidregg.Theory.CredentialAuthorityState
+open Minidregg.Theory.CredentialLineageAdmission
 open Minidregg.Theory.DeployedMaterializerWitness
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.ResourceCost
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-/-! ## Exact deployed carriers and public policy pins -/
+/-! ## The deployed authority cell and its built pre-cell -/
 
-noncomputable abbrev AuthorityMaterializer : Materializer :=
+abbrev AuthorityMaterializer : Materializer :=
   Compiler.DeployedCellRegistry.materializer
     Compiler.DeployedCellRegistry.Kind.credentialAuthority
 
-/-- A future policy revision may be staged before it becomes current. Grant
-generation rotation does not select it: revision two remains current until an
-explicit policy installation changes the revision field. -/
-def initialLogical : LogicalState CredentialAuthorityState.schema.{0, 0} where
-  fields := prePage.toCanonicalState.fields.write
-    (.policyAddress examplePolicy 3) ⟨3300⟩
-  resources := fun resource => nomatch resource
+/-- The deployed authority kind's materializer is the one authority cell's. -/
+theorem authorityMaterializer_deployed :
+    AuthorityMaterializer = CredentialAuthorityCell.materializer := rfl
 
-noncomputable def initialCell : Cell AuthorityMaterializer :=
+def examplePolicy : PolicyId := ⟨17⟩
+
+/-- The authority domain this lifecycle's requests and durable records name. -/
+def lifecycleDomain : Digest := ⟨8100⟩
+
+/-- The revocation keys the lifecycle registers: the root and child capability
+and the shared channel. -/
+def authorityDomain : ProjectionUniverse where
+  revocationKeys :=
+    { .capability ⟨100⟩, .capability ⟨101⟩, .channel ⟨9⟩ }
+
+/-- Policy generation two at current revision two, a staged revision-three
+address, and every lifecycle revocation key registered (present in the
+append-only `registered` plane) and live (absent from `revoked`).  A staged
+revision does not become current until an explicit policy installation changes
+the revision plane; grant-generation rotation does not select it. -/
+def initialEntries : List (StoreCodec.Entry layout) :=
+  [⟨⟨.policyEpoch, examplePolicy⟩, (2 : Epoch)⟩,
+   ⟨⟨.policyRevision, examplePolicy⟩, (2 : PolicyRevision)⟩,
+   ⟨⟨.policyAddress, (examplePolicy, 2)⟩, (⟨2200⟩ : Digest)⟩,
+   ⟨⟨.policyAddress, (examplePolicy, 3)⟩, (⟨3300⟩ : Digest)⟩,
+   ⟨⟨.registered, .capability ⟨100⟩⟩, ()⟩,
+   ⟨⟨.registered, .capability ⟨101⟩⟩, ()⟩,
+   ⟨⟨.registered, .channel ⟨9⟩⟩, ()⟩]
+
+def initialLogical : Store layout := StoreCodec.fromEntries initialEntries
+
+/-- The pre-cell: the deployed authority cell built from its store.  Its bytes
+are the store codec's and decode back to it (`initial_roundtrip`). -/
+def initialCell : Cell AuthorityMaterializer :=
   CellState.materialize AuthorityMaterializer initialLogical
 
 @[simp] theorem initialCell_logical : initialCell.logical = initialLogical := rfl
 
+theorem initial_roundtrip :
+    AuthorityMaterializer.codec.decode initialCell.bytes = some initialCell.logical :=
+  CredentialAuthorityCell.cell_decode initialCell
+
 @[simp] theorem initial_policy_epoch :
-    policyEpochAt initialCell examplePolicy = 2 := by
-  simp [initialCell_logical, initialLogical, policyEpochAt, prePage,
-    Page.toCanonicalState, Page.entries, oldPolicy, Entry.install]
+    policyEpochAt initialCell examplePolicy = 2 := by decide
 
 @[simp] theorem initial_policy_revision :
-    policyRevisionAt initialCell examplePolicy = 2 := by
-  simp [initialCell_logical, initialLogical, policyRevisionAt, prePage,
-    Page.toCanonicalState, Page.entries, oldPolicy, Entry.install]
+    policyRevisionAt initialCell examplePolicy = 2 := by decide
 
 @[simp] theorem initial_policy_address :
-    policyAddressAt initialCell examplePolicy 2 = ⟨2200⟩ := by
-  simp [initialCell_logical, initialLogical, policyAddressAt, prePage,
-    Page.toCanonicalState, Page.entries, oldPolicy, Entry.install]
-  rfl
+    policyAddressAt initialCell examplePolicy 2 = ⟨2200⟩ := by decide
 
 @[simp] theorem staged_policy_address :
-    policyAddressAt initialCell examplePolicy 3 = ⟨3300⟩ := by
-  simp [initialCell_logical, initialLogical, policyAddressAt]
+    policyAddressAt initialCell examplePolicy 3 = ⟨3300⟩ := by decide
 
-/-- The bounded production page and the full semantic cell agree on the
-grant generation and the address at current revision two. -/
-theorem bounded_page_agrees_with_initial_selection :
-    prePage.policyEpochAt examplePolicy =
-        policyEpochAt initialCell examplePolicy /\
-      prePage.policyAddressAt examplePolicy 2 =
-        policyAddressAt initialCell examplePolicy 2 := by
-  constructor
-  · rw [initial_policy_epoch]
-    simp [Page.policyEpochAt, Page.toCanonicalState,
-      Page.entries, prePage, oldPolicy, Entry.install]
-    rfl
-  · rw [initial_policy_address]
-    simp [Page.policyAddressAt, Page.toCanonicalState,
-      Page.entries, prePage, oldPolicy, Entry.install]
-    rfl
+/-- Every key of the lifecycle's revocation universe is registered and live in
+the pre-cell. -/
+theorem initial_keys_registered_live :
+    ∀ key ∈ authorityDomain.revocationKeys,
+      isRegistered initialCell key = true ∧ isRevoked initialCell key = false := by
+  decide
 
 /-! ## A verifier boundary suitable only for inhabitation -/
 
@@ -131,13 +148,9 @@ structure SignatureRefinement
     lifecyclePortal.verifySignature request witness = true ->
       Authenticates request witness
 
-def authorityDomain : ProjectionUniverse where
-  revocationKeys :=
-    { .capability ⟨100⟩, .capability ⟨101⟩, .channel ⟨9⟩ }
-
 noncomputable def adminRequest (pre : Cell AuthorityMaterializer) (effects : Digest)
     (nonce : Nat) (args : Digest := ⟨9002⟩) : Request .object where
-  domain := prePage.authorityDomain
+  domain := lifecycleDomain
   semantics := ⟨9001⟩
   federation := ⟨1⟩
   subject := ⟨41⟩
@@ -163,7 +176,7 @@ noncomputable def adminContext (pre : Cell AuthorityMaterializer) :
     CredentialAuthorityEffects.RequestContext where
   authority :=
     { kind := .object
-      domain := prePage.authorityDomain
+      domain := lifecycleDomain
       semantics := ⟨9001⟩
       federation := ⟨1⟩
       subject := ⟨41⟩
@@ -291,39 +304,17 @@ noncomputable def issueCodec : LawfulCodec (IssueDeclaration .object) := by
 
 def issueEvidence : IssueEvidence authorityDomain initialCell issueDeclaration where
   preRootExact := rfl
-  slotFresh := by
-    intro kind
-    simp [readCapability, initialCell_logical, initialLogical, prePage,
-      Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
-      issueDeclaration, rootCapability]
-    rfl
-  nullifierFresh := by
-    simp [isNullified, initialCell_logical, initialLogical, prePage,
-      Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
-      issueDeclaration]
-    rfl
+  slotFresh := by intro kind; cases kind <;> decide
+  nullifierFresh := by decide
   rootParent := rfl
   rootSelf := rfl
   rootAncestors := rfl
-  issuerCurrent := by
-    simp [issuerEpochAt, initialCell_logical, initialLogical, rootCapability,
-      issueDeclaration, prePage, Page.toCanonicalState, Page.entries,
-      oldPolicy, Entry.install]
-    rfl
-  policyCurrent := by simp [issueDeclaration, rootCapability]
+  issuerCurrent := by decide
+  policyCurrent := by decide
   selfRegistered := by decide
-  channelsRegistered := by
-    simp [issueDeclaration, rootCapability, authorityDomain]
-  selfLive := by
-    simp [isRevoked, initialCell_logical, initialLogical, prePage,
-      Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
-      issueDeclaration, rootCapability]
-    rfl
-  channelsLive := by
-    simp [isRevoked, initialCell_logical, initialLogical, prePage,
-      Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
-      issueDeclaration, rootCapability]
-    rfl
+  channelsRegistered := by decide
+  selfLive := by decide
+  channelsLive := by decide
 
 noncomputable def issued :=
   acceptIssue authorityDomain initialCell (adminContext initialCell) issueCodec issueDigest issueDeclaration
@@ -363,13 +354,6 @@ noncomputable def storedCapabilityCodec :
   letI : Nonempty (StoredCapability .object) := ⟨parentStored⟩
   exact codecOfCountable _
 
-theorem issued_frame (field : CredentialAuthorityState.schema.{0, 0}.Field)
-    (outside : field ∉
-      (show CellState.Patch CredentialAuthorityState.schema.{0, 0} Digest from
-        issueDeclaration.patch).fieldFootprint) :
-    issuedCell.logical.fields field = initialCell.logical.fields field :=
-  issued.field_frame field outside
-
 def attenuateEvidence :
     AttenuateEvidence authorityDomain issuedCell attenuateDeclaration parentStored where
   preRootExact := rfl
@@ -378,109 +362,16 @@ def attenuateEvidence :
   parentLineageValid := .root rootCapability rfl rfl rfl
   parentLineageAnchored := True.intro
   strict := strict_edge
-  childSlotFresh := by
-    intro kind
-    change issuedCell.logical.fields
-      (.capability kind childCapability.id) = none
-    rw [issued_frame (.capability kind childCapability.id) (by
-      change AuthorityField.capability kind ⟨101⟩ ∉
-        (show Finset AuthorityField from
-          {AuthorityField.capability .object ⟨100⟩,
-            AuthorityField.nullifier 1001})
-      cases kind <;> decide)]
-    simp [initialCell_logical, initialLogical, prePage,
-      Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
-      childCapability]
-    rfl
-  nullifierFresh := by
-    change (issuedCell.logical.fields
-      (.nullifier attenuateDeclaration.operationNullifier)).getD false = false
-    rw [issued_frame (.nullifier attenuateDeclaration.operationNullifier)
-      (by
-        change AuthorityField.nullifier 1002 ∉
-          (show Finset AuthorityField from
-            {AuthorityField.capability .object ⟨100⟩,
-              AuthorityField.nullifier 1001})
-        decide)]
-    simp [initialCell_logical, initialLogical, prePage,
-      Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
-      attenuateDeclaration]
-    rfl
-  issuerCurrent := by
-    change childCapability.issuerEpoch = issuerEpochAt issuedCell childCapability.issuer
-    rw [show issuerEpochAt issuedCell childCapability.issuer =
-        issuerEpochAt initialCell childCapability.issuer by
-      unfold issuerEpochAt
-      rw [issued_frame (.issuerEpoch childCapability.issuer) (by
-        change AuthorityField.issuerEpoch ⟨7⟩ ∉
-          (show Finset AuthorityField from
-            {AuthorityField.capability .object ⟨100⟩,
-              AuthorityField.nullifier 1001})
-        decide)]]
-    simp [childCapability, rootCapability, issuerEpochAt, initialCell_logical,
-      initialLogical, prePage, Page.toCanonicalState, Page.entries, oldPolicy,
-      Entry.install]
-    rfl
-  policyCurrent := by
-    change childCapability.policyEpoch = policyEpochAt issuedCell childCapability.policyId
-    rw [show policyEpochAt issuedCell childCapability.policyId =
-        policyEpochAt initialCell childCapability.policyId by
-      unfold policyEpochAt
-      rw [issued_frame (.policyEpoch childCapability.policyId) (by
-        change AuthorityField.policyEpoch examplePolicy ∉
-          (show Finset AuthorityField from
-            {AuthorityField.capability .object ⟨100⟩,
-              AuthorityField.nullifier 1001})
-        decide)]]
-    simp [childCapability, rootCapability]
+  childSlotFresh := by intro kind; cases kind <;> decide
+  nullifierFresh := by decide
+  issuerCurrent := by decide
+  policyCurrent := by decide
   selfRegistered := by decide
-  ancestorsRegistered := by
-    simp [attenuateDeclaration, childCapability, rootCapability, authorityDomain]
-  channelsRegistered := by
-    simp [attenuateDeclaration, childCapability, rootCapability, authorityDomain]
-  selfLive := by
-    unfold isRevoked
-    change (issuedCell.logical.fields
-      (.revoked (.capability childCapability.id))).getD false = false
-    rw [issued_frame (.revoked (.capability childCapability.id)) (by
-      change AuthorityField.revoked (.capability ⟨101⟩) ∉
-        (show Finset AuthorityField from
-          {AuthorityField.capability .object ⟨100⟩,
-            AuthorityField.nullifier 1001})
-      decide)]
-    simp [initialCell_logical, initialLogical, prePage, Page.toCanonicalState,
-      Page.entries, oldPolicy, Entry.install]
-    rfl
-  ancestorsLive := by
-    intro ancestor member
-    have exact : ancestor = rootCapability.id := by
-      simpa [attenuateDeclaration, childCapability] using member
-    subst ancestor
-    unfold isRevoked
-    rw [issued_frame (.revoked (.capability rootCapability.id)) (by
-      change AuthorityField.revoked (.capability ⟨100⟩) ∉
-        (show Finset AuthorityField from
-          {AuthorityField.capability .object ⟨100⟩,
-            AuthorityField.nullifier 1001})
-      decide)]
-    simp [initialCell_logical, initialLogical, prePage, Page.toCanonicalState,
-      Page.entries, oldPolicy, Entry.install]
-    rfl
-  channelsLive := by
-    intro channel member
-    have exact : channel = ⟨9⟩ := by
-      simpa [attenuateDeclaration, childCapability, rootCapability] using member
-    subst channel
-    unfold isRevoked
-    rw [issued_frame (.revoked (.channel ⟨9⟩)) (by
-      change AuthorityField.revoked (.channel ⟨9⟩) ∉
-        (show Finset AuthorityField from
-          {AuthorityField.capability .object ⟨100⟩,
-            AuthorityField.nullifier 1001})
-      decide)]
-    simp [initialCell_logical, initialLogical, prePage, Page.toCanonicalState,
-      Page.entries, oldPolicy, Entry.install]
-    rfl
+  ancestorsRegistered := by decide
+  channelsRegistered := by decide
+  selfLive := by decide
+  ancestorsLive := by decide
+  channelsLive := by decide
 
 noncomputable def attenuated :=
   acceptAttenuation authorityDomain issuedCell (adminContext issuedCell) attenuateCodec
@@ -503,102 +394,40 @@ theorem attenuated_child_lineage :
 
 /-! ## Capability transport and one exact token use -/
 
-theorem attenuated_frame
-    (field : CredentialAuthorityState.schema.{0, 0}.Field)
-    (outside : field ∉
-      (show CellState.Patch CredentialAuthorityState.schema.{0, 0} Digest from
-        attenuateDeclaration.patch parentStored).fieldFootprint) :
-    attenuatedCell.logical.fields field = issuedCell.logical.fields field :=
-  attenuated.field_frame field outside
-
 @[simp] theorem attenuated_policy_epoch_two :
-    policyEpochAt attenuatedCell examplePolicy = 2 := by
-  unfold policyEpochAt
-  rw [attenuated_frame (.policyEpoch examplePolicy) (by
-    change AuthorityField.policyEpoch examplePolicy ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.policyEpoch examplePolicy) (by
-    change AuthorityField.policyEpoch examplePolicy ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  exact initial_policy_epoch
+    policyEpochAt attenuatedCell examplePolicy = 2 := by decide
 
 @[simp] theorem attenuated_policy_revision_two :
-    policyRevisionAt attenuatedCell examplePolicy = 2 := by
-  unfold policyRevisionAt
-  rw [attenuated_frame (.policyRevision examplePolicy) (by
-    change AuthorityField.policyRevision examplePolicy ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.policyRevision examplePolicy) (by
-    change AuthorityField.policyRevision examplePolicy ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  exact initial_policy_revision
+    policyRevisionAt attenuatedCell examplePolicy = 2 := by decide
 
 @[simp] theorem attenuated_policy_address_two :
-    policyAddressAt attenuatedCell examplePolicy 2 = ⟨2200⟩ := by
-  unfold policyAddressAt
-  rw [attenuated_frame (.policyAddress examplePolicy 2) (by
-    change AuthorityField.policyAddress examplePolicy 2 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.policyAddress examplePolicy 2) (by
-    change AuthorityField.policyAddress examplePolicy 2 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  exact initial_policy_address
+    policyAddressAt attenuatedCell examplePolicy 2 = ⟨2200⟩ := by decide
 
 @[simp] theorem attenuated_issuer_epoch_zero :
-    issuerEpochAt attenuatedCell rootCapability.issuer = 0 := by
-  unfold issuerEpochAt
-  rw [attenuated_frame (.issuerEpoch rootCapability.issuer) (by
-    change AuthorityField.issuerEpoch ⟨7⟩ ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.issuerEpoch rootCapability.issuer) (by
-    change AuthorityField.issuerEpoch ⟨7⟩ ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  simp [initialCell_logical, initialLogical, prePage,
-    Page.toCanonicalState, Page.entries, oldPolicy, Entry.install,
-    rootCapability]
-  rfl
+    issuerEpochAt attenuatedCell rootCapability.issuer = 0 := by decide
 
+/-- No key is revoked after issuance and attenuation: neither family patch
+names the revoked plane (their exact footprints), and the pre-cell holds no
+revocation. -/
 theorem attenuated_live (key : RevocationKey) :
     isRevoked attenuatedCell key = false := by
+  have attenuatedFrame : attenuatedCell.logical ⟨.revoked, key⟩ =
+      issuedCell.logical ⟨.revoked, key⟩ :=
+    attenuated.frame _ (by
+      change _ ∉ Patch.writeFootprint
+        (attenuateDeclaration.patch parentStored issuedCell.logical)
+      rw [AttenuateDeclaration.patch_writeFootprint]
+      simp)
+  have issuedFrame : issuedCell.logical ⟨.revoked, key⟩ =
+      initialCell.logical ⟨.revoked, key⟩ :=
+    issued.frame _ (by
+      change _ ∉ Patch.writeFootprint (issueDeclaration.patch initialCell.logical)
+      rw [IssueDeclaration.patch_writeFootprint]
+      simp)
+  have initialAbsent : initialLogical ⟨.revoked, key⟩ = none :=
+    (StoreCodec.fromEntries_apply_eq_none_iff _ _).2 (by simp [initialEntries])
   unfold isRevoked
-  rw [attenuated_frame (.revoked key) (by
-    change AuthorityField.revoked key ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    simp)]
-  rw [issued_frame (.revoked key) (by
-    change AuthorityField.revoked key ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    simp)]
-  simp [initialCell_logical, initialLogical, prePage, Page.toCanonicalState,
-    Page.entries, oldPolicy, Entry.install]
+  rw [attenuatedFrame, issuedFrame, initialCell_logical, initialAbsent]
   rfl
 
 noncomputable def useRequest : Request .object :=
@@ -711,22 +540,7 @@ noncomputable def revokeCodec : LawfulCodec RevokeDeclaration := by
 
 theorem attenuated_nullifier_fresh :
     isNullified attenuatedCell revokeDeclaration.operationNullifier = false := by
-  unfold isNullified
-  rw [attenuated_frame (.nullifier revokeDeclaration.operationNullifier) (by
-    change AuthorityField.nullifier 1003 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.nullifier revokeDeclaration.operationNullifier) (by
-    change AuthorityField.nullifier 1003 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  simp [initialCell_logical, initialLogical, prePage, Page.toCanonicalState,
-    Page.entries, oldPolicy, Entry.install, revokeDeclaration]
-  rfl
+  decide
 
 def revokeEvidence :
     RevokeEvidence authorityDomain attenuatedCell revokeDeclaration where
@@ -753,14 +567,6 @@ theorem revoked_channel_authorizer_member :
     .channel ⟨9⟩ ∈ (authState authorityDomain revokedCell).revoked :=
   revocation_post_is_authorizer_member revoked
 
-theorem revoked_frame
-    (field : CredentialAuthorityState.schema.{0, 0}.Field)
-    (outside : field ∉
-      (show CellState.Patch CredentialAuthorityState.schema.{0, 0} Digest from
-        revokeDeclaration.patch).fieldFootprint) :
-    revokedCell.logical.fields field = attenuatedCell.logical.fields field :=
-  revoked.field_frame field outside
-
 noncomputable def rotateDeclaration : RotateEpochDeclaration where
   target := .policy examplePolicy
   expectedEpoch := 2
@@ -775,42 +581,11 @@ noncomputable def rotateCodec : LawfulCodec RotateEpochDeclaration := by
   exact codecOfCountable _
 
 theorem revoked_policy_epoch_two :
-    policyEpochAt revokedCell examplePolicy = 2 := by
-  unfold policyEpochAt
-  rw [revoked_frame (.policyEpoch examplePolicy) (by
-    change AuthorityField.policyEpoch examplePolicy ∉
-      (show Finset AuthorityField from
-        {AuthorityField.revoked (.channel ⟨9⟩),
-          AuthorityField.nullifier 1003})
-    decide)]
-  exact attenuated_policy_epoch_two
+    policyEpochAt revokedCell examplePolicy = 2 := by decide
 
 theorem revoked_rotation_nullifier_fresh :
     isNullified revokedCell rotateDeclaration.operationNullifier = false := by
-  unfold isNullified
-  rw [revoked_frame (.nullifier rotateDeclaration.operationNullifier) (by
-    change AuthorityField.nullifier 1004 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.revoked (.channel ⟨9⟩),
-          AuthorityField.nullifier 1003})
-    decide)]
-  change isNullified attenuatedCell 1004 = false
-  unfold isNullified
-  rw [attenuated_frame (.nullifier 1004) (by
-    change AuthorityField.nullifier 1004 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.nullifier 1004) (by
-    change AuthorityField.nullifier 1004 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  simp [initialCell_logical, initialLogical, prePage, Page.toCanonicalState,
-    Page.entries, oldPolicy, Entry.install]
-  rfl
+  decide
 
 def rotateEvidence : RotateEpochEvidence revokedCell rotateDeclaration where
   preRootExact := rfl
@@ -832,84 +607,25 @@ noncomputable abbrev finalCell : Cell AuthorityMaterializer :=
     policyEpochAt finalCell examplePolicy = 3 := by
   simpa [rotateDeclaration, EpochTarget.read] using rotation_post_exact rotated
 
-theorem rotated_frame
-    (field : CredentialAuthorityState.schema.{0, 0}.Field)
-    (outside : field ∉
-      (show CellState.Patch CredentialAuthorityState.schema.{0, 0} Digest from
-        rotateDeclaration.patch).fieldFootprint) :
-    finalCell.logical.fields field = revokedCell.logical.fields field :=
-  rotated.field_frame field outside
-
 /-- Grant generation changes independently of the current resource law. -/
 @[simp] theorem final_policy_revision_two :
-    policyRevisionAt finalCell examplePolicy = 2 := by
-  unfold policyRevisionAt
-  rw [rotated_frame (.policyRevision examplePolicy) (by
-    change AuthorityField.policyRevision examplePolicy ∉
-      (show Finset AuthorityField from
-        {AuthorityField.policyEpoch examplePolicy, AuthorityField.nullifier 1004})
-    decide)]
-  rw [revoked_frame (.policyRevision examplePolicy) (by
-    change AuthorityField.policyRevision examplePolicy ∉
-      (show Finset AuthorityField from
-        {AuthorityField.revoked (.channel ⟨9⟩), AuthorityField.nullifier 1003})
-    decide)]
-  exact attenuated_policy_revision_two
+    policyRevisionAt finalCell examplePolicy = 2 := by decide
 
 @[simp] theorem final_policy_address_two :
-    policyAddressAt finalCell examplePolicy 2 = ⟨2200⟩ := by
-  unfold policyAddressAt
-  rw [rotated_frame (.policyAddress examplePolicy 2) (by
-    change AuthorityField.policyAddress examplePolicy 2 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.policyEpoch examplePolicy, AuthorityField.nullifier 1004})
-    decide)]
-  rw [revoked_frame (.policyAddress examplePolicy 2) (by
-    change AuthorityField.policyAddress examplePolicy 2 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.revoked (.channel ⟨9⟩), AuthorityField.nullifier 1003})
-    decide)]
-  exact attenuated_policy_address_two
+    policyAddressAt finalCell examplePolicy 2 = ⟨2200⟩ := by decide
 
 @[simp] theorem final_policy_address_three :
-    policyAddressAt finalCell examplePolicy 3 = ⟨3300⟩ := by
-  unfold policyAddressAt
-  rw [rotated_frame (.policyAddress examplePolicy 3) (by
-    change AuthorityField.policyAddress examplePolicy 3 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.policyEpoch examplePolicy,
-          AuthorityField.nullifier 1004})
-    decide)]
-  rw [revoked_frame (.policyAddress examplePolicy 3) (by
-    change AuthorityField.policyAddress examplePolicy 3 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.revoked (.channel ⟨9⟩),
-          AuthorityField.nullifier 1003})
-    decide)]
-  rw [attenuated_frame (.policyAddress examplePolicy 3) (by
-    change AuthorityField.policyAddress examplePolicy 3 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.policyAddress examplePolicy 3) (by
-    change AuthorityField.policyAddress examplePolicy 3 ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  exact staged_policy_address
+    policyAddressAt finalCell examplePolicy 3 = ⟨3300⟩ := by decide
 
 @[simp] theorem final_channel_revoked :
-    isRevoked finalCell (.channel ⟨9⟩) = true := by
-  unfold isRevoked
-  rw [rotated_frame (.revoked (.channel ⟨9⟩)) (by
-    change AuthorityField.revoked (.channel ⟨9⟩) ∉
-      (show Finset AuthorityField from
-        {AuthorityField.policyEpoch examplePolicy,
-          AuthorityField.nullifier 1004})
-    decide)]
-  exact revoked_channel_exact
+    isRevoked finalCell (.channel ⟨9⟩) = true := by decide
+
+/-- The revoked channel is registered present AND revoked present in the final
+cell: its registration survived the revocation and the rotation. -/
+theorem final_channel_registered_and_revoked :
+    isRegistered finalCell (.channel ⟨9⟩) = true ∧
+      isRevoked finalCell (.channel ⟨9⟩) = true := by
+  decide
 
 theorem final_channel_authorizer_member :
     .channel ⟨9⟩ ∈ (authState authorityDomain finalCell).revoked := by
@@ -963,31 +679,75 @@ theorem stale_root_rejected :
   have values := congrArg Digest.value equal
   simp [staleIssueDeclaration] at values
 
-/-! The bounded page publishes the same final selection/revocation facts.
-The imported `postPage` demonstrates a revision update, so this generation
-rotation has its own witness instead of conflating those two operations. -/
+/-! ## Refusing poles at the validator
 
-def rotatedPage : Page :=
-  { postPage with slot0 := some (.policy examplePolicy 3 2 ⟨2200⟩) }
+The steps above are accepted.  The same validator refuses the two moves the
+append-only planes forbid, naming the exact failing operation. -/
 
-theorem rotatedPage_valid : rotatedPage.Valid := by decide
+/-- A revocation of a registered, live key that reuses the spent operation
+nullifier of the channel revocation. -/
+noncomputable def spentRevokeDeclaration : RevokeDeclaration where
+  key := .capability rootCapability.id
+  expectedPreRoot := finalCell.root
+  operationNullifier := revokeDeclaration.operationNullifier
 
-def rotatedPageCell : Materialized materializer :=
-  CellState.materialize materializer (stateOfOption (some rotatedPage))
-
-theorem bounded_page_agrees_with_final_selection :
-    rotatedPage.policyEpochAt examplePolicy = policyEpochAt finalCell examplePolicy /\
-      rotatedPage.policyRevisionAt examplePolicy = policyRevisionAt finalCell examplePolicy /\
-      rotatedPage.policyAddressAt examplePolicy 2 =
-        policyAddressAt finalCell examplePolicy 2 /\
-      .channel ⟨9⟩ ∈ rotatedPage.revoked := by
-  rw [final_policy_epoch_three, final_policy_revision_two, final_policy_address_two]
+/-- The key it names is still revocable: registered and live at `finalCell`. -/
+theorem spent_revoke_key_revocable :
+    isRegistered finalCell spentRevokeDeclaration.key = true ∧
+      isRevoked finalCell spentRevokeDeclaration.key = false := by
   decide
+
+/-- Refuting pole (validator): its patch, generated at `finalCell`, is rejected at
+operation 1 -- the nullifier allocation -- because nullifier 1003 is present in
+the append-only nullifier plane.  Operation 0 (the revocation) was enabled. -/
+theorem spent_nullifier_revocation_rejected :
+    CellState.validate AuthorityMaterializer finalCell finalCell.root
+        (spentRevokeDeclaration.patch finalCell.logical) =
+      .rejected (.disabledOperation 1) := by
+  have disabled : Patch.firstDisabled? finalCell.logical
+      (spentRevokeDeclaration.patch finalCell.logical) = some 1 := by
+    decide
+  unfold CellState.validate
+  rw [dif_pos rfl]
+  split
+  · rename_i reported
+    rw [disabled] at reported
+    cases reported
+  · rename_i index reported
+    rw [disabled] at reported
+    cases reported
+    rfl
+
+/-- Refuting pole (effect boundary): no revocation evidence exists for it. -/
+theorem spent_nullifier_revocation_no_evidence :
+    RevokeEvidence authorityDomain finalCell spentRevokeDeclaration -> False := by
+  intro evidence
+  have fresh := evidence.nullifierFresh
+  have spent : isNullified finalCell spentRevokeDeclaration.operationNullifier = true := by
+    decide
+  rw [spent] at fresh
+  cases fresh
+
+/-- Refuting pole (validator): the revoked channel's registration cannot be
+erased; the free is rejected at operation 0. -/
+theorem final_deregistration_rejected :
+    CellState.validate AuthorityMaterializer finalCell finalCell.root
+        [Op.free (L := layout) .registered (.channel ⟨9⟩) ()] =
+      .rejected (.disabledOperation 0) :=
+  deregister_rejected AuthorityMaterializer finalCell _
+
+/-- Refuting pole (validator): nor can its revocation. -/
+theorem final_unrevocation_rejected :
+    CellState.validate AuthorityMaterializer finalCell finalCell.root
+        [Op.free (L := layout) .revoked (.channel ⟨9⟩) ()] =
+      .rejected (.disabledOperation 0) :=
+  unrevoke_rejected AuthorityMaterializer finalCell _
 
 /-! ## Payload-bearing durable use with an exact authority read guard -/
 
-abbrev fullRoot : List UInt8 -> Digest :=
-  Minidregg.Theory.DeployedMaterializerWitness.lengthRoot
+/-- The durable snapshot's root function is the deployed store root (cSHAKE256
+under `DREGG.STORE.ROOT/v1`), the same function the authority cell uses. -/
+abbrev fullRoot : List UInt8 -> Digest := StoreCodec.rootBytes
 
 def authorityCellId : Minidregg.Kernel.DurableDataIntent.CellId := ⟨102⟩
 def resultCellId : Minidregg.Kernel.DurableDataIntent.CellId := ⟨902⟩
@@ -1023,13 +783,13 @@ def useWrite : DataWrite where
 
 def useNullifier : StableNullifier where
   codecVersion := 1
-  domain := prePage.authorityDomain
+  domain := lifecycleDomain
   nullifierId := ⟨2001⟩
   canonicalBytes := [116, 111, 107, 101, 110, 45, 117, 115, 101]
 
 def useEvent : StableEvent where
   codecVersion := 1
-  domain := prePage.authorityDomain
+  domain := lifecycleDomain
   eventId := ⟨9200⟩
   canonicalBytes := [117, 115, 101, 45, 97, 99, 99, 101, 112, 116, 101, 100]
 
@@ -1072,7 +832,11 @@ noncomputable def guardedUseIntent : DataIntent fullRoot :=
 
 @[simp] theorem base_use_ready :
     baseUseIntent.preflight durableBefore = .ok () := by
-  decide
+  simp [DataIntent.preflight, DataIntent.readGuardsMatchCheck, DataIntent.erase,
+    Intent.preflight, Intent.rootsMatchCheck, Intent.nullifiersFreshCheck,
+    Charge.fundedCheck, baseUseIntent, durableBefore, durableBeforeModel,
+    durableBeforeBytes, useWrite, useNullifier, resultCellId, authorityCellId,
+    Lane.allCheck]
 
 @[simp] theorem guarded_use_ready :
     guardedUseIntent.preflight durableBefore = .ok () := by
@@ -1128,10 +892,26 @@ theorem exact_retry_no_double_charge :
   rw [exact_retry_is_replay]
   exact ⟨rfl, fun _ => rfl⟩
 
-/-- This is the remaining CR premise for the full sparse-cell carrier.  The
-current byte-length root cannot prove it; a production digest must. -/
-structure FullAuthorityPairBinding : Prop where
-  rootsDistinct : finalCell.root ≠ attenuatedCell.root
+/-- The authority update between the admitted use and settlement changed the
+authority store: the grant generation moved from two to three. -/
+theorem authority_update_changes_store :
+    finalCell.logical ≠ attenuatedCell.logical := by
+  intro same
+  have epochs : policyEpochAt finalCell examplePolicy =
+      policyEpochAt attenuatedCell examplePolicy := by
+    unfold policyEpochAt
+    rw [same]
+  rw [final_policy_epoch_three, attenuated_policy_epoch_two] at epochs
+  exact absurd epochs (by decide)
+
+/-- Under the pair-scoped no-collision premise for exactly these two stores,
+the authority update moves the root a durable read guard observes. -/
+theorem authority_update_moves_root
+    (binding : CredentialAuthorityCell.PairBindingPremise
+      finalCell.logical attenuatedCell.logical) :
+    finalCell.root ≠ attenuatedCell.root :=
+  CredentialAuthorityCell.root_ne_of_logical_ne (left := finalCell) (right := attenuatedCell)
+    binding authority_update_changes_store
 
 noncomputable def afterAuthorityUpdateBytes
     (cellId : Minidregg.Kernel.DurableDataIntent.CellId) : List UInt8 :=
@@ -1150,34 +930,18 @@ noncomputable def afterAuthorityUpdate : DataSnapshot fullRoot where
   coherent := fun _ => rfl
 
 /-- The old accepted use cannot cross settlement after the authority cell has
-moved.  This is conditional exactly on the full-cell binding premise above. -/
+moved.  This is conditional exactly on the pair-scoped no-collision premise
+for the two authority stores. -/
 theorem authority_update_rejects_old_use
-    (binding : FullAuthorityPairBinding) :
+    (binding : CredentialAuthorityCell.PairBindingPremise
+      finalCell.logical attenuatedCell.logical) :
     guardedUseIntent.preflight afterAuthorityUpdate =
       .error .staleReadGuard := by
   apply policy_registry_rotation_rejects_old_intent attenuatedCell
     authorityCellId sharedFullDigest baseUseIntent authority_read_only
     afterAuthorityUpdate
   simpa [afterAuthorityUpdate, afterAuthorityUpdateModel,
-    afterAuthorityUpdateBytes, authorityCellId] using binding.rootsDistinct
-
-/-- On the real bounded page, root movement follows from the existing
-pair-scoped cSHAKE binding premise rather than from a global injectivity lie. -/
-theorem bounded_page_update_moves_root
-    (binding : PairBindingPremise
-      (stateOfOption (some prePage)) (stateOfOption (some rotatedPage))) :
-    preCell.root ≠ rotatedPageCell.root := by
-  intro sameRoot
-  have statesEqual : stateOfOption (some prePage) =
-      stateOfOption (some rotatedPage) :=
-    state_eq_of_root_eq binding sameRoot
-  have pagesEqual : prePage = rotatedPage := by
-    have fieldsEqual := congrArg
-      (fun state : LogicalState
-        CredentialAuthorityPageMaterializer.schema => state.fields ()) statesEqual
-    simpa [stateOfOption] using fieldsEqual
-  have different : prePage ≠ rotatedPage := by decide
-  exact different pagesEqual
+    afterAuthorityUpdateBytes, authorityCellId] using authority_update_moves_root binding
 
 /-- No filesystem, database, RPC stack, or physical transport is claimed here.
 Such a claim must inhabit the existing simulation boundary. -/
@@ -1189,6 +953,18 @@ abbrev PhysicalDurabilityCeiling
 
 /-! ## Axiom audit -/
 
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.initial_keys_registered_live' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms initial_keys_registered_live
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.final_channel_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms final_channel_registered_and_revoked
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.spent_nullifier_revocation_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spent_nullifier_revocation_rejected
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.spent_nullifier_revocation_no_evidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spent_nullifier_revocation_no_evidence
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.final_deregistration_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms final_deregistration_rejected
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.authority_update_moves_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms authority_update_moves_root
 /-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.subsequent_child_authorization_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms subsequent_child_authorization_rejected
 /-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.first_use_exact_charge' depends on axioms: [propext, Classical.choice, Quot.sound] -/

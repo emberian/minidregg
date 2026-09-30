@@ -441,14 +441,106 @@ theorem nullifier_clear_refused (store : Store layout) (id : Nat) :
   change ¬ (layout.discipline .nullifier = .ram ∧ store ⟨.nullifier, id⟩ = some ())
   simp [AuthorityPlane.discipline]
 
-/-- **At the cell.**  Validation of a patch that would un-revoke a key is
-rejected at its first operation, whatever the materializer. -/
-theorem unrevoke_rejected (M : Materializer) (pre : Cell M) (key : RevocationKey) :
-    CellState.validate M pre pre.root [Op.free (L := layout) .revoked key ()] =
+/-! ## Registration is append-only: deregistration is impossible
+
+A revocation key's lifecycle is read from two presence planes and nothing
+else: registered-and-live is `registered` present with `revoked` absent; a
+revoked key is `registered` present AND `revoked` present.  Neither plane can
+lose an entry, so the only transition is live → revoked, and it is permanent. -/
+
+/-- A registration survives every valid patch. -/
+theorem registration_permanent (store : Store layout) (patch : Patch layout)
+    (key : RevocationKey) (valid : Patch.ValidFrom store patch)
+    (registered : store ⟨.registered, key⟩ = some ()) :
+    Patch.run store patch ⟨.registered, key⟩ = some () :=
+  Patch.appendOnly_present_preserved store patch ⟨.registered, key⟩ () valid rfl registered
+
+/-- Satisfiable pole: registering a key not yet registered is enabled. -/
+theorem register_enabled_iff (store : Store layout) (key : RevocationKey) :
+    (Op.allocate (L := layout) .registered key ()).Enabled store ↔
+      store ⟨.registered, key⟩ = none := by
+  change layout.discipline .registered ≠ .rom ∧ store ⟨.registered, key⟩ = none ↔ _
+  simp [AuthorityPlane.discipline]
+
+/-- Refuting pole: no operation removes a registration. -/
+theorem deregister_refused (store : Store layout) (key : RevocationKey) :
+    ¬ (Op.free (L := layout) .registered key ()).Enabled store := by
+  change ¬ (layout.discipline .registered = .ram ∧ store ⟨.registered, key⟩ = some ())
+  simp [AuthorityPlane.discipline]
+
+/-- Refuting pole: no operation overwrites a registration. -/
+theorem registration_overwrite_refused (store : Store layout) (key : RevocationKey) :
+    ¬ (Op.write (L := layout) .registered key () ()).Enabled store := by
+  change ¬ (layout.discipline .registered = .ram ∧ store ⟨.registered, key⟩ = some ())
+  simp [AuthorityPlane.discipline]
+
+/-! ### Monotonicity over every accepted history
+
+`Patch.Executes` composes by list append (`Patch.Executes.append`), so a
+history of accepted patches is one executed patch and the statements below
+cover every finite history, not only one step. -/
+
+/-- On an append-only plane a present entry is present, with the same value,
+after every executed patch. -/
+theorem presence_monotone (plane : AuthorityPlane)
+    (appendOnly : AuthorityPlane.discipline plane = .appendOnly) (key : plane.Key)
+    (value : plane.Value) {pre post : Store layout} {patch : Patch layout}
+    (executes : Patch.Executes pre patch post)
+    (present : pre ⟨plane, key⟩ = some value) :
+    post ⟨plane, key⟩ = some value := by
+  obtain ⟨valid, ran⟩ := executes
+  rw [← ran]
+  exact Patch.appendOnly_present_preserved pre patch ⟨plane, key⟩ value valid appendOnly present
+
+/-- **Revocation is monotone:** once revoked, revoked after every accepted history. -/
+theorem revocation_monotone {pre post : Store layout} {patch : Patch layout}
+    (executes : Patch.Executes pre patch post) (key : RevocationKey)
+    (revoked : pre ⟨.revoked, key⟩ = some ()) :
+    post ⟨.revoked, key⟩ = some () :=
+  presence_monotone .revoked rfl key () executes revoked
+
+/-- **Registration is monotone:** once registered, registered after every
+accepted history.  Deregistration is not an operation of this domain. -/
+theorem registration_monotone {pre post : Store layout} {patch : Patch layout}
+    (executes : Patch.Executes pre patch post) (key : RevocationKey)
+    (registered : pre ⟨.registered, key⟩ = some ()) :
+    post ⟨.registered, key⟩ = some () :=
+  presence_monotone .registered rfl key () executes registered
+
+/-- A spent nullifier is spent after every accepted history. -/
+theorem nullifier_monotone {pre post : Store layout} {patch : Patch layout}
+    (executes : Patch.Executes pre patch post) (id : Nat)
+    (spent : pre ⟨.nullifier, id⟩ = some ()) :
+    post ⟨.nullifier, id⟩ = some () :=
+  presence_monotone .nullifier rfl id () executes spent
+
+/-- A revoked key (registered present AND revoked present) stays exactly that:
+no accepted history returns it to registered-and-live, or to unregistered. -/
+theorem revoked_registration_permanent {pre post : Store layout} {patch : Patch layout}
+    (executes : Patch.Executes pre patch post) (key : RevocationKey)
+    (registered : pre ⟨.registered, key⟩ = some ())
+    (revoked : pre ⟨.revoked, key⟩ = some ()) :
+    post ⟨.registered, key⟩ = some () ∧ post ⟨.revoked, key⟩ = some () :=
+  ⟨registration_monotone executes key registered, revocation_monotone executes key revoked⟩
+
+/-! ### Refusal at the cell, both poles, for every presence plane -/
+
+/-- Validation of a one-operation patch that frees an entry of an append-only
+plane is rejected at its first operation, whatever the materializer and
+whether or not the entry is present. -/
+theorem presence_free_rejected (M : Materializer) (pre : Cell M) (plane : AuthorityPlane)
+    (appendOnly : AuthorityPlane.discipline plane = .appendOnly)
+    (key : plane.Key) (value : plane.Value) :
+    CellState.validate M pre pre.root [Op.free (L := layout) plane key value] =
       .rejected (.disabledOperation 0) := by
+  have notEnabled : ¬ (Op.free (L := layout) plane key value).Enabled pre.logical := by
+    rintro ⟨ram, _⟩
+    change AuthorityPlane.discipline plane = .ram at ram
+    rw [appendOnly] at ram
+    cases ram
   have disabled :
-      Patch.firstDisabled? pre.logical [Op.free (L := layout) .revoked key ()] = some 0 := by
-    simp [Patch.firstDisabled?, unrevoke_refused]
+      Patch.firstDisabled? pre.logical [Op.free (L := layout) plane key value] = some 0 := by
+    simp [Patch.firstDisabled?, notEnabled]
   unfold CellState.validate
   rw [dif_pos rfl]
   split
@@ -460,6 +552,33 @@ theorem unrevoke_rejected (M : Materializer) (pre : Cell M) (key : RevocationKey
     cases reported
     rfl
 
+/-- Allocating an absent entry of an append-only plane validates, and the post
+holds it. -/
+theorem presence_allocate_accepted (M : Materializer) (pre : Cell M) (plane : AuthorityPlane)
+    (appendOnly : AuthorityPlane.discipline plane = .appendOnly)
+    (key : plane.Key) (value : plane.Value)
+    (fresh : pre.logical ⟨plane, key⟩ = none) :
+    ∃ validated : CellState.ValidatedPatch M pre pre.root
+        [Op.allocate (L := layout) plane key value],
+      CellState.validate M pre pre.root [Op.allocate (L := layout) plane key value] =
+          .accepted validated ∧
+        validated.apply.logical ⟨plane, key⟩ = some value := by
+  have enabled : (Op.allocate (L := layout) plane key value).Enabled pre.logical := by
+    refine ⟨?_, fresh⟩
+    change AuthorityPlane.discipline plane ≠ .rom
+    rw [appendOnly]
+    nofun
+  obtain ⟨validated, accepted⟩ := CellState.validate_accepts M pre pre.root
+    [Op.allocate (L := layout) plane key value] rfl ⟨enabled, trivial⟩
+  exact ⟨validated, accepted, by simp [Op.apply]⟩
+
+/-- **At the cell.**  Validation of a patch that would un-revoke a key is
+rejected at its first operation, whatever the materializer. -/
+theorem unrevoke_rejected (M : Materializer) (pre : Cell M) (key : RevocationKey) :
+    CellState.validate M pre pre.root [Op.free (L := layout) .revoked key ()] =
+      .rejected (.disabledOperation 0) :=
+  presence_free_rejected M pre .revoked rfl key ()
+
 /-- **At the cell.**  Revoking an unrevoked key validates, and the post has it
 revoked. -/
 theorem revoke_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey)
@@ -468,11 +587,26 @@ theorem revoke_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey)
         [Op.allocate (L := layout) .revoked key ()],
       CellState.validate M pre pre.root [Op.allocate (L := layout) .revoked key ()] =
           .accepted validated ∧
-        validated.apply.logical ⟨.revoked, key⟩ = some () := by
-  obtain ⟨validated, accepted⟩ := CellState.validate_accepts M pre pre.root
-    [Op.allocate (L := layout) .revoked key ()] rfl
-    ⟨(revoke_enabled_iff pre.logical key).2 fresh, trivial⟩
-  exact ⟨validated, accepted, by simp [Op.apply]; rfl⟩
+        validated.apply.logical ⟨.revoked, key⟩ = some () :=
+  presence_allocate_accepted M pre .revoked rfl key () fresh
+
+/-- **At the cell, refuting pole.**  Deregistration is rejected at operation 0,
+whatever the materializer: a registered key cannot be erased. -/
+theorem deregister_rejected (M : Materializer) (pre : Cell M) (key : RevocationKey) :
+    CellState.validate M pre pre.root [Op.free (L := layout) .registered key ()] =
+      .rejected (.disabledOperation 0) :=
+  presence_free_rejected M pre .registered rfl key ()
+
+/-- **At the cell, satisfiable pole.**  Registering a fresh key validates, and
+the post has it registered. -/
+theorem register_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey)
+    (fresh : pre.logical ⟨.registered, key⟩ = none) :
+    ∃ validated : CellState.ValidatedPatch M pre pre.root
+        [Op.allocate (L := layout) .registered key ()],
+      CellState.validate M pre pre.root [Op.allocate (L := layout) .registered key ()] =
+          .accepted validated ∧
+        validated.apply.logical ⟨.registered, key⟩ = some () :=
+  presence_allocate_accepted M pre .registered rfl key () fresh
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
@@ -484,5 +618,19 @@ theorem revoke_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey)
 #guard_msgs (whitespace := lax) in #print axioms unrevoke_rejected
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.revoke_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms revoke_accepted
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.registration_permanent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms registration_permanent
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.revocation_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revocation_monotone
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.registration_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms registration_monotone
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.revoked_registration_permanent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revoked_registration_permanent
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.deregister_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deregister_refused
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.deregister_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deregister_rejected
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.register_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms register_accepted
 
 end Minidregg.Theory.CredentialAuthorityState

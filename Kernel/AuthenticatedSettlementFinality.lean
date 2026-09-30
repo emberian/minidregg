@@ -8,7 +8,8 @@ that book explicit.  A signed vote binds all of the following data:
 * the canonical credential-authority root consulted for admission;
 * a versioned public-key identity selected for one replica;
 * the current subject-key and governance-policy epochs;
-* a registered, live revocation key for that key identity;
+* a revocation key for that key identity that is registered and live in the
+  exact cell (present in `registered`, absent from `revoked`);
 * the protocol domain, consensus epoch, derived log slot, and injectively
   encoded candidate bytes.
 
@@ -111,10 +112,15 @@ structure CurrentSigner (node : Node) : Prop where
         (authority.signer node).governancePolicy
         (authority.signer node).governanceEpoch =
       (authority.signer node).governanceAddress
-  revocationRegistered :
-    (authority.signer node).revocationKey ∈ authority.projection.revocationKeys
+  /-- The key-version revocation key is registered in the exact cell: present
+  in the append-only `registered` plane, so it can never be erased. -/
+  registered :
+    CredentialAuthorityState.isRegistered authority.cell
+      (authority.signer node).revocationKey = true
+  /-- ...and live: absent from the append-only `revoked` plane of the same cell. -/
   notRevoked :
-    (authority.signer node).revocationKey ∉ authority.authState.revoked
+    CredentialAuthorityState.isRevoked authority.cell
+      (authority.signer node).revocationKey = false
 
 end SignerAuthority
 
@@ -244,11 +250,30 @@ theorem revoked_signer_rejected
     {portal : SignaturePortal PublicKey Signature}
     {node : Node} {candidate : Candidate TxId CellId Nullifier Event}
     {vote : SignedVote PublicKey Signature TxId CellId Nullifier Event}
-    (revoked : vote.identity.revocationKey ∈ authority.authState.revoked) :
+    (revoked : CredentialAuthorityState.isRevoked authority.cell
+      vote.identity.revocationKey = true) :
     ¬ AcceptedVote authority candidateCodec payloadCodec portal node candidate vote := by
   intro accepted
-  apply accepted.currentSigner.notRevoked
-  simpa [accepted.identityExact] using revoked
+  have live := accepted.currentSigner.notRevoked
+  rw [← accepted.identityExact, revoked] at live
+  cases live
+
+/-- A vote whose key-version revocation key the exact cell has not registered
+is refused, whatever its signature. -/
+theorem unregistered_signer_rejected
+    {authority : SignerAuthority M Node PublicKey}
+    {candidateCodec : LawfulCodec (Candidate TxId CellId Nullifier Event)}
+    {payloadCodec : LawfulCodec VotePayload}
+    {portal : SignaturePortal PublicKey Signature}
+    {node : Node} {candidate : Candidate TxId CellId Nullifier Event}
+    {vote : SignedVote PublicKey Signature TxId CellId Nullifier Event}
+    (absent : CredentialAuthorityState.isRegistered authority.cell
+      vote.identity.revocationKey = false) :
+    ¬ AcceptedVote authority candidateCodec payloadCodec portal node candidate vote := by
+  intro accepted
+  have registered := accepted.currentSigner.registered
+  rw [← accepted.identityExact, absent] at registered
+  cases registered
 
 theorem wrong_authority_root_rejected
     {authority : SignerAuthority M Node PublicKey}
@@ -564,8 +589,8 @@ structure RotationHandoff
     (laterAuthority.signer node).subject
   keyEpochAdvanced : (earlierAuthority.signer node).keyEpoch <
     (laterAuthority.signer node).keyEpoch
-  oldKeyRevokedLater : (earlierAuthority.signer node).revocationKey ∈
-    laterAuthority.authState.revoked
+  oldKeyRevokedLater : CredentialAuthorityState.isRevoked laterAuthority.cell
+    (earlierAuthority.signer node).revocationKey = true
   candidateAdvance : EpochAdvance earlier later
 
 theorem RotationHandoff.extends_finalized_log
@@ -605,6 +630,8 @@ structure DeploymentRefinement
 #guard_msgs (whitespace := lax) in #print axioms stale_key_epoch_rejected
 /-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.revoked_signer_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms revoked_signer_rejected
+/-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.unregistered_signer_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unregistered_signer_rejected
 /-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.accepted_candidate_unique_across_authorities_at_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_candidate_unique_across_authorities_at_slot
 /-- info: 'Minidregg.Kernel.AuthenticatedSettlementFinality.accepted_candidate_unique_at_slot' depends on axioms: [propext, Classical.choice, Quot.sound] -/

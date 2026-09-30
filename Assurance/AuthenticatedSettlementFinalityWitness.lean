@@ -4,7 +4,8 @@
 This witness joins `AuthenticatedSettlementFinality` to finite sparse
 `CredentialAuthorityState` cells.  Three replica identities are selected under
 one exact canonical authority root, current subject-key epochs, a versioned
-governance-policy address, and a registered live revocation channel.  Their
+governance-policy address, and a revocation channel that is registered (present
+in the append-only `registered` plane) and live (absent from `revoked`).  Their
 signed payloads retain exact candidate bytes and the derived log slot.
 
 The signature bytes are supplied only through `VerifiedSignatureBoundary`.
@@ -14,10 +15,12 @@ discipline premises.  Closed stale-key, stale-policy, replay-after-revocation,
 wrong-root, wrong-epoch, wrong-slot, and wrong-candidate-byte teeth fail
 structural admission before signature soundness is relevant.
 
-The countability-selected codec and byte-length root below are inhabitation
-witnesses, not production formats or cryptographic commitments.
+The authority snapshots are deployed `CredentialAuthorityCell` stores (the
+store codec and its cSHAKE256 root).  The countability-selected codecs for
+candidates and vote payloads are inhabitation witnesses, not production formats.
 -/
 import Kernel.AuthenticatedSettlementFinality
+import Compiler.CredentialAuthorityCell
 import Theory.DeployedMaterializerWitness
 
 namespace Minidregg.Assurance.AuthenticatedSettlementFinalityWitness
@@ -30,6 +33,9 @@ open Minidregg.Theory.CredentialAuthorityState
 open Minidregg.Theory.DeployedMaterializerWitness
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.Store
+open Minidregg.Compiler
+open Minidregg.Compiler.StoreCodec
 
 set_option autoImplicit false
 noncomputable section
@@ -52,50 +58,64 @@ def governancePolicy : PolicyId := ⟨17⟩
 def oldKeyRevocation : RevocationKey := .channel ⟨9⟩
 def newKeyRevocation : RevocationKey := .channel ⟨10⟩
 
-noncomputable abbrev AuthorityMaterializer : CredentialAuthorityState.Materializer :=
-  DeployedMaterializerWitness.authorityMaterializer
+abbrev AuthorityMaterializer : CredentialAuthorityState.Materializer :=
+  CredentialAuthorityCell.materializer
 
-/-- Epoch two, governance policy epoch five, and a live key-revocation channel. -/
-def liveLogical : LogicalState CredentialAuthorityState.schema.{0, 0} where
-  fields :=
-    (((((((0 : FieldStore CredentialAuthorityState.schema.{0, 0}).write
-      (.subjectKeyEpoch subject0) (show Epoch from 2)).write
-      (.subjectKeyEpoch subject1) (show Epoch from 2)).write
-      (.subjectKeyEpoch subject2) (show Epoch from 2)).write
-      (.policyEpoch governancePolicy) (show Epoch from 5)).write
-      (.policyAddress governancePolicy 5) ⟨5500⟩).write
-      (.revoked oldKeyRevocation) false).write
-      (.revoked newKeyRevocation) false
-  resources := fun resource => nomatch resource
+/-- Epoch two, governance policy epoch five, and two registered key-revocation
+channels, neither revoked.  Registration is presence in the append-only
+`registered` plane; liveness is absence from `revoked`. -/
+def liveEntries : List (Entry layout) :=
+  [⟨⟨.subjectKeyEpoch, subject0⟩, (2 : Epoch)⟩,
+   ⟨⟨.subjectKeyEpoch, subject1⟩, (2 : Epoch)⟩,
+   ⟨⟨.subjectKeyEpoch, subject2⟩, (2 : Epoch)⟩,
+   ⟨⟨.policyEpoch, governancePolicy⟩, (5 : Epoch)⟩,
+   ⟨⟨.policyAddress, (governancePolicy, 5)⟩, (⟨5500⟩ : Digest)⟩,
+   ⟨⟨.registered, oldKeyRevocation⟩, ()⟩,
+   ⟨⟨.registered, newKeyRevocation⟩, ()⟩]
 
-noncomputable def liveCell : CredentialAuthorityState.Cell AuthorityMaterializer :=
+def liveLogical : Store layout := fromEntries liveEntries
+
+def liveCell : CredentialAuthorityState.Cell AuthorityMaterializer :=
   CellState.materialize AuthorityMaterializer liveLogical
 
 @[simp] theorem liveCell_logical : liveCell.logical = liveLogical := rfl
 
-/-- The exact key-rotation snapshot advances all signer subjects to epoch three. -/
-def rotatedLogical : LogicalState CredentialAuthorityState.schema.{0, 0} where
-  fields := (((liveLogical.fields.write (.subjectKeyEpoch subject0)
-    (show Epoch from 3)).write (.subjectKeyEpoch subject1)
-    (show Epoch from 3)).write (.subjectKeyEpoch subject2)
-    (show Epoch from 3)).write (.revoked oldKeyRevocation) true
-  resources := fun resource => nomatch resource
+/-- The key rotation as one guarded patch: every signer subject advances from
+epoch two to three, and the old key's revocation is allocated.  Both
+registrations are untouched. -/
+def rotationPatch : Patch layout :=
+  [.write .subjectKeyEpoch subject0 (2 : Epoch) (3 : Epoch),
+   .write .subjectKeyEpoch subject1 (2 : Epoch) (3 : Epoch),
+   .write .subjectKeyEpoch subject2 (2 : Epoch) (3 : Epoch),
+   .allocate .revoked oldKeyRevocation ()]
 
-noncomputable def rotatedCell : CredentialAuthorityState.Cell AuthorityMaterializer :=
+/-- The exact key-rotation snapshot: all signer subjects at epoch three and the
+old key's channel revoked (registered present AND revoked present).  It is not
+supplied beside the live snapshot: it is the store the rotation patch runs to. -/
+def rotatedLogical : Store layout := Patch.run liveLogical rotationPatch
+
+def rotatedCell : CredentialAuthorityState.Cell AuthorityMaterializer :=
   CellState.materialize AuthorityMaterializer rotatedLogical
 
 @[simp] theorem rotatedCell_logical : rotatedCell.logical = rotatedLogical := rfl
 
-/-- A later snapshot additionally rotates policy content and revokes the old
-key channel.  It is used only for rejection teeth. -/
-def finalLogical : LogicalState CredentialAuthorityState.schema.{0, 0} where
-  fields := (((rotatedLogical.fields.write (.policyEpoch governancePolicy)
-    (show Epoch from 6)).write
-    (.policyAddress governancePolicy 6) ⟨6600⟩).write
-    (.revoked oldKeyRevocation) true)
-  resources := fun resource => nomatch resource
+/-- Every guard of the rotation patch holds at its prefix: the rotation is an
+accepted transition of the live store. -/
+theorem rotation_executes : Patch.Executes liveLogical rotationPatch rotatedLogical :=
+  ⟨by decide, rfl⟩
 
-noncomputable def finalCell : CredentialAuthorityState.Cell AuthorityMaterializer :=
+/-- A later policy-content rotation.  It is used only for rejection teeth. -/
+def policyRotationPatch : Patch layout :=
+  [.write .policyEpoch governancePolicy (5 : Epoch) (6 : Epoch),
+   .allocate .policyAddress (governancePolicy, 6) (⟨6600⟩ : Digest)]
+
+def finalLogical : Store layout := Patch.run rotatedLogical policyRotationPatch
+
+theorem policy_rotation_executes :
+    Patch.Executes rotatedLogical policyRotationPatch finalLogical :=
+  ⟨by decide, rfl⟩
+
+def finalCell : CredentialAuthorityState.Cell AuthorityMaterializer :=
   CellState.materialize AuthorityMaterializer finalLogical
 
 @[simp] theorem finalCell_logical : finalCell.logical = finalLogical := rfl
@@ -144,7 +164,7 @@ def directory : KeyDirectory Nat where
           identity.publicKey = 9000 + identity.subject.value ∧
           identity.publicKeyAddress = ⟨10000 + identity.subject.value⟩))
 
-noncomputable def authority :
+def authority :
     SignerAuthority AuthorityMaterializer Node Nat where
   projection := projection
   cell := liveCell
@@ -154,87 +174,70 @@ noncomputable def authority :
 
 @[simp] theorem live_subject_epoch (node : Node) :
     subjectKeyEpochAt liveCell (signerSubject node) = 2 := by
-  fin_cases node <;>
-    simp [liveCell_logical, liveLogical, subjectKeyEpochAt, signerSubject,
-      subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-      newKeyRevocation] <;>
-    decide
+  fin_cases node <;> decide
 
 @[simp] theorem live_policy_epoch :
     policyEpochAt liveCell governancePolicy = 5 := by
-  simp [liveCell_logical, liveLogical, policyEpochAt, subject0, subject1, subject2,
-    governancePolicy, oldKeyRevocation, newKeyRevocation]
+  decide
 
 @[simp] theorem live_policy_address :
     policyAddressAt liveCell governancePolicy 5 = ⟨5500⟩ := by
-  simp [liveCell_logical, liveLogical, policyAddressAt, subject0, subject1, subject2,
-    governancePolicy, oldKeyRevocation, newKeyRevocation]
+  decide
+
+@[simp] theorem live_old_key_registered :
+    isRegistered liveCell oldKeyRevocation = true := by
+  decide
 
 @[simp] theorem live_old_key_not_revoked :
     isRevoked liveCell oldKeyRevocation = false := by
-  have readExact :
-      liveLogical.fields (.revoked oldKeyRevocation) = some false := by
-    unfold liveLogical
-    rw [FieldStore.write_other (different := by decide)]
-    rw [FieldStore.write_self]
-    rfl
-  change (liveLogical.fields (.revoked oldKeyRevocation)).getD false = false
-  rw [readExact]
-  rfl
+  decide
 
 @[simp] theorem rotated_subject_epoch (node : Node) :
     subjectKeyEpochAt rotatedCell (signerSubject node) = 3 := by
-  fin_cases node <;>
-    simp [rotatedCell_logical, rotatedLogical, liveLogical, subjectKeyEpochAt,
-      signerSubject, subject0, subject1, subject2, governancePolicy,
-      oldKeyRevocation, newKeyRevocation] <;>
-    decide
+  fin_cases node <;> decide
 
 @[simp] theorem rotated_policy_epoch :
     policyEpochAt rotatedCell governancePolicy = 5 := by
-  simp [rotatedCell_logical, rotatedLogical, liveLogical, policyEpochAt,
-    subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-    newKeyRevocation]
+  decide
 
 @[simp] theorem rotated_policy_address :
     policyAddressAt rotatedCell governancePolicy 5 = ⟨5500⟩ := by
-  simp [rotatedCell_logical, rotatedLogical, liveLogical, policyAddressAt,
-    subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-    newKeyRevocation]
+  decide
 
 @[simp] theorem rotated_old_key_revoked :
     isRevoked rotatedCell oldKeyRevocation = true := by
-  simp [rotatedCell_logical, rotatedLogical, liveLogical, isRevoked,
-    subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-    newKeyRevocation]
+  decide
+
+/-- The old key after rotation is registered present AND revoked present: its
+registration survived the rotation (`registration_monotone`). -/
+theorem rotated_old_key_registered_and_revoked :
+    rotatedLogical ⟨.registered, oldKeyRevocation⟩ = some () ∧
+      rotatedLogical ⟨.revoked, oldKeyRevocation⟩ = some () :=
+  ⟨registration_monotone rotation_executes oldKeyRevocation rfl, rfl⟩
+
+/-- ...and it stays so through the later policy rotation: the permanence
+theorem, applied to the actual next transition. -/
+theorem final_old_key_registered_and_revoked :
+    finalLogical ⟨.registered, oldKeyRevocation⟩ = some () ∧
+      finalLogical ⟨.revoked, oldKeyRevocation⟩ = some () :=
+  revoked_registration_permanent policy_rotation_executes oldKeyRevocation
+    rotated_old_key_registered_and_revoked.1 rotated_old_key_registered_and_revoked.2
+
+@[simp] theorem rotated_new_key_registered :
+    isRegistered rotatedCell newKeyRevocation = true := by
+  decide
 
 @[simp] theorem rotated_new_key_not_revoked :
     isRevoked rotatedCell newKeyRevocation = false := by
-  have readExact :
-      rotatedLogical.fields (.revoked newKeyRevocation) = some false := by
-    unfold rotatedLogical
-    rw [FieldStore.write_other (different := by decide)]
-    rw [FieldStore.write_other (different := by simp)]
-    rw [FieldStore.write_other (different := by simp)]
-    rw [FieldStore.write_other (different := by simp)]
-    unfold liveLogical
-    rw [FieldStore.write_self]
-    rfl
-  change (rotatedLogical.fields (.revoked newKeyRevocation)).getD false = false
-  rw [readExact]
-  rfl
+  decide
 
 @[simp] theorem final_policy_epoch :
     policyEpochAt finalCell governancePolicy = 6 := by
-  simp [finalCell_logical, finalLogical, rotatedLogical, liveLogical, policyEpochAt,
-    subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-    newKeyRevocation]
+  decide
 
 @[simp] theorem final_key_revoked :
     isRevoked finalCell oldKeyRevocation = true := by
-  simp [finalCell_logical, finalLogical, rotatedLogical, liveLogical, isRevoked,
-    subject0, subject1, subject2, governancePolicy, oldKeyRevocation,
-    newKeyRevocation]
+  decide
 
 theorem currentSigner (node : Node) : authority.CurrentSigner node where
   directoryExact := by simp [authority, directory, signerIdentity]
@@ -242,15 +245,8 @@ theorem currentSigner (node : Node) : authority.CurrentSigner node where
   keyEpochCurrent := by simp [authority, signerIdentity]
   governanceEpochCurrent := by simp [authority, signerIdentity]
   governanceAddressCurrent := by simp [authority, signerIdentity]
-  revocationRegistered := by
-    simp [authority, signerIdentity, projection, oldKeyRevocation,
-      newKeyRevocation]
-  notRevoked := by
-    intro revoked
-    rcases (mem_authState_revoked_iff projection liveCell oldKeyRevocation).mp revoked with
-      ⟨_, marked⟩
-    rw [live_old_key_not_revoked] at marked
-    contradiction
+  registered := live_old_key_registered
+  notRevoked := live_old_key_not_revoked
 
 /-! ## One exact signed durable candidate and quorum -/
 
@@ -421,24 +417,15 @@ theorem rotatedCurrentSigner (node : Node) :
     simp [rotatedAuthority, authority, rotatedSignerIdentity]
   governanceAddressCurrent := by
     simp [rotatedAuthority, authority, rotatedSignerIdentity]
-  revocationRegistered := by
-    simp [rotatedAuthority, authority, rotatedSignerIdentity, projection,
-      oldKeyRevocation, newKeyRevocation]
-  notRevoked := by
-    intro revoked
-    rcases (mem_authState_revoked_iff projection rotatedCell
-      newKeyRevocation).mp revoked with ⟨_, marked⟩
-    rw [rotated_new_key_not_revoked] at marked
-    contradiction
+  registered := rotated_new_key_registered
+  notRevoked := rotated_new_key_not_revoked
 
 def rotationHandoff : RotationHandoff
     (earlierAuthority := authority) (laterAuthority := rotatedAuthority)
     0 candidate rotatedCandidate where
   sameSubject := rfl
   keyEpochAdvanced := by decide
-  oldKeyRevokedLater := by
-    apply (mem_authState_revoked_iff projection rotatedCell oldKeyRevocation).2
-    exact ⟨by simp [projection], rotated_old_key_revoked⟩
+  oldKeyRevokedLater := rotated_old_key_revoked
   candidateAdvance :=
     { laterEpoch := by simp [rotatedCandidate]
       extendsPrior := List.prefix_rfl }
@@ -471,9 +458,26 @@ theorem revoked_signer_vote_rejected
     (boundary : VerifiedSignatureBoundary) (node : Node) :
     ¬ AcceptedVote finalAuthority candidateCodec payloadCodec boundary.portal
       node candidate (vote boundary node) := by
-  apply revoked_signer_rejected
-  apply (mem_authState_revoked_iff projection finalCell oldKeyRevocation).2
-  exact ⟨by simp [projection], final_key_revoked⟩
+  exact revoked_signer_rejected final_key_revoked
+
+/-- A key-version revocation channel the cell never registered. -/
+def strangerRevocation : RevocationKey := .channel ⟨11⟩
+
+/-- The same signed vote, relabelled with an unregistered revocation key. -/
+def strangerVote (boundary : VerifiedSignatureBoundary) (node : Node) :
+    SignedVote Nat boundary.Signature Nat Nat Nat Nat :=
+  { vote boundary node with
+    identity := { signerIdentity node with revocationKey := strangerRevocation } }
+
+/-- Refuting pole of registration: a key the exact cell has not registered is
+refused before signature soundness is relevant. -/
+theorem unregistered_key_vote_rejected
+    (boundary : VerifiedSignatureBoundary) (node : Node) :
+    ¬ AcceptedVote authority candidateCodec payloadCodec boundary.portal
+      node candidate (strangerVote boundary node) :=
+  unregistered_signer_rejected (by
+    show isRegistered liveCell strangerRevocation = false
+    decide)
 
 /-! ## Explicit physical/cryptographic ceiling -/
 
@@ -507,6 +511,14 @@ structure PhysicalAuthenticatedFinalityRefinement
 #guard_msgs (whitespace := lax) in #print axioms stale_key_after_rotation_rejected
 /-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.revoked_signer_vote_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms revoked_signer_vote_rejected
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.unregistered_key_vote_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unregistered_key_vote_rejected
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.rotation_executes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rotation_executes
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.rotated_old_key_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rotated_old_key_registered_and_revoked
+/-- info: 'Minidregg.Assurance.AuthenticatedSettlementFinalityWitness.final_old_key_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms final_old_key_registered_and_revoked
 
 end
 end Minidregg.Assurance.AuthenticatedSettlementFinalityWitness
