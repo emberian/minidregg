@@ -436,14 +436,6 @@ fn source_context(
         &tool.parent_capability,
         &tool.parent_observe_capability,
     )?;
-    let authority_root = tool_view
-        .get("authorityRoot")
-        .and_then(Value::as_str)
-        .ok_or("signed tool authorityRoot absent")?;
-    crate::decimal(authority_root, "signed tool authorityRoot")?;
-    if parent_view.get("authorityRoot").and_then(Value::as_str) != Some(authority_root) {
-        return Err("tool and parent observations have different authority roots".into());
-    }
     let height = tool_view
         .get("height")
         .and_then(Value::as_str)
@@ -456,7 +448,7 @@ fn source_context(
     }
     let grain_birth = json!({
         "tariff":{"base":profile.tariff_base,"perBirth":profile.tariff_per_birth},
-        (shape.birth_field):shape.birth,"authorityRoot":authority_root,"tool":tool_peer,"parent":parent_peer
+        (shape.birth_field):shape.birth,"tool":tool_peer,"parent":parent_peer
     });
     let source = json!({
         "subject":tool.subject,"nonce":nonce.to_string(),(shape.outer_field):grain_birth,
@@ -788,7 +780,6 @@ mod tests {
             source["applicationGrainBirth"]["applicationBirth"]["application"]["app"],
             "101"
         );
-        assert_eq!(source["applicationGrainBirth"]["authorityRoot"], "42");
         assert_eq!(source["grants"].as_array().unwrap().len(), 4);
         let (session_source, session_members) = plan_session_birth(
             &session(),
@@ -809,8 +800,13 @@ mod tests {
                 ["app"],
             "101"
         );
+        // The source names no authority root: observations at different
+        // authority roots still plan (the signed footprint binds instead).
+        let mut other_root = view.clone();
+        other_root["authorityRoot"] = json!("43");
+        assert!(plan_application_birth(&app(), &tool, "2", 77, 1, &view, &other_root).is_ok());
         let mut changed = view.clone();
-        changed["authorityRoot"] = json!("43");
+        changed["height"] = json!("10");
         assert!(plan_application_birth(&app(), &tool, "2", 77, 1, &view, &changed).is_err());
     }
 }

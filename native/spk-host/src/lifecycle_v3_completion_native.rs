@@ -116,7 +116,6 @@ impl FixedLaunchCompletionSigners {
             || text(view, "volumeIdHex")? != evidence.volume_id_hex
             || !lowercase_hex(text(view, "sourceHex")?)
             || text(view, "sourceHex")?.is_empty()
-            || !decimal(text(view, "currentAuthorityRoot")?)
             || !decimal(text(view, "currentAppRoot")?)
             || !decimal(text(view, "currentPackageRoot")?)
             || !decimal(text(view, "imageBoundary")?)
@@ -559,7 +558,7 @@ mod tests {
             "originalClaimHex":hex(evidence.claim),
             "signedReportHex":hex(evidence.report),
             "app":"5", "descriptorRoot":"8", "volumeIdHex":"aa",
-            "currentAuthorityRoot":"1", "currentAppRoot":"2",
+            "currentAppRoot":"2",
             "currentPackageRoot":"3", "imageBoundary":"4", "height":"5",
             "slots":[],
         });

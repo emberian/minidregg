@@ -893,7 +893,6 @@ fn assemble_completion(
         }
     }
     for name in [
-        "currentAuthorityRoot",
         "currentAppRoot",
         "currentPackageRoot",
         "imageBoundary",

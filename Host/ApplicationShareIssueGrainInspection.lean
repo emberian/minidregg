@@ -146,7 +146,6 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
           (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth),
         ("sourceCapabilities", .arr <| capabilities.toArray.map
           (fun cap => decimal cap.value)),
-        ("authorityRoot", decimal source.authorityRoot.value),
         ("tool", .mkObj
           [("task", decimal source.toolTask),
            ("capability", decimal source.toolCapability.value),

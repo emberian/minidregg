@@ -52,7 +52,6 @@ structure Source where
   begin : Begin
   originalIndex : Nat
   before : ApplicationGrain.State
-  currentAuthorityRoot : Digest
   currentAppRoot : Digest
   currentPackageRoot : Digest
   currentImageBoundary : Digest
@@ -87,25 +86,24 @@ def sourceStream : StreamCodec Source :=
           (StreamCodec.product digestStream
             (StreamCodec.product digestStream
               (StreamCodec.product digestStream
-                (StreamCodec.product digestStream
                   (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
                     (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
-                      StreamCodec.nat)))))))))
+                      StreamCodec.nat))))))))
     (fun source => (source.begin, source.originalIndex, source.before,
-      source.currentAuthorityRoot, source.currentAppRoot,
+      source.currentAppRoot,
       source.currentPackageRoot, source.currentImageBoundary,
       source.appObserveCapability, source.packageObserveCapability,
       source.queryNonce))
-    (fun (begin, originalIndex, before, currentAuthorityRoot, currentAppRoot,
+    (fun (begin, originalIndex, before, currentAppRoot,
           currentPackageRoot, currentImageBoundary, appObserveCapability,
           packageObserveCapability, queryNonce) =>
-      ⟨begin, originalIndex, before, currentAuthorityRoot, currentAppRoot,
+      ⟨begin, originalIndex, before, currentAppRoot,
         currentPackageRoot, currentImageBoundary, appObserveCapability,
         packageObserveCapability, queryNonce⟩)
     (by intro source; cases source; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-CLAIM/v1".toUTF8.toList
+  "DREGG/APPLICATION/LIFECYCLE-CLAIM/v2".toUTF8.toList
 
 private def rawCodec : LawfulCodec Source where
   encode source := frame ++ sourceStream.encode source

@@ -22,7 +22,6 @@ private def initial : Source where
   capability := ⟨11⟩
   packageObserveCapability := ⟨12⟩
   before := ⟨0, 0, 0, 0⟩
-  authorityRoot := ⟨0⟩
   appRoot := ⟨0⟩
   packageRoot := ⟨0⟩
   packageDigest := ⟨0⟩

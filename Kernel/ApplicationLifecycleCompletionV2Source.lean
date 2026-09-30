@@ -24,7 +24,6 @@ structure Source where
   originalBegin : ApplicationLifecycleBeginV3Ingress.Ingress
   originalClaim : ApplicationLifecycleClaimV3Ingress.Ingress
   physical : ApplicationLifecycleCompletionV2Report.Signed
-  currentAuthorityRoot : Digest
   currentAppRoot : Digest
   currentPackageRoot : Digest
   appCapability : CapabilityId
@@ -40,30 +39,29 @@ def sourceStream : StreamCodec Source :=
       (StreamCodec.product ApplicationLifecycleClaimV3Ingress.ingressStream
         (StreamCodec.product ApplicationLifecycleCompletionV2Report.signedStream
           (StreamCodec.product digestStream
-            (StreamCodec.product digestStream
               (StreamCodec.product digestStream
                 (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
                   (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
                     (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
                       (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
-                        (StreamCodec.option atomRecordStream)))))))))))
+                        (StreamCodec.option atomRecordStream))))))))))
     (fun source => (source.originalBegin, source.originalClaim,
-      source.physical, source.currentAuthorityRoot, source.currentAppRoot,
+      source.physical, source.currentAppRoot,
       source.currentPackageRoot, source.appCapability,
       source.appObserveCapability, source.packageCapability,
       source.packageObserveCapability, source.packageAtomBefore))
-    (fun (originalBegin, originalClaim, physical, currentAuthorityRoot,
+    (fun (originalBegin, originalClaim, physical,
           currentAppRoot, currentPackageRoot, appCapability,
           appObserveCapability, packageCapability, packageObserveCapability,
           packageAtomBefore) =>
-      ⟨originalBegin, originalClaim, physical, currentAuthorityRoot,
+      ⟨originalBegin, originalClaim, physical,
         currentAppRoot, currentPackageRoot, appCapability,
         appObserveCapability, packageCapability, packageObserveCapability,
         packageAtomBefore⟩)
     (by intro source; cases source; rfl)
 
 def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-COMPLETION-SOURCE/v2".toUTF8.toList
+  "DREGG/APPLICATION/LIFECYCLE-COMPLETION-SOURCE/v4".toUTF8.toList
 
 def codec : LawfulCodec Source := NativeHostCodec.framed frame sourceStream
 

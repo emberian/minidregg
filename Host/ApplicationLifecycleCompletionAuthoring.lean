@@ -80,7 +80,6 @@ def signedReport (beginBytes reportBytes signature : List UInt8) :
     { report := report, signature := signature }
 
 structure CurrentObservation where
-  authorityRoot : Digest
   appRoot : Digest
   packageRoot : Digest
   appCapability : CapabilityId
@@ -106,7 +105,6 @@ def sourcePlan (beginBytes claimIngressBytes signedReportBytes : List UInt8)
     { originalBegin := begin
       originalClaim := claim
       physical := physical
-      currentAuthorityRoot := current.authorityRoot
       currentAppRoot := current.appRoot
       currentPackageRoot := current.packageRoot
       appCapability := current.appCapability

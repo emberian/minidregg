@@ -138,7 +138,7 @@ private def peer (task capability observe root : Nat) : Json := object [
 private def composite (fieldName : String) (typedBirth : Json) : Json :=
   let metered := object [
     ("tariff", object [("base", number 5), ("perBirth", number 2)]),
-    (fieldName, typedBirth), ("authorityRoot", number 777),
+    (fieldName, typedBirth),
     ("tool", peer 6000 6001 6002 6003),
     ("parent", peer 7000 7001 7002 7003)]
   object [("subject", number 8), ("nonce", number 41000),
@@ -159,8 +159,7 @@ private def compositeShape (kind fieldName : String) (typedBirth : Json)
                   intent.subject == ⟨8⟩ && sourceCaps == [⟨42⟩] &&
                     source.birth.births.length == expectedBirths &&
                     source.birth.grants.length == expectedGrants &&
-                    source.toolTask == 6000 && source.parentTask == 7000 &&
-                    source.authorityRoot.value == 777
+                    source.toolTask == 6000 && source.parentTask == 7000
               | none => false
           | _ => false
       | none => false
@@ -196,7 +195,7 @@ private def configuredChecks : IO Unit := do
     ("predicate", emptyRule)]
   let plain := configuredRequest "resources" (.arr #[resource])
   let grain := object [("tariff", object [("base", number 5), ("perBirth", number 2)]),
-    ("birth", plain), ("authorityRoot", number 777),
+    ("birth", plain),
     ("tool", peer 6000 6001 6002 6003), ("parent", peer 7000 7001 7002 7003)]
   for (kind, source) in [
       ("birth", plain), ("birth-intent", wrapIntent "birth" plain),

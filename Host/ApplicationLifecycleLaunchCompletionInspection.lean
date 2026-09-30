@@ -88,7 +88,6 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("descriptorRoot", decimal source.originalBegin.descriptor.root.value),
      ("volumeIdHex", hex <| ApplicationLifecycleLaunchBinding.volumeIdBytes
        source.originalBegin.base.domain source.app),
-     ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
      ("currentAppRoot", decimal source.currentAppRoot.value),
      ("currentPackageRoot", decimal source.currentPackageRoot.value),
      ("imageBoundary", decimal plan.invocation.imageBoundary.value),

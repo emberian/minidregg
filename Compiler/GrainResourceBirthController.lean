@@ -50,7 +50,6 @@ theorem Tariff.charge_positive (tariff : Tariff)
 projection, policy verdict, or physical write is accepted as a field. -/
 structure Source where
   birth : ResourceBirth.Descriptor CanonicalCellRegistry.registry
-  authorityRoot : Digest
   toolTask : Nat
   toolCapability : CapabilityId
   toolObserveCapability : CapabilityId

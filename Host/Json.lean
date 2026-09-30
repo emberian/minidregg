@@ -1493,7 +1493,7 @@ and native fee; this wrapper cannot accept Rust-supplied descriptor bytes. -/
 def grainBirthFrom (path sourceField : String) (json : Lean.Json)
     (authorBirth : String → Lean.Json → Option NativeHost.GrainBirthTariffPin → Result Draft) :
     Result Draft := do
-  let obj ← exactObject path ["tariff", sourceField, "authorityRoot", "tool", "parent"] json
+  let obj ← exactObject path ["tariff", sourceField, "tool", "parent"] json
   let tariffObj ← exactObject (path ++ ".tariff") ["base", "perBirth"]
     (← field path "tariff" obj)
   let pinned : NativeHost.GrainBirthTariffPin :=
@@ -1509,7 +1509,6 @@ def grainBirthFrom (path sourceField : String) (json : Lean.Json)
   let parent ← grainBirthPeer (path ++ ".parent") (← field path "parent" obj)
   let source : GrainResourceBirthController.Source := {
     birth := born
-    authorityRoot := ⟨← nat (path ++ ".authorityRoot") (← field path "authorityRoot" obj)⟩
     toolTask := tool.task, toolCapability := tool.capability
     toolObserveCapability := tool.observeCapability, toolRoot := tool.root
     toolBefore := tool.before
@@ -1930,12 +1929,11 @@ private def launchPhysicalSignedReport (json : Lean.Json) : Result (List UInt8) 
     (← decodeHex "$.signature" (← field "$" "signature" obj))
 
 private def completionSource (json : Lean.Json) : Result (List UInt8) := do
-  let obj ← exactObject "$" ["begin", "claimIngress", "signedReport", "authorityRoot",
+  let obj ← exactObject "$" ["begin", "claimIngress", "signedReport",
     "appRoot", "packageRoot", "appCapability", "appObserveCapability",
     "packageCapability", "packageObserveCapability", "packageAtomBefore"] json
   let current : ApplicationLifecycleCompletionAuthoring.CurrentObservation :=
-    { authorityRoot := ← completionDigest "$.authorityRoot" (← field "$" "authorityRoot" obj)
-      appRoot := ← completionDigest "$.appRoot" (← field "$" "appRoot" obj)
+    { appRoot := ← completionDigest "$.appRoot" (← field "$" "appRoot" obj)
       packageRoot := ← completionDigest "$.packageRoot" (← field "$" "packageRoot" obj)
       appCapability := ⟨← nat "$.appCapability" (← field "$" "appCapability" obj)⟩
       appObserveCapability := ⟨← nat "$.appObserveCapability" (← field "$" "appObserveCapability" obj)⟩
@@ -2585,7 +2583,6 @@ private def lifecycleClaimOperatorPlanJson
      ("managementSubject", decimal source.begin.source.managementSubject.value),
      ("beforeGeneration", signedDecimal source.before.generation),
      ("beforePhase", signedDecimal source.before.phase),
-     ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
      ("currentAppRoot", decimal source.currentAppRoot.value),
      ("currentPackageRoot", decimal source.currentPackageRoot.value),
      ("currentImageBoundary", decimal source.currentImageBoundary.value),

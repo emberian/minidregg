@@ -166,7 +166,6 @@ impl FixedLaunchClaimSigners {
             || text(view, "originalBeginReceiptHex")?.is_empty()
             || !lowercase_hex(text(view, "sourceHex")?)
             || text(view, "sourceHex")?.is_empty()
-            || !decimal(text(view, "currentAuthorityRoot")?)
             || !decimal(text(view, "currentAppRoot")?)
             || !decimal(text(view, "currentPackageRoot")?)
             || !decimal(text(view, "currentImageBoundary")?)
@@ -688,7 +687,6 @@ mod tests {
             "originalBeginImageBoundary":"13",
             "originalBeginReceiptHex":"ab",
             "sourceHex":"cd",
-            "currentAuthorityRoot":"1",
             "currentAppRoot":"2",
             "currentPackageRoot":"3",
             "currentImageBoundary":"4",
@@ -761,7 +759,7 @@ mod tests {
             "originalBeginTransactionId":"10", "originalBeginEventId":"11",
             "originalBeginAcceptedCount":"12", "originalBeginImageBoundary":"13",
             "originalBeginReceiptHex":"ab", "sourceHex":"cd",
-            "currentAuthorityRoot":"1", "currentAppRoot":"2",
+            "currentAppRoot":"2",
             "currentPackageRoot":"3", "currentImageBoundary":"4",
             "imageBoundary":"5", "height":"6",
             "binding":{"choice":"continue","createIndex":null,"commandDigest":"44",

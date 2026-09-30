@@ -114,7 +114,6 @@ def prepareVerified (config : Config) {target : Durable}
     { begin := begin.base
       originalIndex := prior.index
       before := before
-      currentAuthorityRoot := opened.authority.snapshot.cell.root
       currentAppRoot := appCell.payload.root
       currentPackageRoot := packageCell.payload.root
       currentImageBoundary := NativeHostCodec.imageBoundary config.deployment.domain

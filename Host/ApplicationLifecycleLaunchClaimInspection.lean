@@ -107,7 +107,6 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("managementSubject", decimal source.begin.source.managementSubject.value),
      ("beforeGeneration", signed source.before.generation),
      ("beforePhase", signed source.before.phase),
-     ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
      ("currentAppRoot", decimal source.currentAppRoot.value),
      ("currentPackageRoot", decimal source.currentPackageRoot.value),
      ("currentImageBoundary", decimal source.currentImageBoundary.value),
