@@ -34,22 +34,14 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$state" ] || candidate_die "--state DIR is required"
 
-check_params() {
-  # Every genesis coordinate is a JSON integer the operator chose. jq holds
-  # numbers as doubles, so refuse anything at or above 2^53 rather than round it.
-  jq -e '
-    def int: type == "number" and . >= 0 and . == floor and . < 9007199254740992;
-    .type == "minidregg-candidate-genesis-params-v1"
-    and ([.domain, .federation, .factoryId, .resourceBookId, .authorityCatalogueId, .issuer,
-          .ownerBudget, .lifetime, .tariffBase, .tariffPerBirth, .tariffPerGrant,
-          .tariffPerInitialPayloadByte, .collector, .asset, .genesisHeight, .issuerEpoch,
-          .factoryControllerCapability] | all(int))
-    and (.sponsor | [.subject, .keyId, .keyEpoch, .activeFrom, .activeUntil, .accountId,
-          .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId,
-          .initialBalance] | all(int))
-    and (.meterAllowance | type == "object" and length == 10 and (map_values(int) | all))
-  ' "$1" >/dev/null || candidate_die "params file fails the minidregg-candidate-genesis-params-v1 schema (INTERFACES.md)"
-}
+# The one genesis template: genesis.sh beside this script in a built
+# candidate, native/resource-client/genesis.sh in a source tree.
+if [ -f "$here/genesis.sh" ]; then
+  GENESIS=$here/genesis.sh
+else
+  GENESIS=$here/../../native/resource-client/genesis.sh
+fi
+check_params() { sh "$GENESIS" --check "$1" || candidate_die "params file fails the minidregg-candidate-genesis-params-v1 schema (INTERFACES.md)"; }
 
 init() {
   [ -n "$manifest" ] || candidate_die "init needs --manifest"
@@ -75,58 +67,12 @@ init() {
     >"$state/keys/sponsor.pub.hex"
   sponsor_public=$(od -An -tx1 -v "$state/keys/sponsor.pub" | tr -d ' \n')
 
-  jq -n --slurpfile p "$p" --arg store "$STORE" --arg root "$state/store" --arg verifier "$VERIFIER" '
-    $p[0] as $p |
-    {domain: $p.domain, federation: $p.federation, factoryId: $p.factoryId,
-     resourceBookId: $p.resourceBookId, authorityCatalogueId: $p.authorityCatalogueId,
-     issuer: $p.issuer, ownerBudget: $p.ownerBudget, lifetime: $p.lifetime,
-     tariffBase: $p.tariffBase, tariffPerBirth: $p.tariffPerBirth, tariffPerGrant: $p.tariffPerGrant,
-     tariffPerInitialPayloadByte: $p.tariffPerInitialPayloadByte, collector: $p.collector,
-     asset: $p.asset, genesisHeight: $p.genesisHeight, expectedSeed: 0,
-     storageBinary: $store, storageRoot: $root, signatureBinary: $verifier}' >"$state/operator.json"
-
-  "$HOST" "$state/operator.json" profile >"$state/profile.json"
-  semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
-    "$state/profile.json") || candidate_die "Host profile has no semantics digest"
-
-  jq -n --slurpfile p "$p" --arg semantics "$semantics" --arg public "$sponsor_public" '
-    $p[0] as $p | def s: tostring;
-    {domain: ($p.domain|s), factoryId: ($p.factoryId|s), resourceBookId: ($p.resourceBookId|s),
-     authorityCatalogueId: ($p.authorityCatalogueId|s), federation: ($p.federation|s),
-     tariffBase: ($p.tariffBase|s), tariffPerBirth: ($p.tariffPerBirth|s),
-     tariffPerGrant: ($p.tariffPerGrant|s),
-     tariffPerInitialPayloadByte: ($p.tariffPerInitialPayloadByte|s),
-     collector: ($p.collector|s), asset: ($p.asset|s), expectedSemantics: $semantics,
-     issuerEpoch: ($p.issuerEpoch|s), genesisHeight: ($p.genesisHeight|s),
-     factoryPredicate: {type: "all", predicates: []},
-     enrollments: [{key: {keyId: ($p.sponsor.keyId|s), keyEpoch: ($p.sponsor.keyEpoch|s),
-                          algorithm: "1", subject: ($p.sponsor.subject|s), publicKey: $public,
-                          activeFrom: ($p.sponsor.activeFrom|s),
-                          activeUntil: ($p.sponsor.activeUntil|s), revoked: false},
-                    accountId: ($p.sponsor.accountId|s),
-                    spendCapabilityId: ($p.sponsor.spendCapabilityId|s),
-                    controlCapabilityId: ($p.sponsor.controlCapabilityId|s),
-                    factoryObserveCapabilityId: ($p.sponsor.factoryObserveCapabilityId|s),
-                    initialBalance: ($p.sponsor.initialBalance|s),
-                    accountPredicate: {type: "all", predicates: []}}],
-     factoryControllerSubject: ($p.sponsor.subject|s),
-     factoryControllerCapability: ($p.factoryControllerCapability|s),
-     meterAllowance: ($p.meterAllowance | map_values(s))}' >"$state/genesis.json"
+  sh "$GENESIS" "$p" "$sponsor_public" "$HOST" "$STORE" "$VERIFIER" "$state" \
+    || candidate_die "genesis template refused (see above)"
 
   "$MINI" bootstrap --host "$HOST" --config "$state/operator.json" \
     --source "$state/genesis.json" --dir "$state/deployment" >"$state/logs/bootstrap.stdout"
   [ -s "$state/deployment/pinned-config.json" ] || candidate_die "bootstrap produced no pinned config"
-
-  jq -n --slurpfile p "$p" --slurpfile g "$state/genesis.json" '
-    $p[0] as $p | def s: tostring;
-    {type: "minidregg-participant-birth-context-v1", genesis: $g[0],
-     template: {issuer: ($p.issuer|s), ownerBudget: ($p.ownerBudget|s), lifetime: ($p.lifetime|s)},
-     sourceCapabilities: [($p.sponsor.spendCapabilityId|s)], funding: [],
-     feePayer: ($p.sponsor.accountId|s),
-     grants: [{kind: "object", target: ($p.factoryId|s),
-               capability: ($p.sponsor.factoryObserveCapabilityId|s)},
-              {kind: "account", target: ($p.sponsor.accountId|s),
-               capability: ($p.sponsor.spendCapabilityId|s)}]}' >"$state/sponsor-birth-context.json"
 
   jq -n --arg manifest "$CANDIDATE_MANIFEST" --arg host "$(candidate_sha256 "$HOST")" \
     --arg config "$(candidate_sha256 "$state/deployment/pinned-config.json")" \

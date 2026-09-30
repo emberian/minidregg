@@ -56,7 +56,7 @@ that can find the versioned one) for the Store helper.
 | `OUT/bin/mini` | client (`native/resource-client`) |
 | `OUT/bin/minidregg-link-sqlite-store` | Store helper (`native/hyperdocument-link-sqlite-store`) |
 | `OUT/bin/minidregg-credential-signature-verifier` | Ed25519 verifier helper (`native/credential-signature-verifier`) |
-| `OUT/run.sh`, `OUT/lib.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive |
+| `OUT/run.sh`, `OUT/lib.sh`, `OUT/genesis.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive; `genesis.sh` and the example params come from `native/resource-client/`, the one genesis template the acceptance fixture also uses |
 | `OUT/source.tar` | the exact source archive |
 | `OUT/provenance.json` | source, toolchains, relative binary paths and hashes, timings (below) |
 | `OUT/SHA256SUMS` | `sha256sum` lines for everything above and `logs/source-files.sha256`, relative to `OUT` |

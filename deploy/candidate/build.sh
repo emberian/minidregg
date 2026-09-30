@@ -152,7 +152,10 @@ file "$out"/bin/* > "$out/logs/file-types.txt"
 for script in run.sh lib.sh; do
   install -m 0555 "$src/deploy/candidate/$script" "$out/$script"
 done
-for document in INTERFACES.md genesis-params.example.json; do
+install -m 0555 "$src/native/resource-client/genesis.sh" "$out/genesis.sh"
+install -m 0444 "$src/native/resource-client/genesis-params.example.json" \
+  "$out/genesis-params.example.json"
+for document in INTERFACES.md; do
   install -m 0444 "$src/deploy/candidate/$document" "$out/$document"
 done
 
@@ -189,7 +192,7 @@ jq -n \
     seconds: {leanPackagesAndMathlibCache: $tCache, nativeHost: $tHost, rust: $tRust, total: $tTotal},
     builtUtc: $built}' > "$out/provenance.json"
 (cd "$out" && sha256sum bin/minidregg-host bin/mini bin/minidregg-link-sqlite-store \
-  bin/minidregg-credential-signature-verifier provenance.json run.sh lib.sh INTERFACES.md \
+  bin/minidregg-credential-signature-verifier provenance.json run.sh lib.sh genesis.sh INTERFACES.md \
   genesis-params.example.json source.tar logs/source-files.sha256) > "$out/SHA256SUMS"
 jq -n --arg dir "$out" \
   --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
