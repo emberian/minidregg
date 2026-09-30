@@ -1,11 +1,13 @@
 /-
-# Assurance — the apex bridge + generated ledger machinery (ATLAS §7).
+# Assurance — the apex bridge (ATLAS §7).
 
 The only lawful home for cross-boundary apex theorems: `Assurance/` is
 unrestricted, so a kernel object (a receipt word) may meet a proof-system
 object (the code + claim) here — nowhere else.
+
+Every file here is hand-written. Axiom pins are `#guard_msgs in #print axioms`
+lines written beside each theorem; nothing generates them.
 -/
-import Assurance.Placeholder  -- carve marker: pins, keystone audit, carrier registry, Bound/Forced
 import Assurance.CapabilityRevocationAudit
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
 import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Selvage AccClaim fold
