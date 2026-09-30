@@ -199,6 +199,35 @@ theorem assignableAll_pair (store : Store layout) (first second : Entry)
   rw [Store.set_ne _ _ _ _ distinct]
   exact secondOk
 
+/-- A run of RAM entries followed by one final entry is assignable exactly when
+the final entry is assignable at the pre-store: RAM entries never share a plane
+with an append-only one, so they cannot occupy its address first. -/
+theorem assignableAll_ram_append_iff (store : Store layout) (ram : List Entry) (last : Entry)
+    (allRam : ∀ entry ∈ ram, layout.discipline entry.1.1 = .ram) :
+    AssignableAll store (ram ++ [last]) ↔ Assignable store last.1 := by
+  induction ram generalizing store with
+  | nil => exact ⟨fun both => both.1, fun lastOk => ⟨lastOk, trivial⟩⟩
+  | cons entry rest ih =>
+      have entryRam := allRam entry (List.mem_cons_self ..)
+      have restRam : ∀ other ∈ rest, layout.discipline other.1.1 = .ram :=
+        fun other member => allRam other (List.mem_cons_of_mem _ member)
+      change Assignable store entry.1 ∧
+          AssignableAll (store.set entry.1 (some entry.2)) (rest ++ [last]) ↔ _
+      rw [ih _ restRam]
+      constructor
+      · rintro ⟨_, lastRam | absent⟩
+        · exact Or.inl lastRam
+        · by_cases same : last.1 = entry.1
+          · exact Or.inl (same ▸ entryRam)
+          · exact Or.inr ((Store.set_ne _ _ _ _ same).symm.trans absent)
+      · intro lastOk
+        refine ⟨Or.inl entryRam, ?_⟩
+        rcases lastOk with lastRam | absent
+        · exact Or.inl lastRam
+        · by_cases same : last.1 = entry.1
+          · exact Or.inl (same ▸ entryRam)
+          · exact Or.inr ((Store.set_ne _ _ _ _ same).trans absent)
+
 theorem assignable_of_ram (store : Store layout) (address : Address layout)
     (ram : layout.discipline address.1 = .ram) : Assignable store address :=
   Or.inl ram
@@ -1471,5 +1500,9 @@ theorem revoke_nullifier_exact
 #guard_msgs (whitespace := lax) in #print axioms setAll_member
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.rotation_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rotation_post_exact
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.assignAll_valid_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms assignAll_valid_iff
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.assignableAll_ram_append_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms assignableAll_ram_append_iff
 
 end Minidregg.Theory.CredentialAuthorityEffects
