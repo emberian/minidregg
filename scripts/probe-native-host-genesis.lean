@@ -20,7 +20,7 @@ def profile := NativeHostProfile.profile ⟨⟨5⟩, 100000, 10000⟩
 
 def key (subject : Nat) (bytes : List UInt8) : KeyRecord :=
   ⟨7000 + subject, 2, CredentialSignatureAdmission.ed25519Algorithm,
-    subject, bytes, 0, 100, false⟩
+    subject, bytes, 0, 100⟩
 
 def config (alice bob : List UInt8) : Config where
   deployment := ⟨⟨8500⟩, 10, 11, 12⟩
@@ -62,6 +62,14 @@ def run (alice bob : List UInt8) : IO Unit := do
        built.authority.snapshot.logical ⟨.subjectKey, (⟨7⟩, 2)⟩) = some (key 7 alice)) &&
      decide ((show Option KeyRecord from
        built.authority.snapshot.logical ⟨.subjectKey, (⟨8⟩, 2)⟩) = some (key 8 bob)))
+  require "every supplied key version registered and live in the loaded authority"
+    (CredentialAuthorityState.keyStanding built.authority.snapshot.cell
+        (CredentialAuthorityState.signingKeyRevocation (key 7 alice)) == .live &&
+     CredentialAuthorityState.keyStanding built.authority.snapshot.cell
+        (CredentialAuthorityState.signingKeyRevocation (key 8 bob)) == .live)
+  require "no other key version of a supplied subject is registered"
+    (CredentialAuthorityState.keyStanding built.authority.snapshot.cell
+        (.signingKey ⟨7⟩ 3) == .unregistered)
   require "explicit conserved allocations"
     (cfg.initialBook.balance 7 0 == 100 && cfg.initialBook.balance 8 0 == 200 &&
      cfg.initialBook.balance 0 0 == -300 && cfg.initialBook.balance 99 0 == 0 &&
@@ -89,7 +97,6 @@ def run (alice bob : List UInt8) : IO Unit := do
   refused "duplicate capability" { cfg with enrollments := [first, { second with
     spendCapabilityId := cfg.factoryController.capabilityId }] }
   refused "unfunded anonymous controller" { cfg with factoryController := ⟨⟨123456⟩, ⟨43⟩⟩ }
-  refused "revoked key" { cfg with enrollments := [{ first with key := { first.key with revoked := true } }, second] }
   refused "inactive key" { cfg with enrollments := [{ first with key := { first.key with activeFrom := 2 } }, second] }
   refused "wrong key algorithm" { cfg with enrollments := [{ first with key := { first.key with algorithm := 100 } }, second] }
   refused "short key" { cfg with enrollments := [{ first with key := { first.key with publicKey := [] } }, second] }
