@@ -769,6 +769,14 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
   let durable ← timed "load" do
     IO.ofExcept (← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes)
   IO.println s!"records {durable.image.accepted.length} base {durable.baseHeight} cells {durable.image.cellIds.length}"
+  let lanes : List (String × Minidregg.Theory.ResourceCost.Lane) :=
+    [("incidences", .incidences), ("turnBytes", .turnBytes), ("memoryTouches", .memoryTouches),
+     ("witnessBytes", .witnessBytes), ("proofWork", .proofWork), ("storageBytes", .storageBytes),
+     ("networkBytes", .networkBytes), ("sideEffectCount", .sideEffectCount),
+     ("feeDebit", .feeDebit), ("leaseByteBlocks", .leaseByteBlocks)]
+  for (name, lane) in lanes do
+    let last := (durable.image.accepted.getLast?.map fun r => r.exactCharge lane).getD 0
+    IO.println s!"allowance {name}: available {durable.snapshot.model.available lane} last-record charge {last}"
   discard <| timed "cellIds x10" do
     let mut n := 0
     for _ in [0:10] do n := n + durable.image.cellIds.length
