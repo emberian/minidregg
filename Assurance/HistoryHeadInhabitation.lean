@@ -7,9 +7,12 @@ constructed one.**  `start` and `append` are the only ways to build a head and
 neither was applied outside its own defining module; every other occurrence is
 a bound hypothesis.  A development with that shape is indistinguishable from a
 vacuous one: if the type were empty, `SemanticHistoryBcsGame`,
-`SemanticHistoryTower256DeployedBcs`, `HyperdocumentHistoryAdmission`,
-`SemanticHistoryPcsEventRealization`, and `RawHistoryBcsOpenings` would all be
-trivially true and say nothing.
+`HyperdocumentHistoryAdmission` and `RawHistoryBcsOpenings` would all be
+trivially true and say nothing.  (Two further modules once listed here,
+`SemanticHistoryTower256DeployedBcs` and `SemanticHistoryPcsEventRealization`,
+were ALSO quantified over `MerklePcs ell`, which is empty at every positive
+height, so inhabiting the head never gave them subjects; they were deleted on
+2026-09-30.)
 
 This module exhibits a head, at closed parameters, with a real fold round.
 Nothing is postulated: the manifest, registry, clause-evidence family, entry

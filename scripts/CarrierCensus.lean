@@ -134,7 +134,7 @@ def mustBeWitnessed : List Name :=
    `Minidregg.Kernel.MultiCellHyperedge.Commit]
 
 def mustBeUnwitnessed : List Name :=
-  [`Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily]
+  [`Minidregg.Compiler.Tower256AdditiveFriController.MerklePcs]
 
 /-- An unwitnessed carrier whose status has already been decided.  `evidence`
 names the load-bearing impossibility theorem when the status is a theorem rather
@@ -152,9 +152,6 @@ def auditedNonTargets : List AuditAnnotation :=
    (`Minidregg.Compiler.Tower256AdditiveFriController.AcceptedReceipt,
     "legacy accepted receipt indexed by the positive-height binding-closed PCS; use raw accepted execution",
     none),
-   (`Minidregg.Assurance.SemanticHistoryTower256CheckpointGame.JointGameFamily,
-    "formally impossible; replaced by RawSemanticHistoryCheckpointGame",
-    some `Minidregg.Assurance.Tower256MerkleBindingCardinality.jointGameFamily_impossible),
    (`Minidregg.Assurance.AcceptedCellEffectHistory.HistoryProjection,
     "global finite-word projection is impossible on root-separated infinite streams; use scoped history",
     some `Minidregg.Assurance.HistoryProjectionCardinalityTooth.no_historyProjection_of_rootSeparatedStream)]

@@ -71,7 +71,9 @@ response. Rust execution remains opaque/fallible and returns bytes/error.
 
 ### 1. Instantiate the remaining common additive/history reductions
 
-`SemanticHistoryTower256CheckpointGame` puts the landed additive controller and retained-history
+⛑ DELETED 2026-09-30: this module was quantified over `MerklePcs ell`, which `Tower256MerkleCardinalityCore.merklePcs_empty_of_positive` proves empty at every positive height, so its results held of nothing. The live path is the raw-history family (`RawSemanticHistoryCheckpointGame`, `Tower256AdditiveFriRawAdmission`). The paragraph below describes the deleted module.
+
+`SemanticHistoryTower256CheckpointGame` put the landed additive controller and retained-history
 BCS boundary on one explicit `Omega`, one existing ledger, exact terminal/initial root and schedule
 equalities, and one four-event union bound without independence. The history event is now the
 literal retained-history Fiat--Shamir verifier/knowledge failure, not an external proxy. The
