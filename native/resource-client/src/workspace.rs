@@ -77,7 +77,7 @@ fn validate_name(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn private_dir(path: &Path) -> Result<()> {
+pub(crate) fn private_dir(path: &Path) -> Result<()> {
     let named = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
     unsafe extern "C" {
@@ -95,7 +95,7 @@ fn private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn make_private_dir(path: &Path) -> Result<()> {
+pub(crate) fn make_private_dir(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.mode(0o700);
     builder
@@ -104,7 +104,7 @@ fn make_private_dir(path: &Path) -> Result<()> {
     private_dir(path)
 }
 
-fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -122,7 +122,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn bounded_json(path: &Path) -> Result<Value> {
+pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD {
@@ -141,14 +141,14 @@ fn bounded_json(path: &Path) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
 }
 
-fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
+pub(crate) fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     value
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("workspace record lacks {key}"))
 }
 
-fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
+pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     let path = PathBuf::from(member(value, key)?);
     if !path.is_absolute() {
         return Err(format!("workspace {key} is not absolute"));
@@ -162,7 +162,7 @@ fn os_string(value: OsString, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} must be UTF-8"))
 }
 
-fn random_nonce() -> Result<String> {
+pub(crate) fn random_nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
@@ -181,7 +181,7 @@ fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     Err("could not allocate a distinct workspace attempt name".into())
 }
 
-fn load(root: &Path) -> Result<Value> {
+pub(crate) fn load(root: &Path) -> Result<Value> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -325,7 +325,7 @@ fn init(
     Ok(())
 }
 
-fn reference(root: &Path, name: &str) -> Result<Value> {
+pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
     validate_name(name)?;
     let value = bounded_json(&root.join("refs").join(format!("{name}.json")))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
@@ -477,7 +477,7 @@ fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Resu
     )
 }
 
-fn signed_view(
+pub(crate) fn signed_view(
     root: &Path,
     workspace: &Value,
     reference: &Value,
