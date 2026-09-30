@@ -2,6 +2,10 @@
 The authority preparation shared by grain-backed birth authoring and receiving.
 The marker supplied here must be derived and bound by the enclosing composite
 source. This module grants no authorization and emits no durable intent.
+
+The birth's grant batch and the composite operation's marker are one patch of
+the one authority cell: the batch entries, then the marker's nullifier, each a
+guarded assignment read at the store its prefix produced.
 -/
 import Compiler.CredentialAuthorityDomainReceiver
 
@@ -11,214 +15,137 @@ open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.ResourceBirth
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.CredentialAuthorityState (layout isNullified)
+open Minidregg.Theory.CredentialAuthorityEffects
+  (Entry assignAll setAll run_assignAll nullifierEntry)
 open Minidregg.Compiler
 
 set_option autoImplicit false
 
-def edits (snapshot : CredentialAuthorityDomain.Snapshot)
-    (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) :
-    List CredentialAuthorityDomain.Edit :=
-  CredentialAuthorityDomainReceiver.grantEdits snapshot descriptor ++
-    [CredentialAuthorityDomain.nullifierEdit snapshot operationMarker]
+/-- The birth batch's entries followed by the operation marker's nullifier. -/
+def entries (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) :
+    List Entry :=
+  ResourceBirthAuthority.entries descriptor ++ [nullifierEntry operationMarker]
 
-theorem edits_birth_prefix (snapshot : CredentialAuthorityDomain.Snapshot)
+def patch (snapshot : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) :
-    (edits snapshot descriptor operationMarker).take
-      (CredentialAuthorityDomainReceiver.grantEdits snapshot descriptor).length =
-        CredentialAuthorityDomainReceiver.grantEdits snapshot descriptor := by
-  simp [edits]
+    Patch layout :=
+  assignAll snapshot.logical (entries descriptor operationMarker)
 
-theorem edits_operation_suffix (snapshot : CredentialAuthorityDomain.Snapshot)
-    (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) :
-    (edits snapshot descriptor operationMarker).drop
-      (CredentialAuthorityDomainReceiver.grantEdits snapshot descriptor).length =
-        [CredentialAuthorityDomain.nullifierEdit snapshot operationMarker] := by
-  simp [edits]
+private theorem setAll_append (store : Store layout) (first second : List Entry) :
+    setAll store (first ++ second) = setAll (setAll store first) second := by
+  induction first generalizing store with
+  | nil => rfl
+  | cons entry rest ih => exact ih _
 
-/-- Both replay markers are checked on the same OLD authority state, then
-prepared and physically lowered as one update. The checked birth grant
-template is retained separately for the eventual birth policy admission. -/
+/-- Both replay markers are checked on the same OLD authority cell, then
+prepared as one patch of it. The checked birth grant template is retained
+separately for the eventual birth policy admission. -/
 structure Prepared {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot)
+    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
     (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) where
   private mk ::
   markersDistinct : descriptor.authorityNullifier ≠ operationMarker
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile
     descriptor.initialPolicies
   birthReady : CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot descriptor
-  operationMarkerFresh : CredentialAuthorityState.isNullified loaded.snapshot.cell
-    operationMarker = false
+  operationMarkerFresh : isNullified loaded.snapshot.cell operationMarker = false
   checked : CredentialAuthorityDomain.Prepared loaded.snapshot
-    (edits loaded.snapshot descriptor operationMarker)
-  physical : CredentialAuthorityDomainReceiver.Lowered directory loaded
-    (edits loaded.snapshot descriptor operationMarker) checked
-    (CredentialAuthorityDomainReceiver.allocationReservedIds deployment descriptor)
+    (patch loaded.snapshot descriptor operationMarker)
 
 def prepare {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot)
+    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
     (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) :
-    Option (Prepared profile deployment directory loaded descriptor operationMarker) := do
+    Option (Prepared profile deployment loaded descriptor operationMarker) := do
   if distinct : descriptor.authorityNullifier ≠ operationMarker then
     let initialSources ← PolicySourceCell.checkInitials deployment.domain profile
       descriptor.initialPolicies
     if ready : CredentialAuthorityDomainReceiver.BatchReady loaded.snapshot descriptor then
-      if fresh : CredentialAuthorityState.isNullified loaded.snapshot.cell operationMarker = false then
+      if fresh : isNullified loaded.snapshot.cell operationMarker = false then
         let checked ← CredentialAuthorityDomain.prepare loaded.snapshot
-          (edits loaded.snapshot descriptor operationMarker)
-        let physical ← CredentialAuthorityDomainReceiver.lower directory loaded checked
-          (CredentialAuthorityDomainReceiver.allocationReservedIds deployment descriptor)
-        some ⟨distinct, initialSources, ready, fresh, checked, physical⟩
+          (patch loaded.snapshot descriptor operationMarker)
+        some ⟨distinct, initialSources, ready, fresh, checked⟩
       else none
     else none
   else none
 
-def Prepared.auxiliaryCreates {F : Type} [Field F]
+section Prepared
+
+variable {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot}
+    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
     {descriptor : Descriptor CanonicalCellRegistry.registry} {operationMarker : Nat}
-    (prepared : Prepared profile deployment directory loaded descriptor operationMarker) :
+
+/-- The post authority cell of the combined patch. -/
+def Prepared.post (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.checked.validated.apply
+
+/-- The one physical authority write. -/
+def Prepared.writes (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    List Kernel.DurableDataIntent.DataWrite :=
+  loaded.writes prepared.post
+
+/-- Authority allocates no cells; the only auxiliary creates are the birth's
+initial policy sources. -/
+def Prepared.auxiliaryCreates
+    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
     List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry) :=
-  CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records ++
-    prepared.physical.placement.auxiliaryCreates
+  CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records
 
-/-- The routed physical authority post is the exact logical result of the
-single combined checked edit list. It is not the bare birth-only post. -/
-theorem Prepared.physical_post_exact {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot}
-    {descriptor : Descriptor CanonicalCellRegistry.registry} {operationMarker : Nat}
-    (prepared : Prepared profile deployment directory loaded descriptor operationMarker) :
-    prepared.physical.post.logical = prepared.checked.postLogical := by
-  change CredentialAuthorityDomain.logicalOfPages prepared.physical.post.pages =
-    CredentialAuthorityDomain.logicalOfPages prepared.checked.postPages
-  rw [prepared.physical.postPages]
-
-private theorem applyFieldWrites_append
-    (first second : List (FieldWrite CredentialAuthorityState.schema.{0, 0}))
-    (fields : FieldStore CredentialAuthorityState.schema.{0, 0}) :
-    applyFieldWrites (first ++ second) fields =
-      applyFieldWrites second (applyFieldWrites first fields) := by
-  induction first generalizing fields with
-  | nil => rfl
-  | cons write rest ih =>
-      simp only [List.cons_append, applyFieldWrites]
-      exact ih _
-
-private theorem nullifierEdit_sets (snapshot : CredentialAuthorityDomain.Snapshot)
-    (marker : Nat) (fields : FieldStore CredentialAuthorityState.schema.{0, 0}) :
-    applyFieldWrites (CredentialAuthorityDomain.nullifierEdit snapshot marker).writes
-      fields (.nullifier marker) = some true := by
-  let beforeWrites : List (FieldWrite CredentialAuthorityState.schema.{0, 0}) :=
-    ((CredentialAuthorityDomain.nullifierEdit snapshot marker).before.toList.flatMap
-      CredentialAuthorityPageMaterializer.Entry.fields).map
-      (fun field => ⟨field, none⟩)
-  have lastWrite : (CredentialAuthorityDomain.nullifierEdit snapshot marker).writes =
-      beforeWrites ++ [⟨.nullifier marker, some true⟩] := by
-    simp [beforeWrites, CredentialAuthorityDomain.Edit.writes,
-      CredentialAuthorityDomain.entryWrites_nullifier,
-      CredentialAuthorityDomain.nullifierEdit]
-    rfl
-  rw [lastWrite]
-  rw [applyFieldWrites_append]
-  simp [applyFieldWrites, FieldStore.assign]
+theorem Prepared.post_logical
+    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    prepared.post.logical =
+      (setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor)).set
+        ⟨.nullifier, operationMarker⟩ (some ()) := by
+  change Patch.run loaded.snapshot.logical (patch loaded.snapshot descriptor operationMarker) = _
+  rw [patch, run_assignAll, entries, setAll_append]
   rfl
 
-theorem Prepared.operation_marker_consumed {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot}
-    {descriptor : Descriptor CanonicalCellRegistry.registry} {operationMarker : Nat}
-    (prepared : Prepared profile deployment directory loaded descriptor operationMarker) :
-    prepared.physical.post.logical.fields (.nullifier operationMarker) = some true := by
-  rw [prepared.physical_post_exact]
-  rw [show prepared.checked.postLogical = prepared.checked.validated.apply.logical from
-    prepared.checked.projectionExact]
-  simp [CredentialAuthorityDomain.editPatch, edits,
-    CredentialAuthorityDomain.Edit.writes,
-    CredentialAuthorityDomain.entryWrites_nullifier,
-    applyFieldWrites_append, ValidatedPatch.apply,
-    CredentialAuthorityDomain.nullifierEdit, applyFieldWrites, materialize,
-    FieldStore.assign]
+theorem Prepared.operation_marker_consumed
+    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    prepared.post.logical ⟨.nullifier, operationMarker⟩ = some () := by
+  rw [prepared.post_logical, Store.set_eq]
   rfl
 
 /-- Appending the separate operation marker cannot erase any birth grant,
-initial policy, or the birth's own nullifier field. Their exact values remain
-the result of the existing birth grant batch's source edits. -/
-theorem Prepared.birth_fields_preserved {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot}
-    {descriptor : Descriptor CanonicalCellRegistry.registry} {operationMarker : Nat}
-    (prepared : Prepared profile deployment directory loaded descriptor operationMarker)
-    (field : CredentialAuthorityState.AuthorityField)
-    (different : field ≠ .nullifier operationMarker) :
-    prepared.physical.post.logical.fields field =
-      applyFieldWrites
-        ((CredentialAuthorityDomainReceiver.grantEdits loaded.snapshot descriptor).flatMap
-          CredentialAuthorityDomain.Edit.writes)
-        loaded.snapshot.cell.logical.fields field := by
-  rw [prepared.physical_post_exact]
-  rw [show prepared.checked.postLogical = prepared.checked.validated.apply.logical from
-    prepared.checked.projectionExact]
-  let last := CredentialAuthorityDomain.nullifierEdit loaded.snapshot operationMarker
-  have outside : field ∉ (last.writes.map FieldWrite.field).toFinset := by
-    have lastFields : last.writes.map FieldWrite.field =
-        (if (loaded.snapshot.logical.fields (.nullifier operationMarker)).isSome then
-          [.nullifier operationMarker, .nullifier operationMarker]
-        else [.nullifier operationMarker]) := by
-      dsimp [last, CredentialAuthorityDomain.nullifierEdit,
-        CredentialAuthorityDomain.Edit.writes, CredentialAuthorityDomain.entryWrites]
-      cases loaded.snapshot.logical.fields (.nullifier operationMarker) <;> rfl
-    rw [lastFields]
-    split <;> simp only [List.toFinset_cons, List.toFinset_nil, Finset.insert_idem]
-    all_goals
-      change field ∉ ({.nullifier operationMarker} : Finset _)
-      simpa only [Finset.mem_singleton] using different
-  simp only [ValidatedPatch.apply, materialize, CredentialAuthorityDomain.editPatch,
-    edits, List.flatMap_append, List.flatMap_cons, List.flatMap_nil, List.append_nil]
-  change applyFieldWrites
-      (((CredentialAuthorityDomainReceiver.grantEdits loaded.snapshot descriptor).flatMap
-        CredentialAuthorityDomain.Edit.writes) ++ last.writes)
-      loaded.snapshot.cell.logical.fields field = _
-  rw [applyFieldWrites_append]
-  exact applyFieldWrites_frame last.writes _ field outside
+initial policy, or the birth's own nullifier. Their exact values remain the
+result of the birth grant batch's entries. -/
+theorem Prepared.birth_fields_preserved
+    (prepared : Prepared profile deployment loaded descriptor operationMarker)
+    (address : Address layout) (different : address ≠ ⟨.nullifier, operationMarker⟩) :
+    prepared.post.logical address =
+      setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor) address := by
+  rw [prepared.post_logical]
+  exact Store.set_ne _ _ _ _ different
 
-theorem Prepared.birth_marker_consumed {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot}
-    {descriptor : Descriptor CanonicalCellRegistry.registry} {operationMarker : Nat}
-    (prepared : Prepared profile deployment directory loaded descriptor operationMarker) :
-    prepared.physical.post.logical.fields (.nullifier descriptor.authorityNullifier) =
-      some true := by
-  have different : (.nullifier descriptor.authorityNullifier :
-      CredentialAuthorityState.AuthorityField) ≠ .nullifier operationMarker := by
+theorem Prepared.birth_marker_consumed
+    (prepared : Prepared profile deployment loaded descriptor operationMarker) :
+    prepared.post.logical ⟨.nullifier, descriptor.authorityNullifier⟩ = some () := by
+  have different : (⟨.nullifier, descriptor.authorityNullifier⟩ : Address layout) ≠
+      ⟨.nullifier, operationMarker⟩ := by
     intro same
-    exact prepared.markersDistinct (by cases same; rfl)
+    exact prepared.markersDistinct (eq_of_heq (Sigma.mk.inj same).2)
   rw [prepared.birth_fields_preserved _ different]
-  unfold CredentialAuthorityDomainReceiver.grantEdits
-  simp only [List.flatMap_append, applyFieldWrites_append, List.flatMap_singleton]
-  exact nullifierEdit_sets loaded.snapshot descriptor.authorityNullifier _
+  have last : nullifierEntry descriptor.authorityNullifier ∈ ResourceBirthAuthority.entries descriptor := by
+    simp [ResourceBirthAuthority.entries]
+  exact CredentialAuthorityEffects.setAll_member _ _ prepared.birthReady.1 _ last
+
+end Prepared
+
+/-- info: 'Minidregg.Compiler.GrainResourceBirthAuthority.Prepared.birth_marker_consumed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Prepared.birth_marker_consumed
+/-- info: 'Minidregg.Compiler.GrainResourceBirthAuthority.Prepared.birth_fields_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Prepared.birth_fields_preserved
 
 end Minidregg.Compiler.GrainResourceBirthAuthority
