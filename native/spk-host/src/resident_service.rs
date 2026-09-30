@@ -180,7 +180,12 @@ struct ResidentConfig {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum StartAction {
     Create { index: usize },
     Continue { created_index: String },

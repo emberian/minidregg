@@ -337,13 +337,19 @@ def linkedCurrentPolicies {F : Type} [Field F]
   let kind := if ingress.dispatch.dispatch.session.kind = InterfaceKind.web then
     ApplicationGrainSession.Kind.web else ApplicationGrainSession.Kind.api
   let management := Minidregg.Pred.Pred.eq "request/subject" ingress.appManagementSubject.value
+  let participant := ingress.dispatch.dispatch.session.subject
+  -- The session and descriptor laws are exactly those the current session
+  -- birth installs (`ApplicationGrainSessionBirth.Ready.policyRecords`):
+  -- the participant manages its own session. Expecting the older no-manager
+  -- law refused every dispatch for a currently born session.
+  let sessionManagement := Minidregg.Pred.Pred.eq "request/subject" participant.value
   decide (spec.issuer = ingress.appManagementSubject) &&
   policyAt app == some (ApplicationGrain.policy manifest ingress.appSnapshotManifest management) &&
   policyAt manifest == some (ApplicationGrain.packageManifestPolicy app management) &&
   policyAt session == some (ApplicationGrainSession.policy descriptor kind
-    ingress.dispatch.dispatch.session.subject) &&
+    participant sessionManagement) &&
   policyAt descriptor == some (ApplicationGrainSession.descriptorPolicy session kind
-    ingress.dispatch.dispatch.session.subject) &&
+    participant sessionManagement) &&
   policyAt spec.ticket.resource == some (ticketPolicy spec.issuer)
 
 /-- Issuance authenticated the issuer once. At each dispatch, the same

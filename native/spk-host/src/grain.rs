@@ -827,9 +827,9 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
         let create = config.pointer("/startAction/kind").and_then(Value::as_str) == Some("create");
         let admitted = dir.join("start-admitted-v3.json");
         let completed = dir.join("start-completed-v3.json");
-        let stop_plan = dir.join("stop-begin").join("plan.json");
+        let stop_plan = dir.join("stop-begin").join("stop-plan-v2.json");
         let stop_generation = if exists(&stop_plan)? {
-            decimal_u64(read_json(&stop_plan)?.get("processGeneration"))
+            decimal_u64(read_json(&stop_plan)?.pointer("/basePlan/processGeneration"))
         } else {
             None
         };

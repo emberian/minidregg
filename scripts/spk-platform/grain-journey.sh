@@ -24,7 +24,7 @@ shift 2
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BIN=${BIN:-/opt/minidregg-m6-20260930/bin}
 SPK=${SPK:-/home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk}
-HOST=${GRAIN_HOST:-$BIN/minidregg-host-m6c}
+HOST=${GRAIN_HOST:-$BIN/minidregg-host-m6d}
 MINI=$BIN/mini
 SPK_HOST=$BIN/spk-host
 BWRAP=${BWRAP:-/usr/bin/bwrap}
@@ -235,6 +235,42 @@ approve() (
   chmod 600 "$out"
 )
 
+# delegate_observe LABEL TARGET PARENT_CAP CHILD_CAP HOLDER NONCE: the owner of
+# TARGET delegates an observe-only child capability (ordinary signed
+# delegation). Event22 does not mint the participant's ticket observation.
+delegate_observe() (
+  label=$1 target=$2 parent=$3 child=$4 holder=$5 nonce=$6
+  D=$EV/$label-delegate-$child
+  if [ -s "$D-attempt/outcome.json" ]; then confirmed "$D-attempt/outcome.json"; exit 0; fi
+  qcap() (
+    name=$1 view=$2 n=$3
+    jq -n --arg t "$target" --arg c "$parent" --arg n "$n" --arg v "$view" '
+      {subject:"8",nonce:$n,purpose:{type:"query",kind:"object",target:$t,view:$v},
+       grants:[{kind:"object",target:$t,capability:$c}]}' >"$D-$name-intent.json"
+    rm -rf "$D-$name"
+    "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$PSOCK" \
+      --intent "$D-$name-intent.json" --key "$WR/tool.key" --view "$view" \
+      --dir "$D-$name" >"$D-$name.stdout"
+  )
+  qcap parent capability "$nonce"
+  "$HOST" "$CONFIG" inspect view-object-capability "$D-parent/view.bin" "$D-parent/head.json"
+  qcap owner resource "$((nonce + 1))"
+  jq -n --slurpfile cap "$D-parent/head.json" --slurpfile current "$D-owner/challenge.json" \
+    --slurpfile resource "$D-owner/view.json" --arg holder "$holder" --arg child "$child" \
+    --arg target "$target" --arg nonce "$((nonce + 2))" --arg commandNonce "$((nonce + 3))" '
+    $cap[0].head as $p | $current[0] as $c |
+    {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
+      command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
+        expectedTargetRoot:$resource[0].page.root,parentId:$p.id,target:$target,
+        expectedPreRoot:$c.signing[0].authorityRoot,
+        child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
+          targets:[$target],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
+     grants:[{kind:"object",target:$target,capability:$p.id}]}' >"$D-intent.json"
+  "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$PSOCK" \
+    --intent "$D-intent.json" --key "$WR/tool.key" --dir "$D-attempt" >"$D.stdout"
+  confirmed "$D-attempt/outcome.json"
+)
+
 # share LABEL APP SESSION TICKET CAP NONCE KIND: session birth, event22 ticket
 # and event28 enrollment for participant 8, then `spk-host grain route`.
 share() (
@@ -299,6 +335,8 @@ share() (
         >"$T/submit.stdout" || echo "ticket submit uncertain; exact lookup follows" >&2
     "$MINI" grain-share-issue-lookup --socket "$OSOCK" --attempt "$T/issue" >"$T/lookup.stdout"
   fi
+  delegate_observe "$label-ticket" "$ticket" "$((cap + ticket % 100))" \
+    "$((cap + ticket % 100 + 2))" 8 "$((nonce + 700))"
   jq -n --arg name "owner-$kind" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
     --arg seed "$WR/tool.key" \
@@ -328,6 +366,13 @@ enroll() (
     "$EV/$label-enroll-app-$nonce/view.json")
   N=$EV/$label-enroll-g$gen
   [ ! -s "$N/receipt.json" ] || exit 0
+  # A definite refusal committed nothing; keep it for audit and plan afresh.
+  if [ -s "$N/submit.outcome.json" ] &&
+      jq -e '.type == "refused"' "$N/submit.outcome.json" >/dev/null; then
+    aside=$N-refused-$(date +%s)
+    mv "$N" "$aside"
+    for f in "$N"-*.json "$N"-*.stdout; do [ -e "$f" ] && mv "$f" "$aside/" || :; done
+  fi
   query "$label-session-$nonce" 8 "$session" "$cap" "$WR/tool.key" "$((nonce + 1))"
   sview=$EV/$label-session-$nonce/view.json
   sgen=$(jq -er '[.page.entries[] | select(.key.field == "2")][0].value' "$sview")
@@ -384,7 +429,7 @@ enroll() (
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
   dir=$RUN/host/apps/$app/routes/owner-$kind
-  curl -sS --max-time 120 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
+  curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
     -H "Host: grain.test" -H "Authorization: Bearer $(cat "$dir/api.token")" \
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
 )
@@ -430,6 +475,7 @@ run_phase() {
     share-a) step share-a share a 9101 9110 9120 3111 52000 api ;;
     share-b) step share-b share b 9201 9210 9220 3211 62000 api ;;
     share-b2) step share-b2 share b 9201 9210 9230 3211 64000 api ;;
+    enroll-b3) step enroll-b3 enroll b 9201 9210 9230 3211 66000 ;;
     start-b2) step start-b2 "$SPK_HOST" grain start "$PROFILE" 9201 ;;
     enroll-b2) step enroll-b2 enroll b 9201 9210 9230 3211 65000 ;;
     get-b2) step get-b2 http_get get-b2-body 9201 /v1/health ;;
