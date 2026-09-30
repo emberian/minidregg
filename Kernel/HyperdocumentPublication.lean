@@ -57,12 +57,12 @@ abbrev EventAccepted
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     (content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration)
-    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
+    (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store)
     (eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config)
     (eventPortal : Portal)
     (eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration) :=
-  Minidregg.Kernel.HyperdocumentVersionEffects.Accepted content representation
+  Minidregg.Kernel.HyperdocumentVersionEffects.Accepted content MLog
     store eventConfig eventPortal eventDeclaration
 
 def cells
@@ -70,20 +70,16 @@ def cells
     (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
-    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
+    (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (contentPortal eventPortal : Portal)
     (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.CellFamily Incidence where
-  schema
-    | .content => Hyperdocument.cellSchema
-    | .eventLog => Minidregg.Kernel.HyperdocumentEventLog.cellSchema
-  fieldDecidableEq incidence := by
-    cases incidence <;> infer_instance
-  resourceDecidableEq incidence := by
-    cases incidence <;> infer_instance
+  storeLayout
+    | .content => Hyperdocument.layout
+    | .eventLog => Minidregg.Kernel.HyperdocumentEventLog.Sparse.layout
   materializer
     | .content => documentMaterializer
-    | .eventLog => representation.cellMaterializer
+    | .eventLog => MLog
   portal
     | .content => contentPortal
     | .eventLog => eventPortal
@@ -104,16 +100,16 @@ def declaration
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     (content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
-    (event : EventAccepted content representation store eventConfig eventPortal
+    (_event : EventAccepted content MLog store eventConfig eventPortal
       eventDeclaration)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.Declaration
-      (cells projection authorityPre MDoc representation contentPortal
+      (cells projection authorityPre MDoc MLog contentPortal
         eventPortal contentCellId eventCellId) where
   header :=
     { domain := contentConfig.requestDomain
@@ -122,7 +118,7 @@ def declaration
   pre
     | .content => documentPre
     | .eventLog =>
-        Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store
+        Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store
   legs
     | .content =>
         { Nullifier := Nat
@@ -135,8 +131,8 @@ def declaration
     | .eventLog =>
         { Nullifier := Nat
           family := Minidregg.Kernel.HyperdocumentVersionEffects.family
-            representation eventConfig
-              (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre representation store)
+            MLog eventConfig
+              (Minidregg.Kernel.HyperdocumentVersionEffects.cellPre MLog store)
           kind := .object
           request := eventDeclaration.toRequest eventConfig
           declaration := eventDeclaration
@@ -153,12 +149,12 @@ def acceptedLegs
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     (content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
-    (event : EventAccepted content representation store eventConfig eventPortal
+    (event : EventAccepted content MLog store eventConfig eventPortal
       eventDeclaration)
     (header : Header) (contentCellId eventCellId : Digest) :
     (declaration content event header contentCellId eventCellId).AcceptedLegs
@@ -176,12 +172,12 @@ def zeroResourceLaw
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     (content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
-    (event : EventAccepted content representation store eventConfig eventPortal
+    (event : EventAccepted content MLog store eventConfig eventPortal
       eventDeclaration)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.ResourceLaw
@@ -193,12 +189,12 @@ theorem cellIds_injective
     (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
-    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest)
+    (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (contentPortal eventPortal : Portal)
     {contentCellId eventCellId : Digest}
     (distinct : contentCellId ≠ eventCellId) :
     Function.Injective
-      (cells projection authorityPre documentMaterializer representation
+      (cells projection authorityPre documentMaterializer MLog
         contentPortal eventPortal contentCellId eventCellId).cellId := by
   intro left right equal
   cases left <;> cases right
@@ -218,12 +214,12 @@ theorem aggregate_zero
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     (content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
-    (event : EventAccepted content representation store eventConfig eventPortal
+    (event : EventAccepted content MLog store eventConfig eventPortal
       eventDeclaration)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.aggregateDelta
@@ -245,12 +241,12 @@ def commit
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     (content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration)
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
-    (event : EventAccepted content representation store eventConfig eventPortal
+    (event : EventAccepted content MLog store eventConfig eventPortal
       eventDeclaration)
     (header : Header) (contentCellId eventCellId : Digest)
     (domainExact : eventConfig.requestDomain = contentConfig.requestDomain)
@@ -264,7 +260,7 @@ def commit
     Minidregg.Kernel.MultiCellHyperedge.Commit
       (zeroResourceLaw content event header contentCellId eventCellId)
       (acceptedLegs content event header contentCellId eventCellId) boundary where
-  cellIdsDistinct := cellIds_injective projection authorityPre MDoc representation
+  cellIdsDistinct := cellIds_injective projection authorityPre MDoc MLog
     contentPortal eventPortal cellIdsDistinct
   sharedDomain := by
     intro incidence
@@ -287,12 +283,12 @@ def commit
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     {content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
-    {event : EventAccepted content representation store eventConfig eventPortal
+    {event : EventAccepted content MLog store eventConfig eventPortal
       eventDeclaration}
     {header : Header} {contentCellId eventCellId : Digest}
     {domainExact : eventConfig.requestDomain = contentConfig.requestDomain}
@@ -319,12 +315,12 @@ def commit
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     {content : ContentAccepted contentConfig projection authorityPre documentPre
       contentPortal contentDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
-    {event : EventAccepted content representation store eventConfig eventPortal
+    {event : EventAccepted content MLog store eventConfig eventPortal
       eventDeclaration}
     {header : Header} {contentCellId eventCellId : Digest}
     {domainExact : eventConfig.requestDomain = contentConfig.requestDomain}
@@ -337,9 +333,9 @@ def commit
       (acceptedLegs content event header contentCellId eventCellId) jointInput} :
     ((commit content event header contentCellId eventCellId domainExact
       cellIdsDistinct boundary jointInput jointCommitExact jointEvidence).post
-        .eventLog).logical.fields
-      ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
-        eventDeclaration.key eventConfig⟩ = some eventDeclaration.record :=
+        .eventLog).logical
+      (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
+        (eventDeclaration.key eventConfig)) = some eventDeclaration.record :=
   event.post_contains
 
 /-- info: 'Minidregg.Kernel.HyperdocumentPublication.commit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
