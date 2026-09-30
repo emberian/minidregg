@@ -39,7 +39,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y
+universe u v w y
 
 noncomputable section
 
@@ -82,10 +82,9 @@ noncomputable def acceptPreparedBatchSealed
     {prepared : PreparedBatch claim}
     (admission : ConcreteAdmission manifest prepared)
     (commitmentId : Digest)
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -97,30 +96,28 @@ noncomputable def acceptPreparedBatchSealed
         (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (legs : CompletionLegs authority request outcome)
     (statementExact :
       authority.declaration.computationStatementOf request outcome =
         admission.statement commitmentId)
-    (validated : CellState.ValidatedPatch M pre
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       (adapter.patch request outcome)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
       (PrivateCellEffect.sealedFamily (M := M)
         (privateDeclaration := authority.declaration) adapter pre :
-          SemanticEffectFamily S M Nullifier)
+          SemanticEffectFamily L M Nullifier)
       commonRequest pre request outcome :=
   acceptBatchSealed authority admission commitmentId adapter commonAuthorization
-    requestBound effectsDigestBound preRootBound legs statementExact validated
+    requestBound effectsDigestBound legs statementExact validated
 
 @[simp] theorem acceptPreparedBatchSealed_disclosure
     {manifest : Manifest} {claim : PublicStatement}
     {prepared : PreparedBatch claim}
     (admission : ConcreteAdmission manifest prepared)
     (commitmentId : Digest)
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -132,15 +129,14 @@ noncomputable def acceptPreparedBatchSealed
         (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (legs : CompletionLegs authority request outcome)
     (statementExact :
       authority.declaration.computationStatementOf request outcome =
         admission.statement commitmentId)
-    (validated : CellState.ValidatedPatch M pre
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       (adapter.patch request outcome)) :
     (acceptPreparedBatchSealed authority admission commitmentId adapter
-      commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
+      commonAuthorization requestBound effectsDigestBound legs statementExact
       validated).disclosure = .sealed :=
   rfl
 
@@ -151,10 +147,9 @@ theorem acceptedPreparedBatch_all_384_exact
     {prepared : PreparedBatch claim}
     (admission : ConcreteAdmission manifest prepared)
     (commitmentId : Digest)
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -166,33 +161,32 @@ theorem acceptedPreparedBatch_all_384_exact
         (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (legs : CompletionLegs authority request outcome)
     (statementExact :
       authority.declaration.computationStatementOf request outcome =
         admission.statement commitmentId)
-    (validated : CellState.ValidatedPatch M pre
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       (adapter.patch request outcome)) :
     forall rowIndex : Fin equationsPerOwner,
       (((acceptPreparedBatchSealed authority admission commitmentId adapter
-        commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
+        commonAuthorization requestBound effectsDigestBound legs statementExact
         validated).modeEvidence.computation.witness.outputRepresentation.equations.equation
           rowIndex).numerator
         (acceptPreparedBatchSealed authority admission commitmentId adapter
-          commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
+          commonAuthorization requestBound effectsDigestBound legs statementExact
           validated).modeEvidence.computation.witness.token.input.row) =
       ((((acceptPreparedBatchSealed authority admission commitmentId adapter
-        commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
+        commonAuthorization requestBound effectsDigestBound legs statementExact
         validated).modeEvidence.computation.witness.outputRepresentation.equations.equation
           rowIndex).rns.value : Nat) : Int) *
         ((acceptPreparedBatchSealed authority admission commitmentId adapter
-          commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
+          commonAuthorization requestBound effectsDigestBound legs statementExact
           validated).modeEvidence.computation.witness.token.batch.rowCall
             rowIndex).witness.quotient.value := by
   intro rowIndex
   exact accepted_every_exact_integer_equation authority
     (acceptPreparedBatchSealed authority admission commitmentId adapter
-      commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact validated)
+      commonAuthorization requestBound effectsDigestBound legs statementExact validated)
     rowIndex
 
 /-! ## The same concrete admission enters verified history -/
@@ -202,10 +196,9 @@ noncomputable def historyClaimOfPreparedBatch
     {prepared : PreparedBatch claim}
     (admission : ConcreteAdmission manifest prepared)
     (commitmentId : Digest)
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -217,23 +210,22 @@ noncomputable def historyClaimOfPreparedBatch
         (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (legs : CompletionLegs authority request outcome)
     (statementExact :
       authority.declaration.computationStatementOf request outcome =
         admission.statement commitmentId)
-    (validated : CellState.ValidatedPatch M pre
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       (adapter.patch request outcome))
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (projection : HistoryProjection
       (PrivateCellEffect.sealedFamily (M := M)
         (privateDeclaration := authority.declaration) adapter pre :
-          SemanticEffectFamily S M Nullifier) n F)
+          SemanticEffectFamily L M Nullifier) n F)
     (headerCells : HistoryAdmissionContext -> BindingIx -> F)
     (context : HistoryAdmissionContext) :
     BoundSemanticReceiptClaim n F :=
   historyClaimOfBatchSealed authority admission commitmentId adapter
-    commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
+    commonAuthorization requestBound effectsDigestBound legs statementExact
     validated projection headerCells context
 
 /-! ## Exact proof-suite ceiling -/
