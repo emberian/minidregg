@@ -38,7 +38,7 @@ done
 command -v jq >/dev/null || { echo 'jq is required' >&2; exit 66; }
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
-REPO=$(CDPATH='' cd -- "$HERE/.." && pwd)
+REPO=$(CDPATH='' cd -- "$HERE/../.." && pwd)
 WRAPPER_SRC=$REPO/deploy/shell/mini-shell-ssh
 RENDER=$REPO/deploy/shell/render-shell-key
 [[ -x $WRAPPER_SRC && -x $RENDER ]] || { echo 'deploy/shell scripts missing' >&2; exit 66; }
