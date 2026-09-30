@@ -39,16 +39,6 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-local instance schemaFieldDecidableEq :
-    DecidableEq CanonicalResourceKernel.schema.Field := by
-  change DecidableEq CanonicalResourceKernel.Field
-  infer_instance
-
-local instance schemaResourceDecidableEq :
-    DecidableEq CanonicalResourceKernel.schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
 /-! ## Canonical order terms and state -/
 
 structure Terms where
@@ -247,7 +237,7 @@ structure DepositRuntime where
   cellsDistinct : resourceCell ≠ orderCell
 
 structure Deposit
-    (M : Materializer CanonicalResourceKernel.schema Digest)
+    (M : Materializer CanonicalResourceKernel.layout Digest)
     (portal : Portal) (authState : AuthState) (pre : Materialized M) where
   terms : Terms
   wellFormed : terms.WellFormed
@@ -261,7 +251,7 @@ structure Deposit
 
 namespace Deposit
 
-variable {M : Materializer CanonicalResourceKernel.schema Digest}
+variable {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
 
 noncomputable def acceptedEffect (deposit : Deposit M portal authState pre) :=
@@ -388,7 +378,7 @@ structure FillRuntime where
   cellsDistinct : resourceCell ≠ orderCell
 
 structure Fill
-    (M : Materializer CanonicalResourceKernel.schema Digest)
+    (M : Materializer CanonicalResourceKernel.layout Digest)
     (portal : Portal) (authState : AuthState) where
   terms : Terms
   wellFormed : terms.WellFormed
@@ -421,7 +411,7 @@ structure Fill
 
 namespace Fill
 
-variable {M : Materializer CanonicalResourceKernel.schema Digest}
+variable {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
 
 def after (fill : Fill M portal authState) : State :=
@@ -650,7 +640,7 @@ structure CloseRuntime where
   orderCell : CellId
 
 structure Close
-    (M : Materializer CanonicalResourceKernel.schema Digest) where
+    (M : Materializer CanonicalResourceKernel.layout Digest) where
   terms : Terms
   wellFormed : terms.WellFormed
   manifest : AuthorizedResourceCharge.DeploymentManifest
@@ -664,7 +654,7 @@ structure Close
 
 namespace Close
 
-variable {M : Materializer CanonicalResourceKernel.schema Digest}
+variable {M : Materializer CanonicalResourceKernel.layout Digest}
 
 def after (close : Close M) : State :=
   { close.before with phase := close.decision.phase }
@@ -733,7 +723,7 @@ structure RefundRuntime where
   resourceCell : CellId
 
 structure Refund
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {close : Close M} (_due : close.after.ReleaseDue)
     (portal : Portal) (authState : AuthState) where
   runtime : RefundRuntime
@@ -747,7 +737,7 @@ structure Refund
 
 namespace Refund
 
-variable {M : Materializer CanonicalResourceKernel.schema Digest}
+variable {M : Materializer CanonicalResourceKernel.layout Digest}
     {close : Close M} {due : close.after.ReleaseDue}
     {portal : Portal} {authState : AuthState}
 
@@ -851,7 +841,7 @@ end Refund
 /-! ## Fill/close race and explicit trust boundaries -/
 
 theorem fill_after_close_has_stale_order_root
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (fill : Fill M portal authState) (close : Close M)
     (sameTerms : fill.terms = close.terms)
@@ -868,7 +858,7 @@ theorem fill_after_close_has_stale_order_root
     sameTerms, sameState, sameOrderCell] using equal
 
 theorem fill_after_close_roots_check_fails
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (fill : Fill M portal authState) (close : Close M)
     (sameTerms : fill.terms = close.terms)
@@ -894,7 +884,7 @@ theorem fill_after_close_roots_check_fails
         sameOrderCell rootMoves before orderMatch).elim
 
 theorem fill_after_close_preflight_rejects
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (fill : Fill M portal authState) (close : Close M)
     (sameTerms : fill.terms = close.terms)
@@ -925,14 +915,14 @@ theorem fill_after_close_preflight_rejects
   simp only [Bool.not_true, Bool.false_eq_true, if_false]
   cases checked : fill.intent.erase.preflight
       (Snapshot.install before.model close.intent.erase) with
-  | error reason => simp [checked]
+  | error reason => split <;> simp [checked]
   | ok unit => exact (modelReject checked).elim
 
 /-- A private proof is outside this public settlement kernel.  The only sound
 join is a refinement showing that a verified private statement denotes the
 already explicit public fill and its three exact accepted legs. -/
 structure PrivateFillRefinement
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (fill : Fill M portal authState)
     (Statement Proof : Type) (verify : Statement -> Proof -> Bool)
@@ -956,7 +946,7 @@ structure PriceOracleRefinement (terms : Terms) (Evidence : Type)
 /-- Durable logical atomicity becomes a provider/storage claim only through
 the common data-intent implementation refinement. -/
 theorem physical_fill_atomic
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (fill : Fill M portal authState)
     {PhysicalState : Type} {PhysicalStep : PhysicalState -> DataIntent M.rootBytes -> PhysicalState -> Type}
@@ -1053,15 +1043,14 @@ example :
   rw [Operation.apply_conserves _ _ (by decide) (by decide) 4]
   exact Operation.apply_conserves _ _ (by decide) (by decide) 4
 
-def logical : LogicalState CanonicalResourceKernel.schema where
-  fields := (0 : FieldStore CanonicalResourceKernel.schema).write .book book
-  resources := fun resource => nomatch resource
+def logical : Store.Store CanonicalResourceKernel.layout :=
+  (0 : Store.Store CanonicalResourceKernel.layout).set bookAddress (some book)
 
 noncomputable def cell : Materialized CanonicalResourceKernel.materializer :=
   materialize CanonicalResourceKernel.materializer logical
 
 @[simp] theorem cell_book : logicalBook cell.logical = book := by
-  simp [cell, logical, logicalBook, materialize, FieldStore.read]
+  simp [cell, logical, logicalBook, materialize]
 
 def depositAdmission : Admission book terms.depositOperation where
   sourcePresent := by decide

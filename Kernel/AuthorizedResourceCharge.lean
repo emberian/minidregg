@@ -29,19 +29,10 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.ResourceCost
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CanonicalResourceKernel
+open Minidregg.Theory.Store
 open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
-
-local instance schemaFieldDecidableEq :
-    DecidableEq CanonicalResourceKernel.schema.Field := by
-  change DecidableEq CanonicalResourceKernel.Field
-  infer_instance
-
-local instance schemaResourceDecidableEq :
-    DecidableEq CanonicalResourceKernel.schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
 
 /-! ## First-order deployment and tariff commitment -/
 
@@ -154,15 +145,12 @@ theorem DeploymentManifest.semanticDigest_injective :
 /-- Canonical post selected by the operation patch itself.  This is the same
 value as `Accepted.post`; validation proofs cannot affect it. -/
 def canonicalPost
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     (pre : Materialized M) (operation : Operation) : Materialized M :=
-  materialize M
-    { fields := applyFieldWrites (operation.patch pre).fieldWrites pre.logical.fields
-      resources := applyResourceWrites (operation.patch pre).resourceWrites
-        pre.logical.resources }
+  materialize M (Patch.run pre.logical (operation.patch pre))
 
 @[simp] theorem accepted_post_eq_canonical
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (accepted : Accepted pre operation) :
     accepted.post = canonicalPost pre operation :=
@@ -170,17 +158,16 @@ def canonicalPost
 
 /-- Exact footprint cardinality of the accepted canonical patch. -/
 def memoryTouches
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (_accepted : Accepted pre operation) : Nat :=
-  (operation.patch pre).fieldFootprint.card +
-    (operation.patch pre).resourceFootprint.card
+  (Patch.writeFootprint (operation.patch pre)).card
 
 /-- Operational coordinates are fixed before fee and lease pricing.  Byte
 counts come from the lawful operation codec and the exact canonical pre/post
 state codecs; no executor counter enters this definition. -/
 def operationalChargeOf
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     (manifest : DeploymentManifest) (pre : Materialized M)
     (operation : Operation) : Charge
   | .incidences => 1
@@ -188,13 +175,11 @@ def operationalChargeOf
       (CanonicalResourceEffect.operationCodec.encode operation).length +
         pre.bytes.length + (canonicalPost pre operation).bytes.length
   | .memoryTouches =>
-      (operation.patch pre).fieldFootprint.card +
-        (operation.patch pre).resourceFootprint.card
+      (Patch.writeFootprint (operation.patch pre)).card
   | .witnessBytes => manifest.tariff.authorizationWitnessBytes
   | .proofWork => manifest.tariff.baseProofWork +
       manifest.tariff.proofWorkPerTouch *
-        ((operation.patch pre).fieldFootprint.card +
-          (operation.patch pre).resourceFootprint.card)
+        (Patch.writeFootprint (operation.patch pre)).card
   | .storageBytes =>
       (canonicalPost pre operation).bytes.length +
         (CanonicalResourceEffect.operationCodec.encode operation).length
@@ -206,13 +191,13 @@ def operationalChargeOf
   | .leaseByteBlocks => 0
 
 def operationalCharge
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (_accepted : Accepted pre operation) : Charge :=
   operationalChargeOf manifest pre operation
 
 @[simp] theorem operationalCharge_memoryTouches
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) :
     operationalCharge manifest accepted .memoryTouches = memoryTouches accepted :=
@@ -231,7 +216,7 @@ def Tariff.billable (tariff : Tariff) (charge : Charge) : Nat :=
 
 /-- The sole exact ten-lane settlement vector. -/
 def exactChargeOf
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     (manifest : DeploymentManifest) (pre : Materialized M)
     (operation : Operation) : Charge
   | .feeDebit => manifest.tariff.billable (operationalChargeOf manifest pre operation)
@@ -240,13 +225,13 @@ def exactChargeOf
   | lane => operationalChargeOf manifest pre operation lane
 
 def exactCharge
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (_accepted : Accepted pre operation) : Charge :=
   exactChargeOf manifest pre operation
 
 @[simp] theorem exactCharge_feeDebit
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) :
     exactCharge manifest accepted .feeDebit =
@@ -254,7 +239,7 @@ def exactCharge
   rfl
 
 @[simp] theorem exactCharge_leaseByteBlocks
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) :
     exactCharge manifest accepted .leaseByteBlocks =
@@ -268,7 +253,7 @@ def effectDigestWithCharge (operation : Operation) (charge : Charge) : Digest :=
     (chargeCode charge)⟩
 
 def chargedEffectDigest
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     (manifest : DeploymentManifest) (pre : Materialized M)
     (operation : Operation) : Digest :=
   effectDigestWithCharge operation (exactChargeOf manifest pre operation)
@@ -303,7 +288,7 @@ structure RequestContext where
 /-- The exact request authorized for this accepted effect.  Its scalar cost is
 the fee coordinate of the same vector later placed in durable settlement. -/
 def RequestContext.requestOf
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     (context : RequestContext) (manifest : DeploymentManifest)
     (pre : Materialized M) (operation : Operation) : Request .account where
   domain := context.domain
@@ -325,7 +310,7 @@ def RequestContext.requestOf
 
 /-- The accepted wrapper contributes no new request data. -/
 def RequestContext.request
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (manifest : DeploymentManifest)
     (_accepted : Accepted pre operation) : Request .account :=
@@ -334,11 +319,11 @@ def RequestContext.request
 /-- This family differs from the legacy resource adapter in one load-bearing
 way: its effect digest includes the exact ten-lane settlement charge. -/
 def family
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     (manifest : DeploymentManifest) (pre : Materialized M)
     (context : RequestContext) :
-    SemanticEffectFamily.{0, 0, 0, 0, 0, 0}
-      CanonicalResourceKernel.schema M Unit where
+    SemanticEffectFamily.{0, 0, 0, 0, 0}
+      CanonicalResourceKernel.layout M Unit where
   Declaration := Operation
   declarationCodec := CanonicalResourceEffect.operationCodec
   pre := pre
@@ -359,7 +344,7 @@ def family
   DisclosureAllowed := fun _ _ disclosure => disclosure = .sealed
 
 @[simp] theorem RequestContext.request_semantics
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) :
@@ -367,7 +352,7 @@ def family
   rfl
 
 @[simp] theorem RequestContext.request_cost
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) :
@@ -376,7 +361,7 @@ def family
   rfl
 
 @[simp] theorem RequestContext.request_effectsDigest
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) :
@@ -387,7 +372,7 @@ def family
 /-- Resource acceptance enters the common accepted-effect path under authority
 for the tariff-derived request. -/
 noncomputable def toCellEffect
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     {portal : Portal} {authState : AuthState}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation)
@@ -401,7 +386,6 @@ noncomputable def toCellEffect
   preStateBound := rfl
   requestBound := rfl
   effectsDigestBound := rfl
-  preRootBound := rfl
   modeEvidence := PLift.up accepted.admission
   validated := accepted.validated
   postcondition := ⟨accepted.validated.resultAt, accepted.post_logicalBook⟩
@@ -411,7 +395,7 @@ noncomputable def toCellEffect
 /-- Stable receipt payload.  Its domain commits the deployment manifest and
 its event id commits the complete canonical resource operation. -/
 def stableEvent
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (_accepted : Accepted pre operation) : StableEvent where
   codecVersion := manifest.version
@@ -423,7 +407,7 @@ def stableEvent
 the canonical bytes of the accepted post and the charge is definitionally the
 same vector whose fee coordinate was authorized. -/
 def durableIntent
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) : DataIntent M.rootBytes where
@@ -445,7 +429,7 @@ def durableIntent
   guardsReadOnly := by simp
 
 @[simp] theorem durableIntent_exactCharge
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) :
@@ -454,7 +438,7 @@ def durableIntent
   rfl
 
 @[simp] theorem request_cost_eq_durable_fee
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (context : RequestContext)
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) :
@@ -466,20 +450,20 @@ def durableIntent
 
 /-- The fee/replay prologue owns exactly the authorized scalar debit. -/
 def admissionCharge
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) : Charge :=
   fun lane => if lane = .feeDebit then exactCharge manifest accepted lane else 0
 
 /-- The body owns every non-fee lane and cannot charge admission a second time. -/
 def bodyCharge
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) : Charge :=
   fun lane => if lane = .feeDebit then 0 else exactCharge manifest accepted lane
 
 @[simp] theorem admissionCharge_feeDebit
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) :
     admissionCharge manifest accepted .feeDebit =
@@ -487,14 +471,14 @@ def bodyCharge
   simp [admissionCharge]
 
 @[simp] theorem bodyCharge_feeDebit
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) :
     bodyCharge manifest accepted .feeDebit = 0 := by
   simp [bodyCharge]
 
 theorem admission_add_body_exact
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : DeploymentManifest) (accepted : Accepted pre operation) :
     admissionCharge manifest accepted + bodyCharge manifest accepted =
@@ -509,7 +493,7 @@ theorem admission_add_body_exact
 bytes, and event, but with the fee lane removed because the prologue has
 already settled that exact authorized debit. -/
 def admissionBodyIntent
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) : DataIntent M.rootBytes :=
@@ -517,7 +501,7 @@ def admissionBodyIntent
       exactCharge := bodyCharge manifest accepted }
 
 @[simp] theorem admissionBodyIntent_no_second_fee
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) :
@@ -531,7 +515,7 @@ derived fee projection and that its body is the canonical charged body above.
 Those premises make the authorized scalar, prologue debit, zero-fee body, and
 recombined ten-lane charge agree. -/
 theorem admissionPrologue_exact_split
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (context : RequestContext)
     (manifest : DeploymentManifest) (accepted : Accepted pre operation)
@@ -560,7 +544,7 @@ def inflateLane (charge : Charge) (lane : Lane) (increment : Nat) : Charge :=
   fun queried => if queried = lane then charge queried + increment else charge queried
 
 theorem inflated_charge_rejected
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) (lane : Lane) (increment : Nat)
@@ -575,7 +559,7 @@ theorem inflated_charge_rejected
 /-- Inflation cannot retain the effect digest already authorized by the
 request, even if the scalar fee coordinate itself was not the modified lane. -/
 theorem inflated_charge_changes_authorized_effectDigest
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) (lane : Lane) (increment : Nat)
@@ -598,7 +582,7 @@ def swapLanes (charge : Charge) (left right : Lane) : Charge :=
     else charge lane
 
 theorem swapped_charge_rejected
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (transactionId cellId : Digest) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) (left right : Lane)
@@ -617,7 +601,7 @@ theorem swapped_charge_rejected
 /-- Swapping two distinguishable lanes likewise changes the effect digest
 named by authorization. -/
 theorem swapped_charge_changes_authorized_effectDigest
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (manifest : DeploymentManifest)
     (accepted : Accepted pre operation) (left right : Lane)
@@ -640,7 +624,7 @@ theorem swapped_charge_changes_authorized_effectDigest
 /-- A different codec/tariff manifest cannot preserve the semantic identifier
 that authorization signed. -/
 theorem different_manifest_changes_request_semantics
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (context : RequestContext) (accepted : Accepted pre operation)
     (left right : DeploymentManifest) (different : left ≠ right) :

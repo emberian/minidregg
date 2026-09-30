@@ -311,7 +311,7 @@ theorem acceptable_pins_named_relation (b : EvidenceBinding) (h : b.Acceptable) 
 
 variable {Source : Claim → EvidenceBinding → Type}
   {M : Minidregg.Theory.CellState.Materializer
-    Minidregg.Theory.CanonicalResourceKernel.schema Digest}
+    Minidregg.Theory.CanonicalResourceKernel.layout Digest}
   {portal : Portal} {authState : AuthState}
 
 /-- **The kernel's `Settlement` is a `BindingGate` by TYPE**: every settlement is accepted (the

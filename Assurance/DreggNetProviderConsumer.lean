@@ -47,7 +47,7 @@ set_option autoImplicit false
 filled capacity, and unit quote are definitionally the lease's holder,
 provider, prepaid asset, epochs, and rate. -/
 structure CommercialBinding
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (fill : CanonicalEscrowMarket.Fill M portal authState)
     (lease : ProviderExecutionLease.OpenedLease M portal authState pre) : Prop where
@@ -58,7 +58,7 @@ structure CommercialBinding
   unitPrice : lease.terms.rate = fill.terms.unitQuote
 
 theorem CommercialBinding.exact_quote
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {fill : CanonicalEscrowMarket.Fill M portal authState}
     {lease : ProviderExecutionLease.OpenedLease M portal authState pre}
@@ -126,7 +126,7 @@ theorem different_manifest_changes_provider_key
 /-- A consumer lease may enter the provider boundary only when its external
 transaction id is the key derived above. -/
 structure BoundLease
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M} where
   lease : ProviderExecutionLease.OpenedLease M portal authState pre
   exactProviderKey : lease.runtime.startTransaction =
@@ -135,7 +135,7 @@ structure BoundLease
 
 namespace BoundLease
 
-variable {M : Materializer CanonicalResourceKernel.schema Digest}
+variable {M : Materializer CanonicalResourceKernel.layout Digest}
   {portal : Portal} {authState : AuthState} {pre : Materialized M}
 
 @[simp] theorem start_uses_exact_provider_key
@@ -181,7 +181,7 @@ end BoundLease
 provider observation.  This is the semantic idempotency contract expected of
 the cloud adapter; its physical refinement remains explicit below. -/
 structure IdempotentProviderStart
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (job : BoundLease (M := M) (portal := portal) (authState := authState)
       (pre := pre))
@@ -195,7 +195,7 @@ structure IdempotentProviderStart
 
 namespace IdempotentProviderStart
 
-variable {M : Materializer CanonicalResourceKernel.schema Digest}
+variable {M : Materializer CanonicalResourceKernel.layout Digest}
   {portal : Portal} {authState : AuthState} {pre : Materialized M}
   {job : BoundLease (M := M) (portal := portal) (authState := authState)
     (pre := pre)}
@@ -218,7 +218,7 @@ body retains the provider prepay transaction id and resource cell; this
 dependent carrier supplies their separation without admitting an impossible
 or vacuous runtime value. -/
 structure FeeFirstJob
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : ProviderExecutionLease.OpenedLease M portal authState pre) where
   admissionId : TransactionId
@@ -233,7 +233,7 @@ structure FeeFirstJob
 
 namespace FeeFirstJob
 
-variable {M : Materializer CanonicalResourceKernel.schema Digest}
+variable {M : Materializer CanonicalResourceKernel.layout Digest}
   {portal : Portal} {authState : AuthState} {pre : Materialized M}
   {lease : ProviderExecutionLease.OpenedLease M portal authState pre}
 
@@ -338,7 +338,7 @@ end FeeFirstJob
 /-- A positive per-incidence tariff makes every canonical accepted operation
 costed, independently of the sizes of its other nine lanes. -/
 theorem exactFee_positive_of_incidence_price
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation}
     (manifest : AuthorizedResourceCharge.DeploymentManifest)
     (accepted : Accepted pre operation)
@@ -939,7 +939,7 @@ end Witness
 claim about a particular cloud and storage deployment.  None of its fields is
 constructed above. -/
 structure DeploymentRefinement
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : ProviderExecutionLease.OpenedLease M portal authState pre}
     {boundary : ProviderExecutionLease.StartBoundary}
