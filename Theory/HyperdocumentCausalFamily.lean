@@ -370,8 +370,7 @@ def principal : AuthenticatedPrincipal projection authorityPre
     have notRevoked : CredentialAuthorityState.isRevoked authorityPre
         (.capability storedCapability.head.id) = false := by
       change
-        (authorityLogical ⟨.revoked, .capability storedCapability.head.id⟩).getD
-          false = false
+        (authorityLogical ⟨.revoked, .capability storedCapability.head.id⟩).isSome = false
       rw [authorityLogical, Store.Store.set_ne _ _ _ _ (by intro same; cases same)]
       rfl
     exact Bool.false_ne_true (notRevoked.symm.trans member.2)

@@ -47,12 +47,14 @@ def emptyCapability (kind : ResourceKind) : Capability kind where
   channels := ∅
 
 /-- The old total authority state can retain an arbitrary Boolean stream in
-the capability-revocation plane.  All unrelated typed fields receive an
-arbitrary inhabitant solely to reconstruct the deleted carrier. -/
+the issuer-epoch plane (epoch `1` marks, `0` does not).  The revocation,
+nullifier and registration planes are presence-only (`Unit`) and carry no bit;
+every other typed field receives an arbitrary inhabitant solely to reconstruct
+the deleted carrier. -/
 def totalAuthorityStateOf (marked : Nat -> Bool) :
     TotalStore CredentialAuthorityState.layout
   | ⟨.capability kind, _⟩ => show StoredCapability kind from ⟨emptyCapability kind, []⟩
-  | ⟨.issuerEpoch, _⟩ => show Epoch from 0
+  | ⟨.issuerEpoch, ⟨identifier⟩⟩ => show Epoch from (marked identifier).toNat
   | ⟨.policyEpoch, _⟩ => show Epoch from 0
   | ⟨.policyRevision, _⟩ => show PolicyRevision from 0
   | ⟨.policyAddress, _⟩ => show Digest from ⟨0⟩
@@ -61,16 +63,18 @@ def totalAuthorityStateOf (marked : Nat -> Bool) :
       show CredentialSigningKey.KeyRecord from
         { keyId := 0, keyEpoch := epoch, algorithm := 0, subject := subject.value,
           publicKey := [], activeFrom := 0, activeUntil := 0, revoked := false }
-  | ⟨.revoked, .capability ⟨identifier⟩⟩ => show Bool from marked identifier
-  | ⟨.revoked, .channel _⟩ => show Bool from false
-  | ⟨.nullifier, _⟩ => show Bool from false
+  | ⟨.revoked, _⟩ => show Unit from ()
+  | ⟨.nullifier, _⟩ => show Unit from ()
+  | ⟨.registered, _⟩ => show Unit from ()
 
 theorem totalAuthorityStateOf_injective :
     Function.Injective totalAuthorityStateOf := by
   intro left right same
   funext index
-  exact congrFun same
-    (⟨.revoked, RevocationKey.capability ⟨index⟩⟩ : Address CredentialAuthorityState.layout)
+  have marked : (left index).toNat = (right index).toNat := congrFun same
+    (⟨.issuerEpoch, ⟨index⟩⟩ : Address CredentialAuthorityState.layout)
+  revert marked
+  cases left index <;> cases right index <;> decide
 
 /-- Restoring a total field at the authority boundary reintroduces the exact
 cardinality obstruction fixed by the sparse migration. -/

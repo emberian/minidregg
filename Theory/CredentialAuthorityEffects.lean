@@ -86,17 +86,41 @@ def assignOp (store : Store layout) (address : Address layout)
   unfold assignOp
   split <;> rfl
 
-/-- The guard of an assignment holds at the store it was generated from (every
-authority plane is RAM). -/
+/-- No authority plane is ROM: each is RAM or append-only. -/
+theorem discipline_ne_rom (plane : AuthorityPlane) : layout.discipline plane ≠ .rom := by
+  cases plane <;> nofun
+
+/-- An address may be assigned at `store` when its plane is RAM or it is absent
+there.  A present address on an append-only plane (revoked, nullifier,
+registered) is not assignable: its only modification is an allocation. -/
+def Assignable (store : Store layout) (address : Address layout) : Prop :=
+  layout.discipline address.1 = .ram ∨ store address = none
+
+/-- The guard of an assignment holds at the store it was generated from exactly
+when the address is assignable there. -/
 theorem assignOp_enabled (store : Store layout) (address : Address layout)
-    (value : layout.Value address.1) :
+    (value : layout.Value address.1) (assignable : Assignable store address) :
     (assignOp store address value).Enabled store := by
   unfold assignOp
   split
   · rename_i absent
-    exact ⟨nofun, absent⟩
+    exact ⟨discipline_ne_rom _, absent⟩
   · rename_i before present
-    exact ⟨rfl, present⟩
+    rcases assignable with ram | absent
+    · exact ⟨ram, present⟩
+    · rw [present] at absent
+      cases absent
+
+/-- Refuting pole: a present entry on an append-only plane cannot be assigned. -/
+theorem assignOp_enabled_iff (store : Store layout) (address : Address layout)
+    (value : layout.Value address.1) :
+    (assignOp store address value).Enabled store ↔ Assignable store address := by
+  refine ⟨fun enabled => ?_, assignOp_enabled store address value⟩
+  unfold assignOp at enabled
+  split at enabled
+  · rename_i absent
+    exact Or.inr absent
+  · exact Or.inl enabled.1
 
 @[simp] theorem assignOp_apply (store : Store layout) (address : Address layout)
     (value : layout.Value address.1) :
@@ -139,14 +163,49 @@ def setAll : Store layout → List Entry → Store layout
   | store, [] => store
   | store, entry :: rest => setAll (store.set entry.1 (some entry.2)) rest
 
-theorem assignAll_valid (store : Store layout) (entries : List Entry) :
-    Patch.ValidFrom store (assignAll store entries) := by
+/-- Every entry is assignable at the store its prefix produced. -/
+def AssignableAll : Store layout → List Entry → Prop
+  | _, [] => True
+  | store, entry :: rest =>
+      Assignable store entry.1 ∧ AssignableAll (store.set entry.1 (some entry.2)) rest
+
+/-- A family patch is valid at the store it was generated from exactly when
+every entry is assignable at its prefix: RAM planes always are, and an
+append-only entry must be fresh. -/
+theorem assignAll_valid_iff (store : Store layout) (entries : List Entry) :
+    Patch.ValidFrom store (assignAll store entries) ↔ AssignableAll store entries := by
   induction entries generalizing store with
-  | nil => trivial
+  | nil => exact Iff.rfl
   | cons entry rest ih =>
-      refine ⟨assignOp_enabled store entry.1 entry.2, ?_⟩
-      rw [assignOp_apply]
-      exact ih _
+      change (assignOp store entry.1 entry.2).Enabled store ∧
+          Patch.ValidFrom ((assignOp store entry.1 entry.2).apply store)
+            (assignAll (store.set entry.1 (some entry.2)) rest) ↔ _
+      rw [assignOp_apply, assignOp_enabled_iff, ih]
+      rfl
+
+theorem assignAll_valid (store : Store layout) (entries : List Entry)
+    (assignable : AssignableAll store entries) :
+    Patch.ValidFrom store (assignAll store entries) :=
+  (assignAll_valid_iff store entries).mpr assignable
+
+/-- The two-entry families: a record and a distinct second entry, each
+assignable at the pre-store. -/
+theorem assignableAll_pair (store : Store layout) (first second : Entry)
+    (distinct : second.1 ≠ first.1) (firstOk : Assignable store first.1)
+    (secondOk : Assignable store second.1) :
+    AssignableAll store [first, second] := by
+  refine ⟨firstOk, ?_, trivial⟩
+  unfold Assignable at secondOk ⊢
+  rw [Store.set_ne _ _ _ _ distinct]
+  exact secondOk
+
+theorem assignable_of_ram (store : Store layout) (address : Address layout)
+    (ram : layout.discipline address.1 = .ram) : Assignable store address :=
+  Or.inl ram
+
+theorem assignable_of_absent (store : Store layout) (address : Address layout)
+    (absent : (store address).isSome = false) : Assignable store address :=
+  Or.inr (Option.not_isSome_iff_eq_none.mp (by simp [absent]))
 
 @[simp] theorem run_assignAll (store : Store layout) (entries : List Entry) :
     Patch.run store (assignAll store entries) = setAll store entries := by
@@ -211,15 +270,28 @@ theorem setAll_pair_second (store : Store layout) (first second : Entry) :
 other quoted root. -/
 theorem validated_of_assign {M : Materializer} {pre : Cell M}
     {expectedPreRoot : Digest} (entries : List Entry)
-    (preRootExact : expectedPreRoot = pre.root) :
+    (preRootExact : expectedPreRoot = pre.root)
+    (assignable : AssignableAll pre.logical entries) :
     CellState.ValidatedPatch M pre expectedPreRoot (assignAll pre.logical entries) := by
   obtain ⟨validated, _⟩ := CellState.validate_accepts M pre expectedPreRoot
-    (assignAll pre.logical entries) preRootExact (assignAll_valid _ _)
+    (assignAll pre.logical entries) preRootExact (assignAll_valid _ _ assignable)
   exact validated
 
 /-- The nullifier entry every family writes. -/
 def nullifierEntry (operationNullifier : OperationNullifier) : Entry :=
-  ⟨⟨.nullifier, operationNullifier⟩, true⟩
+  ⟨⟨.nullifier, operationNullifier⟩, ()⟩
+
+/-- A two-entry family (a record on a plane other than the nullifier's, then the
+operation nullifier) is assignable at `pre` when its record is and the nullifier
+is unspent. -/
+theorem assignableAll_record_nullifier {M : Materializer} (pre : Cell M) (record : Entry)
+    (operationNullifier : OperationNullifier)
+    (recordOk : Assignable pre.logical record.1)
+    (plane : record.1.1 ≠ .nullifier)
+    (fresh : isNullified pre operationNullifier = false) :
+    AssignableAll pre.logical [record, nullifierEntry operationNullifier] :=
+  assignableAll_pair _ _ _ (fun same => plane (congrArg Sigma.fst same).symm) recordOk
+    (assignable_of_absent _ _ fresh)
 
 /-- The applied post of a two-entry family patch holds its first entry. -/
 theorem apply_pair_first {M : Materializer} {pre : Cell M} {expectedPreRoot : Digest}
@@ -348,6 +420,8 @@ def acceptIssue
   effectsDigestBound := requestDigestExact
   modeEvidence := modeEvidence
   validated := validated_of_assign declaration.entries requestPreExact
+    (assignableAll_record_nullifier pre _ _ (assignable_of_ram _ _ rfl) (by intro h; cases h)
+      modeEvidence.nullifierFresh)
   postcondition := CellState.ValidatedPatch.resultAt _
   disclosure := .sealed
   disclosureAllowed := trivial
@@ -541,6 +615,8 @@ def acceptAttenuation
       request pre declaration parent := by
   have validated := validated_of_assign (M := M) (pre := pre)
     (declaration.entries parent) requestPreExact
+    (assignableAll_record_nullifier pre _ _ (assignable_of_ram _ _ rfl) (by intro h; cases h)
+      modeEvidence.nullifierFresh)
   exact
     { authorization := authorization
       preStateBound := rfl
@@ -734,6 +810,8 @@ def acceptDelegation {M : Materializer}
   let request := context.request codec effectDigest pre declaration
   have validated := validated_of_assign (M := M) (pre := pre)
     (expectedPreRoot := request.preStateRoot) (declaration.entries parent request) rfl
+    (assignableAll_record_nullifier pre _ _ (assignable_of_ram _ _ rfl) (by intro h; cases h)
+      mode.nullifierFresh)
   exact
     { authorization := mode.parentAuthorization
       preStateBound := rfl
@@ -853,7 +931,7 @@ end DelegationObligations
       (context.request codec effectDigest pre declaration) pre declaration parent) :
     isNullified accepted.prepared.post declaration.operationNullifier = true := by
   have written : accepted.validated.apply.logical
-      ⟨.nullifier, declaration.operationNullifier⟩ = some true :=
+      ⟨.nullifier, declaration.operationNullifier⟩ = some () :=
     apply_pair_second
       (first := declaration.capabilityEntry parent
         (context.request codec effectDigest pre declaration))
@@ -884,7 +962,7 @@ structure RevokeDeclaration where
   operationNullifier : OperationNullifier
 
 def RevokeDeclaration.revokedEntry (declaration : RevokeDeclaration) : Entry :=
-  ⟨⟨.revoked, declaration.key⟩, true⟩
+  ⟨⟨.revoked, declaration.key⟩, ()⟩
 
 def RevokeDeclaration.entries (declaration : RevokeDeclaration) : List Entry :=
   [declaration.revokedEntry, nullifierEntry declaration.operationNullifier]
@@ -950,6 +1028,8 @@ def acceptRevocation
   effectsDigestBound := requestDigestExact
   modeEvidence := modeEvidence
   validated := validated_of_assign declaration.entries requestPreExact
+    (assignableAll_record_nullifier pre _ _ (assignable_of_absent _ _ modeEvidence.live)
+      (by intro h; cases h) modeEvidence.nullifierFresh)
   postcondition := CellState.ValidatedPatch.resultAt _
   disclosure := .sealed
   disclosureAllowed := trivial
@@ -993,6 +1073,14 @@ def EpochTarget.entry (target : EpochTarget) (epoch : Epoch) : Entry :=
 @[simp] theorem EpochTarget.entry_address (target : EpochTarget) (epoch : Epoch) :
     (target.entry epoch).1 = target.address := by
   cases target <;> rfl
+
+theorem EpochTarget.entry_ram (target : EpochTarget) (epoch : Epoch) :
+    layout.discipline (target.entry epoch).1.1 = .ram := by
+  cases target <;> rfl
+
+theorem EpochTarget.entry_plane (target : EpochTarget) (epoch : Epoch) :
+    (target.entry epoch).1.1 ≠ .nullifier := by
+  cases target <;> (intro h; cases h)
 
 /-- A cell holding a target's entry reads that epoch back through the target's
 own reader. -/
@@ -1103,17 +1191,25 @@ def acceptEpochRotation
     (requestPreExact : request.preStateRoot = pre.root)
     (modeEvidence : RotateEpochEvidence pre declaration) :
     AcceptedCellEffect (portal := portal) (authState := authState domain pre)
-      (rotateEpochFamily pre codec effectDigest context) request pre declaration () where
+      (rotateEpochFamily pre codec effectDigest context) request pre declaration () :=
+  have assignable : AssignableAll pre.logical declaration.entries :=
+    assignableAll_record_nullifier pre _ _
+      (assignable_of_ram _ _ (EpochTarget.entry_ram declaration.target declaration.nextEpoch))
+      (EpochTarget.entry_plane declaration.target declaration.nextEpoch)
+      modeEvidence.nullifierFresh
+  {
   authorization := authorization
   preStateBound := rfl
   requestBound := requestBound
   effectsDigestBound := requestDigestExact
   modeEvidence := modeEvidence
   validated := validated_of_assign declaration.entries requestPreExact
+    assignable
   postcondition := ⟨CellState.ValidatedPatch.resultAt _,
-    declaration.source_framed (validated_of_assign declaration.entries requestPreExact)⟩
+    declaration.source_framed (validated_of_assign declaration.entries requestPreExact
+      assignable)⟩
   disclosure := .sealed
-  disclosureAllowed := trivial
+  disclosureAllowed := trivial }
 
 /-! ## The common canonical-pre theorem and atomic patch teeth -/
 
@@ -1157,7 +1253,7 @@ theorem authorization_consults_same_canonical_pre
       (issueFamily domain pre codec effectDigest context) request pre declaration ()) :
     isNullified accepted.prepared.post declaration.operationNullifier = true := by
   have written : accepted.validated.apply.logical
-      ⟨.nullifier, declaration.operationNullifier⟩ = some true :=
+      ⟨.nullifier, declaration.operationNullifier⟩ = some () :=
     apply_pair_second
       (first := declaration.capabilityEntry)
       (second := nullifierEntry declaration.operationNullifier) accepted.validated
@@ -1243,7 +1339,7 @@ theorem attenuation_post_lineage_anchored
       (authState := authState domain pre)
       (revokeFamily domain pre codec effectDigest context) request pre declaration ()) :
     isRevoked accepted.prepared.post declaration.key = true := by
-  have written : accepted.validated.apply.logical ⟨.revoked, declaration.key⟩ = some true :=
+  have written : accepted.validated.apply.logical ⟨.revoked, declaration.key⟩ = some () :=
     apply_pair_first
       (first := declaration.revokedEntry)
       (second := nullifierEntry declaration.operationNullifier)

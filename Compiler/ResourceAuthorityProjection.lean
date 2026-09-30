@@ -26,7 +26,7 @@ def bytesSlots (stem : String) : Nat → List UInt8 → List (String × Int)
   | index, byte :: rest => (s!"{stem}/{index}", Int.ofNat byte.toNat) :: bytesSlots stem (index + 1) rest
 
 def selfRevoked (logical : Authority) (identifier : CapabilityId) : Bool :=
-  (logical ⟨.revoked, .capability identifier⟩).getD false
+  (logical ⟨.revoked, .capability identifier⟩).isSome
 
 /-- Both fields are selected by literal source-derived identifiers. Absence
 remains visible as absence, not a fabricated grant or an implicit all-zero key.
