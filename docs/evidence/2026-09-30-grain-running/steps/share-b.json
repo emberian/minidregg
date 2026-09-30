@@ -1,0 +1,15 @@
+{
+  "app": "9201",
+  "descriptor": "9211",
+  "directory": "/var/lib/minidregg/grains/m6-r4/host/apps/9201/routes/owner-api",
+  "issueIndex": "46",
+  "kind": "api",
+  "name": "owner-api",
+  "protocol": "mini-spk-grain-route-v1",
+  "session": "9210",
+  "signedApiPath": "/",
+  "socket": "/var/lib/minidregg/grains/m6-r4/host/apps/9201/routes/owner-api/http.sock",
+  "subject": "8",
+  "ticket": "9220",
+  "tokenFile": "/var/lib/minidregg/grains/m6-r4/host/apps/9201/routes/owner-api/api.token"
+}

@@ -59,8 +59,7 @@ pub(crate) fn later_decimal(value: &str, earlier: &str) -> bool {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedLaunchClaimSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
@@ -76,59 +75,16 @@ struct ClaimPlanEvidence<'a> {
 
 impl FixedLaunchClaimSigners {
     pub(crate) fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-resident-claim-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || ![&self.app, &self.package_manifest, &self.management_subject]
-                .iter()
-                .all(|value| decimal(value))
-        {
+        if self.protocol != "mini-spk-resident-claim-management-v1" {
             return Err(invalid("v3 claim fixed management custody refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("residentClaimManagement")
-            .ok_or_else(|| invalid("Mini claim management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            let value = manager
-                .get(field)
-                .ok_or_else(|| invalid("Mini claim management coordinate absent"))?;
-            let value = value
-                .as_str()
-                .map(str::to_owned)
-                .or_else(|| value.as_u64().map(|number| number.to_string()))
-                .ok_or_else(|| invalid("Mini claim management coordinate malformed"))?;
-            if value != *expected {
-                return Err(invalid("v3 claim fixed management differs from Mini pin"));
-            }
-        }
-        let key_id = manager
-            .get("managementKeyId")
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| value.as_u64().map(|number| number.to_string()))
-            })
-            .ok_or_else(|| invalid("Mini claim management key absent"))?;
-        for signer in &self.signers {
-            if signer.key_id != key_id {
-                return Err(invalid("v3 claim signer key differs from Mini pin"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("v3 claim signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 
     fn checked_plan_slots<'a>(
@@ -156,7 +112,7 @@ impl FixedLaunchClaimSigners {
             || text(view, "authorizationOperationId")? != begin.authorization_operation_id
             || text(view, "originalIndex")? != *original_index
             || text(view, "queryNonce")? != *query_nonce
-            || text(view, "app")? != self.app
+            || text(view, "app")? != self.selector.app
             || text(view, "managementSubject")? != self.management_subject
             || text(view, "originalBeginTransactionId")? != begin.transaction_id
             || text(view, "originalBeginEventId")? != begin.event_id
@@ -219,8 +175,8 @@ impl FixedLaunchClaimSigners {
             .get("slots")
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("v3 claim signing slots absent"))?;
-        if slots.len() != self.signers.len() {
-            return Err(invalid("v3 claim signer count differs"));
+        if slots.len() > self.signers.len() {
+            return Err(invalid("v3 claim signing slot count exceeds custody pins"));
         }
         Ok(slots)
     }
@@ -284,7 +240,7 @@ pub(crate) fn assemble_once(
     }))?;
     write_new(attempt_dir, "op68-requested.json", &active)?;
     write_new(parent, "lifecycle-claim-v3-active.json", &active)?;
-    let reply = operator.invoke(68, &request)?;
+    let reply = operator.invoke(68, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op68-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 68, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
@@ -356,11 +312,11 @@ fn checked_committed(
         || text(view, "frameByteCount")? != committed.len().to_string()
         || text(view, "originalClaimHex")? != hex(&assembled.ingress)
         || text(view, "originalBeginHex")? != hex(&begin.ingress)
-        || text(view, "app")? != fixed.app
+        || text(view, "app")? != fixed.selector.app
         || text(view, "kind")? != kind
         || text(view, "clientOperationId")? != begin.client_operation_id
         || text(view, "authorizationOperationId")? != begin.authorization_operation_id
-        || text(view, "packageManifest")? != fixed.package_manifest
+        || text(view, "packageManifest")? != fixed.selector.package_manifest
         || text(view, "snapshotManifest")? != begin.snapshot_manifest
         || text(view, "processGeneration")? != begin.process_generation
         || text(view, "processIdentityHex")? != begin.process_identity_hex
@@ -503,6 +459,7 @@ fn verified_physical_begin(
     event_id: &str,
 ) -> io::Result<VerifiedBegin> {
     let app: u64 = fixed
+        .selector
         .app
         .parse()
         .map_err(|_| invalid("v3 claimed app exceeds host unit range"))?;
@@ -663,8 +620,7 @@ mod tests {
         };
         let fixed = FixedLaunchClaimSigners {
             protocol: "mini-spk-resident-claim-management-v1".into(),
-            app: "5".into(),
-            package_manifest: "6".into(),
+            selector: crate::lifecycle_selector::test_selector("5", "6", "1006"),
             management_subject: "4".into(),
             signers: vec![],
         };
@@ -745,8 +701,7 @@ mod tests {
         };
         let fixed = FixedLaunchClaimSigners {
             protocol: "mini-spk-resident-claim-management-v1".into(),
-            app: "5".into(),
-            package_manifest: "6".into(),
+            selector: crate::lifecycle_selector::test_selector("5", "6", "1006"),
             management_subject: "4".into(),
             signers: vec![],
         };
@@ -810,8 +765,7 @@ mod tests {
         };
         let fixed = FixedLaunchClaimSigners {
             protocol: "mini-spk-resident-claim-management-v1".into(),
-            app: "5".into(),
-            package_manifest: "6".into(),
+            selector: crate::lifecycle_selector::test_selector("5", "6", "1006"),
             management_subject: "4".into(),
             signers: vec![],
         };

@@ -274,128 +274,103 @@ instance : FromJson CompletionCustodianKeySettings where
 instance : ToJson CompletionCustodianKeySettings where
   toJson value := .str (Minidregg.Host.Json.encodeHex value.bytes)
 
-/-- Fixed operator custody for source-derived lifecycle completion signing.
-Incoming op44 requests contain only exact BEGIN, claim and physical report
-bytes; they cannot select this management identity or capabilities. -/
-structure CompletionManagementSettings where
-  app : Nat
-  packageManifest : Nat
+/-- Operator-pinned lifecycle management identity. It is one signing subject
+and key for every application the operator manages; it names no application.
+Each lifecycle authoring request (ops 44/50/52/66/68/70) carries a
+`LifecycleSelector` naming the application resources and the management
+capabilities. The selector confers nothing: the receiver's current app and
+package law (`request/subject == managementSubject`, linking the exact package
+and snapshot manifests) and capability admission decide whether this identity
+may manage that application. -/
+structure LifecycleManagementSettings where
   managementSubject : Nat
   managementKeyId : Nat
+  deriving ToJson
+
+instance : FromJson LifecycleManagementSettings where
+  fromJson? json := do
+    let object ← json.getObj?
+    let expected := ["managementSubject", "managementKeyId"]
+    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
+    unless actual.length == expected.length && actual.all expected.contains do
+      throw "lifecycleManagement has missing or unknown fields"
+    return ⟨← json.getObjValAs? Nat "managementSubject",
+      ← json.getObjValAs? Nat "managementKeyId"⟩
+
+/-- Request-supplied application coordinates for one lifecycle authoring call.
+Fields are canonical decimal strings so full-width identifiers are exact. -/
+structure LifecycleSelector where
+  app : Nat
+  packageManifest : Nat
+  snapshotManifest : Nat
   appCapability : Nat
   appObserveCapability : Nat
   packageCapability : Nat
   packageObserveCapability : Nat
-  deriving ToJson
 
-instance : FromJson CompletionManagementSettings where
+def canonicalDecimal? (text : String) : Option Nat :=
+  if text.isEmpty || text.length > 78 || (text.length > 1 && text.front == '0') ||
+      !text.all Char.isDigit then none
+  else text.toNat?
+
+instance : FromJson LifecycleSelector where
   fromJson? json := do
     let object ← json.getObj?
-    let expected := ["app", "packageManifest", "managementSubject",
-      "managementKeyId", "appCapability", "appObserveCapability",
-      "packageCapability", "packageObserveCapability"]
+    let expected := ["app", "packageManifest", "snapshotManifest", "appCapability",
+      "appObserveCapability", "packageCapability", "packageObserveCapability"]
     let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
     unless actual.length == expected.length && actual.all expected.contains do
-      throw "completionManagement has missing or unknown fields"
-    return ⟨← json.getObjValAs? Nat "app",
-      ← json.getObjValAs? Nat "packageManifest",
-      ← json.getObjValAs? Nat "managementSubject",
-      ← json.getObjValAs? Nat "managementKeyId",
-      ← json.getObjValAs? Nat "appCapability",
-      ← json.getObjValAs? Nat "appObserveCapability",
-      ← json.getObjValAs? Nat "packageCapability",
-      ← json.getObjValAs? Nat "packageObserveCapability"⟩
+      throw "lifecycle selector has missing or unknown fields"
+    let field := fun (name : String) => do
+      let text ← json.getObjValAs? String name
+      let some value := canonicalDecimal? text
+        | throw s!"lifecycle selector {name} is not a canonical decimal"
+      pure value
+    return ⟨← field "app", ← field "packageManifest", ← field "snapshotManifest",
+      ← field "appCapability", ← field "appObserveCapability",
+      ← field "packageCapability", ← field "packageObserveCapability"⟩
 
-def CompletionManagementSettings.pin (settings : CompletionManagementSettings) :
+def LifecycleSelector.parse (bytes : List UInt8) : Except String LifecycleSelector := do
+  unless 0 < bytes.length && bytes.length ≤ 4096 do
+    throw "lifecycle selector size refused"
+  let some text := String.fromUTF8? (ByteArray.mk bytes.toArray)
+    | throw "lifecycle selector is not UTF-8"
+  let json ← Minidregg.Host.Json.parse text
+  fromJson? json
+
+def LifecycleSelector.completionPin (selector : LifecycleSelector)
+    (management : LifecycleManagementSettings) :
     ApplicationLifecycleCompletionOperator.Pin :=
-  { app := settings.app
-    packageManifest := settings.packageManifest
-    managementSubject := settings.managementSubject
-    managementKeyId := settings.managementKeyId
-    appCapability := ⟨settings.appCapability⟩
-    appObserveCapability := ⟨settings.appObserveCapability⟩
-    packageCapability := ⟨settings.packageCapability⟩
-    packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
+  { app := selector.app
+    packageManifest := selector.packageManifest
+    managementSubject := management.managementSubject
+    managementKeyId := management.managementKeyId
+    appCapability := ⟨selector.appCapability⟩
+    appObserveCapability := ⟨selector.appObserveCapability⟩
+    packageCapability := ⟨selector.packageCapability⟩
+    packageObserveCapability := ⟨selector.packageObserveCapability⟩ }
 
-/-- Operator-pinned management identity for a current-image INSTALL/START
-BEGIN-v2 signing plan. Incoming op50 requests cannot select these resources,
-subject, key, or capabilities. -/
-structure ResidentBeginManagementSettings where
-  app : Nat
-  packageManifest : Nat
-  snapshotManifest : Nat
-  managementSubject : Nat
-  managementKeyId : Nat
-  appCapability : Nat
-  packageObserveCapability : Nat
-  deriving ToJson
-
-instance : FromJson ResidentBeginManagementSettings where
-  fromJson? json := do
-    let object ← json.getObj?
-    let expected := ["app", "packageManifest", "snapshotManifest",
-      "managementSubject", "managementKeyId", "appCapability",
-      "packageObserveCapability"]
-    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
-    unless actual.length == expected.length && actual.all expected.contains do
-      throw "residentBeginManagement has missing or unknown fields"
-    return ⟨← json.getObjValAs? Nat "app",
-      ← json.getObjValAs? Nat "packageManifest",
-      ← json.getObjValAs? Nat "snapshotManifest",
-      ← json.getObjValAs? Nat "managementSubject",
-      ← json.getObjValAs? Nat "managementKeyId",
-      ← json.getObjValAs? Nat "appCapability",
-      ← json.getObjValAs? Nat "packageObserveCapability"⟩
-
-def ResidentBeginManagementSettings.pin (settings : ResidentBeginManagementSettings) :
+def LifecycleSelector.beginPin (selector : LifecycleSelector)
+    (management : LifecycleManagementSettings) :
     ApplicationLifecycleBeginOperator.Pin :=
-  { app := settings.app
-    packageManifest := settings.packageManifest
-    snapshotManifest := settings.snapshotManifest
-    managementSubject := settings.managementSubject
-    managementKeyId := settings.managementKeyId
-    appCapability := ⟨settings.appCapability⟩
-    packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
+  { app := selector.app
+    packageManifest := selector.packageManifest
+    snapshotManifest := selector.snapshotManifest
+    managementSubject := management.managementSubject
+    managementKeyId := management.managementKeyId
+    appCapability := ⟨selector.appCapability⟩
+    packageObserveCapability := ⟨selector.packageObserveCapability⟩ }
 
-/-- Fixed operator custody for a descriptor-bound one-shot claim plan. The
-caller may name the historical BEGIN index and query nonce, but cannot select
-the app or management signing authority. -/
-structure ResidentClaimManagementSettings where
-  app : Nat
-  packageManifest : Nat
-  managementSubject : Nat
-  managementKeyId : Nat
-  appCapability : Nat
-  appObserveCapability : Nat
-  packageObserveCapability : Nat
-  deriving ToJson
-
-instance : FromJson ResidentClaimManagementSettings where
-  fromJson? json := do
-    let object ← json.getObj?
-    let expected := ["app", "packageManifest", "managementSubject",
-      "managementKeyId", "appCapability", "appObserveCapability",
-      "packageObserveCapability"]
-    let actual := object.foldl (init := []) (fun fields key _ => key :: fields)
-    unless actual.length == expected.length && actual.all expected.contains do
-      throw "residentClaimManagement has missing or unknown fields"
-    return ⟨← json.getObjValAs? Nat "app",
-      ← json.getObjValAs? Nat "packageManifest",
-      ← json.getObjValAs? Nat "managementSubject",
-      ← json.getObjValAs? Nat "managementKeyId",
-      ← json.getObjValAs? Nat "appCapability",
-      ← json.getObjValAs? Nat "appObserveCapability",
-      ← json.getObjValAs? Nat "packageObserveCapability"⟩
-
-def ResidentClaimManagementSettings.pin (settings : ResidentClaimManagementSettings) :
+def LifecycleSelector.claimPin (selector : LifecycleSelector)
+    (management : LifecycleManagementSettings) :
     ApplicationLifecycleClaimOperator.Pin :=
-  { app := settings.app
-    packageManifest := settings.packageManifest
-    managementSubject := settings.managementSubject
-    managementKeyId := settings.managementKeyId
-    appCapability := ⟨settings.appCapability⟩
-    appObserveCapability := ⟨settings.appObserveCapability⟩
-    packageObserveCapability := ⟨settings.packageObserveCapability⟩ }
+  { app := selector.app
+    packageManifest := selector.packageManifest
+    managementSubject := management.managementSubject
+    managementKeyId := management.managementKeyId
+    appCapability := ⟨selector.appCapability⟩
+    appObserveCapability := ⟨selector.appObserveCapability⟩
+    packageObserveCapability := ⟨selector.packageObserveCapability⟩ }
 
 /-- Operator custody pins all non-HTTP selectors and the reserve/charge cap
 before any event21 signing headers are exposed. HTTP bytes and the fresh
@@ -525,9 +500,7 @@ structure Settings where
   providerServices : Option (List ProviderMeteringSettings) := none
   grainBirthTariff : Option GrainBirthTariffSettings := none
   completionCustodianKey : Option CompletionCustodianKeySettings := none
-  completionManagement : Option CompletionManagementSettings := none
-  residentBeginManagement : Option ResidentBeginManagementSettings := none
-  residentClaimManagement : Option ResidentClaimManagementSettings := none
+  lifecycleManagement : Option LifecycleManagementSettings := none
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
   agentLifetimeDispatchServices : Option (List AgentLifetimeDispatchFixedSettings) := none
@@ -613,6 +586,13 @@ def Settings.lifetimeDispatchPins (settings : Settings) : Except String
 def loadSettings (path : System.FilePath) : IO Settings := do
   let text ← IO.FS.readFile path
   let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
+  -- The single-application lifecycle pins were replaced by one management
+  -- identity plus per-request selectors. An old config must not load as if
+  -- its application pins still bounded what this operator may author.
+  for legacy in ["completionManagement", "residentBeginManagement",
+      "residentClaimManagement"] do
+    if (json.getObjVal? legacy).toOption.isSome then
+      throw (IO.userError s!"legacy single-application lifecycle pin {legacy} is no longer accepted; use lifecycleManagement")
   let settings : Settings ← IO.ofExcept (fromJson? json)
   discard <| IO.ofExcept settings.providerMeteringPin
   discard <| IO.ofExcept settings.providerServicePins
@@ -5261,13 +5241,15 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((43 : UInt8),
                               FnConsumerNamespaceRegistration.ingressCodec.encode ingress)
                         | 44 =>
-                            let some custody := settings.completionManagement
+                            let some management := settings.lifecycleManagement
                               | return ((255 : UInt8), failure "application-lifecycle-completion-author"
-                                  "completion management pin is not configured")
+                                  "lifecycle management identity is not configured")
+                            let (selectorBytes, request) ← splitPair payload
+                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
                               (← ApplicationLifecycleCompletionOperator.prepareRequestVerified
-                                pinnedConfig session.verified custody.pin payload)
+                                pinnedConfig session.verified (selector.completionPin management) request)
                             let bytes := ApplicationLifecycleCompletionOperator.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle completion plan exceeds host frame bound")
@@ -5284,13 +5266,15 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "lifecycle completion ingress exceeds host frame bound")
                             return ((45 : UInt8), ingress)
                         | 50 =>
-                            let some custody := settings.residentBeginManagement
+                            let some management := settings.lifecycleManagement
                               | return ((255 : UInt8), failure "application-lifecycle-resident-begin-author"
-                                  "resident BEGIN management pin is not configured")
+                                  "lifecycle management identity is not configured")
+                            let (selectorBytes, request) ← splitPair payload
+                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationLifecycleBeginOperator.prepareRequestVerified
-                                pinnedConfig session.verified custody.pin payload
+                                pinnedConfig session.verified (selector.beginPin management) request
                             let bytes := ApplicationLifecycleBeginOperator.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resident BEGIN plan exceeds host frame bound")
@@ -5307,13 +5291,15 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "resident BEGIN ingress exceeds host frame bound")
                             return ((51 : UInt8), ingress)
                         | 52 =>
-                            let some custody := settings.residentClaimManagement
+                            let some management := settings.lifecycleManagement
                               | return ((255 : UInt8), failure "application-lifecycle-claim-author"
-                                  "resident claim management pin is not configured")
+                                  "lifecycle management identity is not configured")
+                            let (selectorBytes, request) ← splitPair payload
+                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationLifecycleClaimOperator.prepareRequestVerified
-                                pinnedConfig session.verified custody.pin payload
+                                pinnedConfig session.verified (selector.claimPin management) request
                             let bytes := ApplicationLifecycleClaimOperator.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "lifecycle claim plan exceeds host frame bound")
@@ -5330,26 +5316,29 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "lifecycle claim ingress exceeds host frame bound")
                             return ((53 : UInt8), ingress)
                         | 66 =>
-                            let some custody := settings.residentBeginManagement
+                            let some management := settings.lifecycleManagement
                               | return ((255 : UInt8), failure "application-lifecycle-launch-begin-author"
-                                  "resident BEGIN management pin is not configured")
+                                  "lifecycle management identity is not configured")
+                            let (selectorBytes, payload) ← splitPair payload
+                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
+                            let pin := selector.beginPin management
                             let session ← sessionCurrent pinnedConfig state
                             let bytes ← if let some request :=
                                 ApplicationLifecycleLaunchBeginAuthoring.requestCodec.decode payload then
                               if request.kind == .stop then do
                                 let plan ← IO.ofExcept <|
                                   ApplicationLifecycleLaunchBeginAuthoring.prepareStopRequestVerified
-                                    pinnedConfig session.verified custody.pin payload
+                                    pinnedConfig session.verified pin payload
                                 pure (ApplicationLifecycleLaunchBeginAuthoring.stopPlanCodec.encode plan)
                               else do
                                 let plan ← IO.ofExcept <|
                                   ApplicationLifecycleLaunchBeginAuthoring.prepareVerified
-                                    pinnedConfig session.verified custody.pin request
+                                    pinnedConfig session.verified pin request
                                 pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
                             else do
                               let plan ← IO.ofExcept <|
                                 (← ApplicationLifecycleLaunchBeginAuthoring.prepareContinueRequestVerified
-                                  pinnedConfig session.verified custody.pin payload)
+                                  pinnedConfig session.verified pin payload)
                               pure (ApplicationLifecycleLaunchBeginAuthoring.planCodec.encode plan)
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch BEGIN plan exceeds host frame bound")
@@ -5372,13 +5361,15 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "launch BEGIN ingress exceeds host frame bound")
                             return ((67 : UInt8), ingress)
                         | 68 =>
-                            let some custody := settings.residentClaimManagement
+                            let some management := settings.lifecycleManagement
                               | return ((255 : UInt8), failure "application-lifecycle-launch-claim-author"
-                                  "resident claim management pin is not configured")
+                                  "lifecycle management identity is not configured")
+                            let (selectorBytes, payload) ← splitPair payload
+                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
                               ApplicationLifecycleLaunchClaimAuthoring.prepareRequestVerified
-                                pinnedConfig session.verified custody.pin payload
+                                pinnedConfig session.verified (selector.claimPin management) payload
                             let bytes := ApplicationLifecycleLaunchClaimAuthoring.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch claim plan exceeds host frame bound")
@@ -5395,13 +5386,15 @@ def run (arguments : List String) : IO UInt32 := do
                               throw (IO.userError "launch claim ingress exceeds host frame bound")
                             return ((69 : UInt8), ingress)
                         | 70 =>
-                            let some custody := settings.completionManagement
+                            let some management := settings.lifecycleManagement
                               | return ((255 : UInt8), failure "application-lifecycle-launch-completion-author"
-                                  "completion management pin is not configured")
+                                  "lifecycle management identity is not configured")
+                            let (selectorBytes, payload) ← splitPair payload
+                            let selector ← IO.ofExcept (LifecycleSelector.parse selectorBytes)
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
                               (← ApplicationLifecycleLaunchCompletionAuthoring.prepareRequestVerified
-                                pinnedConfig session.verified custody.pin payload)
+                                pinnedConfig session.verified (selector.completionPin management) payload)
                             let bytes := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch completion plan exceeds host frame bound")

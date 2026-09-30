@@ -1,0 +1,17 @@
+{
+  "protocol": "mini-spk-grain-placement-v1",
+  "selector": {
+    "app": "9201",
+    "packageManifest": "9202",
+    "snapshotManifest": "9203",
+    "appCapability": "3201",
+    "appObserveCapability": "3201",
+    "packageCapability": "3203",
+    "packageObserveCapability": "3203"
+  },
+  "rawSha256": "bc424d5fd3cf60977cacdac328adfbee4de94f88d57383ad38b3d472c0c24f2d",
+  "appUid": 992,
+  "appGid": 977,
+  "volumeResource": "9201",
+  "volumeMib": 512
+}

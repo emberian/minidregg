@@ -9,7 +9,6 @@
 use crate::dispatch_author::{private_signing_key, SignerPin};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::Journal;
-use crate::sandbox::open_protected_directory;
 use ed25519_dalek::Signer;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -132,8 +131,7 @@ pub(crate) struct PreparedRunningReport {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedCompletionSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
@@ -159,53 +157,16 @@ fn text_field<'a>(value: &'a Value, name: &str) -> io::Result<&'a str> {
 
 impl FixedCompletionSigners {
     pub(crate) fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-completion-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || ![&self.app, &self.package_manifest, &self.management_subject]
-                .iter()
-                .all(|value| canonical_decimal(value))
-        {
+        if self.protocol != "mini-spk-completion-management-v1" {
             return Err(invalid("fixed completion signer profile refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("completionManagement")
-            .ok_or_else(|| invalid("Mini completion management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            if decimal(
-                manager
-                    .get(field)
-                    .ok_or_else(|| invalid("Mini management pin field absent"))?,
-            )? != *expected
-            {
-                return Err(invalid("fixed signer differs from Mini management pin"));
-            }
-        }
-        let management_key = decimal(
-            manager
-                .get("managementKeyId")
-                .ok_or_else(|| invalid("Mini management key pin absent"))?,
-        )?;
-        for pin in &self.signers {
-            if pin.key_id != management_key {
-                return Err(invalid(
-                    "completion signer differs from Mini management key",
-                ));
-            }
-            open_protected_directory(
-                pin.seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("management signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 
     fn sign_plan(&self, inspection: &Value, plan: &[u8]) -> io::Result<Value> {
@@ -217,8 +178,8 @@ impl FixedCompletionSigners {
         };
         if field("type")? != "application-lifecycle-completion-operator-plan-v1"
             || field("canonicalPlan")? != hex(plan)
-            || field("app")? != self.app
-            || field("packageManifest")? != self.package_manifest
+            || field("app")? != self.selector.app
+            || field("packageManifest")? != self.selector.package_manifest
             || field("managementSubject")? != self.management_subject
         {
             return Err(invalid(
@@ -306,7 +267,7 @@ pub(crate) fn assemble_current_completion(
         &attempt_dir.join("operator-request.bin"),
     )?;
     write_new(attempt_dir, "op44-requested.bin", &request)?;
-    let reply = operator.invoke(44, &request)?;
+    let reply = operator.invoke(44, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op44-frame.bin", &reply)?;
     let plan = reply_payload(&reply, 44)?;
     let plan_path = write_new(attempt_dir, "operator-plan.bin", plan)?;

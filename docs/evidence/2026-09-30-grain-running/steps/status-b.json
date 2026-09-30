@@ -1,0 +1,15 @@
+{
+  "app": "9201",
+  "appUid": 992,
+  "installCompleted": true,
+  "installPrepared": true,
+  "protocol": "mini-spk-grain-status-v1",
+  "rawSha256": "bc424d5fd3cf60977cacdac328adfbee4de94f88d57383ad38b3d472c0c24f2d",
+  "runs": [
+    {
+      "generation": "2",
+      "state": "running",
+      "unitActiveState": "active"
+    }
+  ]
+}

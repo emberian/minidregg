@@ -592,62 +592,23 @@ fn prepare_report(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StopCompletionSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl StopCompletionSigners {
     fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-completion-management-v1"
-            || !decimal(&self.app)
-            || !decimal(&self.package_manifest)
-            || !decimal(&self.management_subject)
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-        {
+        if self.protocol != "mini-spk-completion-management-v1" {
             return Err(invalid("STOP completion management custody refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let pin = config
-            .get("completionManagement")
-            .ok_or_else(|| invalid("STOP completion management pin absent"))?;
-        let number = |name| -> io::Result<String> {
-            let value = pin
-                .get(name)
-                .ok_or_else(|| invalid("STOP management coordinate absent"))?;
-            let result = value
-                .as_str()
-                .map(str::to_owned)
-                .or_else(|| value.as_u64().map(|number| number.to_string()))
-                .ok_or_else(|| invalid("STOP management coordinate malformed"))?;
-            if !decimal(&result) {
-                return Err(invalid("STOP management coordinate noncanonical"));
-            }
-            Ok(result)
-        };
-        if number("app")? != self.app
-            || number("packageManifest")? != self.package_manifest
-            || number("managementSubject")? != self.management_subject
-        {
-            return Err(invalid("STOP completion signer differs from Mini pin"));
-        }
-        let key_id = number("managementKeyId")?;
-        for signer in &self.signers {
-            if signer.key_id != key_id {
-                return Err(invalid("STOP completion key differs"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("STOP completion signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 }
 
@@ -841,7 +802,7 @@ fn assemble_completion(
         ("originalBeginHex", hex(&evidence.begin)),
         ("originalClaimHex", hex(&evidence.claim_ingress)),
         ("signedReportHex", hex(signed_report)),
-        ("app", fixed.app.clone()),
+        ("app", fixed.selector.app.clone()),
         ("descriptorRoot", launch.descriptor().root.clone()),
         ("volumeIdHex", evidence.target.volume_id_hex().to_owned()),
     ] {
@@ -864,7 +825,7 @@ fn assemble_completion(
         "lifecycle-stop-completion-v2-active.json",
         &active,
     )?;
-    let reply = operator.invoke(70, &request)?;
+    let reply = operator.invoke(70, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 70, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
@@ -884,7 +845,7 @@ fn assemble_completion(
         ("originalBeginHex", hex(&evidence.begin)),
         ("originalClaimHex", hex(&evidence.claim_ingress)),
         ("signedReportHex", hex(signed_report)),
-        ("app", fixed.app.clone()),
+        ("app", fixed.selector.app.clone()),
         ("descriptorRoot", launch.descriptor().root.clone()),
         ("volumeIdHex", evidence.target.volume_id_hex().to_owned()),
     ] {
@@ -907,7 +868,7 @@ fn assemble_completion(
         .get("slots")
         .and_then(Value::as_array)
         .ok_or_else(|| invalid("STOP completion signing slots absent"))?;
-    if slots.len() != fixed.signers.len() {
+    if slots.len() > fixed.signers.len() {
         return Err(invalid("STOP completion slot count differs"));
     }
     let signatures = sign_pinned_slots(slots, &fixed.signers)?;
@@ -1151,6 +1112,54 @@ fn complete_once_or_lookup(
 /// Callable operator entry for one resident STOP. The supervisor intentionally
 /// has no API for choosing the old running unit, source event, or volume.
 /// Those come from the current verifier-selected STOP plan and exact journal.
+/// A STOP BEGIN attempt that only authored its op66 plan changed nothing in
+/// Mini: no signatures were assembled (op67) and nothing was submitted (op22).
+/// Set it and its matching active marker aside so a new STOP may begin. Any
+/// later marker, a differing active marker or other attempt keeps the audit.
+fn set_aside_pure_begin(config: &StopConfig, journal_dir: &Path) -> io::Result<()> {
+    let attempt = &config.begin_attempt_dir;
+    let active = journal_dir.join("lifecycle-stop-begin-v3-active.json");
+    if absent(attempt)? {
+        return Ok(());
+    }
+    private_dir(attempt)?;
+    for later in ["op67-requested.bin", "op22-requested.json", "begin-v3.bin"] {
+        if !absent(&attempt.join(later))? {
+            return Ok(());
+        }
+    }
+    for other in [
+        &config.claim_author_attempt_dir,
+        &config.claim_attempt_dir,
+        &config.report_attempt_dir,
+        &config.completion_attempt_dir,
+        &journal_dir.join("lifecycle-stop-claim-v3-active.json"),
+    ] {
+        if !absent(other)? {
+            return Ok(());
+        }
+    }
+    let requested = attempt.join("op66-requested.json");
+    if absent(&requested)? {
+        return Ok(());
+    }
+    let marker = read_private(&requested, MAX_CONFIG)?;
+    if !absent(&active)? && read_private(&active, MAX_CONFIG)? != marker {
+        return Ok(());
+    }
+    let mut random = [0u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    let aside = journal_dir.join(format!("stop-begin-plan-only-{}", hex(&random)));
+    fs::rename(attempt, &aside)?;
+    File::open(journal_dir)?.sync_all()?;
+    if !absent(&active)? {
+        fs::rename(&active, aside.join("active-marker.json"))?;
+        File::open(&aside)?.sync_all()?;
+        File::open(journal_dir)?.sync_all()?;
+    }
+    Ok(())
+}
+
 pub fn run(config_path: &Path) -> io::Result<()> {
     let (config, pins) = load_config(config_path)?;
     private_dir(&pins.journal_dir)?;
@@ -1200,6 +1209,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .phase;
     let audit = match phase {
         Phase::Running => {
+            set_aside_pure_begin(&config, &pins.journal_dir)?;
             // Any prior source or physical marker makes this run an uncertain
             // attempt. It cannot be converted into a second fresh op26.
             for path in [

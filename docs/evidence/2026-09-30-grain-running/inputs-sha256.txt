@@ -1,0 +1,14 @@
+3e9cb1ca488995a0a591ea6db8f9b4b6b59d9629782daf6babb294620c74513d  /opt/minidregg-m6-20260930/bin/mini
+c84004123ae6f02654cb6749e4105e351199618aaefce5755a2a0bb10bd0892b  /opt/minidregg-m6-20260930/bin/minidregg-credential-signature-verifier
+8492ac555a293f863ea2a36b7a9ce66abeec2c6250b70d4254a81359d59dce11  /opt/minidregg-m6-20260930/bin/minidregg-host-m6
+0f564b90a33096ca785a02e1070c297c6bad3c307ac0102bf3ed8a44ecf6a4d3  /opt/minidregg-m6-20260930/bin/minidregg-host-m6c
+2ddd9d0aec87d1db8c403b381612b77ee0d4df412e42da08547307918b11d022  /opt/minidregg-m6-20260930/bin/minidregg-host-m6d
+f045a79e3185e720fa919d1eaec2ece4e8f4de9c9a2c56cc2d77fae3ab3a73bc  /opt/minidregg-m6-20260930/bin/minidregg-host-m6e
+ad03aede839259c1884383fc97f141a3fe106ba2f2cbae0df6f7916676fe193f  /opt/minidregg-m6-20260930/bin/minidregg-link-sqlite-store
+09ea24b85ba227bb3d602442d9e4cc1bafbf9af1ccbebf43c727c24fa1315fb0  /opt/minidregg-m6-20260930/bin/spk-host
+3f007ea5813b4a680e491147ea72428574dc0421b1728dd8f143295494d465ba  /opt/minidregg-m6-20260930/bin/spk-ingest
+dd8b21bc4d4e35a2bde489d70c9c66365dab5aecee7b6a83214ed2bf913c3bd4  /opt/minidregg-m6-20260930/bin/spk-smoke
+c9c03020be2ba9029cf7193c3f63047d2bea295c710c4774c6c81a9109d4f13b  /opt/minidregg-m6-20260930/bin/spk-var-volume
+7bbffeb19f312d5503232e1502f0f97f2ac4ffcb51dec47d9a58bffbad1f12d5  /usr/bin/bwrap
+bc424d5fd3cf60977cacdac328adfbee4de94f88d57383ad38b3d472c0c24f2d  /home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk
+318eb912958bd594327df66f380945cdd5c10b959cff5b1d0384fd9557e0ae8a  /var/lib/minidregg/grains/m6-r4/store/base/workroom/deployment/pinned-config.json

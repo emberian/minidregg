@@ -180,7 +180,12 @@ struct ResidentConfig {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum StartAction {
     Create { index: usize },
     Continue { created_index: String },
@@ -1165,7 +1170,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     journal.arm(claim.physical_begin.clone())?;
     journal.request_launch(&claim.physical_begin)?;
     let mut resident = prepared.start(&journal, &claim.physical_begin)?;
-    let view = resident.rpc.get_view_info(Duration::from_secs(300))?;
+    // The RPC driver bounds every call (MAX_CALL_TIME, 30 s); a longer
+    // request is refused before it is sent, after the claim is committed.
+    let view = resident.rpc.get_view_info(Duration::from_secs(30))?;
     if view != bridge.view_info {
         return Err(invalid(
             "running app ViewInfo differs from signed bridge schema",

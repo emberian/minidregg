@@ -1,0 +1,1 @@
+/opt/minidregg-m6-20260930/bin/spk-host grain install /var/lib/minidregg/grains/m6-r4/host/grain-host.json /var/lib/minidregg/grains/m6-r4/evidence/a-app-author/source.json /var/lib/minidregg/grains/m6-r4/evidence/a-app-attempt/outcome.json /home/ember/build/mini-product-20260930/m6-grain/inputs/sntfy.spk

@@ -1,0 +1,26 @@
+{
+  "appUids": [
+    994,
+    993,
+    992,
+    991
+  ],
+  "bwrap": "/usr/bin/bwrap",
+  "bwrapSha256": "7bbffeb19f312d5503232e1502f0f97f2ac4ffcb51dec47d9a58bffbad1f12d5",
+  "completionSemantics": "59097258844702178791501792674914968914456860055583945665465394522587790278467",
+  "ingestHelper": "/opt/minidregg-m6-20260930/bin/spk-ingest",
+  "managementKeyEpoch": "2",
+  "managementPublicKeyHex": "52850c469aa4a7949c12c7394b62b67d2164395b4cd39d783429f0ce485a0b66",
+  "managementSubject": "8",
+  "miniConfig": "/var/lib/minidregg/grains/m6-r4/store/base/workroom/deployment/pinned-config.json",
+  "miniConfigSha256": "318eb912958bd594327df66f380945cdd5c10b959cff5b1d0384fd9557e0ae8a",
+  "miniHost": "/opt/minidregg-m6-20260930/bin/minidregg-host-m6e",
+  "miniHostSha256": "f045a79e3185e720fa919d1eaec2ece4e8f4de9c9a2c56cc2d77fae3ab3a73bc",
+  "miniOperatorSocket": "/var/lib/minidregg/grains/m6-r4/sock/operator/host.sock",
+  "protocol": "mini-spk-grain-host-v1",
+  "spkHost": "/opt/minidregg-m6-20260930/bin/spk-host",
+  "spkHostSha256": "09ea24b85ba227bb3d602442d9e4cc1bafbf9af1ccbebf43c727c24fa1315fb0",
+  "stateRoot": "/var/lib/minidregg/grains/m6-r4/host",
+  "volumeHelper": "/opt/minidregg-m6-20260930/bin/spk-var-volume",
+  "volumeMib": 512
+}

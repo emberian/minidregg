@@ -44,60 +44,23 @@ fn number(value: &Value) -> io::Result<String> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedLaunchCompletionSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl FixedLaunchCompletionSigners {
     pub(crate) fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-completion-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || ![&self.app, &self.package_manifest, &self.management_subject]
-                .iter()
-                .all(|value| decimal(value))
-        {
+        if self.protocol != "mini-spk-completion-management-v1" {
             return Err(invalid("v3 completion fixed management refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("completionManagement")
-            .ok_or_else(|| invalid("Mini completion management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            if number(
-                manager
-                    .get(field)
-                    .ok_or_else(|| invalid("Mini completion management field absent"))?,
-            )? != *expected
-            {
-                return Err(invalid("v3 completion signer differs from Mini pin"));
-            }
-        }
-        let key_id = number(
-            manager
-                .get("managementKeyId")
-                .ok_or_else(|| invalid("Mini completion management key absent"))?,
-        )?;
-        for signer in &self.signers {
-            if signer.key_id != key_id {
-                return Err(invalid("v3 completion signer key differs from Mini pin"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("v3 completion signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 
     fn checked_slots<'a>(
@@ -111,7 +74,7 @@ impl FixedLaunchCompletionSigners {
             || text(view, "originalBeginHex")? != hex(evidence.begin)
             || text(view, "originalClaimHex")? != hex(evidence.claim)
             || text(view, "signedReportHex")? != hex(evidence.report)
-            || text(view, "app")? != self.app
+            || text(view, "app")? != self.selector.app
             || text(view, "descriptorRoot")? != evidence.descriptor_root
             || text(view, "volumeIdHex")? != evidence.volume_id_hex
             || !lowercase_hex(text(view, "sourceHex")?)
@@ -130,8 +93,8 @@ impl FixedLaunchCompletionSigners {
             .get("slots")
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("v3 completion signing slots absent"))?;
-        if slots.len() != self.signers.len() {
-            return Err(invalid("v3 completion signing slot count differs"));
+        if slots.len() > self.signers.len() {
+            return Err(invalid("v3 completion signing slot count exceeds custody pins"));
         }
         Ok(slots)
     }
@@ -255,7 +218,7 @@ pub(crate) fn assemble_once(
         || text(&request_view, "originalBeginHex")? != hex(&begin.ingress)
         || text(&request_view, "originalClaimHex")? != hex(&claim.claim_ingress)
         || text(&request_view, "signedReportHex")? != hex(signed_report)
-        || text(&request_view, "app")? != fixed.app
+        || text(&request_view, "app")? != fixed.selector.app
         || text(&request_view, "descriptorRoot")? != launch.descriptor().root
         || text(&request_view, "volumeIdHex")? != begin.volume_id_hex
     {
@@ -272,7 +235,7 @@ pub(crate) fn assemble_once(
     }))?;
     write_new(attempt_dir, "op70-requested.json", &active)?;
     write_new(parent, "lifecycle-completion-v2-active.json", &active)?;
-    let reply = operator.invoke(70, &request)?;
+    let reply = operator.invoke(70, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 70, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
@@ -536,8 +499,7 @@ mod tests {
     fn completion_plan_pins_exact_begin_claim_report_and_volume() {
         let fixed = FixedLaunchCompletionSigners {
             protocol: "mini-spk-completion-management-v1".into(),
-            app: "5".into(),
-            package_manifest: "6".into(),
+            selector: crate::lifecycle_selector::test_selector("5", "6", "1006"),
             management_subject: "7".into(),
             signers: vec![],
         };

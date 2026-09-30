@@ -171,67 +171,23 @@ pub(crate) fn allocate_operation_id(ledger: &Path) -> io::Result<String> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedBeginSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
-    snapshot_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl FixedBeginSigners {
     pub(crate) fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-resident-begin-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || ![
-                &self.app,
-                &self.package_manifest,
-                &self.snapshot_manifest,
-                &self.management_subject,
-            ]
-            .iter()
-            .all(|value| decimal(value))
-        {
+        if self.protocol != "mini-spk-resident-begin-management-v1" {
             return Err(invalid("fixed resident BEGIN management refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("residentBeginManagement")
-            .ok_or_else(|| invalid("Mini resident BEGIN management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("snapshotManifest", &self.snapshot_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            if number(
-                manager
-                    .get(field)
-                    .ok_or_else(|| invalid("BEGIN management field absent"))?,
-            )? != *expected
-            {
-                return Err(invalid("BEGIN signer differs from Mini pin"));
-            }
-        }
-        let key = number(
-            manager
-                .get("managementKeyId")
-                .ok_or_else(|| invalid("BEGIN management key absent"))?,
-        )?;
-        for signer in &self.signers {
-            if signer.key_id != key {
-                return Err(invalid("BEGIN signer key differs from Mini pin"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("BEGIN signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 
     fn sign_plan(
@@ -247,9 +203,9 @@ impl FixedBeginSigners {
             || text(inspection, "descriptor")? != hex(descriptor)
             || text(inspection, "kind")? != kind
             || text(inspection, "operationId")? != operation_id
-            || text(inspection, "app")? != self.app
-            || text(inspection, "packageManifest")? != self.package_manifest
-            || text(inspection, "snapshotManifest")? != self.snapshot_manifest
+            || text(inspection, "app")? != self.selector.app
+            || text(inspection, "packageManifest")? != self.selector.package_manifest
+            || text(inspection, "snapshotManifest")? != self.selector.snapshot_manifest
             || text(inspection, "managementSubject")? != self.management_subject
         {
             return Err(invalid("resident BEGIN plan differs from fixed request"));
@@ -368,7 +324,7 @@ pub(crate) fn submit_once(
         &attempt_dir.join("request.bin"),
     )?;
     write_new(attempt_dir, "op50-requested.bin", &request)?;
-    let reply = operator.invoke(50, &request)?;
+    let reply = operator.invoke(50, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op50-frame.bin", &reply)?;
     let plan = reply_payload(&reply, 50)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
@@ -459,60 +415,23 @@ pub(crate) fn submit_once(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedClaimSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl FixedClaimSigners {
     pub(crate) fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-resident-claim-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || ![&self.app, &self.package_manifest, &self.management_subject]
-                .iter()
-                .all(|value| decimal(value))
-        {
+        if self.protocol != "mini-spk-resident-claim-management-v1" {
             return Err(invalid("fixed resident CLAIM management refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("residentClaimManagement")
-            .ok_or_else(|| invalid("Mini resident CLAIM management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            if number(
-                manager
-                    .get(field)
-                    .ok_or_else(|| invalid("CLAIM management field absent"))?,
-            )? != *expected
-            {
-                return Err(invalid("CLAIM signer differs from Mini pin"));
-            }
-        }
-        let key = number(
-            manager
-                .get("managementKeyId")
-                .ok_or_else(|| invalid("CLAIM management key absent"))?,
-        )?;
-        for signer in &self.signers {
-            if signer.key_id != key {
-                return Err(invalid("CLAIM signer key differs from Mini pin"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("CLAIM signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 
     fn sign_plan(
@@ -526,7 +445,7 @@ impl FixedClaimSigners {
         if text(inspection, "type")? != "application-lifecycle-claim-operator-plan-v1"
             || text(inspection, "canonicalPlan")? != hex(plan)
             || text(inspection, "originalBegin")? != hex(&begin.ingress)
-            || text(inspection, "app")? != self.app
+            || text(inspection, "app")? != self.selector.app
             || text(inspection, "originalIndex")? != original_index
             || text(inspection, "queryNonce")? != query_nonce
             || text(inspection, "managementSubject")? != self.management_subject
@@ -599,7 +518,7 @@ pub(crate) fn assemble_current_claim(
         &attempt_dir.join("request.bin"),
     )?;
     write_new(attempt_dir, "op52-requested.bin", &canonical)?;
-    let reply = operator.invoke(52, &canonical)?;
+    let reply = operator.invoke(52, &fixed.selector.framed(&canonical)?)?;
     write_new(attempt_dir, "op52-frame.bin", &reply)?;
     let plan = reply_payload(&reply, 52)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;

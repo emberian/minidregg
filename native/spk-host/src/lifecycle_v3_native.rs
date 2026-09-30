@@ -117,12 +117,27 @@ fn hold_begin_attempt(parent: &Path, active: &[u8]) -> io::Result<()> {
 
 /// Sign only source-inspected, ordered Ed25519 headers pinned to exact
 /// operator custody. Both v3 BEGIN and v3 claim plans use this slot grammar.
+///
+/// The pins are the complete set of slots this custody may ever sign. One
+/// management custody serves INSTALL, START and STOP plans whose slot lists
+/// differ (only INSTALL writes the package manifest), so each Mini slot must
+/// match exactly one distinct pin by role and index, never the reverse.
 pub(crate) fn sign_pinned_slots(slots: &[Value], pins: &[SignerPin]) -> io::Result<Value> {
-    if slots.len() != pins.len() {
-        return Err(invalid("v3 lifecycle signing slot count differs"));
+    if slots.is_empty() || slots.len() > pins.len() {
+        return Err(invalid("v3 lifecycle signing slot count exceeds custody pins"));
     }
+    let mut used = vec![false; pins.len()];
     let mut signatures = Vec::with_capacity(slots.len());
-    for (slot, pin) in slots.iter().zip(pins) {
+    for slot in slots {
+        let role = text(slot, "role")?;
+        let index = text(slot, "index")?;
+        let position = pins
+            .iter()
+            .enumerate()
+            .position(|(at, pin)| !used[at] && pin.role == role && pin.index == index)
+            .ok_or_else(|| invalid("v3 lifecycle slot has no custody pin"))?;
+        used[position] = true;
+        let pin = &pins[position];
         let signing = slot
             .get("signing")
             .ok_or_else(|| invalid("v3 lifecycle signing decode absent"))?;
@@ -248,74 +263,23 @@ pub(crate) struct CreatedWitness {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedLaunchBeginSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
-    snapshot_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl FixedLaunchBeginSigners {
     pub(crate) fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-resident-begin-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || ![
-                &self.app,
-                &self.package_manifest,
-                &self.snapshot_manifest,
-                &self.management_subject,
-            ]
-            .iter()
-            .all(|value| decimal(value))
-        {
+        if self.protocol != "mini-spk-resident-begin-management-v1" {
             return Err(invalid("v3 BEGIN fixed management custody refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("residentBeginManagement")
-            .ok_or_else(|| invalid("Mini BEGIN management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("snapshotManifest", &self.snapshot_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            let value = manager
-                .get(field)
-                .ok_or_else(|| invalid("Mini BEGIN management coordinate absent"))?;
-            let value = value
-                .as_str()
-                .map(str::to_owned)
-                .or_else(|| value.as_u64().map(|number| number.to_string()))
-                .ok_or_else(|| invalid("Mini BEGIN management coordinate malformed"))?;
-            if value != *expected {
-                return Err(invalid("v3 BEGIN fixed management differs from Mini pin"));
-            }
-        }
-        let key_id = manager
-            .get("managementKeyId")
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| value.as_u64().map(|n| n.to_string()))
-            })
-            .ok_or_else(|| invalid("Mini BEGIN management key absent"))?;
-        for signer in &self.signers {
-            if signer.key_id != key_id {
-                return Err(invalid("v3 BEGIN signer key differs from Mini pin"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("v3 BEGIN signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 
     fn checked_plan_slots<'a>(
@@ -345,9 +309,9 @@ impl FixedLaunchBeginSigners {
             || text(nested, "kind")? != action.kind()
             || text(nested, "clientOperationId")? != client_operation_id
             || text(nested, "descriptorHex")? != hex(&descriptor.canonical)
-            || text(view, "app")? != self.app
-            || text(view, "packageManifest")? != self.package_manifest
-            || text(view, "snapshotManifest")? != self.snapshot_manifest
+            || text(view, "app")? != self.selector.app
+            || text(view, "packageManifest")? != self.selector.package_manifest
+            || text(view, "snapshotManifest")? != self.selector.snapshot_manifest
             || text(view, "managementSubject")? != self.management_subject
             || text(view, "descriptorRoot")? != descriptor.root
             || text(view, "packageRoot")? != descriptor.root
@@ -399,8 +363,8 @@ impl FixedLaunchBeginSigners {
             .get("slots")
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("v3 BEGIN signing slots absent"))?;
-        if slots.len() != self.signers.len() {
-            return Err(invalid("v3 BEGIN signing slot count differs"));
+        if slots.len() > self.signers.len() {
+            return Err(invalid("v3 BEGIN signing slot count exceeds custody pins"));
         }
         Ok((slots, prior_create))
     }
@@ -473,7 +437,7 @@ pub(crate) fn submit_once(
     // already been allocated; recovery must inspect the original attempt and
     // never call submit_once again.
     hold_begin_attempt(parent, &active)?;
-    let reply = operator.invoke(66, &request)?;
+    let reply = operator.invoke(66, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 66, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
@@ -640,6 +604,25 @@ mod tests {
     }
 
     #[test]
+    fn pinned_slots_are_a_permitted_set_not_a_sequence() {
+        let pin = |role: &str, index: &str| SignerPin {
+            role: role.into(),
+            index: index.into(),
+            key_id: "8008".into(),
+            key_epoch: "2".into(),
+            public_key_hex: "00".repeat(32),
+            seed_path: "/nonexistent/seed".into(),
+        };
+        let slot = |role: &str, index: &str| json!({"role":role,"index":index});
+        let pins = [pin("4", "0"), pin("1", "0")];
+        assert!(sign_pinned_slots(&[], &pins).is_err());
+        assert!(sign_pinned_slots(&[slot("9", "0")], &pins).is_err());
+        assert!(
+            sign_pinned_slots(&[slot("4", "0"), slot("1", "0"), slot("4", "0")], &pins).is_err()
+        );
+    }
+
+    #[test]
     fn v3_plan_and_ingress_reply_tags_cannot_accept_historical_payload() {
         let mut reply = ((PLAN_TAG.len() + 2) as u32).to_le_bytes().to_vec();
         reply.push(66);
@@ -675,9 +658,7 @@ mod tests {
         let launch = launch();
         let fixed = FixedLaunchBeginSigners {
             protocol: "mini-spk-resident-begin-management-v1".into(),
-            app: "8401".into(),
-            package_manifest: "17".into(),
-            snapshot_manifest: "18".into(),
+            selector: crate::lifecycle_selector::test_selector("8401", "17", "18"),
             management_subject: "19".into(),
             signers: vec![],
         };
@@ -744,9 +725,7 @@ mod tests {
         let launch = launch();
         let fixed = FixedLaunchBeginSigners {
             protocol: "mini-spk-resident-begin-management-v1".into(),
-            app: "8401".into(),
-            package_manifest: "17".into(),
-            snapshot_manifest: "18".into(),
+            selector: crate::lifecycle_selector::test_selector("8401", "17", "18"),
             management_subject: "19".into(),
             signers: vec![],
         };
