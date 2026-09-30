@@ -198,12 +198,14 @@ WRAP
   mkdir -p "$out/work/sdk/MacOSX.sdk"
   target_env=$(printf '%s' "$target" | tr 'a-z-' 'A-Z_')
   target_cc=$(printf '%s' "$target" | tr '-' '_')
-  # The Mach-O UUID hashes the linked objects, and ring's C objects carry the
-  # build directory in their debug info; map it away so the bytes do not
-  # depend on --out (as the Linux build's RUSTFLAGS already do for Rust).
+  # The linker computes the Mach-O LC_UUID over the file it writes, and that
+  # file's debug map (N_OSO stabs) names every object by its path under --out;
+  # rustc strips the stabs afterwards but the UUID stays. -Wl,-S keeps the
+  # debug map out of the link, so the bytes do not depend on --out. The prefix
+  # maps keep the build directory out of ring's C objects as well.
   (cd "$src" && env "CC_$target_cc=$cc_wrap" \
       "CFLAGS_$target_cc=-ffile-prefix-map=$out=/out -ffile-prefix-map=$cargo_home=/cargo" \
-      RUSTFLAGS="--remap-path-prefix=$out=/out $RUSTFLAGS" \
+      RUSTFLAGS="--remap-path-prefix=$out=/out $RUSTFLAGS -C link-arg=-Wl,-S" \
       "CARGO_TARGET_${target_env}_LINKER=$cc_wrap" SDKROOT="$out/work/sdk/MacOSX.sdk" \
       ZIG_GLOBAL_CACHE_DIR="$out/work/zig-cache" ZIG_LOCAL_CACHE_DIR="$out/work/zig-cache" \
     cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
