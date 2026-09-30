@@ -19,6 +19,7 @@ open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
 open Minidregg.Theory.IndexedProgram
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 set_option maxHeartbeats 800000
@@ -30,29 +31,22 @@ variable {F : Type} [Field F] {deployment : Deployment}
 
 def layout (prepared : PreparedInvocation deployment profile ambient durable command) :
     CellLayout (Incidence command) where
-  schema | some i => command.targets[i].schema | none => CredentialAuthorityState.schema.{0,0}
-  fieldDecidableEq incidence := by cases incidence <;> dsimp <;> infer_instance
-  resourceDecidableEq incidence := by cases incidence <;> dsimp <;> infer_instance
-  materializer | some i => command.targets[i].materializer | none => CredentialAuthorityStateCodec.materializer
+  storeLayout | some i => command.targets[i].layout | none => CredentialAuthorityState.layout
+  materializer | some i => command.targets[i].materializer | none => CredentialAuthorityCell.materializer
   projectAuthority := fun _ _ => prepared.authority.snapshot.authState
-  cellId | some i => ⟨command.targets[i].target⟩ | none => deployment.authorityAnchor.catalogueCellId
-
-local instance fieldEq (prepared : PreparedInvocation deployment profile ambient durable command)
-    (incidence : Incidence command) : DecidableEq ((layout prepared).schema incidence).Field :=
-  (layout prepared).fieldDecidableEq incidence
-local instance resourceEq (prepared : PreparedInvocation deployment profile ambient durable command)
-    (incidence : Incidence command) : DecidableEq ((layout prepared).schema incidence).Resource :=
-  (layout prepared).resourceDecidableEq incidence
+  cellId | some i => ⟨command.targets[i].target⟩ | none => CredentialAuthorityDomainReceiver.cellIdOf deployment
 
 def rawLeg (prepared : PreparedInvocation deployment profile ambient durable command)
     (source : Source command) : (incidence : Incidence command) → CandidateLegData (layout prepared) incidence
   | some i =>
       { pre := (prepared.targets i).pre
-        patch := targetPatch command.targets[i] (prepared.targets i).pre (prepared.targets i).post
+        patch := targetPatch prepared.authority.snapshot profile.semantics command command.targets[i]
+          (prepared.targets i).pre
         request := ⟨command.targets[i].kind, requestFor prepared.authority.snapshot profile.semantics
           ambient command command.targets[i] (prepared.targets i).pre.root⟩
         Postcondition := fun logical =>
-          (targetPatch command.targets[i] (prepared.targets i).pre (prepared.targets i).post).ResultAt
+          (targetPatch prepared.authority.snapshot profile.semantics command command.targets[i]
+            (prepared.targets i).pre).ResultAt
             (prepared.targets i).pre.logical logical }
   | none =>
       { pre := prepared.authority.snapshot.cell
@@ -65,11 +59,11 @@ def rawLeg (prepared : PreparedInvocation deployment profile ambient durable com
 
 def bindFamily (prepared : PreparedInvocation deployment profile ambient durable command)
     (source : Source command) (_portals : Incidence command → Portal) :
-    (incidence : Incidence command) → SemanticLegBinding.{0,0,0,0,0,0} (rawLeg prepared source incidence)
+    (incidence : Incidence command) → SemanticLegBinding.{0,0,0,0,0} (rawLeg prepared source incidence)
   | some i =>
       { Nullifier := Nat
         family := by
-          change SemanticEffectFamily command.targets[i].schema command.targets[i].materializer Nat
+          change SemanticEffectFamily command.targets[i].layout command.targets[i].materializer Nat
           exact targetFamily deployment prepared.authority.snapshot profile.semantics ambient command
             command.targets[i] (prepared.targets i).pre
         declaration := ()
@@ -89,15 +83,16 @@ def bindFamily (prepared : PreparedInvocation deployment profile ambient durable
         postconditionExact := fun _ => Iff.rfl }
 
 def plan (prepared : PreparedInvocation deployment profile ambient durable command) :
-    PreparationPlan.{0,0,0,0,0,0} (layout prepared) (Source command) where
+    PreparationPlan.{0,0,0,0,0} (layout prepared) (Source command) where
   leg := rawLeg prepared
   jointDigest := fun source => effectsDigest prepared.authority.snapshot.domain profile.semantics source.val
   legEffectsDigest := fun source _ => effectsDigest prepared.authority.snapshot.domain profile.semantics source.val
   bindFamily := bindFamily prepared
 
-def validated (prepared : PreparedInvocation deployment profile ambient durable command) :
+theorem validated (prepared : PreparedInvocation deployment profile ambient durable command) :
     (incidence : Incidence command) → ValidatedPatch ((layout prepared).materializer incidence)
       (rawLeg prepared ⟨command, rfl⟩ incidence).pre
+      (rawLeg prepared ⟨command, rfl⟩ incidence).request.2.preStateRoot
       (rawLeg prepared ⟨command, rfl⟩ incidence).patch
   | some i => (prepared.targets i).candidate.validated
   | none => prepared.marker.prepared.validated
@@ -119,7 +114,6 @@ def prepareTuple (prepared : PreparedInvocation deployment profile ambient durab
         validated := validated prepared
         postconditions := postconditions prepared
         cellIdsDistinct := distinct
-        requestRoots := by intro incidence; cases incidence <;> rfl
         requestEffects := by intro incidence; cases incidence <;> rfl }
   else none
 
@@ -128,18 +122,12 @@ abbrev bytesSlots := ResourceAuthorityProjection.bytesSlots
 /-- Exact scalar/content projection from the committed old and candidate final
 states. Local names remain convenient; joint names expose every declared
 participant without granting a view of unrelated cells. -/
-def targetProjection (target : Target) (before after : LogicalState target.schema) : List (String × Int) := by
+def targetProjection (target : Target) (before after : Store target.layout) : List (String × Int) := by
   cases target with
   | mk kind id capability version root payload observe =>
     cases payload with
-    | scalar _ => exact
-        match DeclaredEffectPageMaterializer.pageAt before, DeclaredEffectPageMaterializer.pageAt after with
-        | some old, some post => DeclaredResourceProjection.project id old post
-        | _, _ => []
-    | content content => exact
-        match HyperdocumentContentPageMaterializer.pageAt before, HyperdocumentContentPageMaterializer.pageAt after with
-        | some old, some post => ContentResource.project old post content
-        | _, _ => []
+    | scalar _ => exact DeclaredResourceProjection.project id before after
+    | content content => exact ContentResource.project before after content
 
 def incidenceTarget (command : Command) : Incidence command → Target
   | some i => command.targets[i]
@@ -180,7 +168,7 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
 
 def projectWithCommon (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (common : List (String × Int))
-    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
   let localIndex := primary.getD (firstIndex prepared)
   let localSlots :=
@@ -194,13 +182,13 @@ def projectWithCommon (prepared : PreparedInvocation deployment profile ambient 
 
 def project (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command)
-    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
   projectWithCommon prepared primary (projectCommonSlots prepared primary source) logical
 
 theorem projectWithCommon_exact (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command)
-    (logical : (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence)) :
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     projectWithCommon prepared primary (projectCommonSlots prepared primary source) logical =
       project prepared primary source logical := rfl
 
@@ -223,7 +211,7 @@ theorem policyPreCell_exact (prepared : PreparedInvocation deployment profile am
   cases incidence <;> rfl
 
 def policyPostState (prepared : PreparedInvocation deployment profile ambient durable command) :
-    (incidence : Incidence command) → LogicalState ((layout prepared).schema incidence) :=
+    (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence) :=
   fun incidence => ((validated prepared incidence).apply).logical
 
 theorem policyPostState_exact (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -526,10 +514,8 @@ theorem AcceptedInvocation.post_exact [DecidableEq F]
 theorem AcceptedInvocation.authority_post_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) :
-    accepted.declaration.post accepted.legs none = prepared.physical.post.cell := by
-  rw [accepted.post_exact none]
-  apply Materialized.ext
-  exact prepared.physical.projection_exact.symm
+    accepted.declaration.post accepted.legs none = prepared.authorityPost :=
+  accepted.post_exact none
 
 theorem AcceptedInvocation.policy_view_exact [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
@@ -550,15 +536,16 @@ def targetWrite (prepared : PreparedInvocation deployment profile ambient durabl
     (packTarget command.targets[i] (prepared.targets i).candidate.post)
 
 def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  (List.finRange command.targets.length).map (targetWrite prepared) ++ prepared.physical.writes ++
-    prepared.physical.placement.auxiliaryCreates.map ResourceBirthController.birthWrite
+  (List.finRange command.targets.length).map (targetWrite prepared) ++
+    prepared.authority.writes prepared.authorityPost
 
 def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
   (List.finRange command.targets.length).map fun i =>
     ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩
 
 def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  sourceGuards prepared ++ readonlyGuards prepared.authority.readGuards (writes prepared)
+  sourceGuards prepared ++ prepared.authority.readGuards.filter fun guard =>
+    guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : PreparedInvocation deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
@@ -574,7 +561,7 @@ def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient
   let ws := writes prepared
   let ids := ws.map DataWrite.cellId
   let source := sourceGuards prepared
-  let guards := source ++ readonlyGuards prepared.authority.readGuards ws
+  let guards := source ++ prepared.authority.readGuards.filter fun guard => guard.cellId ∉ ids
   decide ids.Nodup &&
   decide (∀ write ∈ ws, write.expectedPre = durable.snapshot.model.roots write.cellId) &&
   decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
@@ -595,15 +582,12 @@ instance physicalShapeDecidable (prepared : PreparedInvocation deployment profil
 theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
   intro write member
-  rcases List.mem_append.mp member with ordinary | allocation
-  · rcases List.mem_append.mp ordinary with target | authority
-    · obtain ⟨i, _, rfl⟩ := List.mem_map.mp target
-      rfl
-    · exact CredentialAuthorityDomainReceiver.planWrites_roots_bound
-        deployment.authorityAnchor durable.snapshot prepared.authority.snapshot.catalogue
-        prepared.marker.prepared.postPages prepared.physical.placement write authority
-  · obtain ⟨creation, _, rfl⟩ := List.mem_map.mp allocation
-    exact ResourceBirthController.birthWrite_root_bound creation
+  rcases List.mem_append.mp member with target | authority
+  · obtain ⟨i, _, rfl⟩ := List.mem_map.mp target
+    rfl
+  · simp only [Loaded.writes, List.mem_singleton] at authority
+    subst write
+    exact prepared.authority.write_root_bound _
 
 theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) :
@@ -611,7 +595,7 @@ theorem readGuards_readonly (prepared : PreparedInvocation deployment profile am
   intro guard member
   rcases List.mem_append.mp member with source | authority
   · exact shape.2.2.2.1 guard source
-  · exact of_decide_eq_true (List.mem_filter.mp authority).2
+  · simpa using (List.mem_filter.mp authority).2
 
 def signedIngressFrame : List UInt8 := "DREGG/RESOURCE/SIGNED-INGRESS".toUTF8.toList ++ [3]
 abbrev SignedIngress := Digest × Digest × SignedCommand
@@ -679,7 +663,8 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     (_accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ws := writes prepared
-  let guards := sourceGuards prepared ++ readonlyGuards prepared.authority.readGuards ws
+  let guards := sourceGuards prepared ++ prepared.authority.readGuards.filter fun guard =>
+    guard.cellId ∉ ws.map DataWrite.cellId
   { transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
     writes := ws
     readGuards := guards
