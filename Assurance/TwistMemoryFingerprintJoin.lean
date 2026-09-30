@@ -61,8 +61,6 @@ set_option autoImplicit false
 universe u v w
 
 variable {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
     {F : Type} [Field F] [Fintype F] [DecidableEq F]
 
 /-- **The Twist memory-soundness join (adversarial pole).**  A row list that
@@ -82,7 +80,7 @@ theorem nonContinuous_fingerprint_accept_le
       t ∈ readTuples stamp rows + auditTuples post fstamp dom})
     (disc : ∀ row ∈ rows, DisciplineRowValid row)
     (addr : ∀ row ∈ rows, busAddress row ∈ dom)
-    (outside : ∀ a : Address L, a ∉ dom → post.lookup a = pre.lookup a)
+    (outside : ∀ a : Address L, a ∉ dom → post a = pre a)
     (stampDisc : ∀ i < rows.length, stamp i ≤ i)
     (htc : ¬ TwistContinuity pre rows post) :
     uniformProb (F × F) (fun γ =>
@@ -110,7 +108,8 @@ with Lemma 2's completeness and the fingerprint's completeness. -/
 theorem exactBusClaim_fingerprint_accepted
     {Root : Type} {materializer : Materializer L Root}
     {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {expectedPreRoot : Root}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     (bus : ExactBusClaim accepted) {dom : Finset (Address L)}
     (addr : ∀ row ∈ bus.rows, busAddress row ∈ dom)
     (vec : MemTuple L → Polynomial F) :
@@ -121,7 +120,7 @@ theorem exactBusClaim_fingerprint_accepted
             writeTuples 0 bus.rows) =
         fingerprintProd vec γ
           (readTuples stamp bus.rows +
-            auditTuples accepted.post.logical fstamp dom) := by
+            auditTuples accepted.apply.logical fstamp dom) := by
   obtain ⟨stamp, fstamp, hdisc, heq⟩ := ExactBusClaim.grandEquation bus addr
   exact ⟨stamp, fstamp, hdisc,
     fun γ => fingerprint_multiset_complete vec γ heq⟩
@@ -137,7 +136,7 @@ could never supply. -/
 
 namespace Teeth
 
-open Minidregg.Kernel.SparseAuthenticatedState.Example
+open Minidregg.Theory.Store.Example
 open Minidregg.Compiler.TwistMultisetInvariant.Teeth
 open Minidregg.Selvage.MultisetFingerprintExample
 

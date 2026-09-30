@@ -73,7 +73,7 @@ audited address, carrying the store's exact content there.  Instantiated at
 the pre-state it is Nebula's `IS`; at the post-state it is `FS`. -/
 def auditTuples (store : Store L) (stampOf : Address L → Nat)
     (dom : Finset (Address L)) : Multiset (MemTuple L) :=
-  dom.val.map fun a => ⟨a, store.lookup a, stampOf a⟩
+  dom.val.map fun a => ⟨a, store a, stampOf a⟩
 
 /-- Nebula's `WS`: the tuple produced by each row, stamped by list position
 (`base + i + 1` for the `i`-th row) -- the verifier's counter, not prover data. -/
@@ -153,12 +153,11 @@ theorem stamp_lt_of_mem_writeTuples {base : Nat} {rows : List (BusRow L)}
 
 /-- Peel the audited tuple of one member address off the audit multiset. -/
 theorem auditTuples_cons_erase {store : Store L} {stampOf : Address L → Nat}
-    {dom : Finset (Address L)} [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
+    {dom : Finset (Address L)}
     {a : Address L} (ha : a ∈ dom) :
     auditTuples store stampOf dom =
-      (⟨a, store.lookup a, stampOf a⟩ : MemTuple L) ::ₘ
-        (dom.erase a).val.map fun b => ⟨b, store.lookup b, stampOf b⟩ := by
+      (⟨a, store a, stampOf a⟩ : MemTuple L) ::ₘ
+        (dom.erase a).val.map fun b => ⟨b, store b, stampOf b⟩ := by
   unfold auditTuples
   conv_lhs => rw [← Multiset.cons_erase (show a ∈ dom.val from ha)]
   rw [Multiset.map_cons, Finset.erase_val]
@@ -168,16 +167,14 @@ the produced write tuple consed onto the untouched remainder of the pre-state
 audit.  Shared by both directions of Lemma 2. -/
 theorem auditTuples_step {pre middle : Store L} {row : BusRow L}
     {istamp : Address L → Nat} {dom : Finset (Address L)} {n : Nat}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
     (ha : busAddress row ∈ dom)
-    (hafter : middle.lookup (busAddress row) = row.after)
+    (hafter : middle (busAddress row) = row.after)
     (hframe : ∀ b : Address L, b ≠ busAddress row →
-      middle.lookup b = pre.lookup b) :
+      middle b = pre b) :
     auditTuples middle (Function.update istamp (busAddress row) n) dom =
       (⟨busAddress row, row.after, n⟩ : MemTuple L) ::ₘ
         (dom.erase (busAddress row)).val.map
-          fun b => ⟨b, pre.lookup b, istamp b⟩ := by
+          fun b => ⟨b, pre b, istamp b⟩ := by
   rw [auditTuples_cons_erase ha]
   congr 1
   · rw [hafter]
@@ -191,8 +188,8 @@ theorem auditTuples_step {pre middle : Store L} {row : BusRow L}
 theorem lookup_eq_of_auditTuples_eq {pre post : Store L}
     {istamp fstamp : Address L → Nat} {dom : Finset (Address L)}
     (h : auditTuples pre istamp dom = auditTuples post fstamp dom)
-    {a : Address L} (ha : a ∈ dom) : post.lookup a = pre.lookup a := by
-  have hmem : (⟨a, pre.lookup a, istamp a⟩ : MemTuple L) ∈
+    {a : Address L} (ha : a ∈ dom) : post a = pre a := by
+  have hmem : (⟨a, pre a, istamp a⟩ : MemTuple L) ∈
       auditTuples post fstamp dom := by
     rw [← h]
     exact Multiset.mem_map_of_mem _ (show a ∈ dom.val from ha)
@@ -216,13 +213,11 @@ still, is sequentially consistent: `TwistContinuity` holds.  No hypothesis
 mentions how `rows` was produced -- this is the statement a committed bus is
 forced into. -/
 theorem twistContinuity_of_grandEquation
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
     {base : Nat} {pre post : Store L} {istamp fstamp : Address L → Nat}
     {dom : Finset (Address L)} {stamp : Nat → Nat} {rows : List (BusRow L)}
     (disc : ∀ row ∈ rows, DisciplineRowValid row)
     (addr : ∀ row ∈ rows, busAddress row ∈ dom)
-    (outside : ∀ a : Address L, a ∉ dom → post.lookup a = pre.lookup a)
+    (outside : ∀ a : Address L, a ∉ dom → post a = pre a)
     (stampDisc : ∀ i < rows.length, stamp i ≤ base + i)
     (eq : MemoryGrandEquation base pre post istamp fstamp dom stamp rows) :
     TwistContinuity pre rows post := by
@@ -231,11 +226,11 @@ theorem twistContinuity_of_grandEquation
       unfold MemoryGrandEquation at eq
       rw [writeTuples_nil, readTuples_nil, add_zero, zero_add] at eq
       have hstore : pre = post := by
-        apply Store.ext
-        intro space key
-        by_cases hmem : (⟨space, key⟩ : Address L) ∈ dom
+        apply DFinsupp.ext
+        intro a
+        by_cases hmem : a ∈ dom
         · exact (lookup_eq_of_auditTuples_eq eq hmem).symm
-        · exact (outside ⟨space, key⟩ hmem).symm
+        · exact (outside a hmem).symm
       cases hstore
       exact TwistContinuity.nil _
   | cons row rest ih =>
@@ -261,34 +256,34 @@ theorem twistContinuity_of_grandEquation
       simp only [MemTuple.mk.injEq] at heq
       obtain ⟨hb, hv, hs⟩ := heq
       subst hb
-      have hbefore : pre.lookup (busAddress row) = row.before := eq_of_heq hv
+      have hbefore : pre (busAddress row) = row.before := eq_of_heq hv
       -- the one-cell transition, with its frame
       have htrans : CellTransition pre
-          (pre.set row.space row.key row.after) row :=
-        ⟨hbefore, Store.set_eq pre row.space row.key row.after,
-          fun space key hne =>
-            Store.set_ne pre row.space row.key row.after space key hne⟩
+          (pre.set (busAddress row) row.after) row :=
+        ⟨hbefore, Minidregg.Theory.Store.Store.set_eq pre (busAddress row) row.after,
+          fun other hne =>
+            Minidregg.Theory.Store.Store.set_ne pre (busAddress row) row.after other hne⟩
       -- rearrange the equation into the tail's grand equation
-      have hstep : auditTuples (pre.set row.space row.key row.after)
+      have hstep : auditTuples (pre.set (busAddress row) row.after)
           (Function.update istamp (busAddress row) (base + 1)) dom =
           (⟨busAddress row, row.after, base + 1⟩ : MemTuple L) ::ₘ
             (dom.erase (busAddress row)).val.map
-              fun b => ⟨b, pre.lookup b, istamp b⟩ :=
+              fun b => ⟨b, pre b, istamp b⟩ :=
         auditTuples_step ha
-          (Store.set_eq pre row.space row.key row.after)
-          (fun b hne => Store.set_ne pre row.space row.key row.after b.1 b.2
+          (Minidregg.Theory.Store.Store.set_eq pre (busAddress row) row.after)
+          (fun b hne => Minidregg.Theory.Store.Store.set_ne pre (busAddress row) row.after b
             hne)
       rw [auditTuples_cons_erase (store := pre)
             (stampOf := istamp) ha, writeTuples_cons, readTuples_cons] at eq
       rw [Multiset.cons_add, Multiset.add_cons, Multiset.cons_add] at eq
-      rw [show (⟨busAddress row, pre.lookup (busAddress row),
+      rw [show (⟨busAddress row, pre (busAddress row),
             istamp (busAddress row)⟩ : MemTuple L) =
           ⟨busAddress row, row.before, stamp 0⟩ by rw [hbefore, hs]] at eq
       have eq' := (Multiset.cons_inj_right _).mp eq
       -- recurse on the tail at the updated store
       refine TwistContinuity.cons (disc row List.mem_cons_self) htrans
         (ih (base := base + 1)
-          (pre := pre.set row.space row.key row.after)
+          (pre := pre.set (busAddress row) row.after)
           (istamp := Function.update istamp (busAddress row) (base + 1))
           (stamp := fun i => stamp (i + 1))
           (fun r hr => disc r (List.mem_cons_of_mem _ hr))
@@ -301,7 +296,7 @@ theorem twistContinuity_of_grandEquation
             omega)
           ?_)
       · rw [outside a hnot]
-        refine (Store.set_ne pre row.space row.key row.after a.1 a.2 ?_).symm
+        refine (Minidregg.Theory.Store.Store.set_ne pre (busAddress row) row.after a ?_).symm
         intro h
         exact hnot (show a ∈ dom from by
           rw [show a = busAddress row from h]; exact ha)
@@ -317,8 +312,6 @@ equation hold.  Together with `TwistContinuity.of_busRelation` this says every
 accepted semantic execution passes the offline check -- Lemma 2's "if reads
 are consistent then such an FS exists". -/
 theorem grandEquation_of_twistContinuity
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
     {pre post : Store L} {rows : List (BusRow L)}
     (tc : TwistContinuity pre rows post) :
     ∀ {base : Nat} {istamp : Address L → Nat} {dom : Finset (Address L)},
@@ -358,17 +351,17 @@ theorem grandEquation_of_twistContinuity
             (Function.update istamp (busAddress row) (base + 1)) dom =
             (⟨busAddress row, row.after, base + 1⟩ : MemTuple L) ::ₘ
               (dom.erase (busAddress row)).val.map
-                fun b => ⟨b, pre.lookup b, istamp b⟩ :=
+                fun b => ⟨b, pre b, istamp b⟩ :=
           auditTuples_step ha htrans.after_exact
-            (fun b hne => htrans.frame b.1 b.2 hne)
-        have hbe : pre.lookup (busAddress row) = row.before :=
+            (fun b hne => htrans.frame b hne)
+        have hbe : pre (busAddress row) = row.before :=
           htrans.before_exact
         unfold MemoryGrandEquation at heq' ⊢
         rw [hstep, Multiset.cons_add] at heq'
         rw [auditTuples_cons_erase (store := pre) (stampOf := istamp) ha,
           writeTuples_cons, readTuples_cons]
         rw [Multiset.cons_add, Multiset.add_cons, Multiset.cons_add]
-        rw [show (⟨busAddress row, pre.lookup (busAddress row),
+        rw [show (⟨busAddress row, pre (busAddress row),
               istamp (busAddress row)⟩ : MemTuple L) =
             ⟨busAddress row, row.before,
               istamp (busAddress row)⟩ by rw [hbe]]
@@ -380,14 +373,12 @@ theorem _root_.Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.TwistConti
     {pre post : Store L}
     {rows : List (BusRow L)} (tc : TwistContinuity pre rows post)
     {a : Address L} (huntouched : ∀ row ∈ rows, busAddress row ≠ a) :
-    post.lookup a = pre.lookup a := by
+    post a = pre a := by
   induction tc with
   | nil => rfl
   | @cons pre middle post row rest _ htrans _ ih =>
       rw [ih fun r hr => huntouched r (List.mem_cons_of_mem _ hr)]
-      obtain ⟨space, key⟩ := a
-      exact htrans.frame space key
-        (Ne.symm (huntouched row List.mem_cons_self))
+      exact htrans.frame a (Ne.symm (huntouched row List.mem_cons_self))
 
 /-! ## The biconditional (Nebula Lemma 2, both directions, packaged) -/
 
@@ -398,13 +389,11 @@ outside the domain and some read/final stamps satisfy the stamp discipline
 and the grand equation.  `DisciplineRowValid` stays a hypothesis because it is
 checked row-locally by the shape constraints, never by the multiset argument. -/
 theorem twistContinuity_iff_grandEquation
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
     {pre post : Store L} {dom : Finset (Address L)} {rows : List (BusRow L)}
     (disc : ∀ row ∈ rows, DisciplineRowValid row)
     (addr : ∀ row ∈ rows, busAddress row ∈ dom) :
     TwistContinuity pre rows post ↔
-      ((∀ a : Address L, a ∉ dom → post.lookup a = pre.lookup a) ∧
+      ((∀ a : Address L, a ∉ dom → post a = pre a) ∧
         ∃ stamp fstamp, (∀ i < rows.length, stamp i ≤ i) ∧
           MemoryGrandEquation 0 pre post (fun _ => 0) fstamp dom stamp rows) := by
   constructor
@@ -425,12 +414,10 @@ fingerprint layer consumes: a non-continuous trace has NO stamps satisfying
 the invariant -- for every prover-supplied read/final stamp choice the two
 tuple multisets genuinely differ. -/
 theorem grandEquation_refuted_of_not_twistContinuity
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
     {pre post : Store L} {dom : Finset (Address L)} {rows : List (BusRow L)}
     (disc : ∀ row ∈ rows, DisciplineRowValid row)
     (addr : ∀ row ∈ rows, busAddress row ∈ dom)
-    (outside : ∀ a : Address L, a ∉ dom → post.lookup a = pre.lookup a)
+    (outside : ∀ a : Address L, a ∉ dom → post a = pre a)
     (htc : ¬ TwistContinuity pre rows post)
     {base : Nat} {istamp fstamp : Address L → Nat} {stamp : Nat → Nat}
     (stampDisc : ∀ i < rows.length, stamp i ≤ base + i) :
@@ -447,15 +434,14 @@ of the offline memory check, derived (never re-proved) from the bridge's
 `TwistContinuity.of_busRelation`. -/
 theorem _root_.Minidregg.Compiler.SparseAuthenticatedStateLogupBridge.ExactBusClaim.grandEquation
     {L : Layout.{u, v, w}} {Root : Type}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) → DecidableEq (L.Key space)]
     {materializer : Materializer L Root}
     {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {expectedPreRoot : Root}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     (bus : ExactBusClaim accepted) {dom : Finset (Address L)}
     (addr : ∀ row ∈ bus.rows, busAddress row ∈ dom) :
     ∃ stamp fstamp, (∀ i < bus.rows.length, stamp i ≤ i) ∧
-      MemoryGrandEquation 0 pre.logical accepted.post.logical
+      MemoryGrandEquation 0 pre.logical accepted.apply.logical
         (fun _ => 0) fstamp dom stamp bus.rows := by
   obtain ⟨stamp, fstamp, hdisc, heq⟩ :=
     grandEquation_of_twistContinuity
@@ -476,7 +462,7 @@ Three poles, all constructive:
 
 namespace Teeth
 
-open Minidregg.Kernel.SparseAuthenticatedState.Example
+open Minidregg.Theory.Store.Example
 
 /-- Strip stamps: the accounting a stampless checker sees. -/
 def stripStamps (m : Multiset (MemTuple layout)) : Multiset (MemTuple layout) :=
@@ -491,7 +477,7 @@ def heapVal (n : Nat) : layout.Value heapSpace := n
 
 /-- One RAM cell holding `some 0`. -/
 def cyclePre : Store layout :=
-  (0 : Store layout).set heapSpace heapKey (some (heapVal 0))
+  (0 : Store layout).set ⟨heapSpace, heapKey⟩ (some (heapVal 0))
 
 /-- The value-swap cycle: write `1 -> 2` then `2 -> 1` at a cell that actually
 holds `0`.  No read ever returned the last write, yet every VALUE that is
@@ -544,8 +530,9 @@ theorem cycle_not_continuous :
   cases h with
   | cons _ htrans _ =>
       have hbefore := htrans.before_exact
-      have hcell : cyclePre heapSpace heapKey = some (heapVal 0) :=
-        Store.set_eq (0 : Store layout) heapSpace heapKey (some (heapVal 0))
+      simp only [busAddress] at hbefore
+      have hcell : cyclePre ⟨heapSpace, heapKey⟩ = some (heapVal 0) :=
+        Minidregg.Theory.Store.Store.set_eq (0 : Store layout) ⟨heapSpace, heapKey⟩ (some (heapVal 0))
       rw [hcell] at hbefore
       exact absurd hbefore (by decide)
 
@@ -593,6 +580,7 @@ theorem stale_not_continuous :
           | cons _ htrans₃ _ =>
               have h₂ := htrans₂.after_exact
               have h₃ := htrans₃.before_exact
+              simp only [busAddress] at h₂ h₃
               rw [h₂] at h₃
               simp at h₃
 
@@ -612,19 +600,15 @@ theorem stale_read_after_free_refused
     (base := 0) (fun i hi => by simpa using stampDisc i hi)
 
 /-- An honest RAM lifetime: allocate, overwrite, read back, free. -/
-def honestOps : List (Op layout) :=
-  [Op.allocate heapSpace heapKey (heapVal 42),
-   Op.write heapSpace heapKey (heapVal 42) (heapVal 43),
-   Op.read heapSpace heapKey (some (heapVal 43)),
-   Op.free heapSpace heapKey (heapVal 43)]
+def honestOps : List (Minidregg.Theory.Store.Op layout) :=
+  [.allocate heapSpace heapKey (heapVal 42),
+   .write heapSpace heapKey (heapVal 42) (heapVal 43),
+   .read heapSpace heapKey (some (heapVal 43)),
+   .free heapSpace heapKey (heapVal 43)]
 
 theorem honestOps_valid :
-    Trace.ValidFrom (0 : Store layout) honestOps :=
-  ⟨⟨by decide, rfl⟩,
-   ⟨rfl, Store.set_eq _ _ _ _⟩,
-   Store.set_eq _ _ _ _,
-   ⟨rfl, Store.set_eq _ _ _ _⟩,
-   trivial⟩
+    Trace.ValidFrom (0 : Store layout) honestOps := by
+  decide
 
 theorem honestRows_addr :
     ∀ row ∈ Trace.busRows (0 : Store layout) honestOps,
