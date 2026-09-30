@@ -513,6 +513,11 @@ def fleetSubmitLoaded (config : Config) (opened : Opened config)
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.storage.transport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  -- The signed header names an authority root older than the loaded one: the
+  -- plan was made against an earlier image and nothing moved. That is the
+  -- typed contention outcome (re-plan against the new state), decided from the
+  -- header's root before any signature is examined.
+  | .rejected (.signature (.envelope .staleAuthority)) => return .contention
   | .rejected reason => return refused "fleet-turn" s!"{repr reason}"
   | .transactionConflict => return refused "replay" "transaction identity conflict"
   | .durableRejected reason => return refused "durable" s!"{repr reason}"
