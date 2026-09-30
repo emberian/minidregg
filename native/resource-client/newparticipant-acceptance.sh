@@ -62,6 +62,21 @@ cat >"$ROOT/genesis.json" <<EOF
    "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
 EOF
 
+# A hosted operator may enroll its own agent-grain subjects at genesis. The
+# only AgentGrain birth route on the current Host is the historical birth
+# intent, which Mini admits only against the genesis image, so a hosted
+# grain's owner and worker subjects must exist before any other event.
+if [ -n "${EXTRA_GENESIS_ENROLLMENTS:-}" ]; then
+  case "$EXTRA_GENESIS_ENROLLMENTS" in /*) ;; *) echo 'EXTRA_GENESIS_ENROLLMENTS must be absolute' >&2; exit 2;; esac
+  jq -e 'type == "array" and length > 0 and length <= 8 and
+    all(.[]; .key.subject != "7" and .accountId != "7")' \
+    "$EXTRA_GENESIS_ENROLLMENTS" >/dev/null ||
+    { echo 'extra genesis enrollments are invalid' >&2; exit 2; }
+  jq --slurpfile extra "$EXTRA_GENESIS_ENROLLMENTS" '.enrollments += $extra[0]' \
+    "$ROOT/genesis.json" >"$ROOT/genesis-extended.json"
+  mv "$ROOT/genesis-extended.json" "$ROOT/genesis.json"
+fi
+
 "$MINI" bootstrap --host "$HOST" --config "$ROOT/operator.json" \
   --source "$ROOT/genesis.json" --dir "$ROOT/deployment" \
   >"$ROOT/bootstrap.stdout"

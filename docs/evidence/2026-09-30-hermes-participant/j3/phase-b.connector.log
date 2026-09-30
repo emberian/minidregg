@@ -1,0 +1,15 @@
+attached soft to Mini grain 8751
+Hermes interrupted turn changed the transcript store; reloading its exact session ID after Mini reconciliation
+Hermes session reloaded; the interrupted last turn may be partial, so inspect its history before repeating effects
+step @attempts
+attempt 14 proposal 13: refused (absent-after-submitter-stop; restart-recovery)
+step @read shared
+read shared: {"1": "0"}
+step @write shared 2 1
+proposal 54 (create field 2 := 1)
+submission 55: performed (native-outcome)
+step @read shared
+read shared: {"1": "0", "2": "1"}
+step @attempts
+attempt 55 proposal 54: performed (native-outcome; submit)
+attempt 14 proposal 13: refused (absent-after-submitter-stop; restart-recovery)

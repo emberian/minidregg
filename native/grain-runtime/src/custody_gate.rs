@@ -74,6 +74,12 @@ impl CustodyGate {
         }
     }
 
+    /// No custody child is tracked: every child this gate spawned has been
+    /// reaped (or never existed).
+    pub fn is_idle(&self) -> bool {
+        self.child.lock().map(|slot| slot.is_none()).unwrap_or(false)
+    }
+
     pub fn run_capture(
         &self,
         cancelled: &AtomicBool,

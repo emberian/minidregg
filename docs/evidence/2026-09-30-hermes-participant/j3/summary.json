@@ -1,0 +1,95 @@
+{
+  "type": "mini-hermes-journey-v1",
+  "killedOperation": "14",
+  "friendSubject": "11925152333604001647",
+  "resolutions": [
+    {
+      "operationId": 14,
+      "proposalId": 13,
+      "intentSha256": "c06a5070218451a0d2351e482a1d9f040cee98505d4a89bb5bc33de680f5c40e",
+      "attempt": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/resource-workspace/attempts/14",
+      "resolution": "refused",
+      "basis": "absent-after-submitter-stop",
+      "outcome": {
+        "type": "absent"
+      },
+      "toolCharge": "1",
+      "resolvedBy": "restart-recovery",
+      "authored": "13-x14"
+    },
+    {
+      "operationId": 55,
+      "proposalId": 54,
+      "intentSha256": "625fa60629378c8a3849733dcbc1b5b542de73782addbb8291a7d55200bd1d9d",
+      "attempt": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/resource-workspace/attempts/55",
+      "resolution": "performed",
+      "basis": "native-outcome",
+      "outcome": {
+        "acceptedCount": "20",
+        "confirmation": "installed",
+        "eventId": "93277656410751775929666408127536270493216897002135532010930093385611322608074",
+        "imageBoundary": "42994306518370151379184009593743753077566156216631871033561799486672655364698",
+        "transactionId": "102250889723252268063497390658783792887155123367653091728350031259872887586635",
+        "type": "confirmed"
+      },
+      "toolCharge": "1",
+      "resolvedBy": "submit",
+      "authored": "54-x55"
+    },
+    {
+      "operationId": 82,
+      "proposalId": 81,
+      "intentSha256": "41c3c81a976cf16199c7af4dd929d70c67ed6f478cfd3acc4ee910eab0df4f2c",
+      "attempt": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/resource-workspace/attempts/82",
+      "resolution": "performed",
+      "basis": "native-outcome",
+      "outcome": {
+        "acceptedCount": "29",
+        "confirmation": "installed",
+        "eventId": "81266534065617297775128193491012943976945986348523044719496914625192916230829",
+        "imageBoundary": "66495301493179186216143329226244709508010519278513365555387173374187601974727",
+        "transactionId": "7427595428254330393359229786662657666528879772420147256129142724346312195000",
+        "type": "confirmed"
+      },
+      "toolCharge": "1",
+      "resolvedBy": "submit",
+      "authored": "81-x82"
+    }
+  ],
+  "managedLawGeneration": "3",
+  "automaticDecisions": [
+    {
+      "action": "recover-gated-worker",
+      "decisionId": "21",
+      "machineProven": true,
+      "operationId": "11",
+      "stage": "physical-stop-verified",
+      "unit": "mini-grain-t8751-o11"
+    },
+    {
+      "action": "derive-no-unaccounted-external-effects",
+      "automatic": true,
+      "basis": "derived: scoped --network none worker whose only external channel is the Mini broker; every Mini attempt resolved; no provider or dispatch attempt outstanding",
+      "decisionId": "42",
+      "details": [
+        "worker operation 11 stopped after controller restart; external effects need acknowledgement",
+        "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    },
+    {
+      "action": "startup-recovery",
+      "automatic": true,
+      "connection": "detached",
+      "decisionId": "43",
+      "priorRunProof": null,
+      "priorRunStopped": true,
+      "result": "recovered",
+      "unresolvedExternal": []
+    }
+  ],
+  "friendField2": "1",
+  "sponsorField2": "1"
+}

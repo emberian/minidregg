@@ -1,0 +1,29 @@
+1790749257.778283261	bootstrap start
+1790749306.898100308	bootstrap done: sponsor workspace, public socket
+1790749318.784064929	hosted grain born: parent 8751 owner 8 worker 9, tool 8752 owner 9
+1790749327.216406591	parent witness capability 15955908978350248959 delegated to worker subject 9
+1790749345.443337937	friend enrolled through mini enroll: subject 11632635962349928183
+1790749365.503996243	sponsor created 'shared' and published a recipient reference for subject 9
+1790749366.441899120	controller unit mini-grain-controller@8751 active, MainPID 1521650, Restart=on-failure
+1790749385.642613977	phase-a: attached soft (worker law renewed to generation 1)
+1790749399.904282094	phase-a: prompt running in worker unit mini-grain-t8751-o11
+1790749436.334546533	phase-a: write operation 14 has a retained signed call; outcome.json present: no
+1790749436.964601325	KILL: SIGKILL to controller MainPID 1521650 during write operation 14 (delay 600 ms after call.bin; outcome.json present at kill: no)
+1790749439.216202873	RESTART: systemd started controller MainPID 1551758 (NRestarts=1)
+1790749504.018970558	RESOLVED: operation 14 performed (exact-lookup; restart-recovery); connection detached; unresolved external []
+1790749530.930160392	phase-b: attached soft (worker law renewed to generation 3)
+1790749547.917435934	phase-b: prompt running in worker unit mini-grain-t8751-o53
+1790749562.036820865	phase-b: prompt settled
+1790749562.076616941	phase-c: attached soft (worker law renewed to generation 3)
+1790749607.750518181	phase-c: prompt running in worker unit mini-grain-t8751-o66
+1790749721.248326932	phase-c: prompt settled
+1790749723.994441936	friend imported Hermes's reference with the CLI and read: field 2 = 1
+1790749726.840191232	sponsor read of 'shared': field 2 = 1
+1790749764.790787272	phase-d: attached hard
+1790749786.604247969	phase-d: hard connector dropped while the prompt ran
+1790749855.429666894	phase-d: prompt interrupted after 1 of 5 directives; parent settled automatically; task detached
+1790749893.454634509	phase-e: attached soft (worker law renewed to generation 5)
+1790749917.883211840	phase-e: soft connector closed while the prompt ran
+1790749939.934127768	phase-e: soft prompt completed all 3 directives after detach and settled
+1790749940.090382602	PASS: Hermes J4 on the humans' Store through MCP, killed mid-write, restarted by its unit, attempt 14 performed, readback 1, delegation reached the friend, hard loss interrupted, soft detach continued
+1790749941.147218258	services stopped
