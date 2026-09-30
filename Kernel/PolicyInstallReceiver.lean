@@ -382,11 +382,19 @@ theorem AcceptedInstall.capability_preserved
   rw [accepted.actual_authority_post]
   exact accepted.installed.capability_preserved kind id
 
-theorem AcceptedInstall.marker_consumed
+/-- The operation marker was unspent in the durable nullifier set this install
+was prepared against; the intent below consumes it there. -/
+theorem AcceptedInstall.marker_was_unspent
     (accepted : AcceptedInstall profile deployment durable federation height) :
-    accepted.prepared.authorityPost.logical ⟨.nullifier, accepted.ingress.marker⟩ = some () := by
-  rw [accepted.actual_authority_post, accepted.prepared.markerExact]
-  exact accepted.installed.nullifier_consumed
+    CredentialAuthorityDomainReceiver.spentOf deployment.domain durable.snapshot
+      accepted.ingress.marker = false := by
+  have unspent : accepted.prepared.authority.snapshot.spent
+      (PolicyInstallController.requestDigest profile accepted.prepared.authority.snapshot
+        (context federation height accepted.prepared.authority.snapshot accepted.ingress)
+        accepted.prepared.semantic.declaration).value = false :=
+    accepted.installed.marker_was_unspent
+  rw [← accepted.prepared.markerExact, accepted.prepared.authority.spentExact] at unspent
+  exact unspent
 
 /-! ## Exact source-owned intent, storage bytes and accounting -/
 

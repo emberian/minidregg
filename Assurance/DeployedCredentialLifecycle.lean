@@ -11,9 +11,11 @@ attenuated, used as a token, revoked, and made stale by a policy-epoch
 rotation.  Every step is the validated patch of its family at the exact post of
 the previous one, starting from a built pre-cell.  The revoked channel ends
 registered present AND revoked present, and neither presence can be erased.
-The refusing poles are stated at the validator: replaying a spent operation
-nullifier and erasing a registration are both rejected with the exact failing
-operation.  The durable use intent carries its payload and observes the exact
+The refusing poles are stated at the validator: erasing a registration or a
+revocation is rejected with the exact failing operation, and replaying an
+issuance is refused by its occupied capability slot.  Operation nullifiers are
+not authority-cell state; their single use is the durable consumed set's
+(`DurableDataIntent.DataIntent.consumed_nullifier_refused`).  The durable use intent carries its payload and observes the exact
 authority-cell root read-only.
 
 Two deployment ceilings remain deliberately visible.  The portal below is an
@@ -305,7 +307,6 @@ noncomputable def issueCodec : LawfulCodec (IssueDeclaration .object) := by
 def issueEvidence : IssueEvidence authorityDomain initialCell issueDeclaration where
   preRootExact := rfl
   slotFresh := by intro kind; cases kind <;> decide
-  nullifierFresh := by decide
   rootParent := rfl
   rootSelf := rfl
   rootAncestors := rfl
@@ -329,10 +330,6 @@ noncomputable abbrev issuedCell : Cell AuthorityMaterializer :=
     readCapability issuedCell .object rootCapability.id =
       some ⟨rootCapability, []⟩ :=
   issue_post_capability_exact issued
-
-@[simp] theorem issue_nullifier_consumed :
-    isNullified issuedCell issueDeclaration.operationNullifier = true :=
-  issue_post_nullifier_exact issued
 
 def parentStored : StoredCapability .object := ⟨rootCapability, []⟩
 
@@ -363,7 +360,6 @@ def attenuateEvidence :
   parentLineageAnchored := True.intro
   strict := strict_edge
   childSlotFresh := by intro kind; cases kind <;> decide
-  nullifierFresh := by decide
   issuerCurrent := by decide
   policyCurrent := by decide
   selfRegistered := by decide
@@ -538,16 +534,11 @@ noncomputable def revokeCodec : LawfulCodec RevokeDeclaration := by
   letI : Nonempty RevokeDeclaration := ⟨revokeDeclaration⟩
   exact codecOfCountable _
 
-theorem attenuated_nullifier_fresh :
-    isNullified attenuatedCell revokeDeclaration.operationNullifier = false := by
-  decide
-
 def revokeEvidence :
     RevokeEvidence authorityDomain attenuatedCell revokeDeclaration where
   preRootExact := rfl
   registered := by decide
   live := attenuated_live _
-  nullifierFresh := attenuated_nullifier_fresh
 
 noncomputable def revoked :=
   acceptRevocation authorityDomain attenuatedCell (adminContext attenuatedCell) revokeCodec revokeDigest
@@ -583,15 +574,10 @@ noncomputable def rotateCodec : LawfulCodec RotateEpochDeclaration := by
 theorem revoked_policy_epoch_two :
     policyEpochAt revokedCell examplePolicy = 2 := by decide
 
-theorem revoked_rotation_nullifier_fresh :
-    isNullified revokedCell rotateDeclaration.operationNullifier = false := by
-  decide
-
 def rotateEvidence : RotateEpochEvidence revokedCell rotateDeclaration where
   preRootExact := rfl
   currentExact := revoked_policy_epoch_two
   successorExact := by decide
-  nullifierFresh := revoked_rotation_nullifier_fresh
 
 noncomputable def rotated :=
   acceptEpochRotation authorityDomain revokedCell (adminContext revokedCell) rotateCodec rotateDigest
@@ -661,11 +647,8 @@ theorem wrong_scope_rejected :
 /-! ## Replay and stale-root teeth at the semantic effect boundary -/
 
 theorem issue_replay_rejected :
-    IssueEvidence authorityDomain issuedCell issueDeclaration -> False := by
-  intro replay
-  have impossible : true = false :=
-    issue_nullifier_consumed.symm.trans replay.nullifierFresh
-  contradiction
+    IssueEvidence authorityDomain issuedCell issueDeclaration -> False := fun replay =>
+  replay.reject_existing_id .object ⟨rootCapability, []⟩ issued_root_exact
 
 noncomputable def staleIssueDeclaration : IssueDeclaration .object :=
   { issueDeclaration with
@@ -681,52 +664,8 @@ theorem stale_root_rejected :
 
 /-! ## Refusing poles at the validator
 
-The steps above are accepted.  The same validator refuses the two moves the
+The steps above are accepted.  The same validator refuses the moves the
 append-only planes forbid, naming the exact failing operation. -/
-
-/-- A revocation of a registered, live key that reuses the spent operation
-nullifier of the channel revocation. -/
-noncomputable def spentRevokeDeclaration : RevokeDeclaration where
-  key := .capability rootCapability.id
-  expectedPreRoot := finalCell.root
-  operationNullifier := revokeDeclaration.operationNullifier
-
-/-- The key it names is still revocable: registered and live at `finalCell`. -/
-theorem spent_revoke_key_revocable :
-    isRegistered finalCell spentRevokeDeclaration.key = true ∧
-      isRevoked finalCell spentRevokeDeclaration.key = false := by
-  decide
-
-/-- Refuting pole (validator): its patch, generated at `finalCell`, is rejected at
-operation 1 -- the nullifier allocation -- because nullifier 1003 is present in
-the append-only nullifier plane.  Operation 0 (the revocation) was enabled. -/
-theorem spent_nullifier_revocation_rejected :
-    CellState.validate AuthorityMaterializer finalCell finalCell.root
-        (spentRevokeDeclaration.patch finalCell.logical) =
-      .rejected (.disabledOperation 1) := by
-  have disabled : Patch.firstDisabled? finalCell.logical
-      (spentRevokeDeclaration.patch finalCell.logical) = some 1 := by
-    decide
-  unfold CellState.validate
-  rw [dif_pos rfl]
-  split
-  · rename_i reported
-    rw [disabled] at reported
-    cases reported
-  · rename_i index reported
-    rw [disabled] at reported
-    cases reported
-    rfl
-
-/-- Refuting pole (effect boundary): no revocation evidence exists for it. -/
-theorem spent_nullifier_revocation_no_evidence :
-    RevokeEvidence authorityDomain finalCell spentRevokeDeclaration -> False := by
-  intro evidence
-  have fresh := evidence.nullifierFresh
-  have spent : isNullified finalCell spentRevokeDeclaration.operationNullifier = true := by
-    decide
-  rw [spent] at fresh
-  cases fresh
 
 /-- Refuting pole (validator): the revoked channel's registration cannot be
 erased; the free is rejected at operation 0. -/
@@ -957,10 +896,6 @@ abbrev PhysicalDurabilityCeiling
 #guard_msgs (whitespace := lax) in #print axioms initial_keys_registered_live
 /-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.final_channel_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms final_channel_registered_and_revoked
-/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.spent_nullifier_revocation_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms spent_nullifier_revocation_rejected
-/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.spent_nullifier_revocation_no_evidence' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms spent_nullifier_revocation_no_evidence
 /-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.final_deregistration_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms final_deregistration_rejected
 /-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.authority_update_moves_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/

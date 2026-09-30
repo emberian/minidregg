@@ -44,9 +44,6 @@ import Theory.CredentialAuthorityEffects
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_existing_child' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_existing_child
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_spent_nullifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_spent_nullifier
-
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.capabilityProduction_preserves_present' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.capabilityProduction_preserves_present
 
@@ -88,9 +85,6 @@ import Theory.CredentialAuthorityEffects
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.delegation_post_capability_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.delegation_post_capability_exact
-
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.delegation_post_nullifier_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.delegation_post_nullifier_exact
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.delegation_post_lineage_valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.delegation_post_lineage_valid

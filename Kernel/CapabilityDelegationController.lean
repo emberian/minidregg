@@ -173,7 +173,7 @@ def DescentReady {kind : ResourceKind} (snapshot : Snapshot) (command : Command 
     readCapability snapshot.cell kind command.declaration.parentId = some parent ∧
     parent.head.id = command.declaration.parentId ∧
     CapabilityIdFresh snapshot.cell command.declaration.child.id ∧
-    isNullified snapshot.cell command.declaration.operationNullifier = false ∧
+    snapshot.spent command.declaration.operationNullifier = false ∧
     command.declaration.child.issuerEpoch = issuerEpochAt snapshot.cell command.declaration.child.issuer ∧
     command.declaration.child.policyEpoch = policyEpochAt snapshot.cell command.declaration.child.policyId ∧
     RevocationKey.capability command.declaration.child.id ∈ (projectionUniverse snapshot command).revocationKeys ∧
@@ -196,10 +196,10 @@ def descentEvidence {kind : ResourceKind} (snapshot : Snapshot) (command : Comma
     (parent : StoredCapability kind) (ready : DescentReady snapshot command parent)
     (valid : LineageValid parent) (anchored : LineageAnchored snapshot.cell parent) :
     DescentEvidence (projectionUniverse snapshot command) snapshot.cell command.declaration.expectedPreRoot
-      command.declaration.parentId command.declaration.child command.declaration.operationNullifier parent := by
-  rcases ready with ⟨root, lookup, parentId, fresh, marker, issuer, generation,
+      command.declaration.parentId command.declaration.child parent := by
+  rcases ready with ⟨root, lookup, parentId, fresh, _unspent, issuer, generation,
     selfRegistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
-  exact ⟨root, lookup, parentId, valid, anchored, fresh, marker, issuer, generation,
+  exact ⟨root, lookup, parentId, valid, anchored, fresh, issuer, generation,
     selfRegistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
 
 abbrev ObservedTarget (deployment : Deployment) (directory : Directory Nat Registry)
@@ -219,8 +219,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   target : ObservedTarget deployment directory.directory command
   parent : StoredCapability kind
   descent : DescentEvidence (projectionUniverse authority.snapshot command) authority.snapshot.cell
-    command.declaration.expectedPreRoot command.declaration.parentId command.declaration.child
-    command.declaration.operationNullifier parent
+    command.declaration.expectedPreRoot command.declaration.parentId command.declaration.child parent
   shape : CredentialAuthorityFamily.DelegationShape
     (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head
   policyTarget : command.declaration.child.policyId = ⟨command.declaration.target.value⟩

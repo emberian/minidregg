@@ -724,8 +724,7 @@ theorem PreparedBirth.authority_post_exact {deployment : Deployment} {pins : Fac
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) :
     prepared.grants.post =
-      ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor
-        prepared.grants.mode.nullifierFresh := rfl
+      ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor := rfl
 
 /-- The authority cell's one write carries exactly the batch's post, guarded at
 the loaded root of that cell. -/

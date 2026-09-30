@@ -144,12 +144,12 @@ def rawLeg {F : Type} [Field F]
             (CanonicalResourceKernel.logicalBook birth.prepared.pre.book.payload.logical) }
   | .inl .authority =>
       { pre := birth.prepared.pre.authority.snapshot.cell
-        patch := source.authorityPatch birth.prepared.pre.authority.snapshot profile.semantics tariff
+        patch := source.authorityPatch birth.prepared.pre.authority.snapshot
         request := ⟨.object, source.factoryRequest tariff pins
           CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
           birth.prepared.pre.authority.snapshot.cell.root height⟩
         Postcondition := fun post =>
-          (source.authorityPatch birth.prepared.pre.authority.snapshot profile.semantics tariff).ResultAt
+          (source.authorityPatch birth.prepared.pre.authority.snapshot).ResultAt
               birth.prepared.pre.authority.snapshot.cell.logical post }
   | .inl (.allocation index) =>
       { pre := ResourceBirthController.allocationPre birth.prepared.pre.directory.directory

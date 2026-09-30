@@ -175,6 +175,8 @@ inductive Reject where
   | unsupportedPolicy
   | invalidSuccessor
   | pageUpdateRejected
+  /-- The operation marker is already consumed in the durable nullifier set. -/
+  | markerSpent
   | subjectKeyEpoch
   | signature
   | policyEpoch
@@ -197,9 +199,9 @@ structure Ready (profile : RuntimeProfile F) (snapshot : Snapshot) (declaration 
 structure CheckedPreparation (profile : RuntimeProfile F) (snapshot : Snapshot)
     (context : RequestContext) (declaration : Declaration) where
   ready : Ready profile snapshot declaration
-  update : CredentialAuthorityDomain.PreparedPolicyAndNullifier snapshot
+  unspent : snapshot.spent (requestDigest profile snapshot context declaration).value = false
+  update : CredentialAuthorityDomain.PreparedPolicy snapshot
     declaration.source.policyId declaration.source.version (policyRecordDigest declaration.source)
-    (requestDigest profile snapshot context declaration).value
 
 /-- The source-owned domain editor derives the patch from the old selected
 entry, checks routed pages, and proves their exact canonical-state projection.
@@ -213,14 +215,16 @@ def prepareChecked (profile : RuntimeProfile F) (snapshot : Snapshot) (context :
         if semanticsExact : declaration.source.semantics = profile.semantics then
           if supported : Minidregg.Compiler.supported profile.compilerProfile.compiler declaration.source.predicate = true then
             if successor : checkSuccessor declaration.expected declaration.source.source = true then
-              match CredentialAuthorityDomain.preparePolicyAndNullifier snapshot declaration.source.policyId
-                  declaration.source.version (policyRecordDigest declaration.source)
-                  (requestDigest profile snapshot context declaration).value with
-              | none => .error .pageUpdateRejected
-              | some update => .ok
-                  { ready := ⟨rootExact, headExact, domainExact, semanticsExact, supported,
-                      (checkSuccessor_iff _ _).mp successor⟩
-                    update := update }
+              if unspent : snapshot.spent (requestDigest profile snapshot context declaration).value = false then
+                match CredentialAuthorityDomain.preparePolicy snapshot declaration.source.policyId
+                    declaration.source.version (policyRecordDigest declaration.source) with
+                | none => .error .pageUpdateRejected
+                | some update => .ok
+                    { ready := ⟨rootExact, headExact, domainExact, semanticsExact, supported,
+                        (checkSuccessor_iff _ _).mp successor⟩
+                      unspent := unspent
+                      update := update }
+              else .error .markerSpent
             else .error .invalidSuccessor
           else .error .unsupportedPolicy
         else .error .wrongSemantics
@@ -250,13 +254,11 @@ def project (wanted : Request .program) (declaration : Declaration)
           ("policy/version", Int.ofNat head.version) ::
             addressSlots 0 (Sp800185Cshake256.digestCodec.encode head.address) }
 
-/-- The one authority patch: the policy head's succession and the operation's
-nullifier, generated from the snapshot's own store. -/
-def patch (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)
-    (declaration : Declaration) : Patch layout :=
-  CredentialAuthorityDomain.policyAndNullifierPatch snapshot.logical declaration.source.policyId
+/-- The one authority patch: the policy head's succession, generated from the
+snapshot's own store.  The operation marker is the intent's durable nullifier. -/
+def patch (snapshot : Snapshot) (declaration : Declaration) : Patch layout :=
+  CredentialAuthorityDomain.policyPatch snapshot.logical declaration.source.policyId
     declaration.source.version (policyRecordDigest declaration.source)
-    (requestDigest profile snapshot context declaration).value
 
 private def unitCodec : LawfulCodec Unit where
   encode := fun _ => []
@@ -280,10 +282,9 @@ def family (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Request
     currentHead logical declaration.source.policyId =
       some ⟨declaration.source.version, policyRecordDigest declaration.source⟩ ∧
       logical ⟨.policyEpoch, declaration.source.policyId⟩ =
-        snapshot.logical ⟨.policyEpoch, declaration.source.policyId⟩ ∧
-      logical ⟨.nullifier, (requestDigest profile snapshot context declaration).value⟩ = some ()
+        snapshot.logical ⟨.policyEpoch, declaration.source.policyId⟩
   effectDigest := effectDigest
-  patch := fun declaration _ => patch profile snapshot context declaration
+  patch := fun declaration _ => patch snapshot declaration
   nullifier := fun declaration _ => some (requestDigest profile snapshot context declaration)
   Release := fun _ _ => Empty
   DeclassificationAuthority := fun _ _ => Empty
@@ -296,7 +297,7 @@ structure Prepared (profile : RuntimeProfile F) (snapshot : Snapshot) (context :
 
 def Prepared.update {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     (prepared : Prepared profile snapshot context) :
-    CredentialAuthorityDomain.Prepared snapshot (patch profile snapshot context prepared.declaration) :=
+    CredentialAuthorityDomain.Prepared snapshot (patch snapshot prepared.declaration) :=
   prepared.candidate.modeEvidence.update.prepared
 
 def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext) (bytes : List UInt8) :
@@ -312,8 +313,7 @@ def prepare (profile : RuntimeProfile F) (snapshot : Snapshot) (context : Reques
               modeEvidence := checked
               validated := checked.update.prepared.validated
               postcondition :=
-                ⟨checked.update.head_exact, checked.update.generation_preserved,
-                  checked.update.nullifier_consumed⟩ } }
+                ⟨checked.update.head_exact, checked.update.generation_preserved⟩ } }
 
 def Prepared.step {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext}
     (prepared : Prepared profile snapshot context) : PolicyStepContext :=
@@ -471,7 +471,7 @@ theorem Installed.post_logical [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
     (installed : Installed profile snapshot context store) :
     installed.post.logical =
-      Patch.run snapshot.logical (patch profile snapshot context installed.prepared.declaration) :=
+      Patch.run snapshot.logical (patch snapshot installed.prepared.declaration) :=
   rfl
 
 theorem Installed.source_selected_in_post [DecidableEq F]
@@ -490,7 +490,7 @@ theorem Installed.generation_preserved [DecidableEq F]
     (installed : Installed profile snapshot context store) :
     installed.post.logical ⟨.policyEpoch, installed.prepared.declaration.source.policyId⟩ =
       snapshot.logical ⟨.policyEpoch, installed.prepared.declaration.source.policyId⟩ :=
-  installed.accepted.postcondition.2.1
+  installed.accepted.postcondition.2
 
 /-- The actual source-install patch preserves every stored capability exactly.
 No grant is rewritten or silently reissued to manufacture continued use. -/
@@ -502,9 +502,8 @@ theorem Installed.capability_preserved [DecidableEq F]
   apply Patch.run_frame
   intro member
   obtain ⟨op, inPatch, writes⟩ := (Patch.mem_writeFootprint_iff _ _).mp member
-  simp only [patch, CredentialAuthorityDomain.policyAndNullifierPatch,
-    CredentialAuthorityDomain.policyPatch, List.mem_append, List.mem_singleton] at inPatch
-  rcases inPatch with (retire | assigned) | nullifier
+  simp only [patch, CredentialAuthorityDomain.policyPatch, List.mem_append] at inPatch
+  rcases inPatch with retire | assigned
   · unfold CredentialAuthorityDomain.retirePolicy at retire
     split at retire
     · split at retire
@@ -516,24 +515,14 @@ theorem Installed.capability_preserved [DecidableEq F]
   · have footprint := (Patch.mem_writeFootprint_iff _ _).mpr ⟨op, assigned, writes⟩
     rw [CredentialAuthorityEffects.assignAll_writeFootprint] at footprint
     simp [CredentialAuthorityDomain.policyEntries] at footprint
-  · subst nullifier
-    simp [Op.writeAddress?, Op.address] at writes
 
-/-- A signature marker is consumed by the same routed authority patch as the
-policy head. No standalone signature cache is treated as a durable replay guard. -/
-theorem Installed.nullifier_consumed [DecidableEq F]
+/-- The operation marker was unspent in the durable nullifier set the snapshot
+was loaded with; the receiver's intent consumes it there. -/
+theorem Installed.marker_was_unspent [DecidableEq F]
     {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
     (installed : Installed profile snapshot context store) :
-    installed.post.logical
-      ⟨.nullifier, (requestDigest profile snapshot context installed.prepared.declaration).value⟩ =
-      some () := installed.accepted.postcondition.2.2
-
-theorem Installed.nullifier_was_fresh [DecidableEq F]
-    {profile : RuntimeProfile F} {snapshot : Snapshot} {context : RequestContext} {store : PayloadStore}
-    (installed : Installed profile snapshot context store) :
-    CredentialAuthorityState.isNullified snapshot.cell
-      (requestDigest profile snapshot context installed.prepared.declaration).value = false :=
-  installed.accepted.modeEvidence.update.nullifierFresh
+    snapshot.spent (requestDigest profile snapshot context installed.prepared.declaration).value = false :=
+  installed.accepted.modeEvidence.unspent
 
 /-- The mandatory family postcondition transports the OLD selected predicate
 to the actual joint post-state. It preserves the complete fixed policy view

@@ -167,28 +167,20 @@ def Source.replayMarkers (domain semantics : Digest) (tariff : Tariff)
   [source.birth.authorityNullifier,
     DeclaredResourceController.operationMarker domain semantics (source.grainCommand tariff)]
 
-/-- Both authority effects are one patch of the one authority cell: the birth's
-grant batch and the grain operation marker, generated from the same old store.
-Authorizing its composite request remains a receiving obligation. -/
+/-- The birth's grant batch is one patch of the one authority cell, generated
+from the old store; both replay markers are consumed in the durable set by the
+receiver's intent.  Authorizing its composite request remains a receiving
+obligation. -/
 def Source.authorityPatch (snapshot : CredentialAuthorityDomain.Snapshot)
-    (semantics : Digest) (tariff : Tariff) (source : Source) :
+    (source : Source) :
     Store.Patch CredentialAuthorityState.layout :=
   GrainResourceBirthAuthority.patch snapshot source.birth
-    (DeclaredResourceController.operationMarker snapshot.domain semantics (source.grainCommand tariff))
 
 theorem Source.authorityPatch_auxiliary_independent
-    (snapshot : CredentialAuthorityDomain.Snapshot) (semantics : Digest)
-    (tariff : Tariff) (source : Source)
+    (snapshot : CredentialAuthorityDomain.Snapshot) (source : Source)
     (creates : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)) :
-    (source.withAuxiliaryCreates creates).authorityPatch snapshot semantics tariff =
-      source.authorityPatch snapshot semantics tariff := rfl
-
-def Source.prepareAuthority (snapshot : CredentialAuthorityDomain.Snapshot)
-    (semantics : Digest) (tariff : Tariff) (source : Source) :
-    Option (CredentialAuthorityDomain.Prepared snapshot
-      (source.authorityPatch snapshot semantics tariff)) :=
-  CredentialAuthorityDomain.prepare snapshot
-    (source.authorityPatch snapshot semantics tariff)
+    (source.withAuxiliaryCreates creates).authorityPatch snapshot =
+      source.authorityPatch snapshot := rfl
 
 /-- This is only the checkable source shape. The receiver must establish that
 both supplied roots and states are the actual old loaded cells and that the
@@ -312,8 +304,7 @@ def prepareSourceBirth {F : Type} [Field F]
     .ok ⟨shape, prepared⟩
   else .error .authorityBatch
 
-/-- The composite authority patch, including both the birth marker and the
-grain operation marker, validated at the loaded cell's own root. -/
+/-- The birth's authority patch validated at the loaded cell's own root. -/
 def PreparedSourceBirth.authorityValidated {F : Type} [Field F]
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
@@ -323,9 +314,7 @@ def PreparedSourceBirth.authorityValidated {F : Type} [Field F]
     CellState.ValidatedPatch CredentialAuthorityCell.materializer
       prepared.prepared.pre.authority.snapshot.cell
       prepared.prepared.pre.authority.snapshot.cell.root
-      (source.authorityPatch prepared.prepared.pre.authority.snapshot semantics tariff) := by
-  unfold Source.authorityPatch
-  rw [prepared.prepared.pre.authority.domainExact]
+      (source.authorityPatch prepared.prepared.pre.authority.snapshot) := by
   exact prepared.prepared.authorityCombined.checked.validated
 
 end Minidregg.Compiler.GrainResourceBirthController

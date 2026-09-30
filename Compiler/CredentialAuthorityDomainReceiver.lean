@@ -14,6 +14,7 @@ cell's logical content alone (`write_of_planes`).
 -/
 import Compiler.CanonicalCellRegistry
 import Compiler.CredentialAuthorityDomain
+import Compiler.CredentialAuthorityReplay
 import Compiler.DurableReceiverIO
 import Theory.ResourceBirthAuthority
 
@@ -72,14 +73,59 @@ theorem decodeCell_canonical {bytes : List UInt8} {cell : CredentialAuthorityDom
     exact LifecycleImage.decode_canonical registry image
   · cases decoded
 
+/-! ## The authority clock and the spent markers are durable system state
+
+Operation nullifiers are not authority-cell state.  Every authority receiver
+puts its operation marker into its intent's `nullifiers` as
+`CredentialAuthorityReplay.nullifier domain marker`, and the durable protocol
+installs it into its append-only consumed set and refuses a second use
+(`DataIntent.consumed_nullifier_refused`).  The authority clock is the durable
+height: every installation appends exactly one history event
+(`clockOf_install`). -/
+
+/-- The authority clock of a physical snapshot: its accepted-record count. -/
+def clockOf (physical : PhysicalSnapshot) : Nat := physical.model.history.length
+
+/-- Whether an authority operation marker is consumed in the durable set. -/
+def spentOf (domain : Digest) (physical : PhysicalSnapshot) (marker : Nat) : Bool :=
+  physical.model.consumed (CredentialAuthorityReplay.nullifier domain marker)
+
+/-- Every accepted record advances the clock by exactly one. -/
+theorem clockOf_install (physical : PhysicalSnapshot)
+    (intent : DataIntent ResourceBirthCodec.rootBytes) :
+    clockOf (DataSnapshot.install physical intent) = clockOf physical + 1 := by
+  simp [clockOf, DataSnapshot.install_model, Minidregg.Kernel.DurableCommitProtocol.Snapshot.install_history]
+
+/-- Satisfiable pole: installing an intent that carries a marker's replay key
+marks it spent. -/
+theorem spentOf_install (domain : Digest) (physical : PhysicalSnapshot)
+    (intent : DataIntent ResourceBirthCodec.rootBytes) (marker : Nat)
+    (carries : CredentialAuthorityReplay.nullifier domain marker ∈ intent.nullifiers) :
+    spentOf domain (DataSnapshot.install physical intent) marker = true := by
+  unfold spentOf
+  rw [DataSnapshot.install_model]
+  exact Minidregg.Kernel.DurableCommitProtocol.Snapshot.install_consumes _ _ _ (by simpa using carries)
+
+/-- Refuting pole: an intent carrying a spent marker's replay key never passes
+preflight, whatever else it carries. -/
+theorem spent_marker_refused (domain : Digest) (physical : PhysicalSnapshot)
+    (intent : DataIntent ResourceBirthCodec.rootBytes) (marker : Nat)
+    (carries : CredentialAuthorityReplay.nullifier domain marker ∈ intent.nullifiers)
+    (spent : spentOf domain physical marker = true) :
+    intent.preflight physical ≠ .ok () :=
+  DataIntent.consumed_nullifier_refused physical intent _ carries spent
+
 /-- The loaded authority domain.  The constructor is private: `load` is the
 only route, so the snapshot is exactly the cell at the pinned identifier of one
-physical snapshot, read in the deployment's domain. -/
+physical snapshot, read in the deployment's domain, with the clock and spent
+markers of that same physical snapshot. -/
 structure Loaded (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) where
   private mk ::
   snapshot : CredentialAuthorityDomain.Snapshot
   valid : deployment.Valid
   domainExact : snapshot.domain = deployment.domain
+  revisionExact : snapshot.revision = clockOf physical
+  spentExact : snapshot.spent = spentOf deployment.domain physical
   observed : physical.canonicalBytes (cellIdOf deployment) = cellBytes snapshot.cell
 
 def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
@@ -88,7 +134,9 @@ def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : P
     match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
     | none => none
     | some cell =>
-        some ⟨Snapshot.ofCell deployment.domain cell, valid, rfl, (decodeCell_canonical decoded).symm⟩
+        some ⟨Snapshot.ofCell deployment.domain (clockOf physical)
+            (spentOf deployment.domain physical) cell, valid, rfl, rfl, rfl,
+          (decodeCell_canonical decoded).symm⟩
   else none
 
 /-- Refuting pole: a pinned identifier that does not hold a live authority cell
@@ -131,7 +179,9 @@ theorem Loaded.snapshot_unique {deployment : CanonicalCellRegistry.Deployment}
     rw [← left.observed, right.observed, decodeCell_bytes] at decoded
     exact (Option.some.inj decoded).symm
   exact CredentialAuthorityDomain.Snapshot.ext_cell
-    (left.domainExact.trans right.domainExact.symm) cells
+    (left.domainExact.trans right.domainExact.symm)
+    (left.revisionExact.trans right.revisionExact.symm)
+    (left.spentExact.trans right.spentExact.symm) cells
 
 theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :
@@ -343,7 +393,7 @@ def BatchReady (snapshot : CredentialAuthorityDomain.Snapshot)
   ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
     descriptor.GrantIdsDistinct ∧
     (∀ policy ∈ descriptor.initialPolicies, policyFresh snapshot policy) ∧
-    isNullified snapshot.cell descriptor.authorityNullifier = false ∧
+    snapshot.spent descriptor.authorityNullifier = false ∧
     (∀ grant ∈ descriptor.grants, GrantReady snapshot grant)
 
 instance batchReadyDecidable (snapshot : CredentialAuthorityDomain.Snapshot)
@@ -358,7 +408,6 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
   slotsDistinct := ready.1
   grantIdsDistinct := ready.2.1
   policiesFresh := ready.2.2.1
-  nullifierFresh := ready.2.2.2.1
   ancestryEmpty := fun grant member => (ready.2.2.2.2 grant member).1
   issue := fun grant member => by
     obtain ⟨_, slot, parent, root, ancestors, issuer, policy, self, channels⟩ :=
@@ -366,7 +415,6 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
     exact
       { preRootExact := rfl
         slotFresh := slot
-        nullifierFresh := ready.2.2.2.1
         rootParent := parent
         rootSelf := root
         rootAncestors := ancestors
@@ -411,9 +459,9 @@ variable {F : Type} [Field F]
     {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
     {descriptor : Descriptor registry}
 
-def PreparedGrantBatch.post (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+def PreparedGrantBatch.post (_prepared : PreparedGrantBatch profile deployment loaded descriptor) :
     CredentialAuthorityDomain.Cell :=
-  ResourceBirthAuthority.post loaded.snapshot.cell descriptor prepared.mode.nullifierFresh
+  ResourceBirthAuthority.post loaded.snapshot.cell descriptor
 
 def PreparedGrantBatch.writes (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
     List DataWrite :=
@@ -427,12 +475,18 @@ def PreparedGrantBatch.auxiliaryCreates
 theorem PreparedGrantBatch.post_logical
     (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
     prepared.post.logical = setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor) :=
-  ResourceBirthAuthority.post_logical _ _ _
+  ResourceBirthAuthority.post_logical _ _
 
 end GrantBatch
 
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.Loaded.snapshot_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Loaded.snapshot_unique
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.clockOf_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms clockOf_install
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.spentOf_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spentOf_install
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.spent_marker_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spent_marker_refused
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.write_of_planes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms write_of_planes
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.loadDeployment_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/

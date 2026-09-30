@@ -1,7 +1,8 @@
 /- The sole signed resource invocation receiver. A one-target transaction is
 an ordinary finite transaction, not a separate admission or persistence path.
-Every target and the shared replay marker form one actual MultiCellHyperedge
-PreparedTuple; all signatures and current policies precede its single CAS. -/
+Every target and the authority read incidence form one actual MultiCellHyperedge
+PreparedTuple; all signatures and current policies precede its single CAS.  The
+shared replay marker is the intent's durable nullifier. -/
 import Kernel.ResourceTransaction
 import Kernel.ResourceObservationAdmission
 import Compiler.ResourceAuthorityProjection
@@ -50,12 +51,11 @@ def rawLeg (prepared : PreparedInvocation deployment profile ambient durable com
             (prepared.targets i).pre.logical logical }
   | none =>
       { pre := prepared.authority.snapshot.cell
-        patch := markerPatch prepared.authority.snapshot profile.semantics source.val
+        patch := authorityReadPatch
         request := ⟨source.val.first.kind, request prepared.authority.snapshot profile.semantics
           ambient source.val prepared.authority.snapshot.cell.root⟩
         Postcondition := fun logical =>
-          (markerPatch prepared.authority.snapshot profile.semantics source.val).ResultAt
-            prepared.authority.snapshot.logical logical }
+          authorityReadPatch.ResultAt prepared.authority.snapshot.logical logical }
 
 def bindFamily (prepared : PreparedInvocation deployment profile ambient durable command)
     (source : Source command) (_portals : Incidence command → Portal) :
@@ -535,9 +535,10 @@ def targetWrite (prepared : PreparedInvocation deployment profile ambient durabl
   ResourceBirthController.Concrete.packedWrite command.targets[i].target (prepared.targets i).before
     (packTarget command.targets[i] (prepared.targets i).candidate.post)
 
+/-- The physical writes are the targets' alone: the authority incidence is a
+read, so the authority cell enters as a read guard (`readGuards`). -/
 def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  (List.finRange command.targets.length).map (targetWrite prepared) ++
-    prepared.authority.writes prepared.authorityPost
+  (List.finRange command.targets.length).map (targetWrite prepared)
 
 def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
   (List.finRange command.targets.length).map fun i =>
@@ -582,12 +583,8 @@ instance physicalShapeDecidable (prepared : PreparedInvocation deployment profil
 theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
   intro write member
-  rcases List.mem_append.mp member with target | authority
-  · obtain ⟨i, _, rfl⟩ := List.mem_map.mp target
-    rfl
-  · simp only [Loaded.writes, List.mem_singleton] at authority
-    subst write
-    exact prepared.authority.write_root_bound _
+  obtain ⟨i, _, rfl⟩ := List.mem_map.mp member
+  rfl
 
 theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) :
@@ -674,6 +671,19 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
     postRootsBound := writes_roots_bound prepared
     guardsReadOnly := readGuards_readonly prepared shape }
+
+/-- **Charging rule: a record is charged the bytes it writes.**  The storage
+charge of an accepted invocation is exactly the canonical bytes of the cells
+its record writes, and those writes are the targets' alone (one per target):
+the authority cell is read (a guard), neither stored nor charged. -/
+theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
+    (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
+    (accepted.dataIntent shape).exactCharge .storageBytes =
+        ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
+      (accepted.dataIntent shape).writes =
+        (List.finRange command.targets.length).map (targetWrite prepared) :=
+  ⟨rfl, rfl⟩
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}

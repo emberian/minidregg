@@ -120,10 +120,12 @@ def select (snapshot : Snapshot) (request : SomeRequest) : Except Reject (Select
         else .error .subjectKeyEpoch
   else .error .wrongDomain
 
-/-- The activation epoch is the authority clock of the one authority cell: the
-number of spent operation nullifiers (`Snapshot.revision`). It never runs
-backwards and every authority operation advances it; it is not height or
-subject epoch. -/
+/-- The activation epoch is the authority clock (`Snapshot.revision`): the
+durable height the snapshot was loaded at
+(`CredentialAuthorityDomainReceiver.Loaded.revisionExact`). It never runs
+backwards and every accepted record advances it
+(`CredentialAuthorityDomainReceiver.clockOf_install`); it is not a subject
+epoch. -/
 def keyRegistry (snapshot : Snapshot) (key : KeyRecord) : CredentialSignedEnvelopeController.KeyRegistryProjection where
   codecVersion := CredentialSignedEnvelopeController.registryCodecVersion
   authorityRoot := snapshot.cell.root
@@ -138,7 +140,7 @@ def controllerState (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat) :
     (CredentialSignedEnvelopeController.registryCodec.encode (keyRegistry snapshot key))
   registryEpoch := snapshot.revision
   consumedNullifiers :=
-    if CredentialAuthorityState.isNullified snapshot.cell nullifier then [nullifier] else []
+    if snapshot.spent nullifier then [nullifier] else []
 
 def header (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat)
     (request : SomeRequest) : CredentialSignedEnvelopeController.SignedHeader where

@@ -8,7 +8,7 @@ declared `wire` below, and its materializer is `StoreCodec.materializer wire`;
 round trip, canonicity and injectivity are the general theorems of
 `Compiler.StoreCodec`.
 
-The `revoked`, `nullifier` and `registered` planes are presence-only
+The `revoked` and `registered` planes are presence-only
 (`Unit` values) and append-only.  A present revocation cannot be removed or
 overwritten by any accepted patch (`CredentialAuthorityState.revocation_permanent`);
 at this cell, a patch that tries is rejected at its first operation
@@ -71,7 +71,6 @@ def planeTag : AuthorityPlane → UInt8
   | .policyAddress => 5
   | .subjectKeyEpoch => 6
   | .revoked => 7
-  | .nullifier => 9
   | .subjectKey => 10
   | .policyRevision => 11
   | .registered => 12
@@ -85,11 +84,15 @@ def planeOfTag : UInt8 → Option AuthorityPlane
   | 5 => some .policyAddress
   | 6 => some .subjectKeyEpoch
   | 7 => some .revoked
-  | 9 => some .nullifier
   | 10 => some .subjectKey
   | 11 => some .policyRevision
   | 12 => some .registered
   | _ => none
+
+/-- The retired operation-nullifier plane (tag 9, wire v1) refuses to decode:
+operation nullifiers live in the durable consumed set, so an authority cell
+written with them must be re-genesised, never reinterpreted. -/
+theorem retired_nullifier_plane_refused : planeOfTag 9 = none := rfl
 
 theorem planeOfTag_tag (plane : AuthorityPlane) : planeOfTag (planeTag plane) = some plane := by
   cases plane with
@@ -114,7 +117,6 @@ def keyStream : (plane : AuthorityPlane) → StreamCodec plane.Key
   | .subjectKeyEpoch => subjectIdStream
   | .subjectKey => StreamCodec.product subjectIdStream StreamCodec.nat
   | .revoked => revocationKeyStream
-  | .nullifier => StreamCodec.nat
   | .registered => revocationKeyStream
 
 def valueStream : (plane : AuthorityPlane) → StreamCodec plane.Value
@@ -126,7 +128,6 @@ def valueStream : (plane : AuthorityPlane) → StreamCodec plane.Value
   | .subjectKeyEpoch => StreamCodec.nat
   | .subjectKey => CredentialSigningKeyCodec.keyRecordStream
   | .revoked => unitStream
-  | .nullifier => unitStream
   | .registered => unitStream
 
 def keyCodecId : AuthorityPlane → String
@@ -138,7 +139,6 @@ def keyCodecId : AuthorityPlane → String
   | .subjectKeyEpoch => "subject-id/nat"
   | .subjectKey => "subject-id/nat x nat"
   | .revoked => "revocation-key/tagged-v1"
-  | .nullifier => "nat/base255"
   | .registered => "revocation-key/tagged-v1"
 
 def valueCodecId : AuthorityPlane → String
@@ -150,17 +150,16 @@ def valueCodecId : AuthorityPlane → String
   | .subjectKeyEpoch => "nat/base255"
   | .subjectKey => "signing-key-record/v1"
   | .revoked => "unit/presence"
-  | .nullifier => "unit/presence"
   | .registered => "unit/presence"
 
 def planes : List AuthorityPlane :=
   [.capability .object, .capability .account, .capability .program,
     .issuerEpoch, .policyEpoch, .policyRevision, .policyAddress,
-    .subjectKeyEpoch, .subjectKey, .revoked, .nullifier, .registered]
+    .subjectKeyEpoch, .subjectKey, .revoked, .registered]
 
 /-- The authority layout on the wire. -/
 def wire : Wire layout where
-  name := "minidregg/credential-authority/v1"
+  name := "minidregg/credential-authority/v2"
   namespaces := planes
   namespaces_complete := by
     intro plane

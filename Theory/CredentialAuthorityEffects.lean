@@ -4,9 +4,12 @@
 Issuance, strict attenuation, authorized subject delegation, revocation,
 and epoch rotation are ordinary
 `AcceptedCellEffect` families over `CredentialAuthorityState.layout`.  Each
-family writes one exact authority address together with one exact single-use
-nullifier address in the same validated `Store.Patch`.  No receipt-side
-authority cache or host callback can replace these Lean indices.
+family writes one exact authority address in a validated `Store.Patch`.  The
+family's operation nullifier (`SemanticEffectFamily.nullifier`) is not written
+here: the receiver lifts it into the durable protocol's append-only consumed
+set (`CredentialAuthorityReplay.nullifier`), which refuses a second use, so the
+authority cell does not grow per operation.  No receipt-side authority cache or
+host callback can replace these Lean indices.
 
 Every positive construction below is indexed by
 `CredentialAuthorityState.authState domain pre`.  Consequently authorization,
@@ -44,8 +47,8 @@ def sealedOnly : DisclosureDecision Unit Unit (fun _ => Unit) → Prop
   | .reveal _ _ => False
   | .declassify _ _ _ => False
 
-/-- Canonical operation wrappers use eager nullifier identifiers.  The same id
-is also written to the canonical sparse nullifier plane by every patch. -/
+/-- Canonical operation wrappers use eager nullifier identifiers.  The id is the
+request nonce and the key the receiver consumes in the durable nullifier set. -/
 abbrev OperationNullifier := Nat
 
 /-- The deployment fixes the authority-control resource and ambient identity
@@ -152,7 +155,7 @@ def assignAll : Store layout → List Entry → Patch layout
 
 /-- A family patch is refused at any store that disagrees with the store it was
 generated from at its first written address: e.g. an issuance replayed after
-its nullifier or capability slot moved. -/
+its capability slot moved. -/
 theorem assignAll_refused_of_changed (store other : Store layout) (entry : Entry)
     (rest : List Entry) (changed : other entry.1 ≠ store entry.1) :
     ¬ Patch.ValidFrom other (assignAll store (entry :: rest)) :=
@@ -188,16 +191,10 @@ theorem assignAll_valid (store : Store layout) (entries : List Entry)
     Patch.ValidFrom store (assignAll store entries) :=
   (assignAll_valid_iff store entries).mpr assignable
 
-/-- The two-entry families: a record and a distinct second entry, each
-assignable at the pre-store. -/
-theorem assignableAll_pair (store : Store layout) (first second : Entry)
-    (distinct : second.1 ≠ first.1) (firstOk : Assignable store first.1)
-    (secondOk : Assignable store second.1) :
-    AssignableAll store [first, second] := by
-  refine ⟨firstOk, ?_, trivial⟩
-  unfold Assignable at secondOk ⊢
-  rw [Store.set_ne _ _ _ _ distinct]
-  exact secondOk
+/-- The one-entry families: a record assignable at the pre-store. -/
+theorem assignableAll_single (store : Store layout) (record : Entry)
+    (recordOk : Assignable store record.1) : AssignableAll store [record] :=
+  ⟨recordOk, trivial⟩
 
 /-- A run of RAM entries followed by one final entry is assignable exactly when
 the final entry is assignable at the pre-store: RAM entries never share a plane
@@ -231,6 +228,16 @@ theorem assignableAll_ram_append_iff (store : Store layout) (ram : List Entry) (
 theorem assignable_of_ram (store : Store layout) (address : Address layout)
     (ram : layout.discipline address.1 = .ram) : Assignable store address :=
   Or.inl ram
+
+/-- A batch of RAM entries is assignable at every store. -/
+theorem assignableAll_of_ram (store : Store layout) (entries : List Entry)
+    (allRam : ∀ entry ∈ entries, layout.discipline entry.1.1 = .ram) :
+    AssignableAll store entries := by
+  induction entries generalizing store with
+  | nil => trivial
+  | cons entry rest ih =>
+      exact ⟨Or.inl (allRam entry (List.mem_cons_self ..)),
+        ih _ fun other member => allRam other (List.mem_cons_of_mem _ member)⟩
 
 theorem assignable_of_absent (store : Store layout) (address : Address layout)
     (absent : (store address).isSome = false) : Assignable store address :=
@@ -283,16 +290,9 @@ theorem setAll_member (store : Store layout) (entries : List Entry)
         rw [setAll_frame _ rest _ pieces.1, Store.set_eq]
       · exact ih _ pieces.2 inRest
 
-/-- Every family below writes exactly two entries: its authority record and its
-operation nullifier. -/
-theorem setAll_pair_first (store : Store layout) (first second : Entry)
-    (distinct : first.1 ≠ second.1) :
-    setAll store [first, second] first.1 = some first.2 := by
-  simp only [setAll]
-  rw [Store.set_ne _ _ _ _ distinct, Store.set_eq]
-
-theorem setAll_pair_second (store : Store layout) (first second : Entry) :
-    setAll store [first, second] second.1 = some second.2 := by
+/-- Every family below writes exactly one entry: its authority record. -/
+theorem setAll_single (store : Store layout) (record : Entry) :
+    setAll store [record] record.1 = some record.2 := by
   simp only [setAll, Store.set_eq]
 
 /-- A family patch generated from `pre` validates at `pre`'s own root and at no
@@ -306,40 +306,14 @@ theorem validated_of_assign {M : Materializer} {pre : Cell M}
     (assignAll pre.logical entries) preRootExact (assignAll_valid _ _ assignable)
   exact validated
 
-/-- The nullifier entry every family writes. -/
-def nullifierEntry (operationNullifier : OperationNullifier) : Entry :=
-  ⟨⟨.nullifier, operationNullifier⟩, ()⟩
-
-/-- A two-entry family (a record on a plane other than the nullifier's, then the
-operation nullifier) is assignable at `pre` when its record is and the nullifier
-is unspent. -/
-theorem assignableAll_record_nullifier {M : Materializer} (pre : Cell M) (record : Entry)
-    (operationNullifier : OperationNullifier)
-    (recordOk : Assignable pre.logical record.1)
-    (plane : record.1.1 ≠ .nullifier)
-    (fresh : isNullified pre operationNullifier = false) :
-    AssignableAll pre.logical [record, nullifierEntry operationNullifier] :=
-  assignableAll_pair _ _ _ (fun same => plane (congrArg Sigma.fst same).symm) recordOk
-    (assignable_of_absent _ _ fresh)
-
-/-- The applied post of a two-entry family patch holds its first entry. -/
-theorem apply_pair_first {M : Materializer} {pre : Cell M} {expectedPreRoot : Digest}
-    {first second : Entry}
+/-- The applied post of a one-entry family patch holds its entry. -/
+theorem apply_single {M : Materializer} {pre : Cell M} {expectedPreRoot : Digest}
+    {record : Entry}
     (validated : CellState.ValidatedPatch M pre expectedPreRoot
-      (assignAll pre.logical [first, second]))
-    (distinct : first.1 ≠ second.1) :
-    validated.apply.logical first.1 = some first.2 := by
+      (assignAll pre.logical [record])) :
+    validated.apply.logical record.1 = some record.2 := by
   rw [CellState.ValidatedPatch.apply_logical, run_assignAll]
-  exact setAll_pair_first _ _ _ distinct
-
-/-- The applied post of a two-entry family patch holds its second entry. -/
-theorem apply_pair_second {M : Materializer} {pre : Cell M} {expectedPreRoot : Digest}
-    {first second : Entry}
-    (validated : CellState.ValidatedPatch M pre expectedPreRoot
-      (assignAll pre.logical [first, second])) :
-    validated.apply.logical second.1 = some second.2 := by
-  rw [CellState.ValidatedPatch.apply_logical, run_assignAll]
-  exact setAll_pair_second _ _ _
+  exact setAll_single _ _
 
 /-! ## Capability issuance -/
 
@@ -356,7 +330,7 @@ def IssueDeclaration.capabilityEntry {kind : ResourceKind}
 
 def IssueDeclaration.entries {kind : ResourceKind}
     (declaration : IssueDeclaration kind) : List Entry :=
-  [declaration.capabilityEntry, nullifierEntry declaration.operationNullifier]
+  [declaration.capabilityEntry]
 
 /-- The issuance patch generated from an authority store. -/
 def IssueDeclaration.patch {kind : ResourceKind}
@@ -366,19 +340,17 @@ def IssueDeclaration.patch {kind : ResourceKind}
 @[simp] theorem IssueDeclaration.patch_writeFootprint {kind : ResourceKind}
     (declaration : IssueDeclaration kind) (store : Store layout) :
     Patch.writeFootprint (declaration.patch store) =
-      {⟨.capability kind, declaration.capability.id⟩,
-        ⟨.nullifier, declaration.operationNullifier⟩} := by
+      {⟨.capability kind, declaration.capability.id⟩} := by
   simp [IssueDeclaration.patch, assignAll_writeFootprint, IssueDeclaration.entries,
-    IssueDeclaration.capabilityEntry, nullifierEntry]
+    IssueDeclaration.capabilityEntry]
 
-/-- Issuance is root-only, fresh, current-epoch, registered for revocation, and
-single-use. -/
+/-- Issuance is root-only, fresh, current-epoch and registered for revocation.
+Single use is the durable consumed set's, keyed by the operation nullifier. -/
 structure IssueEvidence {M : Materializer} (domain : ProjectionUniverse)
     (pre : Cell M) {kind : ResourceKind}
     (declaration : IssueDeclaration kind) : Type where
   preRootExact : declaration.expectedPreRoot = pre.root
   slotFresh : CapabilityIdFresh pre declaration.capability.id
-  nullifierFresh : isNullified pre declaration.operationNullifier = false
   rootParent : declaration.capability.parent = none
   rootSelf : declaration.capability.root = declaration.capability.id
   rootAncestors : declaration.capability.ancestors = ∅
@@ -449,8 +421,7 @@ def acceptIssue
   effectsDigestBound := requestDigestExact
   modeEvidence := modeEvidence
   validated := validated_of_assign declaration.entries requestPreExact
-    (assignableAll_record_nullifier pre _ _ (assignable_of_ram _ _ rfl) (by intro h; cases h)
-      modeEvidence.nullifierFresh)
+    (assignableAll_single _ _ (assignable_of_ram _ _ rfl))
   postcondition := CellState.ValidatedPatch.resultAt _
   disclosure := .sealed
   disclosureAllowed := trivial
@@ -474,7 +445,7 @@ def AttenuateDeclaration.capabilityEntry {kind : ResourceKind}
 def AttenuateDeclaration.entries {kind : ResourceKind}
     (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind) :
     List Entry :=
-  [declaration.capabilityEntry parent, nullifierEntry declaration.operationNullifier]
+  [declaration.capabilityEntry parent]
 
 def AttenuateDeclaration.patch {kind : ResourceKind}
     (declaration : AttenuateDeclaration kind)
@@ -485,10 +456,9 @@ def AttenuateDeclaration.patch {kind : ResourceKind}
     (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind)
     (store : Store layout) :
     Patch.writeFootprint (declaration.patch parent store) =
-      {⟨.capability kind, declaration.child.id⟩,
-        ⟨.nullifier, declaration.operationNullifier⟩} := by
+      {⟨.capability kind, declaration.child.id⟩} := by
   simp [AttenuateDeclaration.patch, assignAll_writeFootprint, AttenuateDeclaration.entries,
-    AttenuateDeclaration.capabilityEntry, nullifierEntry]
+    AttenuateDeclaration.capabilityEntry]
 
 /-- Shared pre-state requirements for strict narrowing and explicit
 subject delegation. Both use the same canonical lookup, anchored lineage,
@@ -496,14 +466,13 @@ across-kind identity freshness and current revocation/epoch planes. -/
 structure DescentEvidence {M : Materializer} (domain : ProjectionUniverse)
     (pre : Cell M) {kind : ResourceKind} (expectedPreRoot : Digest)
     (parentId : CapabilityId) (child : Capability kind)
-    (operationNullifier : OperationNullifier) (parent : StoredCapability kind) : Type where
+    (parent : StoredCapability kind) : Type where
   preRootExact : expectedPreRoot = pre.root
   parentExact : readCapability pre kind parentId = some parent
   parentIdExact : parent.head.id = parentId
   parentLineageValid : LineageValid parent
   parentLineageAnchored : LineageAnchored pre parent
   childSlotFresh : CapabilityIdFresh pre child.id
-  nullifierFresh : isNullified pre operationNullifier = false
   issuerCurrent : child.issuerEpoch = issuerEpochAt pre child.issuer
   policyCurrent : child.policyEpoch = policyEpochAt pre child.policyId
   selfRegistered : RevocationKey.capability child.id ∈ domain.revocationKeys
@@ -520,31 +489,21 @@ structure DescentEvidence {M : Materializer} (domain : ProjectionUniverse)
 theorem DescentEvidence.reject_existing_child {M : Materializer}
     {domain : ProjectionUniverse} {pre : Cell M} {kind : ResourceKind}
     {expectedPreRoot : Digest} {parentId : CapabilityId} {child : Capability kind}
-    {operationNullifier : OperationNullifier} {parent : StoredCapability kind}
-    (mode : DescentEvidence domain pre expectedPreRoot parentId child operationNullifier parent)
+    {parent : StoredCapability kind}
+    (mode : DescentEvidence domain pre expectedPreRoot parentId child parent)
     (otherKind : ResourceKind) (existing : StoredCapability otherKind)
     (present : readCapability pre otherKind child.id = some existing) : False := by
   rw [mode.childSlotFresh otherKind] at present
   cases present
-
-theorem DescentEvidence.reject_spent_nullifier {M : Materializer}
-    {domain : ProjectionUniverse} {pre : Cell M} {kind : ResourceKind}
-    {expectedPreRoot : Digest} {parentId : CapabilityId} {child : Capability kind}
-    {operationNullifier : OperationNullifier} {parent : StoredCapability kind}
-    (mode : DescentEvidence domain pre expectedPreRoot parentId child operationNullifier parent)
-    (spent : isNullified pre operationNullifier = true) : False := by
-  rw [mode.nullifierFresh] at spent
-  cases spent
 
 /-- Fresh capability production preserves every already-present capability,
 even when storage kinds differ. This is the shared frame fact needed to keep
 canonical ancestry anchored after appending a child. -/
 theorem capabilityProduction_preserves_present {M : Materializer}
     {pre : Cell M} {expectedPreRoot : Digest} {patch : Patch layout}
-    {kind : ResourceKind} {identifier : CapabilityId} {nullifier : Nat}
+    {kind : ResourceKind} {identifier : CapabilityId}
     (validated : CellState.ValidatedPatch M pre expectedPreRoot patch)
-    (footprint : Patch.writeFootprint patch =
-      {⟨.capability kind, identifier⟩, ⟨.nullifier, nullifier⟩})
+    (footprint : Patch.writeFootprint patch = {⟨.capability kind, identifier⟩})
     (fresh : CapabilityIdFresh pre identifier)
     (otherKind : ResourceKind) (otherId : CapabilityId)
     (stored : StoredCapability otherKind)
@@ -566,10 +525,7 @@ theorem capabilityProduction_preserves_present {M : Materializer}
       Patch.run_frame pre.logical patch ⟨.capability otherKind, otherId⟩ (by
         intro member
         rw [footprint] at member
-        rcases Finset.mem_insert.mp member with same | singleton
-        · exact different same
-        · have impossible := Finset.mem_singleton.mp singleton
-          cases impossible)
+        exact different (Finset.mem_singleton.mp member))
     _ = some stored := present
 
 /-- The strict operation retains its original holder-narrowing relation. -/
@@ -577,7 +533,7 @@ structure AttenuateEvidence {M : Materializer} (domain : ProjectionUniverse)
     (pre : Cell M) {kind : ResourceKind}
     (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind)
     extends DescentEvidence domain pre declaration.expectedPreRoot declaration.parentId
-      declaration.child declaration.operationNullifier parent where
+      declaration.child parent where
   strict : declaration.child.StrictAttenuates parent.head
 
 theorem AttenuateEvidence.childLineageAnchored {M : Materializer}
@@ -644,8 +600,7 @@ def acceptAttenuation
       request pre declaration parent := by
   have validated := validated_of_assign (M := M) (pre := pre)
     (declaration.entries parent) requestPreExact
-    (assignableAll_record_nullifier pre _ _ (assignable_of_ram _ _ rfl) (by intro h; cases h)
-      modeEvidence.nullifierFresh)
+    (assignableAll_single _ _ (assignable_of_ram _ _ rfl))
   exact
     { authorization := authorization
       preStateBound := rfl
@@ -722,8 +677,7 @@ def DelegateDeclaration.capabilityEntry {kind : ResourceKind}
 def DelegateDeclaration.entries {kind : ResourceKind}
     (declaration : DelegateDeclaration kind) (parent : StoredCapability kind)
     (request : Request kind) : List Entry :=
-  [declaration.capabilityEntry parent request,
-    nullifierEntry declaration.operationNullifier]
+  [declaration.capabilityEntry parent request]
 
 def DelegateDeclaration.patch {kind : ResourceKind}
     (declaration : DelegateDeclaration kind) (parent : StoredCapability kind)
@@ -734,10 +688,9 @@ def DelegateDeclaration.patch {kind : ResourceKind}
     (declaration : DelegateDeclaration kind) (parent : StoredCapability kind)
     (request : Request kind) (store : Store layout) :
     Patch.writeFootprint (declaration.patch parent request store) =
-      {⟨.capability kind, declaration.child.id⟩,
-        ⟨.nullifier, declaration.operationNullifier⟩} := by
+      {⟨.capability kind, declaration.child.id⟩} := by
   simp [DelegateDeclaration.patch, assignAll_writeFootprint, DelegateDeclaration.entries,
-    DelegateDeclaration.capabilityEntry, nullifierEntry]
+    DelegateDeclaration.capabilityEntry]
 
 /-- The parent invocation is mandatory inside family mode evidence, not only
 inside a convenience constructor. Its commitment is the one verified by the
@@ -749,7 +702,7 @@ structure DelegationEvidence {M : Materializer} (domain : ProjectionUniverse)
     (effectDigest : DelegateDeclaration kind → Digest)
     (declaration : DelegateDeclaration kind) (parent : StoredCapability kind)
     extends DescentEvidence domain pre declaration.expectedPreRoot declaration.parentId
-      declaration.child declaration.operationNullifier parent where
+      declaration.child parent where
   parentCommitment : Digest
   parentAuthorization : Authorized portal (authState domain pre)
     (context.request codec effectDigest pre declaration)
@@ -839,8 +792,7 @@ def acceptDelegation {M : Materializer}
   let request := context.request codec effectDigest pre declaration
   have validated := validated_of_assign (M := M) (pre := pre)
     (expectedPreRoot := request.preStateRoot) (declaration.entries parent request) rfl
-    (assignableAll_record_nullifier pre _ _ (assignable_of_ram _ _ rfl) (by intro h; cases h)
-      mode.nullifierFresh)
+    (assignableAll_single _ _ (assignable_of_ram _ _ rfl))
   exact
     { authorization := mode.parentAuthorization
       preStateBound := rfl
@@ -942,31 +894,8 @@ end DelegationObligations
     readCapability accepted.prepared.post kind declaration.child.id =
       some (delegatedCapability declaration.child parent
         (context.request codec effectDigest pre declaration)) :=
-  apply_pair_first
-    (first := declaration.capabilityEntry parent
-      (context.request codec effectDigest pre declaration))
-    (second := nullifierEntry declaration.operationNullifier)
-    accepted.validated (by simp [DelegateDeclaration.capabilityEntry, nullifierEntry])
-
-@[simp] theorem delegation_post_nullifier_exact {M : Materializer}
-    {domain : ProjectionUniverse} {pre : Cell M} {portal : Portal}
-    {context : DelegationContext} {kind : ResourceKind}
-    {codec : LawfulCodec (DelegateDeclaration kind)}
-    {parentCodec : LawfulCodec (StoredCapability kind)}
-    {effectDigest : DelegateDeclaration kind → Digest}
-    {declaration : DelegateDeclaration kind} {parent : StoredCapability kind}
-    (accepted : AcceptedCellEffect (portal := portal) (authState := authState domain pre)
-      (delegateFamily domain pre portal context codec parentCodec effectDigest)
-      (context.request codec effectDigest pre declaration) pre declaration parent) :
-    isNullified accepted.prepared.post declaration.operationNullifier = true := by
-  have written : accepted.validated.apply.logical
-      ⟨.nullifier, declaration.operationNullifier⟩ = some () :=
-    apply_pair_second
-      (first := declaration.capabilityEntry parent
-        (context.request codec effectDigest pre declaration))
-      (second := nullifierEntry declaration.operationNullifier) accepted.validated
-  simp only [isNullified, AcceptedCellEffect.prepared_post, written]
-  rfl
+  apply_single (record := declaration.capabilityEntry parent
+    (context.request codec effectDigest pre declaration)) accepted.validated
 
 theorem delegation_post_lineage_valid {M : Materializer}
     {domain : ProjectionUniverse} {pre : Cell M} {portal : Portal}
@@ -994,7 +923,7 @@ def RevokeDeclaration.revokedEntry (declaration : RevokeDeclaration) : Entry :=
   ⟨⟨.revoked, declaration.key⟩, ()⟩
 
 def RevokeDeclaration.entries (declaration : RevokeDeclaration) : List Entry :=
-  [declaration.revokedEntry, nullifierEntry declaration.operationNullifier]
+  [declaration.revokedEntry]
 
 def RevokeDeclaration.patch
     (declaration : RevokeDeclaration) (store : Store layout) : Patch layout :=
@@ -1003,16 +932,15 @@ def RevokeDeclaration.patch
 @[simp] theorem RevokeDeclaration.patch_writeFootprint (declaration : RevokeDeclaration)
     (store : Store layout) :
     Patch.writeFootprint (declaration.patch store) =
-      {⟨.revoked, declaration.key⟩, ⟨.nullifier, declaration.operationNullifier⟩} := by
+      {⟨.revoked, declaration.key⟩} := by
   simp [RevokeDeclaration.patch, assignAll_writeFootprint, RevokeDeclaration.entries,
-    RevokeDeclaration.revokedEntry, nullifierEntry]
+    RevokeDeclaration.revokedEntry]
 
 structure RevokeEvidence {M : Materializer} (domain : ProjectionUniverse)
     (pre : Cell M) (declaration : RevokeDeclaration) : Type where
   preRootExact : declaration.expectedPreRoot = pre.root
   registered : declaration.key ∈ domain.revocationKeys
   live : isRevoked pre declaration.key = false
-  nullifierFresh : isNullified pre declaration.operationNullifier = false
 
 def revokeFamily {M : Materializer} (domain : ProjectionUniverse) (pre : Cell M)
     (codec : LawfulCodec RevokeDeclaration)
@@ -1057,8 +985,7 @@ def acceptRevocation
   effectsDigestBound := requestDigestExact
   modeEvidence := modeEvidence
   validated := validated_of_assign declaration.entries requestPreExact
-    (assignableAll_record_nullifier pre _ _ (assignable_of_absent _ _ modeEvidence.live)
-      (by intro h; cases h) modeEvidence.nullifierFresh)
+    (assignableAll_single _ _ (assignable_of_absent _ _ modeEvidence.live))
   postcondition := CellState.ValidatedPatch.resultAt _
   disclosure := .sealed
   disclosureAllowed := trivial
@@ -1107,10 +1034,6 @@ theorem EpochTarget.entry_ram (target : EpochTarget) (epoch : Epoch) :
     layout.discipline (target.entry epoch).1.1 = .ram := by
   cases target <;> rfl
 
-theorem EpochTarget.entry_plane (target : EpochTarget) (epoch : Epoch) :
-    (target.entry epoch).1.1 ≠ .nullifier := by
-  cases target <;> (intro h; cases h)
-
 /-- A cell holding a target's entry reads that epoch back through the target's
 own reader. -/
 theorem EpochTarget.read_of_entry {M : Materializer} (target : EpochTarget)
@@ -1130,8 +1053,7 @@ structure RotateEpochDeclaration where
   operationNullifier : OperationNullifier
 
 def RotateEpochDeclaration.entries (declaration : RotateEpochDeclaration) : List Entry :=
-  [declaration.target.entry declaration.nextEpoch,
-    nullifierEntry declaration.operationNullifier]
+  [declaration.target.entry declaration.nextEpoch]
 
 def RotateEpochDeclaration.patch
     (declaration : RotateEpochDeclaration) (store : Store layout) : Patch layout :=
@@ -1140,9 +1062,9 @@ def RotateEpochDeclaration.patch
 @[simp] theorem RotateEpochDeclaration.patch_writeFootprint
     (declaration : RotateEpochDeclaration) (store : Store layout) :
     Patch.writeFootprint (declaration.patch store) =
-      {declaration.target.address, ⟨.nullifier, declaration.operationNullifier⟩} := by
+      {declaration.target.address} := by
   simp [RotateEpochDeclaration.patch, assignAll_writeFootprint,
-    RotateEpochDeclaration.entries, nullifierEntry]
+    RotateEpochDeclaration.entries]
 
 /-- Rotating a grant generation leaves that resource's selected policy source
 unchanged in the ACTUAL joint post. A deliberate combined source-and-generation
@@ -1181,7 +1103,6 @@ structure RotateEpochEvidence {M : Materializer} (pre : Cell M)
   preRootExact : declaration.expectedPreRoot = pre.root
   currentExact : declaration.target.read pre = declaration.expectedEpoch
   successorExact : declaration.nextEpoch = declaration.expectedEpoch + 1
-  nullifierFresh : isNullified pre declaration.operationNullifier = false
 
 def rotateEpochFamily {M : Materializer} (pre : Cell M)
     (codec : LawfulCodec RotateEpochDeclaration)
@@ -1222,10 +1143,8 @@ def acceptEpochRotation
     AcceptedCellEffect (portal := portal) (authState := authState domain pre)
       (rotateEpochFamily pre codec effectDigest context) request pre declaration () :=
   have assignable : AssignableAll pre.logical declaration.entries :=
-    assignableAll_record_nullifier pre _ _
+    assignableAll_single _ _
       (assignable_of_ram _ _ (EpochTarget.entry_ram declaration.target declaration.nextEpoch))
-      (EpochTarget.entry_plane declaration.target declaration.nextEpoch)
-      modeEvidence.nullifierFresh
   {
   authorization := authorization
   preStateBound := rfl
@@ -1266,28 +1185,7 @@ theorem authorization_consults_same_canonical_pre
       (issueFamily domain pre codec effectDigest context) request pre declaration ()) :
     accepted.prepared.post.logical ⟨.capability kind, declaration.capability.id⟩ =
       some (⟨declaration.capability, []⟩ : StoredCapability kind) :=
-  apply_pair_first
-    (first := declaration.capabilityEntry)
-    (second := nullifierEntry declaration.operationNullifier)
-    accepted.validated (by simp [IssueDeclaration.capabilityEntry, nullifierEntry])
-
-@[simp] theorem issue_post_nullifier_exact
-    {M : Materializer} {domain : ProjectionUniverse} {pre : Cell M}
-    {portal : Portal} {kind : ResourceKind} {request : Request kind}
-    {codec : LawfulCodec (IssueDeclaration kind)}
-    {effectDigest : IssueDeclaration kind → Digest}
-    {declaration : IssueDeclaration kind}
-    (accepted : AcceptedCellEffect (portal := portal)
-      (authState := authState domain pre)
-      (issueFamily domain pre codec effectDigest context) request pre declaration ()) :
-    isNullified accepted.prepared.post declaration.operationNullifier = true := by
-  have written : accepted.validated.apply.logical
-      ⟨.nullifier, declaration.operationNullifier⟩ = some () :=
-    apply_pair_second
-      (first := declaration.capabilityEntry)
-      (second := nullifierEntry declaration.operationNullifier) accepted.validated
-  simp only [isNullified, AcceptedCellEffect.prepared_post, written]
-  rfl
+  apply_single (record := declaration.capabilityEntry) accepted.validated
 
 theorem issue_post_lineage_valid
     {M : Materializer} {domain : ProjectionUniverse} {pre : Cell M}
@@ -1317,10 +1215,7 @@ theorem issue_post_lineage_valid
       request pre declaration parent) :
     readCapability accepted.prepared.post kind declaration.child.id =
       some (descendedCapability declaration.child parent) :=
-  apply_pair_first
-    (first := declaration.capabilityEntry parent)
-    (second := nullifierEntry declaration.operationNullifier)
-    accepted.validated (by simp [AttenuateDeclaration.capabilityEntry, nullifierEntry])
+  apply_single (record := declaration.capabilityEntry parent) accepted.validated
 
 /-- The written child is not just present: its retained first-order ancestry is
 validated by the exact strict edge and parent lineage read from canonical pre. -/
@@ -1369,10 +1264,7 @@ theorem attenuation_post_lineage_anchored
       (revokeFamily domain pre codec effectDigest context) request pre declaration ()) :
     isRevoked accepted.prepared.post declaration.key = true := by
   have written : accepted.validated.apply.logical ⟨.revoked, declaration.key⟩ = some () :=
-    apply_pair_first
-      (first := declaration.revokedEntry)
-      (second := nullifierEntry declaration.operationNullifier)
-      accepted.validated (by simp [RevokeDeclaration.revokedEntry, nullifierEntry])
+    apply_single (record := declaration.revokedEntry) accepted.validated
   simp only [isRevoked, AcceptedCellEffect.prepared_post, written]
   rfl
 
@@ -1402,12 +1294,7 @@ theorem revocation_post_is_authorizer_member
       (rotateEpochFamily pre codec effectDigest context) request pre declaration ()) :
     declaration.target.read accepted.prepared.post = declaration.nextEpoch :=
   EpochTarget.read_of_entry declaration.target accepted.prepared.post
-    (apply_pair_first
-      (first := declaration.target.entry declaration.nextEpoch)
-      (second := nullifierEntry declaration.operationNullifier)
-      accepted.validated (by
-        rw [EpochTarget.entry_address]
-        cases declaration.target <;> simp [EpochTarget.address, nullifierEntry]))
+    (apply_single (record := declaration.target.entry declaration.nextEpoch) accepted.validated)
 
 /-- The family postcondition retains source framing through joint composition,
 not merely on the standalone patch that initially produced the token. -/
@@ -1448,8 +1335,8 @@ theorem rotation_post_is_authorizer_epoch
   rw [declaration.target.readAuth_authState]
   exact rotation_post_exact accepted
 
-/-- Revocation acceptance changes only its exact revocation key and operation
-nullifier; every other typed address is framed by the canonical delta. -/
+/-- Revocation acceptance changes only its exact revocation key; every other
+typed address is framed by the canonical delta. -/
 theorem revoke_frame
     {M : Materializer} {domain : ProjectionUniverse} {pre : Cell M}
     {portal : Portal} {kind : ResourceKind} {request : Request kind}
@@ -1460,17 +1347,14 @@ theorem revoke_frame
       (authState := authState domain pre)
       (revokeFamily domain pre codec effectDigest context) request pre declaration ())
     (address : Address layout)
-    (outside : address ∉
-      ({⟨.revoked, declaration.key⟩, ⟨.nullifier, declaration.operationNullifier⟩} :
-        Finset (Address layout))) :
+    (outside : address ∉ ({⟨.revoked, declaration.key⟩} : Finset (Address layout))) :
     accepted.prepared.post.logical address = pre.logical address :=
   accepted.frame address (by
     change address ∉ Patch.writeFootprint (declaration.patch pre.logical)
     rw [RevokeDeclaration.patch_writeFootprint]
     exact outside)
 
-/-- Every family exposes the exact eager nullifier that its atomic patch also
-writes. -/
+/-- Every family exposes the exact eager nullifier the receiver consumes. -/
 theorem revoke_nullifier_exact
     {M : Materializer} {domain : ProjectionUniverse} {pre : Cell M}
     {portal : Portal} {kind : ResourceKind} {request : Request kind}

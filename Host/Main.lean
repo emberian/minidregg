@@ -816,34 +816,12 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     let mut n := 0
     for _ in [0:10] do n := n + (ResourceBirthCodec.rootBytes authorityBytes).value % 3
     pure n
-  -- Scaling of the authority cell alone: add K synthetic nullifiers.
-  for k in [100, 200, 400, 800, 1600] do
-    let store := (List.range k).foldl (fun (st : Minidregg.Theory.Store.Store
-        Minidregg.Theory.CredentialAuthorityState.layout) i =>
-      Minidregg.Theory.Store.Store.set st ⟨.nullifier, 1000000 + i⟩ (some ())) authority.snapshot.logical
-    let cell := Minidregg.Theory.CellState.materialize CredentialAuthorityCell.materializer store
-    let bytes ← timed s!"K={k} encode" do
-      let t := (← IO.monoMsNow)
-      pure (Minidregg.Theory.CellState.materialize CredentialAuthorityCell.materializer
-        (Minidregg.Theory.Store.Store.set store ⟨.nullifier, t⟩ none)).bytes
-    IO.println s!"K={k} bytes {bytes.length}"
-    discard <| timed s!"K={k} decode+load x3" do
-      let mut n := 0
-      for i in [0:3] do
-        if (CredentialAuthorityDomain.load ⟨config.deployment.domain.value + i⟩ bytes).isSome then n := n + 1
-      pure n
-    discard <| timed s!"K={k} support x3" do
-      let mut n := 0
-      for i in [0:3] do
-        n := n + (Minidregg.Theory.Store.Store.set store ⟨.nullifier, i⟩ none).support.card
-      pure n
-    discard <| timed s!"K={k} authState x3" do
-      let snap := CredentialAuthorityDomain.Snapshot.ofCell config.deployment.domain cell
-      let mut n := 0
-      for i in [0:3] do n := n + snap.authState.revoked.card + snap.authState.policyEpoch ⟨i⟩
-      pure n
-    discard <| timed s!"K={k} rootBytes" do
-      pure (ResourceBirthCodec.rootBytes bytes).value
+  discard <| timed "authority decode+load x10" do
+    let mut n := 0
+    for _ in [0:10] do
+      if (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot).isSome then
+        n := n + authority.snapshot.cell.logical.support.card
+    pure n
   discard <| timed "head receipt x10" do
     let mut n := 0
     for _ in [0:10] do

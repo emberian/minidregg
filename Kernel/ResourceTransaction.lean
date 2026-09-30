@@ -414,17 +414,17 @@ abbrev Incidence (command : Command) := Option (TargetIndex command)
 def incidences (command : Command) : List (Incidence command) :=
   (List.finRange command.targets.length).map some ++ [none]
 
-/-- The transaction's one authority write: a fresh allocation of its operation
-nullifier in the append-only plane. -/
-def markerPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
-    Patch CredentialAuthorityState.layout :=
-  [.allocate .nullifier (operationMarker snapshot.domain semantics command) ()]
+/-- The authority incidence reads the authority cell and writes nothing: it
+carries the transaction's authorization at the authority root.  The
+operation marker is consumed in the durable nullifier set by the intent
+(`DeclaredResourceController.AcceptedInvocation.dataIntent`), so a field
+write leaves the authority cell, its root and its bytes unchanged. -/
+def authorityReadPatch : Patch CredentialAuthorityState.layout := []
 
 structure MarkerMode (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) where
   rootExact : command.expectedAuthorityRoot = snapshot.cell.root
-  unused : CredentialAuthorityState.isNullified snapshot.cell
-    (operationMarker snapshot.domain semantics command) = false
-  prepared : CredentialAuthorityDomain.Prepared snapshot (markerPatch snapshot semantics command)
+  unused : snapshot.spent (operationMarker snapshot.domain semantics command) = false
+  prepared : CredentialAuthorityDomain.Prepared snapshot authorityReadPatch
 
 def markerFamily (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) :
     SemanticEffectFamily CredentialAuthorityState.layout CredentialAuthorityCell.materializer Nat where
@@ -435,10 +435,9 @@ def markerFamily (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : 
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => DeclaredActionLowering.unitCodec
   ModeEvidence := fun command _ => MarkerMode snapshot semantics command
-  Postcondition := fun command _ logical =>
-    (markerPatch snapshot semantics command).ResultAt snapshot.logical logical
+  Postcondition := fun _ _ logical => authorityReadPatch.ResultAt snapshot.logical logical
   effectDigest := effectsDigest snapshot.domain semantics
-  patch := fun command _ => markerPatch snapshot semantics command
+  patch := fun _ _ => authorityReadPatch
   nullifier := fun command _ => some (operationMarker snapshot.domain semantics command)
   Release := fun _ _ => Empty
   DeclassificationAuthority := fun _ _ => Empty
@@ -448,9 +447,8 @@ def markerFamily (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : 
 def prepareMarker (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
     Except Reject (MarkerMode snapshot semantics command) :=
   if root : command.expectedAuthorityRoot = snapshot.cell.root then
-    if unused : CredentialAuthorityState.isNullified snapshot.cell
-        (operationMarker snapshot.domain semantics command) = false then
-      match CredentialAuthorityDomain.prepare snapshot (markerPatch snapshot semantics command) with
+    if unused : snapshot.spent (operationMarker snapshot.domain semantics command) = false then
+      match CredentialAuthorityDomain.prepare snapshot authorityReadPatch with
       | none => .error .authorityPreparation
       | some prepared => .ok ⟨root, unused, prepared⟩
     else .error .nullifierUsed
@@ -487,12 +485,21 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     else .error .duplicateTargets
   else .error .emptyTargets
 
-/-- The authority cell after the transaction: the marker patch applied to the
-loaded cell. -/
+/-- The authority cell after the transaction: the (empty) authority read patch
+applied to the loaded cell. -/
 def PreparedInvocation.authorityPost {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command) :
     CredentialAuthorityDomain.Cell :=
   prepared.marker.prepared.validated.apply
+
+/-- The transaction leaves the authority cell's logical content unchanged. -/
+theorem PreparedInvocation.authorityPost_logical {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command) :
+    prepared.authorityPost.logical = prepared.authority.snapshot.logical := by
+  simp only [PreparedInvocation.authorityPost, ValidatedPatch.apply_logical, authorityReadPatch,
+    Patch.run_nil]
+  rfl
 
 end Minidregg.Kernel.DeclaredResourceController

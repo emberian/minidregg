@@ -3,7 +3,11 @@
 
 The authorization projection is not an independently supplied cache.  This
 module places capability records, issuer/policy/subject epochs, revocations,
-and single-use operation nullifiers in one typed `CellState`.  A finite
+and registrations in one typed `CellState`.  Single-use operation nullifiers
+are not authority state: they live in the durable protocol's append-only
+consumed set (`DurableCommitProtocol.Snapshot.consumed`), keyed by
+`CredentialAuthorityReplay.nullifier`, so this cell does not grow per
+operation.  A finite
 deployment universe turns the sparse revocation plane into the exact `Finset`
 required by `TypedAuthorization.AuthState`; both authenticated-set roots are
 the root of the same canonical materialization.
@@ -50,9 +54,6 @@ inductive AuthorityPlane where
   /-- Presence-only and append-only: a present key IS a revocation, and no
   accepted patch removes or overwrites it. -/
   | revoked
-  /-- Presence-only and append-only: a present identifier is a spent
-  single-use operation. -/
-  | nullifier
   /-- Presence-only and append-only: a revocation key the domain has
   registered (and may later revoke).  This replaces the former "stored
   `false` in the revocation plane" encoding of "registered, not revoked". -/
@@ -69,7 +70,6 @@ def AuthorityPlane.Key : AuthorityPlane → Type
   | .subjectKeyEpoch => SubjectId
   | .subjectKey => SubjectId × Epoch
   | .revoked => RevocationKey
-  | .nullifier => Nat
   | .registered => RevocationKey
 
 instance AuthorityPlane.keyDecEq : (plane : AuthorityPlane) → DecidableEq plane.Key
@@ -81,7 +81,6 @@ instance AuthorityPlane.keyDecEq : (plane : AuthorityPlane) → DecidableEq plan
   | .subjectKeyEpoch => inferInstanceAs (DecidableEq SubjectId)
   | .subjectKey => inferInstanceAs (DecidableEq (SubjectId × Epoch))
   | .revoked => inferInstanceAs (DecidableEq RevocationKey)
-  | .nullifier => inferInstanceAs (DecidableEq Nat)
   | .registered => inferInstanceAs (DecidableEq RevocationKey)
 
 /-- A stored lineage is data: the head capability followed by its parent,
@@ -108,7 +107,6 @@ def AuthorityPlane.Value : AuthorityPlane → Type
   | .subjectKeyEpoch => Epoch
   | .subjectKey => CredentialSigningKey.KeyRecord
   | .revoked => Unit
-  | .nullifier => Unit
   | .registered => Unit
 
 instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq plane.Value
@@ -120,18 +118,16 @@ instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq pl
   | .subjectKeyEpoch => inferInstanceAs (DecidableEq Epoch)
   | .subjectKey => inferInstanceAs (DecidableEq CredentialSigningKey.KeyRecord)
   | .revoked => inferInstanceAs (DecidableEq Unit)
-  | .nullifier => inferInstanceAs (DecidableEq Unit)
   | .registered => inferInstanceAs (DecidableEq Unit)
 
-/-- The mutation discipline of each plane.  The revocation, nullifier and
-registration planes are presence-only and append-only: once present, a key
-stays present with the same value under every accepted patch
-(`revocation_permanent`, `nullifier_permanent`), so revocation is monotone by
+/-- The mutation discipline of each plane.  The revocation and registration
+planes are presence-only and append-only: once present, a key stays present
+with the same value under every accepted patch (`revocation_permanent`,
+`registration_permanent`), so revocation is monotone by
 the namespace's discipline rather than by a theorem each writer must recall.
 Every other plane is RAM, guarded by its exact prior value. -/
 def AuthorityPlane.discipline : AuthorityPlane → Discipline
   | .revoked => .appendOnly
-  | .nullifier => .appendOnly
   | .registered => .appendOnly
   | _ => .ram
 
@@ -209,9 +205,6 @@ theorem currentSigningKey_rejects_mismatch
 
 def isRevoked {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
   (pre.logical ⟨.revoked, key⟩).isSome
-
-def isNullified {M : Materializer} (pre : Cell M) (id : Nat) : Bool :=
-  (pre.logical ⟨.nullifier, id⟩).isSome
 
 def isRegistered {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
   (pre.logical ⟨.registered, key⟩).isSome
@@ -409,13 +402,6 @@ theorem revocation_permanent (store : Store layout) (patch : Patch layout)
     Patch.run store patch ⟨.revoked, key⟩ = some () :=
   Patch.appendOnly_present_preserved store patch ⟨.revoked, key⟩ () valid rfl revoked
 
-/-- A spent nullifier stays spent under every valid patch. -/
-theorem nullifier_permanent (store : Store layout) (patch : Patch layout)
-    (id : Nat) (valid : Patch.ValidFrom store patch)
-    (spent : store ⟨.nullifier, id⟩ = some ()) :
-    Patch.run store patch ⟨.nullifier, id⟩ = some () :=
-  Patch.appendOnly_present_preserved store patch ⟨.nullifier, id⟩ () valid rfl spent
-
 /-- Satisfiable pole: revoking a key not yet revoked is enabled. -/
 theorem revoke_enabled_iff (store : Store layout) (key : RevocationKey) :
     (Op.allocate (L := layout) .revoked key ()).Enabled store ↔
@@ -433,12 +419,6 @@ theorem unrevoke_refused (store : Store layout) (key : RevocationKey) :
 theorem revocation_overwrite_refused (store : Store layout) (key : RevocationKey) :
     ¬ (Op.write (L := layout) .revoked key () ()).Enabled store := by
   change ¬ (layout.discipline .revoked = .ram ∧ store ⟨.revoked, key⟩ = some ())
-  simp [AuthorityPlane.discipline]
-
-/-- Refuting pole: no operation clears a spent nullifier. -/
-theorem nullifier_clear_refused (store : Store layout) (id : Nat) :
-    ¬ (Op.free (L := layout) .nullifier id ()).Enabled store := by
-  change ¬ (layout.discipline .nullifier = .ram ∧ store ⟨.nullifier, id⟩ = some ())
   simp [AuthorityPlane.discipline]
 
 /-! ## Registration is append-only: deregistration is impossible
@@ -506,13 +486,6 @@ theorem registration_monotone {pre post : Store layout} {patch : Patch layout}
     (registered : pre ⟨.registered, key⟩ = some ()) :
     post ⟨.registered, key⟩ = some () :=
   presence_monotone .registered rfl key () executes registered
-
-/-- A spent nullifier is spent after every accepted history. -/
-theorem nullifier_monotone {pre post : Store layout} {patch : Patch layout}
-    (executes : Patch.Executes pre patch post) (id : Nat)
-    (spent : pre ⟨.nullifier, id⟩ = some ()) :
-    post ⟨.nullifier, id⟩ = some () :=
-  presence_monotone .nullifier rfl id () executes spent
 
 /-- A revoked key (registered present AND revoked present) stays exactly that:
 no accepted history returns it to registered-and-live, or to unregistered. -/

@@ -230,7 +230,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
       if rootExact : command.expectedAuthorityRoot = authority.snapshot.cell.root then
         if registered : RevocationKey.capability command.capability ∈ authority.snapshot.revocationUniverse.revocationKeys then
           if live : isRevoked authority.snapshot.cell (.capability command.capability) = false then
-            if fresh : isNullified authority.snapshot.cell (operationMarker authority.snapshot.domain profile.semantics command) = false then
+            if authority.snapshot.spent (operationMarker authority.snapshot.domain profile.semantics command) = false then
               match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
                   ((declaration authority.snapshot.domain profile.semantics command).patch
                     authority.snapshot.logical) with
@@ -242,7 +242,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                       (authority.snapshot.authState.policyRevision ⟨command.target.value⟩)))
                   .ok ⟨directory, authority, target, victim, victimExact, victimIdentity, victimPolicy,
                     { preStateBound := rfl
-                      modeEvidence := ⟨rootExact, registered, live, fresh⟩
+                      modeEvidence := ⟨rootExact, registered, live⟩
                       validated := validated
                       postcondition := validated.resultAt },
                     source⟩
@@ -394,7 +394,7 @@ theorem Accepted.control_capability_required [DecidableEq F]
       exact ⟨cap, commitment, rfl, semantic.scope.verb⟩
 
 /-- Revocation preserves ALL grant payloads and their generation/revision
-coordinates. Only the named revocation fact and the operation nullifier change. -/
+coordinates. Only the named revocation fact changes. -/
 theorem Accepted.grants_preserved [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) (other : ResourceKind) (identifier : CapabilityId) :
@@ -406,10 +406,8 @@ theorem Accepted.grants_preserved [DecidableEq F]
   exact frame
     (by
       intro member
-      rcases Finset.mem_insert.mp member with impossible | member
-      · cases impossible
-      · have impossible := Finset.mem_singleton.mp member
-        cases impossible)
+      have impossible := Finset.mem_singleton.mp member
+      cases impossible)
 
 theorem Accepted.policy_generation_preserved [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
@@ -420,10 +418,8 @@ theorem Accepted.policy_generation_preserved [DecidableEq F]
     ⟨.policyEpoch, policy⟩
       (by
       intro member
-      rcases Finset.mem_insert.mp member with impossible | member
-      · cases impossible
-      · have impossible := Finset.mem_singleton.mp member
-        cases impossible)
+      have impossible := Finset.mem_singleton.mp member
+      cases impossible)
   rw [AcceptedCellEffect.recast_prepared] at frame
   exact congrArg (fun value : Option Nat => value.getD 0) frame
 

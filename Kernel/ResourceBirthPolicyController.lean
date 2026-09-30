@@ -549,7 +549,6 @@ theorem validated (prepared : PreparedBirth profile.compilerProfile deployment p
   | .factory => factoryValidated prepared.factory.payload
   | .book => prepared.resources.validated
   | .authority => ResourceBirthAuthority.validated prepared.authority.snapshot.cell descriptor
-      prepared.grants.mode.nullifierFresh
   | .allocation index => ResourceBirthController.allocationValidated
       prepared.directory.directory (creation descriptor index) (allocationFresh prepared index)
 
@@ -853,8 +852,7 @@ def policyPostState
     (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)
   | .factory => prepared.factory.payload.logical
   | .book => prepared.resources.post.logical
-  | .authority => (ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor
-      prepared.grants.mode.nullifierFresh).logical
+  | .authority => (ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor).logical
   | .allocation index => LifecycleSlot.state Registry (.live (creation descriptor index).cell)
 
 theorem Pending.policyPreCell_exact

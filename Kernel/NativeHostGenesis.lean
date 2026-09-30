@@ -177,9 +177,9 @@ theorem v1_config_refused (payload : List UInt8) :
     simp [configRawCodec, lengthExact, different]
   simp [configCodec, ResourceBirthCodec.strictCodec, raw]
 
-/-- The authority clock at genesis: no operation nullifier has been spent
-(`genesis_revision` below). Key activation uses this clock (the one authority
-cell's spent-nullifier count), not height or key epoch. -/
+/-- The authority clock at genesis: no record has been accepted
+(`genesis_revision` below). Key activation uses this clock (the durable
+height, `CredentialAuthorityDomainReceiver.clockOf`), not a key epoch. -/
 def initialAuthorityRevision : Nat := 0
 
 def Config.Valid {F : Type} [Field F]
@@ -352,30 +352,11 @@ def authorityStore {F : Type} [Field F]
     Store.Store CredentialAuthorityState.layout :=
   StoreCodec.fromEntries (entries profile config)
 
-theorem entries_not_nullifier {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
-    (entry : CredentialAuthorityEffects.Entry) (member : entry ∈ entries profile config) :
-    entry.1.1 ≠ .nullifier := by
-  simp only [entries, policyEntries, keyEntries, capabilityEntry, List.mem_append, List.mem_cons,
-    List.mem_flatMap, List.not_mem_nil, or_false] at member
-  rcases member with ((rfl | rfl) | ⟨_, _, rfl | rfl | rfl⟩) | ⟨_, _, (rfl | rfl) | rfl | rfl | rfl⟩ <;>
-    exact fun same => by cases same
-
-/-- No operation nullifier is spent at genesis: the authority clock starts at
-`initialAuthorityRevision`. -/
-theorem genesis_revision {F : Type} [Field F]
-    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
-    CredentialAuthorityDomain.revisionOf (authorityStore profile config) = initialAuthorityRevision := by
-  unfold CredentialAuthorityDomain.revisionOf initialAuthorityRevision
-  rw [Finset.card_eq_zero, Finset.eq_empty_iff_forall_notMem]
-  intro address member
-  rw [CredentialAuthorityDomain.mem_spent_iff] at member
-  obtain ⟨plane, present⟩ := member
-  have listed : address ∈ (entries profile config).map Sigma.fst := by
-    by_contra outside
-    exact present ((StoreCodec.fromEntries_apply_eq_none_iff _ _).mpr outside)
-  obtain ⟨entry, member, rfl⟩ := List.mem_map.mp listed
-  exact entries_not_nullifier profile config entry member plane
+/-- The authority clock starts at `initialAuthorityRevision`: the genesis
+durable snapshot has accepted no record. -/
+theorem genesis_revision (seed : DurableReceiver.Seed) :
+    CredentialAuthorityDomainReceiver.clockOf (seed.snapshot ResourceBirthCodec.rootBytes) =
+      initialAuthorityRevision := rfl
 
 def pins {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : FactoryPins where

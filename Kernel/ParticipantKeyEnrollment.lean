@@ -3,7 +3,7 @@ Runtime enrollment of a fresh signing principal. The new key is installed in
 the same canonical authority cell used by every signed receiver. Enrollment
 does not issue a capability or create an account: a current factory-management
 capability, its current law, and the new key holder's proof of possession are
-all required before the authority and nullifier update can commit.
+all required before the authority update and its durable nullifier commit.
 -/
 import Kernel.CapabilityRevocationController
 
@@ -145,19 +145,18 @@ def declarationCodec : LawfulCodec Declaration :=
 def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.key, command.expectedAuthorityRoot, marker domain semantics command⟩
 
-/-- Enrollment allocates a fresh subject's key epoch and key record, and the
-operation nullifier: three allocations, each enabled only at an absent address. -/
+/-- Enrollment allocates a fresh subject's key epoch and key record: two
+allocations, each enabled only at an absent address.  The operation marker is
+the intent's durable nullifier. -/
 def Declaration.patch (d : Declaration) : Patch CredentialAuthorityState.layout :=
   [.allocate .subjectKeyEpoch ⟨d.key.subject⟩ d.key.keyEpoch,
-   .allocate .subjectKey (⟨d.key.subject⟩, d.key.keyEpoch) d.key,
-   .allocate .nullifier d.operationNullifier ()]
+   .allocate .subjectKey (⟨d.key.subject⟩, d.key.keyEpoch) d.key]
 
 structure Mode {M : Materializer} (pre : Cell M) (d : Declaration) : Type where
   rootExact : d.expectedPreRoot = pre.root
   subjectAbsent : (show Option Epoch from pre.logical ⟨.subjectKeyEpoch, ⟨d.key.subject⟩⟩) = none
   keyAbsent : (show Option KeyRecord from
     pre.logical ⟨.subjectKey, (⟨d.key.subject⟩, d.key.keyEpoch)⟩) = none
-  fresh : isNullified pre d.operationNullifier = false
 
 /-- The key record stored at one authority address satisfies `check`; every
 other address passes. -/
@@ -292,7 +291,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                   command.key.activeFrom ≤ snapshot.revision + 1 ∧
                   snapshot.revision + 1 ≤ command.key.activeUntil ∧
                   command.key.subject ≠ command.sponsor.value then
-                if fresh : isNullified snapshot.cell d.operationNullifier = false then
+                if snapshot.spent d.operationNullifier = false then
                   match validate AuthorityMaterializer snapshot.cell snapshot.cell.root d.patch with
                   | .rejected _ => throw .validation
                   | .accepted validated =>
@@ -303,7 +302,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                       let candidate : Candidate (family deployment snapshot profile.semantics ambient command)
                           snapshot.cell d () :=
                         { preStateBound := rfl
-                          modeEvidence := ⟨rootExact, subjectAbsent, keyAbsent, fresh⟩
+                          modeEvidence := ⟨rootExact, subjectAbsent, keyAbsent⟩
                           validated := validated
                           postcondition := validated.resultAt }
                       pure ⟨directory, authority, factory, candidate, source,

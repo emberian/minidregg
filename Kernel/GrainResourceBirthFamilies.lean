@@ -120,11 +120,11 @@ def authorityFamily (tariff : Tariff) (source : Source)
   outcomeCodec := fun _ => DeclaredActionLowering.unitCodec
   ModeEvidence := fun _ _ => Unit
   Postcondition := fun _ _ logical =>
-    (source.authorityPatch snapshot semantics tariff).ResultAt snapshot.cell.logical logical
+    (source.authorityPatch snapshot).ResultAt snapshot.cell.logical logical
   effectDigest := fun _ => encoding.hashBytes
     ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v1".toUTF8.toList ++
       source.canonicalBytes tariff)
-  patch := fun _ _ => source.authorityPatch snapshot semantics tariff
+  patch := fun _ _ => source.authorityPatch snapshot
   nullifier := fun _ _ => some
     (DeclaredResourceController.operationMarker snapshot.domain semantics
       (source.grainCommand tariff))

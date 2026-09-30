@@ -14,11 +14,12 @@ Everything a consumer reads is read from the cell:
   capability names (`mem_revocationUniverse_iff`), so no caller-authored list
   can omit a live revocation (`mem_revoked_iff`), and a registered or issued,
   unrevoked key is in the universe, which is how families read registration;
-* the authority clock (`Snapshot.revision`) is the number of spent operation
-  nullifiers.  The nullifier plane is append-only, so the clock never runs
-  backwards under any valid patch (`revision_monotone`) and every accepted
-  operation that spends a fresh nullifier advances it (`revision_advances`).
-  It replaces the retired catalogue's revision counter;
+* the authority clock (`Snapshot.revision`) and the spent-marker query
+  (`Snapshot.spent`) are NOT cell state.  Both are read from the durable
+  system state the snapshot is loaded from: the clock is the durable height
+  and `spent` is the durable consumed-nullifier set at the authority replay
+  key (`CredentialAuthorityDomainReceiver.Loaded.revisionExact/spentExact`).
+  The cell therefore does not grow per operation;
 * policy heads and current signing keys are the typed planes' reads.
 
 Preparation is the guarded patch on that one cell, validated by the kernel
@@ -45,7 +46,7 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.Store
 open Minidregg.Theory.CredentialAuthorityState
 open Minidregg.Theory.CredentialAuthorityEffects
-  (Entry assignAll setAll run_assignAll nullifierEntry)
+  (Entry assignAll setAll run_assignAll)
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -85,17 +86,22 @@ def authStateOf (cell : Cell) : AuthState :=
 
 /-- The deployment's authority domain: its domain digest, its one cell, and the
 cell's authorization projection, computed once when the snapshot is built
-(`authStateExact` pins it to `authStateOf`). Every request reads it; recomputing
-it walked every address of the cell, nullifiers included, on each read. -/
+(`authStateExact` pins it to `authStateOf`).  `revision` (the authority clock)
+and `spent` (which operation markers are consumed) are the durable system
+state's, carried here so every consumer of the snapshot reads the same
+values; the receiver's `Loaded` pins both to the physical snapshot. -/
 structure Snapshot where
   domain : Digest
+  revision : Nat
+  spent : Nat → Bool
   cell : Cell
   authState : AuthState
   authStateExact : authState = authStateOf cell
 
 /-- The only constructor callers use. -/
-def Snapshot.ofCell (domain : Digest) (cell : Cell) : Snapshot :=
-  ⟨domain, cell, authStateOf cell, rfl⟩
+def Snapshot.ofCell (domain : Digest) (revision : Nat) (spent : Nat → Bool) (cell : Cell) :
+    Snapshot :=
+  ⟨domain, revision, spent, cell, authStateOf cell, rfl⟩
 
 /-! The projection's coordinates read the cell, whatever the snapshot's
 provenance; these are what the definitional unfolding used to give. -/
@@ -126,15 +132,17 @@ provenance; these are what the definitional unfolding used to give. -/
       snapshot.authState.policyRoot = snapshot.cell.root := by
   rw [snapshot.authStateExact]; exact ⟨rfl, rfl, rfl⟩
 
-/-- A snapshot is its domain and cell; the projection is determined. -/
+/-- A snapshot is its domain, clock, spent set and cell; the projection is
+determined. -/
 theorem Snapshot.ext_cell {left right : Snapshot} (domains : left.domain = right.domain)
+    (revisions : left.revision = right.revision) (spents : left.spent = right.spent)
     (cells : left.cell = right.cell) : left = right := by
   cases left with
-  | mk leftDomain leftCell leftState leftExact =>
+  | mk leftDomain leftRevision leftSpent leftCell leftState leftExact =>
       cases right with
-      | mk rightDomain rightCell rightState rightExact =>
-          simp only at domains cells
-          subst domains cells
+      | mk rightDomain rightRevision rightSpent rightCell rightState rightExact =>
+          simp only at domains revisions spents cells
+          subst domains revisions spents cells
           have states : leftState = rightState := leftExact.trans rightExact.symm
           subst states
           rfl
@@ -221,12 +229,14 @@ end Snapshot
 
 /-- Decode the deployment's authority cell.  The codec is canonical, so an
 accepted cell re-encodes to exactly the loaded bytes (`load_bytes`). -/
-def load (domain : Digest) (bytes : List UInt8) : Option Snapshot :=
+def load (domain : Digest) (revision : Nat) (spent : Nat → Bool) (bytes : List UInt8) :
+    Option Snapshot :=
   (CredentialAuthorityCell.materializer.codec.decode bytes).map fun store =>
-    Snapshot.ofCell domain (materialize CredentialAuthorityCell.materializer store)
+    Snapshot.ofCell domain revision spent (materialize CredentialAuthorityCell.materializer store)
 
-theorem load_bytes {domain : Digest} {bytes : List UInt8} {snapshot : Snapshot}
-    (loaded : load domain bytes = some snapshot) :
+theorem load_bytes {domain : Digest} {revision : Nat} {spent : Nat → Bool}
+    {bytes : List UInt8} {snapshot : Snapshot}
+    (loaded : load domain revision spent bytes = some snapshot) :
     snapshot.cell.bytes = bytes ∧ snapshot.domain = domain := by
   unfold load at loaded
   cases decoded : CredentialAuthorityCell.materializer.codec.decode bytes with
@@ -236,8 +246,8 @@ theorem load_bytes {domain : Digest} {bytes : List UInt8} {snapshot : Snapshot}
       subst loaded
       exact ⟨CredentialAuthorityCell.decode_canonical decoded, rfl⟩
 
-theorem load_cell (domain : Digest) (cell : Cell) :
-    load domain cell.bytes = some (Snapshot.ofCell domain cell) := by
+theorem load_cell (domain : Digest) (revision : Nat) (spent : Nat → Bool) (cell : Cell) :
+    load domain revision spent cell.bytes = some (Snapshot.ofCell domain revision spent cell) := by
   unfold load
   rw [CredentialAuthorityCell.cell_decode cell]
   rfl
@@ -245,8 +255,9 @@ theorem load_cell (domain : Digest) (cell : Cell) :
 /-- The retired catalogue frame (`LOOM/AUTH/DOMAIN` v2) refuses to load. -/
 def retiredCatalogueFrame : List UInt8 := "LOOM/AUTH/DOMAIN".toUTF8.toList ++ [2]
 
-theorem retired_catalogue_frame_refused (domain : Digest) (payload : List UInt8) :
-    load domain (retiredCatalogueFrame ++ payload) = none := by
+theorem retired_catalogue_frame_refused (domain : Digest) (revision : Nat)
+    (spent : Nat → Bool) (payload : List UInt8) :
+    load domain revision spent (retiredCatalogueFrame ++ payload) = none := by
   have head : retiredCatalogueFrame = 76 :: retiredCatalogueFrame.drop 1 := by decide +kernel
   have refused : CredentialAuthorityCell.materializer.codec.decode
       (retiredCatalogueFrame ++ payload) = none := by
@@ -254,56 +265,6 @@ theorem retired_catalogue_frame_refused (domain : Digest) (payload : List UInt8)
     exact StoreCodec.decode_other_first_byte CredentialAuthorityCell.wire 76
       (retiredCatalogueFrame.drop 1 ++ payload) (by decide)
   simp [load, refused]
-
-/-! ## The authority clock -/
-
-/-- The spent operation nullifiers of a store. -/
-def spent (store : Store layout) : Finset (Address layout) :=
-  store.support.filter fun address => address.1 = .nullifier
-
-/-- The authority clock: how many single-use operations this domain has
-spent.  It is committed state (the append-only nullifier plane), never a
-counter a caller supplies. -/
-def revisionOf (store : Store layout) : Nat := (spent store).card
-
-def Snapshot.revision (snapshot : Snapshot) : Nat := revisionOf snapshot.logical
-
-theorem mem_spent_iff (store : Store layout) (address : Address layout) :
-    address ∈ spent store ↔ address.1 = .nullifier ∧ store address ≠ none := by
-  simp only [spent, Finset.mem_filter, DFinsupp.mem_support_iff]
-  exact and_comm
-
-theorem spent_subset (store : Store layout) (patch : Patch layout)
-    (valid : Patch.ValidFrom store patch) : spent store ⊆ spent (Patch.run store patch) := by
-  intro address member
-  rw [mem_spent_iff] at member ⊢
-  obtain ⟨⟨plane, id⟩, rfl⟩ : ∃ a : Address layout, a = address := ⟨address, rfl⟩
-  obtain ⟨plane, present⟩ := member
-  cases plane
-  refine ⟨rfl, ?_⟩
-  obtain ⟨value, isSome⟩ := Option.ne_none_iff_exists'.mp present
-  rw [Patch.appendOnly_present_preserved store patch ⟨.nullifier, id⟩ value valid rfl isSome]
-  simp
-
-/-- The clock never runs backwards under a valid patch. -/
-theorem revision_monotone (store : Store layout) (patch : Patch layout)
-    (valid : Patch.ValidFrom store patch) :
-    revisionOf store ≤ revisionOf (Patch.run store patch) :=
-  Finset.card_le_card (spent_subset store patch valid)
-
-/-- A valid patch whose post spends a nullifier the pre had not spent
-advances the clock. -/
-theorem revision_advances (store : Store layout) (patch : Patch layout)
-    (valid : Patch.ValidFrom store patch) (id : Nat)
-    (fresh : store ⟨.nullifier, id⟩ = none)
-    (spentAfter : Patch.run store patch ⟨.nullifier, id⟩ = some ()) :
-    revisionOf store < revisionOf (Patch.run store patch) := by
-  apply Finset.card_lt_card
-  refine Finset.ssubset_iff_subset_ne.mpr ⟨spent_subset store patch valid, fun same => ?_⟩
-  have inPost : (⟨.nullifier, id⟩ : Address layout) ∈ spent (Patch.run store patch) :=
-    (mem_spent_iff _ _).mpr ⟨rfl, by rw [spentAfter]; simp⟩
-  rw [← same, mem_spent_iff] at inPost
-  exact inPost.2 fresh
 
 /-! ## Policy heads and signing keys -/
 
@@ -414,15 +375,6 @@ theorem Prepared.frame {snapshot : Snapshot} {patch : Patch layout}
   rw [ValidatedPatch.apply_logical]
   exact Patch.run_frame _ patch address outside
 
-/-- The prepared post as a snapshot of the same domain. -/
-def Prepared.post {snapshot : Snapshot} {patch : Patch layout}
-    (prepared : Prepared snapshot patch) : Snapshot :=
-  Snapshot.ofCell snapshot.domain prepared.validated.apply
-
-theorem Prepared.revision_monotone {snapshot : Snapshot} {patch : Patch layout}
-    (prepared : Prepared snapshot patch) : snapshot.revision ≤ prepared.post.revision :=
-  CredentialAuthorityDomain.revision_monotone _ patch prepared.validated.valid
-
 /-! ### Policy installation -/
 
 /-- Free the superseded revision's address when the revision changes. -/
@@ -444,11 +396,6 @@ def policyPatch (logical : Store layout) (policy : PolicyId) (revision : PolicyR
     (address : Digest) : Patch layout :=
   let retire := retirePolicy logical policy revision
   retire ++ assignAll (Patch.run logical retire) (policyEntries policy revision address)
-
-/-- Policy installation plus the operation's single-use nullifier. -/
-def policyAndNullifierPatch (logical : Store layout) (policy : PolicyId)
-    (revision : PolicyRevision) (address : Digest) (nullifierId : Nat) : Patch layout :=
-  policyPatch logical policy revision address ++ [.allocate .nullifier nullifierId ()]
 
 private theorem sigma_ne {a b : AuthorityPlane} {ka : a.Key} {kb : b.Key}
     (planes : a ≠ b) : (⟨a, ka⟩ : Address layout) ≠ ⟨b, kb⟩ := by
@@ -498,25 +445,6 @@ theorem policyPatch_run (logical : Store layout) (policy : PolicyId)
         (policyEntries policy revision address) := by
   simp [policyPatch]
 
-theorem policyAndNullifierPatch_valid_iff (logical : Store layout) (policy : PolicyId)
-    (revision : PolicyRevision) (address : Digest) (nullifierId : Nat) :
-    Patch.ValidFrom logical (policyAndNullifierPatch logical policy revision address nullifierId) ↔
-      logical ⟨.nullifier, nullifierId⟩ = none := by
-  unfold policyAndNullifierPatch
-  rw [Patch.validFrom_append]
-  have untouched : Patch.run logical (policyPatch logical policy revision address)
-      ⟨.nullifier, nullifierId⟩ = logical ⟨.nullifier, nullifierId⟩ := by
-    rw [policyPatch_run]
-    simp only [policyEntries, setAll]
-    rw [Store.set_ne _ _ _ _ (sigma_ne (by decide)), Store.set_ne _ _ _ _ (sigma_ne (by decide))]
-    exact retirePolicy_run logical policy revision _ (fun _ _ _ => sigma_ne (by decide))
-  constructor
-  · rintro ⟨_, enabled, _⟩
-    exact untouched ▸ enabled.2
-  · intro fresh
-    refine ⟨policyPatch_valid logical policy revision address, ⟨by decide, ?_⟩, trivial⟩
-    exact untouched.trans fresh
-
 /-- The head after installation. -/
 theorem policyPatch_head (logical : Store layout) (policy : PolicyId)
     (revision : PolicyRevision) (address : Digest)
@@ -560,113 +488,73 @@ theorem policyPatch_retired_absent (logical : Store layout) (policy : PolicyId)
   rw [Store.set_ne _ _ _ _ distinct, Store.set_ne _ _ _ _ (sigma_ne (by decide))]
   simp [retirePolicy, current, different, Op.apply]
 
-/-- A policy update with its operation nullifier, prepared on the one cell.
-The generation must already be present and the policy must have a head: this
-path updates an existing policy; initial policies are born with the domain. -/
-structure PreparedPolicyAndNullifier (snapshot : Snapshot) (policy : PolicyId)
-    (revision : PolicyRevision) (address : Digest) (nullifierId : Nat) : Type where
-  prepared : Prepared snapshot
-    (policyAndNullifierPatch snapshot.logical policy revision address nullifierId)
-  nullifierFresh : isNullified snapshot.cell nullifierId = false
+/-- A policy update prepared on the one cell.  The generation must already be
+present and the policy must have a head: this path updates an existing policy;
+initial policies are born with the domain.  The operation's single use is the
+durable consumed set's (the receiver's intent nullifier), not a cell write. -/
+structure PreparedPolicy (snapshot : Snapshot) (policy : PolicyId)
+    (revision : PolicyRevision) (address : Digest) : Type where
+  prepared : Prepared snapshot (policyPatch snapshot.logical policy revision address)
   headPresent : (snapshot.currentHead policy).isSome
 
-def preparePolicyAndNullifier (snapshot : Snapshot) (policy : PolicyId)
-    (revision : PolicyRevision) (address : Digest) (nullifierId : Nat) :
-    Option (PreparedPolicyAndNullifier snapshot policy revision address nullifierId) :=
-  if fresh : isNullified snapshot.cell nullifierId = false then
-    if present : (snapshot.currentHead policy).isSome then
-      (prepare snapshot (policyAndNullifierPatch snapshot.logical policy revision address
-        nullifierId)).map fun prepared => ⟨prepared, fresh, present⟩
-    else none
+def preparePolicy (snapshot : Snapshot) (policy : PolicyId)
+    (revision : PolicyRevision) (address : Digest) :
+    Option (PreparedPolicy snapshot policy revision address) :=
+  if present : (snapshot.currentHead policy).isSome then
+    (prepare snapshot (policyPatch snapshot.logical policy revision address)).map
+      fun prepared => ⟨prepared, present⟩
   else none
 
-/-- Satisfiable pole: an existing policy with an unspent nullifier prepares. -/
-theorem preparePolicyAndNullifier_isSome (snapshot : Snapshot) (policy : PolicyId)
-    (revision : PolicyRevision) (address : Digest) (nullifierId : Nat)
-    (fresh : isNullified snapshot.cell nullifierId = false)
+/-- Satisfiable pole: an existing policy prepares. -/
+theorem preparePolicy_isSome (snapshot : Snapshot) (policy : PolicyId)
+    (revision : PolicyRevision) (address : Digest)
     (present : (snapshot.currentHead policy).isSome) :
-    (preparePolicyAndNullifier snapshot policy revision address nullifierId).isSome := by
-  have valid := (policyAndNullifierPatch_valid_iff snapshot.logical policy revision address
-    nullifierId).mpr (by simpa [isNullified] using fresh)
-  have prepared := (prepare_valid_iff snapshot _).mpr valid
-  simp only [preparePolicyAndNullifier, fresh, present, dite_true]
+    (preparePolicy snapshot policy revision address).isSome := by
+  have prepared := (prepare_valid_iff snapshot _).mpr
+    (policyPatch_valid snapshot.logical policy revision address)
+  simp only [preparePolicy, present, dite_true]
   simpa using prepared
 
-/-- Refuting pole: a spent nullifier is refused. -/
-theorem preparePolicyAndNullifier_used_refused (snapshot : Snapshot) (policy : PolicyId)
-    (revision : PolicyRevision) (address : Digest) (nullifierId : Nat)
-    (used : isNullified snapshot.cell nullifierId = true) :
-    preparePolicyAndNullifier snapshot policy revision address nullifierId = none := by
-  simp [preparePolicyAndNullifier, used]
+/-- Refuting pole: a policy with no head is refused. -/
+theorem preparePolicy_headless_refused (snapshot : Snapshot) (policy : PolicyId)
+    (revision : PolicyRevision) (address : Digest)
+    (headless : snapshot.currentHead policy = none) :
+    preparePolicy snapshot policy revision address = none := by
+  simp [preparePolicy, headless]
 
-namespace PreparedPolicyAndNullifier
+namespace PreparedPolicy
 
 variable {snapshot : Snapshot} {policy : PolicyId} {revision : PolicyRevision}
-  {address : Digest} {nullifierId : Nat}
+  {address : Digest}
 
-def post (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId) :
-    Store layout :=
+def post (update : PreparedPolicy snapshot policy revision address) : Store layout :=
   update.prepared.validated.apply.logical
 
-private theorem post_eq
-    (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId) :
-    update.post = Patch.run
-      (Patch.run snapshot.logical (policyPatch snapshot.logical policy revision address))
-      [.allocate .nullifier nullifierId ()] := by
-  simp only [post, ValidatedPatch.apply_logical, policyAndNullifierPatch, Patch.run_append]
+private theorem post_eq (update : PreparedPolicy snapshot policy revision address) :
+    update.post = Patch.run snapshot.logical (policyPatch snapshot.logical policy revision address) := by
+  simp only [post, ValidatedPatch.apply_logical]
   rfl
 
-private theorem post_other
-    (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId)
-    (target : Address layout) (plane : target.1 ≠ .nullifier) :
-    update.post target =
-      Patch.run snapshot.logical (policyPatch snapshot.logical policy revision address) target := by
-  rw [post_eq]
-  simp only [Patch.run_cons, Patch.run_nil, Op.apply]
-  exact Store.set_ne _ _ _ _ (fun same => plane (congrArg Sigma.fst same))
-
-theorem head_exact
-    (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId) :
+theorem head_exact (update : PreparedPolicy snapshot policy revision address) :
     headAt update.post policy = some ⟨revision, address⟩ := by
   obtain ⟨head, current⟩ := Option.isSome_iff_exists.mp update.headPresent
   have generation := (headAt_exact _ _ head current).1
-  have installed := policyPatch_head snapshot.logical policy revision address generation
-  obtain ⟨epochPresent, revisionExact, addressExact⟩ := headAt_exact _ _ _ installed
-  apply headAt_of_fields
-  · rw [post_other update _ (by simp)]; exact epochPresent
-  · rw [post_other update _ (by simp)]; exact revisionExact
-  · rw [post_other update _ (by simp)]; exact addressExact
+  rw [post_eq]
+  exact policyPatch_head snapshot.logical policy revision address generation
 
-theorem generation_preserved
-    (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId) :
+theorem generation_preserved (update : PreparedPolicy snapshot policy revision address) :
     update.post ⟨.policyEpoch, policy⟩ = snapshot.logical ⟨.policyEpoch, policy⟩ := by
-  rw [post_other update _ (by simp)]
+  rw [post_eq]
   exact policyPatch_generation _ _ _ _
 
-theorem nullifier_consumed
-    (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId) :
-    update.post ⟨.nullifier, nullifierId⟩ = some () := by
-  rw [post_eq]
-  simp only [Patch.run_cons, Patch.run_nil, Op.apply, Store.set_eq]
-  rfl
-
-theorem retired_address_absent
-    (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId)
+theorem retired_address_absent (update : PreparedPolicy snapshot policy revision address)
     (old : PolicyInstall.Head) (current : snapshot.currentHead policy = some old)
     (different : old.version ≠ revision) :
     update.post ⟨.policyAddress, (policy, old.version)⟩ = none := by
-  rw [post_other update _ (by simp)]
+  rw [post_eq]
   exact policyPatch_retired_absent _ _ _ _ old current different
 
-/-- The operation advances the authority clock. -/
-theorem revision_advances
-    (update : PreparedPolicyAndNullifier snapshot policy revision address nullifierId) :
-    snapshot.revision < update.prepared.post.revision := by
-  apply CredentialAuthorityDomain.revision_advances _ _ update.prepared.validated.valid nullifierId
-  · simpa [isNullified] using update.nullifierFresh
-  · exact update.nullifier_consumed
-
-end PreparedPolicyAndNullifier
+end PreparedPolicy
 
 /-! ### Signing-key installation -/
 
@@ -769,29 +657,25 @@ namespace Witness
 
 def policy : PolicyId := ⟨17⟩
 
-/-- A domain with policy 17 at generation 1, revision 3, one spent operation. -/
+/-- A domain with policy 17 at generation 1, revision 3. -/
 def store : Store layout :=
   StoreCodec.fromEntries
     ([⟨⟨.policyEpoch, policy⟩, (1 : Nat)⟩,
       ⟨⟨.policyRevision, policy⟩, (3 : Nat)⟩,
-      ⟨⟨.policyAddress, (policy, 3)⟩, (⟨3300⟩ : Digest)⟩,
-      ⟨⟨.nullifier, (5 : Nat)⟩, ()⟩] : List (StoreCodec.Entry layout))
+      ⟨⟨.policyAddress, (policy, 3)⟩, (⟨3300⟩ : Digest)⟩] : List (StoreCodec.Entry layout))
 
-def snapshot : Snapshot := Snapshot.ofCell ⟨91⟩ (materialize CredentialAuthorityCell.materializer store)
+def snapshot : Snapshot :=
+  Snapshot.ofCell ⟨91⟩ 0 (fun _ => false) (materialize CredentialAuthorityCell.materializer store)
 
 theorem head : snapshot.currentHead policy = some ⟨3, ⟨3300⟩⟩ := by decide
 
-theorem revision_one : snapshot.revision = 1 := by decide +kernel
+/-- Satisfiable pole: revision 4 of the present policy prepares. -/
+theorem update_prepares : (preparePolicy snapshot policy 4 ⟨4400⟩).isSome :=
+  preparePolicy_isSome snapshot policy 4 ⟨4400⟩ (by decide)
 
-/-- Satisfiable pole: revision 4 with a fresh nullifier prepares. -/
-theorem update_prepares :
-    (preparePolicyAndNullifier snapshot policy 4 ⟨4400⟩ 6).isSome :=
-  preparePolicyAndNullifier_isSome snapshot policy 4 ⟨4400⟩ 6 (by decide) (by decide)
-
-/-- Refuting pole: replaying the spent nullifier is refused. -/
-theorem replay_refused :
-    preparePolicyAndNullifier snapshot policy 4 ⟨4400⟩ 5 = none :=
-  preparePolicyAndNullifier_used_refused snapshot policy 4 ⟨4400⟩ 5 (by decide)
+/-- Refuting pole: a policy the domain has no head for is refused. -/
+theorem headless_refused : preparePolicy snapshot ⟨18⟩ 0 ⟨4400⟩ = none :=
+  preparePolicy_headless_refused snapshot ⟨18⟩ 0 ⟨4400⟩ (by decide)
 
 end Witness
 
@@ -801,18 +685,12 @@ end Witness
 #guard_msgs (whitespace := lax) in #print axioms load_bytes
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.retired_catalogue_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms retired_catalogue_frame_refused
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.revision_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms revision_monotone
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.revision_advances' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms revision_advances
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.policyAndNullifierPatch_valid_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms policyAndNullifierPatch_valid_iff
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.PreparedPolicyAndNullifier.head_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms PreparedPolicyAndNullifier.head_exact
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.PreparedPolicyAndNullifier.retired_address_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms PreparedPolicyAndNullifier.retired_address_absent
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.preparePolicyAndNullifier_used_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms preparePolicyAndNullifier_used_refused
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.PreparedPolicy.head_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedPolicy.head_exact
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.PreparedPolicy.retired_address_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedPolicy.retired_address_absent
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.preparePolicy_headless_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparePolicy_headless_refused
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.signingKeyPatch_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms signingKeyPatch_current
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Snapshot.mem_revocationUniverse_of_stored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -825,7 +703,7 @@ end Witness
 #guard_msgs (whitespace := lax) in #print axioms Snapshot.authState_extension_exact
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Witness.update_prepares' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Witness.update_prepares
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Witness.replay_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Witness.replay_refused
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomain.Witness.headless_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.headless_refused
 
 end Minidregg.Compiler.CredentialAuthorityDomain

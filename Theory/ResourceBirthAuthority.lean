@@ -3,8 +3,9 @@
 
 Every root-capability issue is checked against the same original canonical
 authority cell using the existing IssueEvidence. The batch installs the exact
-declared stored capabilities and consumes one shared nullifier. It never uses
-one newborn grant as authority for a later grant.
+declared stored capabilities. Its one shared nullifier (`authorityNullifier`)
+is consumed in the durable nullifier set by the receiver, not written to the
+authority cell. It never uses one newborn grant as authority for a later grant.
 
 The physical domain receiver computes its routed shard updates independently
 of authorization, then proves their folded logical post equals this patch's
@@ -55,7 +56,7 @@ def issueDeclaration (preRoot : Digest) (nullifier : Nat) (grant : AuthorityGran
 def entries {registry : TypeRegistry Digest} (descriptor : Descriptor registry) :
     List Entry :=
   descriptor.initialPolicies.flatMap policyEntries ++
-    descriptor.grants.map grantEntry ++ [nullifierEntry descriptor.authorityNullifier]
+    descriptor.grants.map grantEntry
 
 /-- The batch patch: every entry a guarded assignment at the canonical pre-cell. -/
 def patch {registry : TypeRegistry Digest} {M : CellState.Materializer CredentialAuthorityState.layout Digest}
@@ -82,67 +83,43 @@ structure BatchEvidence {registry : TypeRegistry Digest}
     pre.logical ⟨.policyEpoch, policy.policyId⟩ = none ∧
       pre.logical ⟨.policyRevision, policy.policyId⟩ = none ∧
       pre.logical ⟨.policyAddress, (policy.policyId, 0)⟩ = none
-  nullifierFresh : isNullified pre descriptor.authorityNullifier = false
   ancestryEmpty : ∀ grant ∈ descriptor.grants, grant.capability.ancestry = []
   issue : ∀ grant ∈ descriptor.grants,
     IssueEvidence domain pre (issueDeclaration pre.root descriptor.authorityNullifier grant)
 
-/-- Every entry but the last (the batch nullifier) is on a RAM plane. -/
-theorem entries_ram_prefix {registry : TypeRegistry Digest} (descriptor : Descriptor registry) :
-    ∀ entry ∈ descriptor.initialPolicies.flatMap policyEntries ++
-        descriptor.grants.map grantEntry,
-      layout.discipline entry.1.1 = .ram := by
+/-- Every entry is on a RAM plane. -/
+theorem entries_ram {registry : TypeRegistry Digest} (descriptor : Descriptor registry) :
+    ∀ entry ∈ entries descriptor, layout.discipline entry.1.1 = .ram := by
   intro entry member
-  simp only [List.mem_append, List.mem_flatMap, List.mem_map] at member
+  simp only [entries, List.mem_append, List.mem_flatMap, List.mem_map] at member
   rcases member with ⟨policy, _, inPolicy⟩ | ⟨grant, _, rfl⟩
   · simp only [policyEntries, List.mem_cons, List.not_mem_nil, or_false] at inPolicy
     rcases inPolicy with rfl | rfl | rfl <;> rfl
   · rfl
 
-/-- The batch patch is valid at its own pre exactly when its nullifier is
-unspent (every other entry is on a RAM plane); a spent nullifier is refused by
-the validator, not only by `BatchEvidence`. -/
-theorem valid_iff {registry : TypeRegistry Digest}
+/-- The batch patch is valid at its own pre: every entry is on a RAM plane,
+guarded at its exact prior value. Single use is the durable nullifier set's. -/
+theorem valid {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.layout Digest}
     (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry) :
-    Patch.ValidFrom pre.logical (patch pre descriptor) ↔
-      isNullified pre descriptor.authorityNullifier = false := by
-  rw [patch, assignAll_valid_iff, entries,
-    assignableAll_ram_append_iff _ _ _ (entries_ram_prefix descriptor)]
-  constructor
-  · rintro (appendOnly | absent)
-    · cases appendOnly
-    · have spentAbsent : pre.logical ⟨.nullifier, descriptor.authorityNullifier⟩ = none := absent
-      simp [isNullified, spentAbsent]
-  · intro fresh
-    exact assignable_of_absent _ _ fresh
+    Patch.ValidFrom pre.logical (patch pre descriptor) :=
+  assignAll_valid _ _ (assignableAll_of_ram _ _ (entries_ram descriptor))
 
 theorem validated {registry : TypeRegistry Digest} {M : CellState.Materializer CredentialAuthorityState.layout Digest}
-    (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry)
-    (fresh : isNullified pre descriptor.authorityNullifier = false) :
+    (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry) :
     ValidatedPatch M pre pre.root (patch pre descriptor) := by
   obtain ⟨validated, _⟩ := CellState.validate_accepts M pre pre.root
-    (patch pre descriptor) rfl ((valid_iff pre descriptor).mpr fresh)
+    (patch pre descriptor) rfl (valid pre descriptor)
   exact validated
 
-/-- Refuting pole: at a spent nullifier the batch patch is not valid. -/
-theorem not_valid_of_spent {registry : TypeRegistry Digest}
-    {M : CellState.Materializer CredentialAuthorityState.layout Digest}
-    (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry)
-    (spent : isNullified pre descriptor.authorityNullifier = true) :
-    ¬ Patch.ValidFrom pre.logical (patch pre descriptor) := fun valid =>
-  Bool.noConfusion (spent.symm.trans ((valid_iff pre descriptor).mp valid))
-
 def post {registry : TypeRegistry Digest} {M : CellState.Materializer CredentialAuthorityState.layout Digest}
-    (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry)
-    (fresh : isNullified pre descriptor.authorityNullifier = false) :
+    (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry) :
     CredentialAuthorityState.Cell M :=
-  (validated pre descriptor fresh).apply
+  (validated pre descriptor).apply
 
 theorem post_logical {registry : TypeRegistry Digest} {M : CellState.Materializer CredentialAuthorityState.layout Digest}
-    (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry)
-    (fresh : isNullified pre descriptor.authorityNullifier = false) :
-    (post pre descriptor fresh).logical = setAll pre.logical (entries descriptor) :=
+    (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry) :
+    (post pre descriptor).logical = setAll pre.logical (entries descriptor) :=
   run_assignAll _ _
 
 theorem BatchEvidence.writes_distinct {registry : TypeRegistry Digest}
@@ -156,62 +133,44 @@ theorem BatchEvidence.installs_grant {registry : TypeRegistry Digest}
     {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
     (evidence : BatchEvidence domain pre descriptor)
     (grant : AuthorityGrant) (member : grant ∈ descriptor.grants) :
-    (post pre descriptor evidence.nullifierFresh).logical (grantField grant) = some grant.capability := by
+    (post pre descriptor).logical (grantField grant) = some grant.capability := by
   rw [post_logical]
   exact setAll_member _ (entries descriptor) evidence.writes_distinct (grantEntry grant)
-      (List.mem_append_left _ (List.mem_append_right _
-        (List.mem_map.mpr ⟨grant, member, rfl⟩)))
+      (List.mem_append_right _ (List.mem_map.mpr ⟨grant, member, rfl⟩))
 
 theorem BatchEvidence.installs_policy {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.layout Digest} {domain : ProjectionUniverse}
     {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
     (evidence : BatchEvidence domain pre descriptor)
     (policy : InitialPolicy) (member : policy ∈ descriptor.initialPolicies) :
-    (post pre descriptor evidence.nullifierFresh).logical ⟨.policyEpoch, policy.policyId⟩ = some (0 : Epoch) ∧
-      (post pre descriptor evidence.nullifierFresh).logical ⟨.policyRevision, policy.policyId⟩ =
+    (post pre descriptor).logical ⟨.policyEpoch, policy.policyId⟩ = some (0 : Epoch) ∧
+      (post pre descriptor).logical ⟨.policyRevision, policy.policyId⟩ =
         some (0 : PolicyRevision) ∧
-      (post pre descriptor evidence.nullifierFresh).logical ⟨.policyAddress, (policy.policyId, 0)⟩ =
+      (post pre descriptor).logical ⟨.policyAddress, (policy.policyId, 0)⟩ =
         some policy.address := by
   refine ⟨?_, ?_, ?_⟩
   · rw [post_logical]
     exact setAll_member _ (entries descriptor) evidence.writes_distinct
       (policyEpochEntry policy)
-      (List.mem_append_left _ (List.mem_append_left _
-        (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩)))
+      (List.mem_append_left _
+        (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩))
   · rw [post_logical]
     exact setAll_member _ (entries descriptor) evidence.writes_distinct
       (policyRevisionEntry policy)
-      (List.mem_append_left _ (List.mem_append_left _
-        (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩)))
+      (List.mem_append_left _
+        (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩))
   · rw [post_logical]
     exact setAll_member _ (entries descriptor) evidence.writes_distinct
       (policyAddressEntry policy)
-      (List.mem_append_left _ (List.mem_append_left _
-        (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩)))
-
-theorem BatchEvidence.consumes_nullifier {registry : TypeRegistry Digest}
-    {M : CellState.Materializer CredentialAuthorityState.layout Digest} {domain : ProjectionUniverse}
-    {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
-    (evidence : BatchEvidence domain pre descriptor) :
-    (post pre descriptor evidence.nullifierFresh).logical ⟨.nullifier, descriptor.authorityNullifier⟩ = some () := by
-  rw [post_logical]
-  exact setAll_member _ (entries descriptor) evidence.writes_distinct
-    (nullifierEntry descriptor.authorityNullifier) (by simp [entries])
+      (List.mem_append_left _
+        (List.mem_flatMap.mpr ⟨policy, member, by simp [policyEntries]⟩))
 
 theorem post_frame {registry : TypeRegistry Digest} {M : CellState.Materializer CredentialAuthorityState.layout Digest}
     (pre : CredentialAuthorityState.Cell M) (descriptor : Descriptor registry)
-    (fresh : isNullified pre descriptor.authorityNullifier = false)
     (address : Address CredentialAuthorityState.layout)
     (outside : address ∉ Patch.writeFootprint (patch pre descriptor)) :
-    (post pre descriptor fresh).logical address = pre.logical address :=
+    (post pre descriptor).logical address = pre.logical address :=
   Patch.run_frame pre.logical _ address outside
-
-theorem no_batch_of_used_nullifier {registry : TypeRegistry Digest}
-    {M : CellState.Materializer CredentialAuthorityState.layout Digest} {domain : ProjectionUniverse}
-    {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
-    (used : isNullified pre descriptor.authorityNullifier = true) :
-    IsEmpty (BatchEvidence domain pre descriptor) :=
-  ⟨fun evidence => Bool.noConfusion (used.symm.trans evidence.nullifierFresh)⟩
 
 theorem no_batch_of_nonroot_lineage {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.layout Digest} {domain : ProjectionUniverse}
@@ -222,24 +181,22 @@ theorem no_batch_of_nonroot_lineage {registry : TypeRegistry Digest}
   ⟨fun evidence => nonempty (evidence.ancestryEmpty grant member)⟩
 
 /-- These exact semantic outcomes must survive the final composed post:
-every complete stored grant, every initial policy head, and the consumed
-nullifier. Source bytes are checked and retained by the physical compiler. -/
+every complete stored grant and every initial policy head. Source bytes are checked and retained by the physical compiler. -/
 def Postcondition {registry : TypeRegistry Digest} (descriptor : Descriptor registry)
     (state : Store CredentialAuthorityState.layout) : Prop :=
   (∀ grant ∈ descriptor.grants, state (grantField grant) = some grant.capability) ∧
     (∀ policy ∈ descriptor.initialPolicies,
       state ⟨.policyEpoch, policy.policyId⟩ = some (0 : Epoch) ∧
         state ⟨.policyRevision, policy.policyId⟩ = some (0 : PolicyRevision) ∧
-        state ⟨.policyAddress, (policy.policyId, 0)⟩ = some policy.address) ∧
-    state ⟨.nullifier, descriptor.authorityNullifier⟩ = some ()
+        state ⟨.policyAddress, (policy.policyId, 0)⟩ = some policy.address)
 
 theorem BatchEvidence.postcondition {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.layout Digest} {domain : ProjectionUniverse}
     {pre : CredentialAuthorityState.Cell M} {descriptor : Descriptor registry}
     (evidence : BatchEvidence domain pre descriptor) :
-    Postcondition descriptor (post pre descriptor evidence.nullifierFresh).logical :=
+    Postcondition descriptor (post pre descriptor).logical :=
   ⟨fun grant member => evidence.installs_grant grant member,
-    fun policy member => evidence.installs_policy policy member, evidence.consumes_nullifier⟩
+    fun policy member => evidence.installs_policy policy member⟩
 
 theorem no_final_grant_erasure {registry : TypeRegistry Digest}
     {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
@@ -247,16 +204,11 @@ theorem no_final_grant_erasure {registry : TypeRegistry Digest}
     (missing : state (grantField grant) ≠ some grant.capability) :
     ¬Postcondition descriptor state := fun final => missing (final.1 grant member)
 
-theorem no_final_nullifier_erasure {registry : TypeRegistry Digest}
-    {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
-    (missing : state ⟨.nullifier, descriptor.authorityNullifier⟩ ≠ some ()) :
-    ¬Postcondition descriptor state := fun final => missing final.2.2
-
 theorem no_final_policy_erasure {registry : TypeRegistry Digest}
     {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
     {policy : InitialPolicy} (member : policy ∈ descriptor.initialPolicies)
     (missing : state ⟨.policyAddress, (policy.policyId, 0)⟩ ≠ some policy.address) :
-    ¬Postcondition descriptor state := fun final => missing (final.2.1 policy member).2.2
+    ¬Postcondition descriptor state := fun final => missing (final.2 policy member).2.2
 
 theorem no_initial_policy_overwrite {registry : TypeRegistry Digest}
     {M : CellState.Materializer CredentialAuthorityState.layout Digest} {domain : ProjectionUniverse}
@@ -293,7 +245,7 @@ theorem no_final_revision_erasure {registry : TypeRegistry Digest}
     {descriptor : Descriptor registry} {state : Store CredentialAuthorityState.layout}
     {policy : InitialPolicy} (member : policy ∈ descriptor.initialPolicies)
     (missing : state ⟨.policyRevision, policy.policyId⟩ ≠ some (0 : PolicyRevision)) :
-    ¬Postcondition descriptor state := fun final => missing (final.2.1 policy member).2.1
+    ¬Postcondition descriptor state := fun final => missing (final.2 policy member).2.1
 
 /-- Distinct typed capability slots cannot excuse a shared revocation ID inside
 the same batch. This is enforced by the family mode, not only by the receiver. -/
@@ -345,7 +297,7 @@ def descriptor (registry : TypeRegistry Digest) : Descriptor registry where
 theorem typed_fields_distinct (registry : TypeRegistry Digest) :
     ((entries (descriptor registry)).map Sigma.fst).Nodup := by
   change ([⟨.capability .object, TypedAuthorization.demoCapability.id⟩,
-    ⟨.capability .program, TypedAuthorization.demoCapability.id⟩, ⟨.nullifier, (1 : Nat)⟩] :
+    ⟨.capability .program, TypedAuthorization.demoCapability.id⟩] :
       List (Address CredentialAuthorityState.layout)).Nodup
   decide
 
@@ -414,7 +366,7 @@ def accept {registry : TypeRegistry Digest} {M : CellState.Materializer Credenti
   requestBound := rfl
   effectsDigestBound := rfl
   modeEvidence := evidence
-  validated := validated pre descriptor evidence.nullifierFresh
+  validated := validated pre descriptor
   postcondition := evidence.postcondition
   disclosure := .sealed
   disclosureAllowed := trivial
@@ -424,14 +376,8 @@ def accept {registry : TypeRegistry Digest} {M : CellState.Materializer Credenti
 /-- info: 'Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.installs_grant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.installs_grant
 
-/-- info: 'Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.consumes_nullifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.consumes_nullifier
-
 /-- info: 'Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.postcondition' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.BatchEvidence.postcondition
-
-/-- info: 'Minidregg.Theory.ResourceBirthAuthority.no_batch_of_used_nullifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.no_batch_of_used_nullifier
 
 /-- info: 'Minidregg.Theory.ResourceBirthAuthority.no_final_grant_erasure' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.no_final_grant_erasure
@@ -439,10 +385,7 @@ def accept {registry : TypeRegistry Digest} {M : CellState.Materializer Credenti
 /-- info: 'Minidregg.Theory.ResourceBirthAuthority.factory_root_request_distinct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.factory_root_request_distinct
 
-/-- info: 'Minidregg.Theory.ResourceBirthAuthority.valid_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.valid_iff
-
-/-- info: 'Minidregg.Theory.ResourceBirthAuthority.not_valid_of_spent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.not_valid_of_spent
+/-- info: 'Minidregg.Theory.ResourceBirthAuthority.valid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.ResourceBirthAuthority.valid
 
 end Minidregg.Theory.ResourceBirthAuthority

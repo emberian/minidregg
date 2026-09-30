@@ -47,8 +47,8 @@ def emptyCapability (kind : ResourceKind) : Capability kind where
   channels := ∅
 
 /-- The old total authority state can retain an arbitrary Boolean stream in
-the issuer-epoch plane (epoch `1` marks, `0` does not).  The revocation,
-nullifier and registration planes are presence-only (`Unit`) and carry no bit;
+the issuer-epoch plane (epoch `1` marks, `0` does not).  The revocation and
+registration planes are presence-only (`Unit`) and carry no bit;
 every other typed field receives an arbitrary inhabitant solely to reconstruct
 the deleted carrier. -/
 def totalAuthorityStateOf (marked : Nat -> Bool) :
@@ -64,7 +64,6 @@ def totalAuthorityStateOf (marked : Nat -> Bool) :
         { keyId := 0, keyEpoch := epoch, algorithm := 0, subject := subject.value,
           publicKey := [], activeFrom := 0, activeUntil := 0, revoked := false }
   | ⟨.revoked, _⟩ => show Unit from ()
-  | ⟨.nullifier, _⟩ => show Unit from ()
   | ⟨.registered, _⟩ => show Unit from ()
 
 theorem totalAuthorityStateOf_injective :

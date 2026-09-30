@@ -299,6 +299,25 @@ def preflight [DecidableEq CellId] [DecidableEq Nullifier]
   else
     .ok ()
 
+/-- A passing preflight found every claimed nullifier unconsumed. -/
+theorem preflight_ok_fresh [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (ok : intent.preflight before = .ok ()) :
+    intent.nullifiersFreshCheck before = true := by
+  unfold Intent.preflight at ok
+  split at ok
+  · cases ok
+  split at ok
+  · cases ok
+  split at ok
+  · cases ok
+  split at ok
+  · cases ok
+  split at ok
+  · cases ok
+  next fresh => simpa using fresh
+
 theorem preflight_empty_effect_rejected [DecidableEq CellId] [DecidableEq Nullifier]
     (before : Snapshot TxId CellId Nullifier Event)
     (intent : Intent TxId CellId Nullifier Event)

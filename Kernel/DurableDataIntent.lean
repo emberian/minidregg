@@ -331,6 +331,28 @@ def preflight (before : DataSnapshot rootBytes) (intent : DataIntent rootBytes) 
     | .error reason => .error (.durable reason)
     | .ok () => .ok ()
 
+/-- The durable nullifier namespace is single-use: an intent carrying a
+consumed nullifier never passes preflight. -/
+theorem consumed_nullifier_refused (before : DataSnapshot rootBytes)
+    (intent : DataIntent rootBytes) (nullifier : StableNullifier)
+    (carries : nullifier ∈ intent.nullifiers)
+    (spent : before.model.consumed nullifier = true) :
+    intent.preflight before ≠ .ok () := by
+  intro ok
+  have lower : intent.erase.preflight before.model = .ok () := by
+    unfold preflight at ok
+    split at ok
+    · cases ok
+    split at ok
+    · cases ok
+    split at ok
+    · cases ok
+    · assumption
+  have fresh := (DurableCommitProtocol.Intent.nullifiersFreshCheck_eq_true_iff _ _).mp
+    (DurableCommitProtocol.Intent.preflight_ok_fresh _ _ lower) nullifier (by simpa using carries)
+  rw [spent] at fresh
+  cases fresh
+
 theorem unguarded_claim_only_rejected (before : DataSnapshot rootBytes)
     (intent : DataIntent rootBytes) (noWrites : intent.writes = [])
     (hasClaim : intent.nullifiers ≠ []) (noGuards : intent.readGuards = []) :
