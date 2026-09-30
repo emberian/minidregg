@@ -22,7 +22,7 @@ abbrev SourceWire := List UInt8 × List Nat × List Int
 def sourceWireStream : StreamCodec SourceWire :=
   StreamCodec.product bytesStream
     (StreamCodec.product (StreamCodec.list StreamCodec.nat)
-      (StreamCodec.list CanonicalResourcePageMaterializer.intStream))
+      (StreamCodec.list IntStream.intStream))
 
 def sourceFrame : List UInt8 :=
   "DREGG/GRAIN-RESOURCE-BIRTH/HOST-SOURCE/v1".toUTF8.toList

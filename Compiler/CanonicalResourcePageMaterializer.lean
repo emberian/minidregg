@@ -13,6 +13,7 @@ Lean cSHAKE256 implementation. Hash collision resistance is an explicit
 compared-pair premise, never universal injectivity into a finite digest.
 -/
 import Compiler.FiniteDependentMapCodec
+import Compiler.IntStream
 import Compiler.Sp800185Cshake256
 import Theory.CanonicalResourceKernel
 import Mathlib.Data.Finset.Sort
@@ -25,6 +26,7 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CanonicalResourceKernel
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory.Store
+open Minidregg.Compiler.IntStream (intStream)
 set_option autoImplicit false
 
 /-- Re-encoding is part of decoding: alternative integer encodings, duplicate
@@ -74,18 +76,6 @@ theorem fromEntries_entries [LinearOrder K] [DecidableEq V] (f : Π₀ _ : K, V)
 /-- Pair order is pinned by the injective natural pairing, not insertion order. -/
 local instance accountAssetOrder : LinearOrder (AccountId × AssetId) :=
   LinearOrder.lift' Nat.pairEquiv Nat.pairEquiv.injective
-
-def intWire : Int → Sum Nat Nat
-  | .ofNat value => .inl value
-  | .negSucc value => .inr value
-
-def intOfWire : Sum Nat Nat → Int
-  | .inl value => .ofNat value
-  | .inr value => .negSucc value
-
-def intStream : StreamCodec Int :=
-  StreamCodec.xmap (StreamCodec.sum StreamCodec.nat StreamCodec.nat)
-    intWire intOfWire (by intro value; cases value <;> rfl)
 
 abbrev LeaseTuple := Nat × Nat × Nat × Nat × Nat × Nat
 

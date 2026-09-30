@@ -1,12 +1,15 @@
 /- Generic scalar projection for declared resource policy evaluation.
-All values come from canonical resource pages. Pair deltas expose linear
-conservation constraints to the existing Pred algebra without opaque checks,
+All values come from the declared-effect cell's store (`Compiler.DeclaredEffectCell`),
+read in its canonical address order.  A resource contributes every field it
+has; there is no page capacity.  Pair deltas expose linear conservation
+constraints to the existing Pred algebra without opaque checks,
 application-specific evaluator branches or a host-provided admission bit. -/
-import Compiler.DeclaredEffectPageMaterializer
+import Compiler.DeclaredEffectCell
 
 namespace Minidregg.Kernel.DeclaredResourceProjection
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Compiler
 open Minidregg.Theory.EffectDeclaration
+open Minidregg.Theory.Store
 set_option autoImplicit false
 
 /-- Full field identifier, not a reduced digest or truncated address. -/
@@ -15,11 +18,13 @@ def pairName (a b : Nat) : String := s!"resource/pair/{a}/{b}/delta"
 
 abbrev Values := List (Nat × Int)
 
-def values (task : Nat) (page : Page) : Values :=
-  page.entries.filterMap fun entry => match entry.key with
-    | .objectField object field =>
-        if object.value = task then some (field.value, entry.value) else none
-    | _ => none
+/-- The present fields of object `task`, in the cell's canonical entry order. -/
+def values (task : Nat) (store : Store effectLayout) : Values :=
+  (StoreCodec.entries DeclaredEffectCell.wire store).filterMap fun entry =>
+    match entry.1.2, entry.2 with
+    | .objectField object field, value =>
+        if object.value = task then some (field.value, value) else none
+    | _, _ => none
 
 def get (xs : Values) (key : Nat) : Option Int :=
   (xs.find? (fun p => p.1 == key)).map (·.2)
@@ -35,7 +40,7 @@ def scalarSlots (before after : Values) : List (String × Int) :=
     let oldB ← get before b.1
     return (pairName a.1 b.1, a.2 + b.2 - oldA - oldB))
 
-def project (task : Nat) (before after : Page) : List (String × Int) :=
+def project (task : Nat) (before after : Store effectLayout) : List (String × Int) :=
   scalarSlots (values task before) (values task after)
 
 /-- This arithmetic projection is exact over integers, before the existing

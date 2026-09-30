@@ -1,8 +1,10 @@
-/- Scalar action lowering used by the joint resource receiver. This module has no signed ingress or durable receiving path. Its command is an internal projection of one scalar target; joint authority and policy are checked only by DeclaredResourceController. -/
+/- Scalar action lowering used by the joint resource receiver. This module has no signed ingress or durable receiving path. Its command is an internal projection of one scalar target; joint authority and policy are checked only by DeclaredResourceController.
+
+The target is a declared-effect cell (`Compiler.DeclaredEffectCell`): a store over `effectLayout`. Preparation validates the command's own guarded patch against the cell at the quoted root and runs it; the post is `Patch.run`. There is no page, no shard, no capacity: the reject reasons `invalidPage`, `pageMutation` (with its `overflow`/`unsupportedAddress`) and `pageValidation` are removed, and a failed guard is `guardRejected i`, naming the first disabled operation. -/
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.CredentialAuthorityReplay
-import Compiler.DeclaredEffectPageMaterializer
+import Compiler.DeclaredEffectCell
 import Compiler.CanonicalRuntimeProfile
 import Kernel.MultiCellHyperedge
 import Kernel.ResourceBirthController
@@ -15,7 +17,8 @@ open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.CredentialAuthorityDomain
 open Minidregg.Compiler.CredentialAuthorityDomainReceiver
 open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Compiler.DeclaredEffectCell (stateKeyStream)
+open Minidregg.Compiler.IntStream (intStream)
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.MultiCellHyperedge
 open Minidregg.Kernel.DurableDataIntent
@@ -23,6 +26,8 @@ open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
 open Minidregg.Theory.DeclaredActionLowering
+open Minidregg.Theory.EffectDeclaration (effectLayout StateKey)
+open Minidregg.Theory.Store
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 
@@ -31,7 +36,7 @@ set_option autoImplicit false
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
-abbrev PageCell := Materialized DeclaredEffectPageMaterializer.materializer
+abbrev EffectCell := DeclaredEffectCell.Cell
 abbrev AuthoritySnapshot := CredentialAuthorityDomain.Snapshot
 
 /-! ## One compact transport for the existing action syntax -/
@@ -205,7 +210,7 @@ theorem request_policy_is_target (snapshot : AuthoritySnapshot) (semantics : Dig
 
 theorem ordinary_program_verb_distinct : ordinaryVerb .program ≠ .installPolicy := by decide
 
-/-! ## Source-owned page preparation, before portals or authorization -/
+/-! ## Source-owned cell preparation, before portals or authorization -/
 
 inductive Reject where
   | malformedCommand
@@ -214,12 +219,10 @@ inductive Reject where
   | emptyActions
   | wrongRole
   | missingTarget
-  | invalidPage
   | staleTarget
   | staleAuthority
   | inadmissibleAction
-  | pageMutation (reason : DeclaredEffectPageMaterializer.RejectReason)
-  | pageValidation
+  | guardRejected (index : Nat)
   | invalidPost
   | authorityUnavailable
   | directoryUnavailable
@@ -239,67 +242,48 @@ def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
   | none => .error reason
   | some value => .ok value
 
-def packDeclared (kind : ResourceKind) (payload : PageCell) : PackedCell Registry :=
+def packDeclared (kind : ResourceKind) (payload : EffectCell) : PackedCell Registry :=
   match kind with
   | .object => ⟨.declaredObject, payload⟩
   | .account => ⟨.accountMetadata, payload⟩
   | .program => ⟨.declaredProgram, payload⟩
 
-def pagePatch (pre : PageCell) (post : Page) :
-    Patch DeclaredEffectPageMaterializer.schema Digest where
-  expectedPreRoot := pre.root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [⟨(), some post⟩]
-  resourceWrites := []
-
-theorem pagePatch_apply (pre : PageCell) (post : Page)
-    (validated : ValidatedPatch DeclaredEffectPageMaterializer.materializer pre
-      (pagePatch pre post)) :
-    validated.apply.logical = stateOfOption (some post) := by
-  have page : pageAt validated.apply.logical = some post := by
-    change (applyFieldWrites (pagePatch pre post).fieldWrites pre.logical.fields) () = some post
-    simp [pagePatch, applyFieldWrites, FieldStore.assign]
-    rfl
-  exact (state_ext validated.apply.logical).trans (congrArg stateOfOption page)
+/-- The command's one guarded patch.  It is the declaration's own lowering,
+not a whole-cell replacement computed beside it. -/
+def cellPatch (command : Command) : Patch effectLayout :=
+  command.declaration.patch
 
 /-- The guard relation is the existing sequential action semantics, with
 exact sparse presence. It says nothing about an unrelated host proposal. -/
-def CanonicalActionResult (pre : PageCell) (command : Command) (post : Page) : Prop :=
-  ∃ before, pageAt pre.logical = some before ∧
-    command.declaration.run before.toCanonicalState.fields = some post.toCanonicalState.fields
+def CanonicalActionResult (pre : EffectCell) (command : Command)
+    (post : Store effectLayout) : Prop :=
+  command.declaration.run pre.logical = some post
 
-structure PageMode (deployment : Deployment) (pre : PageCell)
-    (command : Command) (post : Page) where
-  before : Page
-  beforeExact : pageAt pre.logical = some before
-  beforeLaw : CanonicalCellRegistry.DeclaredPageLaw deployment command.kind command.target before
+structure CellMode (pre : EffectCell) (command : Command) (post : Store effectLayout) where
+  beforeLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target pre.logical
   rootExact : command.expectedTargetRoot = pre.root
   versionExact : command.schemaVersion = 1
   ordinary : command.kind ≠ .account
   actionsPresent : command.actions ≠ []
   admitted : command.declaration.Admitted
-  computed : before.applyWrites command.declaration.checkedWrites = .ok post
-  postLaw : CanonicalCellRegistry.DeclaredPageLaw deployment command.kind command.target post
-  semanticsExact :
-    command.declaration.run before.toCanonicalState.fields = some post.toCanonicalState.fields
+  postLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target post
+  semanticsExact : CanonicalActionResult pre command post
 
-def pageFamily (deployment : Deployment) (snapshot : AuthoritySnapshot)
-    (semantics : Digest) (ambient : Ambient) (pre : PageCell) :
-    SemanticEffectFamily DeclaredEffectPageMaterializer.schema
-      DeclaredEffectPageMaterializer.materializer Nat where
+def cellFamily (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (pre : EffectCell) :
+    SemanticEffectFamily effectLayout DeclaredEffectCell.materializer Nat where
   Declaration := Command
   declarationCodec := commandCodec
   pre := pre
   request := fun command => ⟨command.kind, request snapshot semantics ambient command pre.root⟩
-  Outcome := fun _ => Page
-  outcomeCodec := fun _ => ResourceBirthCodec.strictCodec pageStream.toLawful
-  ModeEvidence := fun command post => PageMode deployment pre command post
+  Outcome := fun _ => Store effectLayout
+  outcomeCodec := fun _ => DeclaredEffectCell.materializer.codec
+  ModeEvidence := fun command post => CellMode pre command post
   Postcondition := fun command post logical =>
-    logical = stateOfOption (some post) ∧ CanonicalActionResult pre command post ∧
-      CanonicalCellRegistry.DeclaredPageLaw deployment command.kind command.target post
+    logical = post ∧ CanonicalActionResult pre command post ∧
+      CanonicalCellRegistry.DeclaredCellLaw command.kind command.target post
   effectDigest := effectsDigest snapshot.domain semantics
-  patch := fun _ post => pagePatch pre post
+  patch := fun command _ => cellPatch command
   nullifier := fun _ _ => none
   Release := fun _ _ => Empty
   DeclassificationAuthority := fun _ _ => Empty
@@ -308,59 +292,53 @@ def pageFamily (deployment : Deployment) (snapshot : AuthoritySnapshot)
 
 /-- Computation precedes policy admission. The retained candidate has no
 authorization token; a requester cannot construct it by supplying a post. -/
-structure PreparedPage (deployment : Deployment) (snapshot : AuthoritySnapshot)
-    (semantics : Digest) (ambient : Ambient) (pre : PageCell) (command : Command) where
+structure PreparedCell (snapshot : AuthoritySnapshot)
+    (semantics : Digest) (ambient : Ambient) (pre : EffectCell) (command : Command) where
   private mk ::
-  post : Page
-  candidate : PolicyInstall.Candidate (pageFamily deployment snapshot semantics ambient pre)
+  post : Store effectLayout
+  candidate : PolicyInstall.Candidate (cellFamily snapshot semantics ambient pre)
     pre command post
 
-def preparePage (deployment : Deployment) (snapshot : AuthoritySnapshot)
-    (semantics : Digest) (ambient : Ambient) (pre : PageCell) (command : Command) :
-    Except Reject (PreparedPage deployment snapshot semantics ambient pre command) := do
+def prepareCell (snapshot : AuthoritySnapshot)
+    (semantics : Digest) (ambient : Ambient) (pre : EffectCell) (command : Command) :
+    Except Reject (PreparedCell snapshot semantics ambient pre command) := do
   if ordinary : command.kind ≠ .account then
     if version : command.schemaVersion = 1 then
       if nonempty : command.actions ≠ [] then
         if root : command.expectedTargetRoot = pre.root then
-          match present : pageAt pre.logical with
-          | none => .error .invalidPage
-          | some before =>
-              if preLaw : CanonicalCellRegistry.DeclaredPageLaw deployment
-                  command.kind command.target before then
-                if admitted : command.declaration.admissionCheck = true then
-                  match computed : before.applyWrites command.declaration.checkedWrites with
-                  | .error reason => .error (.pageMutation reason)
-                  | .ok post =>
-                      if postLaw : CanonicalCellRegistry.DeclaredPageLaw deployment
-                          command.kind command.target post then
-                        match validate DeclaredEffectPageMaterializer.materializer pre (pagePatch pre post) with
-                        | .rejected _ => .error .pageValidation
-                        | .accepted validated =>
-                            let semantic : command.declaration.run before.toCanonicalState.fields =
-                                some post.toCanonicalState.fields := by
-                              simpa [Declaration.run, admitted] using
-                                Page.applyWrites_checked computed
-                            .ok ⟨post,
-                              { preStateBound := rfl
-                                modeEvidence :=
-                                  ⟨before, present, preLaw, root, version, ordinary,
-                                    nonempty, admitted, computed, postLaw, semantic⟩
-                                validated := validated
-                                postcondition :=
-                                  ⟨pagePatch_apply pre post validated,
-                                    ⟨before, present, semantic⟩, postLaw⟩ }⟩
-                      else .error .invalidPost
-                else .error .inadmissibleAction
-              else .error .wrongRole
+          if preLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target
+              pre.logical then
+            if admitted : command.declaration.admissionCheck = true then
+              match checked : validate DeclaredEffectCell.materializer pre
+                  command.expectedTargetRoot (cellPatch command) with
+              | .rejected (.stalePreRoot) => .error .staleTarget
+              | .rejected (.disabledOperation index) => .error (.guardRejected index)
+              | .accepted validated =>
+                  let post := Patch.run pre.logical (cellPatch command)
+                  if postLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind
+                      command.target post then
+                    let semantic : CanonicalActionResult pre command post :=
+                      (command.declaration.run_eq_some_iff _ _).mpr
+                        ⟨admitted, validated.valid, rfl⟩
+                    .ok ⟨post,
+                      { preStateBound := rfl
+                        modeEvidence :=
+                          ⟨preLaw, root, version, ordinary, nonempty, admitted, postLaw,
+                            semantic⟩
+                        validated := validated
+                        postcondition := ⟨by simp [post], semantic, postLaw⟩ }⟩
+                  else .error .invalidPost
+            else .error .inadmissibleAction
+          else .error .wrongRole
         else .error .staleTarget
       else .error .emptyActions
     else .error .unsupportedVersion
   else .error .accountRequiresBook
 
-theorem PreparedPage.action_semantics_exact {deployment : Deployment}
+theorem PreparedCell.action_semantics_exact
     {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
-    {pre : PageCell} {command : Command}
-    (prepared : PreparedPage deployment snapshot semantics ambient pre command) :
+    {pre : EffectCell} {command : Command}
+    (prepared : PreparedCell snapshot semantics ambient pre command) :
     CanonicalActionResult pre command prepared.post :=
   prepared.candidate.postcondition.2.1
 

@@ -81,11 +81,6 @@ def spaceStream : StreamCodec Space where
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
 
-def unitStream : StreamCodec Unit where
-  encode _ := []
-  decodePrefix bytes := some ((), bytes)
-  decodePrefix_encode := by intro value suffix; rfl
-
 def keyStream : (space : Space) → StreamCodec (Space.Key space)
   | .account => StreamCodec.nat
   | .balance => StreamCodec.product StreamCodec.nat StreamCodec.nat
@@ -93,7 +88,7 @@ def keyStream : (space : Space) → StreamCodec (Space.Key space)
 
 def valueStream : (space : Space) → StreamCodec (Space.Value space)
   | .account => unitStream
-  | .balance => CanonicalResourcePageMaterializer.intStream
+  | .balance => IntStream.intStream
   | .lease => CanonicalResourcePageMaterializer.leaseStream
 
 def wire : Wire layout where
@@ -109,7 +104,7 @@ def wire : Wire layout where
     | .lease => "nat/base255"
   valueCodecId
     | .account => "unit/empty"
-    | .balance => "int/sum-nat-nat"
+    | .balance => IntStream.intCodecId
     | .lease => "lease-record/v1"
 
 /-! ## The Book's pointwise meaning as a store -/

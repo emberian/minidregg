@@ -1,28 +1,27 @@
 /-
-# Compiler.DeclaredEffectPageRegistry -- scoped effect-shard lifecycle exhibit
+# Compiler.DeclaredEffectCellRegistry -- one-kind effect-cell lifecycle exhibit
 
-The actual page codec/materializer and lifecycle evidence here remain useful.
 The unified receiving path selects `Compiler.CanonicalCellRegistry`, whose
-fixed semantic roles and final-state laws determine whether a declared page
-is an object, program, or account-metadata cell. This one-kind exhibit does not
+fixed semantic roles and final-state laws determine whether a declared cell is
+an object, program, or account-metadata cell.  This one-kind exhibit does not
 provide production kind dispatch or a second monetary store.
 
-This is the heterogeneous-cell boundary for the bounded declared-effect page.
-It pins one stable kind tag and V1 schema reference, installs the exact framed
-cSHAKE materializer, round-trips a nonempty accepted-effect page, and executes
-create/delete through `CellRegistry`.
+It is the heterogeneous-cell boundary for the declared-effect cell
+(`Compiler.DeclaredEffectCell`): it pins one stable kind tag and a schema
+reference, installs the store-codec materializer, round-trips a nonempty
+32-field cell, and executes create/delete through `CellRegistry`.
 
-The registry contains a representation shard, not the unbounded
-`DeclaredTurn.effectSchema`.  Retirement prevents identifier resurrection;
-physical stable-media installation and digest collision resistance remain the
-existing explicit refinement ceilings.
+Schema reference `91004` moved from version 1 (the four-slot, sixteen-shard
+page frame `LOOM/EFFECT/PAGE`) to version 2 (the `DREGG/STORE` frame at the
+declared-effect wire).  A version-1 cell refuses to decode.  Retirement
+prevents identifier resurrection; physical stable-media installation and
+digest collision resistance remain the existing explicit refinement ceilings.
 -/
-import Compiler.DeclaredEffectPageMaterializer
+import Compiler.DeclaredEffectCell
 import Theory.CellSlot
 
-namespace Minidregg.Compiler.DeclaredEffectPageRegistry
+namespace Minidregg.Compiler.DeclaredEffectCellRegistry
 
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
 open Minidregg.Compiler.Sp800185Cshake256
 open Minidregg.Theory
 open Minidregg.Theory.CausalVersionDag
@@ -34,14 +33,14 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 inductive Kind where
-  | declaredEffectShard
+  | declaredEffect
   deriving DecidableEq, Repr
 
 def Kind.tag : Kind -> UInt8
-  | .declaredEffectShard => 5
+  | .declaredEffect => 5
 
 def kindAtTag : UInt8 -> Option Kind
-  | 5 => some .declaredEffectShard
+  | 5 => some .declaredEffect
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) :
@@ -49,12 +48,11 @@ def kindAtTag : UInt8 -> Option Kind
   cases kind
   rfl
 
-/-- Schema id 91004 extends the three bounded page ids 91001--91003.  Version
-one is the exact V1/capacity-4/modulus-16 frame in the materializer. -/
-def effectShardSchemaRef : SchemaRef := ⟨⟨91004⟩, 1⟩
+/-- Schema id 91004, version 2: the store frame at `DeclaredEffectCell.wire`. -/
+def effectCellSchemaRef : SchemaRef := ⟨⟨91004⟩, 2⟩
 
 def schemaRef : Kind -> SchemaRef
-  | .declaredEffectShard => effectShardSchemaRef
+  | .declaredEffect => effectCellSchemaRef
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right _same
@@ -62,25 +60,24 @@ theorem schemaRef_injective : Function.Injective schemaRef := by
   cases right
   rfl
 
-def schema : Kind -> CellState.Schema.{0, 0, 0, 0}
-  | .declaredEffectShard =>
-      Minidregg.Compiler.DeclaredEffectPageMaterializer.schema
+def layout : Kind -> Store.Layout.{0, 0, 0}
+  | .declaredEffect => EffectDeclaration.effectLayout
 
-def materializer : (kind : Kind) -> Materializer (schema kind) Digest
-  | .declaredEffectShard =>
-      Minidregg.Compiler.DeclaredEffectPageMaterializer.materializer
+def materializer : (kind : Kind) -> Materializer (layout kind) Digest
+  | .declaredEffect => DeclaredEffectCell.materializer
 
+/-- `DREGG.EFFECT.CELL.REGISTRY.ROOT/v1`. -/
 def directoryRootCustomization : List UInt8 :=
-  [76, 79, 79, 77, 46, 69, 70, 70, 69, 67, 84, 46, 80, 65, 71, 69,
-    46, 82, 69, 71, 73, 83, 84, 82, 89, 46, 82, 79, 79, 84, 47, 118, 49]
+  [68, 82, 69, 71, 71, 46, 69, 70, 70, 69, 67, 84, 46, 67, 69, 76, 76, 46,
+    82, 69, 71, 73, 83, 84, 82, 89, 46, 82, 79, 79, 84, 47, 118, 49]
 
 def directoryRoot (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash directoryRootCustomization bytes).digest
 
 theorem directory_payload_domains_distinct :
-    directoryRootCustomization ≠
-      Minidregg.Compiler.DeclaredEffectPageMaterializer.rootCustomization := by
-  decide
+    directoryRootCustomization ≠ StoreCodec.rootCustomization := by
+  unfold StoreCodec.rootCustomization
+  decide +kernel
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -89,33 +86,33 @@ def registry : TypeRegistry Digest where
   kindAtTag_tag := kindAtTag_tag
   schemaRef := schemaRef
   schemaRef_injective := schemaRef_injective
-  schema := schema
+  layout := layout
   materializer := materializer
   rootBytes := directoryRoot
 
 @[simp] theorem registry_schemaRef :
-    registry.schemaRef .declaredEffectShard = effectShardSchemaRef :=
+    registry.schemaRef .declaredEffect = effectCellSchemaRef :=
   rfl
 
 @[simp] theorem registry_materializer :
-    registry.materializer .declaredEffectShard =
-      Minidregg.Compiler.DeclaredEffectPageMaterializer.materializer :=
+    registry.materializer .declaredEffect = DeclaredEffectCell.materializer :=
   rfl
 
-def witnessCell :
-    Materialized
-      Minidregg.Compiler.DeclaredEffectPageMaterializer.materializer :=
-  CellState.materialize
-    Minidregg.Compiler.DeclaredEffectPageMaterializer.materializer
-    (stateOfOption (some Witness.postPage))
+/-- A 32-field object resource, as one cell. -/
+def witnessCell : DeclaredEffectCell.Cell :=
+  CellState.materialize DeclaredEffectCell.materializer
+    (DeclaredEffectCell.objectFields ⟨204⟩ 32)
 
 def packedCell : PackedCell registry :=
-  ⟨.declaredEffectShard, witnessCell⟩
+  ⟨.declaredEffect, witnessCell⟩
 
 @[simp] theorem packedCell_roundtrip :
     PackedCell.decode registry (PackedCell.bytes registry packedCell) =
       some packedCell :=
   PackedCell.decode_bytes registry packedCell
+
+theorem witnessCell_fields : witnessCell.logical.support.card = 32 :=
+  (DeclaredEffectCell.resource_32_fields_roundtrip ⟨204⟩).1
 
 /-! ## Executable create/delete/retire lifecycle -/
 
@@ -148,7 +145,7 @@ theorem create_succeeds :
 def deleteRequest : DeleteRequest (CellId := CellId) registry where
   cellId := cellId
   expectedPreRoot := CellSlot.root registry (.present packedCell)
-  expectedSchema := effectShardSchemaRef
+  expectedSchema := effectCellSchemaRef
 
 def afterDelete : Directory CellId registry :=
   Directory.retire registry afterCreate cellId
@@ -192,14 +189,14 @@ abbrev RootBindingCeiling : Prop := RootBindingPremise registry
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Compiler.DeclaredEffectPageRegistry.create_succeeds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.DeclaredEffectCellRegistry.create_succeeds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms create_succeeds
-/-- info: 'Minidregg.Compiler.DeclaredEffectPageRegistry.delete_succeeds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.DeclaredEffectCellRegistry.delete_succeeds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms delete_succeeds
-/-- info: 'Minidregg.Compiler.DeclaredEffectPageRegistry.recreate_after_delete_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.DeclaredEffectCellRegistry.recreate_after_delete_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms recreate_after_delete_rejected
 
-end Minidregg.Compiler.DeclaredEffectPageRegistry
+end Minidregg.Compiler.DeclaredEffectCellRegistry

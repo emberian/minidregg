@@ -109,6 +109,13 @@ structure Wire (L : Layout.{0, 0, 0}) where
   keyCodecId : L.Namespace → String
   valueCodecId : L.Namespace → String
 
+/-- The empty codec of `Unit`: a single-namespace layout's namespace, or a
+presence-only value, contributes no bytes. -/
+def unitStream : StreamCodec Unit where
+  encode _ := []
+  decodePrefix bytes := some ((), bytes)
+  decodePrefix_encode := by intro value suffix; rfl
+
 /-- One store entry: an address and a present value at that address. -/
 abbrev Entry (L : Layout.{0, 0, 0}) := Σ address : Address L, L.Value address.1
 
@@ -520,6 +527,19 @@ theorem decode_other_header (header payload : List UInt8)
     (sameLength : header.length = (frame W).length) (different : header ≠ frame W) :
     decode W (header ++ payload) = none := by
   simp [decode, ← sameLength, different]
+
+/-- Bytes whose first byte is not the store magic's first byte (`'D'`) are
+refused whatever follows.  Every retired page frame (`LOOM/…`, first byte
+`'L'` = 76) falls here, so an old page cell refuses to decode rather than being
+reinterpreted as a store. -/
+theorem decode_other_first_byte (first : UInt8) (rest : List UInt8)
+    (other : first ≠ 68) : decode W (first :: rest) = none := by
+  unfold decode
+  rw [if_neg]
+  intro framed
+  have heads := congrArg List.head? framed
+  simp [frame, magic] at heads
+  exact other heads
 
 theorem decode_other_version (version : UInt8) (digest payload : List UInt8)
     (digestLength : digest.length = 32) (otherVersion : version ≠ storeVersion) :

@@ -13,7 +13,7 @@ import Effects     -- open handler registry: one declaration per effect, proof f
 import Compiler    -- arithmetization spine: syntactic-leaf IR + fold_unique
 import Compiler.BoundedQuantifiedPolicyAdmission  -- bounded quantified policies reach committed-policy AIR reflection
 import Compiler.DeclaredActionAir  -- canonical action bytes and sparse guard execution are equivalent to one emitted descriptor
-import Compiler.DeclaredEffectPageRegistry  -- bounded declared-effect pages enter the dependent cell registry
+import Compiler.DeclaredEffectCellRegistry  -- the declared-effect store cell (any field count) enters the dependent cell registry
 import Selvage        -- the proof system
 import Assurance   -- generated ledger machinery: pins, keystone audit, Bound/Forced
 import Assurance.CredentialFoundationMigrationAudit  -- exact pins for revision/generation separation and explicit delegation

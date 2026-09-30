@@ -32,7 +32,7 @@ theorem accountCut_noninterference (left right : CanonicalResourceKernel.Book) (
   rw [equal]
 
 def balanceStream : StreamCodec (List (Nat × Int)) :=
-  StreamCodec.list (StreamCodec.product StreamCodec.nat CanonicalResourcePageMaterializer.intStream)
+  StreamCodec.list (StreamCodec.product StreamCodec.nat IntStream.intStream)
 
 private def byteSlots : Nat → List UInt8 → List (String × Int)
   | _, [] => []

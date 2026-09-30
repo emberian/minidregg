@@ -162,9 +162,21 @@ def Declaration.toWire {kind : ResourceKind} {target : ResourceId kind}
   target := target.value
   effects := declaration.effects.map Effect.toWire
 
+/-- The one integer-to-natural encoding (zigzag): nonnegatives to evens,
+negatives to odds.  Declaration words, action codes and every store-coded
+integer value (`Compiler.IntStream`) use this map and its inverse. -/
 def encodeInt : Int → Nat
   | .ofNat value => 2 * value
   | .negSucc value => 2 * value + 1
+
+def decodeInt : Nat -> Int
+  | n => if n % 2 = 0 then Int.ofNat (n / 2) else Int.negSucc (n / 2)
+
+@[simp] theorem decodeInt_encodeInt (value : Int) :
+    decodeInt (encodeInt value) = value := by
+  cases value with
+  | ofNat value => simp [decodeInt, encodeInt]
+  | negSucc value => simp [decodeInt, encodeInt]; omega
 
 def EffectWire.words : EffectWire → List Nat
   | .objectWrite target field expected replacement =>

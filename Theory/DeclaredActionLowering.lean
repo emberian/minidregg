@@ -356,15 +356,6 @@ theorem Action.posting_key_mem (action : Action) (posting : Posting)
 
 /-! ## Lawful first-order bytes -/
 
-def decodeInt : Nat -> Int
-  | n => if n % 2 = 0 then Int.ofNat (n / 2) else Int.negSucc (n / 2)
-
-@[simp] theorem decodeInt_encodeInt (value : Int) :
-    decodeInt (EffectDeclaration.encodeInt value) = value := by
-  cases value with
-  | ofNat value => simp [decodeInt, EffectDeclaration.encodeInt]
-  | negSucc value => simp [decodeInt, EffectDeclaration.encodeInt]; omega
-
 def keyCode : StateKey -> Nat
   | .objectField object field =>
       Nat.pair 0 (Nat.pair object.value field.value)

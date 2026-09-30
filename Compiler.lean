@@ -39,6 +39,8 @@ import Compiler.HyperdocumentIndexPageMaterializer  -- bounded backlink/range in
 import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
 import Compiler.FiniteSparseMaterializerAudit  -- exact seven-schema census: all accepted/non-vacuous, with four inhabitation-only codecs distinguished from three production-pinned page codecs
 import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (DATAMODEL §5 A2)
+import Compiler.IntStream  -- the one integer byte codec: zigzag base-255; the Book's Sum codec is deleted
+import Compiler.DeclaredEffectCell  -- declared object/program/account-metadata cells are StoreCodec at the effect wire; the four-slot page is deleted (DATAMODEL §5 B1)
 import Compiler.StoreCodecBook  -- the finite Book as a store at the Book layout: pointwise adapter, round-trip, explicit-zero refusal, transcode from the existing Book codec
 import Compiler.CredentialAuthorityPolicyRegistry  -- the bounded authority page drives exact compiled-policy selection and a root-guarded durable intent
 import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic receipt declaration -> AIR -> emitted first-order artifact; downstream native code only reads the generated descriptor

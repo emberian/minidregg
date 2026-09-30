@@ -18,7 +18,7 @@ import Compiler.CanonicalCellRegistry
 import Compiler.CredentialAuthorityDomain
 import Compiler.CredentialAuthorityReplay
 import Compiler.CredentialSignatureAdmission
-import Compiler.DeclaredEffectPageMaterializer
+import Compiler.DeclaredEffectCell
 import Compiler.PolicyRecordCodec
 import Compiler.ResourceBirthCodec
 
@@ -171,8 +171,8 @@ def sourceComponents : List (List UInt8) :=
    (StreamCodec.list StreamCodec.nat).encode
      [PolicySourceCell.registryTag.toNat, PolicySourceCell.schemaId,
       PolicySourceCell.wireVersion],
-   DeclaredEffectPageMaterializer.wireFrame,
-   DeclaredEffectPageMaterializer.rootCustomization,
+   StoreCodec.frame DeclaredEffectCell.wire,
+   StoreCodec.rootCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,
    StreamCodec.nat.encode CanonicalResourcePageMaterializer.wireVersion,

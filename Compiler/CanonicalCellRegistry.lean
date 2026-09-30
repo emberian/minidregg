@@ -19,7 +19,7 @@ payloads. Those cells are produced by their source-owned semantic lowerings.
 The registry supplies no public raw-state installation endpoint.
 -/
 import Compiler.BoundedPageExtensionCatalog
-import Compiler.DeclaredEffectPageMaterializer
+import Compiler.DeclaredEffectCell
 import Compiler.CredentialAuthorityDomain
 import Compiler.CanonicalResourcePageMaterializer
 import Compiler.ResourceBirthCodec
@@ -36,6 +36,7 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.DeclaredActionLowering
 open Minidregg.Theory.EffectDeclaration
+open Minidregg.Theory.Store (Store)
 
 set_option autoImplicit false
 
@@ -87,11 +88,11 @@ def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 2⟩
   | .eventHistory => ⟨⟨91002⟩, 1⟩
   | .authorityShard => ⟨⟨91003⟩, 4⟩
-  | .declaredObject => ⟨⟨91004⟩, 1⟩
+  | .declaredObject => ⟨⟨91004⟩, 2⟩
   | .resourceBook => ⟨⟨91005⟩, 2⟩
   | .authorityCatalogue => ⟨⟨91006⟩, 2⟩
-  | .accountMetadata => ⟨⟨91007⟩, 1⟩
-  | .declaredProgram => ⟨⟨91008⟩, 1⟩
+  | .accountMetadata => ⟨⟨91007⟩, 2⟩
+  | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
@@ -103,11 +104,11 @@ def schema : Kind → CellState.Schema.{0, 0, 0, 0}
   | .content => HyperdocumentContentPageMaterializer.schema
   | .eventHistory => HyperdocumentEventPageMaterializer.schema
   | .authorityShard => CredentialAuthorityPageMaterializer.schema
-  | .declaredObject => DeclaredEffectPageMaterializer.schema
+  | .declaredObject => EffectDeclaration.effectLayout
   | .resourceBook => CanonicalResourceKernel.schema
   | .authorityCatalogue => CredentialAuthorityDomain.catalogueSchema
-  | .accountMetadata => DeclaredEffectPageMaterializer.schema
-  | .declaredProgram => DeclaredEffectPageMaterializer.schema
+  | .accountMetadata => EffectDeclaration.effectLayout
+  | .declaredProgram => EffectDeclaration.effectLayout
   | .policySource => PolicySourceCell.schema
 
 instance fieldDecidableEq : (kind : Kind) → DecidableEq (schema kind).Field
@@ -136,11 +137,11 @@ def materializer : (kind : Kind) → Materializer (schema kind) Digest
   | .content => HyperdocumentContentPageMaterializer.materializer
   | .eventHistory => HyperdocumentEventPageMaterializer.materializer
   | .authorityShard => CredentialAuthorityPageMaterializer.materializer
-  | .declaredObject => DeclaredEffectPageMaterializer.materializer
+  | .declaredObject => DeclaredEffectCell.materializer
   | .resourceBook => CanonicalResourcePageMaterializer.materializer
   | .authorityCatalogue => CredentialAuthorityDomain.catalogueMaterializer
-  | .accountMetadata => DeclaredEffectPageMaterializer.materializer
-  | .declaredProgram => DeclaredEffectPageMaterializer.materializer
+  | .accountMetadata => DeclaredEffectCell.materializer
+  | .declaredProgram => DeclaredEffectCell.materializer
   | .policySource => PolicySourceCell.materializer
 
 def registry : TypeRegistry Digest where
@@ -186,13 +187,13 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
 @[simp] theorem registry_book_materializer :
     registry.materializer .resourceBook = CanonicalResourcePageMaterializer.materializer := rfl
 @[simp] theorem registry_factory_materializer :
-    registry.materializer factoryKind = DeclaredEffectPageMaterializer.materializer := rfl
+    registry.materializer factoryKind = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_account_materializer :
-    registry.materializer .accountMetadata = DeclaredEffectPageMaterializer.materializer := rfl
+    registry.materializer .accountMetadata = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_policy_source_materializer :
     registry.materializer .policySource = PolicySourceCell.materializer := rfl
 @[simp] theorem registry_program_materializer :
-    registry.materializer .declaredProgram = DeclaredEffectPageMaterializer.materializer := rfl
+    registry.materializer .declaredProgram = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_lifecycle_root :
     registry.rootBytes = ResourceBirthCodec.rootBytes := rfl
 
@@ -256,28 +257,23 @@ theorem accountBalance_never_allowed (kind : ResourceKind) (cellId : Nat)
     (account : ResourceId .account) (asset : Digest) :
     ¬KeyAllowed kind cellId (.accountBalance account asset) := fun impossible => impossible
 
-def DeclaredPageLaw (deployment : Deployment) (kind : ResourceKind)
-    (cellId : Nat) (page : DeclaredEffectPageMaterializer.Page) : Prop :=
-  page.effectDomain = deployment.domain ∧
-    page.shardNumber = cellId % DeclaredEffectPageMaterializer.shardCount ∧
-    page.Valid ∧ ∀ entry ∈ page.entries, KeyAllowed kind cellId entry.key
+/-- The declared-cell law: every present field is a key this role allows at
+this cell.  There is no capacity, no shard number and no in-cell domain tag:
+the cell's domain is the directory that holds it. -/
+def DeclaredCellLaw (kind : ResourceKind) (cellId : Nat) (store : Store effectLayout) : Prop :=
+  ∀ address ∈ store.support, KeyAllowed kind cellId address.2
 
-instance declaredPageLawDecidable (deployment : Deployment) (kind : ResourceKind)
-    (cellId : Nat) (page : DeclaredEffectPageMaterializer.Page) :
-    Decidable (DeclaredPageLaw deployment kind cellId page) := by
-  unfold DeclaredPageLaw
+instance declaredCellLawDecidable (kind : ResourceKind) (cellId : Nat)
+    (store : Store effectLayout) : Decidable (DeclaredCellLaw kind cellId store) := by
+  unfold DeclaredCellLaw
   infer_instance
 
-theorem DeclaredPageLaw.no_balance (deployment : Deployment) (kind : ResourceKind)
-    (cellId : Nat) (page : DeclaredEffectPageMaterializer.Page)
-    (law : DeclaredPageLaw deployment kind cellId page)
-    (entry : DeclaredEffectPageMaterializer.Entry) (member : entry ∈ page.entries)
+theorem DeclaredCellLaw.no_balance (kind : ResourceKind) (cellId : Nat)
+    (store : Store effectLayout) (law : DeclaredCellLaw kind cellId store)
     (account : ResourceId .account) (asset : Digest) :
-    entry.key ≠ .accountBalance account asset := by
-  intro same
-  have allowed := law.2.2.2 entry member
-  rw [same] at allowed
-  exact allowed
+    store (StateKey.accountBalance account asset).address = none := by
+  by_contra present
+  exact law _ (DFinsupp.mem_support_toFun _ _ |>.mpr present)
 
 def PresentLaw {α : Type} (law : α → Prop) : Option α → Prop
   | none => False
@@ -317,12 +313,9 @@ def logicalLawVersion : List UInt8 :=
 all effects have composed. Local candidate validity alone does not imply this. -/
 def LogicalLaw (deployment : Deployment) (cellId : Nat) :
     (kind : Kind) → LogicalState (schema kind) → Prop
-  | .declaredObject, state => PresentLaw (DeclaredPageLaw deployment .object cellId)
-      (DeclaredEffectPageMaterializer.pageAt state)
-  | .accountMetadata, state => PresentLaw (DeclaredPageLaw deployment .account cellId)
-      (DeclaredEffectPageMaterializer.pageAt state)
-  | .declaredProgram, state => PresentLaw (DeclaredPageLaw deployment .program cellId)
-      (DeclaredEffectPageMaterializer.pageAt state)
+  | .declaredObject, state => DeclaredCellLaw .object cellId state
+  | .accountMetadata, state => DeclaredCellLaw .account cellId state
+  | .declaredProgram, state => DeclaredCellLaw .program cellId state
   | .content, state => PresentLaw (fun page => page.contentDomain = deployment.domain ∧ page.Valid)
       (HyperdocumentContentPageMaterializer.pageAt state)
   | .eventHistory, state => PresentLaw (fun page => page.historyDomain = deployment.domain ∧ page.Valid)
@@ -421,7 +414,7 @@ instance birthsAdmissibleDecidable (deployment : Deployment) (descriptor : Resou
 /-- The shared physical page schema is not authority to select another role's
 family. Object requests cannot select account metadata with the same id. -/
 def selectDeclared (deployment : Deployment) (cellId : Nat) (requested : ResourceKind)
-    (cell : PackedCell registry) : Option (Materialized DeclaredEffectPageMaterializer.materializer) :=
+    (cell : PackedCell registry) : Option (Materialized DeclaredEffectCell.materializer) :=
   if CellLaw deployment cellId cell then
     match requested, cell with
     | .object, ⟨.declaredObject, payload⟩ => some payload
@@ -431,7 +424,7 @@ def selectDeclared (deployment : Deployment) (cellId : Nat) (requested : Resourc
   else none
 
 theorem object_cannot_select_account (deployment : Deployment) (cellId : Nat)
-    (payload : Materialized DeclaredEffectPageMaterializer.materializer) :
+    (payload : Materialized DeclaredEffectCell.materializer) :
     selectDeclared deployment cellId .object ⟨.accountMetadata, payload⟩ = none := by
   unfold selectDeclared
   split <;> rfl
@@ -722,12 +715,10 @@ namespace Witness
 
 def deployment : Deployment := ⟨⟨42⟩, 1, 2, 3⟩
 
-def page : DeclaredEffectPageMaterializer.Page :=
-  ⟨deployment.domain, 10, some ⟨.objectField ⟨10⟩ ⟨1⟩, 17⟩, none, none, none⟩
-
-def payload : Materialized DeclaredEffectPageMaterializer.materializer :=
-  materialize DeclaredEffectPageMaterializer.materializer
-    (DeclaredEffectPageMaterializer.stateOfOption (some page))
+/-- Account metadata with one field of its own identity. -/
+def payload : Materialized DeclaredEffectCell.materializer :=
+  materialize DeclaredEffectCell.materializer
+    (StoreCodec.fromEntries [⟨(StateKey.objectField ⟨10⟩ ⟨1⟩).address, (17 : Int)⟩])
 
 def account : PackedCell registry := ⟨.accountMetadata, payload⟩
 
@@ -747,7 +738,7 @@ end Minidregg.Compiler.CanonicalCellRegistry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.registry_lifecycle_root
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.decoded_cell_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.decoded_cell_canonical
-/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.DeclaredPageLaw.no_balance' does not depend on any axioms -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.DeclaredPageLaw.no_balance
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.DeclaredCellLaw.no_balance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.DeclaredCellLaw.no_balance
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited
