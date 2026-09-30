@@ -1,0 +1,13 @@
+{
+  "appUid": 992,
+  "entrances": [
+    "Grain owner"
+  ],
+  "expectedRawSha256": "bc424d5fd3cf60977cacdac328adfbee4de94f88d57383ad38b3d472c0c24f2d",
+  "startAction": {
+    "index": 0,
+    "kind": "create"
+  },
+  "unit": "mini-spk-a9201-g2.service",
+  "volumeResource": 9201
+}
