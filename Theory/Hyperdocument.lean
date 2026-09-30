@@ -9,13 +9,13 @@ shortcut.
 Identifier *preimages* have a concrete versioned, domain-separated codec.  A
 deployment may derive a typed digest from those bytes, but no injectivity or
 collision-resistance property is attached to that digest function.  The
-document store is one dependent sparse namespace and is definitionally mapped
-to the canonical `CellState` shape.  A lawful cell codec commits every typed
-value at the byte level; root binding remains a separate cryptographic claim.
+document store is one `Store layout` over typed namespaces.  A lawful cell
+codec commits every typed value at the byte level; root binding remains a
+separate cryptographic claim.
 
-`CellState.LogicalState` stores document addresses in a canonical finite
-dependent map.  Absence is the primitive field-read result, rather than an
-optional value hidden inside an uncountable total function.
+A `Store` is a canonical finite dependent map.  Absence is the primitive read
+result, rather than an optional value hidden inside an uncountable total
+function.
 -/
 import Theory.CausalVersionDag
 import Theory.CredentialAuthorityState
@@ -25,6 +25,7 @@ namespace Minidregg.Theory.Hyperdocument
 open IndexedProgram
 open TypedAuthorization
 open CredentialAuthorityState
+open Minidregg.Theory.Store (Layout Store)
 
 set_option autoImplicit false
 
@@ -374,6 +375,14 @@ def FieldType.Value : FieldType -> Type
   | .reference domain => Identifier .v1 domain
   | .opaque _ => List UInt8
 
+instance FieldType.valueDecEq : (fieldType : FieldType) → DecidableEq fieldType.Value
+  | .text => inferInstanceAs (DecidableEq (List UInt8))
+  | .natural => inferInstanceAs (DecidableEq Nat)
+  | .flag => inferInstanceAs (DecidableEq Bool)
+  | .digest => inferInstanceAs (DecidableEq Digest)
+  | .reference domain => inferInstanceAs (DecidableEq (Identifier .v1 domain))
+  | .opaque _ => inferInstanceAs (DecidableEq (List UInt8))
+
 inductive FieldOwner where
   | document (id : DocumentId)
   | element (id : ElementId)
@@ -391,12 +400,14 @@ structure FieldRecord where
   merge : MergeRegime
   writtenBy : PrincipalRef
   writtenAt : OperationId
+  deriving DecidableEq
 
 structure ConflictAlternative where
   valueType : FieldType
   value : valueType.Value
   author : PrincipalRef
   operation : OperationId
+  deriving DecidableEq
 
 /-- Concurrent values remain representable with their provenance.  Resolution
 is a later authority-sensitive operation, not a projection performed here. -/
@@ -406,6 +417,7 @@ structure ConflictRecord where
   alternatives : List ConflictAlternative
   regime : MergeRegime
   recordedAt : OperationId
+  deriving DecidableEq
 
 inductive TransclusionMode where
   | snapshot
@@ -744,7 +756,7 @@ structure DocumentRecord where
   createdAt : OperationId
   deriving DecidableEq, Repr
 
-/-! ## One dependent document namespace and exact CellState mapping -/
+/-! ## Typed document namespaces and the store layout -/
 
 inductive Namespace where
   | documents
@@ -758,17 +770,6 @@ inductive Namespace where
   | marks
   | annotations
   deriving DecidableEq, Repr
-
-/-- P0 storage discipline declarations.  The separate event-log adapter uses
-`appendOnly`; every namespace in this mutable document cell is currently RAM.
-Enforcement belongs to accepted sparse operations, not this value schema. -/
-inductive StorageDiscipline where
-  | mutable
-  | appendOnly
-  deriving DecidableEq, Repr
-
-def Namespace.discipline : Namespace -> StorageDiscipline
-  | _ => .mutable
 
 def Key : Namespace -> Type
   | .documents => DocumentId
@@ -797,9 +798,20 @@ def Value : (space : Namespace) -> Type
 instance keyDecidableEq (space : Namespace) : DecidableEq (Key space) := by
   cases space <;> simp only [Key] <;> infer_instance
 
-abbrev Address := Sigma Key
+instance valueDecidableEq (space : Namespace) : DecidableEq (Value space) := by
+  cases space <;> simp only [Value] <;> infer_instance
 
-instance : DecidableEq Address := inferInstance
+/-- The document cell layout.  Every namespace of this mutable cell is RAM;
+the separate event log uses `appendOnly`.  Enforcement is the guard of each
+accepted `Store.Op`. -/
+abbrev layout : Layout.{0, 0, 0} where
+  Namespace := Namespace
+  Key := Key
+  Value := Value
+  discipline := fun _ => .ram
+
+/-- A typed document address. -/
+abbrev Address := Store.Address layout
 
 /-- Namespace tags are structurally disjoint even when their underlying digest
 carriers contain the same number. -/
@@ -819,61 +831,13 @@ theorem addresses_disjoint
   intro equal
   exact different (address_namespace_eq_of_eq leftKey rightKey equal)
 
-/-- The exact canonical cell schema.  There is no untyped extension map or
-parallel resource table; absence belongs to the sparse carrier itself. -/
-def cellSchema : CellState.Schema where
-  Field := Address
-  FieldType := fun address => Value address.1
-  Resource := Empty
-  ResourceType := Empty.elim
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
-
-instance : DecidableEq cellSchema.Field := by
-  change DecidableEq Address
-  infer_instance
-
-instance : DecidableEq cellSchema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
-/-- The semantic sparse store is exactly the canonical cell field carrier. -/
-abbrev SparseStore := CellState.FieldStore cellSchema.{0, 0}
-
-/-- Sparse namespace storage becomes canonical cell state without translation
-or a host-authored root. -/
-def SparseStore.toCellState (store : SparseStore) :
-    CellState.LogicalState cellSchema where
-  fields := store
-  resources := fun resource => nomatch resource
-
-/-- The inverse projection reads the exact dependent field. -/
-def SparseStore.ofCellState (state : CellState.LogicalState cellSchema) :
-    SparseStore :=
-  state.fields
-
-@[simp] theorem SparseStore.ofCellState_toCellState (store : SparseStore) :
-    SparseStore.ofCellState store.toCellState = store := by
-  rfl
-
-@[simp] theorem SparseStore.toCellState_ofCellState
-    (state : CellState.LogicalState cellSchema) :
-    (SparseStore.ofCellState state).toCellState = state := by
-  cases state with
-  | mk fields resources =>
-      have resourcesUnique : resources = fun resource => nomatch resource := by
-        funext resource
-        exact Empty.elim resource
-      subst resources
-      rfl
-
-abbrev Materializer (Root : Type) := CellState.Materializer cellSchema Root
+abbrev Materializer (Root : Type) := CellState.Materializer layout Root
 abbrev Cell {Root : Type} (materializer : Materializer Root) :=
   CellState.Materialized materializer
 
-def lookup (state : CellState.LogicalState cellSchema)
+def lookup (state : Store layout)
     (space : Namespace) (key : Key space) : Option (Value space) :=
-  state.fields ⟨space, key⟩
+  state ⟨space, key⟩
 
 /-- Every stored semantic value opens from the exact canonical bytes. -/
 @[simp] theorem CellState.Materialized.decode_bytes
@@ -888,14 +852,14 @@ makes all fields above byte-committed.  It deliberately concludes nothing
 about roots, because root binding is cryptographic evidence outside P0. -/
 theorem semantically_effective_field_change_changes_canonical_bytes
     {Root : Type} (materializer : Materializer Root)
-    (left right : CellState.LogicalState cellSchema)
+    (left right : Store layout)
     (address : Address)
-    (changed : left.fields address = right.fields address -> False) :
+    (changed : left address = right address -> False) :
     materializer.codec.encode left = materializer.codec.encode right -> False := by
   intro encodedEqual
   have stateEqual : left = right :=
     lawfulCodec_encode_injective materializer.codec encodedEqual
-  exact changed (congrArg (fun state => state.fields address) stateEqual)
+  exact changed (congrArg (fun state : Store layout => state address) stateEqual)
 
 /-- info: 'Minidregg.Theory.Hyperdocument.decodePreimage_encodePreimage' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms decodePreimage_encodePreimage
@@ -903,11 +867,7 @@ theorem semantically_effective_field_change_changes_canonical_bytes
 #guard_msgs (whitespace := lax) in #print axioms preimageCodec_encode_injective
 /-- info: 'Minidregg.Theory.Hyperdocument.preimage_encodings_disjoint' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms preimage_encodings_disjoint
-/-- info: 'Minidregg.Theory.Hyperdocument.SparseStore.ofCellState_toCellState' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms SparseStore.ofCellState_toCellState
-/-- info: 'Minidregg.Theory.Hyperdocument.SparseStore.toCellState_ofCellState' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms SparseStore.toCellState_ofCellState
-/-- info: 'Minidregg.Theory.Hyperdocument.semantically_effective_field_change_changes_canonical_bytes' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.Hyperdocument.semantically_effective_field_change_changes_canonical_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms semantically_effective_field_change_changes_canonical_bytes
 
 end Minidregg.Theory.Hyperdocument
