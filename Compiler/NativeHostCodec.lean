@@ -38,14 +38,9 @@ def logRoot0 (domain semantics : Digest) (seed : DurableReceiver.Seed) : Digest 
       (StreamCodec.product digestStream DurableReceiverCodec.seedStream)).encode
         (domain, semantics, seed))).digest
 
-/-- The turn digest of an accepted record: cSHAKE over its canonical bytes. -/
-def recordDigest (record : DurableReceiver.IntentRecord) : Digest :=
-  WorldRoot.turnDigestOfBytes (DurableReceiverCodec.intentStream.encode record)
-
 /-- The log root after the image's accepted records. -/
 def logRoot (domain semantics : Digest) (image : DurableReceiver.Image) : Digest :=
-  image.accepted.foldl (fun acc record => WorldRoot.chainDigest acc (recordDigest record))
-    (logRoot0 domain semantics image.seed)
+  DurableCheckpointCodec.chainAfter (logRoot0 domain semantics image.seed) image.accepted
 
 /-- The height: accepted turns since genesis (`Kernel.World.fold_head` from a
 genesis head at 0). -/
@@ -59,9 +54,7 @@ inductive Leaf where
 /-- A slot's root: the system slot hashes its height and log root; a cell slot
 is the deployed cell root of its current bytes. -/
 def leafRoot : Leaf → Digest
-  | .system height logRoot =>
-      (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.SYSTEM/v1".toUTF8.toList
-        ((StreamCodec.product StreamCodec.nat digestStream).encode (height, logRoot))).digest
+  | .system height logRoot => DurableCheckpointCodec.systemLeaf height logRoot
   | .cell bytes => ResourceBirthCodec.rootBytes bytes
 
 /-- The world's entries: the system slot, then every cell the image names. -/

@@ -32,7 +32,7 @@ def select (config : Config) (opened : Opened config) (index : Nat) :
   match found : opened.durable.image.accepted[index]? with
   | none => .error "historical record index unavailable"
   | some record =>
-      match built : DurableReceiverIO.loadImage rootBytes (prefixImage opened index) with
+      match built : DurableReceiverIO.loadImage rootBytes opened.durable.logStart (prefixImage opened index) with
       | .error detail => .error detail
       | .ok loaded =>
           match validated : validateLoaded config loaded with

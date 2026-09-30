@@ -108,6 +108,16 @@ def seedIdentity (seed : DurableReceiver.Seed) : Digest :=
 def worldRoot (config : Config) (image : DurableReceiver.Image) : Digest :=
   NativeHostCodec.worldRoot config.deployment.domain config.profile.semantics image
 
+/-- The log chain's start for this deployment: C1's genesis log root, binding
+domain, semantics and seed. The Store's MAC chain and the world root's system
+slot are this one chain. -/
+def Config.logStart (config : Config) (seed : DurableReceiver.Seed) : Digest :=
+  NativeHostCodec.logRoot0 config.deployment.domain config.profile.semantics seed
+
+/-- The Store transport for this deployment. -/
+def Config.transport (config : Config) : DurableReceiverIO.Transport :=
+  config.storage.transport config.logStart
+
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length
 
@@ -162,6 +172,7 @@ def validateParts (config : Config) (durable : Durable) :
     check (decide (key.length = 32)) "physical completion custodian key must be 32 bytes"
   check (decide config.deployment.Valid) "invalid deployment role identities"
   check (seedIdentity durable.image.seed == config.expectedSeed) "genesis identity mismatch"
+  check (durable.logStart == config.logStart durable.image.seed) "log chain not rooted at this deployment's genesis"
   let directory ← need "noncanonical native directory"
     (CredentialAuthorityDomainReceiver.loadDirectory durable)
   let authority ← need "complete deployment authority unavailable"

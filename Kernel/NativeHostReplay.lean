@@ -1957,7 +1957,7 @@ def advance {config : Config} (opened : Opened config) (derived : Derived config
   let durable := opened.durable
   match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
       durable.withinLog durable.resumed derived.intent with
-  | .inl ready => .ok (durable.extend ready (durable.chainAfterIntent derived.intent))
+  | .inl ready => .ok (durable.extend ready)
   | .inr (.rejected reason) => .error s!"derived durable intent refused: {repr reason}"
   | .inr (.replayed _) => .error "duplicate accepted history entry"
   | .inr _ => .error "derived durable intent did not make one new commit"
@@ -1978,7 +1978,7 @@ def AdmittedStep (config : Config) (before after : Opened config)
       advance before derived = .ok next ∧
       validateLoaded config next = .ok after ∧
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
-        before.durable.image.accepted.length + 1, worldRoot config next.image⟩
+        before.durable.image.accepted.length + 1, next.worldRoot⟩
 
 /-- The ordered semantic history that `walk` actually constructs. -/
 inductive AdmittedReplay (config : Config) : Opened config →
@@ -2146,7 +2146,7 @@ private def walk (config : Config) (opened : Opened config)
             | .ok after =>
               let receipt : NativeHostCodec.Receipt :=
                 ⟨derived.intent.transactionId, derived.intent.event.eventId,
-                  index + 1, worldRoot config next.image⟩
+                  index + 1, next.worldRoot⟩
               let nextIssues := issuesAfter config opened issues record receipt derived matched
               let nextReserves := reservesAfter config opened reserves record receipt derived matched
               let nextBegins := beginsAfter config opened begins record derived matched
@@ -2394,7 +2394,7 @@ def exactCandidate {config : Config} {oldTarget : Durable}
     (ready : DurableCheckpoint.Ready ResourceBirthCodec.rootBytes
       old.opened.durable.image old.opened.durable.baseHeight old.opened.durable.base
       old.opened.durable.snapshot derived.intent) : Durable :=
-  old.opened.durable.extend ready (old.opened.durable.chainAfterIntent derived.intent)
+  old.opened.durable.extend ready
 
 /-- A receiver-created exact readback: the store holds, at the next height,
 exactly the entry this admitted intent produced (record bytes and tag), read
@@ -2440,7 +2440,7 @@ def extendExact {config : Config} {oldTarget : Durable}
   let target := exactCandidate old readback.derived readback.ready
   let receipt : NativeHostCodec.Receipt :=
     ⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
-      old.opened.durable.image.accepted.length + 1, worldRoot config target.image⟩
+      old.opened.durable.image.accepted.length + 1, target.worldRoot⟩
   have matched : recordMatches record readback.derived.intent = true := by
     exact (recordMatches_iff _ _).mpr rfl
   have step : AdmittedStep config old.opened readback.after record receipt := by
@@ -2499,7 +2499,7 @@ theorem extendExact_receipts {config : Config} {oldTarget : Durable}
     (extendExact old readback).receipts = old.receipts ++
       [⟨readback.derived.intent.transactionId, readback.derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        worldRoot config (exactCandidate old readback.derived readback.ready).image⟩] := by
+        (exactCandidate old readback.derived readback.ready).worldRoot⟩] := by
   rfl
 
 /-- The physically read-back entry is exactly this admitted intent's record. -/
@@ -2531,7 +2531,7 @@ def SemanticStep (config : Config) (verifier : VerifierSemantics config)
       advance before derived = .ok next ∧
       validateLoaded config next = .ok after ∧
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
-        before.durable.image.accepted.length + 1, worldRoot config next.image⟩
+        before.durable.image.accepted.length + 1, next.worldRoot⟩
 
 /-- Ordered accepted-record replay with one original receipt per transition.
 This is the pure trace of the operational `walk`, conditional on a stable
@@ -2597,7 +2597,7 @@ theorem SemanticReplay.append_stable {config : Config}
   (left.verifier_congr stable).append right
 
 def verifyLoaded (config : Config) (target : Durable) : IO (Except Failure (Verified config target)) := do
-  match DurableReceiverIO.loadSeed rootBytes target.image.seed with
+  match DurableReceiverIO.loadSeed rootBytes (config.logStart target.image.seed) target.image.seed with
   | .error detail => return .error ⟨0, s!"genesis decoding: {detail}"⟩
   | .ok initial =>
     match validateLoaded config initial with
@@ -2650,7 +2650,7 @@ def verifyLoadedSelected (config : Config) (target : Durable) (index : Nat) :
     IO (Except Failure (VerifiedSelection config target index)) := do
   if !(index < target.image.accepted.length) then
     return .error ⟨index, "selected accepted history index unavailable"⟩
-  match DurableReceiverIO.loadSeed rootBytes target.image.seed with
+  match DurableReceiverIO.loadSeed rootBytes (config.logStart target.image.seed) target.image.seed with
   | .error detail => return .error ⟨0, s!"genesis decoding: {detail}"⟩
   | .ok initial =>
     match validateLoaded config initial with
@@ -2729,7 +2729,7 @@ def extendVerified (config : Config) {oldTarget : Durable}
 /-- Read-only bytes entrypoint for independent verification. No storage driver
 or network publication is called by this module. -/
 def verifyBytes (config : Config) (bytes : List UInt8) : IO (Except Failure (Sigma (Verified config))) := do
-  match DurableReceiverIO.loadBytes rootBytes bytes with
+  match DurableReceiverIO.loadBytes rootBytes config.logStart bytes with
   | .error detail => return .error ⟨0, detail⟩
   | .ok target =>
     match ← verifyLoaded config target with

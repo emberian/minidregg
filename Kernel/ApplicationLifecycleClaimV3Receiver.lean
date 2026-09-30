@@ -41,7 +41,7 @@ def Reservation.receipt {config : Config} (reservation : Reservation config) :
   ⟨reservation.readback.derived.intent.transactionId,
     reservation.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    worldRoot config candidate.image⟩
+    candidate.worldRoot⟩
 
 theorem Reservation.postRecord_exact {config : Config}
     (reservation : Reservation config) :
@@ -78,7 +78,7 @@ def Reservation.withFreshTip {config : Config} {α : Type}
     IO (Except String α) := do
   unless reservation.confirmation == .installed && reservation.freshCasWinner do
     return .error "launch-bound claim was not freshly installed"
-  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+  let .ok current ← DurableReceiverIO.tipIs config.transport
       reservation.readback.appended.next.image.accepted.length reservation.readback.appended.entry
     | return .error "launch-bound claim physical tip unavailable before handoff"
   if current then
@@ -104,7 +104,7 @@ def receiveVerified (config : Config) {target : Durable}
       (fun record => record.transactionId == derived.intent.transactionId) != none then
     return .rejected "launch-bound claim transaction identity already used"
   let (freshCasWinner, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh
-    config.storage.transport
+    config.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
   | .exact kind appended =>

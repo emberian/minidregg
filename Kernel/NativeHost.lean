@@ -34,7 +34,7 @@ checkpoint is materialized and only the records after it are replayed through
 the shared executor (`DurableCheckpoint.resume`, sound by `resume_sound`). No
 signed ingress is re-admitted here; `audit` does that. -/
 def openExisting (config : Config) : IO (Except String (Opened config)) := do
-  match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
+  match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable => return validateLoaded config durable
 
@@ -43,7 +43,7 @@ by its real native receiver at its original prefix height, compared with the
 stored history record for record (formerly the request path's `verifyLoaded`).
 Returns the number of accepted records audited. -/
 def audit (config : Config) : IO (Except String Nat) := do
-  match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
+  match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable =>
       match ← NativeHostReplay.verifyLoaded config durable with
@@ -54,14 +54,14 @@ def audit (config : Config) : IO (Except String Nat) := do
 /-- Explicit local administration, separate from the signed network protocol.
 The exact operator-pinned source genesis must have no accepted transactions. -/
 def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except String Unit) := do
-  match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes canonicalImage with
+  match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes config.logStart canonicalImage with
   | .error detail => return .error detail
   | .ok durable =>
       if !durable.image.accepted.isEmpty then return .error "bootstrap image contains accepted history"
       match validateLoaded config durable with
       | .error detail => return .error detail
       | .ok _ =>
-          return ← DurableReceiverIO.bootstrap config.storage.transport
+          return ← DurableReceiverIO.bootstrap config.transport
             ResourceBirthCodec.rootBytes durable.image.seed
 
 private def refused (phase detail : String) : Outcome :=
@@ -157,7 +157,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
         let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
         pure (.revoke bytes, [signature])
-  pure ⟨config.deployment.domain, profile.semantics, worldRoot config opened.durable.image,
+  pure ⟨config.deployment.domain, profile.semantics, opened.durable.worldRoot,
     height, finalized, slots⟩
 
 /-- Internal operator computation only. It must not be exposed to an untrusted
@@ -371,6 +371,13 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
       | [envelope] => pure (.revoke (CapabilityRevocationReceiver.ingressCodec.encode ⟨bytes, envelope⟩))
       | _ => .error "revocation signing slots mismatch"
 
+/-- The world root after accepted record `index`: at the head it is the served
+image's cached root (one read); an earlier prefix is evaluated from its image
+(the specification root; a lookup of old history pays for it). -/
+def receiptRoot (config : Config) (durable : Durable) (index : Nat) : Digest :=
+  if index + 1 = durable.image.accepted.length then durable.worldRoot
+  else worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
+
 /-- Seal the ORIGINAL accepted prefix, even when a later transaction was
 published before physical confirmation/readback completed. -/
 def historicalReceipt (config : Config) (durable : Durable) (transactionId eventId : Digest) :
@@ -378,8 +385,7 @@ def historicalReceipt (config : Config) (durable : Durable) (transactionId event
   let index ← durable.image.accepted.findIdx? (fun record => record.transactionId == transactionId)
   let record ← durable.image.accepted[index]?
   if record.event.eventId != eventId then none else
-    let acceptedPrefix : DurableReceiver.Image := ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩
-    some ⟨transactionId, eventId, index + 1, worldRoot config acceptedPrefix⟩
+    some ⟨transactionId, eventId, index + 1, receiptRoot config durable index⟩
 
 /-- **Receipt binding (DATAMODEL §3.4).**  A sealed receipt names its
 transaction's accepted prefix, and carries exactly that prefix's world root and
@@ -389,7 +395,7 @@ theorem historicalReceipt_bound (config : Config) (durable : Durable)
     (sealed : historicalReceipt config durable transactionId eventId = some receipt) :
     ∃ index, durable.image.accepted.findIdx?
         (fun record => record.transactionId == transactionId) = some index ∧
-      receipt.worldRoot = worldRoot config ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩ ∧
+      receipt.worldRoot = receiptRoot config durable index ∧
       receipt.acceptedCount =
         NativeHostCodec.height ⟨durable.image.seed, durable.image.accepted.take (index + 1)⟩ := by
   unfold historicalReceipt at sealed
@@ -424,11 +430,10 @@ theorem historicalReceipt_exactCandidate_fresh (config : Config)
       derived.intent.transactionId derived.intent.event.eventId =
       some ⟨derived.intent.transactionId, derived.intent.event.eventId,
         old.opened.durable.image.accepted.length + 1,
-        worldRoot config (NativeHostReplay.exactCandidate old derived ready).image⟩ := by
-  simp [historicalReceipt, NativeHostReplay.exactCandidate, DurableReceiverIO.Loaded.extend,
-    DurableReceiver.Image.append, List.findIdx?_append, fresh,
-    DurableReceiver.IntentRecord.ofIntent, List.take_append,
-    List.take_of_length_le (Nat.le_succ _)]
+        (NativeHostReplay.exactCandidate old derived ready).worldRoot⟩ := by
+  simp [historicalReceipt, receiptRoot, NativeHostReplay.exactCandidate,
+    DurableReceiverIO.Loaded.extend, DurableReceiver.Image.append, List.findIdx?_append, fresh,
+    DurableReceiver.IntentRecord.ofIntent]
 
 private def confirmed (config : Config) (kind : DurableReceiverIO.Confirmation)
     (transactionId eventId : Digest) : IO Outcome := do
@@ -443,7 +448,7 @@ def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
   match ← ParticipantKeyEnrollmentReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-      config.storage.transport opened.durable bytes with
+      config.transport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused "enroll-key" s!"{repr reason}"
   | .transactionConflict => return refused "replay" "transaction identity conflict"
@@ -483,7 +488,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
   match call with
   | .revoke bytes =>
       match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
-          ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable bytes with
+          ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "revoke" s!"{repr reason}"
       | .transactionConflict => return refused "replay" "transaction identity conflict"
@@ -493,7 +498,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .delegate bytes =>
       match ← CapabilityDelegationReceiver.receiveLoaded config.deployment config.profile
-          ⟨config.federation, height⟩ config.signature config.storage.transport opened.durable bytes with
+          ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "delegate" s!"{repr reason}"
       | .transactionConflict => return refused "replay" "transaction identity conflict"
@@ -506,7 +511,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
         let tariff := config.grainBirthTariffValue.toOption
         let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
         match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
-            opened.pins tariff ambient config.signature config.storage.transport
+            opened.pins tariff ambient config.signature config.transport
             opened.durable bytes with
         | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
         | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
@@ -515,7 +520,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
         | .unavailable detail => return .unavailable detail.toUTF8.toList
         | .uncertain detail => return .uncertain detail.toUTF8.toList
       match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
-          config.signature config.storage.transport opened.durable height bytes with
+          config.signature config.transport opened.durable height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "birth" (birthRejection reason)
       | .contention => return .contention
@@ -523,7 +528,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .install bytes =>
       match ← PolicyInstallReceiver.receiveLoaded config.profile config.deployment config.signature
-          config.storage.transport opened.durable config.federation height bytes with
+          config.transport opened.durable config.federation height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused "install" s!"{repr reason}"
       | .durableRejected reason => return refused "durable" s!"{repr reason}"
@@ -542,7 +547,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
                     config.deployment.domain config.profile.semantics intent).isSome then
                   return .rejected .physicalPreparation
                 return .settlement (← DurableReceiverIO.receiveLoaded
-                  config.storage.transport ResourceBirthCodec.rootBytes opened.durable intent))
+                  config.transport ResourceBirthCodec.rootBytes opened.durable intent))
               pure with
           | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
           | .rejected reason => return refused "invoke" s!"{repr reason}"

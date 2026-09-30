@@ -112,7 +112,7 @@ def receiveLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       match ← admitLoaded config opened ingress with
       | .error _ => return .rejected .sourceAuthority
       | .ok accepted =>
-          match ← DurableReceiverIO.receiveLoaded config.storage.transport
+          match ← DurableReceiverIO.receiveLoaded config.transport
               ResourceBirthCodec.rootBytes opened.durable
               (accepted.intent config opened ingress) with
           | .confirmed kind _ => return .confirmed kind (receipt ingress)

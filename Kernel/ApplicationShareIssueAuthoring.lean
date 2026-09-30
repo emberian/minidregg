@@ -102,7 +102,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
     (fun index => birthSlot 3 index.val (.source index))
   let birth : SigningPlan :=
     ⟨config.deployment.domain, profile.semantics,
-      NativeHost.worldRoot config opened.durable.image, height,
+      opened.durable.worldRoot, height,
       .birth (CanonicalCellRegistry.sourceEncoding.codec.encode prepared.descriptor)
         sourceCapabilities,
       factory :: authority :: allocations ++ sources⟩

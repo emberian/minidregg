@@ -143,7 +143,7 @@ structure Accepted {F : Type} [Field F] [DecidableEq F]
   profileExact : ingress.domain = deployment.domain ∧
     ingress.semantics = profile.semantics
   boundary : ingress.source.currentWorldRoot =
-    NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image
+    durable.worldRoot
   prepared : DeclaredResourceController.PreparedInvocation deployment profile ambient durable
     (command deployment.domain profile.semantics ingress.source)
   linked : linkedCurrentPolicy deployment profile ambient durable ingress.source prepared = true
@@ -184,7 +184,7 @@ theorem stale_image_boundary_has_no_admission {F : Type} [Field F] [DecidableEq 
     {ambient : Ambient} {durable : Durable}
     {ingress : ApplicationLifecycleClaimIngress.Ingress}
     (stale : ingress.source.currentWorldRoot ≠
-      NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image) :
+      durable.worldRoot) :
     ¬ Nonempty (Accepted deployment profile ambient durable ingress) := by
   rintro ⟨accepted⟩
   exact stale accepted.boundary
@@ -199,7 +199,7 @@ def admitLoaded {F : Type} [Field F] [DecidableEq F]
     if profileExact : ingress.domain = deployment.domain ∧
         ingress.semantics = profile.semantics then
       if boundary : source.currentWorldRoot =
-          NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image then
+          durable.worldRoot then
         let expected := command deployment.domain profile.semantics source
         unless ingress.signed.commandBytes ==
             DeclaredResourceController.commandCodec.encode expected do

@@ -95,7 +95,7 @@ def receiveLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
           match ← FnSelectiveReleaseAdmission.admit config opened ingress with
           | .error reason => return .rejected (.admission reason)
           | .ok accepted =>
-              match ← DurableReceiverIO.receiveLoaded config.storage.transport
+              match ← DurableReceiverIO.receiveLoaded config.transport
                   ResourceBirthCodec.rootBytes opened.durable
                   (accepted.intent config opened ingress) with
               | .confirmed kind _ => return .confirmed kind (receipt ingress)

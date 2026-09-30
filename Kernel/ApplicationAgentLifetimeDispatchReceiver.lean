@@ -42,7 +42,7 @@ def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     permit.old.opened.durable.image.accepted.length + 1,
-    worldRoot config candidate.image⟩
+    candidate.worldRoot⟩
 
 theorem Permit.postRecord_exact {config : Config} (permit : Permit config) :
     permit.readback.appended.entry.record =
@@ -70,7 +70,7 @@ private def Permit.canonicalBytes {config : Config} (permit : Permit config) : L
 fences are still checked by the runtime before fd3 delivery. -/
 def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
     (handoff : List UInt8 → IO α) : IO (Except String α) := do
-  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+  let .ok current ← DurableReceiverIO.tipIs config.transport
       permit.readback.appended.next.image.accepted.length permit.readback.appended.entry
     | return .error "lifetime dispatch physical tip unavailable before handoff"
   if current then
@@ -101,7 +101,7 @@ def receiveVerified (config : Config) {target : Durable}
       (fun record => record.transactionId == derived.intent.transactionId) != none then
     return .rejected "lifetime dispatch transaction identity already used"
   let (fresh, result) ← DurableReceiverIO.receiveLoadedDetailedWithFresh
-    config.storage.transport ResourceBirthCodec.rootBytes old.opened.durable derived.intent
+    config.transport ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
   | .exact kind appended =>
       if freshInstalled : fresh = true then

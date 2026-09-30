@@ -41,7 +41,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) :
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    worldRoot config candidate.image⟩
+    candidate.worldRoot⟩
 
 theorem Confirmed.event_exact {config : Config} (confirmed : Confirmed config) :
     confirmed.readback.derived.intent.event =
@@ -67,7 +67,7 @@ def receiveVerified (config : Config) {target : Durable}
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) != none then
     return .rejected "lifecycle BEGIN transaction identity already used"
-  let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+  let result ← DurableReceiverIO.receiveLoadedDetailed config.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
   | .exact kind appended =>

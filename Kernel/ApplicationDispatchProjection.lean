@@ -72,7 +72,7 @@ def ofDispatchAt {config : Config} {opened : Opened config}
     issueEvent := admitted.prior.evidence.eventId
     dispatchTransaction := pending.transactionId
     dispatchEvent := pending.event.eventId
-    currentWorldRoot := worldRoot config opened.durable.image
+    currentWorldRoot := opened.durable.worldRoot
     physicalRequestDigest := requestDigest dispatch.request }
 
 /-- Event21 projects the same base app identity and rights from its distinct
@@ -98,7 +98,7 @@ def ofAgentDispatchAt {config : Config} {opened : Opened config}
     issueEvent := admitted.issue.evidence.eventId
     dispatchTransaction := pending.transactionId
     dispatchEvent := pending.event.eventId
-    currentWorldRoot := worldRoot config opened.durable.image
+    currentWorldRoot := opened.durable.worldRoot
     physicalRequestDigest := requestDigest dispatch.request }
 
 def candidateStream : StreamCodec Candidate :=

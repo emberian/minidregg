@@ -38,7 +38,7 @@ def Reservation.receipt {config : Config} (reservation : Reservation config) :
   ⟨reservation.readback.derived.intent.transactionId,
     reservation.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    worldRoot config candidate.image⟩
+    candidate.worldRoot⟩
 
 theorem Reservation.postRecord_exact {config : Config}
     (reservation : Reservation config) :
@@ -105,7 +105,7 @@ theorem Reservation.projection_valid {config : Config}
 def Reservation.withFreshTip {config : Config} {α : Type}
     (reservation : Reservation config) (handoff : List UInt8 → IO α) :
     IO (Except String α) := do
-  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+  let .ok current ← DurableReceiverIO.tipIs config.transport
       reservation.readback.appended.next.image.accepted.length reservation.readback.appended.entry
     | return .error "descriptor-bound claim physical tip unavailable before handoff"
   if current then
@@ -130,7 +130,7 @@ def receiveVerified (config : Config) {target : Durable}
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) != none then
     return .rejected "descriptor-bound claim transaction identity already used"
-  let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+  let result ← DurableReceiverIO.receiveLoadedDetailed config.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
   | .exact kind appended =>

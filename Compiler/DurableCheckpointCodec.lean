@@ -6,9 +6,11 @@ record is gone):
 
 * the **seed**, written once at bootstrap (`DREGG.DURABLE.SEED/v1`);
 * the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG/v1`)
-  and a 32-byte tag. The log is hash-chained,
-  `chain₀ = H(seed bytes)`, `chainₕ = H(chainₕ₋₁ ‖ record bytesₕ)`, and the tag of
-  entry `h` is `KMAC256(key, (keyId, h, chainₕ))`;
+  and a 32-byte tag. The log is chained by C1's log root: `chain₀ = logStart seed`
+  (the host passes `NativeHostCodec.logRoot0 domain semantics`), and
+  `chainₕ = Kernel.WorldRoot.chainDigest chainₕ₋₁ (recordDigest recordₕ)`; the tag of
+  entry `h` is `KMAC256(key, (keyId, h, chainₕ))`. One chain: the value the
+  world root's system slot commits to is the value the MAC authenticates;
 * **checkpoints** (`DREGG.DURABLE.CHECKPOINT/v1`): the materialized state at a
   height, its world root, the log chain at that height, and
   `KMAC256(key, (keyId, height, root, H(body bytes)))`.
@@ -35,6 +37,7 @@ import Compiler.DurableReceiverCodec
 import Compiler.Sp800185Cshake256
 import Compiler.Sp800185Kmac256
 import Kernel.DurableCheckpoint
+import Kernel.WorldRootCache
 
 namespace Minidregg.Compiler.DurableCheckpointCodec
 
@@ -109,24 +112,31 @@ def MacKey.id (key : MacKey) : List UInt8 :=
 
 /-! ## The log chain and entry tags -/
 
-def chainGenesis (seed : Seed) : List UInt8 :=
-  cshake256Bytes "DREGG/NATIVE-HOST/LOG-CHAIN/v1".toUTF8.toList (seedFrame.encode seed)
+/-- The turn digest of an accepted record: cSHAKE over its canonical bytes. -/
+def recordDigest (record : IntentRecord) : Digest :=
+  Kernel.WorldRoot.turnDigestOfBytes (intentStream.encode record)
 
-def chainStep (previous recordBytes : List UInt8) : List UInt8 :=
-  cshake256Bytes "DREGG/NATIVE-HOST/LOG-CHAIN/v1".toUTF8.toList (previous ++ recordBytes)
+def chainStep (previous : Digest) (record : IntentRecord) : Digest :=
+  Kernel.WorldRoot.chainDigest previous (recordDigest record)
 
-/-- The chain value after the given record bytes, in order. -/
-def chainAfter (start : List UInt8) (records : List (List UInt8)) : List UInt8 :=
+/-- The chain value after the given records, in order. -/
+def chainAfter (start : Digest) (records : List IntentRecord) : Digest :=
   records.foldl chainStep start
 
-theorem chainAfter_append (start : List UInt8) (left right : List (List UInt8)) :
+theorem chainAfter_append (start : Digest) (left right : List IntentRecord) :
     chainAfter start (left ++ right) = chainAfter (chainAfter start left) right := by
   simp [chainAfter, List.foldl_append]
 
-def tagInputStream : StreamCodec (List UInt8 × Nat × List UInt8) :=
-  StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat bytesStream)
+/-- The system slot's leaf: the height and the log root (C1's
+`NativeHostCodec.Leaf.system`). -/
+def systemLeaf (height : Nat) (chain : Digest) : Digest :=
+  (Sp800185Cshake256.hash "DREGG.NATIVE-HOST.SYSTEM/v1".toUTF8.toList
+    ((StreamCodec.product StreamCodec.nat digestStream).encode (height, chain))).digest
 
-def entryTag (key : MacKey) (height : Nat) (chain : List UInt8) : List UInt8 :=
+def tagInputStream : StreamCodec (List UInt8 × Nat × Digest) :=
+  StreamCodec.product bytesStream (StreamCodec.product StreamCodec.nat digestStream)
+
+def entryTag (key : MacKey) (height : Nat) (chain : Digest) : List UInt8 :=
   kmac256Bytes key.bytes "DREGG/NATIVE-HOST/LOG-TAG/v1".toUTF8.toList
     (tagInputStream.encode (key.id, height, chain))
 
@@ -145,23 +155,29 @@ def stateStream : StreamCodec State :=
 structure Body where
   keyId : List UInt8
   height : Nat
-  chain : List UInt8
+  chain : Digest
   state : State
 
 def bodyStream : StreamCodec Body :=
   StreamCodec.xmap
     (StreamCodec.product bytesStream
-      (StreamCodec.product StreamCodec.nat (StreamCodec.product bytesStream stateStream)))
+      (StreamCodec.product StreamCodec.nat (StreamCodec.product digestStream stateStream)))
     (fun body => (body.keyId, body.height, body.chain, body.state))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
     (by intro value; cases value; rfl)
 
-/-- The world root over the current cell-root function: every identifier's
-root, in stored order, plus the fresh-identifier root. -/
-def worldRoot (rootBytes : List UInt8 → Digest) (state : State) : Digest :=
-  (Sp800185Cshake256.hash "DREGG/NATIVE-HOST/WORLD-ROOT/v0".toUTF8.toList
-    ((StreamCodec.product digestStream (StreamCodec.list (StreamCodec.product digestStream digestStream))).encode
-      (rootBytes state.absentBytes, state.cells.map fun cell => (cell.1, rootBytes cell.2)))).digest
+/-- The world-root entries of a materialized state at a height: the system slot
+(height, log root), then every cell's root under the cell-root function — C1's
+`NativeHostCodec.worldEntries`, read off a state instead of an image. -/
+def stateEntries (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
+    (state : State) : List (Kernel.WorldRoot.Key × Digest) :=
+  (.system, systemLeaf height chain) ::
+    state.cells.map fun cell => (.cell cell.1.value, rootBytes cell.2)
+
+/-- The checkpoint's world root: C1's deployed root of its entries, so it is
+the receipt root at that height. Recomputed on open, never trusted. -/
+def worldRoot (rootBytes : List UInt8 → Digest) (body : Body) : Digest :=
+  Kernel.WorldRoot.deployedRoot (stateEntries rootBytes body.height body.chain body.state)
 
 structure Sealed where
   body : Body
@@ -188,10 +204,10 @@ def checkpointMac (key : MacKey) (body : Body) (root : Digest) : List UInt8 :=
       cshake256Bytes "DREGG/NATIVE-HOST/CHECKPOINT-BODY/v1".toUTF8.toList
         (bodyStream.encode body)))
 
-def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : List UInt8)
+def sealCheckpoint (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat) (chain : Digest)
     (state : State) : Sealed :=
   let body : Body := ⟨key.id, height, chain, state⟩
-  let root := worldRoot rootBytes state
+  let root := worldRoot rootBytes body
   ⟨body, root, checkpointMac key body root⟩
 
 inductive OpenError where
@@ -207,13 +223,13 @@ def openSealed (key : MacKey) (rootBytes : List UInt8 → Digest) (bytes : List 
     Except OpenError Body := do
   let some sealed := checkpointFrame.decode bytes | throw .malformed
   unless sealed.body.keyId = key.id do throw .foreignKey
-  unless sealed.root = worldRoot rootBytes sealed.body.state do throw .rootMismatch
+  unless sealed.root = worldRoot rootBytes sealed.body do throw .rootMismatch
   unless sealed.mac = checkpointMac key sealed.body sealed.root do throw .badMac
   pure sealed.body
 
 /-- Satisfiable pole: what the host seals, it opens, exactly. -/
 theorem openSealed_seal (key : MacKey) (rootBytes : List UInt8 → Digest) (height : Nat)
-    (chain : List UInt8) (state : State) :
+    (chain : Digest) (state : State) :
     openSealed key rootBytes (checkpointFrame.encode (sealCheckpoint key rootBytes height chain state)) =
       .ok ⟨key.id, height, chain, state⟩ := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint]
@@ -228,9 +244,9 @@ theorem openSealed_bad_mac (key : MacKey) (rootBytes : List UInt8 → Digest)
   unfold openSealed
   simp only [Framed.decode_encode]
   by_cases keyOk : sealed.body.keyId = key.id
-  · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body.state
+  · by_cases rootOk : sealed.root = worldRoot rootBytes sealed.body
     · have forged' : sealed.mac ≠ checkpointMac key sealed.body
-          (worldRoot rootBytes sealed.body.state) := rootOk ▸ forged
+          (worldRoot rootBytes sealed.body) := rootOk ▸ forged
       refine ⟨.badMac, ?_, by decide⟩
       simp [keyOk, rootOk, forged']
       rfl
@@ -251,7 +267,7 @@ theorem empty_mac_forged (key : MacKey) (body : Body) (root : Digest) :
 /-- A checkpoint sealed under one key and opened under a key with a different
 id refuses. -/
 theorem openSealed_foreign_key (key other : MacKey) (rootBytes : List UInt8 → Digest)
-    (height : Nat) (chain : List UInt8) (state : State) (distinct : other.id ≠ key.id) :
+    (height : Nat) (chain : Digest) (state : State) (distinct : other.id ≠ key.id) :
     openSealed key rootBytes (checkpointFrame.encode (sealCheckpoint other rootBytes height chain state)) =
       .error .foreignKey := by
   simp [openSealed, Framed.decode_encode, sealCheckpoint, distinct]

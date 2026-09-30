@@ -101,7 +101,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   IO.FS.writeBinFile (directory / "key") ((List.range 32).map (fun i => UInt8.ofNat (i * 7 + 3))).toByteArray
   let config : NativeConfig :=
     { binary := binary, root := directory / "store", key := directory / "key", checkpointEvery := 3 }
-  let transport := config.transport
+  let transport := config.transport (fun _ => ⟨7⟩)
   match ← bootstrap transport rootBytes seed with
   | .error message => throw (IO.userError message)
   | .ok () => pure ()
@@ -220,9 +220,13 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let .ok (some stored) ← transport.read 1 true | throw (IO.userError "FAIL read")
   let some checkpoint := stored.checkpoint | throw (IO.userError "FAIL no checkpoint written")
   require "cold open resumed from the latest checkpoint" (afterConcurrent.baseHeight == checkpoint.height && checkpoint.height > 0)
-  let genesisReplay ← match loadImage rootBytes afterConcurrent.image with
+  let genesisReplay ← match loadImage rootBytes ⟨7⟩ afterConcurrent.image with
     | .ok loaded => pure loaded
     | .error detail => throw (IO.userError s!"FAIL genesis replay: {detail}")
+  require "cached world root equals a full rebuild and the genesis replay's root"
+    (afterConcurrent.worldRoot == genesisReplay.worldRoot &&
+      afterConcurrent.worldRoot == Minidregg.Kernel.WorldRoot.deployedRoot
+        (entriesOf afterConcurrent.image afterConcurrent.snapshot afterConcurrent.chain))
   require "checkpoint resume equals the genesis replay on every cell and the meter"
     ([1, 2, 3, 4].all (fun cell => afterConcurrent.snapshot.canonicalBytes ⟨cell⟩ ==
         genesisReplay.snapshot.canonicalBytes ⟨cell⟩) &&
@@ -248,28 +252,28 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
   let secondDirectory := directory / "second"
   IO.FS.createDirAll secondDirectory
   let second : NativeConfig := { config with root := secondDirectory / "store" }
-  match ← bootstrap second.transport rootBytes seed with
+  match ← bootstrap (second.transport (fun _ => ⟨7⟩)) rootBytes seed with
   | .error message => throw (IO.userError message)
   | .ok () => pure ()
-  let _ ← confirmed "second store commit" .installed (← receive second.transport rootBytes first 3)
+  let _ ← confirmed "second store commit" .installed (← receive (second.transport (fun _ => ⟨7⟩)) rootBytes first 3)
   let .ok key ← transport.key | throw (IO.userError "FAIL key")
-  let loadedSecond ← loadExact second.transport
+  let loadedSecond ← loadExact (second.transport (fun _ => ⟨7⟩))
   let honest := sealCheckpoint key rootBytes 1 loadedSecond.chain
     (DurableCheckpoint.State.ofSnapshot loadedSecond.image loadedSecond.snapshot)
   let forgedMac := { honest with mac := List.replicate 32 7 }
-  let .ok () ← second.transport.putCheckpoint 1 (checkpointFrame.encode forgedMac)
+  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode forgedMac)
     | throw (IO.userError "FAIL store forged checkpoint")
-  expectOpenRefused "checkpoint with a forged MAC" second.transport
+  expectOpenRefused "checkpoint with a forged MAC" (second.transport (fun _ => ⟨7⟩))
   let rolledBack := sealCheckpoint key rootBytes 1 loadedSecond.chain (DurableCheckpoint.State.ofSeed seed)
-  let .ok () ← second.transport.putCheckpoint 1 (checkpointFrame.encode rolledBack)
+  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode rolledBack)
     | throw (IO.userError "FAIL store")
-  let resumedRollback ← loadExact second.transport
+  let resumedRollback ← loadExact (second.transport (fun _ => ⟨7⟩))
   require "a key-holder's dishonest checkpoint is trusted on open (Q1): it resumes the rolled-back cell"
     (resumedRollback.snapshot.canonicalBytes ⟨1⟩ == [1])
-  let .ok () ← second.transport.putCheckpoint 1 (checkpointFrame.encode honest)
+  let .ok () ← (second.transport (fun _ => ⟨7⟩)).putCheckpoint 1 (checkpointFrame.encode honest)
     | throw (IO.userError "FAIL store")
   require "the honest checkpoint resumes the committed cell"
-    ((← loadExact second.transport).snapshot.canonicalBytes ⟨1⟩ == [11])
+    ((← loadExact (second.transport (fun _ => ⟨7⟩))).snapshot.canonicalBytes ⟨1⟩ == [11])
   IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, forged tag and forged checkpoint MAC refuse to open; {head} commits"
 
 end DurableReceiverProbe

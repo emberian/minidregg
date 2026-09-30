@@ -28,7 +28,7 @@ def projection {config : Config} {opened : Opened config} {index : Nat}
   let begin := source.originalBegin.base.source
   let receipt : NativeHostCodec.Receipt :=
     ⟨accepted.intent.transactionId, accepted.intent.event.eventId,
-      index + 1, worldRoot config post.image⟩
+      index + 1, post.worldRoot⟩
   { core :=
       { source := source.originalClaim.base.source
         originalTransaction := accepted.original.record.transactionId
@@ -83,7 +83,7 @@ def select (config : Config) (opened : Opened config)
             DurableReceiver.IntentRecord.ofIntent accepted.intent :=
           (NativeHistorySelection.recordMatches_iff _ _).mp matched
         let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
-        let loaded ← match DurableReceiverIO.loadImage rootBytes prefixAfter with
+        let loaded ← match DurableReceiverIO.loadImage rootBytes opened.durable.logStart prefixAfter with
           | .error _ => return .error "selected claim post-prefix unavailable"
           | .ok loaded => pure loaded
         let after ← match validateLoaded config loaded with

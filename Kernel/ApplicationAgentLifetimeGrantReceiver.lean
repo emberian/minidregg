@@ -86,7 +86,7 @@ def receiveVerified {config : Config} {target : Durable}
               unless selected.canonicalBytes.toByteArray == bytes.toByteArray do
                 return .rejected "agent lifetime grant derived ingress differs"
               let _ := admitted
-              match ← DurableReceiverIO.receiveLoaded config.storage.transport
+              match ← DurableReceiverIO.receiveLoaded config.transport
                   ResourceBirthCodec.rootBytes verified.opened.durable derived.intent with
               | .confirmed kind _ => confirmReadback config ingress kind
               | .rejected _ => return .rejected "agent lifetime grant durable refusal"

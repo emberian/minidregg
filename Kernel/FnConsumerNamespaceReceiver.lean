@@ -65,7 +65,7 @@ def receiveVerified {config : NativeHost.Config} {target : NativeHost.Durable}
       match ← FnConsumerNamespaceAdmission.admitVerified verified ingress with
       | .error _ => return .rejected "fn consumer namespace admission refused"
       | .ok accepted =>
-          match ← DurableReceiverIO.receiveLoaded config.storage.transport
+          match ← DurableReceiverIO.receiveLoaded config.transport
               ResourceBirthCodec.rootBytes verified.opened.durable
               (accepted.intent verified ingress) with
           | .confirmed kind _ => confirmReadback config ingress kind

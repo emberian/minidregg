@@ -42,7 +42,7 @@ def start (config : Config) : IO (Except String (Session config)) := do
 
 def refresh (config : Config) (session : Session config) :
     IO (Except String (Session config)) := do
-  match ← DurableReceiverIO.extendFrom config.storage.transport ResourceBirthCodec.rootBytes
+  match ← DurableReceiverIO.extendFrom config.transport ResourceBirthCodec.rootBytes
       session.durable with
   | .error detail => return .error detail
   | .ok durable =>

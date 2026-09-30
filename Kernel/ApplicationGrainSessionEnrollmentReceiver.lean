@@ -63,7 +63,7 @@ def Confirmed.receipt {config : Config} (confirmed : Confirmed config) : Receipt
   ⟨confirmed.readback.derived.intent.transactionId,
     confirmed.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    worldRoot config candidate.image⟩
+    candidate.worldRoot⟩
 
 theorem Confirmed.postRecord_exact {config : Config} (confirmed : Confirmed config) :
     confirmed.readback.appended.entry.record =
@@ -95,7 +95,7 @@ def receiveVerified {config : Config} {target : Durable}
         | .error detail => return .rejected detail
         | .ok admitted => pure admitted
       let derived := admitted.toDerived
-      let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+      let result ← DurableReceiverIO.receiveLoadedDetailed config.transport
         rootBytes verified.opened.durable derived.intent
       match result with
       | .exact kind appended =>

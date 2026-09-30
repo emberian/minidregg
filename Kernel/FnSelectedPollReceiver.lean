@@ -62,7 +62,7 @@ def receiveVerified {config : NativeHost.Config} {target : NativeHost.Durable}
       match ← FnSelectedPollAdmission.admitVerified verified ingress with
       | .error _ => return .rejected "selected fn poll admission refused"
       | .ok accepted =>
-          match ← DurableReceiverIO.receiveLoaded config.storage.transport
+          match ← DurableReceiverIO.receiveLoaded config.transport
               ResourceBirthCodec.rootBytes verified.opened.durable
               (accepted.intent verified ingress) with
           | .confirmed kind _ => confirmReadback config ingress kind

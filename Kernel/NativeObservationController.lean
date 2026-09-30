@@ -161,7 +161,7 @@ private def bindingBytesAt (deployment : Deployment) (worldRoot semantics : Dige
 
 def bindingBytes (_context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : List UInt8 :=
-  bindingBytesAt deployment (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+  bindingBytesAt deployment (durable.worldRoot)
     semantics intent grant
 
 private def effectIdentityAt (deployment : Deployment) (worldRoot semantics : Digest)
@@ -171,7 +171,7 @@ private def effectIdentityAt (deployment : Deployment) (worldRoot semantics : Di
 
 def effectIdentity (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Digest :=
-  effectIdentityAt deployment (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+  effectIdentityAt deployment (durable.worldRoot)
     semantics intent grant
 
 private def markerAt (deployment : Deployment) (worldRoot semantics : Digest)
@@ -181,14 +181,14 @@ private def markerAt (deployment : Deployment) (worldRoot semantics : Digest)
 
 def marker (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) : Nat :=
-  markerAt deployment (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+  markerAt deployment (durable.worldRoot)
     semantics intent grant
 
 theorem effectIdentity_exact (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) :
     effectIdentity context semantics intent grant =
       effectIdentityAt deployment
-        (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+        (durable.worldRoot)
         semantics intent grant := by
   rfl
 
@@ -196,13 +196,13 @@ theorem marker_exact (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) :
     marker context semantics intent grant =
       markerAt deployment
-        (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+        (durable.worldRoot)
         semantics intent grant := by
   rfl
 
 theorem bindingBytesAt_exact (context : Context deployment durable) (semantics : Digest)
     (intent : Intent) (grant : GrantRef) :
-    bindingBytesAt deployment (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+    bindingBytesAt deployment (durable.worldRoot)
       semantics intent grant = bindingBytes context semantics intent grant := by
   rfl
 
@@ -229,13 +229,13 @@ private def requestAt (context : Context deployment durable) (worldRoot semantic
 def request (context : Context deployment durable) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (preRoot : Digest) : Request grant.kind :=
-  requestAt context (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+  requestAt context (durable.worldRoot)
     semantics federation genesisHeight intent grant preRoot
 
 theorem requestAt_exact (context : Context deployment durable) (semantics : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (preRoot : Digest) :
-    requestAt context (NativeHostCodec.worldRoot deployment.domain semantics durable.image)
+    requestAt context (durable.worldRoot)
       semantics federation genesisHeight intent grant preRoot =
       request context semantics federation genesisHeight intent grant preRoot := by
   rfl
@@ -338,14 +338,14 @@ def header (context : Context deployment durable) (profile : CanonicalRuntimePro
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
     Except String CredentialSignedEnvelopeController.SignedHeader :=
   headerAt context profile
-    (NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image)
+    (durable.worldRoot)
     federation genesisHeight intent grant
 
 theorem headerAt_exact (context : Context deployment durable)
     (profile : CanonicalRuntimeProfile.Profile F) (federation : FederationId)
     (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
     headerAt context profile
-      (NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image)
+      (durable.worldRoot)
       federation genesisHeight intent grant =
       header context profile federation genesisHeight intent grant := by
   rfl
@@ -355,7 +355,7 @@ The selected public KeyRecord is reversibly encoded in the existing registry
 binding in each header; this binding is not claimed to hide enrollment data. -/
 def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except String Challenge := do
-  let worldRoot := NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image
+  let worldRoot := durable.worldRoot
   footprintExact context intent
   let headers ← intent.grants.mapM fun grant => do
     let value ← headerAt context profile worldRoot federation genesisHeight intent grant
@@ -370,7 +370,7 @@ def checkGrant (native : CredentialSignatureIO.NativeConfig)
     (grant : GrantRef) (signature : List UInt8) :
     IO (Except String (CheckedGrant context profile federation genesisHeight intent grant)) := do
   let some selected := select context grant | return .error refused
-  let worldRoot := NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image
+  let worldRoot := durable.worldRoot
   let wanted := requestAt context worldRoot profile.semantics federation genesisHeight
     intent grant selected.packed.payload.root
   let .ok prepared := ResourceObservationAdmission.prepare context profile wanted
@@ -532,7 +532,7 @@ theorem challenge_bound {context : Context deployment durable}
     {profile : CanonicalRuntimeProfile.Profile F} {federation : FederationId}
     {genesisHeight : Nat} {intent : Intent} {issued : Challenge}
     (h : challenge context profile federation genesisHeight intent = .ok issued) :
-    issued.worldRoot = NativeHostCodec.worldRoot deployment.domain profile.semantics durable.image ∧
+    issued.worldRoot = durable.worldRoot ∧
       issued.height = genesisHeight + NativeHostCodec.height durable.image := by
   unfold challenge at h
   simp only [bind, Except.bind, pure, Except.pure] at h

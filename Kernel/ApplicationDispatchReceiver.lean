@@ -46,7 +46,7 @@ def Permit.receipt {config : Config} (permit : Permit config) : NativeHostCodec.
   ⟨permit.readback.derived.intent.transactionId,
     permit.readback.derived.intent.event.eventId,
     old.opened.durable.image.accepted.length + 1,
-    worldRoot config candidate.image⟩
+    candidate.worldRoot⟩
 
 theorem Permit.receipt_in_verified {config : Config} (permit : Permit config) :
     permit.verified.receipts =
@@ -89,7 +89,7 @@ is not a lease or cancellation barrier against later turns, and it does not
 lock out concurrent writers after the read. -/
 def Permit.withFreshTip {config : Config} {α : Type} (permit : Permit config)
     (handoff : List UInt8 → IO α) : IO (Except String α) := do
-  let .ok current ← DurableReceiverIO.tipIs config.storage.transport
+  let .ok current ← DurableReceiverIO.tipIs config.transport
       permit.readback.appended.next.image.accepted.length permit.readback.appended.entry
     | return .error "dispatch physical tip unavailable before handoff"
   if current then
@@ -121,7 +121,7 @@ def receiveVerified (config : Config) {target : Durable}
   if old.opened.durable.image.accepted.findIdx?
       (fun record => record.transactionId == derived.intent.transactionId) != none then
     return .rejected "dispatch transaction identity already used"
-  let result ← DurableReceiverIO.receiveLoadedDetailed config.storage.transport
+  let result ← DurableReceiverIO.receiveLoadedDetailed config.transport
     ResourceBirthCodec.rootBytes old.opened.durable derived.intent
   match result with
   | .exact kind appended =>

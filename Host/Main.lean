@@ -683,7 +683,7 @@ op26 callback with one newly verified Mini image. This read-only join returns
 the exact prior running event25 witness; it never mints a launch permit. -/
 def inspectStopClaimCurrent (config : NativeHost.Config)
     (planBytes committedBytes : List UInt8) : IO (Except String Lean.Json) := do
-  match ← DurableReceiverIO.load config.storage.transport ResourceBirthCodec.rootBytes with
+  match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable =>
       match ← NativeHostReplay.verifyLoaded config durable with
@@ -1142,7 +1142,7 @@ def applicationShareIssueSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let opened ← sessionOpened config state
   let result ← ApplicationShareIssueReceiver.receiveLoaded config opened.pins
-    config.signature config.storage.transport opened.durable
+    config.signature config.transport opened.durable
     (NativeHost.logicalHeight config opened.durable) payload
   let outcome ← match result with
     | .historical receipt =>
@@ -1188,7 +1188,7 @@ def applicationGrainShareIssueSubmitSession (config : NativeHost.Config)
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
   let result ← ApplicationShareIssueGrainReceiver.receiveLoaded config opened.pins
-    config.signature config.storage.transport opened.durable ambient payload
+    config.signature config.transport opened.durable ambient payload
   let outcome ← match result with
     | .historical receipt =>
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
@@ -3351,7 +3351,7 @@ def selectedReleaseFnAck (config : NativeHost.Config) (service : FnPollService)
     let executable ← snapshotOperatorFile directory "selected-release-fn-helper"
       fnBinary (64 * 1024 * 1024) "0500"
     let (cursor, report, projection) ← projectFnPoll executable scope cursorPath reportPath
-    let target ← IO.ofExcept (← DurableReceiverIO.load config.storage.transport
+    let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
       ResourceBirthCodec.rootBytes)
     let verified ← match ← NativeHostReplay.verifyLoaded config target with
       | .ok verified => pure verified
@@ -3463,7 +3463,7 @@ def selectedEmptyFnAck (config : NativeHost.Config) (service : FnPollService)
     let (inspectedScope, position) ← inspectFnConsumerCursor executable cursorPath
     unless inspectedScope == progressScope do
       throw (IO.userError "empty fn ACK cursor differs from pinned scope")
-    let target ← IO.ofExcept (← DurableReceiverIO.load config.storage.transport
+    let target ← IO.ofExcept (← DurableReceiverIO.load config.transport
       ResourceBirthCodec.rootBytes)
     let verified ← match ← NativeHostReplay.verifyLoaded config target with
       | .ok verified => pure verified
@@ -4432,7 +4432,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
     | throw (IO.userError "provider continuity outcome is not canonical confirmation")
   let current ← sessionWalked config state
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
-  let checkedWorldRoot := (NativeHost.worldRoot config current.target.image).value
+  let checkedWorldRoot := (current.target.worldRoot).value
   let checkedCount := current.target.image.accepted.length
   let verdict := NativeReserveContinuity.check current anchor reserveCall providerCell
   let (continuous, reason) := match verdict with
@@ -4954,7 +4954,7 @@ def run (arguments : List String) : IO UInt32 := do
             checkpointKey := some keyPath }
           let genesis := DurableReceiverCodec.encode built.image
           discard <| IO.ofExcept <| do
-            let loaded ← DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes genesis
+            let loaded ← DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes pinned.config.logStart genesis
             NativeHost.validateLoaded pinned.config loaded
           writeBytes imageOutput genesis
           IO.FS.writeFile configOutput (toJson pinned).pretty

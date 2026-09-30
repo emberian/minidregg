@@ -42,7 +42,7 @@ structure Candidate (config : Config) (opened : Opened config)
   custodyExact : ingress.source.physical.report.volumeCustody = some custody
   receiptTransaction : selected.record.transactionId = receipt.transactionId
   receiptEvent : selected.record.event.eventId = receipt.eventId
-  receiptBoundary : worldRoot config after.durable.image = receipt.worldRoot
+  receiptBoundary : after.durable.worldRoot = receipt.worldRoot
 
 /-- Creation may have used an older package version. The reusable certificate
 joins app identity, the permanent volume ID, exact signed custody and original
@@ -94,7 +94,7 @@ def select (config : Config) (opened : Opened config)
         | .error detail => return .error detail
         | .ok selected => pure selected
       let prefixAfter := NativeHistorySelection.prefixImage opened (index + 1)
-      let loaded ← match DurableReceiverIO.loadImage rootBytes prefixAfter with
+      let loaded ← match DurableReceiverIO.loadImage rootBytes opened.durable.logStart prefixAfter with
         | .error _ => return .error "selected completed-create post-prefix unavailable"
         | .ok loaded => pure loaded
       let after ← match validateLoaded config loaded with
@@ -126,7 +126,7 @@ def select (config : Config) (opened : Opened config)
                   if custodyExact : ingress.source.physical.report.volumeCustody = some custody then
                     if transaction : selected.record.transactionId = receipt.transactionId then
                       if event : selected.record.event.eventId = receipt.eventId then
-                        if boundary : worldRoot config after.durable.image =
+                        if boundary : after.durable.worldRoot =
                             receipt.worldRoot then
                           return .ok ⟨receipt, custody, priorExact, index, indexExact,
                             selected, after, afterImage, ingress, ingressExact,
