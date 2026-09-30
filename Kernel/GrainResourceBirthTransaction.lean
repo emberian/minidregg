@@ -22,14 +22,6 @@ set_option autoImplicit false
 set_option maxHeartbeats 1000000
 attribute [local irreducible] CanonicalRuntimeProfile.Profile.compilerProfile
 
-local instance bookFieldDecidableEq : DecidableEq CanonicalResourceKernel.schema.Field := by
-  change DecidableEq CanonicalResourceKernel.Field
-  infer_instance
-
-local instance bookResourceDecidableEq : DecidableEq CanonicalResourceKernel.schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
 abbrev Source := GrainResourceBirthController.Source
 abbrev Tariff := GrainResourceBirthController.Tariff
 abbrev Deployment := CanonicalCellRegistry.Deployment
@@ -79,31 +71,23 @@ def layout {F : Type} [Field F]
     (_grain : PreparedTargets deployment birth.prepared.pre.directory.directory
       birth.prepared.pre.authority.snapshot profile.semantics ambient
       (source.grainCommand tariff)) : CellLayout (Incidence tariff source) where
-  schema
-    | .inl .factory => DeclaredEffectPageMaterializer.schema
-    | .inl .book => CanonicalResourceKernel.schema
-    | .inl .authority => CredentialAuthorityState.schema.{0, 0}
-    | .inl (.allocation _) => LifecycleSlot.schema CanonicalCellRegistry.registry
-    | .inr index => (source.grainCommand tariff).targets[index].schema
-  fieldDecidableEq incidence := by
-    cases incidence with
-    | inl leg => cases leg <;> dsimp <;> infer_instance
-    | inr index => dsimp; infer_instance
-  resourceDecidableEq incidence := by
-    cases incidence with
-    | inl leg => cases leg <;> dsimp <;> infer_instance
-    | inr index => dsimp; infer_instance
+  storeLayout
+    | .inl .factory => EffectDeclaration.effectLayout
+    | .inl .book => CanonicalResourceKernel.layout
+    | .inl .authority => CredentialAuthorityState.layout
+    | .inl (.allocation _) => LifecycleSlot.layout CanonicalCellRegistry.registry
+    | .inr index => (source.grainCommand tariff).targets[index].layout
   materializer
-    | .inl .factory => DeclaredEffectPageMaterializer.materializer
+    | .inl .factory => DeclaredEffectCell.materializer
     | .inl .book => CanonicalResourcePageMaterializer.materializer
-    | .inl .authority => CredentialAuthorityStateCodec.materializer
+    | .inl .authority => CredentialAuthorityCell.materializer
     | .inl (.allocation _) => LifecycleSlot.materializer CanonicalCellRegistry.registry
     | .inr index => (source.grainCommand tariff).targets[index].materializer
   projectAuthority := fun _ _ => birth.prepared.pre.authority.snapshot.authState
   cellId
     | .inl .factory => ⟨deployment.factoryId⟩
     | .inl .book => ⟨deployment.resourceBookId⟩
-    | .inl .authority => ⟨deployment.authorityCatalogueId⟩
+    | .inl .authority => CredentialAuthorityDomainReceiver.cellIdOf deployment
     | .inl (.allocation index) =>
         ⟨(ResourceBirthPolicyController.Concrete.creation source.birth index).cellId⟩
     | .inr index => ⟨(source.grainCommand tariff).targets[index].target⟩
@@ -160,19 +144,17 @@ def rawLeg {F : Type} [Field F]
             (CanonicalResourceKernel.logicalBook birth.prepared.pre.book.payload.logical) }
   | .inl .authority =>
       { pre := birth.prepared.pre.authority.snapshot.cell
-        patch := CredentialAuthorityDomain.editPatch birth.prepared.pre.authority.snapshot
-          (source.authorityEdits birth.prepared.pre.authority.snapshot profile.semantics tariff)
+        patch := source.authorityPatch birth.prepared.pre.authority.snapshot profile.semantics tariff
         request := ⟨.object, source.factoryRequest tariff pins
           CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
           birth.prepared.pre.authority.snapshot.cell.root height⟩
         Postcondition := fun post =>
-          (CredentialAuthorityDomain.editPatch birth.prepared.pre.authority.snapshot
-            (source.authorityEdits birth.prepared.pre.authority.snapshot profile.semantics tariff)).ResultAt
+          (source.authorityPatch birth.prepared.pre.authority.snapshot profile.semantics tariff).ResultAt
               birth.prepared.pre.authority.snapshot.cell.logical post }
   | .inl (.allocation index) =>
       { pre := ResourceBirthController.allocationPre birth.prepared.pre.directory.directory
           (ResourceBirthPolicyController.Concrete.creation source.birth index)
-        patch := ResourceBirthController.allocationPatch birth.prepared.pre.directory.directory
+        patch := ResourceBirthController.allocationPatch
           (ResourceBirthPolicyController.Concrete.creation source.birth index)
         request := ⟨.object, ResourceBirthController.allocationRequest pins
           CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
@@ -183,17 +165,17 @@ def rawLeg {F : Type} [Field F]
           (.live (ResourceBirthPolicyController.Concrete.creation source.birth index).cell) }
   | .inr index =>
       { pre := (grain.targets index).pre
-        patch := DeclaredResourceController.targetPatch
+        patch := DeclaredResourceController.targetPatch birth.prepared.pre.authority.snapshot
+          profile.semantics (source.grainCommand tariff)
           (source.grainCommand tariff).targets[index] (grain.targets index).pre
-          (grain.targets index).post
         request := ⟨(source.grainCommand tariff).targets[index].kind,
           DeclaredResourceController.requestFor birth.prepared.pre.authority.snapshot
             profile.semantics ambient (source.grainCommand tariff)
             (source.grainCommand tariff).targets[index] (grain.targets index).pre.root⟩
         Postcondition := fun post =>
-          (DeclaredResourceController.targetPatch
-            (source.grainCommand tariff).targets[index] (grain.targets index).pre
-            (grain.targets index).post).ResultAt
+          (DeclaredResourceController.targetPatch birth.prepared.pre.authority.snapshot
+            profile.semantics (source.grainCommand tariff)
+            (source.grainCommand tariff).targets[index] (grain.targets index).pre).ResultAt
               (grain.targets index).pre.logical post }
 
 def bindFamily {F : Type} [Field F]
@@ -246,7 +228,7 @@ def bindFamily {F : Type} [Field F]
   | .inr index =>
       { Nullifier := Nat
         family := by
-          change SemanticEffectFamily (source.grainCommand tariff).targets[index].schema
+          change SemanticEffectFamily (source.grainCommand tariff).targets[index].layout
             (source.grainCommand tariff).targets[index].materializer Nat
           exact DeclaredResourceController.targetFamily deployment
             birth.prepared.pre.authority.snapshot profile.semantics ambient
@@ -276,31 +258,20 @@ def plan {F : Type} [Field F]
     (rawLeg birth grain height () incidence).request.2.effectsDigest
   bindFamily := bindFamily birth grain height
 
-local instance fieldEq {F : Type} [Field F]
+/-- Every allocated identity was fresh in the loaded directory: the allocator
+accepted the whole birth descriptor. -/
+theorem allocationFresh {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}
-    {ambient : Ambient} {tariff : Tariff} {source : Source}
+    {tariff : Tariff} {source : Source}
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
       deployment pins durable profile.semantics tariff source)
-    (grain : PreparedTargets deployment birth.prepared.pre.directory.directory
-      birth.prepared.pre.authority.snapshot profile.semantics ambient
-      (source.grainCommand tariff)) (incidence : Incidence tariff source) :
-    DecidableEq ((layout birth grain).schema incidence).Field :=
-  (layout birth grain).fieldDecidableEq incidence
+    (index : Fin source.birth.createRequests.length) :
+    LifecycleImage.view CanonicalCellRegistry.registry birth.prepared.pre.directory.directory
+      (ResourceBirthPolicyController.Concrete.creation source.birth index).cellId = .fresh :=
+  birth.prepared.post.allocated.fresh_pre _ (List.get_mem _ _)
 
-local instance resourceEq {F : Type} [Field F]
-    {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : Durable}
-    {ambient : Ambient} {tariff : Tariff} {source : Source}
-    (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
-    (grain : PreparedTargets deployment birth.prepared.pre.directory.directory
-      birth.prepared.pre.authority.snapshot profile.semantics ambient
-      (source.grainCommand tariff)) (incidence : Incidence tariff source) :
-    DecidableEq ((layout birth grain).schema incidence).Resource :=
-  (layout birth grain).resourceDecidableEq incidence
-
-def validated {F : Type} [Field F]
+theorem validated {F : Type} [Field F]
     {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment}
     {pins : ResourceBirth.FactoryPins} {durable : Durable}
     {ambient : Ambient} {tariff : Tariff} {source : Source}
@@ -312,16 +283,15 @@ def validated {F : Type} [Field F]
     (incidence : Incidence tariff source) →
       ValidatedPatch ((layout birth grain).materializer incidence)
         (rawLeg birth grain height () incidence).pre
+        (rawLeg birth grain height () incidence).request.2.preStateRoot
         (rawLeg birth grain height () incidence).patch
-  | .inl .factory =>
-      (ResourceBirthPolicyController.factoryCandidate pins
-        CanonicalCellRegistry.sourceEncoding birth.prepared.pre.authority.snapshot.authState
-        birth.prepared.pre.factory.payload height source.birth).validated
+  | .inl .factory => ResourceBirthPolicyController.factoryValidated birth.prepared.pre.factory.payload
   | .inl .book => birth.prepared.post.resources.validated
   | .inl .authority => birth.authorityValidated
   | .inl (.allocation index) =>
       ResourceBirthController.allocationValidated birth.prepared.pre.directory.directory
         (ResourceBirthPolicyController.Concrete.creation source.birth index)
+        (allocationFresh birth index)
   | .inr index => (grain.targets index).candidate.validated
 
 theorem postconditions {F : Type} [Field F]
@@ -351,6 +321,7 @@ theorem postconditions {F : Type} [Field F]
           exact ResourceBirthController.allocation_post_exact
             birth.prepared.pre.directory.directory
             (ResourceBirthPolicyController.Concrete.creation source.birth index)
+            (allocationFresh birth index)
   | inr index => exact (grain.targets index).candidate.postcondition
 
 /-- A complete joint tuple has one old state, one authority incidence, and
@@ -373,11 +344,6 @@ def prepareTuple {F : Type} [Field F]
         validated := validated birth grain ambient.height
         postconditions := postconditions birth grain ambient.height
         cellIdsDistinct := distinct
-        requestRoots := by
-          intro incidence
-          cases incidence with
-          | inl leg => cases leg <;> rfl
-          | inr index => rfl
         requestEffects := by
           intro incidence
           cases incidence with
@@ -435,11 +401,10 @@ theorem writes_roots_bound {F : Type} [Field F]
         exact ResourceBirthController.birthWrite_root_bound request
       · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
         rcases native with rfl | rfl <;> rfl
-    · exact CredentialAuthorityDomainReceiver.planWrites_roots_bound
-        deployment.authorityAnchor durable.snapshot
-        birth.prepared.pre.authority.snapshot.catalogue
-        birth.prepared.authorityCombined.checked.postPages
-        birth.prepared.authorityCombined.physical.placement write authority
+    · simp only [GrainResourceBirthAuthority.Prepared.writes,
+        CredentialAuthorityDomainReceiver.Loaded.writes, List.mem_singleton] at authority
+      subst write
+      exact birth.prepared.pre.authority.write_root_bound _
   · obtain ⟨index, _, rfl⟩ := List.mem_map.mp target
     rfl
 
