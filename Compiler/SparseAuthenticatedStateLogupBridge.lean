@@ -49,11 +49,10 @@ before/after values it retains a frame theorem for every other typed address.
 This is independent of any field encoding or proof protocol. -/
 structure CellTransition {L : Layout.{u, v, w}}
     (pre post : Store L) (row : BusRow L) : Prop where
-  before_exact : pre row.space row.key = row.before
-  after_exact : post row.space row.key = row.after
-  frame : ∀ (space : L.Namespace) (key : L.Key space),
-    (⟨space, key⟩ : Address L) ≠ busAddress row ->
-      post space key = pre space key
+  before_exact : pre (busAddress row) = row.before
+  after_exact : post (busAddress row) = row.after
+  frame : ∀ address : Address L, address ≠ busAddress row ->
+      post address = pre address
 
 /-- Row shapes are separated by namespace discipline.  Reads are legal in all
 three disciplines.  ROM has no modifying constructor, append-only has only a
@@ -106,13 +105,13 @@ theorem rom_is_read {L : Layout.{u, v, w}} {row : BusRow L}
   cases valid with
   | read => rfl
   | ramWrite _ _ _ _ _ discipline =>
-      exact False.elim (Discipline.noConfusion (discipline.symm.trans rom))
+      exact absurd (discipline.symm.trans rom) (by decide)
   | ramAllocate _ _ _ _ discipline =>
-      exact False.elim (Discipline.noConfusion (discipline.symm.trans rom))
+      exact absurd (discipline.symm.trans rom) (by decide)
   | appendAllocate _ _ _ _ discipline =>
-      exact False.elim (Discipline.noConfusion (discipline.symm.trans rom))
+      exact absurd (discipline.symm.trans rom) (by decide)
   | ramFree _ _ _ _ discipline =>
-      exact False.elim (Discipline.noConfusion (discipline.symm.trans rom))
+      exact absurd (discipline.symm.trans rom) (by decide)
 
 /-- Every modifying append-only row is literally a fresh allocation row. -/
 theorem appendOnly_modification_is_fresh_allocation
@@ -124,12 +123,12 @@ theorem appendOnly_modification_is_fresh_allocation
   cases valid with
   | read => exact False.elim (modifies rfl)
   | ramWrite _ _ _ _ _ discipline =>
-      exact False.elim (Discipline.noConfusion (discipline.symm.trans appendOnly))
+      exact absurd (discipline.symm.trans appendOnly) (by decide)
   | ramAllocate _ _ _ _ discipline =>
-      exact False.elim (Discipline.noConfusion (discipline.symm.trans appendOnly))
+      exact absurd (discipline.symm.trans appendOnly) (by decide)
   | appendAllocate => exact ⟨rfl, rfl⟩
   | ramFree _ _ _ _ discipline =>
-      exact False.elim (Discipline.noConfusion (discipline.symm.trans appendOnly))
+      exact absurd (discipline.symm.trans appendOnly) (by decide)
 
 end DisciplineRowValid
 
@@ -137,36 +136,32 @@ namespace Op
 
 /-- One enabled sparse operation produces an exact framed row transition. -/
 theorem busRow_cellTransition {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (clock : Nat) (store : Store L) (operation : Op L)
     (enabled : operation.Enabled store) :
     CellTransition store (operation.apply store)
-      (operation.busRow clock store) := by
+      (Minidregg.Kernel.SparseAuthenticatedState.Op.busRow clock store operation) := by
   cases operation with
   | read space key observed =>
-      exact ⟨enabled, enabled, fun _ _ _ => rfl⟩
+      exact ⟨enabled, enabled, fun _ _ => rfl⟩
   | write space key before after =>
-      refine ⟨enabled.2, Store.set_eq store space key (some after), ?_⟩
-      intro otherNamespace otherKey different
-      exact Store.set_ne store space key (some after)
-        otherNamespace otherKey different
+      refine ⟨enabled.2, Minidregg.Theory.Store.Store.set_eq store ⟨space, key⟩ (some after), ?_⟩
+      intro other different
+      exact Minidregg.Theory.Store.Store.set_ne store ⟨space, key⟩ (some after) other different
   | allocate space key value =>
-      refine ⟨enabled.2, Store.set_eq store space key (some value), ?_⟩
-      intro otherNamespace otherKey different
-      exact Store.set_ne store space key (some value)
-        otherNamespace otherKey different
+      refine ⟨enabled.2, Minidregg.Theory.Store.Store.set_eq store ⟨space, key⟩ (some value), ?_⟩
+      intro other different
+      exact Minidregg.Theory.Store.Store.set_ne store ⟨space, key⟩ (some value) other different
   | free space key before =>
-      refine ⟨enabled.2, Store.set_eq store space key none, ?_⟩
-      intro otherNamespace otherKey different
-      exact Store.set_ne store space key none
-        otherNamespace otherKey different
+      refine ⟨enabled.2, Minidregg.Theory.Store.Store.set_eq store ⟨space, key⟩ none, ?_⟩
+      intro other different
+      exact Minidregg.Theory.Store.Store.set_ne store ⟨space, key⟩ none other different
 
 /-- Enabledness derives the exact discipline-specific row constructor. -/
 theorem busRow_disciplineValid {L : Layout.{u, v, w}}
     (clock : Nat) (store : Store L) (operation : Op L)
     (enabled : operation.Enabled store) :
-    DisciplineRowValid (operation.busRow clock store) := by
+    DisciplineRowValid
+      (Minidregg.Kernel.SparseAuthenticatedState.Op.busRow clock store operation) := by
   cases operation with
   | read space key observed => exact .read clock space key observed
   | write space key before after =>
@@ -186,8 +181,6 @@ namespace TwistContinuity
 /-- The kernel's exact operation-indexed bus relation erases to the row-only
 Twist continuity statement without weakening any intermediate state. -/
 theorem of_busRelation {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {clock : Nat} {pre post : Store L} {operations : List (Op L)}
     {rows : List (BusRow L)}
     (relation : Trace.BusRelation clock pre operations rows post) :
@@ -217,16 +210,14 @@ end TwistContinuity
 namespace ExactBusClaim
 
 variable {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
 
 /-- Exact bus claims already carry the state continuity required by mutable
 RAM checking; no additional witness is supplied by the proof compiler. -/
 theorem twistContinuity (bus : ExactBusClaim accepted) :
-    TwistContinuity pre.logical bus.rows accepted.post.logical :=
+    TwistContinuity pre.logical bus.rows accepted.apply.logical :=
   TwistContinuity.of_busRelation bus.rows_semantic
 
 /-- All rows of an exact bus retain their ROM/RAM/append-only classification. -/
@@ -266,12 +257,10 @@ structure BusCommitment (L : Layout.{u, v, w}) where
   rootFrames : Digest -> Digest -> List (List UInt8) -> Digest
 
 def BusCommitment.root {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     (commitment : BusCommitment L)
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     (bus : ExactBusClaim accepted) : Digest :=
   commitment.rootFrames bus.preRoot bus.postRoot
     (bus.rows.map commitment.rowCodec.encode)
@@ -281,21 +270,17 @@ silent: this bridge accepts an unpadded sparse trace only with an exact row-coun
 equality.  A later padding dialect must specify and prove its own neutral rows. -/
 structure PowerOfTwoRows
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     (bus : ExactBusClaim accepted) (rowLog : Nat) : Prop where
   exact : bus.rows.length = 2 ^ rowLog
 
 def rowAt
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     {bus : ExactBusClaim accepted} {rowLog : Nat}
     (power : PowerOfTwoRows bus rowLog) (row : Fin (2 ^ rowLog)) : BusRow L :=
   bus.rows.get (Fin.cast power.exact.symm row)
@@ -304,11 +289,9 @@ def rowAt
 No prover-authored indices or address bits enter this constructor. -/
 def committedBusTrace
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     {bus : ExactBusClaim accepted} {rowLog addressLog : Nat}
     (power : PowerOfTwoRows bus rowLog)
     (addressing : CanonicalAddressing L addressLog)
@@ -326,11 +309,9 @@ def committedBusTrace
 /-- Canonical address linkage is true by construction for a sparse bus trace. -/
 theorem committedBusTrace_canonicalAddressLinked
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     {bus : ExactBusClaim accepted} {rowLog addressLog : Nat}
     (power : PowerOfTwoRows bus rowLog)
     (addressing : CanonicalAddressing L addressLog)
@@ -347,11 +328,9 @@ exact incidence pushforward over the committed bus addresses. -/
 noncomputable def canonicalBusClaim
     {F : Type*} [Field F]
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     {bus : ExactBusClaim accepted} {rowLog addressLog : Nat}
     (power : PowerOfTwoRows bus rowLog)
     (addressing : CanonicalAddressing L addressLog)
@@ -376,11 +355,9 @@ cryptographic premises are deliberately absent from this theorem. -/
 theorem canonicalBus_finalStatement
     {F : Type*} [Field F]
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     {bus : ExactBusClaim accepted} {rowLog addressLog : Nat}
     (power : PowerOfTwoRows bus rowLog)
     (addressing : CanonicalAddressing L addressLog)
@@ -407,18 +384,16 @@ Tower256/LogUp controller.  `indexedEvaluation` is the canonical lookup relation
 structure AcceptedSparseBusLookup
     {F : Type*} [Field F] [CharP F 2]
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     (bus : ExactBusClaim accepted) (rowLog addressLog : Nat)
     (power : PowerOfTwoRows bus rowLog)
     (addressing : CanonicalAddressing L addressLog)
     (trace : CommittedSemanticTrace (Fin (2 ^ rowLog)) addressLog)
     (claim : IndexedTableReceiptClaim F (Fin (2 ^ rowLog)) addressLog) : Prop where
   preRoot_exact : bus.preRoot = pre.root
-  postRoot_exact : bus.postRoot = accepted.post.root
+  postRoot_exact : bus.postRoot = accepted.apply.root
   rowIndex_exact : ∀ row,
     trace.index row = addressing.index (busAddress (rowAt power row))
   addressBits_exact : ∀ row,
@@ -439,7 +414,7 @@ structure AcceptedSparseBusLookup
       logupDot
         (fun row => claim.table (addressing.index (busAddress (rowAt power row))))
         claim.weights
-  continuity : TwistContinuity pre.logical bus.rows accepted.post.logical
+  continuity : TwistContinuity pre.logical bus.rows accepted.apply.logical
 
 /-- Main join.  An accepted controller proof over a trace whose row indices are
 exactly the canonical sparse addresses yields the sparse lookup equation while
@@ -448,11 +423,9 @@ its PCS, CR/binding, and ROM premises; this theorem does not discharge them. -/
 theorem acceptedSparseBusLookup
     {F : Type*} [Field F] [CharP F 2]
     {L : Layout.{u, v, w}}
-    [DecidableEq L.Namespace]
-    [(space : L.Namespace) -> DecidableEq (L.Key space)]
     {materializer : Materializer L Digest}
-    {pre : Materialized materializer} {operations : List (Op L)}
-    {accepted : AcceptedExecution materializer pre operations}
+    {pre : Materialized materializer} {expectedPreRoot : Digest} {operations : List (Op L)}
+    {accepted : ValidatedPatch materializer pre expectedPreRoot operations}
     {bus : ExactBusClaim accepted} {rowLog addressLog : Nat}
     {power : PowerOfTwoRows bus rowLog}
     {addressing : CanonicalAddressing L addressLog}

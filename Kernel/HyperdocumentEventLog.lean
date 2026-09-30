@@ -2,15 +2,24 @@
 # Kernel.HyperdocumentEventLog -- separate append-only causal event cell
 
 Final Hyperdocument version events do not live in the mutable document cell.
-This module gives them one typed append-only sparse namespace and derives a
-canonical `CellState` representation from the very same store.  Fresh event
-insertion is accepted only through `SparseAuthenticatedState.Op.allocate`;
-duplicate insertion is therefore rejected before any receipt or history claim.
+This module gives them one typed append-only namespace: the event-log cell is
+a `Store` over `Sparse.layout`, materialized like every other cell.  Fresh
+event insertion is accepted only through `Store.Op.allocate`; duplicate
+insertion is therefore rejected before any receipt or history claim, and the
+`appendOnly` discipline refuses every overwrite or removal of a recorded event
+(`overwrite_refused`, `remove_refused`).
 
 The pre/post roots inside `VersionEventRecord` are document/content roots.  The
 event-log root is independently derived from this log store and is never copied
-into the record it commits.  Atomic document+event publication is a later
-two-incidence `MultiCellHyperedge`; this module does not fake physical atomicity.
+into the record it commits.  Atomic document+event publication is a
+two-incidence `MultiCellHyperedge`; this module does not fake physical
+atomicity.
+
+There is one carrier.  The former adapter into a second `CellState.Schema`
+(`cellSchema`, `toCellState`/`ofCellState`, and `Representation` inducing a
+"sparse" and a "cell" materializer with the same bytes) is deleted: the log
+store is the cell state, and a codec/root declaration is a
+`CellState.Materializer Sparse.layout Root`.
 -/
 import Kernel.SparseAuthenticatedState
 import Theory.Hyperdocument
@@ -28,88 +37,94 @@ inductive Namespace where
   | events
   deriving DecidableEq, Repr
 
-def layout : Minidregg.Kernel.SparseAuthenticatedState.Layout where
+def layout : Store.Layout.{0, 0, 0} where
   Namespace := Namespace
   Key := fun _ => VersionEventId
   Value := fun _ => VersionEventRecord
   discipline := fun _ => .appendOnly
 
-instance : DecidableEq layout.Namespace := by
-  change DecidableEq Namespace
-  infer_instance
+abbrev Store := Minidregg.Theory.Store.Store layout
+abbrev Address := Minidregg.Theory.Store.Address layout
+abbrev Op := Minidregg.Theory.Store.Op layout
+abbrev Patch := Minidregg.Theory.Store.Patch layout
 
-instance (space : layout.Namespace) : DecidableEq (layout.Key space) := by
-  cases space
-  change DecidableEq VersionEventId
-  infer_instance
-
-abbrev Store := Minidregg.Kernel.SparseAuthenticatedState.Store layout
-abbrev Address := Minidregg.Kernel.SparseAuthenticatedState.Address layout
+/-- The address of one event key. -/
+def eventAddress (key : VersionEventId) : Address := ⟨.events, key⟩
 
 def empty : Store := 0
 
 def appendOp {scheme : CausalVersionDag.ContentAddressing}
-    (event : StoredVersionEvent scheme) :
-    Minidregg.Kernel.SparseAuthenticatedState.Op layout :=
+    (event : StoredVersionEvent scheme) : Op :=
   .allocate .events event.key event.record
 
 @[simp] theorem appendOp_address
     {scheme : CausalVersionDag.ContentAddressing}
     (event : StoredVersionEvent scheme) :
-    (appendOp event).address = (⟨.events, event.key⟩ : Address) :=
+    (appendOp event).address = eventAddress event.key :=
   rfl
 
 /-- Append-only validity is exactly typed sparse freshness. -/
 theorem appendOp_enabled_iff
     {scheme : CausalVersionDag.ContentAddressing}
     (store : Store) (event : StoredVersionEvent scheme) :
-    (appendOp event).Enabled store ↔ store .events event.key = none := by
-  simp [appendOp, Minidregg.Kernel.SparseAuthenticatedState.Op.Enabled,
-    layout, Minidregg.Kernel.SparseAuthenticatedState.Fresh]
+    (appendOp event).Enabled store ↔ store (eventAddress event.key) = none := by
+  simp only [appendOp, Minidregg.Theory.Store.Op.Enabled, layout,
+    Minidregg.Theory.Store.Store.Fresh, eventAddress, ne_eq, reduceCtorEq,
+    not_false_eq_true, true_and]
+  exact Iff.rfl
 
-abbrev Materializer (Root : Type) :=
-  Minidregg.Kernel.SparseAuthenticatedState.Materializer layout Root
+/-- The log's discipline refuses every overwrite of a recorded event. -/
+theorem overwrite_refused (store : Store) (key : VersionEventId)
+    (before after : VersionEventRecord) :
+    ¬ (Minidregg.Theory.Store.Op.write (L := layout) .events key before after).Enabled store := by
+  simp [Minidregg.Theory.Store.Op.Enabled, layout]
+
+/-- The log's discipline refuses every removal of a recorded event. -/
+theorem remove_refused (store : Store) (key : VersionEventId)
+    (before : VersionEventRecord) :
+    ¬ (Minidregg.Theory.Store.Op.free (L := layout) .events key before).Enabled store := by
+  simp [Minidregg.Theory.Store.Op.Enabled, layout]
+
+abbrev Materializer (Root : Type) := CellState.Materializer layout Root
 abbrev Cell {Root : Type} (materializer : Materializer Root) :=
-  Minidregg.Kernel.SparseAuthenticatedState.Materialized materializer
+  CellState.Materialized materializer
 
-/-- One accepted append is the existing prefix-valid sparse execution. -/
+/-- One accepted append is the validated one-operation patch at the cell's
+own root. -/
 abbrev AcceptedAppend
     {Root : Type} {scheme : CausalVersionDag.ContentAddressing}
     (materializer : Materializer Root) (pre : Cell materializer)
-    (event : StoredVersionEvent scheme) :=
-  Minidregg.Kernel.SparseAuthenticatedState.AcceptedExecution
-    materializer pre [appendOp event]
+    (event : StoredVersionEvent scheme) : Prop :=
+  CellState.ValidatedPatch materializer pre pre.root [appendOp event]
 
-def accept
-    {Root : Type} {scheme : CausalVersionDag.ContentAddressing}
+theorem accept
+    {Root : Type} [DecidableEq Root] {scheme : CausalVersionDag.ContentAddressing}
     {materializer : Materializer Root} {pre : Cell materializer}
     (event : StoredVersionEvent scheme)
-    (fresh : pre.logical .events event.key = none) :
-    AcceptedAppend materializer pre event where
-  valid := by
-    constructor
-    · exact (appendOp_enabled_iff pre.logical event).2 fresh
-    · trivial
+    (fresh : pre.logical (eventAddress event.key) = none) :
+    AcceptedAppend materializer pre event := by
+  obtain ⟨validated, _⟩ := CellState.validate_accepts materializer pre pre.root
+    [appendOp event] rfl ⟨(appendOp_enabled_iff pre.logical event).2 fresh, trivial⟩
+  exact validated
 
 theorem AcceptedAppend.pre_fresh
     {Root : Type} {scheme : CausalVersionDag.ContentAddressing}
     {materializer : Materializer Root} {pre : Cell materializer}
     {event : StoredVersionEvent scheme}
     (accepted : AcceptedAppend materializer pre event) :
-    pre.logical .events event.key = none :=
+    pre.logical (eventAddress event.key) = none :=
   (appendOp_enabled_iff pre.logical event).1 accepted.valid.1
 
-/-- The accepted sparse post contains the exact addressed event record. -/
+/-- The accepted post contains the exact addressed event record. -/
 @[simp] theorem AcceptedAppend.post_contains
     {Root : Type} {scheme : CausalVersionDag.ContentAddressing}
     {materializer : Materializer Root} {pre : Cell materializer}
     {event : StoredVersionEvent scheme}
     (accepted : AcceptedAppend materializer pre event) :
-    accepted.post.logical .events event.key = some event.record := by
-  change ((appendOp event).apply pre.logical) .events event.key = some event.record
-  exact @Minidregg.Kernel.SparseAuthenticatedState.Store.set_eq
-    layout inferInstance (fun _ => inferInstance) pre.logical .events event.key
-      (some event.record)
+    accepted.apply.logical (eventAddress event.key) = some event.record := by
+  simp [CellState.ValidatedPatch.apply_logical, appendOp, eventAddress,
+    Minidregg.Theory.Store.Op.apply]
+  rfl
 
 /-- Allocation has teeth: the exact same event key cannot be appended again to
 the accepted post, independently of any digest-binding assumption. -/
@@ -118,9 +133,9 @@ theorem AcceptedAppend.duplicate_rejected
     {materializer : Materializer Root} {pre : Cell materializer}
     {event : StoredVersionEvent scheme}
     (accepted : AcceptedAppend materializer pre event) :
-    ¬ (appendOp event).Enabled accepted.post.logical := by
+    ¬ (appendOp event).Enabled accepted.apply.logical := by
   intro enabled
-  have fresh := (appendOp_enabled_iff accepted.post.logical event).1 enabled
+  have fresh := (appendOp_enabled_iff accepted.apply.logical event).1 enabled
   rw [accepted.post_contains] at fresh
   contradiction
 
@@ -134,109 +149,18 @@ theorem AcceptedAppend.bus_relation
     Minidregg.Kernel.SparseAuthenticatedState.Trace.BusRelation
       0 pre.logical [appendOp event]
       (Minidregg.Kernel.SparseAuthenticatedState.Trace.busRows
-        pre.logical [appendOp event]) accepted.post.logical :=
-  accepted.exactBusClaim.rows_semantic
+        pre.logical [appendOp event]) accepted.apply.logical :=
+  (Minidregg.Kernel.SparseAuthenticatedState.ExactBusClaim.ofValidated accepted).rows_semantic
 
 end Sparse
-
-/-! ## Exact adapter into the canonical cell machine -/
-
-/-- The cell schema is derived from the sparse layout's dependent address and
-optional value.  It is not a second event-log state model. -/
-def cellSchema : CellState.Schema where
-  Field := Sparse.Address
-  FieldType := fun address => Sparse.layout.Value address.1
-  Resource := Empty
-  ResourceType := Empty.elim
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
-
-instance : DecidableEq cellSchema.Field := by
-  change DecidableEq Sparse.Address
-  infer_instance
-
-instance : DecidableEq cellSchema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
-def Sparse.Store.toCellState (store : Sparse.Store) :
-    CellState.LogicalState cellSchema where
-  fields := store.entries
-  resources := fun resource => nomatch resource
-
-def Sparse.Store.ofCellState (state : CellState.LogicalState cellSchema) :
-    Sparse.Store :=
-  ⟨state.fields⟩
-
-@[simp] theorem Sparse.Store.ofCellState_toCellState (store : Sparse.Store) :
-    Sparse.Store.ofCellState store.toCellState = store := by
-  cases store
-  rfl
-
-@[simp] theorem Sparse.Store.toCellState_ofCellState
-    (state : CellState.LogicalState cellSchema) :
-    (Sparse.Store.ofCellState state).toCellState = state := by
-  cases state with
-  | mk fields resources =>
-      have resourcesUnique : resources = fun resource => nomatch resource := by
-        funext resource
-        exact Empty.elim resource
-      subst resources
-      rfl
-
-/-- One codec/root declaration induces both sparse and cell materializers. -/
-structure Representation (Root : Type) where
-  sparseCodec : LawfulCodec Sparse.Store
-  rootBytes : List UInt8 -> Root
-
-def Representation.cellCodec {Root : Type} (representation : Representation Root) :
-    LawfulCodec (CellState.LogicalState cellSchema) where
-  encode := fun state =>
-    representation.sparseCodec.encode (Sparse.Store.ofCellState state)
-  decode := fun bytes =>
-    (representation.sparseCodec.decode bytes).map Sparse.Store.toCellState
-  decode_encode := by
-    intro state
-    rw [representation.sparseCodec.decode_encode]
-    simp
-
-def Representation.sparseMaterializer {Root : Type}
-    (representation : Representation Root) : Sparse.Materializer Root where
-  codec := representation.sparseCodec
-  rootBytes := representation.rootBytes
-
-def Representation.cellMaterializer {Root : Type}
-    (representation : Representation Root) :
-    CellState.Materializer cellSchema Root where
-  codec := representation.cellCodec
-  rootBytes := representation.rootBytes
-
-/-- The two views have definitionally the same canonical bytes. -/
-@[simp] theorem Representation.bytes_exact
-    {Root : Type} (representation : Representation Root)
-    (store : Sparse.Store) :
-    (representation.cellCodec.encode store.toCellState) =
-      representation.sparseCodec.encode store := by
-  simp [Representation.cellCodec]
-
-/-- Therefore their derived roots are exact, with no collision-resistance
-claim and no representation-refinement premise. -/
-@[simp] theorem Representation.roots_exact
-    {Root : Type} (representation : Representation Root)
-    (store : Sparse.Store) :
-    (CellState.materialize representation.cellMaterializer
-      store.toCellState).root =
-    (Minidregg.Kernel.SparseAuthenticatedState.materialize
-      representation.sparseMaterializer store).root := by
-  rfl
 
 /-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.post_contains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.post_contains
 /-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.AcceptedAppend.duplicate_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Sparse.AcceptedAppend.duplicate_rejected
-/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store.ofCellState_toCellState' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms Sparse.Store.ofCellState_toCellState
-/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Representation.roots_exact' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Representation.roots_exact
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.overwrite_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Sparse.overwrite_refused
+/-- info: 'Minidregg.Kernel.HyperdocumentEventLog.Sparse.remove_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Sparse.remove_refused
 
 end Minidregg.Kernel.HyperdocumentEventLog
