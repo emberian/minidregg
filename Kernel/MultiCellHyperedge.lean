@@ -4,7 +4,7 @@
 `Kernel.TypedCellHyperedge` composes several accepted effects over one common
 cell.  That is useful for same-cell patch fusion, but it is not a multi-cell
 turn.  This module removes that restriction: every incidence chooses its own
-schema, materializer, canonical pre-cell, authorization projection, and
+store layout, materializer, canonical pre-cell, authorization projection, and
 accepted semantic-effect family.  The only shared data are the turn header,
 the joint receipt binding, and the resource equation.
 
@@ -28,88 +28,70 @@ open Minidregg.Kernel
 open Minidregg.Theory
 open Minidregg.Theory.CanonicalTransition
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.Store
 
 set_option autoImplicit false
 
-universe u v w x y z b h
+universe u v w y z b h
 
 /-! ## Incidence-indexed cells and data-first legs -/
 
-/-- The heterogeneous cells participating in one turn.  Decidable equality is
-stored per schema instead of postulating one universe-wide erased key type. -/
+/-- The heterogeneous cells participating in one turn.  Each incidence has its
+own store layout, which carries its own decidable equalities; there is no
+universe-wide erased key type. -/
 structure CellFamily (Incidence : Type z) where
-  schema : Incidence -> CellState.Schema.{u, v, w, x}
-  fieldDecidableEq : (incidence : Incidence) ->
-    DecidableEq (schema incidence).Field
-  resourceDecidableEq : (incidence : Incidence) ->
-    DecidableEq (schema incidence).Resource
+  storeLayout : Incidence -> Store.Layout.{u, v, w}
   materializer : (incidence : Incidence) ->
-    CellState.Materializer (schema incidence) Digest
+    CellState.Materializer (storeLayout incidence) Digest
   portal : Incidence -> Portal
   projectAuthority : (incidence : Incidence) ->
-    CellState.LogicalState (schema incidence) -> AuthState
+    Store (storeLayout incidence) -> AuthState
   cellId : Incidence -> Digest
 
 /-- The physical and semantic cell layout before any policy portal has been
 constructed. This is the portal-independent part of the existing `CellFamily`,
 so preparing policy inputs never needs a placeholder authorization portal. -/
 structure CellLayout (Incidence : Type z) where
-  schema : Incidence -> CellState.Schema.{u, v, w, x}
-  fieldDecidableEq : (incidence : Incidence) ->
-    DecidableEq (schema incidence).Field
-  resourceDecidableEq : (incidence : Incidence) ->
-    DecidableEq (schema incidence).Resource
+  storeLayout : Incidence -> Store.Layout.{u, v, w}
   materializer : (incidence : Incidence) ->
-    CellState.Materializer (schema incidence) Digest
+    CellState.Materializer (storeLayout incidence) Digest
   projectAuthority : (incidence : Incidence) ->
-    CellState.LogicalState (schema incidence) -> AuthState
+    Store (storeLayout incidence) -> AuthState
   cellId : Incidence -> Digest
 
 /-- Policy construction supplies only the portals; it cannot replace the
 layout, authority projections, or physical cell identities it evaluated. -/
 def CellLayout.withPortals {Incidence : Type z}
-    (layout : CellLayout.{u, v, w, x, z} Incidence) (portals : Incidence -> Portal) :
-    CellFamily.{u, v, w, x, z} Incidence where
-  schema := layout.schema
-  fieldDecidableEq := layout.fieldDecidableEq
-  resourceDecidableEq := layout.resourceDecidableEq
+    (layout : CellLayout.{u, v, w, z} Incidence) (portals : Incidence -> Portal) :
+    CellFamily.{u, v, w, z} Incidence where
+  storeLayout := layout.storeLayout
   materializer := layout.materializer
   projectAuthority := layout.projectAuthority
   cellId := layout.cellId
   portal := portals
 
-local instance layoutFieldDecidableEq
-    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
-    (incidence : Incidence) : DecidableEq (layout.schema incidence).Field :=
-  layout.fieldDecidableEq incidence
-
-local instance layoutResourceDecidableEq
-    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
-    (incidence : Incidence) : DecidableEq (layout.schema incidence).Resource :=
-  layout.resourceDecidableEq incidence
-
 /-- Raw source data for one final per-cell patch. It contains neither a
 semantic family nor a portal: some families mention authorization in their
 mode-evidence type, so even selecting those families must be deferred. -/
 structure CandidateLegData
-    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
+    {Incidence : Type z} (layout : CellLayout.{u, v, w, z} Incidence)
     (incidence : Incidence) where
   pre : CellState.Materialized (layout.materializer incidence)
-  patch : CellState.Patch (layout.schema incidence) Digest
+  patch : Store.Patch (layout.storeLayout incidence)
   request : PackedEffectRequest
-  Postcondition : CellState.LogicalState (layout.schema incidence) -> Prop
+  Postcondition : Store (layout.storeLayout incidence) -> Prop
 
 /-- A source-owned late interpretation of one already-prepared raw leg. Every
 pure facet agrees exactly with the prepared source; choosing a real policy
 portal may change evidence types, never the state, request, patch, or result
 relation that policy evaluation already consumed. -/
 structure SemanticLegBinding
-    {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
+    {Incidence : Type z} {layout : CellLayout.{u, v, w, z} Incidence}
     {incidence : Incidence} (raw : CandidateLegData layout incidence) :
-    Type (max u v w x (y + 1) (z + 1)) where
+    Type (max u v w (y + 1) (z + 1)) where
   Nullifier : Type y
-  family : SemanticEffectFamily.{u, v, w, x, y, z}
-    (layout.schema incidence) (layout.materializer incidence) Nullifier
+  family : SemanticEffectFamily.{u, v, w, y, z}
+    (layout.storeLayout incidence) (layout.materializer incidence) Nullifier
   declaration : family.Declaration
   outcome : family.Outcome declaration
   preExact : raw.pre = family.pre
@@ -123,7 +105,7 @@ structure SemanticLegBinding
 derives each raw leg and its later semantic interpretation. These functions
 and the state projection are never decoded from an incoming request. -/
 structure PreparationPlan
-    {Incidence : Type z} (layout : CellLayout.{u, v, w, x, z} Incidence)
+    {Incidence : Type z} (layout : CellLayout.{u, v, w, z} Incidence)
     (Source : Type z) where
   leg : Source -> (incidence : Incidence) -> CandidateLegData layout incidence
   /-- Concrete plans commit canonical full source coordinates, including
@@ -133,34 +115,34 @@ structure PreparationPlan
   legEffectsDigest : Source -> Incidence -> Digest
   bindFamily : (source : Source) -> (portals : Incidence -> Portal) ->
     (incidence : Incidence) ->
-      SemanticLegBinding.{u, v, w, x, y, z} (leg source incidence)
+      SemanticLegBinding.{u, v, w, y, z} (leg source incidence)
 
 /-- One complete source-derived raw tuple before any portal, authorization, or
 mode evidence exists. Its posts are the existing canonical patch interpreter's
 results. Distinct physical cells each have one final patch; a source combines
 its sequential operations before entering this tuple. -/
 structure PreparedTuple
-    {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
-    {Source : Type z} (plan : PreparationPlan.{u, v, w, x, y, z} layout Source) where
+    {Incidence : Type z} {layout : CellLayout.{u, v, w, z} Incidence}
+    {Source : Type z} (plan : PreparationPlan.{u, v, w, y, z} layout Source) where
   source : Source
   primary : Incidence
+  /-- Each leg's patch, validated at the pre-state root its own request quotes. -/
   validated : (incidence : Incidence) ->
     CellState.ValidatedPatch (layout.materializer incidence)
-      (plan.leg source incidence).pre (plan.leg source incidence).patch
+      (plan.leg source incidence).pre
+      (plan.leg source incidence).request.2.preStateRoot
+      (plan.leg source incidence).patch
   postconditions : forall incidence,
     (plan.leg source incidence).Postcondition (validated incidence).apply.logical
   cellIdsDistinct : Function.Injective layout.cellId
-  requestRoots : forall incidence,
-    (plan.leg source incidence).request.2.preStateRoot =
-      (plan.leg source incidence).pre.root
   requestEffects : forall incidence,
     (plan.leg source incidence).request.2.effectsDigest =
       plan.legEffectsDigest source incidence
 
 namespace PreparedTuple
 
-variable {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
-    {Source : Type z} {plan : PreparationPlan.{u, v, w, x, y, z} layout Source}
+variable {Incidence : Type z} {layout : CellLayout.{u, v, w, z} Incidence}
+    {Source : Type z} {plan : PreparationPlan.{u, v, w, y, z} layout Source}
 
 def pre (prepared : PreparedTuple plan) (incidence : Incidence) :
     CellState.Materialized (layout.materializer incidence) :=
@@ -171,11 +153,11 @@ def post (prepared : PreparedTuple plan) (incidence : Incidence) :
   (prepared.validated incidence).apply
 
 def logicalPre (prepared : PreparedTuple plan) (incidence : Incidence) :
-    CellState.LogicalState (layout.schema incidence) :=
+    Store (layout.storeLayout incidence) :=
   (prepared.pre incidence).logical
 
 def logicalPost (prepared : PreparedTuple plan) (incidence : Incidence) :
-    CellState.LogicalState (layout.schema incidence) :=
+    Store (layout.storeLayout incidence) :=
   (prepared.post incidence).logical
 
 def request (prepared : PreparedTuple plan) (incidence : Incidence) :
@@ -185,32 +167,27 @@ def request (prepared : PreparedTuple plan) (incidence : Incidence) :
 theorem post_exact (prepared : PreparedTuple plan) (incidence : Incidence) :
     prepared.post incidence = (prepared.validated incidence).apply := rfl
 
+/-- Every leg request quotes its exact canonical pre-root: derived from the
+validated patch, not a separately supplied field. -/
+theorem requestRoots (prepared : PreparedTuple plan) (incidence : Incidence) :
+    (plan.leg prepared.source incidence).request.2.preStateRoot =
+      (plan.leg prepared.source incidence).pre.root :=
+  (prepared.validated incidence).preRoot_bound
+
 theorem local_postcondition (prepared : PreparedTuple plan) (incidence : Incidence) :
     (plan.leg prepared.source incidence).Postcondition (prepared.post incidence).logical :=
   prepared.postconditions incidence
 
 end PreparedTuple
 
-/-- Recover each schema's equality procedures only when that exact incidence
-is in scope.  These are projections of declaration data, not global axioms. -/
-local instance cellFieldDecidableEq
-    {Incidence : Type z} (cells : CellFamily.{u, v, w, x, z} Incidence)
-    (incidence : Incidence) : DecidableEq (cells.schema incidence).Field :=
-  cells.fieldDecidableEq incidence
-
-local instance cellResourceDecidableEq
-    {Incidence : Type z} (cells : CellFamily.{u, v, w, x, z} Incidence)
-    (incidence : Incidence) : DecidableEq (cells.schema incidence).Resource :=
-  cells.resourceDecidableEq incidence
-
 /-- One raw semantic leg.  This is deliberately not accepted yet: declaration
 data may be decoded and inspected without manufacturing semantic admission. -/
 structure LegData
-    {Incidence : Type z} (cells : CellFamily.{u, v, w, x, z} Incidence)
-    (incidence : Incidence) : Type (max u v w x (y + 1) (z + 1)) where
+    {Incidence : Type z} (cells : CellFamily.{u, v, w, z} Incidence)
+    (incidence : Incidence) : Type (max u v w (y + 1) (z + 1)) where
   Nullifier : Type y
-  family : SemanticEffectFamily.{u, v, w, x, y, z}
-    (cells.schema incidence) (cells.materializer incidence) Nullifier
+  family : SemanticEffectFamily.{u, v, w, y, z}
+    (cells.storeLayout incidence) (cells.materializer incidence) Nullifier
   kind : ResourceKind
   request : Request kind
   declaration : family.Declaration
@@ -227,26 +204,24 @@ structure Header where
 /-- Candidate data for one heterogeneous turn.  Each pre-cell is canonical
 under its own materializer; no post-cell or authorization witness is supplied. -/
 structure Declaration
-    {Incidence : Type z} (cells : CellFamily.{u, v, w, x, z} Incidence) where
+    {Incidence : Type z} (cells : CellFamily.{u, v, w, z} Incidence) where
   header : Header
   pre : (incidence : Incidence) ->
     CellState.Materialized (cells.materializer incidence)
-  legs : (incidence : Incidence) -> LegData.{u, v, w, x, y, z} cells incidence
+  legs : (incidence : Incidence) -> LegData.{u, v, w, y, z} cells incidence
 
 namespace Declaration
 
 variable {Incidence : Type z}
-variable {cells : CellFamily.{u, v, w, x, z} Incidence}
-variable (declaration : Declaration.{u, v, w, x, y, z} cells)
+variable {cells : CellFamily.{u, v, w, z} Incidence}
+variable (declaration : Declaration.{u, v, w, y, z} cells)
 
 /-- The exact accepted-effect proposition for one incidence.  Its portal and
 authorization state are definitionally projected from that incidence's exact
 canonical pre-cell. -/
 abbrev AcceptedLeg (incidence : Incidence) : Type _ :=
-  @AcceptedCellEffect.{u, v, w, x, y, z}
-    (cells.schema incidence)
-    (cells.fieldDecidableEq incidence)
-    (cells.resourceDecidableEq incidence)
+  @AcceptedCellEffect.{u, v, w, y, z}
+    (cells.storeLayout incidence)
     (cells.materializer incidence)
     (declaration.legs incidence).Nullifier
     (declaration.legs incidence).family
@@ -301,8 +276,8 @@ end Declaration
 
 namespace PreparedTuple
 
-variable {Incidence : Type z} {layout : CellLayout.{u, v, w, x, z} Incidence}
-    {Source : Type z} {plan : PreparationPlan.{u, v, w, x, y, z} layout Source}
+variable {Incidence : Type z} {layout : CellLayout.{u, v, w, z} Incidence}
+    {Source : Type z} {plan : PreparationPlan.{u, v, w, y, z} layout Source}
 
 def binding (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
     (incidence : Incidence) : SemanticLegBinding (plan.leg prepared.source incidence) :=
@@ -320,7 +295,7 @@ def header (prepared : PreparedTuple plan) (apex : Digest) : Header where
 late source binding cannot choose different requests, patches or pre-cells. -/
 def toDeclaration (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
     (apex : Digest) :
-    Declaration.{u, v, w, x, y, z} (layout.withPortals portals) where
+    Declaration.{u, v, w, y, z} (layout.withPortals portals) where
   header := prepared.header apex
   pre := prepared.pre
   legs := fun incidence =>
@@ -336,6 +311,7 @@ There is no second patch executor or post-selection step. -/
 def boundValidated (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
     (incidence : Incidence) :
     CellState.ValidatedPatch (layout.materializer incidence) (prepared.pre incidence)
+      (prepared.request incidence).2.preStateRoot
       ((prepared.binding portals incidence).family.patch
         (prepared.binding portals incidence).declaration
         (prepared.binding portals incidence).outcome) := by
@@ -387,7 +363,6 @@ def accept (prepared : PreparedTuple plan) (portals : Incidence -> Portal)
       preStateBound := (prepared.binding portals incidence).preExact
       requestBound := (prepared.binding portals incidence).requestExact
       effectsDigestBound := (prepared.binding portals incidence).effectsExact
-      preRootBound := prepared.requestRoots incidence
       modeEvidence := evidence.modes incidence
       validated := prepared.boundValidated portals incidence
       postcondition := by
@@ -458,26 +433,26 @@ the exact declaration, complete accepted-leg family, and exact joint input.
 Implementations may witness a database transaction or commitment opening here;
 this kernel does not assert that they did so merely because a digest exists. -/
 structure HandlerBoundary
-    {Incidence : Type z} {cells : CellFamily.{u, v, w, x, z} Incidence}
-    (declaration : Declaration.{u, v, w, x, y, z} cells) where
+    {Incidence : Type z} {cells : CellFamily.{u, v, w, z} Incidence}
+    (declaration : Declaration.{u, v, w, y, z} cells) where
   Evidence : (accepted : declaration.AcceptedLegs) ->
     JointCommitInput -> Type h
 
-/-- Cross-schema resource meaning is explicit.  The law sees the exact raw leg
+/-- Cross-layout resource meaning is explicit.  The law sees the exact raw leg
 and its exact accepted effect, so an implementation cannot charge a different
 request or post-state under the same incidence. -/
 structure ResourceLaw
-    {Incidence : Type z} {cells : CellFamily.{u, v, w, x, z} Incidence}
-    (declaration : Declaration.{u, v, w, x, y, z} cells)
+    {Incidence : Type z} {cells : CellFamily.{u, v, w, z} Incidence}
+    (declaration : Declaration.{u, v, w, y, z} cells)
     (Coordinate : Type y) (Balance : Type b) [AddCommMonoid Balance] where
   delta : (incidence : Incidence) -> declaration.AcceptedLeg incidence ->
     Coordinate -> Balance
 
 variable {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-variable {cells : CellFamily.{u, v, w, x, z} Incidence}
-variable {declaration : Declaration.{u, v, w, x, y, z} cells}
+variable {cells : CellFamily.{u, v, w, z} Incidence}
+variable {declaration : Declaration.{u, v, w, y, z} cells}
 variable {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-variable (law : ResourceLaw.{u, v, w, x, y, z, b} declaration Coordinate Balance)
+variable (law : ResourceLaw.{u, v, w, y, z, b} declaration Coordinate Balance)
 
 /-- The exact joint balance vector of a complete accepted family. -/
 def aggregateDelta (accepted : declaration.AcceptedLegs) : Coordinate -> Balance :=
@@ -505,8 +480,8 @@ resource vector balances, and the handler evidence binds the one exact joint
 input to this complete accepted family. -/
 structure Commit
     (accepted : declaration.AcceptedLegs)
-    (boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration) :
-    Type (max u v w x y z b h) where
+    (boundary : HandlerBoundary.{u, v, w, y, z, h} declaration) :
+    Type (max u v w y z b h) where
   cellIdsDistinct : Function.Injective cells.cellId
   sharedDomain : forall incidence,
     (declaration.legs incidence).request.domain = declaration.header.domain
@@ -517,14 +492,14 @@ structure Commit
 
 /-- Existentially package the complete family with its joint commit. -/
 def AdmittedCommit
-    (boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration) : Type _ :=
+    (boundary : HandlerBoundary.{u, v, w, y, z, h} declaration) : Type _ :=
   Sigma fun accepted => Commit law accepted boundary
 
 namespace Commit
 
-variable {law : ResourceLaw.{u, v, w, x, y, z, b} declaration Coordinate Balance}
+variable {law : ResourceLaw.{u, v, w, y, z, b} declaration Coordinate Balance}
 variable {accepted : declaration.AcceptedLegs}
-variable {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
+variable {boundary : HandlerBoundary.{u, v, w, y, z, h} declaration}
 
 def post (commit : Commit law accepted boundary) (incidence : Incidence) :
     CellState.Materialized (cells.materializer incidence) :=
@@ -548,7 +523,7 @@ noncomputable def nullifiers (commit : Commit law accepted boundary) :
 
 /-! ### Projection to the abstract wide pullback -/
 
-/-- A dependent carrier keeps each heterogeneous cell in its own schema while
+/-- A dependent carrier keeps each heterogeneous cell in its own layout while
 retaining the joint apex installed by the logical step. -/
 structure Carrier where
   incidence : Incidence
@@ -571,12 +546,12 @@ def halfEdge (incidence : Incidence) (_state : Carrier (cells := cells))
 abbrev SemanticHyperedge (commit : Commit law accepted boundary) :=
   Hyperedge
     Incidence
-    (ULift.{max u v w x y z b h, max u v w x z}
+    (ULift.{max u v w y z b h, max u v w z}
       (Carrier (cells := cells)))
-    (ULift.{max u v w x y z b h, max u v w x y z b h}
+    (ULift.{max u v w y z b h, max u v w y z b h}
       (Commit law accepted boundary))
-    (ULift.{max u v w x y z b h, 0} Digest)
-    (ULift.{max u v w x y z b h, max y b} (Coordinate -> Balance))
+    (ULift.{max u v w y z b h, 0} Digest)
+    (ULift.{max u v w y z b h, max y b} (Coordinate -> Balance))
     (fun state turn =>
       ⟨{ incidence := state.down.incidence
          state := turn.down.post state.down.incidence
@@ -600,7 +575,7 @@ def toHyperedge (commit : Commit law accepted boundary) :
     rfl
   balanced := by
     apply (AddEquiv.ulift :
-      ULift.{max u v w x y z b h, max y b} (Coordinate -> Balance) ≃+
+      ULift.{max u v w y z b h, max y b} (Coordinate -> Balance) ≃+
         (Coordinate -> Balance)).injective
     rw [map_sum]
     funext coordinate
@@ -619,7 +594,7 @@ end Commit
 /-- Admission exposes either one fully validated joint commit or a rejection.
 There is no constructor containing a partially accepted leg family. -/
 inductive Admission
-    (boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration)
+    (boundary : HandlerBoundary.{u, v, w, y, z, h} declaration)
     (Reject : Type h) : Type _
   | committed (accepted : declaration.AcceptedLegs)
       (commit : Commit law accepted boundary)
@@ -629,7 +604,7 @@ inductive Admission
 may accelerate either phase, but successful values must inhabit the exact Lean
 types shown here. -/
 def admit
-    {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
+    {boundary : HandlerBoundary.{u, v, w, y, z, h} declaration}
     {Reject : Type h}
     (validateLegs : Except Reject declaration.AcceptedLegs)
     (validateJoint : (accepted : declaration.AcceptedLegs) ->
@@ -646,7 +621,7 @@ def admit
 nothing about a physical multi-database transaction; that remains a handler
 obligation. -/
 def Admission.logicalPost
-    {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
+    {boundary : HandlerBoundary.{u, v, w, y, z, h} declaration}
     {Reject : Type h} (outcome : Admission law boundary Reject)
     (incidence : Incidence) :
     CellState.Materialized (cells.materializer incidence) :=
@@ -655,7 +630,7 @@ def Admission.logicalPost
   | .rejected _ => declaration.pre incidence
 
 @[simp] theorem Admission.rejected_atomic
-    {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
+    {boundary : HandlerBoundary.{u, v, w, y, z, h} declaration}
     {Reject : Type h} (reason : Reject) (incidence : Incidence) :
     Admission.logicalPost (law := law)
       (Admission.rejected (law := law) (boundary := boundary) reason)
@@ -663,7 +638,7 @@ def Admission.logicalPost
   rfl
 
 @[simp] theorem admit_leg_rejected
-    {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
+    {boundary : HandlerBoundary.{u, v, w, y, z, h} declaration}
     {Reject : Type h} (reason : Reject)
     (validateJoint : (accepted : declaration.AcceptedLegs) ->
       Except Reject (Commit law accepted boundary)) :
@@ -677,12 +652,12 @@ distinct cell ids, one domain, a balanced resource law, and one joint evidence
 value construct the same general N-cell commit (there is no transfer-specific
 or call-forest structure). -/
 def binaryCommit
-    {cells : CellFamily.{u, v, w, x, 0} (Fin 2)}
-    {declaration : Declaration.{u, v, w, x, y, 0} cells}
+    {cells : CellFamily.{u, v, w, 0} (Fin 2)}
+    {declaration : Declaration.{u, v, w, y, 0} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    (law : ResourceLaw.{u, v, w, x, y, 0, b} declaration Coordinate Balance)
+    (law : ResourceLaw.{u, v, w, y, 0, b} declaration Coordinate Balance)
     (accepted : declaration.AcceptedLegs)
-    (boundary : HandlerBoundary.{u, v, w, x, y, 0, h} declaration)
+    (boundary : HandlerBoundary.{u, v, w, y, 0, h} declaration)
     (cellIdsDistinct : Function.Injective cells.cellId)
     (sharedDomain : forall incidence,
       (declaration.legs incidence).request.domain = declaration.header.domain)
@@ -701,7 +676,7 @@ def binaryCommit
 /-- Cone data, exact accepted effects, and joint handler evidence cannot
 manufacture conservation when any resource coordinate is nonzero. -/
 theorem no_commit_of_nonzero_balance
-    {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
+    {boundary : HandlerBoundary.{u, v, w, y, z, h} declaration}
     (coordinate : Coordinate)
     (nonzero : forall accepted : declaration.AcceptedLegs,
       aggregateDelta law accepted coordinate ≠ 0) :
@@ -713,7 +688,7 @@ theorem no_commit_of_nonzero_balance
 /-- Distinct-cell policy has a load-bearing tooth: two different incidences
 with the same cell id cannot be smuggled into a committed multi-cell turn. -/
 theorem no_commit_of_conflicting_cell
-    {boundary : HandlerBoundary.{u, v, w, x, y, z, h} declaration}
+    {boundary : HandlerBoundary.{u, v, w, y, z, h} declaration}
     (left right : Incidence) (different : left ≠ right)
     (sameCell : cells.cellId left = cells.cellId right) :
     IsEmpty (AdmittedCommit law boundary) :=
