@@ -498,32 +498,25 @@ private def stableRange (path : String) (json : Lean.Json) : Result Hyperdocumen
   pure ⟨← stablePoint (path ++ ".start") (← field path "start" obj),
     ← stablePoint (path ++ ".finish") (← field path "finish" obj)⟩
 
-private def pageRef (path : String) (json : Lean.Json) : Result HyperdocumentContentPageMaterializer.PageRef := do
-  let obj ← exactObject path ["contentDomain", "pageNumber", "expectedRoot"] json
-  pure ⟨⟨← nat (path ++ ".contentDomain") (← field path "contentDomain" obj)⟩,
-    ← nat (path ++ ".pageNumber") (← field path "pageNumber" obj),
-    ⟨← nat (path ++ ".expectedRoot") (← field path "expectedRoot" obj)⟩⟩
-
-private def forwardTarget (path : String) (json : Lean.Json) :
-    Result HyperdocumentContentPageMaterializer.ForwardTarget := do
+private def linkTarget (path : String) (json : Lean.Json) : Result Hyperdocument.LinkTarget := do
   let (tag, _) ← tagged path json
   match tag with
-  | "document" | "element" =>
-      let obj ← exactObject path ["type", "page", "id"] json
-      let page ← pageRef (path ++ ".page") (← field path "page" obj)
-      if tag = "document" then pure (.document page (← identifier (path ++ ".id") (← field path "id" obj)))
-      else pure (.element page (← identifier (path ++ ".id") (← field path "id" obj)))
+  | "document" =>
+      let obj ← exactObject path ["type", "id"] json
+      pure (.document (← identifier (path ++ ".id") (← field path "id" obj)))
+  | "element" =>
+      let obj ← exactObject path ["type", "id"] json
+      pure (.element (← identifier (path ++ ".id") (← field path "id" obj)))
   | "range" =>
-      let obj ← exactObject path ["type", "page", "document", "range"] json
-      pure (.range (← pageRef (path ++ ".page") (← field path "page" obj))
-        (← identifier (path ++ ".document") (← field path "document" obj))
+      let obj ← exactObject path ["type", "document", "range"] json
+      pure (.range (← identifier (path ++ ".document") (← field path "document" obj))
         (← stableRange (path ++ ".range") (← field path "range" obj)))
   | "external" =>
       let obj ← exactObject path ["type", "scheme", "authority", "path"] json
       pure (.external (← decodeHex (path ++ ".scheme") (← field path "scheme" obj))
         (← decodeHex (path ++ ".authority") (← field path "authority" obj))
         (← decodeHex (path ++ ".path") (← field path "path" obj)))
-  | _ => failAt (path ++ ".type") "unknown forward target"
+  | _ => failAt (path ++ ".type") "unknown link target"
 
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
   let (tag, _) ← tagged path json
@@ -553,7 +546,7 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
       let obj ← exactObject path ["type", "link", "source", "target", "relation"] json
       pure (.link (← identifier (path ++ ".link") (← field path "link" obj))
         (← optional (path ++ ".source") stableRange (← field path "source" obj))
-        (← forwardTarget (path ++ ".target") (← field path "target" obj))
+        (← linkTarget (path ++ ".target") (← field path "target" obj))
         ⟨← nat (path ++ ".relation") (← field path "relation" obj)⟩)
   | _ => failAt (path ++ ".type") "unknown content action"
 
@@ -1223,9 +1216,8 @@ private def birthParts (path : String)
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
-      pure ⟨.declaredObject, CellState.materialize DeclaredEffectPageMaterializer.materializer
-        (DeclaredEffectPageMaterializer.stateOfOption
-          (some (AgentGrain.initialPage source.deployment.domain target budget)))⟩
+      pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
+        (AgentGrain.initialStore target budget)⟩
     else pure (NativeHostGenesis.declaredCell source target (kind = .account))
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
     ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner⟩
@@ -2664,18 +2656,18 @@ private def stateKeyJson : Minidregg.Theory.EffectDeclaration.StateKey → Lean.
   | .programCode resource => .mkObj [("type", "program"),
       ("resource", decimal resource.value)]
 
-private def declaredPageJson (root : Digest)
-    (page : DeclaredEffectPageMaterializer.Page) : Lean.Json :=
-  let base := [("root", decimal root.value), ("effectDomain", decimal page.effectDomain.value),
-    ("shardNumber", decimal page.shardNumber),
-    ("entries", .arr <| page.entries.toArray.map fun entry => .mkObj
-      [("key", stateKeyJson entry.key), ("value", signedDecimal entry.value)])]
-  let grain := page.entries.findSome? fun entry => match entry.key with
+private def declaredCellJson (root : Digest)
+    (store : Store.Store EffectDeclaration.effectLayout) : Lean.Json :=
+  let entries := StoreCodec.entries DeclaredEffectCell.wire store
+  let base := [("root", decimal root.value),
+    ("entries", .arr <| entries.toArray.map fun entry => .mkObj
+      [("key", stateKeyJson entry.1.2), ("value", signedDecimal (entry.2 : Int))])]
+  let grain := entries.findSome? fun entry => match entry.1.2 with
     | .objectField task field => if field.value = 0 then some task.value else none
     | _ => none
   match grain with
   | none => .mkObj base
-  | some task => match AgentGrain.readState task page with
+  | some task => match AgentGrain.readState task store with
     | none => .mkObj base
     | some state => .mkObj <| base ++ [("grain", .mkObj
         [("task", decimal task), ("generation", signedDecimal state.generation),
@@ -2692,61 +2684,60 @@ private def atomKindJson : Hyperdocument.AtomKind → Lean.Json
   | .text => .mkObj [("type", "text")]
   | .inlineObject schema => .mkObj [("type", "inlineObject"), ("schema", decimal schema.value)]
 
-private def contentEntryJson (entry : HyperdocumentContentPageMaterializer.Entry) : Lean.Json :=
-  let canonical := hexJson (HyperdocumentContentPageMaterializer.entryStream.encode entry)
-  match entry with
-  | .document identifier _ => .mkObj [("type", "document"),
-      ("id", decimal identifier.digest.value), ("canonical", canonical)]
-  | .element identifier _ => .mkObj [("type", "element"),
-      ("id", decimal identifier.digest.value), ("canonical", canonical)]
-  | .link identifier _ => .mkObj [("type", "link"),
-      ("id", decimal identifier.digest.value), ("canonical", canonical)]
-  | .atom identifier record => .mkObj [("type", "atom"),
-      ("id", decimal identifier.digest.value), ("document", decimal record.document.digest.value),
-      ("kind", atomKindJson record.kind), ("payload", hexJson record.payload),
-      ("createdBy", principalJson record.createdBy),
-      ("createdAt", decimal record.createdAt.digest.value),
-      ("tombstonedAt", record.tombstonedAt.map (fun id => decimal id.digest.value) |>.getD .null),
-      ("canonical", canonical)]
-  | .run identifier record => .mkObj [("type", "run"),
-      ("id", decimal identifier.digest.value), ("document", decimal record.document.digest.value),
-      ("atoms", .arr <| record.atoms.toArray.map fun atom => decimal atom.digest.value),
-      ("createdBy", principalJson record.createdBy),
-      ("createdAt", decimal record.createdAt.digest.value),
-      ("tombstonedAt", record.tombstonedAt.map (fun id => decimal id.digest.value) |>.getD .null),
-      ("canonical", canonical)]
+private def optionalOperationJson (value : Option Hyperdocument.OperationId) : Lean.Json :=
+  value.map (fun id => decimal id.digest.value) |>.getD .null
 
-private def contentPageJson (root : Digest)
-    (page : ContentResource.ContentStore) : Lean.Json := .mkObj
-  [("root", decimal root.value), ("contentDomain", decimal page.contentDomain.value),
-   ("document", decimal page.document.digest.value), ("pageNumber", decimal page.pageNumber),
-   ("canonicalPage", hexJson (HyperdocumentContentPageMaterializer.pageStream.encode page)),
-   ("entries", .arr <| page.entries.toArray.map contentEntryJson)]
+/-- One entry of a content cell. Documents, elements, links, atoms and runs are
+spelled out; every entry carries its canonical `StoreCodec` entry bytes. -/
+private def contentEntryJson (entry : StoreCodec.Entry Hyperdocument.layout) : Lean.Json :=
+  let canonical := hexJson ((StoreCodec.entryStream HyperdocumentCell.contentWire).encode entry)
+  match entry with
+  | ⟨⟨.documents, identifier⟩, _⟩ =>
+      let identifier : Hyperdocument.DocumentId := identifier
+      .mkObj [("type", "document"), ("id", decimal identifier.digest.value), ("canonical", canonical)]
+  | ⟨⟨.elements, identifier⟩, _⟩ =>
+      let identifier : Hyperdocument.ElementId := identifier
+      .mkObj [("type", "element"), ("id", decimal identifier.digest.value), ("canonical", canonical)]
+  | ⟨⟨.links, identifier⟩, _⟩ =>
+      let identifier : Hyperdocument.LinkId := identifier
+      .mkObj [("type", "link"), ("id", decimal identifier.digest.value), ("canonical", canonical)]
+  | ⟨⟨.atoms, identifier⟩, record⟩ =>
+      let identifier : Hyperdocument.AtomId := identifier
+      let record : Hyperdocument.AtomRecord := record
+      .mkObj [("type", "atom"),
+        ("id", decimal identifier.digest.value), ("document", decimal record.document.digest.value),
+        ("kind", atomKindJson record.kind), ("payload", hexJson record.payload),
+        ("createdBy", principalJson record.createdBy),
+        ("createdAt", decimal record.createdAt.digest.value),
+        ("tombstonedAt", optionalOperationJson record.tombstonedAt),
+        ("canonical", canonical)]
+  | ⟨⟨.runs, identifier⟩, record⟩ =>
+      let identifier : Hyperdocument.RunId := identifier
+      let record : Hyperdocument.RunRecord := record
+      .mkObj [("type", "run"),
+        ("id", decimal identifier.digest.value), ("document", decimal record.document.digest.value),
+        ("atoms", .arr <| record.atoms.toArray.map fun atom => decimal atom.digest.value),
+        ("createdBy", principalJson record.createdBy),
+        ("createdAt", decimal record.createdAt.digest.value),
+        ("tombstonedAt", optionalOperationJson record.tombstonedAt),
+        ("canonical", canonical)]
+  | ⟨⟨space, _⟩, _⟩ => .mkObj [("type", "namespace"),
+      ("namespace", decimal (HyperdocumentCell.namespaceTag space).toNat), ("canonical", canonical)]
+
+private def contentCellJson (root : Digest) (store : ContentResource.ContentStore) : Lean.Json :=
+  .mkObj [("root", decimal root.value),
+    ("entries", .arr <| (StoreCodec.entries HyperdocumentCell.contentWire store).toArray.map
+      contentEntryJson)]
 
 private def resourceJson (value : List UInt8 × List (Nat × Int)) : Result Lean.Json := do
   let packed ← match Minidregg.Theory.CellRegistry.PackedCell.decode
       CanonicalCellRegistry.registry value.1 with
     | some packed => pure packed
     | none => failAt "view-resource.page" "noncanonical packed cell"
-  let view ← match value.1 with
-    | 68 :: 82 :: 1 :: 1 :: payloadBytes =>
-        match HyperdocumentContentPageMaterializer.materializer.codec.decode payloadBytes with
-        | some logical =>
-            match HyperdocumentContentPageMaterializer.pageAt logical with
-            | some page => pure (contentPageJson
-                (HyperdocumentContentPageMaterializer.materializer.rootBytes payloadBytes) page)
-            | none => failAt "view-resource.page" "content object has no page"
-        | none => failAt "view-resource.page" "noncanonical content object"
-    | 68 :: 82 :: 1 :: 5 :: payloadBytes =>
-        match DeclaredEffectPageMaterializer.stateCodec.decode payloadBytes with
-        | some logical =>
-            match DeclaredEffectPageMaterializer.pageAt logical with
-            | some page => pure (declaredPageJson
-                (DeclaredEffectPageMaterializer.materializer.rootBytes payloadBytes) page)
-            | none => failAt "view-resource.page" "declared object has no page"
-        | none => failAt "view-resource.page" "noncanonical declared object"
-    | _ => pure <| .mkObj [("root", decimal packed.payload.root.value),
-          ("canonical", hexJson value.1)]
+  let view := match packed with
+    | ⟨.content, payload⟩ => contentCellJson payload.root payload.logical
+    | ⟨.declaredObject, payload⟩ => declaredCellJson payload.root payload.logical
+    | _ => .mkObj [("root", decimal packed.payload.root.value), ("canonical", hexJson value.1)]
   pure <| .mkObj [("type", "resource"), ("page", view),
     ("balances", .arr <| value.2.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2])]
 
