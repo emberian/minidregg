@@ -291,12 +291,7 @@ def authorizeLeg [DecidableEq F]
       prepared.authority.snapshot.authState (tuple.request incidence).2) := do
   let wanted := (tuple.request incidence).2
   let context := step prepared tuple incidence
-  let config := CredentialAuthorityPolicyRegistry.config profile.compilerProfile
-    prepared.authority.snapshot
-    (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
-    (sourceCapabilityPortal prepared.authority.snapshot
-      (operationMarker prepared.authority.snapshot.domain profile.semantics command))
-    context
+  let config := policyConfig prepared tuple incidence
   let capability := (incidenceTarget command incidence).capability
   let evidence ← requireSome .capabilityRejected (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
     (sourceStore prepared.authority.snapshot.domain prepared.directory.directory)
@@ -313,6 +308,51 @@ def authorizeLeg [DecidableEq F]
     (.policy wanted.policyId wanted.policyRevision)
     (source_request_epoch_current prepared tuple incidence)
     (source_request_revision_current prepared tuple incidence))
+
+/-- The failing clause of this leg's committed law, read on exactly the witness
+`authorizeLeg` hands to `CanonicalPolicyAdmission.admit`: the same resolved law,
+the same projected old and new states. It decides nothing; the Host uses it to
+name the clause when it refuses to plan a write its law rejects. -/
+def lawLeaf [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
+  let wanted := (tuple.request incidence).2
+  let context := step prepared tuple incidence
+  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
+    context.oldState context.newState
+  LawLeaf.of committed.record.predicate witness.oldState witness.newState
+
+/-- A named clause is a leaf of the leg's resolved committed law, at its path,
+and it is false on the witness states `authorizeLeg` evaluates that law on. -/
+theorem lawLeaf_fails [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (leaf : LawLeaf)
+    (named : lawLeaf prepared tuple incidence = some leaf) :
+    ∃ committed, (policyConfig prepared tuple incidence).registry.resolve
+        (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed ∧
+      committed.record.predicate.subterm leaf.path = some leaf.clause ∧
+      Minidregg.Pred.eval leaf.clause
+        (canonicalWitness (F := F) profile.compilerProfile.compiler committed
+          (step prepared tuple incidence).oldState (step prepared tuple incidence).newState).oldState
+        (canonicalWitness (F := F) profile.compilerProfile.compiler committed
+          (step prepared tuple incidence).oldState (step prepared tuple incidence).newState).newState = false := by
+  unfold lawLeaf at named
+  cases resolved : (policyConfig prepared tuple incidence).registry.resolve
+      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision with
+  | none => simp [resolved] at named
+  | some committed =>
+      simp only [resolved, Option.bind_eq_bind, Option.bind_some] at named
+      obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf named
+      exact ⟨committed, rfl, at_, fails⟩
+
+/-- The first leg (targets in order, then the authority leg) whose law names a
+failing clause. -/
+def firstLawLeaf [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option LawLeaf :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+    (lawLeaf prepared tuple)
 
 structure SignedCommand where
   commandBytes : List UInt8
