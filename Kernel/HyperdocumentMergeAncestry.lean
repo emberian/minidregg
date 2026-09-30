@@ -246,12 +246,12 @@ theorem selected_base_conflict_is_published
     {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
     {merge : Accepted history mergeConfig projection authorityPre documentPre
       mergePortal mergeDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal} {expectedLogRoot : Digest}
     {event : Minidregg.Kernel.HyperdocumentMergePublication.EventAccepted merge
-      representation store eventConfig eventPortal expectedLogRoot}
+      MLog store eventConfig eventPortal expectedLogRoot}
     {header : Minidregg.Kernel.HyperdocumentMergePublication.Header}
     {contentCellId eventCellId : Digest}
     {domainExact : eventConfig.requestDomain = mergeConfig.requestDomain}
