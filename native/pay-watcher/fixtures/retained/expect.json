@@ -1,0 +1,8 @@
+{
+  "description": "pay-2 has a retained receipt (named in hex) and is not fetched; the newer pay-3 and the OLDER unreceipted pay-1 are both emitted",
+  "exit": 0,
+  "observations": 2,
+  "reasons": [
+    "alreadyRetained"
+  ]
+}

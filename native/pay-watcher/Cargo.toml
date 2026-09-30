@@ -1,0 +1,20 @@
+[package]
+name = "minidregg-pay-watcher"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Stateless finalized-transfer watcher: Solana JSON-RPC answers become PAY Observation records"
+
+[lib]
+name = "minidregg_pay_watcher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pay-watcher"
+path = "src/main.rs"
+
+[dependencies]
+bs58 = { version = "=0.5.1", default-features = false, features = ["std"] }
+libc = "=0.2.177"
+serde_json = "=1.0.151"

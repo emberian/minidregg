@@ -1,0 +1,16 @@
+{
+  "asset": {
+    "mint": "9xkU49fBixt9jfgvsHquwoA6HBLriYgVsaqa6RaPKuQU",
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "book": [
+    {
+      "address": "2X9EKs5gzkTynxiESNKy3BM2YRrDmLW8r67wHBuCeZTS",
+      "index": 0
+    }
+  ],
+  "maxPages": 4,
+  "minEndpoints": 2,
+  "pageSize": 2,
+  "receiptsDir": "receipts"
+}
