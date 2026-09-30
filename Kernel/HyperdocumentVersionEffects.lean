@@ -7,6 +7,11 @@ author, schema and semantic version are all projections of that exact accepted
 effect.  The event-log effect then allocates the derived final event key in the
 separate append-only sparse log.  No caller authors either content root.
 
+The append itself checks the deployment's history domain: `Config.historyDomain`
+is the domain this log belongs to, and an event record that names another
+domain is refused by the append's mode evidence (`no_accepted_of_foreign_domain`),
+not only by the registry law on loaded and final cells.
+
 This module deliberately stops before receipt-history membership, observation
 coordinates, finality, and physical transaction evidence.  Those are explicit
 downstream seams, not facts inferred from a successful sparse allocation.
@@ -39,6 +44,9 @@ structure Config where
   eventDerivation : DigestDerivation
   requestDomain : Digest
   semanticRelation : Digest
+  /-- The history domain of the deployment this log belongs to.  Every
+  appended event must name it. -/
+  historyDomain : Digest
 
 def Config.scheme (config : Config) : CausalVersionDag.ContentAddressing :=
   causalVersionAddressing config.eventCodec config.eventDerivation
@@ -240,6 +248,16 @@ structure ValidAppend (M : LogMaterializer)
     (declaration : Declaration) : Prop where
   wellFormed : declaration.record.CausallyWellFormed
   fresh : pre.logical (eventAddress (declaration.key config)) = none
+  domainExact : declaration.record.historyDomain = config.historyDomain
+
+theorem validAppend_iff (M : LogMaterializer) (config : Config)
+    (pre : CellState.Materialized M) (declaration : Declaration) :
+    ValidAppend M config pre declaration ↔
+      declaration.record.CausallyWellFormed ∧
+        pre.logical (eventAddress (declaration.key config)) = none ∧
+        declaration.record.historyDomain = config.historyDomain :=
+  ⟨fun valid => ⟨valid.wellFormed, valid.fresh, valid.domainExact⟩,
+    fun ⟨wellFormed, fresh, domainExact⟩ => ⟨wellFormed, fresh, domainExact⟩⟩
 
 def family (M : LogMaterializer)
     (config : Config) (pre : CellState.Materialized M) :
@@ -273,6 +291,18 @@ theorem no_accepted_at_occupied_key
     IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
       (family M config pre) request pre declaration ()) :=
   ⟨fun accepted => occupied accepted.modeEvidence.down.fresh⟩
+
+/-- Refuting pole of the domain pin: an event record naming another history
+domain has no accepted append at this log, whatever its authorization. -/
+theorem no_accepted_of_foreign_domain
+    {M : LogMaterializer}
+    {config : Config} {pre : CellState.Materialized M}
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {request : Request kind} {declaration : Declaration}
+    (foreign : declaration.record.historyDomain ≠ config.historyDomain) :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (family M config pre) request pre declaration ()) :=
+  ⟨fun accepted => foreign accepted.modeEvidence.down.domainExact⟩
 
 /-- The accepted event publication.  Its one validated patch is the append of
 the derived event; there is no second (sparse) view of the same allocation. -/
@@ -326,6 +356,7 @@ def accept
       (declaration.toRequest config))
     (wellFormed : declaration.record.CausallyWellFormed)
     (fresh : store (eventAddress (declaration.key config)) = none)
+    (domainExact : declaration.record.historyDomain = config.historyDomain)
     (authorization : Authorized portal
       (CredentialAuthorityState.authState projection authorityPre)
       (declaration.toRequest config))
@@ -340,7 +371,7 @@ def accept
       preStateBound := rfl
       requestBound := rfl
       effectsDigestBound := rfl
-      modeEvidence := ⟨⟨wellFormed, fresh⟩⟩
+      modeEvidence := ⟨⟨wellFormed, fresh, domainExact⟩⟩
       validated := validated
       postcondition := validated.resultAt
       disclosure := .sealed
@@ -365,6 +396,12 @@ variable
 theorem Accepted.wellFormed (accepted : Accepted content M store config portal declaration) :
     declaration.record.CausallyWellFormed :=
   accepted.accepted.modeEvidence.down.wellFormed
+
+/-- Every accepted append names the log's history domain. -/
+theorem Accepted.domain_exact
+    (accepted : Accepted content M store config portal declaration) :
+    declaration.record.historyDomain = config.historyDomain :=
+  accepted.accepted.modeEvidence.down.domainExact
 
 theorem Accepted.pre_fresh (accepted : Accepted content M store config portal declaration) :
     store (eventAddress (declaration.key config)) = none :=
@@ -403,5 +440,11 @@ end AcceptedLaws
 #guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains
 /-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.Accepted.duplicate_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.duplicate_rejected
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.validAppend_iff' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms validAppend_iff
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.no_accepted_of_foreign_domain' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_foreign_domain
+/-- info: 'Minidregg.Kernel.HyperdocumentVersionEffects.Accepted.domain_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.domain_exact
 
 end Minidregg.Kernel.HyperdocumentVersionEffects
