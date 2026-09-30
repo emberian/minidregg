@@ -87,9 +87,16 @@ fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
 
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] | [254, ..] => Err(format!(
-            "enrollment Host refused op{operation}; exact frame retained"
-        )),
+        [byte @ (255 | 254), encoded @ ..] => {
+            note_host_decision(HostDecision::RefusedFrame {
+                command: format!("enrollment op{operation}"),
+                byte: *byte,
+                encoded: encoded.to_vec(),
+            });
+            Err(format!(
+                "enrollment Host refused op{operation}; exact frame retained"
+            ))
+        }
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
         _ => Err(format!(
             "enrollment op{operation} returned an invalid frame"

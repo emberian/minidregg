@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
@@ -50,6 +50,8 @@ mod session_enrollment;
 #[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
+mod shell;
+#[cfg(unix)]
 mod share_issue_receipt;
 #[cfg(unix)]
 mod transport;
@@ -62,6 +64,35 @@ static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
+
+/// The Host's own verdict on the latest request, retained as data at the point
+/// where the Host answered, so a caller (`mini shell`) can tell a Host decision
+/// from a client error without reading error prose.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum HostDecision {
+    /// The Host session reply carried a refusal byte; `encoded` is the rest of
+    /// the frame (an outcome encoded by the Host's own codec).
+    RefusedFrame {
+        command: String,
+        byte: u8,
+        encoded: Vec<u8>,
+    },
+    /// The Host returned a decoded outcome whose type is not `confirmed`.
+    Outcome(Value),
+}
+
+static HOST_DECISION: Mutex<Option<HostDecision>> = Mutex::new(None);
+
+pub(crate) fn note_host_decision(decision: HostDecision) {
+    *HOST_DECISION.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(decision);
+}
+
+pub(crate) fn take_host_decision() -> Option<HostDecision> {
+    HOST_DECISION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
 
 #[cfg(unix)]
 fn host_image_sha256(host: &Path) -> Result<String> {
@@ -150,6 +181,7 @@ usage:
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
+  mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -579,6 +611,11 @@ fn socket_process(
     };
     let reply = session_invoke(host, socket, config, operation, &payload)?;
     if reply[0] == 255 {
+        note_host_decision(HostDecision::RefusedFrame {
+            command: command.to_owned(),
+            byte: 255,
+            encoded: reply[1..].to_vec(),
+        });
         if command == "prepare" {
             let destination = Path::new(arguments[2]);
             prepare_refusal::retain(destination, &payload, config, &reply)?;
@@ -935,6 +972,9 @@ fn print_json(value: &Value) -> Result<()> {
 
 fn print_confirmed_outcome(value: &Value) -> Result<()> {
     print_json(value)?;
+    if value.get("type").and_then(Value::as_str) != Some("confirmed") {
+        note_host_decision(HostDecision::Outcome(value.clone()));
+    }
     match value.get("type").and_then(Value::as_str) {
         Some("confirmed") => Ok(()),
         Some(kind) => Err(format!(
@@ -1955,14 +1995,17 @@ fn continuity(
 }
 
 fn run(mut args: Args) -> Result<()> {
-    if let Some(socket) = args.optional("socket") {
-        let _ = SOCKET.set(path(socket));
+    let socket_argument = args.optional("socket");
+    if let Some(socket) = &socket_argument {
+        let _ = SOCKET.set(path(socket.clone()));
     }
     match args.command.to_string_lossy().as_ref() {
         #[cfg(unix)]
         "workspace" => workspace::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
+        #[cfg(unix)]
+        "shell" => shell::run(args),
         #[cfg(unix)]
         "selected-exchange" => {
             let phase = args.required("phase")?;
@@ -2269,7 +2312,9 @@ fn run(mut args: Args) -> Result<()> {
                 .map_err(|e| format!("cannot print host output: {e}"))
         }
         "keygen" => {
-            if SOCKET.get().is_some() {
+            // Refuse a socket named for this command; a session (`mini shell`)
+            // may already have pinned one for its other verbs.
+            if socket_argument.is_some() {
                 return Err("keygen does not use a host socket".to_owned());
             }
             let secret = path(args.required("secret")?);
