@@ -1,0 +1,14 @@
+{
+  "host": "$FRESH/candidate/bin/minidregg-host",
+  "mini": "$FRESH/candidate/bin/mini",
+  "store": "$FRESH/candidate/bin/minidregg-link-sqlite-store",
+  "verifier": "$FRESH/candidate/bin/minidregg-credential-signature-verifier",
+  "candidate": "$FRESH/candidate/provenance.json",
+  "sha256": {
+    "host": "723940446d3e0256bd446b07ca8d67ea9d67295d8c7cc78e08bb2487ffbe3db2",
+    "mini": "6e74ad4339fea4c36cd03e2787657dcfda43aa46c57d54c2944d4d5dbb5d03b5",
+    "store": "599bc4e6c1a04ab42e4ec4c18f4d47423e9df903006bba1ac2c2b880ff29fbfd",
+    "verifier": "f95f119664a028c15de26687b7853a5ae1e4982a83c14165afbd59ad9ec67336",
+    "candidate": "14d100f5e2bb882a3d8fba341c435f4c0627856b6d2abd976086f0214482256c"
+  }
+}

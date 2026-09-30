@@ -1,0 +1,81 @@
+STEP J0: clean start: private single-authority service, one sponsor ...
+STEP J0 PASS 11.049s service up and a signed read answered in 11.014s
+STEP J1: enroll an independently generated newcomer key ...
+STEP J1 PASS 2.661s subject 16329558529667836102, record 1; key absent from genesis/config; lookup = same receipt
+STEP J2: sponsor creates a resource under a permissive law ...
+STEP J2 PASS 2.221s object 18412643332189611453 under all[], record 2
+STEP J3: sponsor delegates observe+mutate (no control) to newcomer ...
+STEP J3 PASS 3.645s child 11393057549492902502 verbs observe,mutate, record 3
+STEP J4: newcomer signed read, writes field to 1, reads back 1 ...
+STEP J4 PASS 3.879s read 0.706s, write 2.113s, readback field 2 = 1, record 4
+STEP J5: a key with no grant: read and write refused ...
+STEP J5 PASS 14.297s 6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5
+STEP J6: stop/reopen: receipts recovered, exact retry replays ...
+STEP J6 PASS 6.031s reopen to first signed read 3.002s; J1 receipt and field 2 = 1 recovered; retry replayed tx, boundary unchanged
+STEP G: growth 10/100/500/1000: write<=5s, reopen<=60s at 1000 ...
+  growth level 10: write median 4.028s worst 6.131s, read median 1.519s, reopen 8.343s, store 172032 B
+STEP G FAIL 55.788s at 10: write 4.028s, reopen 8.343s; level 1000 not in JOURNEY_GROWTH_LEVELS, so the exit is unmeasured
+STEP J7: law replaced; newcomer's existing grant still works ...
+STEP J7 PASS 13.036s law v1 not(any[]) installed (submit 2.508s); J3 grant wrote 1->7 (submit 3.209s). The new law is still permit-all
+STEP J8: deny-all: newcomer refused, sponsor repair refused ...
+STEP J8 PASS 11.673s deny-all installed (submit 3.310s); 5/5 refused: newcomer read/propose/crafted(current root), sponsor read, sponsor repair propose; prior call replays
+STEP K4: one resource holds 32 fields and reads them back ...
+STEP K4 FAIL 20.737s field 4 of 32 refused by the Host (RejectReason.overflow); the resource holds 4 entries incl. field 1
+STEP M3: newcomer provisions itself and creates, no sponsor step ...
+STEP M3 UNBUILT 0.002s UNBUILT: no journey.d/m3.sh. Green when: a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)
+STEP M4: J1-J8 through the shell over ssh ...
+STEP M4 UNBUILT 0.002s UNBUILT: no journey.d/m4.sh. Green when: J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)
+STEP M5: Hermes does J4 through the client; killed, restarts, resolves ...
+STEP M5 UNBUILT 0.003s UNBUILT: no journey.d/m5.sh. Green when: Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)
+STEP M6: a grain: INSTALL -> START -> reachable over http ...
+STEP M6 UNBUILT 0.003s UNBUILT: no journey.d/m6.sh. Green when: a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)
+STEP M7: candidate built from portable interfaces reproduces hashes ...
+STEP M7 PASS 15.749s M7: candidate 45a99743272e reproduces 8e57b9d9a904 built in another directory (4/4 SHA-256, identical compiled inputs); run.sh served its own Store
+
+step  status      wall_s  what / detail / deciding artifact
+J0   PASS        11.049  clean start: private single-authority service, one sponsor
+                          service up and a signed read answered in 11.014s
+                          -> $FRESH/journey/world/handoff.json
+J1   PASS         2.661  enroll an independently generated newcomer key
+                          subject 16329558529667836102, record 1; key absent from genesis/config; lookup = same receipt
+                          -> $FRESH/journey/world/attempts/newcomer/submit.json
+J2   PASS         2.221  sponsor creates a resource under a permissive law
+                          object 18412643332189611453 under all[], record 2
+                          -> $FRESH/journey/world/sponsor/attempts/create-shared/outcome.json
+J3   PASS         3.645  sponsor delegates observe+mutate (no control) to newcomer
+                          child 11393057549492902502 verbs observe,mutate, record 3
+                          -> $FRESH/journey/world/sponsor/attempts/grant-newcomer/outcome.json
+J4   PASS         3.879  newcomer signed read, writes field to 1, reads back 1
+                          read 0.706s, write 2.113s, readback field 2 = 1, record 4
+                          -> $FRESH/journey/world/newcomer-workspace/attempts/first-action/outcome.json
+J5   PASS        14.297  a key with no grant: read and write refused
+                          6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5
+                          -> $FRESH/journey/steps/J5/refusals.tsv
+J6   PASS         6.031  stop/reopen: receipts recovered, exact retry replays
+                          reopen to first signed read 3.002s; J1 receipt and field 2 = 1 recovered; retry replayed tx, boundary unchanged
+                          -> $FRESH/journey/steps/J6/retry.out
+G    FAIL        55.788  growth 10/100/500/1000: write<=5s, reopen<=60s at 1000
+                          at 10: write 4.028s, reopen 8.343s; level 1000 not in JOURNEY_GROWTH_LEVELS, so the exit is unmeasured
+                          -> $FRESH/journey/steps/G/levels.tsv
+J7   PASS        13.036  law replaced; newcomer's existing grant still works
+                          law v1 not(any[]) installed (submit 2.508s); J3 grant wrote 1->7 (submit 3.209s). The new law is still permit-all
+                          -> $FRESH/journey/world/newcomer-workspace/attempts/after-law-v2/outcome.json
+J8   PASS        11.673  deny-all: newcomer refused, sponsor repair refused
+                          deny-all installed (submit 3.310s); 5/5 refused: newcomer read/propose/crafted(current root), sponsor read, sponsor repair propose; prior call replays
+                          -> $FRESH/journey/steps/J8/refusals.tsv
+K4   FAIL        20.737  one resource holds 32 fields and reads them back
+                          field 4 of 32 refused by the Host (RejectReason.overflow); the resource holds 4 entries incl. field 1
+                          -> $FRESH/journey/steps/K4/s204.err
+M3   UNBUILT      0.002  newcomer provisions itself and creates, no sponsor step
+                          UNBUILT: no journey.d/m3.sh. Green when: a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)
+M4   UNBUILT      0.002  J1-J8 through the shell over ssh
+                          UNBUILT: no journey.d/m4.sh. Green when: J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)
+M5   UNBUILT      0.003  Hermes does J4 through the client; killed, restarts, resolves
+                          UNBUILT: no journey.d/m5.sh. Green when: Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)
+M6   UNBUILT      0.003  a grain: INSTALL -> START -> reachable over http
+                          UNBUILT: no journey.d/m6.sh. Green when: a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)
+M7   PASS        15.749  candidate built from portable interfaces reproduces hashes
+                          M7: candidate 45a99743272e reproduces 8e57b9d9a904 built in another directory (4/4 SHA-256, identical compiled inputs); run.sh served its own Store
+                          -> $FRESH/journey/steps/M7/m7-result.json
+
+FRONTIER: G   (accepted records: 22; load average start/end: 5.24 6.21 6.51 / 7.48 7.15 6.83 on 24 CPUs; result: $FRESH/journey/journey-result.json)

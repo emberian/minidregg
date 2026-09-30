@@ -1,0 +1,52 @@
+{
+  "type": "minidregg-candidate-provenance-v1",
+  "source": {
+    "commit": "45a99743272e6601a22a75b98367abbc84d4af44",
+    "archive": "source.tar",
+    "archiveSha256": "b5ea20b156a369b6ee5bc082b568088bf76647d5d15b3665dec62f550c513652",
+    "origin": "supplied-archive",
+    "fileList": "logs/source-files.sha256",
+    "fileListSha256": "e418d5e66957c2168ea20929d762a5fe8bf175f8696a11c0b1ea9ed8ca12eba0"
+  },
+  "target": "x86_64-linux",
+  "toolchains": {
+    "leanToolchain": "leanprover/lean4:v4.30.0",
+    "lean": "Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)",
+    "lake": "Lake version 5.0.0-src+d024af0 (Lean version 4.30.0)",
+    "mathlibRev": "1c2b90b13009c65b090d95a83c98e248deafb6f1",
+    "rustToolchain": "nightly-2026-06-21",
+    "rustc": "rustc 1.98.0-nightly (8b6558a02 2026-06-20);binary: rustc;commit-hash: 8b6558a02b2774acfb25cf15e199467c37ba7490;commit-date: 2026-06-20;host: x86_64-unknown-linux-gnu;release: 1.98.0-nightly;LLVM version: 22.1.7;",
+    "cargo": "cargo 1.98.0-nightly (a595d0da2 2026-06-20)",
+    "cc": "cc (Ubuntu 15.2.0-4ubuntu4) 15.2.0",
+    "rustflags": "remap source=/minidregg, CARGO_HOME=/cargo"
+  },
+  "binaries": {
+    "host": {
+      "path": "bin/minidregg-host",
+      "sha256": "723940446d3e0256bd446b07ca8d67ea9d67295d8c7cc78e08bb2487ffbe3db2"
+    },
+    "mini": {
+      "path": "bin/mini",
+      "sha256": "6e74ad4339fea4c36cd03e2787657dcfda43aa46c57d54c2944d4d5dbb5d03b5"
+    },
+    "store": {
+      "path": "bin/minidregg-link-sqlite-store",
+      "sha256": "599bc4e6c1a04ab42e4ec4c18f4d47423e9df903006bba1ac2c2b880ff29fbfd"
+    },
+    "verifier": {
+      "path": "bin/minidregg-credential-signature-verifier",
+      "sha256": "f95f119664a028c15de26687b7853a5ae1e4982a83c14165afbd59ad9ec67336"
+    }
+  },
+  "hostBuildManifest": {
+    "path": "work/host-build/manifest.txt",
+    "sha256": "77f3ab92fc0d75d5fbd7f110b17eb19ce284f2b762c1e2ce12f18bf8351bd668"
+  },
+  "seconds": {
+    "leanPackagesAndMathlibCache": 117,
+    "nativeHost": 1629,
+    "rust": 46,
+    "total": 1796
+  },
+  "builtUtc": "2026-09-30T08:21:54Z"
+}
