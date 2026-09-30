@@ -3,18 +3,14 @@
 
 `Theory/CanonicalTransition.lean` derives `PreparedTurn` from a
 `ValidatedPatch` and proves its pre- and post-roots are derived rather than
-supplied.  Those theorems are the point of the module and they are quantified
-over a `PreparedTurn` the file never exhibits.
+supplied.  Those theorems are quantified over a `PreparedTurn` the module never
+exhibits.
 
-`CellStateWitness` now carries a two-state schema on purpose: its cell holds
-`false`, its validated patch writes `true`, and the root is the encoded byte.
-So the prepared turn built here does not merely inhabit the type -- it changes
-the canonical state, and `preparedTurn_moves` shows the derived post-root
-differs from the derived pre-root.
-
-That distinction matters.  A witness over a singleton state space would
-inhabit `PreparedTurn` while leaving "the canonical post is derived from the
-validated patch" untested, because every post would equal every pre.
+`CellStateWitness`'s cell holds `false`, its validated patch writes `true`, and
+the root is the encoded byte.  So the prepared turn built here does not merely
+inhabit the type -- it changes the canonical state, and `preparedTurn_moves`
+shows the derived post-root differs from the derived pre-root.  A witness over
+a singleton state space would inhabit `PreparedTurn` while testing nothing.
 -/
 import Theory.CanonicalTransition
 import Theory.CellStateWitness
@@ -25,12 +21,13 @@ open Minidregg.Theory
 open Minidregg.Theory.CanonicalTransition
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CellStateWitness
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
 /-- The validated patch obtained by running the validator. -/
-theorem validated : ValidatedPatch materializer cell honestPatch :=
+theorem validated : ValidatedPatch materializer cell ⟨0⟩ honestPatch :=
   honestPatch_accepted.choose
 
 /-- **`PreparedTurn` is inhabited**, and its post-state is derived from that
@@ -42,23 +39,26 @@ theorem preparedTurn_nonempty :
     Nonempty (PreparedTurn materializer cell Unit) := ⟨preparedTurn⟩
 
 /-- The pre-root is the cell's, by computation. -/
-theorem preparedTurn_preRoot : preparedTurn.preRoot = ⟨0⟩ := rfl
+theorem preparedTurn_preRoot : preparedTurn.preRoot = ⟨0⟩ := by decide
 
-/-- The post-root is the patched cell's, by computation -- the field moved from
+/-- The post-root is the patched cell's, by computation -- the value moved from
 `false` to `true`, so the encoded byte and hence the root moved with it. -/
 theorem preparedTurn_postRoot : preparedTurn.postRoot = ⟨1⟩ := by decide
 
-/-- **The transition is not trivial.**  This is what a singleton state space
-would have hidden: the derived post-root genuinely differs from the derived
-pre-root, so "canonical post derived from the validated patch" is exercised
-rather than merely typed. -/
+/-- **The transition is not trivial.** -/
 theorem preparedTurn_moves : preparedTurn.preRoot ≠ preparedTurn.postRoot := by
   rw [preparedTurn_preRoot, preparedTurn_postRoot]
   decide
 
-/-- And the eager nullifier defaults to absent: preparing a turn does not mint
-one. -/
+/-- The eager nullifier defaults to absent: preparing a turn does not mint one. -/
 theorem preparedTurn_no_nullifier : preparedTurn.nullifier = none := rfl
+
+/-- The delta's footprint is the patch's syntactic write footprint, and the one
+address in it did change: the frame law's premise is not vacuous here. -/
+theorem preparedTurn_footprint_changes :
+    sole ∈ preparedTurn.delta.footprint ∧
+      preparedTurn.post.logical sole ≠ cell.logical sole := by
+  decide
 
 /-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms preparedTurn_nonempty
@@ -70,5 +70,7 @@ theorem preparedTurn_no_nullifier : preparedTurn.nullifier = none := rfl
 #guard_msgs (whitespace := lax) in #print axioms preparedTurn_moves
 /-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_no_nullifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms preparedTurn_no_nullifier
+/-- info: 'Minidregg.Theory.CanonicalTransitionWitness.preparedTurn_footprint_changes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms preparedTurn_footprint_changes
 
 end Minidregg.Theory.CanonicalTransitionWitness
