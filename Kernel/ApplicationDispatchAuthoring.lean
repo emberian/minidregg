@@ -221,8 +221,7 @@ private def prepareForSelectedIssue (config : Config) {target : Durable}
       ticketObservationEnvelope := []
       issueIngressBytes := prior.evidence.ingressBytes }
   let selection : Selection :=
-    ⟨opened.authority.snapshot.cell.root, sessionCell.payload.root,
-      request.sessionObserveCapability⟩
+    ⟨sessionCell.payload.root, request.sessionObserveCapability⟩
   let command := ApplicationDispatchCommand.command base selection parent
   let .ok prepared := DeclaredResourceController.prepare config.deployment config.profile
     ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩

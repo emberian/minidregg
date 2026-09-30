@@ -124,8 +124,7 @@ def prepareVerified (config : Config) {target : Durable}
       config.deployment.domain pin.packageManifest pin.app packageCell
     | return .error "current package atom unavailable"
   let current : ApplicationLifecycleCompletionAuthoring.CurrentObservation :=
-    { authorityRoot := opened.authority.snapshot.cell.root
-      appRoot := appCell.payload.root
+    { appRoot := appCell.payload.root
       packageRoot := packageCell.payload.root
       appCapability := pin.appCapability
       appObserveCapability := pin.appObserveCapability

@@ -48,7 +48,7 @@ grain_intent() {
     --slurpfile source "$EVIDENCE/$primary/view.json" \
     --slurpfile challenge "$EVIDENCE/$primary/challenge.json" \
     '{grain:{task:$t,subject:$s,capability:$c,observeCapability:$c,
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",
       expectedTargetRoot:$source[0].cell.root,
       context:{operationId:$n,payload:$label},
       before:{generation:$source[0].cell.grain.generation,

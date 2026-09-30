@@ -118,7 +118,6 @@ def prepareVerified (config : Config) {target : Durable}
     { originalBegin := begin
       originalClaim := claim
       physical := physical
-      currentAuthorityRoot := opened.authority.snapshot.cell.root
       currentAppRoot := appCell.payload.root
       currentPackageRoot := packageCell.payload.root
       appCapability := pin.appCapability

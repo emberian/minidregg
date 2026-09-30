@@ -512,7 +512,7 @@ mod tests {
         let header = b"exact source signing header";
         let slot = json!({"role":"2","index":"0","headerHex":hex(header),
             "signing":{"decoded":true,"keyId":"9","keyEpoch":"1",
-                "algorithm":"1","authorityRoot":"12", "domainHex":"ab",
+                "algorithm":"1","validUntil":"12", "domainHex":"ab",
                 "messageHex":"cd", "nullifier":"13"}});
         let signer = json!({"role":"2","index":"0","keyId":"9","keyEpoch":"1",
             "headerSha256":digest(header),"keyPath":utf8_path(&key_path).unwrap(),

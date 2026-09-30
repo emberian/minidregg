@@ -378,14 +378,6 @@ pub(super) fn plan_content_birth(
         &tool.parent_capability,
         &tool.parent_observe_capability,
     )?;
-    let authority_root = tool_view
-        .get("authorityRoot")
-        .and_then(Value::as_str)
-        .ok_or("signed tool authorityRoot absent")?;
-    crate::decimal(authority_root, "signed tool authorityRoot")?;
-    if parent_view.get("authorityRoot").and_then(Value::as_str) != Some(authority_root) {
-        return Err("tool and parent observations have different authority roots".into());
-    }
     let height = tool_view
         .get("height")
         .and_then(Value::as_str)
@@ -423,7 +415,7 @@ pub(super) fn plan_content_birth(
     });
     let source = json!({"subject":tool.subject,"nonce":nonce.to_string(),
     "grainBirth":{"tariff":{"base":family.tariff_base,"perBirth":family.tariff_per_birth},
-        "birth":birth,"authorityRoot":authority_root,
+        "birth":birth,
         "tool":tool_peer,"parent":parent_peer},
     "grants":[
         {"kind":"object","target":family.factory_target,

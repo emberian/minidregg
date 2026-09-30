@@ -242,7 +242,7 @@ def inspectPlanBytes (bytes : List UInt8) : Except String Lean.Json := do
      ("signingKeyId", toJson (Nat.repr header.keyId)),
      ("signingKeyEpoch", toJson (Nat.repr header.keyEpoch)),
      ("signingAlgorithm", toJson (Nat.repr header.algorithm)),
-     ("signingAuthorityRoot", toJson (Nat.repr header.authorityRoot.value)),
+     ("signingValidUntil", toJson (Nat.repr header.validUntil)),
      ("signingHeaderHex", toJson (Minidregg.Host.Json.encodeHex plan.signingHeader))]
 
 end Minidregg.Host.FnConsumerFrontierPlan

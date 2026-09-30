@@ -185,11 +185,11 @@ def assemble (preimage signature : List UInt8)
 /-- Canonical ingress assembly only. Caller-supplied capability and roots are
 rechecked against the recipient's current opened state by admission. -/
 def assembleIngress (packetBytes : List UInt8) (capability : CapabilityId)
-    (authorityRoot targetRoot : Digest) : Except String (List UInt8) := do
+    (targetRoot : Digest) : Except String (List UInt8) := do
   let some packet := packetCodec.decode packetBytes
     | fail "noncanonical owner packet"
   unless packet.signature.length == 64 && packet.release.bounded do
     fail "owner packet exceeds release profile"
-  pure <| ingressCodec.encode ⟨packet, capability, authorityRoot, targetRoot⟩
+  pure <| ingressCodec.encode ⟨packet, capability, targetRoot⟩
 
 end Minidregg.Host.FnSelectiveReleaseAuthoring

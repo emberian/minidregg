@@ -191,7 +191,7 @@ EOF
   --intent "$EVIDENCE/query-before.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-before" >"$EVIDENCE/query-before.stdout"
 TARGET_ROOT=$(page_root "$EVIDENCE/query-before/view.json")
-AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
+AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/query-before/challenge.json")
 jq -e '.cell.entries == []' "$EVIDENCE/query-before/view.json" >/dev/null
@@ -206,7 +206,6 @@ cat >"$EVIDENCE/content-intent.json" <<EOF
       "type": "invoke",
       "command": {
         "subject": "7",
-        "expectedAuthorityRoot": "$AUTHORITY_ROOT",
         "nonce": "30003",
         "targets": [{
           "kind": "object",
@@ -306,7 +305,7 @@ EOF
   --intent "$EVIDENCE/query-scalar-before.json" --key "$EVIDENCE/alice.key" --view resource \
   --dir "$EVIDENCE/query-scalar-before" >"$EVIDENCE/query-scalar-before.stdout"
 SCALAR_ROOT=$(page_root "$EVIDENCE/query-scalar-before/view.json")
-JOINT_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
+JOINT_AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/query-scalar-before/challenge.json")
 jq -e '(.cell.entries | length) == 1 and
@@ -324,7 +323,6 @@ cat >"$EVIDENCE/joint-intent.json" <<EOF
       "type": "invoke",
       "command": {
         "subject": "7",
-        "expectedAuthorityRoot": "$JOINT_AUTHORITY_ROOT",
         "nonce": "30007",
         "targets": [
           {

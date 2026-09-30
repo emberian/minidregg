@@ -295,7 +295,7 @@ fn check_approval(
         "signingKeyId",
         "signingKeyEpoch",
         "signingAlgorithm",
-        "signingAuthorityRoot",
+        "signingValidUntil",
     ] {
         if member(approval, name)? != member(inspection, name)? {
             return Err(format!("fn namespace {name} differs from private approval"));
@@ -659,7 +659,7 @@ mod tests {
             "controlBindingHex":"14","gatewaySubject":"8","gatewayTarget":"601",
             "gatewayCapability":"63","expectedAuthorityRoot":"15",
             "expectedTargetRoot":"16","signingKeyId":"77","signingKeyEpoch":"1",
-            "signingAlgorithm":"1","signingAuthorityRoot":"17",
+            "signingAlgorithm":"1","signingValidUntil":"17",
             "signingHeaderHex":"010203"});
         let mut approval = inspection.clone();
         approval["type"] = json!(APPROVAL);
@@ -676,7 +676,7 @@ mod tests {
         changed["planSha256"] = json!(digest(&[1, 2, 4]));
         assert!(check_approval(&changed, &inspection, &plan, &signing).is_err());
         changed = approval.clone();
-        changed["signingAuthorityRoot"] = json!("15");
+        changed["signingValidUntil"] = json!("15");
         assert!(check_approval(&changed, &inspection, &plan, &signing).is_err());
     }
 
@@ -720,7 +720,7 @@ mod tests {
             "gatewaySubject":"8","gatewayTarget":"601","gatewayCapability":"63",
             "expectedAuthorityRoot":"15","expectedTargetRoot":"16",
             "signingKeyId":"77","signingKeyEpoch":"1","signingAlgorithm":"1",
-            "signingAuthorityRoot":"17","signingHeaderHex":"010203"});
+            "signingValidUntil":"17","signingHeaderHex":"010203"});
         retain_json(&state.join("plan.json"), &inspection).unwrap();
         let host = root.join("host.sh");
         let script = format!("#!/bin/sh\nif [ \"$2\" != inspect ]; then exit 1; fi\nif [ \"$3\" = fn-consumer-namespace-plan ]; then cp '{}' \"$5\"; else printf '%s\\n' '{{\"type\":\"confirmed\",\"transactionId\":\"1\",\"eventId\":\"2\",\"acceptedCount\":\"3\",\"worldRoot\":\"4\"}}' > \"$5\"; fi\n", state.join("plan.json").display());

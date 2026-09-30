@@ -214,7 +214,7 @@ def prepareVerified (config : Config) {target : Durable}
       payload := .content ⟨[action]⟩ }
   let command := ApplicationGrainSession.Operation.command
     (.enroll appState.generation) ticket.participant.subject
-    opened.authority.snapshot.cell.root request.nonce session
+    request.nonce session
     ticket.participant.sessionCapability sessionCell.payload.root before
     [descriptorTarget] (some request.sessionObserveCapability)
   if command.targets != [sessionTarget, descriptorTarget] then

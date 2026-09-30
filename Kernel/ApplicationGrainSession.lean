@@ -201,12 +201,12 @@ def Operation.target (operation : Operation) (session : Nat)
 /-- The descriptor target must participate in an enrollment command. This
 constructor is authoring only and never confers a physical dispatch permit. -/
 def Operation.command (operation : Operation) (subject : SubjectId)
-    (authorityRoot : Digest) (nonce session : Nat) (capability : CapabilityId)
+    (nonce session : Nat) (capability : CapabilityId)
     (expectedRoot : Digest) (before : State)
     (descriptorTargets : List DeclaredResourceController.Target := [])
     (observeCapability : Option CapabilityId := none) :
     DeclaredResourceController.Command :=
-  { subject := subject, expectedAuthorityRoot := authorityRoot, nonce := nonce,
+  { subject := subject, nonce := nonce,
     targets := operation.target session capability expectedRoot before observeCapability :: descriptorTargets }
 
 end Minidregg.Kernel.ApplicationGrainSession

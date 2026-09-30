@@ -86,14 +86,13 @@ structure Command where
   target : Nat
   subject : SubjectId
   capability : CapabilityId
-  expectedAuthorityRoot : Digest
   schemaVersion : Nat
   expectedTargetRoot : Digest
   nonce : Nat
   actions : List Action
   deriving DecidableEq, Repr
 
-abbrev CommandWire := ResourceKind × Nat × SubjectId × CapabilityId × Digest ×
+abbrev CommandWire := ResourceKind × Nat × SubjectId × CapabilityId ×
   Nat × Digest × Nat × List Action
 
 def commandWireStream : StreamCodec CommandWire :=
@@ -101,19 +100,17 @@ def commandWireStream : StreamCodec CommandWire :=
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
-          (StreamCodec.product digestStream
-            (StreamCodec.product StreamCodec.nat
-              (StreamCodec.product digestStream
-                (StreamCodec.product StreamCodec.nat (StreamCodec.list actionStream))))))))
+          (StreamCodec.product StreamCodec.nat
+            (StreamCodec.product digestStream
+              (StreamCodec.product StreamCodec.nat (StreamCodec.list actionStream)))))))
 
 def Command.toWire (command : Command) : CommandWire :=
   (command.kind, command.target, command.subject, command.capability,
-    command.expectedAuthorityRoot, command.schemaVersion, command.expectedTargetRoot,
-    command.nonce, command.actions)
+    command.schemaVersion, command.expectedTargetRoot, command.nonce, command.actions)
 
 def Command.ofWire : CommandWire → Command
-  | (kind, target, subject, capability, authorityRoot, version, targetRoot, nonce, actions) =>
-      ⟨kind, target, subject, capability, authorityRoot, version, targetRoot, nonce, actions⟩
+  | (kind, target, subject, capability, version, targetRoot, nonce, actions) =>
+      ⟨kind, target, subject, capability, version, targetRoot, nonce, actions⟩
 
 @[simp] theorem Command.ofWire_toWire (command : Command) :
     Command.ofWire command.toWire = command := by cases command; rfl
@@ -121,7 +118,8 @@ def Command.ofWire : CommandWire → Command
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap commandWireStream Command.toWire Command.ofWire Command.ofWire_toWire
 
-def commandFrame : List UInt8 := "DREGG/RESOURCE/INVOKE".toUTF8.toList ++ [1]
+/-- Version 2: the command carries no authority root (`Theory.PlanBinding`). -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/INVOKE".toUTF8.toList ++ [2]
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command

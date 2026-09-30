@@ -52,9 +52,14 @@ structure Target where
   observeCapability : Option CapabilityId := none
   deriving DecidableEq, Repr
 
+/-- A transaction names what it read per target (`expectedTargetRoot`, a whole
+cell it reads) and nothing about the authority cell's root: its authority reads
+are the signed header's footprint (`CredentialSignatureAdmission.footprint`,
+`Theory.PlanBinding`), and every other authority check runs at admission
+against the current cell.  A command bound to the authority root was refused
+after any other agent's admission. -/
 structure Command where
   subject : SubjectId
-  expectedAuthorityRoot : Digest
   nonce : Nat
   targets : List Target
   deriving DecidableEq, Repr
@@ -99,12 +104,13 @@ def targetStream : StreamCodec Target :=
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap
     (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
-      (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat (StreamCodec.list targetStream))))
-    (fun command => (command.subject, command.expectedAuthorityRoot, command.nonce, command.targets))
-    (fun (subject, authority, nonce, targets) => ⟨subject, authority, nonce, targets⟩)
+      (StreamCodec.product StreamCodec.nat (StreamCodec.list targetStream)))
+    (fun command => (command.subject, command.nonce, command.targets))
+    (fun (subject, nonce, targets) => ⟨subject, nonce, targets⟩)
     (by intro command; cases command; rfl)
 
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [3]
+/-- Version 4: no authority root in the command. Version-3 commands refuse. -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [4]
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -222,7 +228,7 @@ def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambie
 
 inductive Reject where
   | malformedCommand | emptyTargets | duplicateTargets | emptyActions | unsupportedVersion
-  | missingTarget | wrongRole | staleTarget | staleAuthority
+  | missingTarget | wrongRole | staleTarget
   | scalar (reason : DeclaredResourceScalar.Reject)
   | content (reason : ContentResource.Reject)
   | patchValidation | invalidPost | authorityUnavailable | directoryUnavailable
@@ -279,7 +285,7 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
 def scalarCommand (command : Command) (target : Target)
     (actions : List DeclaredActionLowering.Action) : DeclaredResourceScalar.Command :=
   ⟨target.kind, target.target, command.subject, target.capability,
-    command.expectedAuthorityRoot, target.schemaVersion, target.expectedTargetRoot, command.nonce, actions⟩
+    target.schemaVersion, target.expectedTargetRoot, command.nonce, actions⟩
 
 def contentAuthor (command : Command) (target : Target) : Hyperdocument.PrincipalRef :=
   ⟨command.subject, target.kind, target.capability⟩
@@ -422,7 +428,6 @@ write leaves the authority cell, its root and its bytes unchanged. -/
 def authorityReadPatch : Patch CredentialAuthorityState.layout := []
 
 structure MarkerMode (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) where
-  rootExact : command.expectedAuthorityRoot = snapshot.cell.root
   unused : snapshot.spent (operationMarker snapshot.domain semantics command) = false
   prepared : CredentialAuthorityDomain.Prepared snapshot authorityReadPatch
 
@@ -446,13 +451,11 @@ def markerFamily (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : 
 
 def prepareMarker (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
     Except Reject (MarkerMode snapshot semantics command) :=
-  if root : command.expectedAuthorityRoot = snapshot.cell.root then
-    if unused : snapshot.spent (operationMarker snapshot.domain semantics command) = false then
-      match CredentialAuthorityDomain.prepare snapshot authorityReadPatch with
-      | none => .error .authorityPreparation
-      | some prepared => .ok ⟨root, unused, prepared⟩
-    else .error .nullifierUsed
-  else .error .staleAuthority
+  if unused : snapshot.spent (operationMarker snapshot.domain semantics command) = false then
+    match CredentialAuthorityDomain.prepare snapshot authorityReadPatch with
+    | none => .error .authorityPreparation
+    | some prepared => .ok ⟨unused, prepared⟩
+  else .error .nullifierUsed
 
 def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
     CanonicalPolicyRegistry.PayloadStore where

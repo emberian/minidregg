@@ -25,24 +25,24 @@ def sourceWireStream : StreamCodec SourceWire :=
       (StreamCodec.list IntStream.intStream))
 
 def sourceFrame : List UInt8 :=
-  "DREGG/GRAIN-RESOURCE-BIRTH/HOST-SOURCE/v1".toUTF8.toList
+  "DREGG/GRAIN-RESOURCE-BIRTH/HOST-SOURCE/v2".toUTF8.toList
 
 def toWire (source : Source) : SourceWire :=
   ((ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).encode source.birth,
-    [source.authorityRoot.value, source.toolTask, source.toolCapability.value,
+    [source.toolTask, source.toolCapability.value,
       source.toolObserveCapability.value, source.toolRoot.value,
       source.parentTask, source.parentCapability.value,
       source.parentObserveCapability.value, source.parentRoot.value],
     source.toolBefore.values ++ source.parentBefore.values)
 
 def fromWire : SourceWire → Option Source
-  | (birthBytes, [authorityRoot, toolTask, toolCapability, toolObserveCapability,
+  | (birthBytes, [toolTask, toolCapability, toolObserveCapability,
       toolRoot, parentTask, parentCapability, parentObserveCapability, parentRoot],
       [toolGeneration, toolStatus, toolRemaining, toolReserved,
         parentGeneration, parentStatus, parentRemaining, parentReserved]) => do
       let birth ← (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).decode birthBytes
       some {
-        birth := birth, authorityRoot := ⟨authorityRoot⟩,
+        birth := birth,
         toolTask := toolTask, toolCapability := ⟨toolCapability⟩,
         toolObserveCapability := ⟨toolObserveCapability⟩, toolRoot := ⟨toolRoot⟩,
         toolBefore := ⟨toolGeneration, toolStatus, toolRemaining, toolReserved⟩,
@@ -54,7 +54,7 @@ def fromWire : SourceWire → Option Source
 
 theorem fromWire_toWire (source : Source) : fromWire (toWire source) = some source := by
   cases source with
-  | mk birth authorityRoot toolTask toolCapability toolObserveCapability toolRoot toolBefore
+  | mk birth toolTask toolCapability toolObserveCapability toolRoot toolBefore
       parentTask parentCapability parentObserveCapability parentRoot parentBefore =>
       have decoded := (ResourceBirthCodec.descriptorCodec CanonicalCellRegistry.registry).decode_encode birth
       cases toolBefore

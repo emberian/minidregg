@@ -39,7 +39,6 @@ structure Report where
   subject : SubjectId
   target : Nat
   capability : CapabilityId
-  expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
   deriving Repr
 
@@ -148,7 +147,7 @@ def marker (domain semantics : Digest) (subject : SubjectId)
 
 def progressCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
-  ⟨report.subject, report.expectedAuthorityRoot,
+  ⟨report.subject,
     progressNonce domain semantics report.evidence,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
@@ -175,7 +174,7 @@ def originalOwnR (pin : FnGatewayPolicy.Pin) (scope : FnConsumerProgress.Scope)
   if bytes.length > maxEvidenceBytes then none else
   let evidence ← evidenceCodec.decode bytes
   let report : Report := ⟨evidence, command.subject, target.target,
-    target.capability, command.expectedAuthorityRoot, target.expectedTargetRoot⟩
+    target.capability, target.expectedTargetRoot⟩
   if evidence.application == pin.application && evidence.scope == scope &&
       evidence.valid && command.subject == pin.subject &&
       target.target == pin.target && target.capability == pin.capability &&

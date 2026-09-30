@@ -66,11 +66,20 @@ def canonicalRegistryBytes : List UInt8 :=
 def canonicalRegistryCommitment : Digest :=
   registryDigest canonicalRegistryBytes
 
+/-- The plan's authority footprint bytes, as the controller sees them at
+admission; the signed header must carry exactly these. -/
+def canonicalFootprint : List UInt8 := [3, 1, 4]
+
+/-- The admission height. -/
+def canonicalHeight : Nat := 6
+
 def canonicalState : ControllerState where
   codecVersion := stateCodecVersion
   authorityRoot := attenuatedCell.root
   registryCommitment := canonicalRegistryCommitment
   registryEpoch := canonicalRegistry.registryEpoch
+  footprint := canonicalFootprint
+  height := canonicalHeight
   consumedNullifiers := []
 
 def canonicalStateBytes : List UInt8 := stateCodec.encode canonicalState
@@ -106,8 +115,8 @@ def signatureNullifier : Nat := 44001
 
 def canonicalHeader : SignedHeader where
   codecVersion := envelopeCodecVersion
-  authorityRoot := attenuatedCell.root
-  registryCommitment := canonicalRegistryCommitment
+  footprint := canonicalFootprint
+  validUntil := canonicalHeight + 1
   keyId := canonicalKey.keyId
   keyEpoch := canonicalKey.keyEpoch
   algorithm := canonicalKey.algorithm
@@ -356,10 +365,6 @@ def withCommitment (registry : KeyRegistryProjection) :
       registryCommitment := commitment
       registryEpoch := registry.registryEpoch }, commitment)
 
-def envelopeForCommitment (commitment : Digest)
-    (header : SignedHeader := canonicalHeader) : SignedEnvelope :=
-  { canonicalEnvelope with
-    header := { header with registryCommitment := commitment } }
 
 @[simp] theorem malformed_state_rejected :
     prepare (NativeError := Unit) useRequest.subject.value credentialDomain
@@ -375,49 +380,44 @@ def envelopeForCommitment (commitment : Digest)
   rw [canonical_state_decodes]
   rfl
 
-def staleAuthorityEnvelope : SignedEnvelope :=
+/-- **Refuted pole.**  A header whose footprint differs from the values the
+controller reads at admission (a read address moved) is refused. -/
+def staleFootprintEnvelope : SignedEnvelope :=
   { canonicalEnvelope with
-    header := { canonicalHeader with
-      authorityRoot := ⟨attenuatedCell.root.value + 1⟩ } }
+    header := { canonicalHeader with footprint := [3, 1, 5] } }
 
-@[simp] theorem stale_authority_rejected :
+@[simp] theorem stale_footprint_rejected :
     prepare (NativeError := Unit) useRequest.subject.value credentialDomain
       canonicalMessage canonicalStateBytes canonicalRegistryBytes
-      (envelopeCodec.encode staleAuthorityEnvelope) =
-      .error .staleAuthority := by
+      (envelopeCodec.encode staleFootprintEnvelope) =
+      .error .footprintStale := by
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalStateBytes, canonicalState, canonicalRegistry, staleAuthorityEnvelope,
-    canonicalEnvelope, canonicalHeader, canonicalKey,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, staleFootprintEnvelope,
+    canonicalEnvelope, canonicalHeader, canonicalKey, canonicalFootprint,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion,
     KeyRegistryProjection.findKey]
-  intro equal
-  have values := congrArg Digest.value equal
-  simp at values
 
-def wrongCommitmentEnvelope : SignedEnvelope :=
+def expiredEnvelope : SignedEnvelope :=
   { canonicalEnvelope with
-    header := { canonicalHeader with
-      registryCommitment := ⟨canonicalRegistryCommitment.value + 1⟩ } }
+    header := { canonicalHeader with validUntil := canonicalHeight - 1 } }
 
-@[simp] theorem wrong_registry_commitment_rejected :
+/-- A plan admitted past its signed `validUntil` is refused. -/
+@[simp] theorem expired_plan_rejected :
     prepare (NativeError := Unit) useRequest.subject.value credentialDomain
       canonicalMessage canonicalStateBytes canonicalRegistryBytes
-      (envelopeCodec.encode wrongCommitmentEnvelope) =
-      .error .wrongRegistryCommitment := by
+      (envelopeCodec.encode expiredEnvelope) =
+      .error .expired := by
   unfold prepare
   rw [canonical_state_decodes, canonical_registry_decodes,
     envelopeCodec.decode_encode]
-  simp [canonicalStateBytes, canonicalState, canonicalRegistry, wrongCommitmentEnvelope,
-    canonicalEnvelope, canonicalHeader, canonicalKey,
+  simp [canonicalStateBytes, canonicalState, canonicalRegistry, expiredEnvelope,
+    canonicalEnvelope, canonicalHeader, canonicalKey, canonicalFootprint, canonicalHeight,
     canonicalRegistryCommitment, canonicalRegistryBytes, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion,
     KeyRegistryProjection.findKey]
-  intro equal
-  have values := congrArg Digest.value equal
-  simp at values
 
 def unknownKeyEnvelope : SignedEnvelope :=
   { canonicalEnvelope with
@@ -502,7 +502,7 @@ def rotatedRegistry : KeyRegistryProjection :=
 def rotatedState : ControllerState := (withCommitment rotatedRegistry).1
 def rotatedCommitment : Digest := (withCommitment rotatedRegistry).2
 def oldEpochAfterRotation : SignedEnvelope :=
-  envelopeForCommitment rotatedCommitment
+  canonicalEnvelope
 
 @[simp] theorem rotated_key_selected :
     rotatedRegistry.findKey canonicalKey.keyId = some rotatedKey := by
@@ -518,8 +518,7 @@ def oldEpochAfterRotation : SignedEnvelope :=
   rw [stateCodec.decode_encode, registryCodec.decode_encode,
     envelopeCodec.decode_encode]
   simp [rotatedState, rotatedCommitment, withCommitment, rotatedRegistry,
-    rotatedKey, oldEpochAfterRotation, envelopeForCommitment,
-    canonicalState, canonicalRegistry, canonicalEnvelope, canonicalHeader,
+    rotatedKey, oldEpochAfterRotation, canonicalState, canonicalRegistry, canonicalEnvelope, canonicalHeader,
     canonicalKey, canonicalRegistryCommitment, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion, credentialDomain,
     KeyRegistryProjection.findKey]
@@ -529,7 +528,7 @@ def staleRegistry : KeyRegistryProjection :=
   { canonicalRegistry with keys := [staleKey] }
 def staleState : ControllerState := (withCommitment staleRegistry).1
 def staleCommitment : Digest := (withCommitment staleRegistry).2
-def staleEnvelope : SignedEnvelope := envelopeForCommitment staleCommitment
+def staleEnvelope : SignedEnvelope := canonicalEnvelope
 
 @[simp] theorem stale_key_selected :
     staleRegistry.findKey canonicalKey.keyId = some staleKey := by
@@ -544,7 +543,7 @@ def staleEnvelope : SignedEnvelope := envelopeForCommitment staleCommitment
   rw [stateCodec.decode_encode, registryCodec.decode_encode,
     envelopeCodec.decode_encode]
   simp [staleState, staleCommitment, withCommitment, staleRegistry, staleKey,
-    staleEnvelope, envelopeForCommitment, canonicalState, canonicalRegistry,
+    staleEnvelope, canonicalState, canonicalRegistry,
     canonicalEnvelope, canonicalHeader, canonicalKey,
     canonicalRegistryCommitment, stateCodecVersion, registryCodecVersion,
     envelopeCodecVersion, credentialDomain, KeyRegistryProjection.findKey]

@@ -211,7 +211,6 @@ private def prepareSelectedVerified (config : Config) {target : Durable}
       capability := pin.appCapability
       packageObserveCapability := pin.packageObserveCapability
       before := before
-      authorityRoot := opened.authority.snapshot.cell.root
       appRoot := appCell.payload.root
       packageRoot := packageCell.payload.root
       packageDigest := descriptor.root

@@ -573,10 +573,7 @@ fn plan(mut args: Args) -> Result<()> {
         .ok_or("signed factory view lacks root")?;
     decimal(factory_root, "factory root")?;
     let authority_root = challenge_json
-        .get("signing")
-        .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(|first| first.get("authorityRoot"))
+        .get("authorityRoot")
         .and_then(Value::as_str)
         .ok_or("signed factory challenge lacks authority root")?;
     decimal(authority_root, "authority root")?;

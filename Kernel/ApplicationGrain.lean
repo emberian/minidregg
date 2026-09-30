@@ -276,12 +276,12 @@ def Operation.target (operation : Operation) (app : Nat) (capability : Capabilit
 This command still needs ordinary DRC admission and does not prove physical
 package install, process stop, or snapshot capture. -/
 def Operation.command (operation : Operation) (subject : SubjectId)
-    (authorityRoot : Digest) (nonce app : Nat) (capability : CapabilityId)
+    (nonce app : Nat) (capability : CapabilityId)
     (expectedRoot : Digest) (before : State)
     (contentTargets : List DeclaredResourceController.Target := [])
     (observeCapability : Option CapabilityId := none) :
     DeclaredResourceController.Command :=
-  { subject := subject, expectedAuthorityRoot := authorityRoot, nonce := nonce,
+  { subject := subject, nonce := nonce,
     targets := operation.target app capability expectedRoot before observeCapability :: contentTargets }
 
 /-- Legacy incomplete request identity retained temporarily for compatibility.

@@ -119,7 +119,6 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let (parentRoot, parentBefore) ← currentAgent config opened request.parent.task
   let source : GrainResourceBirthController.Source :=
     { birth := birthDraft
-      authorityRoot := opened.authority.snapshot.cell.root
       toolTask := request.tool.task
       toolCapability := request.tool.capability
       toolObserveCapability := request.tool.observeCapability

@@ -50,7 +50,6 @@ theorem Tariff.charge_positive (tariff : Tariff)
 projection, policy verdict, or physical write is accepted as a field. -/
 structure Source where
   birth : ResourceBirth.Descriptor CanonicalCellRegistry.registry
-  authorityRoot : Digest
   toolTask : Nat
   toolCapability : CapabilityId
   toolObserveCapability : CapabilityId
@@ -95,7 +94,7 @@ the birth identity. -/
 def Source.grainCommand (tariff : Tariff) (source : Source) :
     DeclaredResourceController.Command :=
   AgentGrain.Operation.command (.settle (Int.ofNat (tariff.charge source.birth)))
-    source.birth.creator source.authorityRoot source.grainNonce
+    source.birth.creator source.grainNonce
     source.toolTask source.toolCapability source.toolRoot source.toolBefore
     [source.parentTarget] (some source.toolObserveCapability)
 

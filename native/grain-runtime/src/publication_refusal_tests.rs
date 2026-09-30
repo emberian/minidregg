@@ -57,7 +57,7 @@ if [ "$command" = query ]; then
     *)
       status=$(cat "$state/status")
       printf '{"cell":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"3"}}}\n' "$status" > "$dir/view.json"
-      printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300"}' > "$dir/challenge.json" ;;
+      printf '%s\n' '{"authorityRoot":"200","signing":[{}],"worldRoot":"300"}' > "$dir/challenge.json" ;;
   esac
   exit 0
 fi
@@ -576,7 +576,7 @@ fi
 "#;
     let policy_query = r#"if [ "$command" = query ] && grep -q '"view":"policy"' "$intent"; then
   cp "$state/policy-view.json" "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300"}' > "$dir/challenge.json"
+  printf '%s\n' '{"authorityRoot":"200","signing":[{}],"worldRoot":"300"}' > "$dir/challenge.json"
   exit 0
 fi
 "#;

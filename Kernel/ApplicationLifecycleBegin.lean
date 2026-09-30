@@ -71,7 +71,6 @@ structure Source where
   capability : CapabilityId
   packageObserveCapability : CapabilityId
   before : ApplicationGrain.State
-  authorityRoot : Digest
   appRoot : Digest
   packageRoot : Digest
   packageDigest : Digest
@@ -120,27 +119,26 @@ def sourceStream : StreamCodec Source :=
                   (StreamCodec.product stateStream
                     (StreamCodec.product digestStream
                     (StreamCodec.product digestStream
-                    (StreamCodec.product digestStream
                       (StreamCodec.product digestStream
                         (StreamCodec.product bytesStream
-                          (StreamCodec.product intStream bytesStream))))))))))))))))
+                          (StreamCodec.product intStream bytesStream)))))))))))))))
     (fun s => (s.kind, s.app, s.packageManifest, s.snapshotManifest,
       s.operationId, s.subject, s.managementSubject, s.capability,
       s.packageObserveCapability, s.before,
-      s.authorityRoot, s.appRoot, s.packageRoot,
+      s.appRoot, s.packageRoot,
       s.packageDigest, s.imageIdentity, s.processGeneration, s.processIdentity))
     (fun (kind, app, packageManifest, snapshotManifest, operationId, subject,
           managementSubject, capability,
-          packageObserveCapability, before, authorityRoot, appRoot, packageRoot,
+          packageObserveCapability, before, appRoot, packageRoot,
           packageDigest, imageIdentity, processGeneration, processIdentity) =>
       ⟨kind, app, packageManifest, snapshotManifest, operationId, subject,
         managementSubject, capability,
-        packageObserveCapability, before, authorityRoot, appRoot, packageRoot,
+        packageObserveCapability, before, appRoot, packageRoot,
         packageDigest, imageIdentity, processGeneration, processIdentity⟩)
     (by intro s; cases s; rfl)
 
 private def frame : List UInt8 :=
-  "DREGG/APPLICATION/LIFECYCLE-BEGIN/v1".toUTF8.toList
+  "DREGG/APPLICATION/LIFECYCLE-BEGIN/v2".toUTF8.toList
 
 private def rawSourceCodec : LawfulCodec Source where
   encode source := frame ++ sourceStream.encode source
@@ -199,7 +197,7 @@ def nonce (domain semantics : Digest) (source : Source) : Nat :=
 def command (domain semantics : Digest) (source : Source) :
     DeclaredResourceController.Command :=
   ApplicationGrain.Operation.command source.kind.operation source.subject
-    source.authorityRoot (nonce domain semantics source) source.app source.capability
+    (nonce domain semantics source) source.app source.capability
     source.appRoot source.before
 
 def stableNullifier (domain semantics : Digest) (source : Source) : StableNullifier where

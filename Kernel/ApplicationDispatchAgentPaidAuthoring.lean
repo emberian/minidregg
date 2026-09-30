@@ -176,7 +176,6 @@ def prepareReserveVerified (config : Config) {target : Durable}
       requestDigest := ApplicationDispatchCodec.requestDigest request.base.base.http }
   let command : DeclaredResourceController.Command :=
     { subject := request.payerSubject
-      expectedAuthorityRoot := verified.opened.authority.snapshot.cell.root
       nonce := ApplicationDispatchAgentReserveContext.nonce context
       targets := [AgentGrain.Operation.target (.reserve request.reserveAmount)
         request.purseTask request.purseCapability purseCell.payload.root
@@ -286,7 +285,6 @@ def preparePaidVerified (config : Config) {target : Durable}
     throw "current paid dispatch hold differs from admitted reserve"
   let command : DeclaredResourceController.Command :=
     { subject := request.context.payerSubject
-      expectedAuthorityRoot := verified.opened.authority.snapshot.cell.root
       nonce := ApplicationDispatchAgentPayer.payerNonce request.context
       targets := [AgentGrain.Operation.target .input request.context.purseTask
         request.fixed.purseCapability purseCell.payload.root purseState

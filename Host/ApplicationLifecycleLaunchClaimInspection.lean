@@ -29,7 +29,7 @@ private def slotJson (slot : SigningSlot) : Json :=
          ("keyId", decimal header.keyId),
          ("keyEpoch", decimal header.keyEpoch),
          ("algorithm", decimal header.algorithm),
-         ("authorityRoot", decimal header.authorityRoot.value),
+         ("validUntil", decimal header.validUntil),
          ("domainHex", hex header.domain),
          ("messageHex", hex header.message),
          ("nullifier", decimal header.nullifier)]
@@ -107,7 +107,6 @@ def inspectPlan (bytes : List UInt8) : Except String Json := do
      ("managementSubject", decimal source.begin.source.managementSubject.value),
      ("beforeGeneration", signed source.before.generation),
      ("beforePhase", signed source.before.phase),
-     ("currentAuthorityRoot", decimal source.currentAuthorityRoot.value),
      ("currentAppRoot", decimal source.currentAppRoot.value),
      ("currentPackageRoot", decimal source.currentPackageRoot.value),
      ("currentWorldRoot", decimal source.currentWorldRoot.value),

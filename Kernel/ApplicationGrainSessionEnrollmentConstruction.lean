@@ -146,7 +146,7 @@ def prepare (config : Config) (opened : Opened config)
       payload := .content ⟨[action]⟩ }
   let command := ApplicationGrainSession.Operation.command
     (.enroll appState.generation) ticket.participant.subject
-    opened.authority.snapshot.cell.root request.nonce session
+    request.nonce session
     ticket.participant.sessionCapability sessionCell.payload.root before
     [descriptorTarget] (some request.sessionObserveCapability)
   pure ⟨ticket, enrollment, previous, appCell.payload.root,

@@ -70,7 +70,7 @@ def selectCommand (ingress : ApplicationDispatchAdmissionIngress.Ingress) :
     ingress.dispatch.signed.commandBytes
   let first ← signed.targets.head?
   let observe ← first.observeCapability
-  some ⟨signed.expectedAuthorityRoot, first.expectedTargetRoot, observe⟩
+  some ⟨first.expectedTargetRoot, observe⟩
 
 def appState (app : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
     Option ApplicationGrain.State := do
@@ -444,12 +444,14 @@ structure SessionFingerprintKey where
   issueIngressBytes : List UInt8
   deriving DecidableEq
 
-def sessionFingerprintKey (selection : Selection)
+/-- `authorityRoot` is the authority root at admission (the prepared
+invocation's snapshot); the signed command no longer names one. -/
+def sessionFingerprintKey (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits : List Bool)
     (ticketResource : Nat) (ticketRoot : Digest)
     (enrollmentResource : Nat) (enrollmentRoot : Digest)
     (issueIngressBytes : List UInt8) : SessionFingerprintKey :=
-  ⟨selection.authorityRoot, { dispatch.app with snapshotVersion := 0 },
+  ⟨authorityRoot, { dispatch.app with snapshotVersion := 0 },
     dispatch.session, dispatch.identity, bits, ticketResource, ticketRoot,
     enrollmentResource, enrollmentRoot, issueIngressBytes⟩
 
@@ -463,73 +465,73 @@ private def workflowChangedDispatch (dispatch : ApplicationDispatchCodec.Dispatc
 checkpoint version leaves the cache key equal when the stable authority and
 rights projection is equal. Each request still independently checks those
 current roots in `checkCurrent`. -/
-theorem sessionFingerprintKey_workflow_invariant (selection : Selection)
+theorem sessionFingerprintKey_workflow_invariant (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits : List Bool)
     (ticketResource : Nat) (ticketRoot : Digest)
     (enrollmentResource : Nat) (enrollmentRoot : Digest)
     (issueIngressBytes : List UInt8)
     (nextRoot : Digest) (nextSnapshot : Int)
     (nextRequest : ApplicationDispatchCodec.Request) :
-    sessionFingerprintKey { selection with sessionRoot := nextRoot }
+    sessionFingerprintKey authorityRoot { selection with sessionRoot := nextRoot }
       (workflowChangedDispatch dispatch nextSnapshot nextRequest)
       bits ticketResource ticketRoot enrollmentResource enrollmentRoot issueIngressBytes =
-    sessionFingerprintKey selection dispatch bits ticketResource ticketRoot
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource ticketRoot
       enrollmentResource enrollmentRoot issueIngressBytes := by
   rfl
 
 /-- These are exact source-preimage distinctions. Digest inequality additionally
 relies on the deployed cSHAKE collision boundary, not a Lean axiom. -/
-theorem sessionFingerprintKey_ticket_changes (selection : Selection)
+theorem sessionFingerprintKey_ticket_changes (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits : List Bool)
     (ticketResource enrollmentResource : Nat) (ticketRoot nextTicketRoot enrollmentRoot : Digest)
     (issueIngressBytes : List UInt8) (changed : ticketRoot ≠ nextTicketRoot) :
-    sessionFingerprintKey selection dispatch bits ticketResource ticketRoot
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource ticketRoot
       enrollmentResource enrollmentRoot issueIngressBytes ≠
-    sessionFingerprintKey selection dispatch bits ticketResource nextTicketRoot
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource nextTicketRoot
       enrollmentResource enrollmentRoot issueIngressBytes := by
   intro equal
   exact changed (congrArg SessionFingerprintKey.ticketRoot equal)
 
-theorem sessionFingerprintKey_enrollment_changes (selection : Selection)
+theorem sessionFingerprintKey_enrollment_changes (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits : List Bool)
     (ticketResource enrollmentResource : Nat) (ticketRoot enrollmentRoot nextEnrollmentRoot : Digest)
     (issueIngressBytes : List UInt8) (changed : enrollmentRoot ≠ nextEnrollmentRoot) :
-    sessionFingerprintKey selection dispatch bits ticketResource ticketRoot
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource ticketRoot
       enrollmentResource enrollmentRoot issueIngressBytes ≠
-    sessionFingerprintKey selection dispatch bits ticketResource ticketRoot
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource ticketRoot
       enrollmentResource nextEnrollmentRoot issueIngressBytes := by
   intro equal
   exact changed (congrArg SessionFingerprintKey.enrollmentRoot equal)
 
-theorem sessionFingerprintKey_permissions_change (selection : Selection)
+theorem sessionFingerprintKey_permissions_change (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits nextBits : List Bool)
     (ticketResource enrollmentResource : Nat) (ticketRoot enrollmentRoot : Digest)
     (issueIngressBytes : List UInt8) (changed : bits ≠ nextBits) :
-    sessionFingerprintKey selection dispatch bits ticketResource ticketRoot
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource ticketRoot
       enrollmentResource enrollmentRoot issueIngressBytes ≠
-    sessionFingerprintKey selection dispatch nextBits ticketResource ticketRoot
+    sessionFingerprintKey authorityRoot selection dispatch nextBits ticketResource ticketRoot
       enrollmentResource enrollmentRoot issueIngressBytes := by
   intro equal
   exact changed (congrArg SessionFingerprintKey.bits equal)
 
-theorem sessionFingerprintKey_authority_changes (selection : Selection)
+theorem sessionFingerprintKey_authority_changes (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits : List Bool)
     (ticketResource enrollmentResource : Nat) (ticketRoot enrollmentRoot nextAuthority : Digest)
-    (issueIngressBytes : List UInt8) (changed : selection.authorityRoot ≠ nextAuthority) :
-    sessionFingerprintKey selection dispatch bits ticketResource ticketRoot
+    (issueIngressBytes : List UInt8) (changed : authorityRoot ≠ nextAuthority) :
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource ticketRoot
       enrollmentResource enrollmentRoot issueIngressBytes ≠
-    sessionFingerprintKey { selection with authorityRoot := nextAuthority } dispatch bits
+    sessionFingerprintKey nextAuthority selection dispatch bits
       ticketResource ticketRoot enrollmentResource enrollmentRoot issueIngressBytes := by
   intro equal
   exact changed (congrArg SessionFingerprintKey.authorityRoot equal)
 
-theorem sessionFingerprintKey_package_changes (selection : Selection)
+theorem sessionFingerprintKey_package_changes (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits : List Bool)
     (ticketResource enrollmentResource : Nat) (ticketRoot enrollmentRoot nextPackage : Digest)
     (issueIngressBytes : List UInt8) (changed : dispatch.app.packageRoot ≠ nextPackage) :
-    sessionFingerprintKey selection dispatch bits ticketResource ticketRoot
+    sessionFingerprintKey authorityRoot selection dispatch bits ticketResource ticketRoot
       enrollmentResource enrollmentRoot issueIngressBytes ≠
-    sessionFingerprintKey selection
+    sessionFingerprintKey authorityRoot selection
       { dispatch with app := { dispatch.app with packageRoot := nextPackage } }
       bits ticketResource ticketRoot enrollmentResource enrollmentRoot issueIngressBytes := by
   intro equal
@@ -573,25 +575,25 @@ def sessionFingerprintOfKey (key : SessionFingerprintKey) : Digest :=
     "DREGG/APPLICATION/DISPATCH-SESSION-FINGERPRINT/v2".toUTF8.toList
     (sessionFingerprintMaterial key)).digest
 
-theorem sessionFingerprint_workflow_invariant (selection : Selection)
+theorem sessionFingerprint_workflow_invariant (authorityRoot : Digest) (selection : Selection)
     (dispatch : ApplicationDispatchCodec.Dispatch) (bits : List Bool)
     (ticketResource : Nat) (ticketRoot : Digest)
     (enrollmentResource : Nat) (enrollmentRoot : Digest)
     (issueIngressBytes : List UInt8)
     (nextRoot : Digest) (nextSnapshot : Int)
     (nextRequest : ApplicationDispatchCodec.Request) :
-    sessionFingerprintOfKey (sessionFingerprintKey
+    sessionFingerprintOfKey (sessionFingerprintKey authorityRoot
       { selection with sessionRoot := nextRoot }
       (workflowChangedDispatch dispatch nextSnapshot nextRequest)
       bits ticketResource ticketRoot enrollmentResource enrollmentRoot issueIngressBytes) =
-    sessionFingerprintOfKey (sessionFingerprintKey selection dispatch bits
+    sessionFingerprintOfKey (sessionFingerprintKey authorityRoot selection dispatch bits
       ticketResource ticketRoot enrollmentResource enrollmentRoot issueIngressBytes) := by
   rw [sessionFingerprintKey_workflow_invariant]
 
-def sessionFingerprintKeyFor (selection : Selection)
+def sessionFingerprintKeyFor (authorityRoot : Digest) (selection : Selection)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (bits : List Bool) (ticketResource : Nat) : SessionFingerprintKey :=
-  sessionFingerprintKey selection ingress.dispatch.dispatch bits ticketResource
+  sessionFingerprintKey authorityRoot selection ingress.dispatch.dispatch bits ticketResource
     ingress.ticketRoot ingress.dispatch.enrollmentResource
     ingress.dispatch.enrollmentRoot ingress.issueIngressBytes
 
@@ -608,16 +610,16 @@ private def workflowChangedIngress (ingress : ApplicationDispatchAdmissionIngres
 /-- The source-level carrier may have a different app page root, session page
 root, checkpoint and HTTP request on the next admitted turn while retaining
 the exact same WebSession authority projection. -/
-theorem sessionFingerprint_ingress_workflow_invariant (selection : Selection)
+theorem sessionFingerprint_ingress_workflow_invariant (authorityRoot : Digest) (selection : Selection)
     (ingress : ApplicationDispatchAdmissionIngress.Ingress)
     (bits : List Bool) (ticketResource : Nat)
     (nextAppRoot nextSessionRoot : Digest) (nextSnapshot : Int)
     (nextRequest : ApplicationDispatchCodec.Request) :
-    sessionFingerprintOfKey (sessionFingerprintKeyFor
+    sessionFingerprintOfKey (sessionFingerprintKeyFor authorityRoot
       { selection with sessionRoot := nextSessionRoot }
       (workflowChangedIngress ingress nextAppRoot nextSnapshot nextRequest)
       bits ticketResource) =
-    sessionFingerprintOfKey (sessionFingerprintKeyFor selection ingress bits ticketResource) := by
+    sessionFingerprintOfKey (sessionFingerprintKeyFor authorityRoot selection ingress bits ticketResource) := by
   rfl
 
 /-- This is a cache invalidation key, never an external delivery permit. -/
@@ -627,7 +629,8 @@ def CheckedCurrent.sessionFingerprint {F : Type} [Field F] [DecidableEq F]
     {ingress : ApplicationDispatchAdmissionIngress.Ingress}
     {spec : Spec} {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
     (checked : CheckedCurrent deployment profile ambient durable ingress spec descriptor) : Digest :=
-  sessionFingerprintOfKey (sessionFingerprintKeyFor checked.selection ingress
+  sessionFingerprintOfKey (sessionFingerprintKeyFor
+    checked.prepared.authority.snapshot.cell.root checked.selection ingress
     checked.bits spec.ticket.resource)
 
 /-- Check one loaded image from actual native signature/capability/policy and

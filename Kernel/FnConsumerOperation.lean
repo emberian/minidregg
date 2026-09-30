@@ -75,7 +75,6 @@ structure Report where
   subject : SubjectId
   target : Nat
   capability : CapabilityId
-  expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
   portableInbox : Option PortableInbox := none
   storePoll : Option StorePollInbox := none
@@ -437,7 +436,7 @@ theorem operationAtom_ne_replyAtom (domain semantics : Digest)
 choice depends on the local consumer subject and stable operation nonce. -/
 def marker (domain semantics : Digest) (subject : SubjectId) (nonce : Nat) : Digest :=
   DeclaredResourceController.transactionId domain semantics
-    ⟨subject, ⟨0⟩, nonce, []⟩
+    ⟨subject, nonce, []⟩
 
 def bindingCommand (domain semantics : Digest) (report : Report)
     (receipt : Receipt) : Except String DeclaredResourceController.Command := do
@@ -462,7 +461,7 @@ def bindingCommand (domain semantics : Digest) (report : Report)
     | some inbox =>
         [.createAtom (storeOperationAtom domain semantics report.application report.operation)
           (.inlineObject ⟨5⟩) (storePollCodec.encode inbox)]
-  pure ⟨report.subject, report.expectedAuthorityRoot,
+  pure ⟨report.subject,
     operationNonce domain semantics report.application report.operation,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨actions⟩, none⟩]⟩
@@ -483,7 +482,7 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
     | some inbox =>
         [.createAtom (storeConflictAtom domain semantics report)
           (.inlineObject ⟨5⟩) (storePollCodec.encode inbox)]
-  ⟨report.subject, report.expectedAuthorityRoot,
+  ⟨report.subject,
    conflictNonce domain semantics report,
    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
      .content ⟨actions⟩, none⟩]⟩
@@ -559,7 +558,6 @@ private def originalBindingWithInboxRaw (domain semantics : Digest)
               provenance := binding.provenance, package := binding.package,
               subject := command.subject, target := target.target,
               capability := target.capability,
-              expectedAuthorityRoot := command.expectedAuthorityRoot,
               expectedTargetRoot := target.expectedTargetRoot,
               portableInbox := inbox, storePoll := storeInbox }
           let .ok expected := bindingCommand domain semantics report binding.reply.miniReceipt
@@ -672,7 +670,6 @@ private def originalConflictWithInboxRaw (domain semantics : Digest)
               provenance := evidence.provenance, package := evidence.package,
               subject := command.subject, target := target.target,
               capability := target.capability,
-              expectedAuthorityRoot := command.expectedAuthorityRoot,
               expectedTargetRoot := target.expectedTargetRoot,
               portableInbox := inbox, storePoll := storeInbox }
           if atom == conflictAtom domain semantics report &&

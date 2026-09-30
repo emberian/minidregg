@@ -449,7 +449,7 @@ fn approval_header(approval: &Value, state: &Retained, signing: &SigningKey) -> 
         "signingKeyId",
         "signingKeyEpoch",
         "signingAlgorithm",
-        "signingAuthorityRoot",
+        "signingValidUntil",
     ] {
         if member(approval, name)? != member(&state.inspection, name)? {
             return Err(format!("fn frontier {name} differs from private approval"));

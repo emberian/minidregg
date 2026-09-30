@@ -170,7 +170,6 @@ fn checked_plan<'a>(view: &'a Value, evidence: &ClaimPlanEvidence<'_>) -> io::Re
         || text(view, "originalBeginReceiptHex")?.is_empty()
         || !lowercase_hex(text(view, "sourceHex")?)
         || text(view, "sourceHex")?.is_empty()
-        || !decimal(text(view, "currentAuthorityRoot")?)
         || !decimal(text(view, "currentAppRoot")?)
         || !decimal(text(view, "currentPackageRoot")?)
         || !decimal(text(view, "currentWorldRoot")?)

@@ -514,10 +514,7 @@ fn signed_view(
 
 fn signed_authority_root(challenge: &Value) -> Result<&str> {
     let root = challenge
-        .get("signing")
-        .and_then(Value::as_array)
-        .and_then(|values| values.first())
-        .and_then(|value| value.get("authorityRoot"))
+        .get("authorityRoot")
         .and_then(Value::as_str)
         .ok_or("signed query challenge lacks authority root")?;
     field_decimal(root, "signed authority root")?;
@@ -628,7 +625,6 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
             }
             let mut target_rows = Vec::new();
             let mut grants = Vec::new();
-            let mut authority = None::<String>;
             let mut image = None::<String>;
             let mut seen = std::collections::BTreeSet::new();
             for entry in selected {
@@ -644,13 +640,6 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 }
                 let reference = reference(root, local_name)?;
                 let (view, challenge, _) = signed_view(root, workspace, &reference, "resource")?;
-                let current_authority = signed_authority_root(&challenge)?.to_owned();
-                if let Some(previous) = &authority {
-                    if previous != &current_authority {
-                        return Err("target reads have different authority roots".into());
-                    }
-                }
-                authority = Some(current_authority);
                 let current_image = member(&challenge, "worldRoot")?.to_owned();
                 if let Some(previous) = &image {
                     if previous != &current_image {
@@ -691,7 +680,6 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
                 "purpose":{"type":"prepare","draft":{"type":"invoke",
                     "command":{"subject":member(workspace,"subject")?,
-                    "expectedAuthorityRoot":authority.ok_or("no authority root")?,
                     "nonce":random_nonce()?,"targets":target_rows}}},"grants":grants})
         }
         "install-policy" => {

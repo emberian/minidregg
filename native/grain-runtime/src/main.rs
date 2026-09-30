@@ -7399,7 +7399,7 @@ impl Runtime {
         }
         Ok(
             json!({"grain":grain, "targetRoot":view.pointer("/cell/root"),
-            "authorityRoot":challenge.pointer("/signing/0/authorityRoot"),
+            "authorityRoot":challenge.pointer("/authorityRoot"),
             "worldRoot":challenge.get("worldRoot"),
             "height":challenge.get("height")}),
         )
@@ -7446,7 +7446,7 @@ impl Runtime {
         if view.get("policyId").and_then(Value::as_str) != Some(cfg.task.as_str()) {
             return Err("signed policy view names another task".into());
         }
-        Ok(json!({"view":view,"authorityRoot":challenge.pointer("/signing/0/authorityRoot")}))
+        Ok(json!({"view":view,"authorityRoot":challenge.pointer("/authorityRoot")}))
     }
     fn managed_worker_subjects(&self) -> Result<Vec<String>> {
         let mut workers = Vec::new();
@@ -7907,7 +7907,6 @@ impl Runtime {
         let grants = grain_observation_grants(authority, parent_observation, &publications)?;
         let mut grain = json!({"task":authority.task,"subject":authority.subject,
             "capability":authority.capability,"schemaVersion":"1",
-            "expectedAuthorityRoot":observed.get("authorityRoot").ok_or("missing authority root")?,
             "expectedTargetRoot":observed.get("targetRoot").ok_or("missing target root")?,
             "context":{"operationId":id.to_string(),"payload":payload},
             "before":{"generation":before.get("generation"),"status":before.get("status"),
@@ -17599,7 +17598,7 @@ mkdir -p "$dir"
 if [ "$command" = query ]; then
   status=$(cat "$state/status")
   printf '{"cell":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"3"}}}\n' "$status" > "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"worldRoot":"300"}' > "$dir/challenge.json"
+  printf '%s\n' '{"authorityRoot":"200","signing":[{}],"worldRoot":"300"}' > "$dir/challenge.json"
   exit 0
 fi
 [ "$command" = submit ] || exit 40

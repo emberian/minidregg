@@ -48,7 +48,6 @@ structure Report where
   subject : SubjectId
   target : Nat
   capability : CapabilityId
-  expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
   deriving Repr
 
@@ -124,30 +123,28 @@ def reportStream : StreamCodec Report :=
             (StreamCodec.product portableInboxStream (StreamCodec.product
               storePollStream (StreamCodec.product StreamCodec.nat
                 (StreamCodec.product StreamCodec.nat (StreamCodec.product
-                  StreamCodec.nat (StreamCodec.product digestStream digestStream))))))))))))))
+                  StreamCodec.nat digestStream)))))))))))))
     (fun x => (x.application, x.operation, x.parentSourceIdentity,
       x.parentMessageId, x.originReceipt, x.replySource,
       x.replySourceIdentity, x.replyMessageId, x.portableInbox,
       x.storePoll, x.subject.value, x.target, x.capability.value,
-      x.expectedAuthorityRoot, x.expectedTargetRoot))
+      x.expectedTargetRoot))
     (fun x => ⟨x.1, x.2.1, x.2.2.1, x.2.2.2.1, x.2.2.2.2.1,
       x.2.2.2.2.2.1, x.2.2.2.2.2.2.1, x.2.2.2.2.2.2.2.1,
       x.2.2.2.2.2.2.2.2.1, x.2.2.2.2.2.2.2.2.2.1,
       ⟨x.2.2.2.2.2.2.2.2.2.2.1⟩,
       x.2.2.2.2.2.2.2.2.2.2.2.1,
       ⟨x.2.2.2.2.2.2.2.2.2.2.2.2.1⟩,
-      x.2.2.2.2.2.2.2.2.2.2.2.2.2.1,
-      x.2.2.2.2.2.2.2.2.2.2.2.2.2.2⟩)
+      x.2.2.2.2.2.2.2.2.2.2.2.2.2⟩)
     (by intro x; cases x; rfl)
 
 def reportCodec : LawfulCodec Report :=
-  NativeHostCodec.framed "DREGG/FN/A-REPLY-INBOX/v1".toUTF8.toList reportStream
+  NativeHostCodec.framed "DREGG/FN/A-REPLY-INBOX/v2".toUTF8.toList reportStream
 
-/-- Current resource roots are CAS preconditions and change after acceptance.
-They are retained in the signed call, but are not part of immutable Q input. -/
+/-- The current target root is a CAS precondition and changes after acceptance.
+It is retained in the signed call, but is not part of immutable Q input. -/
 def Report.evidenceBytes (report : Report) : List UInt8 :=
-  reportCodec.encode { report with
-    expectedAuthorityRoot := ⟨0⟩, expectedTargetRoot := ⟨0⟩ }
+  reportCodec.encode { report with expectedTargetRoot := ⟨0⟩ }
 
 def opHash (domain semantics : Digest) (application operation : List UInt8) : Nat :=
   (Sp800185Cshake256.hash "DREGG.FN.A-REPLY-OP/v1".toUTF8.toList
@@ -178,7 +175,7 @@ def resultCommand (domain semantics : Digest) (report : Report) (result : Result
     Except String DeclaredResourceController.Command := do
   unless (reportCodec.encode report).length ≤ 110000 do
     throw "A reply retained inbox exceeds bound"
-  pure ⟨report.subject, report.expectedAuthorityRoot,
+  pure ⟨report.subject,
     resultNonce domain semantics report.application report.operation,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom
@@ -189,7 +186,7 @@ def resultCommand (domain semantics : Digest) (report : Report) (result : Result
 
 def conflictCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
-  ⟨report.subject, report.expectedAuthorityRoot,
+  ⟨report.subject,
     conflictNonce domain semantics report,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (conflictAtom domain semantics report)
@@ -216,7 +213,6 @@ def originalConflict (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
       command.nonce == conflictNonce domain semantics report &&
       command.subject == report.subject && target.target == report.target &&
       target.capability == report.capability &&
-      command.expectedAuthorityRoot == report.expectedAuthorityRoot &&
       target.expectedTargetRoot == report.expectedTargetRoot &&
       FnConsumerOperation.exactSignedCommand signed.commandBytes
         (conflictCommand domain semantics report) then
@@ -250,7 +246,6 @@ def originalResult (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
       command.nonce == resultNonce domain semantics report.application report.operation &&
       command.subject == report.subject && target.target == report.target &&
       target.capability == report.capability &&
-      command.expectedAuthorityRoot == report.expectedAuthorityRoot &&
       target.expectedTargetRoot == report.expectedTargetRoot &&
       checked == result &&
       FnConsumerOperation.exactSignedCommand signed.commandBytes expected then
