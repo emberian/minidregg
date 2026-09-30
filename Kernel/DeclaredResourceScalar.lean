@@ -259,7 +259,7 @@ def CanonicalActionResult (pre : EffectCell) (command : Command)
     (post : Store effectLayout) : Prop :=
   command.declaration.run pre.logical = some post
 
-structure CellMode (pre : EffectCell) (command : Command) (post : Store effectLayout) where
+structure CellMode (pre : EffectCell) (command : Command) (post : Store effectLayout) : Type where
   beforeLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target pre.logical
   rootExact : command.expectedTargetRoot = pre.root
   versionExact : command.schemaVersion = 1
@@ -309,8 +309,8 @@ def prepareCell (snapshot : AuthoritySnapshot)
           if preLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target
               pre.logical then
             if admitted : command.declaration.admissionCheck = true then
-              match checked : validate DeclaredEffectCell.materializer pre
-                  command.expectedTargetRoot (cellPatch command) with
+              match validate DeclaredEffectCell.materializer pre
+                  pre.root (cellPatch command) with
               | .rejected (.stalePreRoot) => .error .staleTarget
               | .rejected (.disabledOperation index) => .error (.guardRejected index)
               | .accepted validated =>
@@ -326,7 +326,7 @@ def prepareCell (snapshot : AuthoritySnapshot)
                           ⟨preLaw, root, version, ordinary, nonempty, admitted, postLaw,
                             semantic⟩
                         validated := validated
-                        postcondition := ⟨by simp [post], semantic, postLaw⟩ }⟩
+                        postcondition := ⟨rfl, semantic, postLaw⟩ }⟩
                   else .error .invalidPost
             else .error .inadmissibleAction
           else .error .wrongRole
