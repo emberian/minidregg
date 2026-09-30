@@ -203,6 +203,57 @@ theorem revoke_accepted_at_cell (pre : Cell) (key : RevocationKey)
         validated.apply.logical ⟨.revoked, key⟩ = some () :=
   revoke_accepted materializer pre key fresh
 
+theorem deregister_rejected_at_cell (pre : Cell) (key : RevocationKey) :
+    CellState.validate materializer pre pre.root [Op.free (L := layout) .registered key ()] =
+      .rejected (.disabledOperation 0) :=
+  deregister_rejected materializer pre key
+
+theorem register_accepted_at_cell (pre : Cell) (key : RevocationKey)
+    (fresh : pre.logical ⟨.registered, key⟩ = none) :
+    ∃ validated : CellState.ValidatedPatch materializer pre pre.root
+        [Op.allocate (L := layout) .registered key ()],
+      CellState.validate materializer pre pre.root
+          [Op.allocate (L := layout) .registered key ()] = .accepted validated ∧
+        validated.apply.logical ⟨.registered, key⟩ = some () :=
+  register_accepted materializer pre key fresh
+
+/-! ## Pair-scoped root binding
+
+The cell root is the cSHAKE256 digest of the canonical bytes.  No global
+injectivity into 256 bits is claimed: a root equality between two specific
+stores is turned into store equality only under the premise that this pair is
+not a collision. -/
+
+/-- A collision between two authority stores: different stores, hence different
+canonical bytes (`encode_injective`), with the same root. -/
+structure Collision (left right : Store layout) : Prop where
+  statesDifferent : left ≠ right
+  bytesDifferent : materializer.codec.encode left ≠ materializer.codec.encode right
+  rootsEqual : materializer.rootOf left = materializer.rootOf right
+
+theorem collision_of_root_eq_of_ne {left right : Store layout} (different : left ≠ right)
+    (same : materializer.rootOf left = materializer.rootOf right) : Collision left right :=
+  ⟨different, fun bytes => different (encode_injective wire bytes), same⟩
+
+/-- The pair-scoped collision-resistance premise. -/
+def PairBindingPremise (left right : Store layout) : Prop :=
+  ¬ Collision left right
+
+/-- Under the pair premise, equal roots mean equal stores. -/
+theorem logical_eq_of_root_eq {left right : Cell}
+    (binding : PairBindingPremise left.logical right.logical)
+    (same : left.root = right.root) : left.logical = right.logical := by
+  by_contra different
+  exact binding (collision_of_root_eq_of_ne different same)
+
+/-- Under the pair premise, two cells with different stores have different
+roots: every accepted authority change moves the root a durable read guard
+observes. -/
+theorem root_ne_of_logical_ne {left right : Cell}
+    (binding : PairBindingPremise left.logical right.logical)
+    (different : left.logical ≠ right.logical) : left.root ≠ right.root :=
+  fun same => different (logical_eq_of_root_eq binding same)
+
 /-! ## A worked authority cell -/
 
 namespace Witness
@@ -337,6 +388,29 @@ theorem revocation_refuses_owner :
   intro admitted
   exact admitted.selfNotRevoked (by decide)
 
+/-- The revoked owner key is registered present AND revoked present. -/
+theorem revoked_owner_registered_and_revoked :
+    isRegistered revokedCell (.capability demoCapability.id) = true ∧
+      isRevoked revokedCell (.capability demoCapability.id) = true := by
+  decide
+
+/-- Refuting pole: the owner's registration cannot be erased. -/
+theorem cell_deregister_rejected :
+    CellState.validate materializer ownerCell ownerCell.root
+        [Op.free (L := layout) .registered (.capability demoCapability.id) ()] =
+      .rejected (.disabledOperation 0) :=
+  deregister_rejected_at_cell ownerCell _
+
+/-- Satisfiable pole: a key the cell has not registered can be registered. -/
+theorem cell_register_fresh_accepted :
+    ∃ validated : CellState.ValidatedPatch materializer ownerCell ownerCell.root
+        [Op.allocate (L := layout) .registered exampleRevocation ()],
+      CellState.validate materializer ownerCell ownerCell.root
+          [Op.allocate (L := layout) .registered exampleRevocation ()] =
+        .accepted validated ∧
+        validated.apply.logical ⟨.registered, exampleRevocation⟩ = some () :=
+  register_accepted_at_cell ownerCell _ (by decide)
+
 end Witness
 
 /-! ## Retired frames refuse to load -/
@@ -378,6 +452,18 @@ theorem retired_page_frame_refused (payload : List UInt8) :
 #guard_msgs (whitespace := lax) in #print axioms Witness.revocation_refuses_owner
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.rotated_issuer_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Witness.rotated_issuer_refused
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.deregister_rejected_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deregister_rejected_at_cell
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.register_accepted_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms register_accepted_at_cell
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.root_ne_of_logical_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms root_ne_of_logical_ne
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.revoked_owner_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.revoked_owner_registered_and_revoked
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.cell_deregister_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.cell_deregister_rejected
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.cell_register_fresh_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Witness.cell_register_fresh_accepted
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_state_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms retired_state_frame_refused
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_page_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
