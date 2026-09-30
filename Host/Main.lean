@@ -4400,7 +4400,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
   let some current ← state.get
     | throw (IO.userError "provider continuity session invalidated")
   let providerCell : DurableDataIntent.CellId := ⟨providerResourceId⟩
-  let checkedBoundary := (NativeHost.worldRoot config current.target.image).value
+  let checkedWorldRoot := (NativeHost.worldRoot config current.target.image).value
   let checkedCount := current.target.image.accepted.length
   let verdict := NativeReserveContinuity.check current anchor reserveCall providerCell
   let (continuous, reason) := match verdict with
@@ -4412,7 +4412,7 @@ def runProviderContinuitySession (config : NativeHost.Config)
      ("continuous", toJson continuous),
      ("providerResourceId", toJson (toString providerResourceId)),
      ("anchor", evidenceReceiptJson anchor),
-     ("checkedWorldRoot", toJson (toString checkedBoundary)),
+     ("checkedWorldRoot", toJson (toString checkedWorldRoot)),
      ("checkedAcceptedCount", toJson (toString checkedCount)),
      ("reason", toJson reason)]).compress.toUTF8.toList)
 
