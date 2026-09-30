@@ -20,6 +20,7 @@ import Compiler.CredentialAuthorityReplay
 import Compiler.CredentialSignatureAdmission
 import Compiler.DeclaredEffectCell
 import Compiler.CredentialAuthorityCell
+import Compiler.HyperdocumentCell
 import Compiler.PolicyRecordCodec
 import Compiler.ResourceBirthCodec
 
@@ -174,11 +175,8 @@ def sourceComponents : List (List UInt8) :=
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,
    StreamCodec.nat.encode CanonicalResourcePageMaterializer.wireVersion,
-   HyperdocumentContentPageMaterializer.wireFrame,
-   HyperdocumentContentPageMaterializer.rootCustomization,
-   HyperdocumentEventPageMaterializer.wireFrame,
-   HyperdocumentEventPageMaterializer.rootCustomization,
-   HyperdocumentEventPageMaterializer.eventCustomization,
+   StoreCodec.frame HyperdocumentCell.contentWire,
+   StoreCodec.frame HyperdocumentCell.eventWire,
    ResourceBirthCodec.descriptorFrame,
    ResourceBirthCodec.rootCustomization,
    (StreamCodec.list (StreamCodec.list StreamCodec.nat)).encode

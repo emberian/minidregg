@@ -1,31 +1,28 @@
 /-
 # Compiler.DeployedCellRegistry -- logical heterogeneous lifecycle exhibit
 
-This noncomputable, non-cryptographic registry is a scoped inhabitation and
-lifecycle witness. The unified receiving path uses
+This registry is a scoped lifecycle witness.  The unified receiving path uses
 `Compiler.CanonicalCellRegistry`; it does not select this witness as a
-production codec/root configuration.
+production registry configuration.
 
-`Theory.CellSlot` deliberately leaves its deployed registry configuration
-uninhabited: a registry must choose exact schemas, lawful materializers, stable
-wire tags, and stable schema identities.  This module makes that choice for the
-four cell families which currently cross the sparse-state boundary:
+`Theory.CellSlot`'s deployed registry configuration is inhabited here with the
+deployed cell materializers -- each one `StoreCodec` at its declared wire:
 
-* declared effects;
-* credential authority;
-* Hyperdocument content; and
-* the append-only Hyperdocument event log.
+* declared effects (`DeclaredEffectCell.materializer`);
+* credential authority (`CredentialAuthorityCell.materializer`);
+* Hyperdocument content (`HyperdocumentCell.contentMaterializer`); and
+* the append-only Hyperdocument event log (`HyperdocumentCell.eventMaterializer`).
 
-The materializers are the existing exhibited materializers.  In particular,
-this file does not invent a codec, cast a dependent payload, or pretend that a
-bounded page codec can round-trip an unbounded sparse schema.  Their shared
-byte-length root is intentionally non-cryptographic; `rootBytes_collision`
-exhibits that ceiling below.  The lifecycle witnesses are logical only.  An
-actual store must separately inhabit the existing `PersistenceRefinement`
-boundary.
+Only the registry's own directory/slot root remains the byte-length root; it is
+intentionally non-cryptographic, and `rootBytes_collision` exhibits that
+ceiling below.  The lifecycle witnesses are logical only.  An actual store must
+separately inhabit the existing `PersistenceRefinement` boundary.
 -/
-import Kernel.DeployedMaterializerWitness
+import Compiler.CredentialAuthorityCell
+import Compiler.DeclaredEffectCell
+import Compiler.HyperdocumentCell
 import Theory.CellSlot
+import Theory.DeployedMaterializerWitness
 
 namespace Minidregg.Compiler.DeployedCellRegistry
 
@@ -40,13 +37,15 @@ set_option autoImplicit false
 
 /-! ## Stable schema identities -/
 
-/-- These values are wire pins.  Changing either component is a migration,
-not a local refactor.  Schema id 14 agrees with the Hyperdocument causal-family
-witnesses already emitted by this tree. -/
-def declaredEffectSchemaRef : SchemaRef := ⟨⟨11⟩, 1⟩
-def credentialAuthoritySchemaRef : SchemaRef := ⟨⟨12⟩, 1⟩
-def hyperdocumentContentSchemaRef : SchemaRef := ⟨⟨14⟩, 1⟩
-def hyperdocumentEventSchemaRef : SchemaRef := ⟨⟨15⟩, 1⟩
+/-- These values are wire pins.  Version 2 is the `DREGG/STORE` frame at each
+kind's declared wire; version-1 cells (countability-selected witness codecs)
+are retired.  Schema id 14 is the id the Hyperdocument causal-family
+witnesses carry as their document schema; those witnesses still name version 1,
+the pre-store wire, and nothing checks the two against each other. -/
+def declaredEffectSchemaRef : SchemaRef := ⟨⟨11⟩, 2⟩
+def credentialAuthoritySchemaRef : SchemaRef := ⟨⟨12⟩, 2⟩
+def hyperdocumentContentSchemaRef : SchemaRef := ⟨⟨14⟩, 2⟩
+def hyperdocumentEventSchemaRef : SchemaRef := ⟨⟨15⟩, 2⟩
 
 theorem schemaRefs_nodup :
     [declaredEffectSchemaRef, credentialAuthoritySchemaRef,
@@ -66,25 +65,22 @@ theorem theorySchemaRef_injective : Function.Injective theorySchemaRef := by
     simp [theorySchemaRef, declaredEffectSchemaRef,
       credentialAuthoritySchemaRef, hyperdocumentContentSchemaRef] at same ⊢
 
-noncomputable def theoryMaterializer :
-    (kind : DeployedKind) -> Materializer (deployedSchema kind) Digest
-  | .declaredEffect =>
-      Minidregg.Theory.DeployedMaterializerWitness.effectMaterializer
-  | .credentialAuthority =>
-      Minidregg.Theory.DeployedMaterializerWitness.authorityMaterializer
-  | .hyperdocument =>
-      Minidregg.Theory.DeployedMaterializerWitness.hyperdocumentMaterializer
+def theoryMaterializer :
+    (kind : DeployedKind) -> Materializer (deployedLayout kind) Digest
+  | .declaredEffect => DeclaredEffectCell.materializer
+  | .credentialAuthority => CredentialAuthorityCell.materializer
+  | .hyperdocument => HyperdocumentCell.contentMaterializer
 
 /-- A concrete outside-home producer of the previously open
 `DeployedRegistryConfig` carrier. -/
-noncomputable def theoryConfig : DeployedRegistryConfig Digest where
+def theoryConfig : DeployedRegistryConfig Digest where
   schemaRef := theorySchemaRef
   schemaRef_injective := theorySchemaRef_injective
   materializer := theoryMaterializer
   rootBytes := Minidregg.Theory.DeployedMaterializerWitness.lengthRoot
 
 /-- The exact generic registry induced by the three-kind Theory configuration. -/
-noncomputable def theoryRegistry : TypeRegistry Digest :=
+def theoryRegistry : TypeRegistry Digest :=
   deployedRegistry theoryConfig
 
 theorem theory_config_nonempty : Nonempty (DeployedRegistryConfig Digest) :=
@@ -133,34 +129,28 @@ theorem schemaRef_injective : Function.Injective schemaRef := by
     simp [schemaRef, declaredEffectSchemaRef, credentialAuthoritySchemaRef,
       hyperdocumentContentSchemaRef, hyperdocumentEventSchemaRef] at same ⊢
 
-def schema : Kind -> CellState.Schema.{0, 0, 0, 0}
-  | .declaredEffect => DeclaredTurn.effectSchema
-  | .credentialAuthority => CredentialAuthorityState.schema
-  | .hyperdocumentContent => Hyperdocument.cellSchema
-  | .hyperdocumentEvent =>
-      Minidregg.Kernel.HyperdocumentEventLog.cellSchema
+def layout : Kind -> Store.Layout.{0, 0, 0}
+  | .declaredEffect => EffectDeclaration.effectLayout
+  | .credentialAuthority => CredentialAuthorityState.layout
+  | .hyperdocumentContent => Hyperdocument.layout
+  | .hyperdocumentEvent => Minidregg.Kernel.HyperdocumentEventLog.Sparse.layout
 
-noncomputable def materializer :
-    (kind : Kind) -> Materializer (schema kind) Digest
-  | .declaredEffect =>
-      Minidregg.Theory.DeployedMaterializerWitness.effectMaterializer
-  | .credentialAuthority =>
-      Minidregg.Theory.DeployedMaterializerWitness.authorityMaterializer
-  | .hyperdocumentContent =>
-      Minidregg.Theory.DeployedMaterializerWitness.hyperdocumentMaterializer
-  | .hyperdocumentEvent =>
-      Minidregg.Kernel.DeployedMaterializerWitness.eventLogCellMaterializer
+def materializer : (kind : Kind) -> Materializer (layout kind) Digest
+  | .declaredEffect => DeclaredEffectCell.materializer
+  | .credentialAuthority => CredentialAuthorityCell.materializer
+  | .hyperdocumentContent => HyperdocumentCell.contentMaterializer
+  | .hyperdocumentEvent => HyperdocumentCell.eventMaterializer
 
 /-- The full heterogeneous registry.  Its dependent payload type is selected
 by `Kind`; no `Dynamic`, erased bytes, or cast participates in storage. -/
-noncomputable def registry : TypeRegistry Digest where
+def registry : TypeRegistry Digest where
   Kind := Kind
   tag := Kind.tag
   kindAtTag := kindAtTag
   kindAtTag_tag := kindAtTag_tag
   schemaRef := schemaRef
   schemaRef_injective := schemaRef_injective
-  schema := schema
+  layout := layout
   materializer := materializer
   rootBytes := Minidregg.Theory.DeployedMaterializerWitness.lengthRoot
 
@@ -177,19 +167,17 @@ theorem registry_nonempty : Nonempty (TypeRegistry Digest) :=
 
 /-! ## One exact packed cell for every registered schema -/
 
-noncomputable def packedCell : (kind : Kind) -> PackedCell registry
+def packedCell : (kind : Kind) -> PackedCell registry
   | .declaredEffect =>
-      ⟨.declaredEffect,
-        Minidregg.Theory.DeployedMaterializerWitness.effectCell⟩
+      ⟨.declaredEffect, CellState.materialize DeclaredEffectCell.materializer
+        (DeclaredEffectCell.objectFields ⟨101⟩ 32)⟩
   | .credentialAuthority =>
-      ⟨.credentialAuthority,
-        Minidregg.Theory.DeployedMaterializerWitness.authorityCell⟩
+      ⟨.credentialAuthority, CredentialAuthorityCell.Witness.ownerCell⟩
   | .hyperdocumentContent =>
-      ⟨.hyperdocumentContent,
-        Minidregg.Theory.DeployedMaterializerWitness.hyperdocumentCell⟩
+      ⟨.hyperdocumentContent, CellState.materialize HyperdocumentCell.contentMaterializer
+        (HyperdocumentCell.linksStore 17)⟩
   | .hyperdocumentEvent =>
-      ⟨.hyperdocumentEvent,
-        Minidregg.Kernel.DeployedMaterializerWitness.eventLogCell⟩
+      ⟨.hyperdocumentEvent, CellState.materialize HyperdocumentCell.eventMaterializer 0⟩
 
 @[simp] theorem packedCell_kind (kind : Kind) :
     (packedCell kind).kind = kind := by
@@ -211,16 +199,16 @@ def cellId : Kind -> CellId
   | .hyperdocumentContent => 103
   | .hyperdocumentEvent => 104
 
-noncomputable def createRequest (kind : Kind) :
+def createRequest (kind : Kind) :
     CreateRequest (CellId := CellId) registry where
   cellId := cellId kind
   expectedPreRoot := CellSlot.root registry .absent
   cell := packedCell kind
 
-noncomputable def emptyDirectory : Directory CellId registry :=
+def emptyDirectory : Directory CellId registry :=
   Directory.empty registry
 
-noncomputable def afterCreate (kind : Kind) : Directory CellId registry :=
+def afterCreate (kind : Kind) : Directory CellId registry :=
   Directory.insert registry emptyDirectory (cellId kind) (packedCell kind)
 
 /-- Every registered schema crosses the actual executable create boundary. -/
@@ -236,13 +224,13 @@ theorem create_succeeds (kind : Kind) :
     (afterCreate kind).slots (cellId kind) = .present (packedCell kind) := by
   simp [afterCreate]
 
-noncomputable def deleteRequest (kind : Kind) :
+def deleteRequest (kind : Kind) :
     DeleteRequest (CellId := CellId) registry where
   cellId := cellId kind
   expectedPreRoot := CellSlot.root registry (.present (packedCell kind))
   expectedSchema := schemaRef kind
 
-noncomputable def afterDelete (kind : Kind) : Directory CellId registry :=
+def afterDelete (kind : Kind) : Directory CellId registry :=
   Directory.retire registry (afterCreate kind) (cellId kind)
 
 /-- Deletion checks the exact stable schema pin and exact current slot root. -/
@@ -285,7 +273,7 @@ theorem recreate_after_delete_rejected (kind : Kind) :
     CellSlot.root registry (.absent : CellSlot registry) = ⟨4⟩ :=
   rfl
 
-noncomputable def staleCreateRequest (kind : Kind) :
+def staleCreateRequest (kind : Kind) :
     CreateRequest (CellId := CellId) registry where
   cellId := cellId kind
   expectedPreRoot := ⟨0⟩
@@ -310,7 +298,7 @@ theorem present_root_ne_zero (kind : Kind) :
     Minidregg.Theory.DeployedMaterializerWitness.lengthRoot,
     CellSlot.codec, CellSlot.bytes, PackedCell.codec, PackedCell.bytes] at values
 
-noncomputable def staleDeleteRequest (kind : Kind) :
+def staleDeleteRequest (kind : Kind) :
     DeleteRequest (CellId := CellId) registry where
   cellId := cellId kind
   expectedPreRoot := ⟨0⟩
@@ -326,7 +314,7 @@ theorem stale_delete_rejected (kind : Kind) :
   · simp [staleDeleteRequest]
   · exact (present_root_ne_zero kind).symm
 
-noncomputable def wrongSchemaDeleteRequest :
+def wrongSchemaDeleteRequest :
     DeleteRequest (CellId := CellId) registry where
   cellId := cellId .hyperdocumentContent
   expectedPreRoot :=

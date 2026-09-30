@@ -72,7 +72,6 @@ import Assurance.HyperdocumentQueryDeployment  -- versioned authorized content/h
 import Assurance.HyperdocumentTransclusionReferenceDeployment  -- globally injective stored references and a finite declared-domain backlink witness reopen through the deployed query path
 import Assurance.HyperdocumentIndexSyncEndpoint  -- persistent bounded backlink/range indexes sync causal deltas and reopen through an opaque fallible byte endpoint
 import Assurance.HyperdocumentFinalizedDomainCrawler  -- finalized finite manifests drive exact two-sided coverage, cursor recovery, and complete-domain backlink results
-import Assurance.BoundedPageSchemaUpgradeCutover  -- authorized V1-to-V2 page migration preserves semantic projections through durable recovery and quorum-finalized payload identity
 import Assurance.HyperdocumentTwoParentHistoryWitness  -- the concrete two-parent conflict survives at an exact verified-history coordinate
 import Assurance.HyperdocumentMergeDurableFinalityWitness  -- the merged conflict survives guarded WAL recovery and an intersecting-quorum finalization witness
 import Assurance.DeployedCredentialLifecycle  -- concrete issue, strict attenuation, use, revocation/rotation, guarded durable debit, and retry inhabit the bounded authority path

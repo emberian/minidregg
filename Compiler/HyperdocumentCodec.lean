@@ -13,13 +13,14 @@ tag, `product` over a record, `sum`/tagged dispatch over an inductive, or
 `ElementBody.container` holds a list of `ElementId`, not of `ElementBody` -- so
 the walk is flat.
 
-None of this is a deployment wire format.  `StreamCodec.finset` is
-noncomputable because `Finset.toList` is, and a deployed transclusion reference
-would carry an explicitly ordered field rather than a set.
+Finite sets are written as the list of their members in the byte order of the
+members' own encodings (`sortedFinsetStream`), so every codec here is
+computable and a set has exactly one encoding order.
 -/
 import Compiler.TypedAuthorizationRequestCodec
 import Theory.HyperdocumentOperations
 import Theory.StableRanges
+import Mathlib.Data.List.Lex
 
 namespace Minidregg.Compiler.HyperdocumentCodec
 
@@ -142,14 +143,46 @@ def openingDescriptorStream : StreamCodec OpeningDescriptor :=
       tuple.2.2.2.2⟩)
     (by intro value; rfl)
 
-noncomputable def storedTransclusionRefStream : StreamCodec StoredTransclusionRef :=
+/-! ## Finite sets in encoded-byte order -/
+
+theorem streamCodec_encode_injective {alpha : Type} (codec : StreamCodec alpha) :
+    Function.Injective codec.encode := by
+  intro left right same
+  have decoded := codec.decodePrefix_encode left []
+  rw [same, codec.decodePrefix_encode right []] at decoded
+  exact (Prod.mk.inj (Option.some.inj decoded)).1.symm
+
+/-- The comparison key of a value: its encoded bytes as naturals. -/
+def encodedKey {alpha : Type} (codec : StreamCodec alpha) (value : alpha) : List Nat :=
+  (codec.encode value).map UInt8.toNat
+
+theorem encodedKey_injective {alpha : Type} (codec : StreamCodec alpha) :
+    Function.Injective (encodedKey codec) := by
+  intro left right same
+  apply streamCodec_encode_injective codec
+  exact (List.map_injective_iff.mpr (fun _ _ h => UInt8.toNat_inj.mp h)) same
+
+/-- Byte order on values, pulled back along the injective codec. -/
+@[reducible] def encodedOrder {alpha : Type} (codec : StreamCodec alpha) :
+    LinearOrder alpha :=
+  LinearOrder.lift' (encodedKey codec) (encodedKey_injective codec)
+
+/-- A finite set as the list of its members sorted by their encoded bytes.
+Computable, and one set has one encoding. -/
+def sortedFinsetStream {alpha : Type} [DecidableEq alpha] (codec : StreamCodec alpha) :
+    StreamCodec (Finset alpha) :=
+  letI := encodedOrder codec
+  StreamCodec.xmap (StreamCodec.list codec) (fun values => values.sort (· ≤ ·))
+    List.toFinset (by intro values; exact Finset.sort_toFinset _ _)
+
+def storedTransclusionRefStream : StreamCodec StoredTransclusionRef :=
   StreamCodec.xmap
     (StreamCodec.product digestStream
       (StreamCodec.product storedSourceIdentityStream
         (StreamCodec.product openingDescriptorStream
           (StreamCodec.product transclusionModeStream
-            (StreamCodec.product (StreamCodec.finset disclosureAtomStream)
-              (StreamCodec.finset disclosureAtomStream))))))
+            (StreamCodec.product (sortedFinsetStream disclosureAtomStream)
+              (sortedFinsetStream disclosureAtomStream))))))
     (fun value => (value.referenceRoot, value.source, value.opening, value.mode,
       value.disclosureScope, value.capabilityCeiling))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
@@ -296,7 +329,7 @@ def linkTargetTag : LinkTarget -> Nat
   | .transclusion _ _ => 3
   | .external _ _ _ => 4
 
-noncomputable def linkTargetStream : StreamCodec LinkTarget where
+def linkTargetStream : StreamCodec LinkTarget where
   encode value :=
     StreamCodec.nat.encode (linkTargetTag value) ++
       match value with
@@ -411,7 +444,7 @@ def editAtomPayloadStream : StreamCodec EditAtomPayload :=
       tuple.2.2.2.2⟩)
     (by intro value; rfl)
 
-noncomputable def linkPayloadStream : StreamCodec LinkPayload :=
+def linkPayloadStream : StreamCodec LinkPayload :=
   StreamCodec.xmap
     (StreamCodec.product (identifierStream .v1 .link)
       (StreamCodec.product (identifierStream .v1 .document)
@@ -423,7 +456,7 @@ noncomputable def linkPayloadStream : StreamCodec LinkPayload :=
       tuple.2.2.2.2⟩)
     (by intro value; rfl)
 
-noncomputable def transcludePayloadStream : StreamCodec TranscludePayload :=
+def transcludePayloadStream : StreamCodec TranscludePayload :=
   StreamCodec.xmap
     (StreamCodec.product (identifierStream .v1 .transclusion)
       (StreamCodec.product (identifierStream .v1 .link)
@@ -472,7 +505,7 @@ def actionTag : Action -> Nat
   | .mark _ => 4
   | .annotate _ => 5
 
-noncomputable def actionStream : StreamCodec Action where
+def actionStream : StreamCodec Action where
   encode value :=
     StreamCodec.nat.encode (actionTag value) ++
       match value with
@@ -516,7 +549,7 @@ noncomputable def actionStream : StreamCodec Action where
 
 /-- **`LawfulCodec Action` exists.**  The second of the three codecs a
 `HyperdocumentOperations.Config` demands. -/
-noncomputable def actionCodec : LawfulCodec Action := actionStream.toLawful
+def actionCodec : LawfulCodec Action := actionStream.toLawful
 
 /-- And it composes, which is what `Declaration` will need. -/
 theorem actionStream_composes (value : Action) (suffix : List UInt8) :
@@ -569,7 +602,7 @@ def requestEnvelopeStream : StreamCodec RequestEnvelope :=
       tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; rfl)
 
-noncomputable def declarationStream : StreamCodec Declaration :=
+def declarationStream : StreamCodec Declaration :=
   StreamCodec.xmap
     (StreamCodec.product operationIntentStream
       (StreamCodec.product requestEnvelopeStream actionStream))
@@ -578,14 +611,14 @@ noncomputable def declarationStream : StreamCodec Declaration :=
     (by intro value; rfl)
 
 /-- **`LawfulCodec Declaration` exists.**  The third of the three. -/
-noncomputable def declarationCodec : LawfulCodec Declaration :=
+def declarationCodec : LawfulCodec Declaration :=
   declarationStream.toLawful
 
 /-- **All three codecs a `Config` demands now exist**, so the structure is
 constructible up to its non-codec fields: `intentAddressing`, two
 `DigestDerivation`s, and two identifier digests, none of which carry proof
 obligations. -/
-noncomputable def configCodecs :
+def configCodecs :
     LawfulCodec Action × LawfulCodec Declaration ×
       LawfulCodec (Minidregg.Theory.TypedAuthorization.Request .object) :=
   ⟨actionCodec, declarationCodec,

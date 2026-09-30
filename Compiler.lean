@@ -29,13 +29,8 @@ import Compiler.GateTraceRelationExt6 -- extends eta aggregation to the entire p
 import Compiler.NextgenLightClientPublicInputs -- exact current binary light-client public schema: consuming decoder round-trip/injectivity, canonical BabyBear cells, exact framed length, and public-prefix uniqueness; handwritten native code remains unverified
 import Compiler.TypedAuthorizationRequestCodec  -- `LawfulCodec (Request .object)` on the landed `StreamCodec` prefix framework: one of the three codecs a Hyperdocument `Config` demands, with teeth that the encoding separates target and effects digest
 import Compiler.HyperdocumentCodec  -- the Hyperdocument value type tree on the wire: identifiers, finite tags, records, atom kinds, embeds, and stable ranges, all on `StreamCodec`; the remaining half of what a `Config` demands
-import Compiler.HyperdocumentContentPageMaterializer  -- bounded versioned content pages retain exact links, routing, canonical sparse projection, and cSHAKE roots
-import Compiler.HyperdocumentEventPageMaterializer  -- bounded versioned causal-event pages retain exact entries, sparse-log projection, and cSHAKE roots
+import Compiler.HyperdocumentCell  -- hyperdocument content, event-log and link-index cells are StoreCodec at declared wires; the four-slot/overflow pages and the bounded-page catalog, registry and upgrade are deleted (DATAMODEL §5 B1)
 import Compiler.CredentialAuthorityCell  -- the authority domain is one StoreCodec cell over typed planes; revoked/nullifier/registered are append-only presence planes; the page and LOOM/AUTH/STATE codecs are deleted (DATAMODEL §5 B1)
-import Compiler.BoundedPageExtensionCatalog  -- one canonical catalog pins all bounded page schemas/codecs/controllers/domains and a cross-page link bundle
-import Compiler.BoundedPageCellRegistry  -- the three exact framed page materializers cross a dependent heterogeneous create/delete registry with no casts
-import Compiler.BoundedPageSchemaUpgrade  -- V2 page codecs/controllers preserve typed projections while changing exact canonical bytes under an authorized migration
-import Compiler.HyperdocumentIndexPageMaterializer  -- bounded backlink/range index rows have a versioned framed codec, cSHAKE root, and exact causal projection
 import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
 import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (DATAMODEL §5 A2)
 import Compiler.IntStream  -- the one integer byte codec: zigzag base-255; the Book's Sum codec is deleted
