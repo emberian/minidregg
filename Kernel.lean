@@ -74,3 +74,5 @@ import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
 import Kernel.ResourceTransactionAudit
+import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired), Turn, admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, poles
+import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)

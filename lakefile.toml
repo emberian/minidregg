@@ -74,3 +74,9 @@ name = "Host"
 [[lean_exe]]
 name = "minidregg-host"
 root = "Host.Main"
+
+# B2 exit measurement: wall-clock of the compiled Kernel.World.fold over a
+# 1000-turn log (Kernel.WorldBench). Not part of the umbrella gate.
+[[lean_exe]]
+name = "world-fold-bench"
+root = "Host.WorldFoldBench"
