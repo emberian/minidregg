@@ -1,0 +1,21 @@
+[
+  {
+    "name": "mini",
+    "type": 1,
+    "description": "Run one line in your Mini session (the same verbs as ssh)",
+    "options": [
+      {
+        "type": 3,
+        "name": "line",
+        "description": "One mini shell line, for example: read shared",
+        "required": true,
+        "max_length": 1000
+      }
+    ]
+  },
+  {
+    "name": "mini-help",
+    "type": 1,
+    "description": "List the mini shell verbs"
+  }
+]

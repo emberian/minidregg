@@ -1,0 +1,41 @@
+# mini-discord: the Discord entrance to Mini (an interactions endpoint).
+# One Discord user = one Mini session, by the root-owned roster
+# /etc/mini/discord-roster.json; every slash command is one `mini shell --line`
+# through the ssh entrance's own forced command (mini-shell-ssh).
+# Configuration is /etc/mini/discord.env (root:root 0600, read by systemd);
+# nothing is passed on argv. See deploy/discord/README.md.
+[Unit]
+Description=Mini Discord entrance (interactions endpoint)
+After=network-online.target mini-store.service
+Wants=network-online.target
+Requires=mini-store.service
+
+[Service]
+Type=simple
+User=mini
+Group=mini
+Slice=mini.slice
+Nice=10
+UMask=0077
+EnvironmentFile=/etc/mini/discord.env
+ExecStart=/usr/local/lib/mini/mini-discord
+# Follow-up bodies are spooled here (0600, removed after each call).
+RuntimeDirectory=mini-discord
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Session homes (keys, requests, refusals, discord.log), the sponsor workspace,
+# and the public socket directory. Same paths the ssh entrance writes.
+ReadWritePaths=/var/lib/mini/sessions /var/lib/mini/store/node/sponsor /var/lib/mini/store/node/public
+
+[Install]
+WantedBy=multi-user.target
