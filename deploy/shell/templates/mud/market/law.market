@@ -1,0 +1,22 @@
+-- kind: market
+-- MUD §2.8 order-book cell {REALM}-market-{K}, four order slots o0..o3. Only the market runner writes it; the
+-- goods and gold are escrowed in the market's Book account A_mkt, which this law cannot see until K-BOOK-SLOTS.
+-- Installed as `law.management ; law.market`.
+-- 1 writer
+any [ not (verb == 2), subject == {MKT} ];
+-- 2 pinned
+any [ not (verb == 2), field id == {K} ];
+-- 3 seq: order numbers only rise.
+any [ not (verb == 2), field seq monotone ];
+-- 4 slot 0: a side, fills that never exceed the quantity and never fall back.
+any [ not (verb == 2), all [ field o0-side in {0,1,2}, field o0-open in {0,1}, leSlots field o0-filled field o0-qty,
+                  any [ field o0-filled monotone, field o0-side == 0, not (field o0-who delta == 0) ] ] ];
+-- 5 slot 1: a side, fills that never exceed the quantity and never fall back.
+any [ not (verb == 2), all [ field o1-side in {0,1,2}, field o1-open in {0,1}, leSlots field o1-filled field o1-qty,
+                  any [ field o1-filled monotone, field o1-side == 0, not (field o1-who delta == 0) ] ] ];
+-- 6 slot 2: a side, fills that never exceed the quantity and never fall back.
+any [ not (verb == 2), all [ field o2-side in {0,1,2}, field o2-open in {0,1}, leSlots field o2-filled field o2-qty,
+                  any [ field o2-filled monotone, field o2-side == 0, not (field o2-who delta == 0) ] ] ];
+-- 7 slot 3: a side, fills that never exceed the quantity and never fall back.
+any [ not (verb == 2), all [ field o3-side in {0,1,2}, field o3-open in {0,1}, leSlots field o3-filled field o3-qty,
+                  any [ field o3-filled monotone, field o3-side == 0, not (field o3-who delta == 0) ] ] ]

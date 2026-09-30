@@ -1,0 +1,159 @@
+{
+  "type": "mud-affliction-table-v1",
+  "readBy": "programs/resolver.hoon (compiled INTO the resolver: the table is data, but a Nock sample carries only field values, so a table change = a new resolver jam = a new {VK_RESOLVER}); sim.py; the MUD-REFEREE lane",
+  "units": {
+    "bal": "K-CLOCK ticks",
+    "eq": "K-CLOCK ticks",
+    "damage": "hp"
+  },
+  "lawBounds": {
+    "MAXHIT": "6",
+    "why": "every damage below is <= MAXHIT; sheet law clause 22 refuses a referee turn that exceeds it whatever the table says"
+  },
+  "actions": {
+    "strike": {
+      "intent": "1",
+      "balance": "bal",
+      "cost": "3",
+      "needsTarget": true
+    },
+    "cast": {
+      "intent": "2",
+      "balance": "eq",
+      "cost": "4",
+      "needsTarget": true
+    },
+    "defend": {
+      "intent": "3",
+      "balance": "bal",
+      "cost": "3",
+      "needsTarget": false
+    },
+    "flee": {
+      "intent": "4",
+      "balance": "bal",
+      "cost": "3",
+      "needsTarget": false,
+      "note": "a `go DIR` that also writes intent := 4; the referee charges the balance on its next tick"
+    },
+    "cure": {
+      "intent": null,
+      "balance": null,
+      "cost": "0",
+      "note": "not an intent: `send --to REF --asset HERB --amount 1 --topic cure/AFF` (M8 send-with-payment); the referee burns the herb (K-WELL) and writes aff := 0"
+    },
+    "pray": {
+      "intent": "9",
+      "balance": null,
+      "cost": "0",
+      "note": "only while dead (law clause 9); the referee revives at HOME with HPMAX once now >= respawn"
+    }
+  },
+  "skills": {
+    "bite": {
+      "action": "strike",
+      "damage": "3",
+      "afflicts": "asthma",
+      "code": "1"
+    },
+    "envenom": {
+      "action": "strike",
+      "damage": "2",
+      "afflicts": "paralysis",
+      "code": "2"
+    },
+    "gnaw": {
+      "action": "strike",
+      "damage": "4",
+      "afflicts": "asthma",
+      "mobOnly": true,
+      "code": "3"
+    },
+    "gust": {
+      "action": "cast",
+      "damage": "1",
+      "afflicts": "clumsiness",
+      "code": "4"
+    },
+    "ward": {
+      "action": "defend",
+      "raises": "ward",
+      "code": "5"
+    }
+  },
+  "afflictions": {
+    "asthma": {
+      "field": "aff-asthma",
+      "causes": [
+        "bite",
+        "gnaw"
+      ],
+      "cure": {
+        "verb": "eat",
+        "asset": "kelp",
+        "qty": "1"
+      },
+      "effect": {
+        "blocks": [
+          "cast"
+        ],
+        "checkedBy": "law.sheet clause 13 asthma"
+      }
+    },
+    "paralysis": {
+      "field": "aff-paralysis",
+      "causes": [
+        "envenom"
+      ],
+      "cure": {
+        "verb": "apply",
+        "asset": "faeleaf",
+        "qty": "1"
+      },
+      "effect": {
+        "blocks": [
+          "strike",
+          "defend",
+          "flee",
+          "go"
+        ],
+        "checkedBy": "law.sheet clause 12 paralysis"
+      },
+      "blockedBy": "ward"
+    },
+    "clumsiness": {
+      "field": "aff-clumsiness",
+      "causes": [
+        "gust"
+      ],
+      "cure": {
+        "verb": "eat",
+        "asset": "faeleaf",
+        "qty": "1"
+      },
+      "effect": {
+        "damageMinus": "1",
+        "checkedBy": "the resolver only (a computed effect; no clause can see a miss)"
+      }
+    }
+  },
+  "defences": {
+    "ward": {
+      "field": "def-ward",
+      "blocks": [
+        "paralysis"
+      ],
+      "raisedBy": "defend",
+      "checkedBy": "law.sheet clauses 31 ward, 32 defend",
+      "lapses": "the referee may lower it at any time (a lapse is not a hurt)"
+    }
+  },
+  "resolution": [
+    "1 read attacker (joint 0) and defender (joint 1) sheets and the skill named by the intent's skill code",
+    "2 if defender dead or not in the attacker's room: clear the attacker's intent, no other write",
+    "3 damage = skill.damage - (1 if attacker clumsy else 0), floored at 0",
+    "4 affliction: set the skill's affliction unless the defender's defence blocks it",
+    "5 attacker: bal|eq := now + action.cost; intent := 0; target := 0",
+    "6 defender: hp -= damage; if hp <= 0: alive := 0, deaths += 1, respawn := now + RESPAWN; burn ESSENCE_ON_DEATH essence (a separate K-WELL turn)"
+  ]
+}

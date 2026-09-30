@@ -1,0 +1,21 @@
+{
+  "type": "mud-fields-v1",
+  "cells": {
+    "item": "{REALM}-item-{ID}"
+  },
+  "itemKinds": {
+    "key": "1",
+    "lantern": "2",
+    "sword": "3"
+  },
+  "kinds": {
+    "item": {
+      "id": "0",
+      "kind": "1",
+      "owner": "2",
+      "where": "3",
+      "worn": "4",
+      "charges": "5"
+    }
+  }
+}

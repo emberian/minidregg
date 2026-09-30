@@ -1,0 +1,18 @@
+{
+  "type": "mud-market-template-v1",
+  "cell": "{REALM}-market-{K}",
+  "fields": "fields.json",
+  "laws": [
+    "law.management",
+    "law.market"
+  ],
+  "program": "../programs/market.hoon",
+  "runner": "{MKT}, holding A_mkt",
+  "verbs": {
+    "sell N KIND PRICE": "send --to A_mkt --asset KIND --amount N --topic sell/PRICE",
+    "buy N KIND PRICE": "send --to A_mkt --asset gold --amount N*PRICE --topic buy/KIND/N/PRICE",
+    "orders": "read the market cell",
+    "cancel N": "send --to A_mkt --amount 0 --topic cancel/N (the runner refunds)"
+  },
+  "honestLabel": "the escrow receipts live in A_mkt's Book history, not in a cell, so they are not inputs the kernel can sample: the matcher is accountable (level 1) until K-BOOK-SLOTS joins payouts to receipts (MUD \u00a72.8)"
+}

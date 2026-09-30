@@ -1,0 +1,10 @@
+{
+  "type": "mud-item-v1",
+  "slug": "lantern",
+  "kind": "2",
+  "charges": "100",
+  "title": "a tin lantern",
+  "examine": "A dented tin lantern with a horn window, its wick trimmed short. It smells of fish oil.",
+  "birth": "the market sells lanterns: the market runner births an item cell per sale (init.item.json with OWNER = the buyer, WHERE = 0) and pays the create tariff from A_mkt; law.management ; law.item",
+  "note": "the dark clause (law.sheet 18) needs kind = {LANTERN} = 2, owner = the mover and charges > 0; the referee spends one charge per tick the lantern's holder is in a dark room (clause 4 of law.item lets it)"
+}

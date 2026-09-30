@@ -1,0 +1,12 @@
+-- kind: org
+-- The treasury A_G is a Book account, not a cell field, so today NO law sees a treasury payout. Two halves:
+--   (a) capability: the treasurer's office is a delegation of transfer on A_G with maxDelta
+--       (offices.json; NEEDS K-FIELDS for maxDelta, and a delegate shape that can target an account);
+--   (b) law: this file, appended to law.org when K-BOOK-SLOTS projects the Book leg of a command into the
+--       org cell's law (joint/target/{BOOK}/balance/{A_G}/{GOLD}/delta; PLACE's name, ASSUMED).
+-- A payout command's targets: 0 = this org cell (observe), plus the Book leg.
+-- 7 treasury [J-MUD-5 rows 3, 4, 5]: gold leaves A_G only on a turn signed by the office holder recorded here,
+--   at most MAXPAY per turn ({MAXPAY_LT} = -(MAXPAY+1)). NEEDS K-BOOK-SLOTS.
+any [ slot joint/target/{BOOK}/balance/{A_G}/{GOLD}/delta == 0,
+      all [ eqSlots subject field treasurer,
+            not (slot joint/target/{BOOK}/balance/{A_G}/{GOLD}/delta <= {MAXPAY_LT}) ] ]

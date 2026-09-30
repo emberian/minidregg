@@ -1,0 +1,8 @@
+-- kind: sheet
+-- Level 3 (MUD §2.3 "November"; NOCK.md §1.2 K-RAN). Appended to law.sheet ONLY when the host supplies the
+-- `witnessed` oracle: today Pred.eval is evalWith failClosed and `witnessed` is constant false
+-- (NOCK.md §1.2, reading Compiler/CanonicalPolicyAdmission.lean:474,496,567), so installing this clause now
+-- refuses every referee write. {VK_RESOLVER} = "nock:" ++ hex H(resolver jam), which rotates whenever
+-- affliction-table.json changes (the table is compiled into the program, programs/README.md).
+-- 33 witnessed [J-MUD-9]: a referee write IS the resolver's run on the observed sheets.
+any [ not (verb == 2), not (subject == {REF}), witnessed {VK_RESOLVER} ]

@@ -1,0 +1,230 @@
+{
+  "type": "all",
+  "predicates": [
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eqSlots",
+          "left": "request/subject",
+          "right": "resource/field/2/before"
+        },
+        {
+          "type": "eq",
+          "slot": "request/subject",
+          "value": "{REF}"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/0/after",
+              "value": "{ID}"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/1/after",
+              "value": "{KIND}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "le",
+          "slot": "resource/field/5/delta",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/subject",
+            "value": "{REF}"
+          }
+        },
+        {
+          "type": "eqSlots",
+          "left": "request/subject",
+          "right": "resource/field/2/before"
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/2/delta",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/3/delta",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/4/delta",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/2/after",
+          "value": "{REF}"
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/3/after",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "resource/field/2/after",
+            "value": "{REF}"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/2/delta",
+          "value": "0"
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eqSlots",
+              "left": "joint/index/1/resource/field/0/after",
+              "right": "request/subject"
+            },
+            {
+              "type": "eqSlots",
+              "left": "resource/field/3/after",
+              "right": "joint/index/1/resource/field/1/after"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "resource/field/2/before",
+            "value": "{REF}"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/2/delta",
+          "value": "0"
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/3/before",
+          "value": "0"
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eqSlots",
+              "left": "joint/index/1/resource/field/0/after",
+              "right": "resource/field/2/after"
+            },
+            {
+              "type": "eqSlots",
+              "left": "joint/index/1/resource/field/1/after",
+              "right": "resource/field/3/before"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

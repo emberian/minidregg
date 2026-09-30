@@ -1,0 +1,58 @@
+{
+  "type": "any",
+  "predicates": [
+    {
+      "type": "not",
+      "predicate": {
+        "type": "eq",
+        "slot": "request/verb",
+        "value": "2"
+      }
+    },
+    {
+      "type": "all",
+      "predicates": [
+        {
+          "type": "eq",
+          "slot": "resource/field/4/delta",
+          "value": "0"
+        },
+        {
+          "type": "eq",
+          "slot": "joint/target/{BOOK}/balance/{A_S}/{XP}/delta",
+          "value": "0"
+        },
+        {
+          "type": "eq",
+          "slot": "joint/target/{BOOK}/balance/{A_S}/{GOLD}/delta",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "type": "all",
+      "predicates": [
+        {
+          "type": "eq",
+          "slot": "resource/field/4/before",
+          "value": "0"
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/4/after",
+          "value": "1"
+        },
+        {
+          "type": "eq",
+          "slot": "joint/target/{BOOK}/balance/{A_S}/{XP}/delta",
+          "value": "{REWARD_XP}"
+        },
+        {
+          "type": "eq",
+          "slot": "joint/target/{BOOK}/balance/{A_S}/{GOLD}/delta",
+          "value": "{REWARD_GOLD}"
+        }
+      ]
+    }
+  ]
+}

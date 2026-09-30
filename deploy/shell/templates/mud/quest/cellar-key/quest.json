@@ -1,0 +1,64 @@
+{
+  "type": "mud-quest-template-v1",
+  "slug": "rat-catcher",
+  "number": "1",
+  "title": "Rat-catcher",
+  "giver": "Oona Brack, the tavern keeper (room 103)",
+  "text": "Something below the quay has been at the Brine Cask's stores. Kill the rat in the cellar and Oona will give you the key she took off a drowned bargeman: it fits the bricked arch north of the cellar.",
+  "cell": "{REALM}-quest-1-{S}",
+  "fields": "../fields.json",
+  "init": "init.quest.json",
+  "laws": {
+    "October": [
+      "law.management",
+      "law.quest"
+    ],
+    "after K-BOOK-SLOTS": [
+      "law.management",
+      "law.quest",
+      "law.quest-lawful"
+    ]
+  },
+  "placeholders": {
+    "{QUEST}": "1",
+    "{S}": "the player",
+    "{REF}": "the referee",
+    "{RAT}": "the cellar rat's subject (tidewrack/warrens/area.json spawns[0])",
+    "{REWARD_XP}": "5",
+    "{REWARD_GOLD}": "2"
+  },
+  "reward": {
+    "item": "cellar-key (item 5001, placed.quest = rat-catcher in warrens/area.json; law.item-reward)",
+    "xp": "5",
+    "gold": "2",
+    "how": "REFEREED: after state = 2 the referee writes ONE joint command [quest: rewarded 0->1, key: owner REF->S]; law.quest clause 7 and law.item-reward clause 8 each refuse it if the other half is missing or the quest is not done. The xp/gold mint is a separate K-WELL turn until K-BOOK-SLOTS (law.quest-lawful)."
+  },
+  "steps": [
+    {
+      "verb": "quest rat-catcher accept",
+      "write": "state 0->1, started := the rat's deaths now",
+      "targets": [
+        "quest cell",
+        "rat sheet (observe)"
+      ],
+      "by": "S"
+    },
+    {
+      "verb": "(the rat dies)",
+      "write": "state 1->2",
+      "targets": [
+        "quest cell",
+        "rat sheet (observe)"
+      ],
+      "by": "REF",
+      "refereed": true,
+      "honestLabel": "the law checks that the rat died after acceptance, not that S killed it; who struck the last blow is the referee's (accountable) judgement"
+    },
+    {
+      "verb": "(reward)",
+      "write": "rewarded 0->1 and the key's owner := S, one command",
+      "by": "REF",
+      "refereed": true
+    }
+  ]
+}

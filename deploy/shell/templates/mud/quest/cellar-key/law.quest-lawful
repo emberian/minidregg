@@ -1,0 +1,11 @@
+-- kind: quest
+-- NEEDS K-BOOK-SLOTS. Appended when it lands: the xp and gold reward are minted from the realm wells in the
+-- same turn that marks the quest rewarded, and in no other (MUD §2.5 "K-BOOK-SLOTS makes it one lawful turn").
+-- Today the mint is a separate K-WELL turn the referee makes after `rewarded` rose: accountable, not lawful.
+-- 9 reward-mint [J-MUD-4b]
+any [ not (verb == 2),
+      all [ field rewarded delta == 0,
+            slot joint/target/{BOOK}/balance/{A_S}/{XP}/delta == 0, slot joint/target/{BOOK}/balance/{A_S}/{GOLD}/delta == 0 ],
+      all [ field rewarded before == 0, field rewarded == 1,
+            slot joint/target/{BOOK}/balance/{A_S}/{XP}/delta == {REWARD_XP},
+            slot joint/target/{BOOK}/balance/{A_S}/{GOLD}/delta == {REWARD_GOLD} ] ]

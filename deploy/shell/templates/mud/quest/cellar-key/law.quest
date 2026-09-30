@@ -1,0 +1,27 @@
+-- kind: quest
+-- MUD §2.5 quest `rat-catcher` (the cellar key), one cell per player, a transition table like the story
+-- template's (p-templates law.state). Installed as `law.management ; law.quest`.
+-- States: 0 not taken, 1 accepted, 2 the rat died after acceptance (done). `rewarded` is separate and write-once.
+-- Joint indices: accept / done: 0 = this quest cell, 1 = the rat's sheet. NEEDS K-JOINT-INDEX.
+-- 1 writer: the player and the referee only.
+any [ not (verb == 2), subject == {S}, subject == {REF} ];
+-- 2 pinned
+any [ not (verb == 2), all [ field id == {QUEST}, field owner == {S} ] ];
+-- 3 range
+any [ not (verb == 2), all [ field state in {0,1,2}, field rewarded in {0,1} ] ];
+-- 4 onward [J-MUD-4 row 7]: no rewind (the refutable pole of the quest-monotone theorem).
+any [ not (verb == 2), field state monotone ];
+-- 5 table [J-MUD-4 rows 3, 4]: 0 -> 1 by the player, recording the rat's deaths; 1 -> 2 by the referee (REFEREED),
+--   only after the rat's deaths moved past that record.
+any [ not (verb == 2), field state delta == 0,
+      all [ field state before == 0, field state == 1, subject == {S},
+            joint 1 sheet id == {RAT}, eqSlots field started joint 1 sheet deaths ],
+      all [ field state before == 1, field state == 2, subject == {REF},
+            joint 1 sheet id == {RAT}, not (leSlots joint 1 sheet deaths field started before) ] ];
+-- 6 started-fixed: `started` is written only by the accept.
+any [ not (verb == 2), field started delta == 0, all [ field state before == 0, field state == 1 ] ];
+-- 7 reward [J-MUD-4 row 5]: `rewarded` rises only by the referee, only once the quest is done (REFEREED reward).
+any [ not (verb == 2), field rewarded delta == 0,
+      all [ subject == {REF}, field state before == 2, field rewarded before == 0, field rewarded == 1 ] ];
+-- 8 reward-once
+any [ not (verb == 2), field rewarded writeOnce ]

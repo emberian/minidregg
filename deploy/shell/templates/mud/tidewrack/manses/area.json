@@ -1,0 +1,106 @@
+{
+  "type": "mud-area-v1",
+  "realm": "tidewrack",
+  "area": "manses",
+  "areaId": "3",
+  "builder": "{CONCIERGE}",
+  "rooms": [
+    {
+      "id": "301",
+      "slug": "row",
+      "title": "Lantern Row",
+      "scene": "rooms/row.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "110",
+        "e": "302",
+        "n": "303"
+      }
+    },
+    {
+      "id": "302",
+      "slug": "plot-1",
+      "title": "Manse Plot One",
+      "scene": "rooms/plot-1.md",
+      "dark": "0",
+      "leased": "1",
+      "exits": {
+        "w": "301"
+      }
+    },
+    {
+      "id": "303",
+      "slug": "row-upper",
+      "title": "Upper Lantern Row",
+      "scene": "rooms/row-upper.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "301",
+        "e": "304",
+        "w": "305",
+        "n": "306"
+      }
+    },
+    {
+      "id": "304",
+      "slug": "plot-2",
+      "title": "Manse Plot Two",
+      "scene": "rooms/plot-2.md",
+      "dark": "0",
+      "leased": "1",
+      "exits": {
+        "w": "303"
+      }
+    },
+    {
+      "id": "305",
+      "slug": "plot-3",
+      "title": "Manse Plot Three",
+      "scene": "rooms/plot-3.md",
+      "dark": "0",
+      "leased": "1",
+      "exits": {
+        "e": "303"
+      }
+    },
+    {
+      "id": "306",
+      "slug": "rows-end",
+      "title": "Row's End",
+      "scene": "rooms/rows-end.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "303",
+        "e": "307",
+        "w": "308"
+      }
+    },
+    {
+      "id": "307",
+      "slug": "plot-4",
+      "title": "Manse Plot Four",
+      "scene": "rooms/plot-4.md",
+      "dark": "0",
+      "leased": "1",
+      "exits": {
+        "w": "306"
+      }
+    },
+    {
+      "id": "308",
+      "slug": "plot-5",
+      "title": "Manse Plot Five",
+      "scene": "rooms/plot-5.md",
+      "dark": "0",
+      "leased": "1",
+      "exits": {
+        "e": "306"
+      }
+    }
+  ],
+  "items": [],
+  "spawns": []
+}

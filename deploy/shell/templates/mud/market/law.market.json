@@ -1,0 +1,306 @@
+{
+  "type": "all",
+  "predicates": [
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "request/subject",
+          "value": "{MKT}"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/0/after",
+          "value": "{K}"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "monotone",
+          "slot": "resource/field/1/after"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "memberOf",
+              "slot": "resource/field/16/after",
+              "values": [
+                "0",
+                "1",
+                "2"
+              ]
+            },
+            {
+              "type": "memberOf",
+              "slot": "resource/field/22/after",
+              "values": [
+                "0",
+                "1"
+              ]
+            },
+            {
+              "type": "leSlots",
+              "left": "resource/field/21/after",
+              "right": "resource/field/18/after"
+            },
+            {
+              "type": "any",
+              "predicates": [
+                {
+                  "type": "monotone",
+                  "slot": "resource/field/21/after"
+                },
+                {
+                  "type": "eq",
+                  "slot": "resource/field/16/after",
+                  "value": "0"
+                },
+                {
+                  "type": "not",
+                  "predicate": {
+                    "type": "eq",
+                    "slot": "resource/field/20/delta",
+                    "value": "0"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "memberOf",
+              "slot": "resource/field/24/after",
+              "values": [
+                "0",
+                "1",
+                "2"
+              ]
+            },
+            {
+              "type": "memberOf",
+              "slot": "resource/field/30/after",
+              "values": [
+                "0",
+                "1"
+              ]
+            },
+            {
+              "type": "leSlots",
+              "left": "resource/field/29/after",
+              "right": "resource/field/26/after"
+            },
+            {
+              "type": "any",
+              "predicates": [
+                {
+                  "type": "monotone",
+                  "slot": "resource/field/29/after"
+                },
+                {
+                  "type": "eq",
+                  "slot": "resource/field/24/after",
+                  "value": "0"
+                },
+                {
+                  "type": "not",
+                  "predicate": {
+                    "type": "eq",
+                    "slot": "resource/field/28/delta",
+                    "value": "0"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "memberOf",
+              "slot": "resource/field/32/after",
+              "values": [
+                "0",
+                "1",
+                "2"
+              ]
+            },
+            {
+              "type": "memberOf",
+              "slot": "resource/field/38/after",
+              "values": [
+                "0",
+                "1"
+              ]
+            },
+            {
+              "type": "leSlots",
+              "left": "resource/field/37/after",
+              "right": "resource/field/34/after"
+            },
+            {
+              "type": "any",
+              "predicates": [
+                {
+                  "type": "monotone",
+                  "slot": "resource/field/37/after"
+                },
+                {
+                  "type": "eq",
+                  "slot": "resource/field/32/after",
+                  "value": "0"
+                },
+                {
+                  "type": "not",
+                  "predicate": {
+                    "type": "eq",
+                    "slot": "resource/field/36/delta",
+                    "value": "0"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "memberOf",
+              "slot": "resource/field/40/after",
+              "values": [
+                "0",
+                "1",
+                "2"
+              ]
+            },
+            {
+              "type": "memberOf",
+              "slot": "resource/field/46/after",
+              "values": [
+                "0",
+                "1"
+              ]
+            },
+            {
+              "type": "leSlots",
+              "left": "resource/field/45/after",
+              "right": "resource/field/42/after"
+            },
+            {
+              "type": "any",
+              "predicates": [
+                {
+                  "type": "monotone",
+                  "slot": "resource/field/45/after"
+                },
+                {
+                  "type": "eq",
+                  "slot": "resource/field/40/after",
+                  "value": "0"
+                },
+                {
+                  "type": "not",
+                  "predicate": {
+                    "type": "eq",
+                    "slot": "resource/field/44/delta",
+                    "value": "0"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

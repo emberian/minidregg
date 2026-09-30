@@ -1,0 +1,51 @@
+{
+  "type": "mud-realm-v1",
+  "realm": "tidewrack",
+  "title": "Tidewrack",
+  "areas": {
+    "harbour": "harbour",
+    "warrens": "warrens",
+    "manses": "manses"
+  },
+  "loadOrder": [
+    "harbour",
+    "warrens",
+    "manses"
+  ],
+  "spawn": "101",
+  "shrine": "105",
+  "wells": [
+    "gold",
+    "kelp",
+    "faeleaf",
+    "xp",
+    "essence"
+  ],
+  "starterKit": {
+    "gold": "20",
+    "kelp": "3"
+  },
+  "essenceOnDeath": "1",
+  "tariff": "../tariff.json",
+  "afflictionTable": "../affliction-table.json",
+  "constants": {
+    "MAXHIT": "6",
+    "MAXHIT_LT": "-7",
+    "COST": "3",
+    "COST_M1": "2",
+    "ECOST": "4",
+    "ECOST_M1": "3",
+    "HPMAX": "10",
+    "RESPAWN": "0",
+    "RESPAWN_M1": "-1",
+    "LANTERN": "2",
+    "TAX_MAX": "50",
+    "MAXPAY": "50",
+    "MAXPAY_LT": "-51",
+    "derivation": "MAXHIT_LT = -(MAXHIT+1); COST_M1 = min(bal cost of strike/defend/flee) - 1; ECOST_M1 = cast eq cost - 1; RESPAWN_M1 = RESPAWN - 1; MAXPAY_LT = -(MAXPAY+1). validate.py checks these against affliction-table.json."
+  },
+  "note": "Mob sheets bind {HPMAX} to the spawn's hp and {RESPAWN_M1} to its respawn - 1 (area.json spawns).",
+  "quests": {
+    "rat-catcher": "../quest/cellar-key"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "type": "mud-fields-v1",
+  "cells": {
+    "quest": "{REALM}-quest-{Q}-{S}"
+  },
+  "kinds": {
+    "quest": {
+      "id": "0",
+      "owner": "1",
+      "state": "2",
+      "started": "3",
+      "rewarded": "4"
+    }
+  }
+}

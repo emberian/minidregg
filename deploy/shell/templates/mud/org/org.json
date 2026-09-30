@@ -1,0 +1,47 @@
+{
+  "type": "mud-org-template-v1",
+  "verbs": {
+    "org found NAME": [
+      "create {REALM}-org-{G} declared under law.management",
+      "init fields: id={G}, leader={FOUNDER}, ballot=0, tax-rate=0, treasurer=0, recruiter=0",
+      "install law.management ; law.org",
+      "create {REALM}-org-{G}-charter (content), write charter.md with placeholders bound",
+      "birth A_G (M3 funded birth; the founder holds its transfer grant)"
+    ],
+    "office give ROLE S": [
+      "write org field ROLE := S (leader signs; law.org clause 5)",
+      "send offices.json offices.ROLE.today requests"
+    ],
+    "ballot open Q A,B,C": [
+      "create {REALM}-org-{G}-ballot-{N} declared",
+      "init: id={N}, org={G}, office=Q, open=1, result=0, ncand=3, vote-0..7=0",
+      "install law.management ; law.ballot with {SEAT_k} bound to the roster in seat order, {OFFICER} = the opener, {TALLY} = the tally runner"
+    ],
+    "vote N X": [
+      "write vote-SEAT := X, expected 0"
+    ],
+    "ballot close": [
+      "officer writes open := 0",
+      "the tally runner runs programs/tally.hoon over the ballot's fields and writes result"
+    ],
+    "treasury pay S N": [
+      "a Book transfer from A_G signed under the treasurer's delegation (needs the transfer-delegation shape, offices.json)"
+    ]
+  },
+  "fields": "fields.json kinds.org / kinds.ballot",
+  "laws": {
+    "org": [
+      "law.management",
+      "law.org"
+    ],
+    "org+treasury (after K-BOOK-SLOTS)": [
+      "law.management",
+      "law.org",
+      "law.treasury"
+    ],
+    "ballot": [
+      "law.management",
+      "law.ballot"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+-- kind: org
+-- MUD §2.7 org cell {REALM}-org-{G}. Installed as `law.management ; law.org`.
+-- Joint index for a handover: 0 = this org cell, 1 = the closed ballot. NEEDS K-JOINT-INDEX.
+-- 1 writer: the founder or the sitting leader.
+any [ not (verb == 2), subject == {FOUNDER}, eqSlots subject field leader before ];
+-- 2 pinned
+any [ not (verb == 2), field id == {G} ];
+-- 3 leader-by-ballot [J-MUD-5 row 10]: `leader` changes only to the result of a closed leader ballot of this org,
+--   a newer one than the last (field ballot).
+any [ not (verb == 2), field leader delta == 0,
+      all [ joint 1 ballot org == {G}, joint 1 ballot office == 1, joint 1 ballot open == 0,
+            not (joint 1 ballot result == 0), eqSlots field leader joint 1 ballot result,
+            eqSlots field ballot joint 1 ballot id, not (field ballot delta <= 0) ] ];
+-- 4 ballot-only-with-leader: `ballot` records the handover and moves with nothing else.
+any [ not (verb == 2), field ballot delta == 0, not (field leader delta == 0) ];
+-- 5 offices [J-MUD-5 row 2]: the treasurer and recruiter fields (the law-side mirror of the office delegations)
+--   are written by the leader.
+any [ not (verb == 2), all [ field treasurer delta == 0, field recruiter delta == 0 ], eqSlots subject field leader before ];
+-- 6 tax [J-MUD-5 row 12]: the rate is the leader's, bounded.
+any [ not (verb == 2), all [ field tax-rate delta == 0 ], all [ eqSlots subject field leader before, field tax-rate <= {TAX_MAX} ] ]

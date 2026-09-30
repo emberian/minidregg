@@ -1,0 +1,39 @@
+{
+  "type": "mud-fields-v1",
+  "cells": {
+    "org": "{REALM}-org-{G}",
+    "ballot": "{REALM}-org-{G}-ballot-{N}",
+    "charter": "{REALM}-org-{G}-charter"
+  },
+  "offices": {
+    "leader": "1",
+    "treasurer": "2",
+    "recruiter": "3"
+  },
+  "kinds": {
+    "org": {
+      "id": "0",
+      "leader": "1",
+      "ballot": "2",
+      "tax-rate": "3",
+      "treasurer": "4",
+      "recruiter": "5"
+    },
+    "ballot": {
+      "id": "0",
+      "org": "1",
+      "office": "2",
+      "open": "3",
+      "result": "4",
+      "ncand": "5",
+      "vote-0": "16",
+      "vote-1": "17",
+      "vote-2": "18",
+      "vote-3": "19",
+      "vote-4": "20",
+      "vote-5": "21",
+      "vote-6": "22",
+      "vote-7": "23"
+    }
+  }
+}

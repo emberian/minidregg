@@ -1,0 +1,45 @@
+{
+  "type": "mud-fields-v1",
+  "cells": {
+    "market": "{REALM}-market-{K}"
+  },
+  "sides": {
+    "none": "0",
+    "buy": "1",
+    "sell": "2"
+  },
+  "kinds": {
+    "market": {
+      "id": "0",
+      "seq": "1",
+      "o0-side": "16",
+      "o0-asset": "17",
+      "o0-qty": "18",
+      "o0-price": "19",
+      "o0-who": "20",
+      "o0-filled": "21",
+      "o0-open": "22",
+      "o1-side": "24",
+      "o1-asset": "25",
+      "o1-qty": "26",
+      "o1-price": "27",
+      "o1-who": "28",
+      "o1-filled": "29",
+      "o1-open": "30",
+      "o2-side": "32",
+      "o2-asset": "33",
+      "o2-qty": "34",
+      "o2-price": "35",
+      "o2-who": "36",
+      "o2-filled": "37",
+      "o2-open": "38",
+      "o3-side": "40",
+      "o3-asset": "41",
+      "o3-qty": "42",
+      "o3-price": "43",
+      "o3-who": "44",
+      "o3-filled": "45",
+      "o3-open": "46"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "type": "minidregg-workspace-proposal-v1",
+  "action": "invoke",
+  "targets": [
+    {
+      "name": "{REALM}-quest-1-{S}",
+      "payload": {
+        "type": "scalar",
+        "actions": [
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "0"
+            },
+            "value": "1"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "1"
+            },
+            "value": "{S}"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "2"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "3"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "4"
+            },
+            "value": "0"
+          }
+        ]
+      }
+    }
+  ]
+}
