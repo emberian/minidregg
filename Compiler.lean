@@ -31,7 +31,7 @@ import Compiler.TypedAuthorizationRequestCodec  -- `LawfulCodec (Request .object
 import Compiler.HyperdocumentCodec  -- the Hyperdocument value type tree on the wire: identifiers, finite tags, records, atom kinds, embeds, and stable ranges, all on `StreamCodec`; the remaining half of what a `Config` demands
 import Compiler.HyperdocumentContentPageMaterializer  -- bounded versioned content pages retain exact links, routing, canonical sparse projection, and cSHAKE roots
 import Compiler.HyperdocumentEventPageMaterializer  -- bounded versioned causal-event pages retain exact entries, sparse-log projection, and cSHAKE roots
-import Compiler.CredentialAuthorityPageMaterializer  -- bounded policy/revocation pages project exact committed authority roots, epochs, addresses, and membership
+import Compiler.CredentialAuthorityCell  -- the authority domain is one StoreCodec cell over typed planes; revoked/nullifier/registered are append-only presence planes; the page and LOOM/AUTH/STATE codecs are deleted (DATAMODEL §5 B1)
 import Compiler.BoundedPageExtensionCatalog  -- one canonical catalog pins all bounded page schemas/codecs/controllers/domains and a cross-page link bundle
 import Compiler.BoundedPageCellRegistry  -- the three exact framed page materializers cross a dependent heterogeneous create/delete registry with no casts
 import Compiler.BoundedPageSchemaUpgrade  -- V2 page codecs/controllers preserve typed projections while changing exact canonical bytes under an authorized migration

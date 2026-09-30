@@ -47,8 +47,16 @@ inductive AuthorityPlane where
   /-- Exact signing-key payload at one subject epoch. The current epoch and
   this record are installed atomically by the source-owned physical entry. -/
   | subjectKey
+  /-- Presence-only and append-only: a present key IS a revocation, and no
+  accepted patch removes or overwrites it. -/
   | revoked
+  /-- Presence-only and append-only: a present identifier is a spent
+  single-use operation. -/
   | nullifier
+  /-- Presence-only and append-only: a revocation key the domain has
+  registered (and may later revoke).  This replaces the former "stored
+  `false` in the revocation plane" encoding of "registered, not revoked". -/
+  | registered
   deriving DecidableEq, Repr
 
 /-- The key of each plane: the identifiers that name one record in it. -/
@@ -62,6 +70,7 @@ def AuthorityPlane.Key : AuthorityPlane → Type
   | .subjectKey => SubjectId × Epoch
   | .revoked => RevocationKey
   | .nullifier => Nat
+  | .registered => RevocationKey
 
 instance AuthorityPlane.keyDecEq : (plane : AuthorityPlane) → DecidableEq plane.Key
   | .capability _ => inferInstanceAs (DecidableEq CapabilityId)
@@ -73,6 +82,7 @@ instance AuthorityPlane.keyDecEq : (plane : AuthorityPlane) → DecidableEq plan
   | .subjectKey => inferInstanceAs (DecidableEq (SubjectId × Epoch))
   | .revoked => inferInstanceAs (DecidableEq RevocationKey)
   | .nullifier => inferInstanceAs (DecidableEq Nat)
+  | .registered => inferInstanceAs (DecidableEq RevocationKey)
 
 /-- A stored lineage is data: the head capability followed by its parent,
 grandparent, and so on.  Validity is a separate Lean proposition below. -/
@@ -97,8 +107,9 @@ def AuthorityPlane.Value : AuthorityPlane → Type
   | .policyAddress => Digest
   | .subjectKeyEpoch => Epoch
   | .subjectKey => CredentialSigningKey.KeyRecord
-  | .revoked => Bool
-  | .nullifier => Bool
+  | .revoked => Unit
+  | .nullifier => Unit
+  | .registered => Unit
 
 instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq plane.Value
   | .capability kind => inferInstanceAs (DecidableEq (StoredCapability kind))
@@ -108,16 +119,28 @@ instance AuthorityPlane.valueDecEq : (plane : AuthorityPlane) → DecidableEq pl
   | .policyAddress => inferInstanceAs (DecidableEq Digest)
   | .subjectKeyEpoch => inferInstanceAs (DecidableEq Epoch)
   | .subjectKey => inferInstanceAs (DecidableEq CredentialSigningKey.KeyRecord)
-  | .revoked => inferInstanceAs (DecidableEq Bool)
-  | .nullifier => inferInstanceAs (DecidableEq Bool)
+  | .revoked => inferInstanceAs (DecidableEq Unit)
+  | .nullifier => inferInstanceAs (DecidableEq Unit)
+  | .registered => inferInstanceAs (DecidableEq Unit)
 
-/-- The authority layout.  Every plane is RAM in this model: the effect family
-(`CredentialAuthorityEffects`) guards each write by its exact prior value. -/
+/-- The mutation discipline of each plane.  The revocation, nullifier and
+registration planes are presence-only and append-only: once present, a key
+stays present with the same value under every accepted patch
+(`revocation_permanent`, `nullifier_permanent`), so revocation is monotone by
+the namespace's discipline rather than by a theorem each writer must recall.
+Every other plane is RAM, guarded by its exact prior value. -/
+def AuthorityPlane.discipline : AuthorityPlane → Discipline
+  | .revoked => .appendOnly
+  | .nullifier => .appendOnly
+  | .registered => .appendOnly
+  | _ => .ram
+
+/-- The authority layout. -/
 abbrev layout : Layout.{0, 0, 0} where
   Namespace := AuthorityPlane
   Key := AuthorityPlane.Key
   Value := AuthorityPlane.Value
-  discipline := fun _ => .ram
+  discipline := AuthorityPlane.discipline
 
 abbrev Materializer := CellState.Materializer layout Digest
 abbrev Cell (M : Materializer) := CellState.Materialized M
@@ -185,10 +208,13 @@ theorem currentSigningKey_rejects_mismatch
   simp [currentSigningKey, current, record, mismatch, bind, Option.bind]
 
 def isRevoked {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
-  (pre.logical ⟨.revoked, key⟩).getD false
+  (pre.logical ⟨.revoked, key⟩).isSome
 
 def isNullified {M : Materializer} (pre : Cell M) (id : Nat) : Bool :=
-  (pre.logical ⟨.nullifier, id⟩).getD false
+  (pre.logical ⟨.nullifier, id⟩).isSome
+
+def isRegistered {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool :=
+  (pre.logical ⟨.registered, key⟩).isSome
 
 /-! ## Proof-relevant validity of stored lineage -/
 
@@ -284,7 +310,7 @@ def StateProjection.authState {L : Layout.{0, 0, 0}}
     policyAddress := fun policy epoch =>
       (show Option Digest from logical ⟨.policyAddress, (policy, epoch)⟩).getD ⟨0⟩
     revoked := (projection.revocationKeys pre.logical).filter fun key =>
-      (show Option Bool from logical ⟨.revoked, key⟩).getD false
+      (logical ⟨.revoked, key⟩).isSome
     issuerEpoch := fun issuer =>
       (logical ⟨.issuerEpoch, issuer⟩).getD (show Epoch from 0)
     policyEpoch := fun policy =>
@@ -374,9 +400,89 @@ theorem not_mem_authState_revoked_of_outside {M : Materializer}
     key ∉ (authState domain pre).revoked := by
   simp [mem_authState_revoked_iff, outside]
 
+/-! ## Append-only presence planes: revocation is monotone -/
+
+/-- A present revocation survives every valid patch. -/
+theorem revocation_permanent (store : Store layout) (patch : Patch layout)
+    (key : RevocationKey) (valid : Patch.ValidFrom store patch)
+    (revoked : store ⟨.revoked, key⟩ = some ()) :
+    Patch.run store patch ⟨.revoked, key⟩ = some () :=
+  Patch.appendOnly_present_preserved store patch ⟨.revoked, key⟩ () valid rfl revoked
+
+/-- A spent nullifier stays spent under every valid patch. -/
+theorem nullifier_permanent (store : Store layout) (patch : Patch layout)
+    (id : Nat) (valid : Patch.ValidFrom store patch)
+    (spent : store ⟨.nullifier, id⟩ = some ()) :
+    Patch.run store patch ⟨.nullifier, id⟩ = some () :=
+  Patch.appendOnly_present_preserved store patch ⟨.nullifier, id⟩ () valid rfl spent
+
+/-- Satisfiable pole: revoking a key not yet revoked is enabled. -/
+theorem revoke_enabled_iff (store : Store layout) (key : RevocationKey) :
+    (Op.allocate (L := layout) .revoked key ()).Enabled store ↔
+      store ⟨.revoked, key⟩ = none := by
+  change layout.discipline .revoked ≠ .rom ∧ store ⟨.revoked, key⟩ = none ↔ _
+  simp [AuthorityPlane.discipline]
+
+/-- Refuting pole: no operation removes a revocation. -/
+theorem unrevoke_refused (store : Store layout) (key : RevocationKey) :
+    ¬ (Op.free (L := layout) .revoked key ()).Enabled store := by
+  change ¬ (layout.discipline .revoked = .ram ∧ store ⟨.revoked, key⟩ = some ())
+  simp [AuthorityPlane.discipline]
+
+/-- Refuting pole: no operation overwrites a revocation. -/
+theorem revocation_overwrite_refused (store : Store layout) (key : RevocationKey) :
+    ¬ (Op.write (L := layout) .revoked key () ()).Enabled store := by
+  change ¬ (layout.discipline .revoked = .ram ∧ store ⟨.revoked, key⟩ = some ())
+  simp [AuthorityPlane.discipline]
+
+/-- Refuting pole: no operation clears a spent nullifier. -/
+theorem nullifier_clear_refused (store : Store layout) (id : Nat) :
+    ¬ (Op.free (L := layout) .nullifier id ()).Enabled store := by
+  change ¬ (layout.discipline .nullifier = .ram ∧ store ⟨.nullifier, id⟩ = some ())
+  simp [AuthorityPlane.discipline]
+
+/-- **At the cell.**  Validation of a patch that would un-revoke a key is
+rejected at its first operation, whatever the materializer. -/
+theorem unrevoke_rejected (M : Materializer) (pre : Cell M) (key : RevocationKey) :
+    CellState.validate M pre pre.root [Op.free (L := layout) .revoked key ()] =
+      .rejected (.disabledOperation 0) := by
+  have disabled :
+      Patch.firstDisabled? pre.logical [Op.free (L := layout) .revoked key ()] = some 0 := by
+    simp [Patch.firstDisabled?, unrevoke_refused]
+  unfold CellState.validate
+  rw [dif_pos rfl]
+  split
+  · rename_i reported
+    rw [disabled] at reported
+    cases reported
+  · rename_i index reported
+    rw [disabled] at reported
+    cases reported
+    rfl
+
+/-- **At the cell.**  Revoking an unrevoked key validates, and the post has it
+revoked. -/
+theorem revoke_accepted (M : Materializer) (pre : Cell M) (key : RevocationKey)
+    (fresh : pre.logical ⟨.revoked, key⟩ = none) :
+    ∃ validated : CellState.ValidatedPatch M pre pre.root
+        [Op.allocate (L := layout) .revoked key ()],
+      CellState.validate M pre pre.root [Op.allocate (L := layout) .revoked key ()] =
+          .accepted validated ∧
+        validated.apply.logical ⟨.revoked, key⟩ = some () := by
+  obtain ⟨validated, accepted⟩ := CellState.validate_accepts M pre pre.root
+    [Op.allocate (L := layout) .revoked key ()] rfl
+    ⟨(revoke_enabled_iff pre.logical key).2 fresh, trivial⟩
+  exact ⟨validated, accepted, by simp [Op.apply]; rfl⟩
+
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LineageValid.root_admissible_of_strict
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.mem_authState_revoked_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_authState_revoked_iff
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.revocation_permanent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revocation_permanent
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.unrevoke_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unrevoke_rejected
+/-- info: 'Minidregg.Theory.CredentialAuthorityState.revoke_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms revoke_accepted
 
 end Minidregg.Theory.CredentialAuthorityState

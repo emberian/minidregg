@@ -19,6 +19,7 @@ import Compiler.CredentialAuthorityDomain
 import Compiler.CredentialAuthorityReplay
 import Compiler.CredentialSignatureAdmission
 import Compiler.DeclaredEffectCell
+import Compiler.CredentialAuthorityCell
 import Compiler.PolicyRecordCodec
 import Compiler.ResourceBirthCodec
 
@@ -157,10 +158,7 @@ def sourceComponents : List (List UInt8) :=
    CredentialAuthorityReplay.frame,
    CredentialAuthorityReplay.birthIdentityFrame,
    CredentialAuthorityReplay.birthIdentityCustomization,
-   CredentialAuthorityStateCodec.wireFrame,
-   CredentialAuthorityStateCodec.rootCustomization,
-   CredentialAuthorityPageMaterializer.wireFrame,
-   CredentialAuthorityPageMaterializer.rootCustomization,
+   StoreCodec.frame CredentialAuthorityCell.wire,
    CredentialAuthorityDomain.catalogueFrame,
    CredentialAuthorityDomain.catalogueRootCustomization,
    PolicyRecordCodec.wireFrame,
