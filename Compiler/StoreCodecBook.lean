@@ -30,7 +30,7 @@ namespace Minidregg.Compiler.StoreCodecBook
 
 open Minidregg.Compiler.StoreCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Kernel.SparseAuthenticatedState
+open Minidregg.Theory.Store
 open Minidregg.Theory.CanonicalResourceKernel
 
 set_option autoImplicit false
@@ -53,25 +53,21 @@ def Space.Value : Space → Type
 
 /-- Every Book namespace is RAM here; whether registrations and leases become
 append-only is a kernel decision for the Book's own lane, not a codec fact. -/
+instance Space.keyDecEq : (space : Space) → DecidableEq (Space.Key space)
+  | .account => inferInstanceAs (DecidableEq Nat)
+  | .balance => inferInstanceAs (DecidableEq (Nat × Nat))
+  | .lease => inferInstanceAs (DecidableEq Nat)
+
+instance Space.valueDecEq : (space : Space) → DecidableEq (Space.Value space)
+  | .account => inferInstanceAs (DecidableEq Unit)
+  | .balance => inferInstanceAs (DecidableEq Int)
+  | .lease => inferInstanceAs (DecidableEq LeaseRecord)
+
 def layout : Layout.{0, 0, 0} where
   Namespace := Space
   Key := Space.Key
   Value := Space.Value
   discipline _ := .ram
-
-instance : DecidableEq layout.Namespace := inferInstanceAs (DecidableEq Space)
-
-instance (space : layout.Namespace) : DecidableEq (layout.Key space) := by
-  cases space
-  · exact inferInstanceAs (DecidableEq Nat)
-  · exact inferInstanceAs (DecidableEq (Nat × Nat))
-  · exact inferInstanceAs (DecidableEq Nat)
-
-instance (space : layout.Namespace) : DecidableEq (layout.Value space) := by
-  cases space
-  · exact inferInstanceAs (DecidableEq Unit)
-  · exact inferInstanceAs (DecidableEq Int)
-  · exact inferInstanceAs (DecidableEq LeaseRecord)
 
 def spaceStream : StreamCodec Space where
   encode
@@ -139,10 +135,10 @@ def bookSupport (book : Book) : Finset (Address layout) :=
     book.leaseRecords.support.map leaseAddress
 
 def bookStore (book : Book) : Store layout :=
-  ⟨DFinsupp.mk (bookSupport book) fun address => bookValue book address.1⟩
+  DFinsupp.mk (bookSupport book) fun address => bookValue book address.1
 
 theorem bookStore_apply (book : Book) (address : Address layout) :
-    (bookStore book).entries address = bookValue book address := by
+    (bookStore book) address = bookValue book address := by
   unfold bookStore
   rw [DFinsupp.mk_apply]
   split_ifs with member
@@ -184,17 +180,17 @@ def leaseOf : Address layout → LeaseId
 def accountsOf (store : Store layout) : Π₀ _ : AccountId, Option Unit :=
   DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
     (fun account : AccountId => (⟨Space.account, account⟩ : Address layout))
-    (h' := accountOf) (fun _ => rfl) store.entries
+    (h' := accountOf) (fun _ => rfl) store
 
 def balancesOf (store : Store layout) : Π₀ _ : AccountId × AssetId, Option Int :=
   DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
     (fun coordinate : AccountId × AssetId => (⟨Space.balance, coordinate⟩ : Address layout))
-    (h' := balanceOf) (fun _ => rfl) store.entries
+    (h' := balanceOf) (fun _ => rfl) store
 
 def leasesOf (store : Store layout) : Π₀ _ : LeaseId, Option LeaseRecord :=
   DFinsupp.comapDomain' (β := fun address : Address layout => Option (layout.Value address.1))
     (fun lease : LeaseId => (⟨Space.lease, lease⟩ : Address layout))
-    (h' := leaseOf) (fun _ => rfl) store.entries
+    (h' := leaseOf) (fun _ => rfl) store
 
 /-- Read a store at the Book layout as a Book; absence of a balance is zero. -/
 def bookOfStore (store : Store layout) : Book where
@@ -205,13 +201,13 @@ def bookOfStore (store : Store layout) : Book where
 
 theorem bookOfStore_account (store : Store layout) (account : AccountId) :
     account ∈ (bookOfStore store).accounts ↔
-      store.entries ⟨Space.account, account⟩ ≠ none := by
+      store ⟨Space.account, account⟩ ≠ none := by
   change account ∈ (accountsOf store).support ↔ _
   rw [DFinsupp.mem_support_toFun]
   rfl
 
 theorem balancesOf_apply (store : Store layout) (coordinate : AccountId × AssetId) :
-    balancesOf store coordinate = store.entries ⟨Space.balance, coordinate⟩ :=
+    balancesOf store coordinate = store ⟨Space.balance, coordinate⟩ :=
   rfl
 
 theorem bookOfStore_balance (store : Store layout) (coordinate : AccountId × AssetId) :
@@ -222,7 +218,7 @@ theorem bookOfStore_balance (store : Store layout) (coordinate : AccountId × As
   rw [DFinsupp.mapRange_apply]
 
 theorem bookOfStore_lease (store : Store layout) (lease : LeaseId) :
-    (bookOfStore store).leaseRecords lease = store.entries ⟨Space.lease, lease⟩ :=
+    (bookOfStore store).leaseRecords lease = store ⟨Space.lease, lease⟩ :=
   rfl
 
 theorem book_ext {left right : Book} (accounts : left.accounts = right.accounts)
@@ -309,7 +305,7 @@ def explicitZeroStore : Store layout :=
   fromEntries [(⟨⟨Space.balance, ((1 : AccountId), (0 : AssetId))⟩, (0 : Int)⟩ : Entry layout)]
 
 theorem explicitZeroStore_balance :
-    explicitZeroStore.entries ⟨Space.balance, ((1 : AccountId), (0 : AssetId))⟩ =
+    explicitZeroStore ⟨Space.balance, ((1 : AccountId), (0 : AssetId))⟩ =
       some (0 : Int) :=
   fromEntries_apply_of_mem _ (by simp) (List.mem_singleton_self _)
 
@@ -317,7 +313,7 @@ theorem explicit_zero_balance_rejected : decodeBook (encode wire explicitZeroSto
   rw [decodeBook_store_eq_none_iff]
   intro same
   have atCoordinate := congrArg
-    (fun store : Store layout => store.entries ⟨Space.balance, ((1 : AccountId), (0 : AssetId))⟩)
+    (fun store : Store layout => store ⟨Space.balance, ((1 : AccountId), (0 : AssetId))⟩)
     same
   simp only [bookStore_apply, explicitZeroStore_balance] at atCoordinate
   have read : (bookOfStore explicitZeroStore).balances ((1 : AccountId), (0 : AssetId)) = 0 := by

@@ -24,11 +24,8 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CanonicalResourceKernel
 open Minidregg.Compiler.Tower256ConcreteBackend
+open Minidregg.Theory.Store
 set_option autoImplicit false
-local instance : DecidableEq CanonicalResourceKernel.schema.Field :=
-  inferInstanceAs (DecidableEq CanonicalResourceKernel.Field)
-local instance : DecidableEq CanonicalResourceKernel.schema.Resource :=
-  inferInstanceAs (DecidableEq Empty)
 
 /-- Re-encoding is part of decoding: alternative integer encodings, duplicate
 map entries, zero entries, reordered supports, and trailing bytes are refused. -/
@@ -130,39 +127,28 @@ def bookTupleStream : StreamCodec BookTuple :=
 def bookStream : StreamCodec Book :=
   StreamCodec.xmap bookTupleStream bookTuple bookOfTuple bookOfTuple_bookTuple
 
-def stateOfOption : Option Book → LogicalState CanonicalResourceKernel.schema
-  | none => { fields := 0, resources := fun resource => nomatch resource }
-  | some book =>
-    { fields := (0 : FieldStore CanonicalResourceKernel.schema).write .book book
-      resources := fun resource => nomatch resource }
+def stateOfOption : Option Book → Store CanonicalResourceKernel.layout
+  | none => 0
+  | some book => (0 : Store CanonicalResourceKernel.layout).set bookAddress (some book)
 
-def bookAt (state : LogicalState CanonicalResourceKernel.schema) : Option Book :=
-  state.fields .book
+def bookAt (state : Store CanonicalResourceKernel.layout) : Option Book :=
+  state bookAddress
 
 @[simp] theorem bookAt_some (book : Book) :
     bookAt (stateOfOption (some book)) = some book := by
   simp [bookAt, stateOfOption]
-  rfl
 
-theorem state_ext (state : LogicalState CanonicalResourceKernel.schema) :
+theorem state_ext (state : Store CanonicalResourceKernel.layout) :
     state = stateOfOption (bookAt state) := by
-  cases state with
-  | mk fields resources =>
-    have resourcesExact : resources = fun resource => nomatch resource := by
-      funext resource; exact Empty.elim resource
-    cases present : fields .book with
-    | none =>
-      have fieldsExact : fields = (0 : FieldStore CanonicalResourceKernel.schema) := by
-        apply DFinsupp.ext
-        intro field; cases field; simpa using present
-      rw [fieldsExact, resourcesExact]; rfl
-    | some book =>
-      have fieldsExact : fields = (0 : FieldStore CanonicalResourceKernel.schema).write .book book := by
-        apply DFinsupp.ext
-        intro field; cases field; simp [present]
-      rw [fieldsExact, resourcesExact]; rfl
+  apply DFinsupp.ext
+  rintro ⟨field, key⟩
+  cases field
+  cases key
+  cases present : state bookAddress with
+  | none => simp [bookAt, stateOfOption, present]
+  | some book => simp [bookAt, stateOfOption, present]
 
-def stateStream : StreamCodec (LogicalState CanonicalResourceKernel.schema) :=
+def stateStream : StreamCodec (Store CanonicalResourceKernel.layout) :=
   StreamCodec.xmap (StreamCodec.option bookStream) bookAt stateOfOption
     (by intro state; exact (state_ext state).symm)
 
@@ -178,7 +164,7 @@ def framedCodec {α : Type} (kind : UInt8) (codec : LawfulCodec α) : LawfulCode
     | _ => none
   decode_encode := by intro value; simp [wireFrame, codec.decode_encode]
 
-def stateCodec : LawfulCodec (LogicalState CanonicalResourceKernel.schema) :=
+def stateCodec : LawfulCodec (Store CanonicalResourceKernel.layout) :=
   canonicalCodec (framedCodec 0 stateStream.toLawful)
 
 def rootCustomization : List UInt8 := "DREGG.RESOURCE.STATE/v2".toUTF8.toList
@@ -186,7 +172,7 @@ def rootCustomization : List UInt8 := "DREGG.RESOURCE.STATE/v2".toUTF8.toList
 def rootBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash rootCustomization bytes).digest
 
-def materializer : Materializer CanonicalResourceKernel.schema Digest where
+def materializer : Materializer CanonicalResourceKernel.layout Digest where
   codec := stateCodec
   rootBytes := rootBytes
 
@@ -263,7 +249,7 @@ theorem codec_encode_injective {α : Type} (codec : LawfulCodec α) :
   have decoded := congrArg codec.decode same
   simpa only [codec.decode_encode, Option.some.injEq] using decoded
 
-theorem state_decode_encode (state : LogicalState CanonicalResourceKernel.schema) :
+theorem state_decode_encode (state : Store CanonicalResourceKernel.layout) :
     stateCodec.decode (stateCodec.encode state) = some state :=
   stateCodec.decode_encode state
 
@@ -386,21 +372,21 @@ theorem preserves_hidden_balance_coordinate :
       some (stateOfOption (some witnessHiddenBook)) :=
   stateCodec.decode_encode _
 
-structure Collision (left right : LogicalState CanonicalResourceKernel.schema) : Prop where
+structure Collision (left right : Store CanonicalResourceKernel.layout) : Prop where
   statesDifferent : left ≠ right
   bytesDifferent : stateCodec.encode left ≠ stateCodec.encode right
   rootsEqual : rootBytes (stateCodec.encode left) = rootBytes (stateCodec.encode right)
 
-theorem collision_of_root_eq_of_ne {left right : LogicalState CanonicalResourceKernel.schema}
+theorem collision_of_root_eq_of_ne {left right : Store CanonicalResourceKernel.layout}
     (different : left ≠ right)
     (same : rootBytes (stateCodec.encode left) = rootBytes (stateCodec.encode right)) :
     Collision left right :=
   ⟨different, fun bytes => different (codec_encode_injective stateCodec bytes), same⟩
 
-def PairBindingPremise (left right : LogicalState CanonicalResourceKernel.schema) : Prop :=
+def PairBindingPremise (left right : Store CanonicalResourceKernel.layout) : Prop :=
   ¬ Collision left right
 
-theorem state_eq_of_root_eq {left right : LogicalState CanonicalResourceKernel.schema}
+theorem state_eq_of_root_eq {left right : Store CanonicalResourceKernel.layout}
     (binding : PairBindingPremise left right)
     (same : rootBytes (stateCodec.encode left) = rootBytes (stateCodec.encode right)) :
     left = right := by
@@ -419,12 +405,12 @@ abbrev materializer := Minidregg.Compiler.CanonicalResourcePageMaterializer.mate
 def witnessCell : Materialized materializer := materialize materializer witnessLogical
 
 @[simp] theorem witnessCell_logicalBook : logicalBook witnessCell.logical = witnessBook := by
-  simp [witnessCell, witnessLogical, logicalBook, materialize, FieldStore.read]
+  simp [witnessCell, witnessLogical, logicalBook, materialize]
 
-noncomputable def witnessMintAccepted : Accepted witnessCell (.mint 0 1 2) :=
+theorem witnessMintAccepted : Accepted witnessCell (.mint 0 1 2) :=
   Accepted.ofAdmission (by simpa using witnessMintAdmission)
 
-noncomputable def witnessBirthAccepted : AcceptedBatch witnessCell witnessBirthBatch :=
+theorem witnessBirthAccepted : AcceptedBatch witnessCell witnessBirthBatch :=
   AcceptedBatch.ofAdmission (by simpa using witnessBirthBatch_admitted)
 
 theorem witnessBirthAccepted_conserves (asset : AssetId) :

@@ -65,14 +65,15 @@ witnesses, not the proofs.
 -/
 import Compiler.FiniteDependentMapCodec
 import Compiler.Sp800185Cshake256
-import Kernel.SparseAuthenticatedState
+import Theory.CellState
 import Mathlib.Data.List.Lex
 import Mathlib.Data.Finset.Sort
 
 namespace Minidregg.Compiler.StoreCodec
 
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Kernel.SparseAuthenticatedState
+open Minidregg.Theory.Store
+open Minidregg.Theory.CellState (Materializer)
 open Minidregg.Theory.IndexedProgram (LawfulCodec)
 open Minidregg.Theory.TypedAuthorization (Digest)
 
@@ -89,9 +90,15 @@ theorem streamEncode_injective {α : Type} (codec : StreamCodec α) :
 
 /-! ## The wire description of a layout -/
 
-/-- The codecs that put one layout on the wire, and the declared identities
-the frame commits to.  Once `Theory.Store.Layout` carries its own key and
-value streams, this structure is a projection of the layout. -/
+/-- The codecs that put one `Theory.Store.Layout` on the wire, and the
+declared identities the frame commits to.
+
+This is deliberately a separate structure over the layout, not a set of
+`Layout` fields: `Layout` is the semantic object in `Theory/`, `StreamCodec`
+lives in `Compiler/`, and the import boundary forbids `Theory/` importing
+`Compiler/`.  A layout has one semantics and may have several wires; a wire's
+byte order on addresses (`addressOrder`) is derived from its codecs, so no
+separate key order exists to disagree with it. -/
 structure Wire (L : Layout.{0, 0, 0}) where
   name : String
   namespaces : List L.Namespace
@@ -198,23 +205,17 @@ end Wire
 section Store
 
 variable {L : Layout.{0, 0, 0}} (W : Wire L)
-  [DecidableEq L.Namespace] [∀ space, DecidableEq (L.Key space)]
-  [∀ space, DecidableEq (L.Value space)]
-
-instance : DecidableEq (Store L) := fun left right =>
-  decidable_of_iff (left.entries = right.entries) (by
-    cases left; cases right; simp)
 
 /-- The support of a store in canonical address-byte order. -/
 def sortedSupport (store : Store L) : List (Address L) :=
   letI := addressOrder W
-  store.entries.support.sort (· ≤ ·)
+  store.support.sort (· ≤ ·)
 
 /-- The entries of a store in canonical order.  Every supported address has a
 present value, so `filterMap` drops nothing (`entries_map`). -/
 def entries (store : Store L) : List (Entry L) :=
   (sortedSupport W store).filterMap fun address =>
-    (store.entries address).map fun value => ⟨address, value⟩
+    (store address).map fun value => ⟨address, value⟩
 
 /-- An entry as a sparse-map coordinate. -/
 def Entry.toCoordinate (entry : Entry L) : Σ address : Address L, Option (L.Value address.1) :=
@@ -223,20 +224,18 @@ def Entry.toCoordinate (entry : Entry L) : Σ address : Address L, Option (L.Val
 /-- Reconstruction from any entry list; the first occurrence of an address wins.
 Canonical decoding never relies on that choice, since it re-encodes. -/
 def fromEntries (entryList : List (Entry L)) : Store L :=
-  ⟨FiniteDependentMapCodec.fromEntries (entryList.map Entry.toCoordinate)⟩
+  FiniteDependentMapCodec.fromEntries (entryList.map Entry.toCoordinate)
 
-omit [∀ space, DecidableEq (L.Value space)] in
 theorem fromEntries_cons (entry : Entry L) (entryList : List (Entry L)) :
-    (fromEntries (entry :: entryList)).entries =
-      (fromEntries entryList).entries.update entry.1 (some entry.2) :=
+    (fromEntries (entry :: entryList)) =
+      (fromEntries entryList).update entry.1 (some entry.2) :=
   rfl
 
-omit [∀ space, DecidableEq (L.Value space)] in
 theorem fromEntries_apply_eq_none_iff (entryList : List (Entry L)) (address : Address L) :
-    (fromEntries entryList).entries address = none ↔
+    (fromEntries entryList) address = none ↔
       address ∉ entryList.map Sigma.fst := by
   induction entryList with
-  | nil => simp [fromEntries, FiniteDependentMapCodec.fromEntries]; rfl
+  | nil => simp [fromEntries, FiniteDependentMapCodec.fromEntries]
   | cons entry rest induction =>
       rw [fromEntries_cons, DFinsupp.coe_update]
       by_cases same : address = entry.1
@@ -245,11 +244,10 @@ theorem fromEntries_apply_eq_none_iff (entryList : List (Entry L)) (address : Ad
       · rw [Function.update_of_ne same, induction]
         simp [same]
 
-omit [∀ space, DecidableEq (L.Value space)] in
 theorem fromEntries_apply_of_mem (entryList : List (Entry L))
     (distinct : (entryList.map Sigma.fst).Nodup) {entry : Entry L}
     (member : entry ∈ entryList) :
-    (fromEntries entryList).entries entry.1 = some entry.2 := by
+    (fromEntries entryList) entry.1 = some entry.2 := by
   induction entryList with
   | nil => cases member
   | cons head rest induction =>
@@ -264,49 +262,44 @@ theorem fromEntries_apply_of_mem (entryList : List (Entry L))
         rw [Function.update_of_ne different]
         exact induction distinct.2 inRest
 
-omit [DecidableEq L.Namespace] [∀ space, DecidableEq (L.Key space)]
-  [∀ space, DecidableEq (L.Value space)] in
 private theorem filterMap_present (store : Store L) (addresses : List (Address L))
-    (present : ∀ address ∈ addresses, store.entries address ≠ none) :
+    (present : ∀ address ∈ addresses, store address ≠ none) :
     (addresses.filterMap fun address =>
-        (store.entries address).map fun value => (⟨address, value⟩ : Entry L)).map
+        (store address).map fun value => (⟨address, value⟩ : Entry L)).map
           Entry.toCoordinate =
-      addresses.map fun address => ⟨address, store.entries address⟩ := by
+      addresses.map fun address => ⟨address, store address⟩ := by
   induction addresses with
   | nil => rfl
   | cons head rest induction =>
       have tail := induction (fun address member => present address (by simp [member]))
-      cases found : store.entries head with
+      cases found : store head with
       | none => exact absurd found (present head (by simp))
       | some value =>
           simp only [List.filterMap_cons, found, Option.map_some, List.map_cons, tail]
           rfl
 
 theorem mem_sortedSupport (store : Store L) (address : Address L) :
-    address ∈ sortedSupport W store ↔ store.entries address ≠ none := by
+    address ∈ sortedSupport W store ↔ store address ≠ none := by
   unfold sortedSupport
   rw [Finset.mem_sort, DFinsupp.mem_support_toFun]
   rfl
 
 theorem entries_map (store : Store L) :
     (entries W store).map Entry.toCoordinate =
-      (sortedSupport W store).map fun address => ⟨address, store.entries address⟩ :=
+      (sortedSupport W store).map fun address => ⟨address, store address⟩ :=
   filterMap_present store _ fun address member =>
     (mem_sortedSupport W store address).mp member
 
 theorem fromEntries_entries (store : Store L) : fromEntries (entries W store) = store := by
-  cases store with
-  | mk map =>
-      unfold fromEntries
-      congr 1
-      rw [entries_map]
-      apply DFinsupp.ext
-      intro address
-      rw [FiniteDependentMapCodec.fromEntries_map]
-      split_ifs with member
-      · rfl
-      · have absent := (mem_sortedSupport W ⟨map⟩ address).not.mp member
-        exact (not_not.mp absent).symm
+  unfold fromEntries
+  rw [entries_map]
+  apply DFinsupp.ext
+  intro address
+  rw [FiniteDependentMapCodec.fromEntries_map]
+  split_ifs with member
+  · rfl
+  · have absent := (mem_sortedSupport W store address).not.mp member
+    exact (not_not.mp absent).symm
 
 /-! ## Canonical order of `entries` -/
 
@@ -314,8 +307,8 @@ theorem sortedSupport_pairwise (store : Store L) :
     (sortedSupport W store).Pairwise fun left right =>
       addressKey W left < addressKey W right := by
   letI := addressOrder W
-  have ordered := Finset.pairwise_sort store.entries.support (· ≤ ·)
-  have distinct := Finset.sort_nodup store.entries.support (· ≤ ·)
+  have ordered := Finset.pairwise_sort store.support (· ≤ ·)
+  have distinct := Finset.sort_nodup store.support (· ≤ ·)
   exact (ordered.and distinct).imp fun both =>
     lt_of_le_of_ne (show addressKey W _ ≤ addressKey W _ from both.1)
       ((addressKey_injective W).ne both.2)
@@ -361,7 +354,7 @@ theorem entries_fromEntries_of_pairwise (entryList : List (Entry L))
     intro address
     rw [mem_sortedSupport, Ne, fromEntries_apply_eq_none_iff, not_not]
   have values : ∀ entry ∈ entryList,
-      ((fromEntries entryList).entries entry.1).map (fun value => (⟨entry.1, value⟩ : Entry L)) =
+      ((fromEntries entryList) entry.1).map (fun value => (⟨entry.1, value⟩ : Entry L)) =
         some entry := by
     intro entry member
     rw [fromEntries_apply_of_mem entryList distinct member]
@@ -536,9 +529,7 @@ theorem decode_other_version (version : UInt8) (digest payload : List UInt8)
     (by simp [frame, otherVersion])
   simpa using header
 
-theorem decode_other_layout {L' : Layout.{0, 0, 0}} [DecidableEq L'.Namespace]
-    [∀ space, DecidableEq (L'.Key space)] [∀ space, DecidableEq (L'.Value space)]
-    (W' : Wire L') (store : Store L')
+theorem decode_other_layout {L' : Layout.{0, 0, 0}} (W' : Wire L') (store : Store L')
     (otherLayout : layoutDigest W' ≠ layoutDigest W) :
     decode W (encode W' store) = none := by
   apply decode_other_header W (frame W')
@@ -576,6 +567,10 @@ def Space.Value : Space → Type
   | .field => Nat
   | .label => List UInt8
 
+instance Space.valueDecEq : (space : Space) → DecidableEq (Space.Value space)
+  | .field => inferInstanceAs (DecidableEq Nat)
+  | .label => inferInstanceAs (DecidableEq (List UInt8))
+
 def layout : Layout.{0, 0, 0} where
   Namespace := Space
   Key := fun _ => Nat
@@ -583,16 +578,6 @@ def layout : Layout.{0, 0, 0} where
   discipline
     | .field => .ram
     | .label => .appendOnly
-
-instance : DecidableEq layout.Namespace := inferInstanceAs (DecidableEq Space)
-
-instance (space : layout.Namespace) : DecidableEq (layout.Key space) :=
-  inferInstanceAs (DecidableEq Nat)
-
-instance (space : layout.Namespace) : DecidableEq (layout.Value space) := by
-  cases space
-  · exact inferInstanceAs (DecidableEq Nat)
-  · exact inferInstanceAs (DecidableEq (List UInt8))
 
 def spaceStream : StreamCodec Space where
   encode
@@ -638,7 +623,7 @@ def fields32 : List (Entry layout) :=
 
 def store32 : Store layout := fromEntries fields32
 
-theorem store32_support_card : store32.entries.support.card = 32 := by
+theorem store32_support_card : store32.support.card = 32 := by
   decide +kernel
 
 /-! ### What the kernel evaluates, and what only the compiler reaches
@@ -751,12 +736,12 @@ open Worked
 def storeOfSize (size : Nat) : Store layout :=
   fromEntries ((List.range size).map fun index => fieldEntry index index)
 
-theorem storeOfSize_card (size : Nat) : (storeOfSize size).entries.support.card = size := by
+theorem storeOfSize_card (size : Nat) : (storeOfSize size).support.card = size := by
   have keys : ((List.range size).map fun index => fieldEntry index index).map Sigma.fst =
       (List.range size).map fun index => (⟨Space.field, index⟩ : Address layout) := by
     rw [List.map_map]
     rfl
-  have support : (storeOfSize size).entries.support =
+  have support : (storeOfSize size).support =
       ((List.range size).map fun index => (⟨Space.field, index⟩ : Address layout)).toFinset := by
     ext address
     rw [DFinsupp.mem_support_toFun, List.mem_toFinset, ← keys]
@@ -772,15 +757,15 @@ theorem storeOfSize_card (size : Nat) : (storeOfSize size).entries.support.card 
 /-- Theorem 4.12: for every size there is a store of exactly that many present
 addresses, and it round-trips through the framed codec. -/
 theorem capacity_unbounded (size : Nat) :
-    ∃ store : Store layout, store.entries.support.card = size ∧
+    ∃ store : Store layout, store.support.card = size ∧
       decode wire (encode wire store) = some store :=
   ⟨storeOfSize size, storeOfSize_card size, decode_encode wire _⟩
 
-theorem capacity_32 : ∃ store : Store layout, store.entries.support.card = 32 ∧
+theorem capacity_32 : ∃ store : Store layout, store.support.card = 32 ∧
     decode wire (encode wire store) = some store :=
   capacity_unbounded 32
 
-theorem capacity_1000 : ∃ store : Store layout, store.entries.support.card = 1000 ∧
+theorem capacity_1000 : ∃ store : Store layout, store.support.card = 1000 ∧
     decode wire (encode wire store) = some store :=
   capacity_unbounded 1000
 
