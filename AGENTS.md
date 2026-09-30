@@ -13,8 +13,8 @@ that older architecture or status text is current.
 - Preserve unrelated WIP. Root owns Git in shared trees, on current `main`;
   subagents edit only their assigned files. No stash/reset, branch/worktree changes,
   or blanket staging. Inspect full-file diffs before committing named paths.
-- Use `scripts/build-native-host.sh` and `scripts/build-native-acceptance-runner.sh`
-  for the recorded native route. Read their help first. Build in independent
+- Use `scripts/build-native-host.sh` for the recorded native route, and the
+  journey (`native/resource-client/journey.sh`) for acceptance. Read their help first. Build in independent
   snapshots with independent writable package state. At most two local Lean
   compiler seats; `LEAN_NUM_THREADS` alone does not bound Lake process fanout.
 - Preserve admitted-history, current-authority, exact-preimage and uncertain-reply

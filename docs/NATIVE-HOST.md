@@ -17,22 +17,13 @@ links the host with bounded compiler concurrency. Its manifest records the sourc
 and object closure. Give each build a fresh binary path so an earlier host remains
 available to tests already running against it. Without `--binary`, the default is
 `.lake/build/bin/minidregg-host`; the builder refuses to replace an existing binary.
-Compile the public acceptance driver against that same closure:
-
-```sh
-scripts/build-native-acceptance-runner.sh \
-  --host-response BUILD-DIR/minidregg-host.rsp --output RUNNER-DIR
-RUNNER-DIR/native-acceptance-runner --new-world \
-  BUILD-DIR/minidregg-host VERIFIER SQLITE-STORE OPENSSL ARTIFACT-DIRECTORY
-RUNNER-DIR/native-acceptance-runner \
-  BUILD-DIR/minidregg-host VERIFIER SQLITE-STORE OPENSSL
-```
-
-Use fresh output directories. The second invocation exercises the earlier
-owner/delegation and history-integrity journey. The runner builder matches
-Lake's package namespace to the host's actual objects. The large signing-plan
-fixture exceeds the interpreted `lean --run` recursion depth; use the compiled
-runner. Building or usage-smoking it is not an acceptance result.
+The process-level acceptance is the journey, `native/resource-client/journey.sh
+MANIFEST.json NEW_RUN_ROOT` (steps J0-J8, growth, K4, M3-M7; see `docs/JOURNEY.md`
+where it has landed). The Lean acceptance drivers that were compiled against the
+host closure (`probe-native-host-cli` and the page-era receiver probes) and
+`scripts/build-native-acceptance-runner.sh` were deleted at wave S4: they built
+fixtures through the retired page and catalogue materializers, and the journey
+runs the same user actions through the public host.
 
 Preparation requires a signed observation challenge covering its actual resource
 read set. Internal preparation reads state, so exposing its success/errors

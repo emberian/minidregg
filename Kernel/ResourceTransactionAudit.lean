@@ -1,5 +1,5 @@
 /- Joint invocation laws over arbitrary commands and loaded state. The native
-multi-principal positive/refusal journey lives in probe-native-host-cli.lean. -/
+multi-principal positive/refusal journey is native/resource-client/journey.sh. -/
 import Kernel.DeclaredResourceController
 
 namespace Minidregg.Kernel.DeclaredResourceController

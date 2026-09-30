@@ -59,9 +59,9 @@ def run (alice bob : List UInt8) : IO Unit := do
     (built.authority.snapshot.authState.subjectKeyEpoch ⟨7⟩ == 2 &&
      built.authority.snapshot.authState.subjectKeyEpoch ⟨8⟩ == 2 &&
      decide ((show Option KeyRecord from
-       built.authority.snapshot.logical.fields (.subjectKey ⟨7⟩ 2)) = some (key 7 alice)) &&
+       built.authority.snapshot.logical ⟨.subjectKey, (⟨7⟩, 2)⟩) = some (key 7 alice)) &&
      decide ((show Option KeyRecord from
-       built.authority.snapshot.logical.fields (.subjectKey ⟨8⟩ 2)) = some (key 8 bob)))
+       built.authority.snapshot.logical ⟨.subjectKey, (⟨8⟩, 2)⟩) = some (key 8 bob)))
   require "explicit conserved allocations"
     (cfg.initialBook.balance 7 0 == 100 && cfg.initialBook.balance 8 0 == 200 &&
      cfg.initialBook.balance 0 0 == -300 && cfg.initialBook.balance 99 0 == 0 &&
@@ -73,7 +73,7 @@ def run (alice bob : List UInt8) : IO Unit := do
     | .ok loaded => pure loaded
     | .error message => throw (IO.userError s!"FAIL reopen: {message}")
   require "reopened complete authority"
-    (CredentialAuthorityDomainReceiver.load cfg.deployment.authorityAnchor reopened.snapshot).isSome
+    (CredentialAuthorityDomainReceiver.loadDeployment cfg.deployment reopened.snapshot).isSome
   require "reopened full physical directory"
     (CredentialAuthorityDomainReceiver.loadDirectory reopened).isSome
   let [first, second] := cfg.enrollments

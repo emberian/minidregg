@@ -60,6 +60,15 @@ def genesis (sponsorKey : List UInt8) : NativeHostGenesis.Config where
   factoryController := ⟨⟨7⟩, ⟨43⟩⟩
   meterAllowance := fun _ => 10000000
 
+def isCapabilityPlane : CredentialAuthorityState.AuthorityPlane → Bool
+  | .capability _ => true
+  | _ => false
+
+/-- The capability planes of an authority store: the addresses a grant occupies. -/
+def capabilityAddresses (store : Store.Store CredentialAuthorityState.layout) :
+    Finset (Store.Address CredentialAuthorityState.layout) :=
+  store.support.filter (fun address => isCapabilityPlane address.1 = true)
+
 def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
   let (sponsorPublic, _) ← sign signer 7 []
   let (newPublic, _) ← sign signer 8 []
@@ -114,15 +123,12 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
   let some updated := CredentialAuthorityDomainReceiver.loadDeployment cfg.deployment post
     | throw (IO.userError "installed authority unreadable")
   require "physical installed authority equals prepared semantic post"
-    (CredentialAuthorityStateCodec.encode updated.snapshot.logical ==
-      CredentialAuthorityStateCodec.encode prepared.update.postLogical)
+    (decide (updated.snapshot.logical = prepared.candidate.post.logical))
   require "new key selected from canonical installed authority"
     (decide (updated.snapshot.currentSigningKey ⟨8⟩ = some key))
   require "enrollment minted no capability"
-    (decide (updated.snapshot.entries.filter (fun entry => match entry with
-      | .capability _ _ => true | _ => false) =
-      authority.snapshot.entries.filter (fun entry => match entry with
-        | .capability _ _ => true | _ => false)))
+    (decide (capabilityAddresses updated.snapshot.logical =
+      capabilityAddresses authority.snapshot.logical))
   let badKey := { command with key := { key with keyId := 7007 } }
   require "global key-id collision refuses"
     (rejected (ParticipantKeyEnrollment.prepare cfg.deployment profile ambient durable badKey))

@@ -1,7 +1,7 @@
 /-
 # Revocation teeth: distinct authority, exact command binding, downstream denial
 
-The native acceptance journey is scripts/probe-native-host-cli.lean. These are
+The native acceptance journey is native/resource-client/journey.sh. These are
 kernel-checked codec/scope cases and source-derived general laws, not deployment
 claims or substitutes for that signed durable test.
 -/
