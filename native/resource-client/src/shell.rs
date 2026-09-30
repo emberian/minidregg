@@ -62,6 +62,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
+    Verb { name: "pay", usage: "pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini pay --action address|status|audit --dir WS [--account REF]" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB]", operation: "local" },
     Verb { name: "exit", usage: "exit", operation: "local" },
@@ -380,6 +381,19 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 _ => return Err(u.to_owned()),
             }
+        }
+        "pay" => {
+            arity(&w, 1, 2, u)?;
+            let mut flags = vec![flag("action", w[1].clone()), flag("dir", ws())];
+            match (w[1].as_str(), w.get(2)) {
+                ("address" | "status", Some(account)) => {
+                    workspace_name(account, "reference name")?;
+                    flags.push(flag("account", account.clone()));
+                }
+                ("address" | "status" | "audit", None) => {}
+                _ => return Err(u.to_owned()),
+            }
+            client("pay", flags)
         }
         "refs" => {
             arity(&w, 0, 0, u)?;
@@ -952,6 +966,8 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("lookup" | "retry", 1) => attempts(),
         ("help", 1) => VERBS.iter().map(|v| v.name.to_owned()).collect(),
         ("history", 1) => vec!["all".into()],
+        ("pay", 1) => ["address", "status", "audit"].map(String::from).to_vec(),
+        ("pay", 2) if w[1] != "audit" => refs(),
         ("init", 1) => keys(),
         ("enroll", 1) => ["plan", "seal", "submit", "lookup"].map(String::from).to_vec(),
         ("enroll", 2) if w[1] != "plan" => enrolled(),
@@ -1183,6 +1199,27 @@ mod tests {
 
     fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
         items.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn pay_verbs_are_one_client_operation_each() {
+        let s = session();
+        assert_eq!(
+            client(plan(&s, "pay address").unwrap()),
+            ("pay".into(), pairs(&[("action", "address"), ("dir", "/w")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay status account").unwrap()),
+            ("pay".into(), pairs(&[("action", "status"), ("dir", "/w"), ("account", "account")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay audit").unwrap()),
+            ("pay".into(), pairs(&[("action", "audit"), ("dir", "/w")]), vec![])
+        );
+        // observe, book and heartbeat belong to the operator and the watcher, not a friend.
+        for line in ["pay observe", "pay book x", "pay audit x", "pay address ../x", "pay"] {
+            assert!(plan(&s, line).is_err(), "{line}");
+        }
     }
 
     #[test]
