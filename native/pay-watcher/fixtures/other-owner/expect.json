@@ -1,0 +1,8 @@
+{
+  "description": "the POST balance of the watched account names another wallet as owner",
+  "exit": 3,
+  "observations": 0,
+  "reasons": [
+    "wrongTokenOwner"
+  ]
+}
