@@ -178,10 +178,11 @@ fn out_of_range_account_index_is_refused() {
 }
 
 #[test]
-fn a_retained_signature_is_skipped_and_stops_paging() {
+fn a_retained_signature_is_not_fetched_and_does_not_stop_paging() {
     let r = run_vector("retained");
-    assert_eq!(r.observations.len(), 1);
-    assert_eq!(r.observations[0].slot, 990);
+    // pay-1 is older than the receipt and unreceipted: paging did not stop at the receipt.
+    let slots: Vec<u64> = r.observations.iter().map(|o| o.slot).collect();
+    assert_eq!(slots, vec![900, 990]);
     let e = only_reason(&r, Reason::AlreadyRetained);
     // The receipt was named in hex; the RPC spelled the signature in base58. Same bytes.
     let receipts: Vec<String> = std::fs::read_dir(fixture("retained").join("receipts"))
@@ -191,7 +192,7 @@ fn a_retained_signature_is_skipped_and_stops_paging() {
         .collect();
     assert_eq!(receipts.len(), 1);
     assert_eq!(hex(&e.signature.unwrap()), receipts[0]);
-    // Reading past the receipt would have hit a missing fixture and refused `transport`.
+    // Fetching the retained pay-2 would have hit a missing fixture and refused `transport`.
     assert!(!r.refused(), "{:?}", r.events);
 }
 

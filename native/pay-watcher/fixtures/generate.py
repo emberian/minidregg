@@ -340,12 +340,14 @@ def main():
         ep = Endpoint().base()
         ep.sigs(ATA0, [(PAY3, 990, None), (PAY2, 950, None), (PAY1, 900, None)])
         ep.tx(PAY3, pay3())
-        # PAY2 is retained and PAY1 is older: no getTransaction answer exists for either, so
-        # reading past the receipt would refuse with `transport`.
+        ep.tx(PAY1, pay1())
+        # PAY2 is retained: no getTransaction answer exists for it, so fetching it would
+        # refuse with `transport`. PAY1 is OLDER than the receipt and has none (say the
+        # endpoints disagreed about it last run): it must still be read and emitted.
         return ep
-    vector("retained", "pay-2 has a retained receipt (named in hex): pay-3 is emitted, pay-2 and the "
-           "older pay-1 are not read",
-           {"exit": 0, "observations": 1, "reasons": ["alreadyRetained"]},
+    vector("retained", "pay-2 has a retained receipt (named in hex) and is not fetched; the newer "
+           "pay-3 and the OLDER unreceipted pay-1 are both emitted",
+           {"exit": 0, "observations": 2, "reasons": ["alreadyRetained"]},
            endpoints=same(retained), receipts=[PAY2.hex()])
 
     def same_signature():
