@@ -256,7 +256,7 @@ theorem erased_nullifiers_nodup : intent.erase.nullifiers.Nodup := by
     have nonempty : intent.erase.rootWrites ≠ [] := by
       rw [DataIntent.erase_rootWrites, intent_payloads_exact]
       simp
-    exact (nonempty empty).elim
+    exact (nonempty empty.1).elim
   · split
     · rename_i duplicate
       have duplicateIds : contentCellId = eventCellId := by
@@ -279,6 +279,12 @@ theorem ready : intent.preflight checkpoint = .ok () := by
   rw [guards]
   simp only [Bool.not_true, Bool.false_eq_true, if_false,
     erased_preflight_checkpoint]
+  split
+  · rename_i unguarded
+    have guardsEmpty := unguarded.2.2
+    rw [intent_authority_guard_exact] at guardsEmpty
+    simp at guardsEmpty
+  · rfl
 
 @[simp] theorem complete_install :
     Minidregg.Kernel.DurableDataIntent.execute .complete checkpoint intent =
@@ -325,8 +331,10 @@ theorem erased_ready : intent.erase.preflight checkpoint.model = .ok () := by
   split at dataReady
   · contradiction
   · split at dataReady
-    next reason failed => contradiction
-    next ok => exact ok
+    · contradiction
+    · split at dataReady
+      next reason failed => contradiction
+      next ok => exact ok
 
 noncomputable def walSyncReady :
     SyncReady walFrameCodec stagedDevice intent.erase where

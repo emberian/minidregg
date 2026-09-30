@@ -167,7 +167,7 @@ theorem content_event_cells_distinct :
   · rename_i empty
     have nonempty : Merge.durableIntent.erase.rootWrites ≠ [] := by
       simp [Merge.durableIntent, DataIntent.erase]
-    exact (nonempty empty).elim
+    exact (nonempty empty.1).elim
   · split
     · rename_i duplicate
       have duplicateIds : Merge.contentCellId = Merge.eventCellId := by
