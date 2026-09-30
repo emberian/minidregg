@@ -13,12 +13,9 @@ import Kernel.State   -- the minimal kernel state: accounts + bal + caps + one U
 import Kernel.Turn    -- the turn as a wide pullback (hyperedge): cone + balance, legs_agree, the binding tooth
 import Kernel.TurnLimit  -- N2a: the hyperedge cone data IS a wide-pullback limit (Types.isLimit), keystones
 import Kernel.TurnBalancedLimit  -- N2b: conservation as the balance equalizer over N2a's limit; the conserving turn is universal
-import Kernel.DeclaredHyperedge  -- computable flat N-incidence turns jointly authorize, balance, compose, and commit one canonical post; this is the call-forest replacement carrier
-import Kernel.DeclaredHyperedgeCost  -- declaration-static bounds and exact Lean-owned flat-turn charges; funding failure is state/budget atomic and machine overflow cannot wrap
-import Kernel.DeclaredHyperedgeWitness  -- concrete two-leg commitment and exact TypedCellHyperedge migration certificate close the carrier without reviving a second runtime
-import Kernel.TypedCellHyperedge  -- schema-polymorphic joint accepted effects over typed fields/resources, one validated post, and an explicit resource law
+import Kernel.TypedCellHyperedge  -- the one flat joint carrier (D-0002): accepted effects over one Store cell, one re-validated joint patch, one post, an explicit resource law; the legacy DeclaredHyperedge carrier is deleted
 import Kernel.MultiCellHyperedge  -- genuinely heterogeneous incidence-indexed cells joined by one flat apex/receipt binding and resource equation
-import Kernel.TypedCellHyperedgeWitness  -- ANTI-VACUITY: a built same-cell `Commit`, giving the landed `no_commit_of_nonzero_resource` something to be a negative ABOUT, plus the matching `no_commit_of_wrong_apex`
+import Kernel.TypedCellHyperedgeWitness  -- ANTI-VACUITY: a built same-cell `Commit`, giving the landed `no_commit_of_nonzero_resource` something to be a negative ABOUT, plus `no_commit_of_wrong_apex` and `repeated_write_refused` (joint re-validation)
 import Kernel.MultiCellHyperedgeWitness  -- ANTI-VACUITY: a built two-incidence `Commit` — distinct cell ids, distinct accepted legs over distinct pre-cells, aggregate balanced by CANCELLATION; the carrier the durable protocol and the Hyperdocument installation quantify over. Cross-SCHEMA heterogeneity is still untested
 import Kernel.SparseAuthenticatedState  -- typed sparse ROM/RAM/append-only namespaces, fresh allocation, exact trace footprints/roots/bus rows
 import Kernel.HyperdocumentEventLog  -- final causal events occupy a separate append-only sparse cell with an exact canonical CellState adapter

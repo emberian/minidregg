@@ -37,7 +37,6 @@ import Compiler.BoundedPageCellRegistry  -- the three exact framed page material
 import Compiler.BoundedPageSchemaUpgrade  -- V2 page codecs/controllers preserve typed projections while changing exact canonical bytes under an authorized migration
 import Compiler.HyperdocumentIndexPageMaterializer  -- bounded backlink/range index rows have a versioned framed codec, cSHAKE root, and exact causal projection
 import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
-import Compiler.FiniteSparseMaterializerAudit  -- exact seven-schema census: all accepted/non-vacuous, with four inhabitation-only codecs distinguished from three production-pinned page codecs
 import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (DATAMODEL §5 A2)
 import Compiler.IntStream  -- the one integer byte codec: zigzag base-255; the Book's Sum codec is deleted
 import Compiler.DeclaredEffectCell  -- declared object/program/account-metadata cells are StoreCodec at the effect wire; the four-slot page is deleted (DATAMODEL §5 B1)
@@ -48,7 +47,7 @@ import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, 
 import Compiler.SemanticArtifactBundle -- canonical Lean-generated manifest/declaration/phase artifact with JSON writer; contains data and plans, never native verifier semantics
 import Compiler.DeclaredEffectArtifact -- first-order effect artifact projected from the target-indexed Theory.EffectDeclaration, including the concrete v1 account move
 import Compiler.DeclaredActionBytes -- versioned canonical create/write/move batches compile fail-closed into the accepted action language
-import Compiler.DeclaredHyperedgeArtifact -- flat joint turns emit the complete ordered request/effect family and presentation-root pins; no call forest or opaque witness codec is invented
+import Compiler.TypedCellHyperedgeArtifact -- flat typed joint turns emit the complete ordered request, effect digest, declaration bytes and presentation-root pins; no call forest or opaque witness codec is invented
 import Compiler.NativeWorkProfiles -- Lean-owned closed native work/codec catalog and benchmark schedules; generated workers still return only fallible bytes
 import Compiler.NativeKernelPlan -- closed arithmetic/hash/transform work plans; arbitrary native runners may block with opaque errors or return bounded data, but cannot choose continuation or acceptance
 import Compiler.MinidreggV1ArithmeticWork -- concrete zero-add arithmetic clause/work item: a successful native buffer is admitted only by the generic Lean checker; native failure blocks

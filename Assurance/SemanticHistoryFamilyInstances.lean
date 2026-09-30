@@ -5,8 +5,9 @@ These are the first two exact `EntrySemanticsFamily` instances:
 
 * a singular `SemanticTurnReceipt`, including receipts derived by
   `DeclaredTurnReceipt`;
-* a flat `DeclaredHyperedge`, retaining its proof-relevant
-  `SemanticOutcome` and, on commit, the full `CommittedHyperedge`.
+* a flat `TypedCellHyperedge`, retaining its proof-relevant
+  `SemanticOutcome`: on commit the full `Commit`, on rejection the proof that
+  no commit exists.
 
 The hyperedge header projections consume the complete declaration.  No
 incidence is selected or encoded as a primary request.  Their deployed
@@ -17,7 +18,7 @@ cryptographic collision-resistance claim.
 
 import Assurance.SemanticHistoryFamily
 import Assurance.DeclaredTurnReceipt
-import Assurance.DeclaredHyperedgeReceipt
+import Assurance.TypedCellHyperedgeReceipt
 
 namespace Minidregg.Assurance.SemanticHistoryFamilyInstances
 
@@ -176,19 +177,20 @@ end TurnEvidence
 
 end Singular
 
-/-! ## Flat declared-hyperedge family -/
+/-! ## Flat typed-hyperedge family -/
 
 section Hyperedge
 
-open Minidregg.Kernel.DeclaredHyperedge
-open Minidregg.Assurance.DeclaredHyperedgeReceipt
-open Minidregg.Theory.EffectDeclaration
-open Minidregg.Theory.CellState
+open Minidregg.Kernel.TypedCellHyperedge
+open Minidregg.Assurance.TypedCellHyperedgeReceipt
 
-variable {portal : Portal}
-variable
-  {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
-variable {Incidence : Type} [Fintype Incidence] [DecidableEq Incidence]
+universe uL vL wL
+
+variable {L : Minidregg.Theory.Store.Layout.{uL, vL, wL}}
+variable {M : Minidregg.Theory.CellState.Materializer L Digest}
+variable {portal : Portal} {projection : AuthorizationProjection L}
+variable {Incidence : Type} [Fintype Incidence]
+variable {Coordinate : Type} {Balance : Type} [AddCommMonoid Balance]
 
 /-- Exact whole-hyperedge projections used by the public header.  Every
 function consumes the full declaration, so authorization/effect/presentation
@@ -196,69 +198,67 @@ roots may commit ordered data for every incidence without inventing a primary
 request. -/
 structure HyperedgeHeaderProjection where
   semanticObjectRoot :
-    Declaration portal materializer Incidence → Digest
-  effectRoot : Declaration portal materializer Incidence → Digest
+    Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence → Digest
+  effectRoot : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence → Digest
   authorizationRoot :
-    Declaration portal materializer Incidence → Digest
-  disclosureRoot : Declaration portal materializer Incidence → Digest
-  rejectReasonId : Minidregg.Kernel.DeclaredHyperedge.RejectReason → Digest
+    Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence → Digest
+  disclosureRoot : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence → Digest
+  rejectReasonId : TypedCellHyperedgeReceipt.RejectReason → Digest
+
+variable {law : ResourceLaw.{uL, vL, wL, 0, 0} L M portal Coordinate Balance}
 
 def HyperedgeOutcome.admissionOutcome
-    {projection : AuthorizationProjection materializer}
-    {declaration : Declaration portal materializer Incidence}
-    (reasonId : Minidregg.Kernel.DeclaredHyperedge.RejectReason → Digest) :
-    SemanticOutcome projection declaration → AdmissionOutcome
+    {declaration : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence}
+    (reasonId : TypedCellHyperedgeReceipt.RejectReason → Digest) :
+    SemanticOutcome law declaration → AdmissionOutcome
   | .rejected reason _ => .rejected (reasonId reason)
-  | .committed _ _ _ => .committed
+  | .committed _ => .committed
 
 def HyperedgeOutcome.postRoot
-    {projection : AuthorizationProjection materializer}
-    {declaration : Declaration portal materializer Incidence}
+    {declaration : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence}
     {n : Nat} {F : Type*}
     (model : BoundedModel declaration n F) :
-    SemanticOutcome projection declaration → Digest
+    SemanticOutcome law declaration → Digest
   | .rejected _ _ =>
-      model.stateCommitment.root (model.project declaration.preStore)
-  | .committed postStore _ _ =>
-      model.stateCommitment.root (model.project postStore)
+      model.stateCommitment.root (model.project declaration.pre.logical)
+  | .committed _ =>
+      model.stateCommitment.root (model.project model.postStore)
 
 def hyperedgeHistoryWitness
-    (projection : AuthorizationProjection materializer)
-    (declaration : Declaration portal materializer Incidence)
+    {declaration : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence}
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (model : BoundedModel declaration n F)
+    (outcome : SemanticOutcome law declaration)
     (headerCells : HistoryAdmissionContext → BindingIx → F)
     (context : HistoryAdmissionContext) : BoundReceiptWitness n F where
   binding := headerCells context
-  core := executeCore projection declaration model
+  core := outcome.core model
 
 def hyperedgeHistoryClaim
-    (projection : AuthorizationProjection materializer)
-    (declaration : Declaration portal materializer Incidence)
+    {declaration : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence}
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (model : BoundedModel declaration n F)
+    (outcome : SemanticOutcome law declaration)
     (headerCells : HistoryAdmissionContext → BindingIx → F)
     (context : HistoryAdmissionContext) : BoundSemanticReceiptClaim n F where
-  witness := hyperedgeHistoryWitness projection declaration model
-    headerCells context
-  valid := executeCore_valid projection declaration model
+  witness := hyperedgeHistoryWitness model outcome headerCells context
+  valid := outcome.core_valid model
 
-/-- Exact evidence for one joint execution.  The proof-relevant outcome keeps
-the literal `execute` equality and its `CommittedHyperedge` on success. -/
+/-- Exact evidence for one joint turn.  The proof-relevant outcome keeps the
+`Commit` on success and the refusal proof on rejection. -/
 structure HyperedgeEvidence
     (headerProjection : HyperedgeHeaderProjection
-      (portal := portal) (materializer := materializer)
+      (L := L) (M := M) (portal := portal) (projection := projection)
       (Incidence := Incidence))
-    (projection : AuthorizationProjection materializer)
-    (declaration : Declaration portal materializer Incidence)
+    (law : ResourceLaw.{uL, vL, wL, 0, 0} L M portal Coordinate Balance)
+    (declaration : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (model : BoundedModel declaration n F)
     (headerCells : HistoryAdmissionContext → BindingIx → F)
     (context : HistoryAdmissionContext)
     (claim : BoundSemanticReceiptClaim n F) : Type where
-  outcome : SemanticOutcome projection declaration
-  claimExact : claim = hyperedgeHistoryClaim projection declaration model
-    headerCells context
+  outcome : SemanticOutcome law declaration
+  claimExact : claim = hyperedgeHistoryClaim model outcome headerCells context
   semanticObjectRootExact : context.semanticObjectRoot =
     headerProjection.semanticObjectRoot declaration
   semanticRelationExact : ∀ incidence,
@@ -267,7 +267,7 @@ structure HyperedgeEvidence
   outcomeExact : context.outcome =
     HyperedgeOutcome.admissionOutcome headerProjection.rejectReasonId outcome
   preStateExact : context.preStateRoot =
-    model.stateCommitment.root (model.project declaration.preStore)
+    model.stateCommitment.root (model.project declaration.pre.logical)
   postStateExact : context.postStateRoot =
     HyperedgeOutcome.postRoot model outcome
   effectRootExact :
@@ -278,28 +278,26 @@ structure HyperedgeEvidence
     context.disclosureRoot = headerProjection.disclosureRoot declaration
 
 /-- Flat hyperedges instantiate the same generic history family.  Rejection
-atomicity is inherited from the exact `DeclaredHyperedge.execute` branch. -/
+atomicity is the rejected core's, which a refusal proof selects. -/
 def hyperedgeFamily
     (headerProjection : HyperedgeHeaderProjection
-      (portal := portal) (materializer := materializer)
+      (L := L) (M := M) (portal := portal) (projection := projection)
       (Incidence := Incidence))
-    (projection : AuthorizationProjection materializer)
-    (declaration : Declaration portal materializer Incidence)
+    (law : ResourceLaw.{uL, vL, wL, 0, 0} L M portal Coordinate Balance)
+    (declaration : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (model : BoundedModel declaration n F)
     (headerCells : HistoryAdmissionContext → BindingIx → F) :
     EntrySemanticsFamily n F where
-  Evidence := HyperedgeEvidence headerProjection projection declaration model
-    headerCells
+  Evidence := HyperedgeEvidence headerProjection law declaration model headerCells
   rejectedCoreAtomic := by
     intro context claim evidence denial rejected
     rw [evidence.claimExact]
+    have outcomeExact := evidence.outcomeExact
     cases outcomeEq : evidence.outcome with
-    | rejected reason executed =>
-        exact executeCore_rejected_atomic projection declaration model reason
-          executed
-    | committed postStore executed semantic =>
-        have outcomeExact := evidence.outcomeExact
+    | rejected reason refused =>
+        exact SemanticOutcome.core_rejected_atomic model reason refused
+    | committed commit =>
         rw [rejected, outcomeEq] at outcomeExact
         simp [HyperedgeOutcome.admissionOutcome] at outcomeExact
 
@@ -307,10 +305,9 @@ namespace HyperedgeEvidence
 
 variable
     {headerProjection : HyperedgeHeaderProjection
-      (portal := portal) (materializer := materializer)
+      (L := L) (M := M) (portal := portal) (projection := projection)
       (Incidence := Incidence)}
-    {projection : AuthorizationProjection materializer}
-    {declaration : Declaration portal materializer Incidence}
+    {declaration : Declaration.{uL, vL, wL, 0, 0} L M portal projection Incidence}
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     {model : BoundedModel declaration n F}
     {headerCells : HistoryAdmissionContext → BindingIx → F}
@@ -325,7 +322,7 @@ variable
 /-- Package exact joint semantic evidence into an entry accepted by the same
 generic history constructor used for singular turns. -/
 def toVerifiedEntry
-    (evidence : HyperedgeEvidence headerProjection projection declaration
+    (evidence : HyperedgeEvidence headerProjection law declaration
       model headerCells context claim)
     (contextWellFormed : context.WellFormed manifest)
     (dialectEvidence :
@@ -335,7 +332,7 @@ def toVerifiedEntry
     Minidregg.Assurance.SemanticHistoryFamily.VerifiedEntry
       (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence)
-      (family := hyperedgeFamily headerProjection projection declaration model
+      (family := hyperedgeFamily headerProjection law declaration model
         headerCells)
       (headerCells := headerCells) (C := C) where
   context := context
@@ -348,9 +345,9 @@ def toVerifiedEntry
 
 /-- The exact semantic outcome retained by an admitted hyperedge entry. -/
 def retainedOutcome
-    (evidence : HyperedgeEvidence headerProjection projection declaration
+    (evidence : HyperedgeEvidence headerProjection law declaration
       model headerCells context claim) :
-    SemanticOutcome projection declaration :=
+    SemanticOutcome law declaration :=
   evidence.outcome
 
 end HyperedgeEvidence

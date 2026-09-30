@@ -11,7 +11,7 @@ handler must stage the immutable source blob and atomically install the changed 
 with the remaining hyperedge participants before publishing the result.
 -/
 import Compiler.CredentialAuthorityPolicyRegistry
-import Compiler.DeclaredHyperedgeArtifact
+import Compiler.TypedCellHyperedgeArtifact
 import Compiler.CanonicalRuntimeProfile
 import Theory.PolicyInstall
 
@@ -165,7 +165,7 @@ def requestDigest (profile : RuntimeProfile F) (snapshot : Snapshot) (context : 
   let wire := AuthorizationDeclaration.encodeRequest ⟨.program, request profile snapshot context declaration⟩
   (Sp800185Cshake256.hash "LOOM.POLICY.INSTALL.REQUEST/v2".toUTF8.toList
     ((StreamCodec.list StreamCodec.nat).encode
-      (DeclaredHyperedgeArtifact.requestWords wire))).digest
+      (TypedCellHyperedgeArtifact.requestWords wire))).digest
 
 
 def edits (profile : RuntimeProfile F) (snapshot : Snapshot) (context : RequestContext)

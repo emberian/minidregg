@@ -27,43 +27,46 @@ open Minidregg.Assurance.SemanticTurnReceipt
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
 open Minidregg.Assurance.SemanticHistoryAccumulator
 
+/-- The declared-effect cell store.  (`Store` below is the receipt word.) -/
+abbrev EffectStore := Minidregg.Theory.Store.Store effectLayout
+
 /-! ## A bounded state/root projection -/
 
-/-- The explicit boundary from the declaration's typed integer store to the
-fixed field word consumed by semantic history.  Root coherence is stated for
-every projected store; it is a codec/commitment obligation, not receipt data. -/
+/-- The explicit boundary from the declaration's typed sparse store to the
+fixed field word consumed by semantic history.  A value is projected with its
+presence (`Option Int`), so absence and a stored zero stay distinct words.
+Root coherence is stated for every projected store; it is a codec/commitment
+obligation, not receipt data. -/
 structure BoundedModel
     {portal : Portal}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     (n : Nat) (F : Type*) where
   keyAt : Fin n → Minidregg.Theory.EffectDeclaration.StateKey
-  encodeValue : Int → F
+  encodeValue : Option Int → F
   stateCommitment : StateCommitment (Fin n) F
   preRootBound :
     declaration.request.preStateRoot =
       stateCommitment.root (fun index =>
-        encodeValue (declaration.preStore (keyAt index)))
-  postRootBound : ∀ postStore : Minidregg.Theory.EffectDeclaration.Store,
-    (Minidregg.Theory.CellState.materialize materializer
-      (Minidregg.Theory.DeclaredTurn.logicalOfStore declaration.pre.logical
-        declaration.effects.footprint postStore)).root =
-        stateCommitment.root (fun index => encodeValue (postStore (keyAt index)))
+        encodeValue (declaration.pre.logical (keyAt index).address))
+  postRootBound : ∀ postStore : EffectStore,
+    (Minidregg.Theory.CellState.materialize materializer postStore).root =
+        stateCommitment.root (fun index => encodeValue (postStore (keyAt index).address))
 
 def BoundedModel.project
     {portal : Portal}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     {declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind}
     {n : Nat} {F : Type*}
     (model : BoundedModel declaration n F)
-    (store : Minidregg.Theory.EffectDeclaration.Store) : Store (Fin n) F :=
-  fun index => model.encodeValue (store (model.keyAt index))
+    (store : EffectStore) : Store (Fin n) F :=
+  fun index => model.encodeValue (store (model.keyAt index).address)
 
 def BoundedModel.footprint
     {portal : Portal}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     {declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind}
     {n : Nat} {F : Type*}
@@ -77,13 +80,13 @@ def BoundedModel.footprint
 mask induced by the declaration-derived footprint. -/
 def BoundedModel.committedCore
     {portal : Portal}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     {declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind}
     {n : Nat} {F : Type*} [Field F]
     (model : BoundedModel declaration n F)
-    (postStore : Minidregg.Theory.EffectDeclaration.Store) : ReceiptWitness (Fin n) F where
-  pre := model.project declaration.preStore
+    (postStore : EffectStore) : ReceiptWitness (Fin n) F where
+  pre := model.project declaration.pre.logical
   post := model.project postStore
   touched := fun index => if index ∈ model.footprint then 1 else 0
 
@@ -91,20 +94,20 @@ def BoundedModel.committedCore
 the touched set is empty. -/
 def BoundedModel.rejectedCore
     {portal : Portal}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     {declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind}
     {n : Nat} {F : Type*} [Field F]
     (model : BoundedModel declaration n F) : ReceiptWitness (Fin n) F :=
   ReceiptWitness.ofDelta
     (Minidregg.Assurance.SemanticHistoryAccumulator.rejectionDelta
-      (model.project declaration.preStore))
+      (model.project declaration.pre.logical))
 
 /-- The sole executable receipt core: it is a projection of the actual
 declared-turn decision, with no receipt or witness argument. -/
 def executeCore
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F]
@@ -115,12 +118,12 @@ def executeCore
 
 @[simp] theorem executeCore_committed_post
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F]
     (model : BoundedModel declaration n F)
-    (postStore : Minidregg.Theory.EffectDeclaration.Store)
+    (postStore : EffectStore)
     (executed : Minidregg.Theory.DeclaredTurn.execute authState declaration =
       .committed postStore) :
     (executeCore authState declaration model).post = model.project postStore := by
@@ -128,7 +131,7 @@ def executeCore
 
 @[simp] theorem executeCore_rejected_atomic
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F]
@@ -145,15 +148,15 @@ def executeCore
 /-- A semantic commit induces the existing frame-preserving receipt delta. -/
 def BoundedModel.commitDelta
     {portal : Portal} {authState : AuthState}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     {declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind}
-    {postStore : Minidregg.Theory.EffectDeclaration.Store}
+    {postStore : EffectStore}
     {n : Nat} {F : Type*}
     (model : BoundedModel declaration n F)
     (commit : Minidregg.Theory.DeclaredTurn.Commit (state := authState)
       declaration postStore) :
-    ReceiptDelta (model.project declaration.preStore)
+    ReceiptDelta (model.project declaration.pre.logical)
       (model.project postStore) where
   touched := model.footprint
   frame := by
@@ -168,10 +171,10 @@ def BoundedModel.commitDelta
 
 @[simp] theorem BoundedModel.committedCore_eq_ofDelta
     {portal : Portal} {authState : AuthState}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     {declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind}
-    {postStore : Minidregg.Theory.EffectDeclaration.Store}
+    {postStore : EffectStore}
     {n : Nat} {F : Type*} [Field F]
     (model : BoundedModel declaration n F)
     (commit : Minidregg.Theory.DeclaredTurn.Commit (state := authState)
@@ -185,7 +188,7 @@ relation.  Commit validity comes only from `execute_committed_sound`; rejection
 uses the existing identity delta. -/
 theorem executeCore_valid
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -196,7 +199,7 @@ theorem executeCore_valid
       simpa [executeCore, executed, BoundedModel.rejectedCore] using
         ReceiptWitness.ofDelta_satisfies
           (Minidregg.Assurance.SemanticHistoryAccumulator.rejectionDelta
-            (model.project declaration.preStore))
+            (model.project declaration.pre.logical))
   | committed postStore =>
       rcases Minidregg.Theory.DeclaredTurn.execute_committed_sound authState declaration
         postStore executed with ⟨commit⟩
@@ -206,7 +209,7 @@ theorem executeCore_valid
 
 def executeClaim
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -219,7 +222,7 @@ def executeClaim
 
 abbrev DeclaredEffect
     {portal : Portal}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind) :=
   Minidregg.Theory.EffectDeclaration.Effect declaration.seed.target
@@ -229,7 +232,7 @@ receipt delta is exactly the delta induced by an existing declared-turn commit
 for the exact request, effect list, pre-store, and post-store. -/
 def declaredEffectSemantics
     {portal : Portal} {authState : AuthState}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*}
@@ -238,13 +241,13 @@ def declaredEffectSemantics
   digest := fun effects =>
     (⟨effects⟩ : Minidregg.Theory.EffectDeclaration.Declaration declaration.seed.target).digest
   Realizes := fun {_requestKind} request effects {pre post} delta =>
-    ∃ (postStore : Minidregg.Theory.EffectDeclaration.Store)
+    ∃ (postStore : EffectStore)
       (commit : Minidregg.Theory.DeclaredTurn.Commit (state := authState)
         declaration postStore),
       (⟨_, request⟩ : Minidregg.Theory.AuthorizationDeclaration.SomeRequest) =
           ⟨kind, declaration.request⟩ ∧
       effects = declaration.effects.effects ∧
-      pre = model.project declaration.preStore ∧
+      pre = model.project declaration.pre.logical ∧
       post = model.project postStore ∧
       HEq delta (model.commitDelta commit)
 
@@ -253,7 +256,7 @@ def noDisclosure : DisclosurePolicy Empty where
 
 abbrev DerivedTurn
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*}
@@ -266,17 +269,17 @@ abbrev DerivedTurn
 
 def BoundedModel.committedTurn
     {portal : Portal} {authState : AuthState}
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     {declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind}
-    {postStore : Minidregg.Theory.EffectDeclaration.Store}
+    {postStore : EffectStore}
     {n : Nat} {F : Type*}
     (model : BoundedModel declaration n F)
     (commit : Minidregg.Theory.DeclaredTurn.Commit (state := authState)
       declaration postStore) :
     CommittedTurn portal authState declaration.request model.stateCommitment
       (declaredEffectSemantics (authState := authState) declaration model)
-      noDisclosure (model.project declaration.preStore) where
+      noDisclosure (model.project declaration.pre.logical) where
   authorization := commit.effect.authorization
   post := model.project postStore
   delta := model.commitDelta commit
@@ -292,7 +295,7 @@ def BoundedModel.committedTurn
 the executable declared-turn outcome. -/
 structure DerivedReceipt
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -305,7 +308,7 @@ structure DerivedReceipt
 authorization, effect witness, delta, post-state, or touched mask. -/
 theorem derivedReceipt_nonempty
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -315,7 +318,7 @@ theorem derivedReceipt_nonempty
   | rejected reason =>
       let receipt : DerivedTurn authState declaration model :=
         TurnReceipt.rejected declaration.request
-          (model.project declaration.preStore) model.preRootBound reason
+          (model.project declaration.pre.logical) model.preRootBound reason
       refine ⟨⟨receipt, ?_⟩⟩
       simp [receipt, Minidregg.Assurance.SemanticHistoryAccumulator.historyCore, executeCore,
         executed, BoundedModel.rejectedCore, TurnReceipt.rejected]
@@ -325,7 +328,7 @@ theorem derivedReceipt_nonempty
       let semanticCommit := model.committedTurn commit
       let receipt : DerivedTurn authState declaration model :=
         TurnReceipt.committed declaration.request
-          (model.project declaration.preStore) model.preRootBound semanticCommit
+          (model.project declaration.pre.logical) model.preRootBound semanticCommit
       refine ⟨⟨receipt, ?_⟩⟩
       change ReceiptWitness.ofDelta (model.commitDelta commit) =
         executeCore authState declaration model
@@ -336,7 +339,7 @@ theorem derivedReceipt_nonempty
 semantic meaning independent of which proof inhabitant is selected. -/
 noncomputable def canonicalReceipt
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -346,7 +349,7 @@ noncomputable def canonicalReceipt
 
 theorem canonical_core_exact
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -362,7 +365,7 @@ theorem canonical_core_exact
 has been fixed by execution. -/
 noncomputable def historyWitness
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -375,7 +378,7 @@ noncomputable def historyWitness
 
 theorem historyWitness_core_exact
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -391,7 +394,7 @@ theorem historyWitness_core_exact
 are manifest well-formedness, exact header projections, and code membership. -/
 noncomputable def historyClaim
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -404,7 +407,7 @@ noncomputable def historyClaim
 
 @[simp] theorem historyClaim_core_exact
     {portal : Portal} (authState : AuthState)
-    {materializer : Materializer Minidregg.Theory.DeclaredTurn.effectSchema Digest}
+    {materializer : Materializer effectLayout Digest}
     {kind : ResourceKind}
     (declaration : Minidregg.Theory.DeclaredTurn.Declaration portal materializer kind)
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]

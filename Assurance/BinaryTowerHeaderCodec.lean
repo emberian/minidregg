@@ -2,7 +2,7 @@
 # Assurance.BinaryTowerHeaderCodec -- exact 32-byte binding cells in GF(2^256)
 
 This is the concrete characteristic-two instance required by
-`DeclaredHyperedgeHistoryBinding`.  Each adjacent byte pair is the existing
+`TypedCellHyperedgeHistoryBinding`.  Each adjacent byte pair is the existing
 little-endian u16 cell, mapped bijectively into `binaryTower 4 = GF(2^16)`,
 then embedded into `binaryTower 8 = GF(2^256)` through the proved tower chain.
 
@@ -11,7 +11,7 @@ four-u64 Rust representation; that remains a generated representation/ABI
 obligation for opaque native compute.
 -/
 
-import Assurance.DeclaredHyperedgeHistoryBinding
+import Assurance.TypedCellHyperedgeHistoryBinding
 import Theory.BinaryTower
 
 namespace Minidregg.Assurance.BinaryTowerHeaderCodec
@@ -19,7 +19,7 @@ namespace Minidregg.Assurance.BinaryTowerHeaderCodec
 open Minidregg.Theory
 open Minidregg.Compiler.NextgenLightClientPublicInputs
 open Minidregg.Assurance.SemanticReceiptRuntimeCodec
-open Minidregg.Assurance.DeclaredHyperedgeHistoryBinding
+open Minidregg.Assurance.TypedCellHyperedgeHistoryBinding
 
 set_option autoImplicit false
 

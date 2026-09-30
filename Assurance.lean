@@ -11,8 +11,8 @@ import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated cl
 import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Selvage AccClaim fold
 import Assurance.SemanticTurnReceipt  -- exact typed request/auth/effects/disclosure wrapper → SemanticReceiptRelation
 import Assurance.DeclaredTurnReceipt  -- DeclaredTurn.execute derives the exact commit/reject receipt core and history claim; callers cannot supply post/touched/auth semantics
-import Assurance.DeclaredHyperedgeReceipt  -- flat jointly authorized turns derive one canonical commit/reject history core without choosing a synthetic primary leg
-import Assurance.DeclaredHyperedgeHistoryBinding  -- context plus the complete ordered request/effect/presentation-root family occupies the joint receipt header; hash collisions stay explicit
+import Assurance.TypedCellHyperedgeReceipt  -- flat typed joint turns derive one history core from a Commit or its proved refusal, without choosing a synthetic primary leg
+import Assurance.TypedCellHyperedgeHistoryBinding  -- context plus the complete ordered request/effect/declaration/presentation-root family occupies the joint receipt header; hash collisions stay explicit
 import Assurance.BinaryTowerHeaderCodec  -- the fixed 32-byte joint header packs injectively into sixteen GF(2^256) cells through GF(2^16), avoiding characteristic-two Nat-cast collapse
 import Assurance.SemanticReceiptRuntimeCodec  -- exact fixed key-major word/residual layout ↔ formal receipt relation; no native semantics is asserted
 import Assurance.SemanticHistoryAccumulator  -- manifest-admitted commit/reject receipts fold only from a verified predecessor head; WARP/PCS recommitment stays explicit proof data
