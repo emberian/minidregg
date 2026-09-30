@@ -76,8 +76,10 @@ def fslots(prefix, pre, post):
     return s
 
 def judge(law, verb, subj, targets=(), i=0, now=0):
-    """targets: list of (pre, post) field dicts in command order; `i` is the target whose law is judged."""
-    old = {"request/verb": verb, "request/subject": subj, "clock/now": now}
+    """targets: list of (pre, post) field dicts in command order; `i` is the target whose law is judged.
+    now=None projects no clock/now slot (wave-c, before K-CLOCK): a clause reading it must refuse."""
+    old = {"request/verb": verb, "request/subject": subj}
+    if now is not None: old["clock/now"] = now
     new = dict(old)
     if targets:
         pre, post = targets[i]
@@ -106,10 +108,10 @@ def F(ckind, **kv):
 
 F_, REF, A, B, C, RAT, TALLY = 7, 9, 11, 12, 13, 21, 30
 MG = lambda: load("law.management.json", {"{W_FOUNDER}": str(F_)})
-def sheet_law(s, home="105", hpmax=None, respawn_m1=None):
+def sheet_law(s, home="105", hpmax=None, neg_respawn=None):
     subs = {"{S}": str(s), "{REF}": str(REF), "{HOME}": home}
     if hpmax: subs["{HPMAX}"] = hpmax
-    if respawn_m1: subs["{RESPAWN_M1}"] = respawn_m1
+    if neg_respawn: subs["{NEG_RESPAWN}"] = neg_respawn
     return compose(MG(), load("sheet/law.sheet.json", subs))
 SN = names("sheet/law.sheet")
 
@@ -162,6 +164,8 @@ show("J-MUD-1 r4", "B forges a destination no exit reaches (square -> 201)", LB,
      [pair(b1, upd(b1, "sheet", at=201)), obs(SQUARE), obs(CELLAR)], expect=16)
 show("J-MUD-1 r6", "B names a room it is not in as 'from'", LB, SN, 2, B,
      [pair(b0, upd(b0, "sheet", at=201)), obs(SQUARE), obs(CELLAR)], expect=14)
+show("J-MUD-1 r6b", "B go n to the square naming the cellar as joint 2", LB, SN, 2, B,
+     [pair(b0, upd(b0, "sheet", at=102)), obs(QUAY), obs(CELLAR)], expect=15)
 show("J-MUD-1 r5", "B go d into the dark cellar, no light", LB, SN, 2, B,
      [pair(b0, upd(b0, "sheet", at=201)), obs(QUAY), obs(CELLAR)], expect=18)
 show("J-MUD-1 r5b", "B go d holding a lit lantern (joint 3)", LB, SN, 2, B,
@@ -199,6 +203,17 @@ b1 = upd(b0, "sheet", hp=7, aff_asthma=1)
 res = [pair(a1, a2), pair(b0, b1)]
 show("J-MUD-3 r2", "referee resolves: A bal := now+3, cleared", LA, SN, 2, REF, res, 0, t)
 show("J-MUD-3 r2b", "... and on B: hp 10 -> 7, asthma := 1", LB, SN, 2, REF, res, 1, t)
+show("J-MUD-3 r2c", "referee resolves A's strike with no clock/now slot (A side)", LA, SN, 2, REF, res, 0, None, expect=28)
+show("J-MUD-3 r2d", "... charging bal := now+2, one short of COST", LA, SN, 2, REF,
+     [pair(a1, upd(a2, "sheet", bal=t + 2)), pair(b0, b1)], 0, t, expect=28)
+ac = upd(a0, "sheet", intent=2, target=B, skill=4)
+ac2 = upd(ac, "sheet", eq=t + 4, intent=0, target=0, skill=0)
+bG = upd(b0, "sheet", hp=9, aff_clumsiness=1)
+show("J-MUD-3 r2e", "referee resolves A's gust: eq := now+4 (A side)", LA, SN, 2, REF, [pair(ac, ac2), pair(b0, bG)], 0, t)
+show("J-MUD-3 r2f", "... and on B: hp 10 -> 9, clumsiness := 1", LB, SN, 2, REF, [pair(ac, ac2), pair(b0, bG)], 1, t)
+show("J-MUD-3 r2g", "... eq := now+3, one short of ECOST", LA, SN, 2, REF,
+     [pair(ac, upd(ac2, "sheet", eq=t + 3)), pair(b0, bG)], 0, t, expect=29)
+show("J-MUD-3 r2h", "... the gust with no clock/now slot (A side)", LA, SN, 2, REF, [pair(ac, ac2), pair(b0, bG)], 0, None, expect=29)
 show("J-MUD-3 r3", "A strikes again inside 3 ticks (now 11)", LA, SN, 2, A,
      [pair(a2, upd(a2, "sheet", intent=1, target=B, skill=1))], now=t + 1, expect=10)
 show("J-MUD-3 r3b", "A strikes again once balanced (now 13)", LA, SN, 2, A,
@@ -245,6 +260,16 @@ show("J-MUD-3 r8a", "... the same blow leaving alive = 1", LA, SN, 2, REF,
      [pair(bS, bS2), pair(aL, upd(aL, "sheet", hp=-2))], 1, t, expect=6)
 show("J-MUD-3 r8b", "... the same blow counting 2 deaths", LA, SN, 2, REF,
      [pair(bS, bS2), pair(aL, upd(aD, "sheet", deaths=2))], 1, t, expect=5)
+# 33 death-needs-hp (SHEET-ITEM-LAW referee_kills_healthy_sheet): the referee zeroes alive at hp 3, no attacker.
+aH3 = sheet(A, at=102, hp=3)
+smite = upd(aH3, "sheet", alive=0, deaths=1, respawn=t)          # respawn = now + RESPAWN (0): clause 25 met
+show("J-MUD-3 r8c", "referee smites A at hp 3: alive 0, deaths +1 (no hp change)", LA, SN, 2, REF,
+     [pair(aH3, smite)], now=t, expect=33)
+show("J-MUD-3 r8d", "... the same smite with no clock/now slot", LA, SN, 2, REF,
+     [pair(aH3, smite)], now=None, expect=25)
+show("J-MUD-3 r8e", "... the smite as a lethal hit (hp 3 -> -1) with no attacker", LA, SN, 2, REF,
+     [pair(aH3, upd(smite, "sheet", hp=-1))], now=t, expect=26)
+show("J-MUD-3 r8f", "B kills A as in r8, no clock/now slot", LA, SN, 2, REF, [pair(bS, bS2), pair(aL, aD)], 1, None, expect=25)
 show("J-MUD-3 r9", "dead A strikes B", LA, SN, 2, A,
      [pair(aD, upd(aD, "sheet", intent=1, target=B, skill=1))], now=t + 5, expect=7)
 show("J-MUD-3 r9b", "B strikes dead A (the referee resolves it)", LA, SN, 2, REF,
@@ -271,8 +296,20 @@ show("J-MUD-3 r15", "warded B envenomed (paralysis := 1)", LB, SN, 2, REF,
      1, t, expect=31)
 show("J-MUD-3 r15b", "referee raises B's ward with no defend intent", LB, SN, 2, REF,
      [pair(b0, upd(b0, "sheet", def_ward=1))], now=t, expect=32)
+show("J-MUD-3 r14b", "paralysed B walks (square -> quay)", LB, SN, 2, B,
+     [pair(upd(bP, "sheet", at=102), upd(bP, "sheet", at=101)), obs(SQUARE), obs(QUAY)], now=t, expect=12)
+show("J-MUD-3 r14c", "paralysed B casts gust (mental: paralysis does not stop it)", LB, SN, 2, B,
+     [pair(bP, upd(bP, "sheet", intent=2, target=A, skill=4))], now=t)
+show("J-MUD-3 r15c", "unwarded B envenomed (paralysis := 1)", LB, SN, 2, REF,
+     [pair(aE, upd(aE, "sheet", bal=t + 3, intent=0, target=0, skill=0)), pair(b0, upd(b0, "sheet", hp=8, aff_paralysis=1))],
+     1, t)
+bD = sheet(B, at=102, intent=3)
+show("J-MUD-3 r15d", "referee raises B's ward on B's defend intent", LB, SN, 2, REF,
+     [pair(bD, upd(bD, "sheet", def_ward=1, bal=t + 3, intent=0))], now=t)
+show("J-MUD-3 r15e", "B lowers its own ward (the owner never writes combat fields)", LB, SN, 2, B,
+     [pair(bW, upd(bW, "sheet", def_ward=0))], now=t, expect=8)
 # the rat: a mob sheet under the same law, RESPAWN 20
-LR = sheet_law(RAT, home="201", hpmax="8", respawn_m1="19")
+LR = sheet_law(RAT, home="201", hpmax="8", neg_respawn="-20")
 r0 = sheet(RAT, at=203, hp=2); bK = sheet(B, at=203, intent=1, target=RAT, skill=1)
 show("J-MUD-4 r2", "B kills the rat, respawn := now+20", LR, SN, 2, REF,
      [pair(bK, upd(bK, "sheet", bal=t + 3, intent=0, target=0, skill=0)),
@@ -280,6 +317,12 @@ show("J-MUD-4 r2", "B kills the rat, respawn := now+20", LR, SN, 2, REF,
 show("J-MUD-4 r2b", "... with respawn := now+5 (too soon)", LR, SN, 2, REF,
      [pair(bK, upd(bK, "sheet", bal=t + 3, intent=0, target=0, skill=0)),
       pair(r0, upd(r0, "sheet", hp=-1, alive=0, deaths=1, respawn=t + 5))], 1, t, expect=25)
+show("J-MUD-4 r2e", "... with respawn := now+19 (one short)", LR, SN, 2, REF,
+     [pair(bK, upd(bK, "sheet", bal=t + 3, intent=0, target=0, skill=0)),
+      pair(r0, upd(r0, "sheet", hp=-1, alive=0, deaths=1, respawn=t + 19))], 1, t, expect=25)
+show("J-MUD-4 r2f", "B kills the rat with no clock/now slot", LR, SN, 2, REF,
+     [pair(bK, upd(bK, "sheet", bal=t + 3, intent=0, target=0, skill=0)),
+      pair(r0, upd(r0, "sheet", hp=-1, alive=0, deaths=1, respawn=t + 20))], 1, None, expect=25)
 rD = sheet(RAT, at=203, hp=-1, alive=0, deaths=1, respawn=t + 20, intent=9)
 show("J-MUD-4 r2c", "referee revives the rat early (now+10)", LR, SN, 2, REF,
      [pair(rD, upd(rD, "sheet", alive=1, hp=8, at=201, intent=0))], now=t + 10, expect=23)
@@ -295,6 +338,10 @@ LI = lambda kind="1", iid="5001": compose(MG(), load("item/law.item.json", {"{RE
 sw = item(7001, 3, A)
 LS = LI("3", "7001")
 show("J-MUD-2 r4", "A gives the sword to B (owner write)", LS, IN, 2, A, [pair(sw, upd(sw, "item", owner=B))])
+show("J-MUD-2 r4b", "A gives the same sword to C from the SAME pre-state (law alone)", LS, IN, 2, A,
+     [pair(sw, upd(sw, "item", owner=C))])   # admitted: per-step law; the durable CAS refuses it (item/README.md)
+show("J-MUD-2 r4c", "... the give to C chained after the give to B", LS, IN, 2, A,
+     [pair(upd(sw, "item", owner=B), upd(sw, "item", owner=C))], expect=1)
 show("J-MUD-2 r5", "C writes owner := C on A's sword", LS, IN, 2, C, [pair(sw, upd(sw, "item", owner=C))], expect=1)
 show("J-MUD-2 r6", "A recharges the lantern (charges up)", LI("2", "6001"), IN, 2, A,
      [pair(LANTERN(A, 5), LANTERN(A, 9))], expect=3)
@@ -311,6 +358,10 @@ show("J-MUD-2 r9", "referee hands the floor sword to B, who stands there", LS, I
      [pair(fl, upd(fl, "item", owner=B, where=0)), obs(sheet(B, at=203))])
 show("J-MUD-2 r9b", "... to C, who is in 101", LS, IN, 2, REF,
      [pair(fl, upd(fl, "item", owner=C, where=0)), obs(sheet(C, at=101))], expect=7)
+show("J-MUD-2 r9d", "referee hands the floor sword to B naming C's sheet as joint 1", LS, IN, 2, REF,
+     [pair(fl, upd(fl, "item", owner=B, where=0)), obs(sheet(C, at=203))], expect=7)
+show("J-MUD-2 r9e", "B takes the floor sword itself (not the referee)", LS, IN, 2, B,
+     [pair(fl, upd(fl, "item", owner=B, where=0)), obs(sheet(B, at=203))], expect=1)
 show("J-MUD-2 r9c", "B keeps the sword but leaves where = 203", LS, IN, 2, REF,
      [pair(fl, upd(fl, "item", owner=B)), obs(sheet(B, at=203))], expect=5)
 

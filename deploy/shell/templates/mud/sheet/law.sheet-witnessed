@@ -4,5 +4,5 @@
 -- (NOCK.md §1.2, reading Compiler/CanonicalPolicyAdmission.lean:474,496,567), so installing this clause now
 -- refuses every referee write. {VK_RESOLVER} = "nock:" ++ hex H(resolver jam), which rotates whenever
 -- affliction-table.json changes (the table is compiled into the program, programs/README.md).
--- 33 witnessed [J-MUD-9]: a referee write IS the resolver's run on the observed sheets.
+-- 34 witnessed [J-MUD-9]: a referee write IS the resolver's run on the observed sheets.
 any [ not (verb == 2), not (subject == {REF}), witnessed {VK_RESOLVER} ]
