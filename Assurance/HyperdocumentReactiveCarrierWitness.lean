@@ -101,15 +101,14 @@ local instance : DecidableEq
     (GuardedAdvice.NullifierKey controllerTypes.vocabulary) :=
   Classical.decEq _
 
-def layout : CellState.ControllerLayout cellSchema.{0, 0} controllerTypes where
-  fieldKey := id
-  resourceKey := Empty.elim
+def layout : CellState.ControllerLayout Hyperdocument.layout controllerTypes where
+  addressKey := id
 
-def patch : CellState.Patch cellSchema.{0, 0} Digest :=
+def patch : Store.Patch Hyperdocument.layout :=
   HW.declaration.patch HW.config
 
 def controllerWrites : List (controllerTypes.Key × controllerTypes.Value) :=
-  (patch.controllerFootprint layout).toList.map fun key => (key, ())
+  (CellState.controllerFootprint layout patch).toList.map fun key => (key, ())
 
 def hole : ReactiveController.HoleSpec firstOrder controllerTypes where
   holeId := 40
@@ -117,7 +116,7 @@ def hole : ReactiveController.HoleSpec firstOrder controllerTypes where
   turnId := 41
   preRoot := HW.pre.root
   authorityDemand := ⟨42⟩
-  footprint := patch.controllerFootprint layout
+  footprint := CellState.controllerFootprint layout patch
   guardCommitment := ⟨43⟩
   effectCommitment := HW.declaration.effectDigest HW.config
   deadline := 25
@@ -306,45 +305,28 @@ theorem controller_post_root_exact :
     _ = HW.accepted.accepted.validated.apply.root := rfl
 
 theorem controller_footprint_exact :
-    patch.controllerFootprint layout = declaration.hole.footprint := rfl
+    CellState.controllerFootprint layout patch = declaration.hole.footprint := rfl
 
-set_option maxRecDepth 10000 in
+/-- The accepted content patch validates at the root the controller intent
+quotes (the hole's pre-root). -/
 theorem patch_validates :
-    CellState.validate HW.materializer HW.pre patch =
-      CellState.ValidationOutcome.accepted HW.accepted.accepted.validated := by
-  have rootExact : (HW.declaration.patch HW.config).expectedPreRoot = HW.pre.root :=
-    HW.accepted.accepted.validated.preRoot_bound
-  have fieldsExact : (HW.declaration.patch HW.config).fieldFootprint =
-      (HW.declaration.patch HW.config).namedFields :=
-    HW.accepted.accepted.validated.fields_exact
-  have resourcesExact : (HW.declaration.patch HW.config).resourceFootprint =
-      (HW.declaration.patch HW.config).namedResources :=
-    HW.accepted.accepted.validated.resources_exact
-  change CellState.validate HW.materializer HW.pre
-      (HW.declaration.patch HW.config) =
-    CellState.ValidationOutcome.accepted HW.accepted.accepted.validated
-  unfold CellState.validate
-  simp only [rootExact, fieldsExact, resourcesExact]
-  congr
+    ∃ validated, CellState.validate HW.materializer HW.pre
+      controllerIntent.request.preRoot patch = .accepted validated :=
+  CellState.validate_accepts _ _ _ _ controller_pre_root_exact
+    HW.accepted.accepted.validated.valid
 
-set_option maxRecDepth 10000 in
 theorem transition_accepts :
     ∃ accepted : ReactiveCellTransition.Accepted HW.materializer layout
         declaration observation advice proofData controllerPre HW.pre patch,
       ReactiveCellTransition.transition HW.materializer
       layout declaration observation advice proofData controllerPre
       HW.pre patch = ReactiveCellTransition.Outcome.accepted accepted := by
+  obtain ⟨validated, validatedExact⟩ := patch_validates
   unfold ReactiveCellTransition.transition
-  simp only [controller_exact, patch_validates]
-  split
-  · split
-    · split
-      · exact ⟨_, rfl⟩
-      · contradiction
-    · rename_i _ postMismatch
-      exact False.elim (postMismatch (by
-        simpa using controller_post_root_exact))
-  · contradiction
+  simp only [controller_exact, validatedExact]
+  rw [dif_pos (show controllerIntent.verified.postRoot = validated.apply.root from
+    controller_post_root_exact.trans rfl), dif_pos controller_footprint_exact]
+  exact ⟨_, rfl⟩
 
 noncomputable def acceptedTransition : ReactiveCellTransition.Accepted
     HW.materializer layout declaration observation advice proofData
