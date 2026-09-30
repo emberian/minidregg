@@ -17,6 +17,11 @@ use std::path::{Path, PathBuf};
 
 const MAX_RECORD: u64 = 256 * 1024;
 
+/// Client-side private-cell codec (`PrivateEnvelope/v1`); hooked into `propose`
+/// and `read` by `--private ROOM`. See `docs/PRIVATE-CELL.md`.
+#[path = "private.rs"]
+pub(crate) mod private;
+
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 39
@@ -605,12 +610,55 @@ fn content_actions(actions: &Value) -> Result<Value> {
     Ok(json!({"type":"content","actions":actions}))
 }
 
-fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &str) -> Result<()> {
+/// The room named by a workspace reference, and its latest key from the cache.
+fn private_room(root: &Path, room: &str) -> Result<(String, private::RoomKey)> {
+    let room_id = member(&reference(root, room)?, "target")?.to_owned();
+    let keys = private::workspace_keys(root)?
+        .ok_or("--private needs the key cache: set MINI_KEYCACHE_PASSPHRASE")?;
+    let key = keys
+        .latest(&room_id)
+        .ok_or_else(|| format!("no room key for {room} in the key cache"))?;
+    Ok((room_id, key))
+}
+
+fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str) -> Result<()> {
+    let room_id = member(&reference(root, room)?, "target")?.to_owned();
+    let reference = reference(root, resource_name)?;
+    let (mut view, _, _) = signed_view(root, workspace, &reference, "resource")?;
+    let keys = private::workspace_keys(root)?;
+    let count = private::open_view(
+        &mut view,
+        &room_id,
+        member(&reference, "target")?,
+        keys.as_ref(),
+    );
+    eprintln!("workspace read: {count} private atom(s) under room {room}");
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&view).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+fn propose(
+    root: &Path,
+    workspace: &Value,
+    request_path: &Path,
+    proposal_id: &str,
+    private_room_name: Option<&str>,
+) -> Result<()> {
     validate_name(proposal_id)?;
     let request = bounded_json(request_path)?;
     if member(&request, "type")? != "minidregg-workspace-proposal-v1" {
         return Err("unknown workspace proposal version".into());
     }
+    let sealing = match private_room_name {
+        Some(_) if member(&request, "action")? != "invoke" => {
+            return Err("--private applies to invoke proposals only".into())
+        }
+        Some(room) => Some(private_room(root, room)?),
+        None => None,
+    };
     let nonce = random_nonce()?;
     let mut delegation = None::<Value>;
     let intent = match member(&request, "action")? {
@@ -676,9 +724,18 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 {
                     return Err("payload may contain only type and actions".into());
                 }
-                let lowered = match member(payload, "type")? {
-                    "scalar" => scalar_actions(&payload["actions"], target)?,
-                    "content" => content_actions(&payload["actions"])?,
+                let lowered = match (member(payload, "type")?, &sealing) {
+                    ("scalar", None) => scalar_actions(&payload["actions"], target)?,
+                    ("content", None) => content_actions(&payload["actions"])?,
+                    ("content", Some((room, key))) => private::seal_content(
+                        content_actions(&payload["actions"])?,
+                        room,
+                        target,
+                        key,
+                    )?,
+                    ("scalar", Some(_)) => {
+                        return Err("--private seals content payloads only".into())
+                    }
                     _ => return Err("unsupported workspace payload type".into()),
                 };
                 let capability = member(&reference, "operationCapability")?;
@@ -1800,7 +1857,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "describe" | "read" => {
             let name = os_string(args.required("name")?, "reference name")?;
+            let room = args
+                .optional("private")
+                .map(|value| os_string(value, "private room"))
+                .transpose()?;
             args.finish()?;
+            if let Some(room) = room {
+                if action == "describe" {
+                    return Err("--private applies to read only".into());
+                }
+                return read_private(&root, &workspace, &name, &room);
+            }
             read(
                 &root,
                 &workspace,
@@ -1839,8 +1906,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "propose" => {
             let request = path(args.required("request")?);
             let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            let room = args
+                .optional("private")
+                .map(|value| os_string(value, "private room"))
+                .transpose()?;
             args.finish()?;
-            propose(&root, &workspace, &request, &proposal_id)
+            propose(&root, &workspace, &request, &proposal_id, room.as_deref())
         }
         "create" => {
             let name = os_string(args.required("name")?, "resource name")?;
