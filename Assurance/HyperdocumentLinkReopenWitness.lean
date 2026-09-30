@@ -50,14 +50,12 @@ noncomputable section
 
 abbrev Fld := ZMod 5
 
-def scalarizer : Scalarizer Hyperdocument.cellSchema Fld where
+def scalarizer : Scalarizer Hyperdocument.layout Fld where
   root := fun root => root.value
-  field := fun _ _ => 1
-  resource := fun resource => nomatch resource
+  value := fun _ _ => 1
 
 abbrev linkScope : DeclaredScope (linkDeclaration.patch config) :=
-  ScopedAcceptedCellEffectHistory.HyperdocumentAdapter.scope.{0, 0}
-    config linkDeclaration
+  ScopedAcceptedCellEffectHistory.HyperdocumentAdapter.scope config linkDeclaration
 
 abbrev width := linkScope.width
 
@@ -65,20 +63,15 @@ def linkAddress : Hyperdocument.Address :=
   ⟨.links, linkId⟩
 
 theorem linkAddress_named :
-    linkAddress ∈ (linkDeclaration.patch config).fieldFootprint := by
+    linkAddress ∈ Store.Patch.writeFootprint (linkDeclaration.patch config) := by
   simp [linkAddress, linkDeclaration, linkAction, linkPayload,
-    HyperdocumentOperations.Declaration.patch,
-    HyperdocumentOperations.Declaration.fieldWrites,
-    HyperdocumentOperations.Declaration.packedWrites,
-    HyperdocumentOperations.Action.packedWrites,
-    HyperdocumentOperations.linkWrites,
-    HyperdocumentOperations.PackedWrite.toFieldWrite,
-    HyperdocumentOperations.PackedWrite.address]
-  exact Finset.mem_singleton_self _
+    HyperdocumentOperations.Declaration.patch, HyperdocumentOperations.Action.ops,
+    HyperdocumentOperations.linkWrites, Store.Patch.writeFootprint,
+    HyperdocumentOperations.guardedSet_writeAddress]
 
 def linkCoordinate : Fin width :=
   linkScope.coordinateEquivFin
-    (linkScope.fieldCoordinate linkAddress linkAddress_named)
+    (linkScope.addressCoordinate linkAddress linkAddress_named)
 
 def linkSpan : PostSpan width where
   start := linkCoordinate.val
@@ -351,7 +344,7 @@ theorem representedPostExact :
     change linkScope.finProject scalarizer
       linkAccepted.accepted.prepared.post linkCoordinate = 1
     rw [show linkCoordinate = linkScope.coordinateEquivFin
-      (linkScope.fieldCoordinate linkAddress linkAddress_named) by rfl]
+      (linkScope.addressCoordinate linkAddress linkAddress_named) by rfl]
     rw [ScopedAcceptedCellEffectHistory.HyperdocumentAdapter.post_lookup_exact
       linkAccepted scalarizer linkAddress linkAddress_named]
     rfl
@@ -454,10 +447,9 @@ def query : ContentQuery := .link linkId
 
 theorem query_dirty : ContentQuery.lens.Dirty query
     linkAccepted.accepted.prepared.delta := by
-  left
   exact ⟨linkAddress, Finset.mem_inter.mpr ⟨by simp [query, linkAddress,
-    ContentQuery.lens, ContentQuery.footprint]; exact Finset.mem_singleton_self _, by
-      rw [AcceptedCellEffect.prepared_fieldFootprint]
+    ContentQuery.lens, ContentQuery.footprint], by
+      rw [AcceptedCellEffect.prepared_footprint]
       exact linkAddress_named⟩⟩
 
 /-- The canonical view reopened after the accepted turn is the exact concrete
