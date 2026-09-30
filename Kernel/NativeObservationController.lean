@@ -6,7 +6,9 @@ every selected resource requires its own actual observe capability, native
 request signature and current compiled policy. Mutating capabilities do not
 implicitly grant observation. Blind submissions remain a separate receiver API.
 
-The policy candidate is an empty patch on the actual selected resource page.
+The policy candidate is an empty patch on the actual selected resource cell.
+A resource view returns that cell's packed store bytes; a capability view reads
+one address of the authority cell's capability plane.
 Account views add only that account's sparse balance cut from the same image;
 neither the policy projection nor the returned value contains the shared Book.
 This is a snapshot read, not a timing-noninterference or malicious-host claim.
@@ -269,8 +271,8 @@ def readCandidate (context : Context deployment durable) (semantics : Digest)
     (request context semantics federation genesisHeight intent grant pre.root) kind pre rfl
 
 /-- Authority kinds select concrete resource roles, never another role sharing
-the same representation. Content is an object; the shared Book and authority
-planes are never observation targets through this protocol. -/
+the same representation. Content is an object; the shared Book and the
+authority cell are never observation targets through this protocol. -/
 def observableKind (kind : ResourceKind) (physical : CanonicalCellRegistry.Kind) : Bool :=
   decide (ResourceTargetAdmission.externalKind physical = some kind)
 
@@ -289,8 +291,8 @@ theorem shared_book_is_not_observable (kind : ResourceKind) :
     observableKind kind .resourceBook = false := by
   cases kind <;> rfl
 
-theorem authority_shard_is_not_observable (kind : ResourceKind) :
-    observableKind kind .authorityShard = false := by
+theorem authority_cell_is_not_observable (kind : ResourceKind) :
+    observableKind kind .authority = false := by
   cases kind <;> rfl
 
 structure Selected (context : Context deployment durable) (grant : GrantRef) where
@@ -463,7 +465,9 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
 def resourceViewStream : StreamCodec (List UInt8 × List (Nat × Int)) :=
   StreamCodec.product bytesStream balanceStream
 
-def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v2".toUTF8.toList
+/-- Version 3: the viewed bytes are the packed store cell (StoreCodec frames),
+not a page. -/
+def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList
 
 def resourceViewCodec : IndexedProgram.LawfulCodec (List UInt8 × List (Nat × Int)) :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
