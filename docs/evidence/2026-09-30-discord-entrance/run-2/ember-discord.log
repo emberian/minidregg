@@ -1,0 +1,8 @@
+{"at":1790802421,"discord_user":"1400000000000000010","ending":"ok","ending_line":"","exit":0,"interaction":"5006","line":"refs"}
+{"at":1790802421,"discord_user":"1400000000000000010","ending":"error","ending_line":"error: cannot inspect /home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor/refs/nope.json: No such file or directory (os error 2)","exit":1,"interaction":"5008","line":"read nope"}
+{"at":1790802422,"discord_user":"1400000000000000010","ending":"ok","ending_line":"","exit":0,"interaction":"9000","line":"whoami"}
+{"at":1790802427,"discord_user":"1400000000000000010","ending":"ok","ending_line":"","exit":0,"interaction":"5017","line":"create shared declared {\"type\":\"all\",\"predicates\":[]}"}
+{"at":1790802428,"discord_user":"1400000000000000010","ending":"ok","ending_line":"","exit":0,"interaction":"5018","line":"invoke w1 shared create 2 1"}
+{"at":1790802430,"discord_user":"1400000000000000010","ending":"ok","ending_line":"","exit":0,"interaction":"5019","line":"submit w1"}
+{"at":1790802431,"discord_user":"1400000000000000010","ending":"ok","ending_line":"","exit":0,"interaction":"5021","line":"invoke w2 shared write 2 7 1"}
+{"at":1790802432,"discord_user":"1400000000000000010","ending":"ok","ending_line":"","exit":0,"interaction":"5022","line":"submit w2"}

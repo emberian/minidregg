@@ -1,0 +1,19 @@
+```
+{
+  "authority": "discovery-only",
+  "references": [
+    {
+      "authority": "hint-only",
+      "controlCapability": "53",
+      "kind": "object",
+      "name": "factory",
+      "observeCapability": "54",
+      "operationCapability": "54",
+      "provenance": null,
+      "target": "10",
+      "type": "minidregg-participant-reference-v1"
+    }
+  ],
+  "type": "minidregg-workspace-list-v1"
+}
+```

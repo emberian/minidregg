@@ -1,0 +1,33 @@
+```
+/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor/sources/create-shared.current/intent.bin
+{
+  "acceptedCount": "1",
+  "confirmation": "installed",
+  "eventId": "48648866006882284574147785883425899094823617599644841003152285362580683937057",
+  "imageBoundary": "8787504948800913392879062619540560281023592007322999668112897615322370530450",
+  "transactionId": "112819883430620011953352738380423787806616286471978898311594497810063003570273",
+  "type": "confirmed"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "17408176558141627099",
+  "kind": "object",
+  "name": "shared",
+  "observeCapability": "10236810033585087225",
+  "operationCapability": "10236810033585087225",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "1",
+      "confirmation": "installed",
+      "eventId": "48648866006882284574147785883425899094823617599644841003152285362580683937057",
+      "imageBoundary": "8787504948800913392879062619540560281023592007322999668112897615322370530450",
+      "transactionId": "112819883430620011953352738380423787806616286471978898311594497810063003570273",
+      "type": "confirmed"
+    },
+    "reservationDigest": "a197fbc376c0d9b978358a7de25ed3a8dd6bec297ac02dfbad3cea82a15b616b",
+    "reservationRecord": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/namespace/request-a197fbc376c0d9b978358a7de25ed3a8dd6bec297ac02dfbad3cea82a15b616b.json"
+  },
+  "target": "17028285529125608631",
+  "type": "minidregg-participant-reference-v1"
+}
+```

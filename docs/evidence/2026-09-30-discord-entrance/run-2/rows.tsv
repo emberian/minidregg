@@ -1,0 +1,28 @@
+n	who	command	line	expect	http	type	ack_s	followup_s	verdict	answer
+1	discord	/pong		pong	200	1	0.004	-	ok	{"type":1} 
+2	sponsor	/mini	refs	401	401	-	0.004	-	ok	invalid request signature 
+3	stranger	/mini	refs	now	200	4	0.003	-	ok	``` error: Discord user 1400000000000000999 is not on this Mini's roster; nothing ran. Ember must add you: send ember this id. ```
+4	friend	/mini	keygen k1	deferred	200	5	0.003	0.119	ok	``` cd7d2a8661920c75226817c005b020fc9073c2d6def9346525886275890e2885 ```
+5	check	-	k1 secret and public key exist only in the friend's session home	-	-	-	-	-	ok	-
+6	sponsor	/mini	refs	deferred	200	5	0.004	0.068	ok	``` {   "authority": "discovery-only",   "references": [     {       "authority": "hint-only",       "controlCapability": "53",       "kind": "object",       "name": "factory",       "observeCapability": "54",       "operationCapability": "
+7	check	-	sponsor refs lists factory (target 10)	-	-	-	-	-	ok	-
+8	sponsor	/mini	read nope	deferred	200	5	0.004	0.067	ok	``` error: cannot inspect /home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor/refs/nope.json: No such file or directory (os error 2) ```
+9	friend	/mini	init k1 4242424242	deferred	200	5	0.004	0.119	ok	``` /home/ember/build/mini-product-20260930/mini-discord/run/de-2/sessions/friend/workspace ```
+10	friend	/mini	import stolen object 10 54	deferred	200	5	0.004	0.120	ok	``` stolen ```
+11	friend	/mini	read stolen	deferred	200	5	0.004	0.487	ok	``` refused: unknown-key: this key is not enrolled on this Host (phase observation) (Host refused challenge, reply byte 255) ```
+12	check	-	friend's read of the sponsor's cell is the Host's refusal, verbatim	-	-	-	-	-	ok	-
+13	friend	/mini	@/home/ember/build/mini-product-20260930/mini-discord/run/de-2/log/lon	now	200	4	0.004	-	ok	``` usage: the line is 1001 characters; the limit is 1000 ```
+14	friend	/mini-help		deferred	200	5	0.004	0.065	ok	``` Every verb is one client operation; the Host decides. Words: 'literal', "escaped", {json} or [json], @FILE (HOME/requests/FILE).   whoami     whoami   keygen     keygen FILE   init       init KEYFILE SUBJECT   enroll     enroll plan NAM
+15	sponsor	/mini	whoami	deferred	200	5	0.004	0.067	ok	``` {   "authority": "discovery-only",   "home": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/sessions/ember",   "initialized": true,   "socket": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/public/
+16	sponsor	/mini	whoami	401	401	-	0.003	-	ok	replayed interaction 
+17	sponsor	/mini	create shared declared {"type":"all","predicates":[]}	deferred	200	5	0.003	4.548	ok	``` /home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor/sources/create-shared.current/intent.bin {   "acceptedCount": "1",   "confirmation": "installed",   "eventId": "486488660068822845741477858834258990948236175996
+18	sponsor	/mini	invoke w1 shared create 2 1	deferred	200	5	0.004	1.529	ok	``` {   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor/proposals/w1/intent.json",   "intentSha256": "84804247
+19	sponsor	/mini	submit w1	deferred	200	5	0.004	1.530	ok	``` {   "acceptedCount": "2",   "confirmation": "installed",   "eventId": "56845010809736958335030026160376921429373485104283041471479002199919998480405",   "imageBoundary": "24931472772394457278986558067319851243025781133638195421043701295
+20	check	-	mirror poll 1 (exit 0) posted field 2 = 1	-	-	-	-	-	ok	-
+21	sponsor	/mini	invoke w2 shared write 2 7 1	deferred	200	5	0.004	0.745	ok	``` {   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor/proposals/w2/intent.json",   "intentSha256": "2e4cfba7
+22	sponsor	/mini	submit w2	deferred	200	5	0.003	1.211	ok	``` {   "acceptedCount": "3",   "confirmation": "installed",   "eventId": "45935298449121642877682314161508729248125016289254017734342476496333570981949",   "imageBoundary": "38435919870251760152483060388458150620311070413088356232590815115
+23	check	-	mirror poll 2 (exit 0) posted field 2 = 7 (was 1)	-	-	-	-	-	ok	-
+24	check	-	mirror poll 3 (exit 0) posted nothing new	-	-	-	-	-	ok	-
+25	check	-	every run line and every rostered refusal is in its session's discord.log	-	-	-	-	-	ok	-
+26	check	-	no interaction token or channel webhook secret appears in the entrance log	-	-	-	-	-	ok	-
+27	check	-	the spool is empty (every follow-up body removed)	-	-	-	-	-	ok	-

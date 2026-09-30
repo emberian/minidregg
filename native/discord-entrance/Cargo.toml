@@ -1,0 +1,29 @@
+[package]
+name = "minidregg-discord-entrance"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+publish = false
+description = "Discord interactions endpoint: one Discord user = one Mini session; every slash command is one `mini shell --line`"
+
+[lib]
+name = "minidregg_discord_entrance"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mini-discord"
+path = "src/main.rs"
+
+[[bin]]
+name = "mini-discord-mirror"
+path = "src/bin/mini-discord-mirror.rs"
+
+[[example]]
+name = "fake-discord"
+path = "examples/fake-discord.rs"
+
+[dependencies]
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }
+libc = "=0.2.177"
+serde_json = "=1.0.151"
+

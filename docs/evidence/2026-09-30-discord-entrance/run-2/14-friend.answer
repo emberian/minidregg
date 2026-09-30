@@ -1,0 +1,25 @@
+```
+Every verb is one client operation; the Host decides. Words: 'literal', "escaped", {json} or [json], @FILE (HOME/requests/FILE).
+  whoami     whoami
+  keygen     keygen FILE
+  init       init KEYFILE SUBJECT
+  enroll     enroll plan NAME KEYFILE [FACTORY-REF] | enroll seal|submit|lookup NAME
+  refs       refs
+  read       read REF
+  describe   describe REF
+  import     import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]
+  create     create NAME STORAGE PREDICATE-JSON|@FILE
+  propose    propose ID REQUEST-JSON|@FILE
+  invoke     invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED
+  delegate   delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST
+  law        law ID REF PREDICATE-JSON|@FILE
+  submit     submit ID
+  lookup     lookup ID
+  retry      retry ID
+  publish    publish ID
+  export     export ID
+  history    history [all]
+  help       help [VERB]
+  exit       exit
+Endings on stderr: usage: (2)  error: client (1)  refused: Host (3)  undecided: Host (4).
+```
