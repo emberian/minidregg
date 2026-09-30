@@ -1,0 +1,8 @@
+{
+  "description": "a listed finalized signature whose getTransaction result is null",
+  "exit": 3,
+  "observations": 0,
+  "reasons": [
+    "prunedTransaction"
+  ]
+}

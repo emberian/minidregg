@@ -1,0 +1,10 @@
+{
+  "description": "two finalized payments to book 0 (one creating the token account, one v0 via a lookup table); a failed, a zero-delta and an above-tip signature; book 1 has no token account",
+  "exit": 0,
+  "observations": 2,
+  "reasons": [
+    "failedTransaction",
+    "noTokenAccount",
+    "zeroDelta"
+  ]
+}

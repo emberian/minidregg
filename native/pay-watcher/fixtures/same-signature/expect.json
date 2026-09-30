@@ -1,0 +1,10 @@
+{
+  "description": "pay-1 is listed on two overlapping pages and pay-2 in the histories of both of the owner's token accounts: one observation each, pay-2 = 250M + 100M",
+  "exit": 0,
+  "observations": 2,
+  "reasons": [
+    "duplicateSignature",
+    "failedTransaction",
+    "ignoredReceiptName"
+  ]
+}

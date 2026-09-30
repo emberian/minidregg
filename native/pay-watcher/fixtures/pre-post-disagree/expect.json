@@ -1,0 +1,8 @@
+{
+  "description": "PRE and POST balances of the watched account name different owners",
+  "exit": 3,
+  "observations": 0,
+  "reasons": [
+    "balanceEntriesDisagree"
+  ]
+}
