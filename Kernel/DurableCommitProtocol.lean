@@ -337,7 +337,26 @@ theorem preflight_spent_single_claim_rejected [DecidableEq CellId]
   simp [Intent.preflight, noWrites, oneClaim, Intent.rootsMatchCheck,
     Intent.nullifiersFreshCheck, spent]
 
+/-- The compare-and-swap guard, refuting pole: a well-formed intent naming a
+cell whose durable root is not the root it was prepared against is refused as
+stale, before any nullifier, charge, or history is touched. -/
+theorem preflight_stale_root_rejected [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (write : RootWrite CellId) (mem : write ∈ intent.rootWrites)
+    (stale : before.roots write.cellId ≠ write.expectedPre)
+    (distinctCells : (intent.rootWrites.map RootWrite.cellId).Nodup)
+    (distinctClaims : intent.nullifiers.Nodup) :
+    intent.preflight before = .error .stalePreRoot := by
+  have nonempty : intent.rootWrites ≠ [] := List.ne_nil_of_mem mem
+  have mismatch : intent.rootsMatchCheck before = false := by
+    cases matched : intent.rootsMatchCheck before
+    · rfl
+    · exact absurd ((rootsMatchCheck_eq_true_iff before intent).1 matched write mem) stale
+  simp [Intent.preflight, nonempty, distinctCells, distinctClaims, mismatch]
+
 end Intent
+
 
 /-- Protocol results carry a replacement snapshot only for a complete atomic
 install or an explicitly modeled crash after that install. -/
@@ -420,6 +439,24 @@ theorem execute_complete_ready
     execute .complete before intent =
       .accepted (Snapshot.install before intent) := by
   simp [execute, unrecorded, ready]
+
+/-- Execution-level stale refusal: an unrecorded intent whose guard fails
+leaves the durable snapshot untouched under every schedule. -/
+theorem execute_stale_root_rejected
+    {TxId : Type u} {CellId : Type v} {Nullifier : Type w} {Event : Type x}
+    [DecidableEq TxId] [DecidableEq CellId] [DecidableEq Nullifier]
+    [DecidableEq Event]
+    (schedule : Schedule) (before : Snapshot TxId CellId Nullifier Event)
+    (intent : Intent TxId CellId Nullifier Event)
+    (unrecorded : Snapshot.lookupRecorded intent.transactionId before.journal = none)
+    (write : RootWrite CellId) (mem : write ∈ intent.rootWrites)
+    (stale : before.roots write.cellId ≠ write.expectedPre)
+    (distinctCells : (intent.rootWrites.map RootWrite.cellId).Nodup)
+    (distinctClaims : intent.nullifiers.Nodup) :
+    execute schedule before intent = .rejected .stalePreRoot := by
+  simp [execute, unrecorded,
+    Intent.preflight_stale_root_rejected before intent write mem stale
+      distinctCells distinctClaims]
 
 /-- A retry after any complete installation is idempotent and returns the
 original recorded payload without touching roots, nullifiers, budget, or
@@ -562,27 +599,44 @@ def exact
 
 end MultiCellCostPolicy
 
-/-- Exact typed patch touches across a complete heterogeneous accepted family.
-This is derived from the same family patches already validated by
+/-- Exact typed patch touches across a complete heterogeneous accepted family:
+the sum of every leg's write footprint (one address per guarded write or
+allocation).  This is derived from the same family patches already validated by
 `MultiCellHyperedge.Commit`; no executor touch counter is accepted. -/
-noncomputable def multiCellMemoryTouches
+def multiCellMemoryTouches
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     (_commit : MultiCellHyperedge.Commit law accepted boundary) : Nat :=
   Finset.univ.sum fun incidence =>
-    ((declaration.legs incidence).family.patch
+    (Store.Patch.writeFootprint ((declaration.legs incidence).family.patch
       (declaration.legs incidence).declaration
-      (declaration.legs incidence).outcome).fieldFootprint.card +
-    ((declaration.legs incidence).family.patch
-      (declaration.legs incidence).declaration
-      (declaration.legs incidence).outcome).resourceFootprint.card
+      (declaration.legs incidence).outcome)).card
+
+/-- The metered touches are exactly the footprints of the accepted legs'
+canonical deltas, so the charge is indexed by what each validated patch
+changed, not by a second syntactic reading. -/
+theorem multiCellMemoryTouches_eq_accepted_footprints
+    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
+    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
+      declaration Coordinate Balance}
+    {accepted : declaration.AcceptedLegs}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
+      declaration}
+    (commit : MultiCellHyperedge.Commit law accepted boundary) :
+    multiCellMemoryTouches commit =
+      Finset.univ.sum fun incidence =>
+        (accepted incidence).prepared.delta.footprint.card :=
+  rfl
 
 /-- A bounded quote indexed by one exact accepted multi-cell commit and one
 exact appended event.  Unlike an arbitrary `Quote`, its exact coordinate is
@@ -590,13 +644,13 @@ definitionally derived from the accepted commit and explicit deployment cost
 policy. -/
 structure BoundedMultiCellCommit
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     (commit : MultiCellHyperedge.Commit law accepted boundary)
     (Event : Type p) (event : Event) where
@@ -610,13 +664,13 @@ namespace BoundedMultiCellCommit
 
 variable
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     {commit : MultiCellHyperedge.Commit law accepted boundary}
     {Event : Type p} {event : Event}
@@ -647,9 +701,8 @@ currently observed snapshot because the budget may have changed since quote
 construction. -/
 def ofPreparedTurn
     {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S TypedAuthorization.Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
     {pre : CellState.Materialized M} {Nullifier : Type y}
     (transactionId : TxId) (cellId : CellId)
     (turn : PreparedTurn M pre Nullifier)
@@ -666,9 +719,8 @@ def ofPreparedTurn
 
 @[simp] theorem ofPreparedTurn_roots
     {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S TypedAuthorization.Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
     {pre : CellState.Materialized M} {Nullifier : Type y}
     (transactionId : TxId) (cellId : CellId)
     (turn : PreparedTurn M pre Nullifier)
@@ -683,9 +735,8 @@ def ofPreparedTurn
 
 @[simp] theorem ofPreparedTurn_nullifiers
     {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S TypedAuthorization.Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
     {pre : CellState.Materialized M} {Nullifier : Type y}
     (transactionId : TxId) (cellId : CellId)
     (turn : PreparedTurn M pre Nullifier)
@@ -698,9 +749,8 @@ def ofPreparedTurn
 
 @[simp] theorem ofPreparedTurn_exactCharge
     {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S TypedAuthorization.Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
     {pre : CellState.Materialized M} {Nullifier : Type y}
     (transactionId : TxId) (cellId : CellId)
     (turn : PreparedTurn M pre Nullifier)
@@ -716,11 +766,10 @@ whose constructor is private and therefore already indexed by the exact
 accepted semantic effect. -/
 def ofAcceptedEffect
     {TxId : Type u} {CellId : Type v}
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S TypedAuthorization.Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
     {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {portal : TypedAuthorization.Portal}
     {authState : TypedAuthorization.AuthState}
     {kind : TypedAuthorization.ResourceKind}
@@ -736,23 +785,122 @@ def ofAcceptedEffect
   ofPreparedTurn transactionId cellId accepted.prepared bounded available funding
     accepted.toReceiptEvent
 
+/-- The one durable write of an accepted effect is guarded at the root the
+request quoted, and installs the root of `run pre patch`: the durable post is
+the family patch run on the canonical pre-store, never a supplied value. -/
+theorem ofAcceptedEffect_rootWrites
+    {TxId : Type u} {CellId : Type v}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
+    {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
+    {portal : TypedAuthorization.Portal}
+    {authState : TypedAuthorization.AuthState}
+    {kind : TypedAuthorization.ResourceKind}
+    {request : TypedAuthorization.Request kind}
+    {pre : CellState.Materialized M}
+    {declaration : family.Declaration} {outcome : family.Outcome declaration}
+    (transactionId : TxId) (cellId : CellId)
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome)
+    (bounded : BoundedPreparedTurn accepted.prepared)
+    (available : Charge) (funding : ChargeReceipt available bounded.quote) :
+    (ofAcceptedEffect transactionId cellId accepted bounded available funding).rootWrites =
+      [{ cellId := cellId
+         expectedPre := request.preStateRoot
+         exactPost := M.rootOf
+           (Store.Patch.run pre.logical (family.patch declaration outcome)) }] := by
+  rw [accepted.preRootBound]
+  rfl
+
+/-- Satisfiable pole at the durable seam: an accepted effect whose cell still
+holds the quoted root, whose eager nullifier is unconsumed, and whose charge is
+funded passes preflight. -/
+theorem ofAcceptedEffect_preflight_ready
+    {TxId : Type u} {CellId : Type v}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
+    {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
+    {portal : TypedAuthorization.Portal}
+    {authState : TypedAuthorization.AuthState}
+    {kind : TypedAuthorization.ResourceKind}
+    {request : TypedAuthorization.Request kind}
+    {pre : CellState.Materialized M}
+    {declaration : family.Declaration} {outcome : family.Outcome declaration}
+    (transactionId : TxId) (cellId : CellId)
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome)
+    (bounded : BoundedPreparedTurn accepted.prepared)
+    (available : Charge) (funding : ChargeReceipt available bounded.quote)
+    [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier (ReceiptEvent family))
+    (current : before.roots cellId = request.preStateRoot)
+    (fresh : ∀ nullifier, family.nullifier declaration outcome = some nullifier →
+      before.consumed nullifier = false)
+    (funded : Charge.fundedCheck bounded.quote.exact before.available = true) :
+    (ofAcceptedEffect transactionId cellId accepted bounded available funding).preflight
+      before = .ok () := by
+  rw [accepted.preRootBound] at current
+  cases hnull : family.nullifier declaration outcome with
+  | none =>
+      simp [Intent.preflight, ofAcceptedEffect, ofPreparedTurn, Intent.rootsMatchCheck,
+        Intent.nullifiersFreshCheck, AcceptedCellEffect.prepared, PreparedTurn.ofValidatedPatch,
+        PreparedTurn.preRoot, hnull, current, funded]
+  | some nullifier =>
+      simp [Intent.preflight, ofAcceptedEffect, ofPreparedTurn, Intent.rootsMatchCheck,
+        Intent.nullifiersFreshCheck, AcceptedCellEffect.prepared, PreparedTurn.ofValidatedPatch,
+        PreparedTurn.preRoot, hnull, current, funded, fresh nullifier hnull]
+
+/-- Refuting pole at the durable seam: once the durable cell has moved off the
+root the accepted effect was validated at, its intent is refused as stale. -/
+theorem ofAcceptedEffect_preflight_stale
+    {TxId : Type u} {CellId : Type v}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
+    {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
+    {portal : TypedAuthorization.Portal}
+    {authState : TypedAuthorization.AuthState}
+    {kind : TypedAuthorization.ResourceKind}
+    {request : TypedAuthorization.Request kind}
+    {pre : CellState.Materialized M}
+    {declaration : family.Declaration} {outcome : family.Outcome declaration}
+    (transactionId : TxId) (cellId : CellId)
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome)
+    (bounded : BoundedPreparedTurn accepted.prepared)
+    (available : Charge) (funding : ChargeReceipt available bounded.quote)
+    [DecidableEq CellId] [DecidableEq Nullifier]
+    (before : Snapshot TxId CellId Nullifier (ReceiptEvent family))
+    (moved : before.roots cellId ≠ request.preStateRoot) :
+    (ofAcceptedEffect transactionId cellId accepted bounded available funding).preflight
+      before = .error .stalePreRoot := by
+  rw [accepted.preRootBound] at moved
+  apply Intent.preflight_stale_root_rejected before _
+    { cellId := cellId, expectedPre := pre.root,
+      exactPost := accepted.prepared.postRoot } (by simp [ofAcceptedEffect, ofPreparedTurn]; rfl)
+    moved (by simp [ofAcceptedEffect, ofPreparedTurn])
+  simp only [ofAcceptedEffect, ofPreparedTurn, AcceptedCellEffect.prepared,
+    PreparedTurn.ofValidatedPatch]
+  cases family.nullifier declaration outcome <;> simp
+
 /-- A same-cell typed hyperedge has one canonical root transition but many
 heterogeneous incidence nullifiers.  Its `PreparedTurn` stores that complete
 list in one optional slot; this dedicated adapter deliberately flattens the
 list so every eager nullifier is consumed individually by `Snapshot.install`. -/
 def ofTypedCellHyperedge
     {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S TypedAuthorization.Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
     {portal : TypedAuthorization.Portal}
-    {projection : TypedCellHyperedge.AuthorizationProjection S}
+    {projection : TypedCellHyperedge.AuthorizationProjection L}
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : TypedCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
-      S M portal Coordinate Balance}
-    {declaration : TypedCellHyperedge.Declaration.{u, v, w, x, y, z}
-      S M portal projection Incidence}
+    {law : TypedCellHyperedge.ResourceLaw.{u, v, w, y, b}
+      L M portal Coordinate Balance}
+    {declaration : TypedCellHyperedge.Declaration.{u, v, w, y, z}
+      L M portal projection Incidence}
     (transactionId : TxId) (cellId : CellId)
     (commit : TypedCellHyperedge.Commit law declaration)
     (bounded : BoundedPreparedTurn commit.prepared)
@@ -769,17 +917,16 @@ def ofTypedCellHyperedge
 
 @[simp] theorem ofTypedCellHyperedge_nullifiers
     {TxId : Type u} {CellId : Type v} {Event : Type p}
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S TypedAuthorization.Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L TypedAuthorization.Digest}
     {portal : TypedAuthorization.Portal}
-    {projection : TypedCellHyperedge.AuthorizationProjection S}
+    {projection : TypedCellHyperedge.AuthorizationProjection L}
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : TypedCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
-      S M portal Coordinate Balance}
-    {declaration : TypedCellHyperedge.Declaration.{u, v, w, x, y, z}
-      S M portal projection Incidence}
+    {law : TypedCellHyperedge.ResourceLaw.{u, v, w, y, b}
+      L M portal Coordinate Balance}
+    {declaration : TypedCellHyperedge.Declaration.{u, v, w, y, z}
+      L M portal projection Incidence}
     (transactionId : TxId) (cellId : CellId)
     (commit : TypedCellHyperedge.Commit law declaration)
     (bounded : BoundedPreparedTurn commit.prepared)
@@ -798,13 +945,13 @@ receipt specializations must supply an existing indexed receipt type, as
 `ofMultiCellJointReceipt` does below. -/
 noncomputable def ofMultiCellWithOpaqueEvent
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     {Event : Type p}
     (commit : MultiCellHyperedge.Commit law accepted boundary) (event : Event)
@@ -827,13 +974,13 @@ noncomputable def ofMultiCellWithOpaqueEvent
 can use `ofMultiCellWithOpaqueEvent` while retaining their own relation proof. -/
 noncomputable def ofMultiCellJointReceipt
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     (commit : MultiCellHyperedge.Commit law accepted boundary)
     (bounded : BoundedMultiCellCommit commit
@@ -847,13 +994,13 @@ noncomputable def ofMultiCellJointReceipt
 
 @[simp] theorem ofMultiCell_exactCharge
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     {Event : Type p}
     (commit : MultiCellHyperedge.Commit law accepted boundary) (event : Event)
@@ -866,13 +1013,13 @@ noncomputable def ofMultiCellJointReceipt
 
 @[simp] theorem ofMultiCell_rootWrites_length
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     {Event : Type p}
     (commit : MultiCellHyperedge.Commit law accepted boundary) (event : Event)
@@ -883,17 +1030,48 @@ noncomputable def ofMultiCellJointReceipt
       Fintype.card Incidence := by
   simp [ofMultiCellWithOpaqueEvent]
 
+/-- Every durable write of a multi-cell commit is guarded at the root its leg's
+request quoted and installs the root of that leg's family patch run on its
+canonical pre-store. -/
+theorem ofMultiCell_rootWrites_exact
+    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
+    {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
+      declaration Coordinate Balance}
+    {accepted : declaration.AcceptedLegs}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
+      declaration}
+    {Event : Type p}
+    (commit : MultiCellHyperedge.Commit law accepted boundary) (event : Event)
+    (bounded : BoundedMultiCellCommit commit Event event)
+    (available : Charge)
+    (funding : ChargeReceipt available bounded.quote) :
+    (ofMultiCellWithOpaqueEvent commit event bounded available funding).rootWrites =
+      Finset.univ.toList.map fun incidence =>
+        { cellId := cells.cellId incidence
+          expectedPre := (declaration.legs incidence).request.preStateRoot
+          exactPost := (cells.materializer incidence).rootOf
+            (Store.Patch.run (declaration.pre incidence).logical
+              ((declaration.legs incidence).family.patch
+                (declaration.legs incidence).declaration
+                (declaration.legs incidence).outcome)) } := by
+  simp only [ofMultiCellWithOpaqueEvent,
+    MultiCellHyperedge.Declaration.accepted_request_preRoot declaration accepted]
+  rfl
+
 /-- Multi-cell semantic admission already proves cell identities injective, so
 the derived durable write set cannot fail the duplicate-cell preflight check. -/
 theorem ofMultiCell_cellIds_nodup
     {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {cells : MultiCellHyperedge.CellFamily.{u, v, w, x, z} Incidence}
-    {declaration : MultiCellHyperedge.Declaration.{u, v, w, x, y, z} cells}
+    {cells : MultiCellHyperedge.CellFamily.{u, v, w, z} Incidence}
+    {declaration : MultiCellHyperedge.Declaration.{u, v, w, y, z} cells}
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, x, y, z, b}
+    {law : MultiCellHyperedge.ResourceLaw.{u, v, w, y, z, b}
       declaration Coordinate Balance}
     {accepted : declaration.AcceptedLegs}
-    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, x, y, z, h}
+    {boundary : MultiCellHyperedge.HandlerBoundary.{u, v, w, y, z, h}
       declaration}
     {Event : Type p}
     (commit : MultiCellHyperedge.Commit law accepted boundary) (event : Event)
@@ -977,3 +1155,15 @@ end Minidregg.Kernel.DurableCommitProtocol
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCellJointReceipt
 /-- info: 'Minidregg.Kernel.DurableCommitProtocol.physical_step_no_partial_commit' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.physical_step_no_partial_commit
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.execute_stale_root_rejected' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.execute_stale_root_rejected
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_ready' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_ready
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_stale' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofAcceptedEffect_preflight_stale
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.multiCellMemoryTouches_eq_accepted_footprints' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.multiCellMemoryTouches_eq_accepted_footprints
+/-- info: 'Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCell_rootWrites_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DurableCommitProtocol.Intent.ofMultiCell_rootWrites_exact
