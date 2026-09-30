@@ -1,0 +1,17 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": {
+    "childCapability": "11230644022455256082",
+    "domain": "8501",
+    "kind": "object",
+    "name": "board",
+    "recipient": "17009279893762011781",
+    "reservation": "168fcd2ce7b77a5527473d43c5bd9df633c26c69f44c8ca1267b5533e7a092a6",
+    "target": "11737776695897016005"
+  },
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-law/run/j13-2/store/sponsor/proposals/grant-b/intent.json",
+  "intentSha256": "70268b16fb2271532ea989bd3d982933ba406dce9930018da81101f76a2c8e2d",
+  "proposalId": "grant-b",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

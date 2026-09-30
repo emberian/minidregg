@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-law/run/j13-2/store/sponsor/proposals/seal/intent.json",
+  "intentSha256": "71980bcd9fec2a9c1abd6869cdd5290beb6ee581d449bd2a972c9efe884685dc",
+  "proposalId": "seal",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

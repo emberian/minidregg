@@ -1,0 +1,5 @@
+step	reason	leaf	shell line	host explain	verdict
+29-D-newcomer	law-denied	field 2 monotone (before 2, after 1)	refused: law-denied: field 2 monotone (before 2, after 1) (Host refused prepare, reply byte 255)	field 2 monotone (before 2, after 1)	ok
+32-D-newcomer	law-denied	field 2 in {0,1,2} (value 5)	refused: law-denied: field 2 in {0,1,2} (value 5) (Host refused prepare, reply byte 255)	field 2 in {0,1,2} (value 5)	ok
+40-E-sponsor	law-denied	sealed	refused: law-denied: sealed (Host refused query, reply byte 255)	sealed	ok
+42-E-newcomer	law-denied	sealed	refused: law-denied: sealed (Host refused query, reply byte 255)	sealed	ok

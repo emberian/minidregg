@@ -1,0 +1,31 @@
+/home/ember/build/mini-product-20260930/p-law/run/j13-2/store/sponsor/sources/create-board.current/intent.bin
+{
+  "acceptedCount": "2",
+  "confirmation": "installed",
+  "eventId": "28453945752721665511318157975372942865086609206084776910820089315893313048919",
+  "imageBoundary": "91000309106980200613638945748948530425279973365560369841485200618567846276029",
+  "transactionId": "80933198165029217044467906825667527159843938397920059527675246852725197984668",
+  "type": "confirmed"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "12823749633102979871",
+  "kind": "object",
+  "name": "board",
+  "observeCapability": "15462119460197463294",
+  "operationCapability": "15462119460197463294",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "2",
+      "confirmation": "installed",
+      "eventId": "28453945752721665511318157975372942865086609206084776910820089315893313048919",
+      "imageBoundary": "91000309106980200613638945748948530425279973365560369841485200618567846276029",
+      "transactionId": "80933198165029217044467906825667527159843938397920059527675246852725197984668",
+      "type": "confirmed"
+    },
+    "reservationDigest": "93b062f7e3fe5f20b954b201b96e2339e07e401da3faddb169d90ec8c489de14",
+    "reservationRecord": "/home/ember/build/mini-product-20260930/p-law/run/j13-2/store/namespace/request-93b062f7e3fe5f20b954b201b96e2339e07e401da3faddb169d90ec8c489de14.json"
+  },
+  "target": "11737776695897016005",
+  "type": "minidregg-participant-reference-v1"
+}
