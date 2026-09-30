@@ -167,51 +167,28 @@ def Source.replayMarkers (domain semantics : Digest) (tariff : Tariff)
   [source.birth.authorityNullifier,
     DeclaredResourceController.operationMarker domain semantics (source.grainCommand tariff)]
 
-/-- Prepare both authority effects against the same old pages. In particular,
-the birth grants and the operation marker must never be prepared as separate
-posts of the same anchor. Lowering this checked post, deriving its auxiliary
-creates, and authorizing its composite request remain receiving obligations. -/
-def Source.authorityEdits (snapshot : CredentialAuthorityDomain.Snapshot)
+/-- Both authority effects are one patch of the one authority cell: the birth's
+grant batch and the grain operation marker, generated from the same old store.
+Authorizing its composite request remains a receiving obligation. -/
+def Source.authorityPatch (snapshot : CredentialAuthorityDomain.Snapshot)
     (semantics : Digest) (tariff : Tariff) (source : Source) :
-    List CredentialAuthorityDomain.Edit :=
-  CredentialAuthorityDomainReceiver.grantEdits snapshot source.birth ++
-    DeclaredResourceController.markerEdits snapshot semantics (source.grainCommand tariff)
+    Store.Patch CredentialAuthorityState.layout :=
+  GrainResourceBirthAuthority.patch snapshot source.birth
+    (DeclaredResourceController.operationMarker snapshot.domain semantics (source.grainCommand tariff))
 
-theorem Source.authorityEdits_eq_combined (snapshot : CredentialAuthorityDomain.Snapshot)
-    (semantics : Digest) (tariff : Tariff) (source : Source) :
-    source.authorityEdits snapshot semantics tariff =
-      GrainResourceBirthAuthority.edits snapshot source.birth
-        (DeclaredResourceController.operationMarker snapshot.domain semantics
-          (source.grainCommand tariff)) := rfl
-
-theorem Source.authorityEdits_auxiliary_independent
+theorem Source.authorityPatch_auxiliary_independent
     (snapshot : CredentialAuthorityDomain.Snapshot) (semantics : Digest)
     (tariff : Tariff) (source : Source)
     (creates : List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry)) :
-    (source.withAuxiliaryCreates creates).authorityEdits snapshot semantics tariff =
-      source.authorityEdits snapshot semantics tariff := rfl
+    (source.withAuxiliaryCreates creates).authorityPatch snapshot semantics tariff =
+      source.authorityPatch snapshot semantics tariff := rfl
 
 def Source.prepareAuthority (snapshot : CredentialAuthorityDomain.Snapshot)
     (semantics : Digest) (tariff : Tariff) (source : Source) :
     Option (CredentialAuthorityDomain.Prepared snapshot
-      (source.authorityEdits snapshot semantics tariff)) :=
+      (source.authorityPatch snapshot semantics tariff)) :=
   CredentialAuthorityDomain.prepare snapshot
-    (source.authorityEdits snapshot semantics tariff)
-
-theorem Source.authorityEdits_birth_prefix (snapshot : CredentialAuthorityDomain.Snapshot)
-    (semantics : Digest) (tariff : Tariff) (source : Source) :
-    (source.authorityEdits snapshot semantics tariff).take
-      (CredentialAuthorityDomainReceiver.grantEdits snapshot source.birth).length =
-        CredentialAuthorityDomainReceiver.grantEdits snapshot source.birth := by
-  simp [Source.authorityEdits]
-
-theorem Source.authorityEdits_operation_suffix (snapshot : CredentialAuthorityDomain.Snapshot)
-    (semantics : Digest) (tariff : Tariff) (source : Source) :
-    (source.authorityEdits snapshot semantics tariff).drop
-      (CredentialAuthorityDomainReceiver.grantEdits snapshot source.birth).length =
-        DeclaredResourceController.markerEdits snapshot semantics
-          (source.grainCommand tariff) := by
-  simp [Source.authorityEdits]
+    (source.authorityPatch snapshot semantics tariff)
 
 /-- This is only the checkable source shape. The receiver must establish that
 both supplied roots and states are the actual old loaded cells and that the
@@ -266,20 +243,18 @@ theorem tool_after_running (domain semantics : Digest) (tariff : Tariff) (source
     simp [AgentGrain.Operation.after, AgentGrain.settle, second]
 
 /-- One checked authority post for the birth grant batch and the tool
-operation marker. This also lowers physical authority writes and derives any
-source-owned shard creates before the complete descriptor is signed. It is
+operation marker, as one patch of the one authority cell. It is
 preparation only: current policy, capability, signature, factory and grain
 incidences still need admission over the same durable image. -/
 structure PreparedSourceAuthority {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot)
+    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
     (semantics : Digest) (tariff : Tariff) (source : Source) where
   private mk ::
   shape : SourceShape loaded.snapshot.domain semantics tariff source
-  combined : GrainResourceBirthAuthority.Prepared profile deployment directory loaded
+  combined : GrainResourceBirthAuthority.Prepared profile deployment loaded
     source.birth (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
       (source.grainCommand tariff))
 
@@ -287,12 +262,11 @@ def prepareSourceAuthority {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment)
-    (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
-    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot)
+    (loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot)
     (semantics : Digest) (tariff : Tariff) (source : Source) :
-    Option (PreparedSourceAuthority profile deployment directory loaded semantics tariff source) := do
+    Option (PreparedSourceAuthority profile deployment loaded semantics tariff source) := do
   if shape : SourceShape loaded.snapshot.domain semantics tariff source then
-    let combined ← GrainResourceBirthAuthority.prepare profile deployment directory loaded
+    let combined ← GrainResourceBirthAuthority.prepare profile deployment loaded
       source.birth (DeclaredResourceController.operationMarker loaded.snapshot.domain semantics
         (source.grainCommand tariff))
     some ⟨shape, combined⟩
@@ -302,10 +276,9 @@ def PreparedSourceAuthority.auxiliaryCreates {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment}
-    {directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable}
-    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot}
+    {loaded : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot}
     {semantics : Digest} {tariff : Tariff} {source : Source}
-    (prepared : PreparedSourceAuthority profile deployment directory loaded semantics tariff source) :
+    (prepared : PreparedSourceAuthority profile deployment loaded semantics tariff source) :
     List (CreateRequest (CellId := Nat) CanonicalCellRegistry.registry) :=
   prepared.combined.auxiliaryCreates
 
@@ -339,23 +312,20 @@ def prepareSourceBirth {F : Type} [Field F]
     .ok ⟨shape, prepared⟩
   else .error .authorityBatch
 
-/-- The composite authority patch is exactly the checked one-post edit list,
-including both the birth marker and the grain operation marker. -/
+/-- The composite authority patch, including both the birth marker and the
+grain operation marker, validated at the loaded cell's own root. -/
 def PreparedSourceBirth.authorityValidated {F : Type} [Field F]
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
     {deployment : CanonicalCellRegistry.Deployment} {pins : FactoryPins}
     {durable : ResourceBirthController.Concrete.Durable}
     {semantics : Digest} {tariff : Tariff} {source : Source}
     (prepared : PreparedSourceBirth profile deployment pins durable semantics tariff source) :
-    CellState.ValidatedPatch CredentialAuthorityStateCodec.materializer
+    CellState.ValidatedPatch CredentialAuthorityCell.materializer
       prepared.prepared.pre.authority.snapshot.cell
-      (CredentialAuthorityDomain.editPatch prepared.prepared.pre.authority.snapshot
-        (source.authorityEdits prepared.prepared.pre.authority.snapshot semantics tariff)) := by
-  rw [Source.authorityEdits_eq_combined]
-  have domainExact : prepared.prepared.pre.authority.snapshot.domain = deployment.domain := by
-    simpa [CanonicalCellRegistry.Deployment.authorityAnchor] using
-      prepared.prepared.pre.authority.observed.1
-  rw [domainExact]
+      prepared.prepared.pre.authority.snapshot.cell.root
+      (source.authorityPatch prepared.prepared.pre.authority.snapshot semantics tariff) := by
+  unfold Source.authorityPatch
+  rw [prepared.prepared.pre.authority.domainExact]
   exact prepared.prepared.authorityCombined.checked.validated
 
 end Minidregg.Compiler.GrainResourceBirthController
