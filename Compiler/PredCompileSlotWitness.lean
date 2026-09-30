@@ -1,5 +1,5 @@
 /-
-Poles for the slot-to-slot atoms `eqSlots`/`leSlots` through the one compiler. The field
+Poles for the slot-to-slot atoms `eqSlots`/`leSlots`/`leSlotsOff` through the one compiler. The field
 `ZMod 17` and width 2 are proof fixtures, as in `PredCompileOrderWitness`.
 
 The runner law binds an output to an observed input (`total/after` equals the observed
@@ -9,8 +9,14 @@ ledger `sum/after`) and caps spending by a budget slot. The story law is the mot
 Slot names are short so the kernel evaluates the emitted systems quickly; they stand for
 `out` = `resource/field/total/after`, `in` = `joint/target/ledger/resource/field/sum/after`,
 `spent`/`cap` = `resource/field/{spent,budget}/after`, `at` = `player/S/at/after`,
-`key` = `player/S/has/key/after`, `need` = the scene's required key. The atoms read slot names
-opaquely, so nothing depends on the spelling.
+`key` = `player/S/has/key/after`, `need` = the scene's required key, `bal` =
+`joint/index/1/field/bal/after` (the attacker's balance timestamp), `now` = `clock/now`,
+`alive` = `joint/index/1/field/alive/after`. The atoms read slot names opaquely, so nothing
+depends on the spelling.
+
+The combat law is MUD.md §2.4's balance clause at `COST = 3`: a strike is lawful only when the
+attacker's new balance timestamp is at least `now + 3`. It is written twice: directly with a
+negative offset, `now ≤ bal − 3`, and in MUD.md's spelling `not (bal ≤ now + (COST − 1))`.
 -/
 import Compiler.PredCompile
 
@@ -143,5 +149,96 @@ theorem disabled_refuses_leSlots (A : List Nat → Nat → ZMod 17) :
 #guard_msgs (whitespace := lax) in #print axioms story_with_key_accepts
 /-- info: 'Minidregg.Compiler.SlotFoldWitness.story_without_key_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms story_without_key_refused
+
+/-! ### Combat: the balance clause (`leSlotsOff`, MUD.md §2.4, `COST = 3`) -/
+
+/-- `bal/after ≥ now + 3`, stated as `now ≤ bal + (−3)`, for a live attacker. -/
+def strikeLaw : Pred := Pred.all
+  [.eq "alive" 1, .leSlotsOff "now" "bal" (-3)]
+
+/-- MUD.md's spelling: `not (leSlotsOff bal now (COST − 1))`, i.e. `¬ (bal ≤ now + 2)`. -/
+def strikeLawMud : Pred := Pred.all
+  [.eq "alive" 1, .not (.leSlotsOff "bal" "now" 2)]
+
+/-- The referee paid the balance: `bal := now + 3`. -/
+def paid : State := ⟨[("alive", 1), ("now", 5), ("bal", 8)]⟩
+
+/-- One tick short: `bal = now + 2`. -/
+def short : State := ⟨[("alive", 1), ("now", 5), ("bal", 7)]⟩
+
+/-- No clock observed: the offset atom fails closed. -/
+def unclocked : State := ⟨[("alive", 1), ("bal", 8)]⟩
+
+theorem strike_source_poles :
+    Minidregg.Pred.eval strikeLaw before paid = true ∧
+    Minidregg.Pred.eval strikeLaw before short = false ∧
+    Minidregg.Pred.eval strikeLaw before unclocked = false ∧
+    Minidregg.Pred.eval strikeLawMud before paid = true ∧
+    Minidregg.Pred.eval strikeLawMud before short = false := by decide
+
+/-- The paid strike is admitted: the emitted system accepts the executable witness. -/
+theorem strike_paid_accepts :
+    systemAccepts (stepAsg before paid (wit profile (F := ZMod 17) strikeLaw before paid))
+      (lower profile strikeLaw) := by decide
+
+/-- A strike one tick short of balance is refused for every auxiliary assignment. -/
+theorem strike_short_refused (A : List Nat → Nat → ZMod 17) :
+    ¬ systemAccepts (stepAsg before short A) (lower profile strikeLaw) := by
+  intro accepted
+  have holds := lower_sound profile profile_admissible
+    (by decide : castInjOn (ZMod 17) (intsOf strikeLaw before short))
+    (by decide) (by decide) accepted
+  have hfalse : Minidregg.Pred.eval strikeLaw before short = false := by decide
+  rw [hfalse] at holds
+  contradiction
+
+/-- With no clock slot the strike is refused for every auxiliary assignment. -/
+theorem strike_unclocked_refused (A : List Nat → Nat → ZMod 17) :
+    ¬ systemAccepts (stepAsg before unclocked A) (lower profile strikeLaw) := by
+  intro accepted
+  have holds := lower_sound profile profile_admissible
+    (by decide : castInjOn (ZMod 17) (intsOf strikeLaw before unclocked))
+    (by decide) (by decide) accepted
+  have hfalse : Minidregg.Pred.eval strikeLaw before unclocked = false := by decide
+  rw [hfalse] at holds
+  contradiction
+
+/-- MUD.md's spelling admits the paid strike through the compiler. -/
+theorem strike_mud_paid_accepts :
+    systemAccepts (stepAsg before paid (wit profile (F := ZMod 17) strikeLawMud before paid))
+      (lower profile strikeLawMud) := by decide
+
+/-- MUD.md's spelling refuses the short strike for every auxiliary assignment. -/
+theorem strike_mud_short_refused (A : List Nat → Nat → ZMod 17) :
+    ¬ systemAccepts (stepAsg before short A) (lower profile strikeLawMud) := by
+  intro accepted
+  have holds := lower_sound profile profile_admissible
+    (by decide : castInjOn (ZMod 17) (intsOf strikeLawMud before short))
+    (by decide) (by decide) accepted
+  have hfalse : Minidregg.Pred.eval strikeLawMud before short = false := by decide
+  rw [hfalse] at holds
+  contradiction
+
+/-- The paid witness replayed on the short step is refused. -/
+theorem paid_witness_on_short_refused :
+    ¬ systemAccepts (stepAsg before short (wit profile (F := ZMod 17) strikeLaw before paid))
+      (lower profile strikeLaw) := by decide
+
+/-- The explicit disabled profile refuses `leSlotsOff` on every assignment. -/
+theorem disabled_refuses_leSlotsOff (A : List Nat → Nat → ZMod 17) :
+    ¬ systemAccepts (stepAsg before paid A)
+      (lower CompilerProfile.disabled (.leSlotsOff "now" "bal" (-3))) :=
+  lower_leSlotsOff_disabled_refuses _ _ _ _
+
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_paid_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms strike_paid_accepts
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_short_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms strike_short_refused
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_unclocked_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms strike_unclocked_refused
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_mud_paid_accepts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms strike_mud_paid_accepts
+/-- info: 'Minidregg.Compiler.SlotFoldWitness.strike_mud_short_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms strike_mud_short_refused
 
 end Minidregg.Compiler.SlotFoldWitness
