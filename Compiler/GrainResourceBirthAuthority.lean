@@ -19,14 +19,14 @@ open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CredentialAuthorityState (layout isNullified)
 open Minidregg.Theory.CredentialAuthorityEffects
-  (Entry assignAll setAll run_assignAll nullifierEntry)
+  (assignAll setAll run_assignAll nullifierEntry)
 open Minidregg.Compiler
 
 set_option autoImplicit false
 
 /-- The birth batch's entries followed by the operation marker's nullifier. -/
 def entries (descriptor : Descriptor CanonicalCellRegistry.registry) (operationMarker : Nat) :
-    List Entry :=
+    List (Entry CredentialAuthorityState.layout) :=
   ResourceBirthAuthority.entries descriptor ++ [nullifierEntry operationMarker]
 
 def patch (snapshot : CredentialAuthorityDomain.Snapshot)
@@ -34,7 +34,7 @@ def patch (snapshot : CredentialAuthorityDomain.Snapshot)
     Patch layout :=
   assignAll snapshot.logical (entries descriptor operationMarker)
 
-private theorem setAll_append (store : Store layout) (first second : List Entry) :
+private theorem setAll_append (store : Store layout) (first second : List (Entry CredentialAuthorityState.layout)) :
     setAll store (first ++ second) = setAll (setAll store first) second := by
   induction first generalizing store with
   | nil => rfl

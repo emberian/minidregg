@@ -225,43 +225,6 @@ theorem register_accepted_at_cell (pre : Cell) (key : RevocationKey)
         validated.apply.logical ⟨.registered, key⟩ = some () :=
   register_accepted materializer pre key fresh
 
-/-! ## Pair-scoped root binding
-
-The cell root is the cSHAKE256 digest of the canonical bytes.  No global
-injectivity into 256 bits is claimed: a root equality between two specific
-stores is turned into store equality only under the premise that this pair is
-not a collision. -/
-
-/-- A collision between two authority stores: different stores, hence different
-canonical bytes (`encode_injective`), with the same root. -/
-structure Collision (left right : Store layout) : Prop where
-  statesDifferent : left ≠ right
-  bytesDifferent : materializer.codec.encode left ≠ materializer.codec.encode right
-  rootsEqual : materializer.rootOf left = materializer.rootOf right
-
-theorem collision_of_root_eq_of_ne {left right : Store layout} (different : left ≠ right)
-    (same : materializer.rootOf left = materializer.rootOf right) : Collision left right :=
-  ⟨different, fun bytes => different (encode_injective wire bytes), same⟩
-
-/-- The pair-scoped collision-resistance premise. -/
-def PairBindingPremise (left right : Store layout) : Prop :=
-  ¬ Collision left right
-
-/-- Under the pair premise, equal roots mean equal stores. -/
-theorem logical_eq_of_root_eq {left right : Cell}
-    (binding : PairBindingPremise left.logical right.logical)
-    (same : left.root = right.root) : left.logical = right.logical := by
-  by_contra different
-  exact binding (collision_of_root_eq_of_ne different same)
-
-/-- Under the pair premise, two cells with different stores have different
-roots: every accepted authority change moves the root a durable read guard
-observes. -/
-theorem root_ne_of_logical_ne {left right : Cell}
-    (binding : PairBindingPremise left.logical right.logical)
-    (different : left.logical ≠ right.logical) : left.root ≠ right.root :=
-  fun same => different (logical_eq_of_root_eq binding same)
-
 /-! ## A worked authority cell -/
 
 namespace Witness
@@ -461,8 +424,6 @@ theorem retired_page_frame_refused (payload : List UInt8) :
 #guard_msgs (whitespace := lax) in #print axioms deregister_rejected_at_cell
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.register_accepted_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms register_accepted_at_cell
-/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.root_ne_of_logical_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms root_ne_of_logical_ne
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.revoked_owner_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Witness.revoked_owner_registered_and_revoked
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.cell_deregister_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/

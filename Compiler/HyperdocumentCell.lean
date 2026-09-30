@@ -35,6 +35,7 @@ namespace Minidregg.Compiler.HyperdocumentCell
 open Minidregg.Compiler.HyperdocumentCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.StoreCodec
+open Minidregg.Theory.Store (Entry)
 open Minidregg.Theory
 open Minidregg.Theory.CausalVersionDag
 open Minidregg.Theory.Hyperdocument

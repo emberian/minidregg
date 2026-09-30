@@ -319,34 +319,34 @@ def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
   factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config)
 
-def policyEntries (record : PolicyRecord) : List CredentialAuthorityEffects.Entry :=
+def policyEntries (record : PolicyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
    ⟨⟨.policyRevision, record.policyId⟩, (record.version : PolicyRevision)⟩,
    ⟨⟨.policyAddress, (record.policyId, record.version)⟩, PolicyRecordCodec.digest record⟩]
 
 /-- A genesis signing key: its current epoch, its record, and the registration
 of its key version, exactly as enrollment writes them. -/
-def keyEntries (key : KeyRecord) : List CredentialAuthorityEffects.Entry :=
+def keyEntries (key : KeyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.subjectKeyEpoch, ⟨key.subject⟩⟩, key.keyEpoch⟩,
    ⟨⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩, key⟩,
    CredentialAuthorityEffects.registrationEntry (CredentialAuthorityState.signingKeyRevocation key)]
 
 def capabilityEntry {kind : ResourceKind} (capability : Capability kind) :
-    CredentialAuthorityEffects.Entry :=
+    Minidregg.Theory.Store.Entry CredentialAuthorityState.layout :=
   ⟨⟨.capability kind, capability.id⟩, (⟨capability, []⟩ : CredentialAuthorityState.StoredCapability kind)⟩
 
 /-- A genesis capability is installed together with the registration of its
 own revocation key, exactly as issuance does: "registered" is presence in the
 `registered` plane, and genesis holds no capability it could not revoke. -/
 def capabilityEntries {kind : ResourceKind} (capability : Capability kind) :
-    List CredentialAuthorityEffects.Entry :=
+    List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [capabilityEntry capability,
    CredentialAuthorityEffects.registrationEntry (.capability capability.id)]
 
 /-- Every genesis authority record, as entries of the one authority cell. -/
 def entries {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
-    List CredentialAuthorityEffects.Entry :=
+    List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   ⟨⟨.issuerEpoch, profile.template.issuer⟩, config.issuerEpoch⟩ ::
   capabilityEntries (controlCapability profile config) ++
   (policies profile config).flatMap policyEntries ++
@@ -364,7 +364,7 @@ def authorityStore {F : Type} [Field F]
 
 theorem entries_not_nullifier {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config)
-    (entry : CredentialAuthorityEffects.Entry) (member : entry ∈ entries profile config) :
+    (entry : Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) (member : entry ∈ entries profile config) :
     entry.1.1 ≠ .nullifier := by
   simp only [entries, policyEntries, keyEntries, capabilityEntries, capabilityEntry,
     CredentialAuthorityEffects.registrationEntry, List.mem_append, List.mem_cons,

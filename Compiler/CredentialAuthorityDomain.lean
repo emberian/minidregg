@@ -43,7 +43,7 @@ open Minidregg.Theory.CellState
 open Minidregg.Theory.Store
 open Minidregg.Theory.CredentialAuthorityState
 open Minidregg.Theory.CredentialAuthorityEffects
-  (Entry assignAll setAll run_assignAll nullifierEntry)
+  (assignAll setAll run_assignAll nullifierEntry)
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -287,7 +287,7 @@ def retirePolicy (logical : Store layout) (policy : PolicyId) (revision : Policy
   | none => []
 
 def policyEntries (policy : PolicyId) (revision : PolicyRevision) (address : Digest) :
-    List Entry :=
+    List (Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyRevision, policy⟩, revision⟩, ⟨⟨.policyAddress, (policy, revision)⟩, address⟩]
 
 /-- Install `(revision, address)` as the policy's head.  The generation is
@@ -532,7 +532,7 @@ def store : Store layout :=
     ([⟨⟨.policyEpoch, policy⟩, (1 : Nat)⟩,
       ⟨⟨.policyRevision, policy⟩, (3 : Nat)⟩,
       ⟨⟨.policyAddress, (policy, 3)⟩, (⟨3300⟩ : Digest)⟩,
-      ⟨⟨.nullifier, (5 : Nat)⟩, ()⟩] : List (StoreCodec.Entry layout))
+      ⟨⟨.nullifier, (5 : Nat)⟩, ()⟩] : List (Minidregg.Theory.Store.Entry layout))
 
 def snapshot : Snapshot := ⟨⟨91⟩, materialize CredentialAuthorityCell.materializer store⟩
 

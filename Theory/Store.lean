@@ -67,6 +67,11 @@ attribute [instance] Layout.namespaceDecEq Layout.keyDecEq Layout.valueDecEq
 /-- One typed address: a namespace and a key of that namespace. -/
 abbrev Address (L : Layout.{u, v, w}) := Σ space : L.Namespace, L.Key space
 
+/-- One store entry: an address and a present value at that address.  This is
+the one entry type: codecs (`StoreCodec.fromEntries`) and family patches
+(`CredentialAuthorityEffects.assignAll`) both consume it. -/
+abbrev Entry (L : Layout.{u, v, w}) := Σ address : Address L, L.Value address.1
+
 /-- `none` is the representation-level zero of a sparse typed map.  It means
 "address absent" and does not choose a semantic default. -/
 instance optionZero (α : Type w) : Zero (Option α) := ⟨none⟩

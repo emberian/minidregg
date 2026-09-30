@@ -30,7 +30,7 @@ def four (v0 v1 v2 v3 : Int) : DeclaredResourceProjection.Values :=
   [(1, v1), (2, v2), (3, v3), (0, v0)]
 
 def entries (object : Nat) (values : DeclaredResourceProjection.Values) :
-    List (StoreCodec.Entry effectLayout) :=
+    List (Minidregg.Theory.Store.Entry effectLayout) :=
   values.map fun pair => ⟨(key object pair.1).address, pair.2⟩
 
 /-- The record's store: exactly its fields, nothing else. -/

@@ -72,9 +72,6 @@ variable {context : RequestContext}
 
 /-! ## Guarded assignment over the authority layout -/
 
-/-- One typed authority entry: an address and a value of its plane. -/
-abbrev Entry := (address : Address layout) × layout.Value address.1
-
 /-- Assign `value` at `address`, guarded at the value `store` holds there:
 `write` from the exact prior value if present, `allocate` if absent. -/
 def assignOp (store : Store layout) (address : Address layout)
@@ -147,7 +144,7 @@ theorem assignOp_not_enabled_of_ne (store other : Store layout) (address : Addre
 
 /-- Guarded assignment of a list of entries, each guard read at the store its
 prefix produced. -/
-def assignAll : Store layout → List Entry → Patch layout
+def assignAll : Store layout → List (Entry layout) → Patch layout
   | _, [] => []
   | store, entry :: rest =>
       assignOp store entry.1 entry.2 ::
@@ -156,18 +153,18 @@ def assignAll : Store layout → List Entry → Patch layout
 /-- A family patch is refused at any store that disagrees with the store it was
 generated from at its first written address: e.g. an issuance replayed after
 its nullifier or capability slot moved. -/
-theorem assignAll_refused_of_changed (store other : Store layout) (entry : Entry)
-    (rest : List Entry) (changed : other entry.1 ≠ store entry.1) :
+theorem assignAll_refused_of_changed (store other : Store layout) (entry : Entry layout)
+    (rest : List (Entry layout)) (changed : other entry.1 ≠ store entry.1) :
     ¬ Patch.ValidFrom other (assignAll store (entry :: rest)) :=
   fun valid => assignOp_not_enabled_of_ne store other entry.1 entry.2 changed valid.1
 
 /-- Unconditional pointwise installation of entries, in order. -/
-def setAll : Store layout → List Entry → Store layout
+def setAll : Store layout → List (Entry layout) → Store layout
   | store, [] => store
   | store, entry :: rest => setAll (store.set entry.1 (some entry.2)) rest
 
 /-- Every entry is assignable at the store its prefix produced. -/
-def AssignableAll : Store layout → List Entry → Prop
+def AssignableAll : Store layout → List (Entry layout) → Prop
   | _, [] => True
   | store, entry :: rest =>
       Assignable store entry.1 ∧ AssignableAll (store.set entry.1 (some entry.2)) rest
@@ -175,7 +172,7 @@ def AssignableAll : Store layout → List Entry → Prop
 /-- A family patch is valid at the store it was generated from exactly when
 every entry is assignable at its prefix: RAM planes always are, and an
 append-only entry must be fresh. -/
-theorem assignAll_valid_iff (store : Store layout) (entries : List Entry) :
+theorem assignAll_valid_iff (store : Store layout) (entries : List (Entry layout)) :
     Patch.ValidFrom store (assignAll store entries) ↔ AssignableAll store entries := by
   induction entries generalizing store with
   | nil => exact Iff.rfl
@@ -186,14 +183,14 @@ theorem assignAll_valid_iff (store : Store layout) (entries : List Entry) :
       rw [assignOp_apply, assignOp_enabled_iff, ih]
       rfl
 
-theorem assignAll_valid (store : Store layout) (entries : List Entry)
+theorem assignAll_valid (store : Store layout) (entries : List (Entry layout))
     (assignable : AssignableAll store entries) :
     Patch.ValidFrom store (assignAll store entries) :=
   (assignAll_valid_iff store entries).mpr assignable
 
 /-- The two-entry families: a record and a distinct second entry, each
 assignable at the pre-store. -/
-theorem assignableAll_pair (store : Store layout) (first second : Entry)
+theorem assignableAll_pair (store : Store layout) (first second : Entry layout)
     (distinct : second.1 ≠ first.1) (firstOk : Assignable store first.1)
     (secondOk : Assignable store second.1) :
     AssignableAll store [first, second] := by
@@ -205,7 +202,7 @@ theorem assignableAll_pair (store : Store layout) (first second : Entry)
 /-- A run of RAM entries followed by one final entry is assignable exactly when
 the final entry is assignable at the pre-store: RAM entries never share a plane
 with an append-only one, so they cannot occupy its address first. -/
-theorem assignableAll_ram_append_iff (store : Store layout) (ram : List Entry) (last : Entry)
+theorem assignableAll_ram_append_iff (store : Store layout) (ram : List (Entry layout)) (last : Entry layout)
     (allRam : ∀ entry ∈ ram, layout.discipline entry.1.1 = .ram) :
     AssignableAll store (ram ++ [last]) ↔ Assignable store last.1 := by
   induction ram generalizing store with
@@ -233,7 +230,7 @@ theorem assignableAll_ram_append_iff (store : Store layout) (ram : List Entry) (
 
 /-- A batch with pairwise distinct addresses is assignable when each entry is
 assignable at the pre-store: no entry's prefix can occupy another's address. -/
-theorem assignableAll_of_nodup (store : Store layout) (entries : List Entry)
+theorem assignableAll_of_nodup (store : Store layout) (entries : List (Entry layout))
     (distinct : (entries.map Sigma.fst).Nodup)
     (each : ∀ entry ∈ entries, Assignable store entry.1) :
     AssignableAll store entries := by
@@ -250,7 +247,7 @@ theorem assignableAll_of_nodup (store : Store layout) (entries : List Entry)
 
 /-- The last entry of an assignable batch is assignable at the store its prefix
 produced. -/
-theorem assignableAll_append_last (store : Store layout) (front : List Entry) (last : Entry)
+theorem assignableAll_append_last (store : Store layout) (front : List (Entry layout)) (last : Entry layout)
     (assignable : AssignableAll store (front ++ [last])) :
     Assignable (setAll store front) last.1 := by
   induction front generalizing store with
@@ -265,7 +262,7 @@ theorem assignable_of_absent (store : Store layout) (address : Address layout)
     (absent : (store address).isSome = false) : Assignable store address :=
   Or.inr (Option.not_isSome_iff_eq_none.mp (by simp [absent]))
 
-@[simp] theorem run_assignAll (store : Store layout) (entries : List Entry) :
+@[simp] theorem run_assignAll (store : Store layout) (entries : List (Entry layout)) :
     Patch.run store (assignAll store entries) = setAll store entries := by
   induction entries generalizing store with
   | nil => rfl
@@ -273,7 +270,7 @@ theorem assignable_of_absent (store : Store layout) (address : Address layout)
       simp only [assignAll, setAll, Patch.run_cons, assignOp_apply]
       exact ih _
 
-theorem assignAll_writeFootprint (store : Store layout) (entries : List Entry) :
+theorem assignAll_writeFootprint (store : Store layout) (entries : List (Entry layout)) :
     Patch.writeFootprint (assignAll store entries) = (entries.map Sigma.fst).toFinset := by
   induction entries generalizing store with
   | nil => rfl
@@ -286,7 +283,7 @@ theorem assignAll_writeFootprint (store : Store layout) (entries : List Entry) :
       simp [Patch.writeFootprint, eq_comm]
 
 /-- Installing entries frames every address none of them names. -/
-theorem setAll_frame (store : Store layout) (entries : List Entry) (address : Address layout)
+theorem setAll_frame (store : Store layout) (entries : List (Entry layout)) (address : Address layout)
     (outside : address ∉ entries.map Sigma.fst) :
     setAll store entries address = store address := by
   induction entries generalizing store with
@@ -299,8 +296,8 @@ theorem setAll_frame (store : Store layout) (entries : List Entry) (address : Ad
 
 /-- In a batch with pairwise distinct addresses, every entry is installed
 exactly. -/
-theorem setAll_member (store : Store layout) (entries : List Entry)
-    (distinct : (entries.map Sigma.fst).Nodup) (entry : Entry) (member : entry ∈ entries) :
+theorem setAll_member (store : Store layout) (entries : List (Entry layout))
+    (distinct : (entries.map Sigma.fst).Nodup) (entry : Entry layout) (member : entry ∈ entries) :
     setAll store entries entry.1 = some entry.2 := by
   induction entries generalizing store with
   | nil => simp at member
@@ -314,20 +311,20 @@ theorem setAll_member (store : Store layout) (entries : List Entry)
 
 /-- Every family below writes exactly two entries: its authority record and its
 operation nullifier. -/
-theorem setAll_pair_first (store : Store layout) (first second : Entry)
+theorem setAll_pair_first (store : Store layout) (first second : Entry layout)
     (distinct : first.1 ≠ second.1) :
     setAll store [first, second] first.1 = some first.2 := by
   simp only [setAll]
   rw [Store.set_ne _ _ _ _ distinct, Store.set_eq]
 
-theorem setAll_pair_second (store : Store layout) (first second : Entry) :
+theorem setAll_pair_second (store : Store layout) (first second : Entry layout) :
     setAll store [first, second] second.1 = some second.2 := by
   simp only [setAll, Store.set_eq]
 
 /-- A family patch generated from `pre` validates at `pre`'s own root and at no
 other quoted root. -/
 theorem validated_of_assign {M : Materializer} {pre : Cell M}
-    {expectedPreRoot : Digest} (entries : List Entry)
+    {expectedPreRoot : Digest} (entries : List (Entry layout))
     (preRootExact : expectedPreRoot = pre.root)
     (assignable : AssignableAll pre.logical entries) :
     CellState.ValidatedPatch M pre expectedPreRoot (assignAll pre.logical entries) := by
@@ -336,19 +333,19 @@ theorem validated_of_assign {M : Materializer} {pre : Cell M}
   exact validated
 
 /-- The nullifier entry every family writes. -/
-def nullifierEntry (operationNullifier : OperationNullifier) : Entry :=
+def nullifierEntry (operationNullifier : OperationNullifier) : Entry layout :=
   ⟨⟨.nullifier, operationNullifier⟩, ()⟩
 
 /-- The registration entry a creating family allocates for the revocation key
 of the capability it creates.  `registered` is append-only, so this is an
 allocation that no later patch can undo. -/
-def registrationEntry (key : RevocationKey) : Entry :=
+def registrationEntry (key : RevocationKey) : Entry layout :=
   ⟨⟨.registered, key⟩, ()⟩
 
 /-- A creating family (a RAM record, the registration of the created key, then
 the operation nullifier) is assignable at `pre` when the key is not yet
 registered and the nullifier is unspent. -/
-theorem assignableAll_creation {M : Materializer} (pre : Cell M) (record : Entry)
+theorem assignableAll_creation {M : Materializer} (pre : Cell M) (record : Entry layout)
     (key : RevocationKey) (operationNullifier : OperationNullifier)
     (recordRam : layout.discipline record.1.1 = .ram)
     (unregistered : isRegistered pre key = false)
@@ -381,7 +378,7 @@ theorem assignableAll_creation {M : Materializer} (pre : Cell M) (record : Entry
 
 /-- The three addresses of a creating family are pairwise distinct whenever its
 record is on a RAM plane. -/
-theorem creation_addresses_nodup (record : Entry) (key : RevocationKey)
+theorem creation_addresses_nodup (record : Entry layout) (key : RevocationKey)
     (operationNullifier : OperationNullifier)
     (recordRam : layout.discipline record.1.1 = .ram) :
     ([record, registrationEntry key, nullifierEntry operationNullifier].map Sigma.fst).Nodup := by
@@ -398,10 +395,10 @@ theorem creation_addresses_nodup (record : Entry) (key : RevocationKey)
 
 /-- The applied post of a creating family holds each of its three entries. -/
 theorem apply_creation_member {M : Materializer} {pre : Cell M} {expectedPreRoot : Digest}
-    {record : Entry} {key : RevocationKey} {operationNullifier : OperationNullifier}
+    {record : Entry layout} {key : RevocationKey} {operationNullifier : OperationNullifier}
     (validated : CellState.ValidatedPatch M pre expectedPreRoot
       (assignAll pre.logical [record, registrationEntry key, nullifierEntry operationNullifier]))
-    (recordRam : layout.discipline record.1.1 = .ram) (entry : Entry)
+    (recordRam : layout.discipline record.1.1 = .ram) (entry : Entry layout)
     (member : entry ∈ [record, registrationEntry key, nullifierEntry operationNullifier]) :
     validated.apply.logical entry.1 = some entry.2 := by
   rw [CellState.ValidatedPatch.apply_logical, run_assignAll]
@@ -411,7 +408,7 @@ theorem apply_creation_member {M : Materializer} {pre : Cell M} {expectedPreRoot
 /-- A two-entry family (a record on a plane other than the nullifier's, then the
 operation nullifier) is assignable at `pre` when its record is and the nullifier
 is unspent. -/
-theorem assignableAll_record_nullifier {M : Materializer} (pre : Cell M) (record : Entry)
+theorem assignableAll_record_nullifier {M : Materializer} (pre : Cell M) (record : Entry layout)
     (operationNullifier : OperationNullifier)
     (recordOk : Assignable pre.logical record.1)
     (plane : record.1.1 ≠ .nullifier)
@@ -422,7 +419,7 @@ theorem assignableAll_record_nullifier {M : Materializer} (pre : Cell M) (record
 
 /-- The applied post of a two-entry family patch holds its first entry. -/
 theorem apply_pair_first {M : Materializer} {pre : Cell M} {expectedPreRoot : Digest}
-    {first second : Entry}
+    {first second : Entry layout}
     (validated : CellState.ValidatedPatch M pre expectedPreRoot
       (assignAll pre.logical [first, second]))
     (distinct : first.1 ≠ second.1) :
@@ -432,7 +429,7 @@ theorem apply_pair_first {M : Materializer} {pre : Cell M} {expectedPreRoot : Di
 
 /-- The applied post of a two-entry family patch holds its second entry. -/
 theorem apply_pair_second {M : Materializer} {pre : Cell M} {expectedPreRoot : Digest}
-    {first second : Entry}
+    {first second : Entry layout}
     (validated : CellState.ValidatedPatch M pre expectedPreRoot
       (assignAll pre.logical [first, second])) :
     validated.apply.logical second.1 = some second.2 := by
@@ -448,14 +445,14 @@ structure IssueDeclaration (kind : ResourceKind) where
 
 /-- The root capability record written by issuance. -/
 def IssueDeclaration.capabilityEntry {kind : ResourceKind}
-    (declaration : IssueDeclaration kind) : Entry :=
+    (declaration : IssueDeclaration kind) : Entry layout :=
   ⟨⟨.capability kind, declaration.capability.id⟩,
     (⟨declaration.capability, []⟩ : StoredCapability kind)⟩
 
 /-- Issuance writes the root record, registers the issued capability's own
 revocation key, and spends its nullifier, in one patch. -/
 def IssueDeclaration.entries {kind : ResourceKind}
-    (declaration : IssueDeclaration kind) : List Entry :=
+    (declaration : IssueDeclaration kind) : List (Entry layout) :=
   [declaration.capabilityEntry,
     registrationEntry (.capability declaration.capability.id),
     nullifierEntry declaration.operationNullifier]
@@ -571,12 +568,12 @@ def descendedCapability {kind : ResourceKind} (child : Capability kind)
   ⟨child, ⟨parent.head, .strict⟩ :: parent.ancestry⟩
 
 def AttenuateDeclaration.capabilityEntry {kind : ResourceKind}
-    (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind) : Entry :=
+    (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind) : Entry layout :=
   ⟨⟨.capability kind, declaration.child.id⟩, descendedCapability declaration.child parent⟩
 
 def AttenuateDeclaration.entries {kind : ResourceKind}
     (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind) :
-    List Entry :=
+    List (Entry layout) :=
   [declaration.capabilityEntry parent, registrationEntry (.capability declaration.child.id),
     nullifierEntry declaration.operationNullifier]
 
@@ -825,13 +822,13 @@ def delegatedCapability {kind : ResourceKind} (child : Capability kind)
 
 def DelegateDeclaration.capabilityEntry {kind : ResourceKind}
     (declaration : DelegateDeclaration kind) (parent : StoredCapability kind)
-    (request : Request kind) : Entry :=
+    (request : Request kind) : Entry layout :=
   ⟨⟨.capability kind, declaration.child.id⟩,
     delegatedCapability declaration.child parent request⟩
 
 def DelegateDeclaration.entries {kind : ResourceKind}
     (declaration : DelegateDeclaration kind) (parent : StoredCapability kind)
-    (request : Request kind) : List Entry :=
+    (request : Request kind) : List (Entry layout) :=
   [declaration.capabilityEntry parent request,
     registrationEntry (.capability declaration.child.id),
     nullifierEntry declaration.operationNullifier]
@@ -1116,10 +1113,10 @@ structure RevokeDeclaration where
   expectedPreRoot : Digest
   operationNullifier : OperationNullifier
 
-def RevokeDeclaration.revokedEntry (declaration : RevokeDeclaration) : Entry :=
+def RevokeDeclaration.revokedEntry (declaration : RevokeDeclaration) : Entry layout :=
   ⟨⟨.revoked, declaration.key⟩, ()⟩
 
-def RevokeDeclaration.entries (declaration : RevokeDeclaration) : List Entry :=
+def RevokeDeclaration.entries (declaration : RevokeDeclaration) : List (Entry layout) :=
   [declaration.revokedEntry, nullifierEntry declaration.operationNullifier]
 
 def RevokeDeclaration.patch
@@ -1222,7 +1219,7 @@ def EpochTarget.readAuth (state : AuthState) : EpochTarget → Epoch
   cases target <;> rfl
 
 /-- The typed entry installing `epoch` at the target's address. -/
-def EpochTarget.entry (target : EpochTarget) (epoch : Epoch) : Entry :=
+def EpochTarget.entry (target : EpochTarget) (epoch : Epoch) : Entry layout :=
   match target with
   | EpochTarget.issuer issuerId => ⟨⟨.issuerEpoch, issuerId⟩, epoch⟩
   | EpochTarget.policy policyId => ⟨⟨.policyEpoch, policyId⟩, epoch⟩
@@ -1258,7 +1255,7 @@ structure RotateEpochDeclaration where
   expectedPreRoot : Digest
   operationNullifier : OperationNullifier
 
-def RotateEpochDeclaration.entries (declaration : RotateEpochDeclaration) : List Entry :=
+def RotateEpochDeclaration.entries (declaration : RotateEpochDeclaration) : List (Entry layout) :=
   [declaration.target.entry declaration.nextEpoch,
     nullifierEntry declaration.operationNullifier]
 

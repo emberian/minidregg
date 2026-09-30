@@ -38,11 +38,6 @@ open Minidregg.Theory.HyperdocumentInterface
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 
-/-- The root-collision premise for one pair of stores under one materializer. -/
-def PairBindingPremise {L : Store.Layout.{0, 0, 0}} (M : CellState.Materializer L Digest)
-    (left right : Store.Store L) : Prop :=
-  M.rootOf left = M.rootOf right → left = right
-
 set_option autoImplicit false
 
 noncomputable section
@@ -704,13 +699,13 @@ structure DeploymentEvidence
     HyperdocumentCell.contentMaterializer.rootOf Content.cell.logical =
       HyperdocumentCell.contentMaterializer.rootOf reopenedContent
   contentPairBinding :
-    PairBindingPremise HyperdocumentCell.contentMaterializer Content.cell.logical
+    CellState.PairBindingPremise HyperdocumentCell.contentMaterializer Content.cell.logical
       reopenedContent
   historyRootObserved :
     HyperdocumentCell.eventMaterializer.rootOf Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.cell.logical =
       HyperdocumentCell.eventMaterializer.rootOf reopenedHistory
   historyPairBinding :
-    PairBindingPremise HyperdocumentCell.eventMaterializer
+    CellState.PairBindingPremise HyperdocumentCell.eventMaterializer
       Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.cell.logical reopenedHistory
   historyMember :
     AuthoritativeHistoryMember Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.key Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.record

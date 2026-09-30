@@ -116,9 +116,6 @@ def unitStream : StreamCodec Unit where
   decodePrefix bytes := some ((), bytes)
   decodePrefix_encode := by intro value suffix; rfl
 
-/-- One store entry: an address and a present value at that address. -/
-abbrev Entry (L : Layout.{0, 0, 0}) := Σ address : Address L, L.Value address.1
-
 section Wire
 
 variable {L : Layout.{0, 0, 0}} (W : Wire L)

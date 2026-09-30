@@ -476,31 +476,26 @@ theorem concrete_authority_roots_differ :
   rw [staleBefore_authority_root]
   simpa using concrete_authority_roots_differ
 
-/-- The root-collision premise for one pair of stores under one materializer. -/
-def PairBindingPremise {L : Store.Layout.{0, 0, 0}} (M : CellState.Materializer L Digest)
-    (left right : Store.Store L) : Prop :=
-  M.rootOf left = M.rootOf right → left = right
-
 structure ContentPairSecurityCeiling : Prop where
-  binding : PairBindingPremise HyperdocumentCell.contentMaterializer
+  binding : CellState.PairBindingPremise HyperdocumentCell.contentMaterializer
     contentPreCell.logical contentPostCell.logical
   rootsDifferent : contentPreCell.root ≠ contentPostCell.root
 
 structure EventPairSecurityCeiling : Prop where
-  binding : PairBindingPremise HyperdocumentCell.eventMaterializer
+  binding : CellState.PairBindingPremise HyperdocumentCell.eventMaterializer
     eventPreCell.logical eventPostCell.logical
   rootsDifferent : eventPreCell.root ≠ eventPostCell.root
 
 /-- The binding premise suffices for the root inequality: the two content
 stores differ at the link address. -/
 theorem ContentPairSecurityCeiling.ofBinding
-    (binding : PairBindingPremise HyperdocumentCell.contentMaterializer
+    (binding : CellState.PairBindingPremise HyperdocumentCell.contentMaterializer
       contentPreCell.logical contentPostCell.logical) :
     ContentPairSecurityCeiling where
   binding := binding
   rootsDifferent := by
     intro equal
-    have stores := binding equal
+    have stores := binding.logical_eq equal
     have atLink := congrArg (fun store : ContentStore => store linkAddress) stores
     simp only [contentPreCell, contentPostCell, CellState.materialize_logical,
       contentPostStore, contentPreStore, Store.Store.set_eq, Store.Store.zero_apply] at atLink

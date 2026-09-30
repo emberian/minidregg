@@ -2688,7 +2688,7 @@ private def optionalOperationJson (value : Option Hyperdocument.OperationId) : L
 
 /-- One entry of a content cell. Documents, elements, links, atoms and runs are
 spelled out; every entry carries its canonical `StoreCodec` entry bytes. -/
-private def contentEntryJson (entry : StoreCodec.Entry Hyperdocument.layout) : Lean.Json :=
+private def contentEntryJson (entry : Minidregg.Theory.Store.Entry Hyperdocument.layout) : Lean.Json :=
   let canonical := hexJson ((StoreCodec.entryStream HyperdocumentCell.contentWire).encode entry)
   match entry with
   | ⟨⟨.documents, identifier⟩, _⟩ =>

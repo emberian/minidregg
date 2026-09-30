@@ -32,23 +32,23 @@ set_option autoImplicit false
 def grantField (grant : AuthorityGrant) : Address CredentialAuthorityState.layout :=
   ⟨.capability grant.kind, grant.capability.head.id⟩
 
-def grantEntry (grant : AuthorityGrant) : Entry :=
+def grantEntry (grant : AuthorityGrant) : Entry CredentialAuthorityState.layout :=
   ⟨grantField grant, grant.capability⟩
 
 /-- The registration of a grant's own revocation key, allocated by the birth. -/
-def grantRegistrationEntry (grant : AuthorityGrant) : Entry :=
+def grantRegistrationEntry (grant : AuthorityGrant) : Entry CredentialAuthorityState.layout :=
   registrationEntry (.capability grant.capability.head.id)
 
-def policyEpochEntry (policy : InitialPolicy) : Entry :=
+def policyEpochEntry (policy : InitialPolicy) : Entry CredentialAuthorityState.layout :=
   ⟨⟨.policyEpoch, policy.policyId⟩, (0 : Epoch)⟩
 
-def policyRevisionEntry (policy : InitialPolicy) : Entry :=
+def policyRevisionEntry (policy : InitialPolicy) : Entry CredentialAuthorityState.layout :=
   ⟨⟨.policyRevision, policy.policyId⟩, (0 : PolicyRevision)⟩
 
-def policyAddressEntry (policy : InitialPolicy) : Entry :=
+def policyAddressEntry (policy : InitialPolicy) : Entry CredentialAuthorityState.layout :=
   ⟨⟨.policyAddress, (policy.policyId, 0)⟩, policy.address⟩
 
-def policyEntries (policy : InitialPolicy) : List Entry :=
+def policyEntries (policy : InitialPolicy) : List (Entry CredentialAuthorityState.layout) :=
   [policyEpochEntry policy, policyRevisionEntry policy, policyAddressEntry policy]
 
 def issueDeclaration (preRoot : Digest) (nullifier : Nat) (grant : AuthorityGrant) :
@@ -58,7 +58,7 @@ def issueDeclaration (preRoot : Digest) (nullifier : Nat) (grant : AuthorityGran
   operationNullifier := nullifier
 
 def entries {registry : TypeRegistry Digest} (descriptor : Descriptor registry) :
-    List Entry :=
+    List (Entry CredentialAuthorityState.layout) :=
   descriptor.initialPolicies.flatMap policyEntries ++
     descriptor.grants.map grantEntry ++ descriptor.grants.map grantRegistrationEntry ++
       [nullifierEntry descriptor.authorityNullifier]

@@ -19,7 +19,7 @@ authority-cell root read-only.
 Two deployment ceilings remain deliberately visible.  The portal below is an
 inhabitation verifier, not a signature or membership security claim.  Root
 movement of the authority cell is conditional on the pair-scoped cSHAKE256
-no-collision premise (`CredentialAuthorityCell.PairBindingPremise`), never on a
+no-collision premise (`CellState.PairBindingPremise`), never on a
 global injection into 256 bits.  Durable execution is a model until a physical
 handler inhabits the existing `ImplementationRefinement` simulation boundary.
 -/
@@ -70,7 +70,7 @@ address, and the shared channel registered (present in the append-only
 capabilities are NOT registered here: issuance and attenuation register them.  A staged
 revision does not become current until an explicit policy installation changes
 the revision plane; grant-generation rotation does not select it. -/
-def initialEntries : List (StoreCodec.Entry layout) :=
+def initialEntries : List (Minidregg.Theory.Store.Entry layout) :=
   [⟨⟨.policyEpoch, examplePolicy⟩, (2 : Epoch)⟩,
    ⟨⟨.policyRevision, examplePolicy⟩, (2 : PolicyRevision)⟩,
    ⟨⟨.policyAddress, (examplePolicy, 2)⟩, (⟨2200⟩ : Digest)⟩,
@@ -911,11 +911,10 @@ theorem authority_update_changes_store :
 /-- Under the pair-scoped no-collision premise for exactly these two stores,
 the authority update moves the root a durable read guard observes. -/
 theorem authority_update_moves_root
-    (binding : CredentialAuthorityCell.PairBindingPremise
+    (binding : CellState.PairBindingPremise AuthorityMaterializer
       finalCell.logical attenuatedCell.logical) :
     finalCell.root ≠ attenuatedCell.root :=
-  CredentialAuthorityCell.root_ne_of_logical_ne (left := finalCell) (right := attenuatedCell)
-    binding authority_update_changes_store
+  binding.root_ne authority_update_changes_store
 
 noncomputable def afterAuthorityUpdateBytes
     (cellId : Minidregg.Kernel.DurableDataIntent.CellId) : List UInt8 :=
@@ -937,7 +936,7 @@ noncomputable def afterAuthorityUpdate : DataSnapshot fullRoot where
 moved.  This is conditional exactly on the pair-scoped no-collision premise
 for the two authority stores. -/
 theorem authority_update_rejects_old_use
-    (binding : CredentialAuthorityCell.PairBindingPremise
+    (binding : CellState.PairBindingPremise AuthorityMaterializer
       finalCell.logical attenuatedCell.logical) :
     guardedUseIntent.preflight afterAuthorityUpdate =
       .error .staleReadGuard := by
