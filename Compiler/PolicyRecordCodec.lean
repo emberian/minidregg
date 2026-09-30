@@ -1,9 +1,10 @@
 /-
 # Compiler.PolicyRecordCodec -- executable, canonical policy source
 
-Version 2 encodes the complete `PolicyRecord`, including every `Pred`
+Version 3 encodes the complete `PolicyRecord`, including every `Pred`
 constructor. Naturals use the shared compact base-255 stream codec; integers
-use disjoint nonnegative/negative tags; strings retain their exact Unicode
+use the one integer codec, `Compiler.IntStream.intStream` (zigzag base-255,
+no tag byte); strings retain their exact Unicode
 scalar sequence. The AST is a typed postfix token stream. Its two stack sorts
 distinguish predicates from predicate lists, so malformed trees fail rather
 than acquiring an implicit meaning.
@@ -15,6 +16,7 @@ universal round-trip and canonical-decoding laws below are kernel proofs.
 The cSHAKE address is executable but is not claimed to be injective.
 -/
 import Compiler.CanonicalPolicyAdmission
+import Compiler.IntStream
 import Compiler.Sp800185Cshake256
 import Compiler.Tower256ConcreteBackend
 import Mathlib.Data.Char
@@ -28,18 +30,6 @@ open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
-
-def intToWire : Int → Sum Nat Nat
-  | .ofNat value => .inl value
-  | .negSucc value => .inr value
-
-def intOfWire : Sum Nat Nat → Int
-  | .inl value => .ofNat value
-  | .inr value => .negSucc value
-
-def intStream : StreamCodec Int :=
-  StreamCodec.xmap (StreamCodec.sum StreamCodec.nat StreamCodec.nat)
-    intToWire intOfWire (by intro value; cases value <;> rfl)
 
 def charStream : StreamCodec Char :=
   StreamCodec.xmap StreamCodec.nat Char.toNat Char.ofNat Char.ofNat_toNat
@@ -64,8 +54,8 @@ inductive Token where
   | cons
   deriving DecidableEq, Repr
 
-def slotIntStream := StreamCodec.product stringStream intStream
-def slotListStream := StreamCodec.product stringStream (StreamCodec.list intStream)
+def slotIntStream := StreamCodec.product stringStream IntStream.intStream
+def slotListStream := StreamCodec.product stringStream (StreamCodec.list IntStream.intStream)
 
 def encodeToken : Token → List UInt8
   | .eq slot value => 0 :: slotIntStream.encode (slot, value)
@@ -231,9 +221,11 @@ def recordOfTuple (tuple : RecordTuple) : Option PolicyRecord := do
   cases record
   simp [recordOfTuple, recordTuple]
 
-def sourceVersion : Nat := 2
+def sourceVersion : Nat := 3
 
-def wireFrame : List UInt8 := "LOOM/AUTH/POLICYRECORD".toUTF8.toList ++ [2]
+def framePrefix : List UInt8 := "LOOM/AUTH/POLICYRECORD".toUTF8.toList
+
+def wireFrame : List UInt8 := framePrefix ++ [3]
 
 def encode (record : PolicyRecord) : List UInt8 :=
   wireFrame ++ recordTupleStream.encode (recordTuple record)
@@ -310,7 +302,25 @@ theorem stack_underflow_rejected : decodePred [.cons] = none := rfl
 
 theorem extra_roots_rejected : decodePred [.nil, .all, .nil, .any] = none := rfl
 
-def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v2".toUTF8.toList
+/-- Version 2 records (the tagged `Sum` integer spelling) refuse to decode:
+their frame byte is 2. -/
+theorem v2_frame_refused (rest : List UInt8) :
+    decode ((framePrefix ++ [2]) ++ rest) = none := by
+  have taken : ((framePrefix ++ [2]) ++ rest).take wireFrame.length = framePrefix ++ [2] := by
+    rw [wireFrame, List.append_assoc, List.length_append, List.take_length_add_append]
+    rfl
+  have differs : framePrefix ++ [2] ≠ wireFrame := by
+    intro same
+    have := List.append_cancel_left same
+    simp at this
+  have raw : decodeRaw ((framePrefix ++ [2]) ++ rest) = none := by
+    unfold decodeRaw
+    rw [if_neg (by rw [taken]; exact differs)]
+  unfold decode
+  rw [raw]
+  rfl
+
+def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v3".toUTF8.toList
 
 def hashBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash customization bytes).digest
@@ -325,3 +335,6 @@ end Minidregg.Compiler.PolicyRecordCodec
 /-- info: 'Minidregg.Compiler.PolicyRecordCodec.decode_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Compiler.PolicyRecordCodec.decode_canonical
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.v2_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.v2_frame_refused
