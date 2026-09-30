@@ -75,7 +75,7 @@ stamp "source commit=$commit archive_sha256=$archive_sha origin=$source_origin"
 lean_pin=$(cat "$src/lean-toolchain")
 rust_pin=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' "$src/rust-toolchain.toml")
 [ -n "$rust_pin" ] || candidate_die "cannot read the Rust channel from rust-toolchain.toml"
-rustup toolchain install "$rust_pin" --profile minimal >>"$log" 2>&1
+rustup toolchain install --no-self-update "$rust_pin" --profile minimal >>"$log" 2>&1
 # elan selects (and on first use installs) the toolchain named by lean-toolchain.
 lake_version=$(cd "$src" && lake --version 2>>"$log" | sed -n 1p)
 lean_version=$(cd "$src" && lean --version 2>>"$log" | sed -n 1p)
@@ -141,9 +141,18 @@ grep -q '^usage:' "$out/logs/usage-store.txt" || candidate_die "Store helper did
 grep -q '^usage:' "$out/logs/usage-verifier.txt" || candidate_die "verifier did not print its usage"
 file "$out"/bin/* > "$out/logs/file-types.txt"
 
-# 7. Hashes and manifest. Paths in the manifest are relative to its directory.
+# 7. The operator scripts travel with the binaries, from the same archive.
+for script in run.sh journey.sh lib.sh; do
+  install -m 0555 "$src/deploy/candidate/$script" "$out/$script"
+done
+for document in INTERFACES.md genesis-params.example.json; do
+  install -m 0444 "$src/deploy/candidate/$document" "$out/$document"
+done
+
+# 8. Hashes and manifest. Paths in the manifest are relative to its directory.
 (cd "$out" && sha256sum bin/minidregg-host bin/mini bin/minidregg-link-sqlite-store \
-  bin/minidregg-credential-signature-verifier source.tar) > "$out/SHA256SUMS"
+  bin/minidregg-credential-signature-verifier run.sh journey.sh lib.sh INTERFACES.md \
+  genesis-params.example.json source.tar) > "$out/SHA256SUMS"
 sum_of() { grep "  $1\$" "$out/SHA256SUMS" | cut -d ' ' -f 1; }
 host_build_manifest_sha=$(candidate_sha256 "$out/work/host-build/manifest.txt")
 jq -n \
