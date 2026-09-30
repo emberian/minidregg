@@ -11,16 +11,16 @@ built.
 
 This builds one, standing on the `Theory` witnesses:
 `AcceptedCellEffectWitness.accepted` and `.acceptedTrue` are the accepted legs,
-their schema and materializer come from `CellStateWitness`, and their portal
+their store layout and materializer come from `CellStateWitness`, and their portal
 and authority state from `TypedAuthorizationWitness`.
 
-The turn has two incidences over TWO DIFFERENT SCHEMAS, which is what this
-module is for.  One cell carries a single field key of type `Bool`; the other
-carries two field keys of type `Unit`, with its own materializer, codec, and
+The turn has two incidences over TWO DIFFERENT LAYOUTS, which is what this
+module is for.  One cell has a single `Unit` key holding a `Bool`; the other
+has two `Bool` keys holding `Unit`, with its own materializer, codec, and
 canonical root.  Nothing about them is shared except the apex they join under.
 
 Every joint condition therefore does work: `cellIdsDistinct` separates two real
-cell identities, the legs are accepted effects at different schemas with
+cell identities, the legs are accepted effects at different layouts with
 different effect digests, and the aggregate resource law balances by
 CANCELLATION -- one leg charges `+1`, the other `-1`, so `aggregateBalanced` is
 the equation forcing their sum to zero rather than a restatement of `0 = 0`.
@@ -41,19 +41,13 @@ set_option autoImplicit false
 
 noncomputable section
 
-/-- Two incidences, indexed by `Bool`, carrying the witness schema,
+/-- Two incidences, indexed by `Bool`, carrying the witness layout,
 materializer, portal, a constant authority projection, and DISTINCT cell
 identities. -/
-def cells : CellFamily.{0, 0, 0, 0, 0} Bool where
-  schema := fun incidence => match incidence with
-    | true => schemaB
-    | false => schema
-  fieldDecidableEq := fun incidence => match incidence with
-    | true => inferInstance
-    | false => inferInstance
-  resourceDecidableEq := fun incidence => match incidence with
-    | true => inferInstance
-    | false => inferInstance
+def cells : CellFamily.{0, 0, 0, 0} Bool where
+  storeLayout := fun incidence => match incidence with
+    | true => layoutB
+    | false => layout
   materializer := fun incidence => match incidence with
     | true => materializerB
     | false => materializer
@@ -62,7 +56,7 @@ def cells : CellFamily.{0, 0, 0, 0, 0} Bool where
   cellId := fun incidence => if incidence then ⟨1⟩ else ⟨0⟩
 
 /-- The leg at the cell holding `false`. -/
-def legFalse : LegData.{0, 0, 0, 0, 0, 0} cells false where
+def legFalse : LegData.{0, 0, 0, 0, 0} cells false where
   Nullifier := Unit
   family := AcceptedCellEffectWitness.family
   kind := .object
@@ -70,8 +64,8 @@ def legFalse : LegData.{0, 0, 0, 0, 0, 0} cells false where
   declaration := ()
   outcome := ()
 
-/-- The leg at the OTHER SCHEMA's cell, with its own family and request. -/
-def legTrue : LegData.{0, 0, 0, 0, 0, 0} cells true where
+/-- The leg at the OTHER LAYOUT's cell, with its own family and request. -/
+def legTrue : LegData.{0, 0, 0, 0, 0} cells true where
   Nullifier := Unit
   family := AcceptedCellEffectWitness.familyB
   kind := .object
@@ -81,7 +75,7 @@ def legTrue : LegData.{0, 0, 0, 0, 0, 0} cells true where
 
 /-- The joint declaration.  Its header domain is the shared request domain,
 which is what `sharedDomain` demands of both legs. -/
-def declaration : Declaration.{0, 0, 0, 0, 0, 0} cells where
+def declaration : Declaration.{0, 0, 0, 0, 0} cells where
   header := { domain := ⟨1⟩, turnId := ⟨2⟩, apex := ⟨3⟩ }
   pre := fun incidence => match incidence with
     | true => cellB
@@ -98,12 +92,12 @@ def acceptedLegs : declaration.AcceptedLegs := fun incidence =>
 
 /-- A resource law that charges the two legs oppositely, so the joint balance
 is a cancellation rather than a triviality. -/
-def law : ResourceLaw.{0, 0, 0, 0, 0, 0, 0} declaration Unit Int where
+def law : ResourceLaw.{0, 0, 0, 0, 0, 0} declaration Unit Int where
   delta := fun incidence _ _ => if incidence then 1 else -1
 
 /-- A handler boundary whose evidence is trivially available.  This is the
 physical/cryptographic seam and it is deliberately not doing any work here. -/
-def boundary : HandlerBoundary.{0, 0, 0, 0, 0, 0, 0} declaration where
+def boundary : HandlerBoundary.{0, 0, 0, 0, 0, 0} declaration where
   Evidence := fun _ _ => Unit
 
 /-- **`Commit` is inhabited.**  The carrier the durable protocol and the
@@ -113,7 +107,7 @@ def commit : Commit law acceptedLegs boundary where
   sharedDomain := fun incidence => by cases incidence <;> rfl
   aggregateBalanced := by
     funext coordinate
-    simp [aggregateDelta, law, Fintype.sum_bool]
+    simp [aggregateDelta, law]
   jointInput := { jointCommit := ⟨3⟩, receiptRoot := ⟨4⟩ }
   jointCommitExact := rfl
   jointEvidence := ()
@@ -122,11 +116,14 @@ def commit : Commit law acceptedLegs boundary where
 constraint here rather than a consequence of a singleton index. -/
 theorem cellIds_distinct : cells.cellId false ≠ cells.cellId true := by decide
 
-/-- And the two incidences really carry different schemas: one field key of
-type `Bool` against two of type `Unit`. -/
-theorem schemas_heterogeneous :
-    (cells.schema false).Field = Unit ∧ (cells.schema true).Field = Bool :=
-  ⟨rfl, rfl⟩
+/-- And the two incidences really carry different layouts: one `Unit` key
+holding a `Bool` against two `Bool` keys holding `Unit`. -/
+theorem layouts_heterogeneous :
+    ((cells.storeLayout false).Key = fun _ => Unit) ∧
+      ((cells.storeLayout false).Value = fun _ => Bool) ∧
+      ((cells.storeLayout true).Key = fun _ => Bool) ∧
+      ((cells.storeLayout true).Value = fun _ => Unit) :=
+  ⟨rfl, rfl, rfl, rfl⟩
 
 theorem commit_nonempty : Nonempty (Commit law acceptedLegs boundary) := ⟨commit⟩
 
@@ -146,8 +143,8 @@ theorem no_commit_with_wrong_apex
 
 /-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.cellIds_distinct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cellIds_distinct
-/-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.schemas_heterogeneous' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms schemas_heterogeneous
+/-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.layouts_heterogeneous' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms layouts_heterogeneous
 /-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.commit_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms commit_nonempty
 /-- info: 'Minidregg.Kernel.MultiCellHyperedgeWitness.commit_jointCommit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
