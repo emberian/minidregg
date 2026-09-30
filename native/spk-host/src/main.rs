@@ -42,6 +42,18 @@ fn main() {
             }
         }
     }
+    if args.len() >= 4 && args[1] == "grain" {
+        match minidregg_spk_host::grain::run(&args[2..]) {
+            Ok(result) => {
+                println!("{result}");
+                return;
+            }
+            Err(error) => {
+                eprintln!("spk-host: grain refused: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if args.len() == 3 && args[1] == "resident-run" {
         match minidregg_spk_host::resident_service::run(Path::new(&args[2])) {
             Ok(()) => return,
@@ -184,7 +196,7 @@ fn main() {
         return;
     }
     eprintln!(
-        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api"
+        "usage: spk-host qualify VERIFIED_SPK | qualify-launch PRIVATE_CONFIG | inspect-installed IMAGE_DIR APP_UID | materialize VERIFIED_SPK OPERATOR_STORE APP_UID | install-prepare PRIVATE_CONFIG | install-complete PRIVATE_CONFIG | resident-run PRIVATE_CONFIG | resident-stop PRIVATE_CONFIG | human-custodian-init PRIVATE_DIR HOST APP SUBJECT SESSION TICKET web|api | grain VERB ..."
     );
     eprintln!("spk-host: resident-run requires current Mini lifecycle admission and physical unit custody");
     std::process::exit(2);

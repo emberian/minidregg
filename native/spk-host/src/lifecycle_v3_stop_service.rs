@@ -592,62 +592,23 @@ fn prepare_report(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StopCompletionSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl StopCompletionSigners {
     fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-completion-management-v1"
-            || !decimal(&self.app)
-            || !decimal(&self.package_manifest)
-            || !decimal(&self.management_subject)
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-        {
+        if self.protocol != "mini-spk-completion-management-v1" {
             return Err(invalid("STOP completion management custody refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let pin = config
-            .get("completionManagement")
-            .ok_or_else(|| invalid("STOP completion management pin absent"))?;
-        let number = |name| -> io::Result<String> {
-            let value = pin
-                .get(name)
-                .ok_or_else(|| invalid("STOP management coordinate absent"))?;
-            let result = value
-                .as_str()
-                .map(str::to_owned)
-                .or_else(|| value.as_u64().map(|number| number.to_string()))
-                .ok_or_else(|| invalid("STOP management coordinate malformed"))?;
-            if !decimal(&result) {
-                return Err(invalid("STOP management coordinate noncanonical"));
-            }
-            Ok(result)
-        };
-        if number("app")? != self.app
-            || number("packageManifest")? != self.package_manifest
-            || number("managementSubject")? != self.management_subject
-        {
-            return Err(invalid("STOP completion signer differs from Mini pin"));
-        }
-        let key_id = number("managementKeyId")?;
-        for signer in &self.signers {
-            if signer.key_id != key_id {
-                return Err(invalid("STOP completion key differs"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("STOP completion signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 }
 
@@ -841,7 +802,7 @@ fn assemble_completion(
         ("originalBeginHex", hex(&evidence.begin)),
         ("originalClaimHex", hex(&evidence.claim_ingress)),
         ("signedReportHex", hex(signed_report)),
-        ("app", fixed.app.clone()),
+        ("app", fixed.selector.app.clone()),
         ("descriptorRoot", launch.descriptor().root.clone()),
         ("volumeIdHex", evidence.target.volume_id_hex().to_owned()),
     ] {
@@ -864,7 +825,7 @@ fn assemble_completion(
         "lifecycle-stop-completion-v2-active.json",
         &active,
     )?;
-    let reply = operator.invoke(70, &request)?;
+    let reply = operator.invoke(70, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op70-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 70, PLAN_TAG)?;
     let plan_path = write_new(attempt_dir, "plan.bin", plan)?;
@@ -884,7 +845,7 @@ fn assemble_completion(
         ("originalBeginHex", hex(&evidence.begin)),
         ("originalClaimHex", hex(&evidence.claim_ingress)),
         ("signedReportHex", hex(signed_report)),
-        ("app", fixed.app.clone()),
+        ("app", fixed.selector.app.clone()),
         ("descriptorRoot", launch.descriptor().root.clone()),
         ("volumeIdHex", evidence.target.volume_id_hex().to_owned()),
     ] {
