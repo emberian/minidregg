@@ -20,42 +20,6 @@ set_option autoImplicit false
 set_option maxHeartbeats 1000000
 attribute [local irreducible] CanonicalRuntimeProfile.Profile.compilerProfile
 
-local instance bookFieldDecidableEq : DecidableEq CanonicalResourceKernel.schema.Field := by
-  change DecidableEq CanonicalResourceKernel.Field
-  infer_instance
-
-local instance bookResourceDecidableEq : DecidableEq CanonicalResourceKernel.schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
-local instance layoutFieldDecidableEq {F : Type} [Field F]
-    {profile : CanonicalRuntimeProfile.Profile F} {deployment : CanonicalCellRegistry.Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : DeclaredResourceController.Durable}
-    {ambient : DeclaredResourceController.Ambient}
-    {tariff : GrainResourceBirthController.Tariff} {source : GrainResourceBirthController.Source}
-    (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
-    (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
-      profile.semantics ambient (source.grainCommand tariff))
-    (incidence : GrainResourceBirthTransaction.Incidence tariff source) :
-    DecidableEq ((GrainResourceBirthTransaction.layout birth grain).schema incidence).Field :=
-  (GrainResourceBirthTransaction.layout birth grain).fieldDecidableEq incidence
-
-local instance layoutResourceDecidableEq {F : Type} [Field F]
-    {profile : CanonicalRuntimeProfile.Profile F} {deployment : CanonicalCellRegistry.Deployment}
-    {pins : ResourceBirth.FactoryPins} {durable : DeclaredResourceController.Durable}
-    {ambient : DeclaredResourceController.Ambient}
-    {tariff : GrainResourceBirthController.Tariff} {source : GrainResourceBirthController.Source}
-    (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
-      deployment pins durable profile.semantics tariff source)
-    (grain : GrainResourceBirthTransaction.PreparedTargets deployment
-      birth.prepared.pre.directory.directory birth.prepared.pre.authority.snapshot
-      profile.semantics ambient (source.grainCommand tariff))
-    (incidence : GrainResourceBirthTransaction.Incidence tariff source) :
-    DecidableEq ((GrainResourceBirthTransaction.layout birth grain).schema incidence).Resource :=
-  (GrainResourceBirthTransaction.layout birth grain).resourceDecidableEq incidence
-
 abbrev Source := GrainResourceBirthController.Source
 abbrev Tariff := GrainResourceBirthController.Tariff
 abbrev Deployment := CanonicalCellRegistry.Deployment
@@ -200,7 +164,7 @@ def project {F : Type} [Field F]
       profile.semantics ambient (source.grainCommand tariff))
     (height : Height) (branch : Branch tariff source)
     (logical : (incidence : GrainResourceBirthTransaction.Incidence tariff source) →
-      LogicalState ((GrainResourceBirthTransaction.layout birth grain).schema incidence)) :
+      Store.Store ((GrainResourceBirthTransaction.layout birth grain).storeLayout incidence)) :
     Minidregg.Pred.State :=
   let wanted := branchRequest birth grain height branch
   let common := CanonicalRuntimeProfile.requestSlots wanted.2
@@ -216,7 +180,7 @@ def project {F : Type} [Field F]
       let resource := match birthBranch with
         | .factory => ResourceBirthPolicyController.Concrete.bytesSlots
             "cell/factory/bytes" 0
-            (DeclaredEffectPageMaterializer.materializer.codec.encode (logical (.inl .factory)))
+            (DeclaredEffectCell.materializer.codec.encode (logical (.inl .factory)))
         | .source _ => match wanted with
           | ⟨.account, request⟩ => CanonicalAccountView.slots
               (CanonicalResourceKernel.logicalBook (logical (.inl .book))) request.target.value
