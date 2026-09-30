@@ -263,26 +263,8 @@ def canonicalWitness : VerifiedWitness demoVerifier where
 
 theorem attenuated_subject_key_epoch_zero :
     subjectKeyEpochAt attenuatedCell useRequest.subject = 0 := by
-  unfold subjectKeyEpochAt
-  rw [attenuated_frame (.subjectKeyEpoch useRequest.subject) (by
-    change AuthorityField.subjectKeyEpoch ⟨41⟩ ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨101⟩,
-          AuthorityField.nullifier 1002})
-    decide)]
-  rw [issued_frame (.subjectKeyEpoch useRequest.subject) (by
-    change AuthorityField.subjectKeyEpoch ⟨41⟩ ∉
-      (show Finset AuthorityField from
-        {AuthorityField.capability .object ⟨100⟩,
-          AuthorityField.nullifier 1001})
-    decide)]
-  simp [useRequest, adminRequest, initialCell_logical, initialLogical,
-    Minidregg.Compiler.CredentialAuthorityPageMaterializer.prePage,
-    Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.toCanonicalState,
-    Minidregg.Compiler.CredentialAuthorityPageMaterializer.Page.entries,
-    Minidregg.Compiler.CredentialAuthorityPageMaterializer.oldPolicy,
-    Minidregg.Compiler.CredentialAuthorityPageMaterializer.Entry.install]
-  rfl
+  show subjectKeyEpochAt attenuatedCell ⟨41⟩ = 0
+  decide
 
 def signedAuthorization :
     Authorized (signaturePortal demoVerifier)
@@ -303,9 +285,9 @@ def signedAuthorization :
   policyRevisionExact := rfl
   policyAddressExact := by
     change ⟨2200⟩ = policyAddressAt attenuatedCell
-      Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy
+      Minidregg.Assurance.DeployedCredentialLifecycle.examplePolicy
       (policyRevisionAt attenuatedCell
-        Minidregg.Compiler.CredentialAuthorityPageMaterializer.examplePolicy)
+        Minidregg.Assurance.DeployedCredentialLifecycle.examplePolicy)
     rw [attenuated_policy_revision_two]
     exact attenuated_policy_address_two.symm
   policyMembershipVerified := rfl
