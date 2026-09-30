@@ -243,9 +243,12 @@ check J12 "task 0 is done (field 2 = 2) and owned by bob (field 3)" \
 # (control: the forward moves m1 and m2 were admitted)
 ok J12 bob "board move m3 tasks 0 done todo"
 refused J12 bob "submit m3" undisclosed "$ADMISSION"
-# a second task needs fields 4 and 5: the declared page holds four entries
+# a declared page holds four entries: genesis field 1, task 0's fields 2 and 3,
+# and task 1's state in field 4; task 1's owner (field 5) is a fifth entry
 ok J12 alice "board add t1 tasks 1"
-refused J12 alice "submit t1" operation-rejected "RejectReason.overflow"
+ok J12 alice "submit t1"
+ok J12 bob "board take k1 tasks 1"
+refused J12 bob "submit k1" operation-rejected "RejectReason.overflow"
 
 # ------------------------------------------------ revoke
 ok J12 alice "revoke cut-bob paper $B"
