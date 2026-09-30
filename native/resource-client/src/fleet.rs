@@ -591,7 +591,7 @@ fn join(mut args: Args) -> Result<()> {
     if !agent_root.join("workspace.json").exists() {
         workspace::init(
             &agent_root,
-            &workspace::member_path(&sponsor_workspace, "host")?,
+            Some(&workspace::member_path(&sponsor_workspace, "host")?),
             &workspace::member_path(&sponsor_workspace, "config")?,
             InitIdentity {
                 key: None,

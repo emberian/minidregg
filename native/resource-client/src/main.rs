@@ -42,6 +42,8 @@ mod participant_provisioning;
 #[cfg(unix)]
 mod prepare_refusal;
 #[cfg(unix)]
+mod proxy;
+#[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
 mod selected_exchange;
@@ -157,8 +159,18 @@ fn host_refusal_ending(decision: &HostDecision) -> Option<String> {
     }
 }
 
+/// The SHA-256 of the Host image this process selects. A remote client has no
+/// Host image: its Host is named by an empty path and known only by the digest
+/// it pinned, which every v2 envelope carries and the box's socket checks.
 #[cfg(unix)]
 fn host_image_sha256(host: &Path) -> Result<String> {
+    if host.as_os_str().is_empty() {
+        return match (SOCKET.get().map(|s| transport::is_remote(s)), EXPECTED_HOST_SHA.get()) {
+            (Some(true), Some(sha)) => Ok(sha.clone()),
+            (Some(true), None) => Err("a remote workspace must pin the Host SHA-256 (--host-sha256)".into()),
+            _ => Err("no Host image: only a remote client (--remote) may omit --host".into()),
+        };
+    }
     let mut file = File::open(host).map_err(|error| {
         format!(
             "cannot open selected Host image {}: {error}",
@@ -240,10 +252,20 @@ fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
+  mini [--remote DEST] COMMAND [options]
   mini keygen --secret KEY --public PUBLIC
+  mini join --key KEY
+  mini join --remote DEST --key KEY --sponsor-plan PLAN.json --dir JOIN-ROOT
+  mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT
+  mini shell --remote DEST --workspace JOIN-ROOT/workspace --home SESSION-HOME [--line LINE]
+  mini socket-proxy --socket PUBLIC-SOCKET
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
-  mini enroll --action seal|submit|lookup --dir ATTEMPT
+  mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
+  mini enroll --action offer|welcome --dir ATTEMPT [--birth-context CONTEXT.json]
+  mini enroll --action possess --dir ATTEMPT --key KEY --subject N --output SIGNATURE.bin
+  mini enroll --action seal --dir ATTEMPT [--possession-signature SIGNATURE.bin]
+  mini enroll --action submit|lookup --dir ATTEMPT
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
@@ -332,11 +354,27 @@ usage:
 Add --socket PRIVATE-DIR/mini.sock to author, submit, query, retry, and other
 supported host commands to use one persistent Lean host session.
 
+--remote DEST (an ssh destination: user@host or an ssh config Host alias) is
+--socket ssh:DEST: every request goes through `ssh -T DEST` to the box's byte
+proxy (mini socket-proxy) instead of a local socket, so keys, workspace and
+signing stay on this machine. A remote workspace has no Host image; it pins
+the Host's SHA-256 (--host-sha256, or from the sponsor's plan via join).
+MINI_SSH names another ssh program.
+
 The Lean host authors and decodes every semantic value. This client owns only
 private-key custody, process transport, retained attempts, and exact retries.
 "#;
 
 type Result<T> = std::result::Result<T, String>;
+
+/// The commands that run over `--remote`: the participant's own surface.
+/// Operator and worker commands keep local sockets, service locks and Host
+/// images, and the proxy never reaches the operator socket anyway.
+#[cfg(unix)]
+const REMOTE_COMMANDS: &[&str] = &[
+    "workspace", "enroll", "join", "shell", "submit", "query", "retry", "author", "inspect",
+    "describe", "profile",
+];
 
 #[derive(Debug)]
 struct Args {
@@ -347,11 +385,16 @@ struct Args {
 impl Args {
     fn parse() -> Result<Self> {
         let mut raw = env::args_os().skip(1);
-        let command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        let mut values = Vec::new();
+        let mut command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        if command == OsStr::new("--remote") {
+            let destination = raw.next().ok_or("missing value for --remote")?;
+            values.push((command, destination));
+            command = raw.next().ok_or_else(|| USAGE.to_owned())?;
+        }
         if command == OsStr::new("--help") || command == OsStr::new("-h") {
             return Err(USAGE.to_owned());
         }
-        let mut values = Vec::new();
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
             if !rendered.starts_with("--") || rendered.len() == 2 {
@@ -592,6 +635,9 @@ fn keygen(secret: &Path, public: &Path) -> Result<()> {
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
     if let Some(socket) = SOCKET.get() {
         return socket_process(host, socket, config, arguments);
+    }
+    if host.as_os_str().is_empty() {
+        return Err("no Host image and no socket: pass --remote or --socket".into());
     }
     let output = Command::new(host)
         .arg(config)
@@ -1091,16 +1137,36 @@ fn encode_signatures(
 }
 
 fn write_manifest(directory: &Path, host: &Path, config: &Path, operation: &str) -> Result<()> {
-    let host = absolute(host)?;
     let config = absolute(config)?;
-    let manifest = json!({
+    let mut manifest = json!({
         "format": "minidregg-resource-client-attempt-v1",
         "operation": operation,
-        "host": utf8_path(&host)?,
+        "host": null,
         "config": utf8_path(&config)?,
-        "socket": SOCKET.get().map(|socket| absolute(socket)).transpose()?.map(|socket| socket.to_string_lossy().into_owned())
+        "socket": SOCKET.get().map(|socket| transport::pinned_address(socket)).transpose()?
     });
+    if host.as_os_str().is_empty() {
+        manifest["hostSha256"] = json!(host_image_sha256(host)?);
+    } else {
+        manifest["host"] = json!(utf8_path(&absolute(host)?)?);
+    }
     write_json_new(&directory.join("attempt.json"), &manifest)
+}
+
+/// Pins, for this process, the Host digest a remote workspace or attempt
+/// recorded. A second, different pin within one process is refused.
+#[cfg(unix)]
+fn pin_remote_host(sha: &str) -> Result<()> {
+    if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err("Host SHA-256 must be 64 lowercase hex digits".into());
+    }
+    match EXPECTED_HOST_SHA.get() {
+        Some(existing) if existing != sha => Err("pinned Host SHA-256 differs within one process".into()),
+        Some(_) => Ok(()),
+        None => EXPECTED_HOST_SHA
+            .set(sha.to_owned())
+            .map_err(|_| "cannot pin the remote Host SHA-256".into()),
+    }
 }
 
 struct Observed {
@@ -1318,11 +1384,18 @@ fn manifest_paths(directory: &Path) -> Result<(PathBuf, PathBuf, Option<PathBuf>
     if value.get("format").and_then(Value::as_str) != Some("minidregg-resource-client-attempt-v1") {
         return Err(format!("unsupported attempt manifest {}", path.display()));
     }
-    let host = value
-        .get("host")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .ok_or_else(|| "attempt manifest has no host path".to_owned())?;
+    let host = match value.get("host") {
+        Some(Value::String(host)) => PathBuf::from(host),
+        Some(Value::Null) => {
+            let sha = value
+                .get("hostSha256")
+                .and_then(Value::as_str)
+                .ok_or("remote attempt manifest has no Host SHA-256")?;
+            pin_remote_host(sha)?;
+            PathBuf::new()
+        }
+        _ => return Err("attempt manifest has no host path".to_owned()),
+    };
     let config = value
         .get("config")
         .and_then(Value::as_str)
@@ -2080,11 +2153,43 @@ fn continuity(
 }
 
 fn run(mut args: Args) -> Result<()> {
-    let socket_argument = args.optional("socket");
+    let mut socket_argument = args.optional("socket");
+    #[cfg(unix)]
+    if let Some(destination) = args.optional("remote") {
+        if socket_argument.is_some() {
+            return Err("--remote and --socket name two transports; pass one".into());
+        }
+        let destination = destination
+            .into_string()
+            .map_err(|_| "--remote must be UTF-8")?;
+        socket_argument = Some(transport::remote_address(&destination)?.into_os_string());
+    }
+    #[cfg(unix)]
+    if let Some(sha) = args.optional("host-sha256") {
+        pin_remote_host(sha.to_str().ok_or("--host-sha256 must be UTF-8")?)?;
+    }
     if let Some(socket) = &socket_argument {
         let _ = SOCKET.set(path(socket.clone()));
     }
+    #[cfg(unix)]
+    if socket_argument.as_deref().is_some_and(|s| transport::is_remote(Path::new(s)))
+        && !REMOTE_COMMANDS.contains(&args.command.to_string_lossy().as_ref())
+    {
+        return Err(format!(
+            "{} is not a participant command; --remote reaches only the public socket's participant surface ({})",
+            args.command.to_string_lossy(),
+            REMOTE_COMMANDS.join(", ")
+        ));
+    }
     match args.command.to_string_lossy().as_ref() {
+        #[cfg(unix)]
+        "join" => participant_enrollment::join(args),
+        #[cfg(unix)]
+        "socket-proxy" => {
+            args.finish()?;
+            let socket = SOCKET.get().ok_or("socket-proxy requires --socket")?;
+            proxy::serve(socket)
+        }
         #[cfg(unix)]
         "workspace" => workspace::run(args),
         #[cfg(unix)]

@@ -9,6 +9,15 @@
 //! the principal signs the Host-chosen possession header in its own process
 //! (`--action possess`); the sponsor seals with that detached signature. No
 //! process ever holds both secrets.
+//!
+//! A *public-key* enrollment is the same custody for a participant of this
+//! Store whose key never leaves their own machine: the sponsor plans from the
+//! public key alone (`--new-public-key` without `--home-subject`, so the
+//! subject is reserved here), hands the participant an offer (`--action
+//! offer`), and seals with the signature `mini join` returns. `mini join` runs
+//! on the participant's machine over `--remote`: it checks the offer against
+//! the Host itself, signs the possession header, and later turns the sponsor's
+//! welcome into a remote workspace.
 use crate::agent_reserve::{bounded, digest, field, private_bytes, private_socket};
 use ed25519_dalek::{Verifier, VerifyingKey};
 use crate::participant_namespace::{self, IdKind, Role};
@@ -324,11 +333,10 @@ fn load_pin(directory: &Path) -> Result<Pin> {
     let operation_socket = member_path(&pin, "operationSocket")?;
     let sponsor_key = member_path(&pin, "sponsorKey")?;
     let home = pin.get("homeSubject").and_then(Value::as_bool) == Some(true);
-    let new_key = if home {
-        if !pin.get("newKey").is_some_and(Value::is_null) {
-            return Err("home-identity enrollment pin must not name a new secret key".into());
-        }
+    let new_key = if pin.get("newKey").is_some_and(Value::is_null) {
         None
+    } else if home {
+        return Err("home-identity enrollment pin must not name a new secret key".into());
     } else {
         Some(member_path(&pin, "newKey")?)
     };
@@ -553,14 +561,14 @@ fn plan(mut args: Args) -> Result<()> {
         })
         .transpose()?;
     let home = match (&new_key, &new_public, &home_subject) {
-        (Some(_), None, None) => false,
+        (Some(_), None, None) | (None, Some(_), None) => false,
         (None, Some(_), Some(subject)) => {
             decimal(subject, "home subject")?;
             true
         }
         _ => {
             return Err(
-                "enrollment takes either --new-key, or --new-public-key with --home-subject".into(),
+                "enrollment takes either --new-key, or --new-public-key [--home-subject N]".into(),
             )
         }
     };
@@ -850,6 +858,214 @@ fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -
         "possessionHeaderSha256":digest(&header),"signatureSha256":digest(&signature)}))
 }
 
+/// The sponsor's half of a public-key enrollment made portable: everything
+/// the participant's `mini join` needs to check the Plan against the Host and
+/// sign possession, and nothing secret. The config travels whole because a
+/// remote client sends it in every envelope; the Host image travels as its
+/// digest, which every envelope pins.
+fn offer(directory: &Path) -> Result<()> {
+    let directory = absolute(directory)?;
+    let pin = load_pin(&directory)?;
+    if pin.new_key.is_some() {
+        return Err("this enrollment holds the new secret key; only a public-key enrollment has an offer".into());
+    }
+    let plan_view = json_private(&directory.join("plan.json"))?;
+    validate_plan(&plan_view, &pin.command, &pin.plan)?;
+    let command_view = json_private(&directory.join("command.json"))?;
+    let config = bounded(&pin.config, 65_536)?;
+    print_json(&json!({"type":"minidregg-participant-join-offer-v1",
+        "subject":pin.subject,"keyId":pin.key_id,"publicKey":pin.public_key,
+        "hostSha256":host_image_sha256(&pin.host)?,
+        "configHex":hex(&config),"configSha256":digest(&config),
+        "plan":plan_view,"command":command_view}))
+}
+
+/// After admission: the participant's admitted enrollment (no key path; the
+/// key was never here) and, when the sponsor provisioned them, the birth
+/// context their own `workspace create` uses.
+fn welcome(directory: &Path, birth_context: Option<&Path>) -> Result<()> {
+    let directory = absolute(directory)?;
+    let enrollment = json_private(&directory.join("enrollment.json"))?;
+    pinned(&enrollment, "type", "minidregg-participant-enrollment-result-v1")?;
+    pinned(&enrollment, "authority", "admitted-key-only")?;
+    if !enrollment.get("keyPath").is_some_and(Value::is_null) {
+        return Err("only a public-key enrollment has a welcome; this one holds the secret here".into());
+    }
+    let context = birth_context
+        .map(|path| {
+            serde_json::from_slice::<Value>(&bounded(&absolute(path)?, 256 * 1024)?)
+                .map_err(|error| format!("invalid birth context: {error}"))
+        })
+        .transpose()?;
+    if let Some(context) = &context {
+        pinned(context, "type", "minidregg-participant-birth-context-v1")?;
+    }
+    print_json(&json!({"type":"minidregg-participant-join-welcome-v1",
+        "enrollment":enrollment,"birthContext":context}))
+}
+
+fn join_dir(path: &Path) -> Result<()> {
+    match fs::DirBuilder::new().mode(0o700).create(path) {
+        Ok(()) => sync_directory_ancestors(path),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => drain::private_dir(path),
+        Err(error) => Err(format!("cannot create {}: {error}", path.display())),
+    }
+}
+
+/// `mini join`, run by the participant on their own machine.
+///   --key KEY                      make the key here (or show it); send the
+///                                  printed public key to the sponsor
+///   --sponsor-plan OFFER --dir R   check the offer against the Host over
+///                                  --remote, sign possession; send the
+///                                  printed signature to the sponsor
+///   --welcome WELCOME --dir R      make R/workspace, a remote workspace
+/// The secret is read only by this process; the box never receives it.
+pub(crate) fn join(mut args: Args) -> Result<()> {
+    let key_path = absolute(&path(args.required("key")?))?;
+    let offer = args.optional("sponsor-plan").map(path);
+    let welcome = args.optional("welcome").map(path);
+    let root = args.optional("dir").map(|dir| absolute(&path(dir))).transpose()?;
+    args.finish()?;
+    match (offer, welcome, root) {
+        (None, None, None) => {
+            if key_path.exists() {
+                println!("{}", hex(&key(&key_path)?.verifying_key().to_bytes()));
+                Ok(())
+            } else {
+                let parent = key_path.parent().ok_or("key path lacks a parent")?;
+                join_dir(parent)?;
+                keygen(&key_path, &key_path.with_extension("pub"))
+            }
+        }
+        (Some(offer), None, Some(root)) => join_possess(&key_path, &absolute(&offer)?, &root),
+        (None, Some(welcome), Some(root)) => join_welcome(&key_path, &absolute(&welcome)?, &root),
+        _ => Err("join takes --key alone, or --key with --sponsor-plan or --welcome and --dir".into()),
+    }
+}
+
+fn join_remote() -> Result<PathBuf> {
+    let socket = SOCKET.get().ok_or("join talks to the Host: pass --remote DEST")?;
+    if !transport::is_remote(socket) {
+        return Err("join runs on the participant's own machine: pass --remote DEST".into());
+    }
+    Ok(socket.clone())
+}
+
+fn join_possess(key_path: &Path, offer_path: &Path, root: &Path) -> Result<()> {
+    let socket = join_remote()?;
+    let offer_bytes = bounded(offer_path, 8 * transport::HOST_MAX_FRAME)?;
+    let offer: Value = serde_json::from_slice(&offer_bytes)
+        .map_err(|error| format!("invalid sponsor plan: {error}"))?;
+    pinned(&offer, "type", "minidregg-participant-join-offer-v1")?;
+    let signing = key(key_path)?;
+    let public_key = hex(&signing.verifying_key().to_bytes());
+    if field(&offer, "publicKey")? != public_key {
+        return Err("the sponsor's plan names another key than --key".into());
+    }
+    let subject = field(&offer, "subject")?.to_owned();
+    decimal(&subject, "offered subject")?;
+    decimal(field(&offer, "keyId")?, "offered key id")?;
+    let config = decode_hex(field(&offer, "configHex")?)?;
+    if digest(&config) != field(&offer, "configSha256")? {
+        return Err("the sponsor's plan config differs from its digest".into());
+    }
+    pin_remote_host(field(&offer, "hostSha256")?)?;
+    let plan_view = offer.get("plan").ok_or("sponsor plan lacks the Plan")?;
+    let command_view = offer.get("command").ok_or("sponsor plan lacks the command")?;
+    let plan = decode_hex(field(plan_view, "canonical")?)?;
+    let command = decode_hex(field(command_view, "canonical")?)?;
+    validate_plan(plan_view, &command, &plan)?;
+    join_dir(root)?;
+    let state = root.join("join");
+    join_dir(&state)?;
+    retain_exact(&state.join("offer.json"), &offer_bytes)?;
+    retain_exact(&root.join("config.json"), &config)?;
+    save_json_staged(&state.join("plan.json"), plan_view)?;
+    save_json_staged(&state.join("command.json"), command_view)?;
+    retain_exact(&state.join("plan.bin"), &plan)?;
+    retain_exact(&state.join("command.bin"), &command)?;
+    // The Host itself, over the proxy, decodes the exact bytes the sponsor
+    // sent; a sponsor (or a box) that altered a view is caught here.
+    let host = Path::new("");
+    for (kind, input, output, view) in [
+        (PLAN_KIND, "plan.bin", "host-plan.json", plan_view),
+        (COMMAND_KIND, "command.bin", "host-command.json", command_view),
+    ] {
+        let decoded = inspect(host, &socket, &root.join("config.json"), kind, &state.join(input), &state.join(output))?;
+        if &decoded != view {
+            return Err(format!("the Host decodes the sponsor's {kind} differently from the plan"));
+        }
+    }
+    let signature_path = state.join("possession-signature.bin");
+    let summary = if signature_path.exists() {
+        let signature = bounded(&signature_path, 64)?;
+        let header = decode_hex(field(plan_view, "possessionHeader")?)?;
+        signing
+            .verifying_key()
+            .verify(&header, &ed25519_dalek::Signature::from_slice(&signature).map_err(|_| "retained possession signature is malformed")?)
+            .map_err(|_| "retained possession signature does not verify")?;
+        json!({"subject":subject,"publicKey":public_key})
+    } else {
+        possess_at(&state, key_path, &subject, &signature_path)?
+    };
+    let signature = bounded(&signature_path, 64)?;
+    print_json(&json!({"type":"minidregg-participant-join-possession-v1",
+        "subject":summary["subject"],"publicKey":summary["publicKey"],
+        "possessionSignature":hex(&signature),
+        "next":"give possessionSignature to your sponsor; then run join --welcome"}))
+}
+
+fn join_welcome(key_path: &Path, welcome_path: &Path, root: &Path) -> Result<()> {
+    join_remote()?;
+    let state = root.join("join");
+    drain::private_dir(&state)?;
+    let offer: Value = serde_json::from_slice(&bounded(&state.join("offer.json"), 8 * transport::HOST_MAX_FRAME)?)
+        .map_err(|error| error.to_string())?;
+    if !state.join("possession-signature.bin").is_file() {
+        return Err("join has not signed possession yet: run join --sponsor-plan first".into());
+    }
+    let welcome: Value = serde_json::from_slice(&bounded(welcome_path, 512 * 1024)?)
+        .map_err(|error| format!("invalid welcome: {error}"))?;
+    pinned(&welcome, "type", "minidregg-participant-join-welcome-v1")?;
+    let admitted = welcome.get("enrollment").ok_or("welcome lacks the enrollment")?;
+    pinned(admitted, "type", "minidregg-participant-enrollment-result-v1")?;
+    pinned(admitted, "authority", "admitted-key-only")?;
+    let public_key = hex(&key(key_path)?.verifying_key().to_bytes());
+    for name in ["subject", "keyId", "publicKey"] {
+        if field(admitted, name)? != field(&offer, name)? {
+            return Err(format!("welcome {name} differs from the plan this key signed"));
+        }
+    }
+    if field(admitted, "publicKey")? != public_key {
+        return Err("welcome names another key than --key".into());
+    }
+    pin_remote_host(field(&offer, "hostSha256")?)?;
+    let mut record = admitted.clone();
+    record["keyPath"] = json!(utf8_path(key_path)?);
+    save_json_staged(&state.join("enrollment.json"), &record)?;
+    let context = match welcome.get("birthContext") {
+        Some(Value::Null) | None => None,
+        Some(context) => {
+            save_json_staged(&state.join("birth-context.json"), context)?;
+            Some(state.join("birth-context.json"))
+        }
+    };
+    let namespace = root.join("namespace");
+    join_dir(&namespace)?;
+    crate::workspace::init(
+        &root.join("workspace"),
+        None,
+        &root.join("config.json"),
+        crate::workspace::InitIdentity {
+            key: None,
+            subject: None,
+            enrollment: Some(&state.join("enrollment.json")),
+        },
+        context.as_deref(),
+        Some(&namespace),
+    )
+}
+
 fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     let directory = absolute(directory)?;
     let _lock = transport::service_lock(&directory.join("enrollment.lock"))?;
@@ -1088,6 +1304,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     match action.as_str() {
         "plan" => plan(args),
         "possess" => possess(args),
+        "offer" => {
+            let directory = path(args.required("dir")?);
+            args.finish()?;
+            offer(&directory)
+        }
+        "welcome" => {
+            let directory = path(args.required("dir")?);
+            let context = args.optional("birth-context").map(path);
+            args.finish()?;
+            welcome(&directory, context.as_deref())
+        }
         "seal" => {
             let directory = path(args.required("dir")?);
             let detached = args.optional("possession-signature").map(path);
@@ -1102,7 +1329,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 _ => lookup(&directory),
             }
         }
-        _ => Err("enrollment action must be plan, possess, seal, submit or lookup".into()),
+        _ => Err("enrollment action must be plan, possess, offer, seal, submit, lookup or welcome".into()),
     }
 }
 
