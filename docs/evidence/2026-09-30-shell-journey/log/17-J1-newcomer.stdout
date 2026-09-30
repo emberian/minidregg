@@ -1,0 +1,9 @@
+{
+  "authority": "discovery-only",
+  "home": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer",
+  "initialized": true,
+  "socket": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock",
+  "subject": "11033321548135836207",
+  "type": "minidregg-shell-session-v1",
+  "workspace": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace"
+}

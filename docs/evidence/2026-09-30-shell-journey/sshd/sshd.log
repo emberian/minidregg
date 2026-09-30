@@ -1,0 +1,553 @@
+Server listening on 127.0.0.1 port 22422.
+Connection from 127.0.0.1 port 36760 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 36760 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 36760 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 912731
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 36760 id 0
+Received disconnect from 127.0.0.1 port 36760:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 36760
+Connection from 127.0.0.1 port 36774 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 36774 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 36774 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 912885
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 36774 id 0
+Close session: user ember from 127.0.0.1 port 36774 id 0
+Received disconnect from 127.0.0.1 port 36774:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 36774
+Connection from 127.0.0.1 port 36790 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 36790 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 36790 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 913657
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 36790 id 0
+Received disconnect from 127.0.0.1 port 36790:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 36790
+Connection from 127.0.0.1 port 36792 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 36792 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 36792 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 913812
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 36792 id 0
+Close session: user ember from 127.0.0.1 port 36792 id 0
+Received disconnect from 127.0.0.1 port 36792:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 36792
+Connection from 127.0.0.1 port 43272 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 43272 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 43272 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 915257
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 43272 id 0
+Received disconnect from 127.0.0.1 port 43272:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43272
+Connection from 127.0.0.1 port 43282 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 43282 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 43282 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 915574
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 43282 id 0
+Close session: user ember from 127.0.0.1 port 43282 id 0
+Received disconnect from 127.0.0.1 port 43282:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43282
+Connection from 127.0.0.1 port 43288 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 43288 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 43288 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 915998
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 43288 id 0
+Close session: user ember from 127.0.0.1 port 43288 id 0
+Received disconnect from 127.0.0.1 port 43288:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43288
+Connection from 127.0.0.1 port 43302 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43302 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43302 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 916238
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43302 id 0
+Close session: user ember from 127.0.0.1 port 43302 id 0
+Received disconnect from 127.0.0.1 port 43302:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43302
+Connection from 127.0.0.1 port 43312 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43312 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43312 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 916311
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43312 id 0
+Close session: user ember from 127.0.0.1 port 43312 id 0
+Received disconnect from 127.0.0.1 port 43312:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43312
+Connection from 127.0.0.1 port 43316 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 43316 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 43316 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 916372
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 43316 id 0
+Received disconnect from 127.0.0.1 port 43316:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43316
+Connection from 127.0.0.1 port 37610 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 37610 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 37610 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 917547
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 37610 id 0
+Received disconnect from 127.0.0.1 port 37610:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 37610
+Connection from 127.0.0.1 port 37616 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 37616 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 37616 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 917603
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 37616 id 0
+Close session: user ember from 127.0.0.1 port 37616 id 0
+Received disconnect from 127.0.0.1 port 37616:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 37616
+Connection from 127.0.0.1 port 37632 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 37632 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 37632 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 917951
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 37632 id 0
+Close session: user ember from 127.0.0.1 port 37632 id 0
+Received disconnect from 127.0.0.1 port 37632:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 37632
+Connection from 127.0.0.1 port 37642 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 37642 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 37642 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 919015
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 37642 id 0
+Received disconnect from 127.0.0.1 port 37642:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 37642
+Connection from 127.0.0.1 port 43132 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 43132 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 43132 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 919756
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 43132 id 0
+Close session: user ember from 127.0.0.1 port 43132 id 0
+Received disconnect from 127.0.0.1 port 43132:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43132
+Connection from 127.0.0.1 port 43142 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 43142 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 43142 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 919891
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 43142 id 0
+Received disconnect from 127.0.0.1 port 43142:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43142
+Connection from 127.0.0.1 port 43146 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43146 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43146 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 919985
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43146 id 0
+Close session: user ember from 127.0.0.1 port 43146 id 0
+Received disconnect from 127.0.0.1 port 43146:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43146
+Connection from 127.0.0.1 port 43156 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43156 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43156 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 920072
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43156 id 0
+Close session: user ember from 127.0.0.1 port 43156 id 0
+Received disconnect from 127.0.0.1 port 43156:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43156
+Connection from 127.0.0.1 port 43164 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43164 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43164 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 920187
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43164 id 0
+Close session: user ember from 127.0.0.1 port 43164 id 0
+Received disconnect from 127.0.0.1 port 43164:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43164
+Connection from 127.0.0.1 port 43176 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43176 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43176 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 920540
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43176 id 0
+Close session: user ember from 127.0.0.1 port 43176 id 0
+Received disconnect from 127.0.0.1 port 43176:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43176
+Connection from 127.0.0.1 port 43182 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43182 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43182 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 921583
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43182 id 0
+Close session: user ember from 127.0.0.1 port 43182 id 0
+Received disconnect from 127.0.0.1 port 43182:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43182
+Connection from 127.0.0.1 port 43186 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 43186 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 43186 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 923346
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 43186 id 0
+Close session: user ember from 127.0.0.1 port 43186 id 0
+Received disconnect from 127.0.0.1 port 43186:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 43186
+Connection from 127.0.0.1 port 37944 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 37944 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 37944 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 923617
+Attempt to write login records by non-root user (aborting)
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' on pts/6 for ember from 127.0.0.1 port 37944 id 0
+Attempt to write login records by non-root user (aborting)
+Close session: user ember from 127.0.0.1 port 37944 id 0
+Received disconnect from 127.0.0.1 port 37944:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 37944
+Connection from 127.0.0.1 port 60722 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Postponed publickey for ember from 127.0.0.1 port 60722 ssh2 [preauth]
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Accepted publickey for ember from 127.0.0.1 port 60722 ssh2: ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs
+User child is on pid 927091
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third' for ember from 127.0.0.1 port 60722 id 0
+Close session: user ember from 127.0.0.1 port 60722 id 0
+Received disconnect from 127.0.0.1 port 60722:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 60722
+Connection from 127.0.0.1 port 60738 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 60738 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 60738 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 927143
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 60738 id 0
+Close session: user ember from 127.0.0.1 port 60738 id 0
+Received disconnect from 127.0.0.1 port 60738:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 60738
+Connection from 127.0.0.1 port 55668 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 55668 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 55668 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 927948
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 55668 id 0
+Close session: user ember from 127.0.0.1 port 55668 id 0
+Received disconnect from 127.0.0.1 port 55668:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 55668
+Connection from 127.0.0.1 port 55680 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 55680 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 55680 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 928177
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 55680 id 0
+Close session: user ember from 127.0.0.1 port 55680 id 0
+Received disconnect from 127.0.0.1 port 55680:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 55680
+Connection from 127.0.0.1 port 55696 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Postponed publickey for ember from 127.0.0.1 port 55696 ssh2 [preauth]
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Accepted publickey for ember from 127.0.0.1 port 55696 ssh2: ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs
+User child is on pid 929285
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third' for ember from 127.0.0.1 port 55696 id 0
+Close session: user ember from 127.0.0.1 port 55696 id 0
+Received disconnect from 127.0.0.1 port 55696:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 55696
+Connection from 127.0.0.1 port 55712 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Postponed publickey for ember from 127.0.0.1 port 55712 ssh2 [preauth]
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Accepted publickey for ember from 127.0.0.1 port 55712 ssh2: ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs
+User child is on pid 929498
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third' for ember from 127.0.0.1 port 55712 id 0
+Close session: user ember from 127.0.0.1 port 55712 id 0
+Received disconnect from 127.0.0.1 port 55712:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 55712
+Connection from 127.0.0.1 port 55728 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Postponed publickey for ember from 127.0.0.1 port 55728 ssh2 [preauth]
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Accepted publickey for ember from 127.0.0.1 port 55728 ssh2: ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs
+User child is on pid 929664
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third' for ember from 127.0.0.1 port 55728 id 0
+Close session: user ember from 127.0.0.1 port 55728 id 0
+Received disconnect from 127.0.0.1 port 55728:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 55728
+Connection from 127.0.0.1 port 55732 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Postponed publickey for ember from 127.0.0.1 port 55732 ssh2 [preauth]
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Accepted publickey for ember from 127.0.0.1 port 55732 ssh2: ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs
+User child is on pid 931064
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third' for ember from 127.0.0.1 port 55732 id 0
+Received disconnect from 127.0.0.1 port 55732:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 55732
+Connection from 127.0.0.1 port 46600 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Postponed publickey for ember from 127.0.0.1 port 46600 ssh2 [preauth]
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Accepted publickey for ember from 127.0.0.1 port 46600 ssh2: ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs
+User child is on pid 931521
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third' for ember from 127.0.0.1 port 46600 id 0
+Received disconnect from 127.0.0.1 port 46600:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46600
+Connection from 127.0.0.1 port 46616 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Postponed publickey for ember from 127.0.0.1 port 46616 ssh2 [preauth]
+Accepted key ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:3
+Accepted publickey for ember from 127.0.0.1 port 46616 ssh2: ED25519 SHA256:DeA62eSXhhWbSwqVG/ed3HgkUpEgO69oPLcGQKc08cs
+User child is on pid 931664
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/third' for ember from 127.0.0.1 port 46616 id 0
+Close session: user ember from 127.0.0.1 port 46616 id 0
+Received disconnect from 127.0.0.1 port 46616:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46616
+Connection from 127.0.0.1 port 46632 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Postponed publickey for ember from 127.0.0.1 port 46632 ssh2 [preauth]
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Accepted publickey for ember from 127.0.0.1 port 46632 ssh2: ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc
+User child is on pid 932062
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger' for ember from 127.0.0.1 port 46632 id 0
+Close session: user ember from 127.0.0.1 port 46632 id 0
+Received disconnect from 127.0.0.1 port 46632:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46632
+Connection from 127.0.0.1 port 46634 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Postponed publickey for ember from 127.0.0.1 port 46634 ssh2 [preauth]
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Accepted publickey for ember from 127.0.0.1 port 46634 ssh2: ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc
+User child is on pid 932099
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger' for ember from 127.0.0.1 port 46634 id 0
+Close session: user ember from 127.0.0.1 port 46634 id 0
+Received disconnect from 127.0.0.1 port 46634:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46634
+Connection from 127.0.0.1 port 46642 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Postponed publickey for ember from 127.0.0.1 port 46642 ssh2 [preauth]
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Accepted publickey for ember from 127.0.0.1 port 46642 ssh2: ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc
+User child is on pid 932209
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger' for ember from 127.0.0.1 port 46642 id 0
+Close session: user ember from 127.0.0.1 port 46642 id 0
+Received disconnect from 127.0.0.1 port 46642:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46642
+Connection from 127.0.0.1 port 46644 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Postponed publickey for ember from 127.0.0.1 port 46644 ssh2 [preauth]
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Accepted publickey for ember from 127.0.0.1 port 46644 ssh2: ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc
+User child is on pid 932281
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger' for ember from 127.0.0.1 port 46644 id 0
+Close session: user ember from 127.0.0.1 port 46644 id 0
+Received disconnect from 127.0.0.1 port 46644:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46644
+Connection from 127.0.0.1 port 46648 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Postponed publickey for ember from 127.0.0.1 port 46648 ssh2 [preauth]
+Accepted key ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:4
+Accepted publickey for ember from 127.0.0.1 port 46648 ssh2: ED25519 SHA256:ojXACYMLdVjCGRyY3kKT8yeClPo9pvXvsRQuKEXXJrc
+User child is on pid 932594
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/stranger' for ember from 127.0.0.1 port 46648 id 0
+Close session: user ember from 127.0.0.1 port 46648 id 0
+Received disconnect from 127.0.0.1 port 46648:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46648
+Connection from 127.0.0.1 port 46664 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 46664 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 46664 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 932747
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 46664 id 0
+Close session: user ember from 127.0.0.1 port 46664 id 0
+Received disconnect from 127.0.0.1 port 46664:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46664
+Connection from 127.0.0.1 port 46678 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 46678 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 46678 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 933176
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 46678 id 0
+Close session: user ember from 127.0.0.1 port 46678 id 0
+Received disconnect from 127.0.0.1 port 46678:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 46678
+Connection from 127.0.0.1 port 49584 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 49584 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 49584 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 933935
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 49584 id 0
+Close session: user ember from 127.0.0.1 port 49584 id 0
+Received disconnect from 127.0.0.1 port 49584:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 49584
+Connection from 127.0.0.1 port 49588 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 49588 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 49588 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 934215
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 49588 id 0
+Close session: user ember from 127.0.0.1 port 49588 id 0
+Received disconnect from 127.0.0.1 port 49588:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 49588
+Connection from 127.0.0.1 port 49592 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 49592 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 49592 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 934351
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 49592 id 0
+Close session: user ember from 127.0.0.1 port 49592 id 0
+Received disconnect from 127.0.0.1 port 49592:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 49592
+Connection from 127.0.0.1 port 49594 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 49594 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 49594 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 934431
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 49594 id 0
+Close session: user ember from 127.0.0.1 port 49594 id 0
+Received disconnect from 127.0.0.1 port 49594:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 49594
+Connection from 127.0.0.1 port 49610 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 49610 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 49610 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 934741
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 49610 id 0
+Close session: user ember from 127.0.0.1 port 49610 id 0
+Received disconnect from 127.0.0.1 port 49610:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 49610
+Connection from 127.0.0.1 port 49626 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 49626 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 49626 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 935396
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 49626 id 0
+Received disconnect from 127.0.0.1 port 49626:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 49626
+Connection from 127.0.0.1 port 50468 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 50468 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 50468 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 935682
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 50468 id 0
+Close session: user ember from 127.0.0.1 port 50468 id 0
+Received disconnect from 127.0.0.1 port 50468:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 50468
+Connection from 127.0.0.1 port 50482 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 50482 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 50482 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 935942
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 50482 id 0
+Close session: user ember from 127.0.0.1 port 50482 id 0
+Received disconnect from 127.0.0.1 port 50482:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 50482
+Connection from 127.0.0.1 port 50484 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 50484 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 50484 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 937322
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 50484 id 0
+Close session: user ember from 127.0.0.1 port 50484 id 0
+Received disconnect from 127.0.0.1 port 50484:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 50484
+Connection from 127.0.0.1 port 50490 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 50490 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 50490 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 938350
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 50490 id 0
+Close session: user ember from 127.0.0.1 port 50490 id 0
+Received disconnect from 127.0.0.1 port 50490:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 50490
+Connection from 127.0.0.1 port 50496 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 50496 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 50496 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 938834
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 50496 id 0
+Close session: user ember from 127.0.0.1 port 50496 id 0
+Received disconnect from 127.0.0.1 port 50496:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 50496
+Connection from 127.0.0.1 port 42218 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 42218 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 42218 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 939452
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 42218 id 0
+Close session: user ember from 127.0.0.1 port 42218 id 0
+Received disconnect from 127.0.0.1 port 42218:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 42218
+Connection from 127.0.0.1 port 42224 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 42224 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 42224 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 939886
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 42224 id 0
+Close session: user ember from 127.0.0.1 port 42224 id 0
+Received disconnect from 127.0.0.1 port 42224:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 42224
+Connection from 127.0.0.1 port 42230 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 42230 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 42230 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 940218
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 42230 id 0
+Close session: user ember from 127.0.0.1 port 42230 id 0
+Received disconnect from 127.0.0.1 port 42230:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 42230
+Connection from 127.0.0.1 port 42232 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Postponed publickey for ember from 127.0.0.1 port 42232 ssh2 [preauth]
+Accepted key ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:1
+Accepted publickey for ember from 127.0.0.1 port 42232 ssh2: ED25519 SHA256:r7OAV0hlYHMdIC1sdmuP75VYZ3oiNRgZSzX17Bjhr+E
+User child is on pid 940596
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor' for ember from 127.0.0.1 port 42232 id 0
+Close session: user ember from 127.0.0.1 port 42232 id 0
+Received disconnect from 127.0.0.1 port 42232:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 42232
+Connection from 127.0.0.1 port 42236 on 127.0.0.1 port 22422 rdomain ""
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Postponed publickey for ember from 127.0.0.1 port 42236 ssh2 [preauth]
+Accepted key ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg found at /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/sshd/authorized_keys:2
+Accepted publickey for ember from 127.0.0.1 port 42236 ssh2: ED25519 SHA256:a5eEo21RrDCAxtqVtfk7zapSSpvhzOQImebahsjnDeg
+User child is on pid 940858
+Starting session: forced-command (key-option) '/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell-ssh /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/bin/mini-shell /home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3 /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/deployment/pinned-config.json /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/public/mini.sock /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer/workspace /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/newcomer' for ember from 127.0.0.1 port 42236 id 0
+Received disconnect from 127.0.0.1 port 42236:11: disconnected by user
+Disconnected from user ember 127.0.0.1 port 42236
+Received signal 15; terminating.

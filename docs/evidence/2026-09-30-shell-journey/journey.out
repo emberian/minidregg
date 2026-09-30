@@ -1,0 +1,102 @@
+run: /home/ember/build/mini-product-20260930/m4-shell/run/journey-3
+  1 J0  OPERATOR  bootstrap fresh private Store, sponsor workspace, mini serve exp=0  got=0    49.215s ok 
+  2 J0  OPERATOR  ssh keys, rendered authorized_keys, private sshd on 127.0.0. exp=0  got=0     0.308s ok 
+  3 J0  sponsor   whoami                                                       exp=0  got=0     0.201s ok 
+  4 J0  check     sponsor session is subject 7                                 exp=-  got=-         -s ok 
+  5 J0  sponsor   read factory                                                 exp=0  got=0     1.372s ok 
+  6 J1  newcomer  keygen mini.key                                              exp=0  got=0     0.210s ok 
+  7 J1  check     newcomer public key appears in no genesis/config file        exp=-  got=-         -s ok 
+  8 J1  OPERATOR  CUSTODY: copy newcomer secret into sponsor home (enroll plan exp=0  got=0     0.013s ok 
+  9 J1  sponsor   enroll plan newcomer-1 newcomer-1.key                        exp=0  got=0     3.853s ok 
+ 10 J1  sponsor   enroll seal newcomer-1                                       exp=0  got=0     1.059s ok 
+ 11 J1  sponsor   enroll submit newcomer-1                                     exp=0  got=0     1.448s ok 
+ 12 J1  check     submit returned an admitted-key-only enrollment result       exp=-  got=-         -s ok 
+ 13 J1  sponsor   enroll lookup newcomer-1                                     exp=0  got=0     1.182s ok 
+ 14 J1  check     lookup returns the same receipt as submit                    exp=-  got=-         -s ok 
+ 15 J1  check     enrolled public key is the newcomer's own                    exp=-  got=-         -s ok 
+ 16 J1  newcomer  init mini.key 11033321548135836207                           exp=0  got=0     0.207s ok 
+ 17 J1  newcomer  whoami                                                       exp=0  got=0     0.201s ok 
+ 18 J1  check     newcomer session is subject 11033321548135836207             exp=-  got=-         -s ok 
+ 19 J2  sponsor   create shared declared {"type":"all","predicates":[]}        exp=0  got=0     5.930s ok 
+ 20 J2  sponsor   refs                                                         exp=0  got=0     0.248s ok 
+ 21 J2  check     sponsor holds reference shared (target 12014773799689856118) exp=-  got=-         -s ok 
+ 22 J2  sponsor   describe shared                                              exp=0  got=0     1.462s ok 
+ 23 J2  check     law is all[] at version 0                                    exp=-  got=-         -s ok 
+ 24 J3  sponsor   delegate grant-newcomer shared 11033321548135836207 observe, exp=0  got=0     4.448s ok 
+ 25 J3  sponsor   submit grant-newcomer                                        exp=0  got=0     3.726s ok 
+ 26 J3  check     delegation installed                                         exp=-  got=-         -s ok 
+ 27 J3  sponsor   publish grant-newcomer                                       exp=0  got=0     0.700s ok 
+ 28 J3  sponsor   export grant-newcomer                                        exp=0  got=0     0.187s ok 
+ 29 J3  check     exported reference is addressed to the newcomer              exp=-  got=-         -s ok 
+ 30 J3  check     signed child capability: holder newcomer, verbs observe+muta exp=-  got=-         -s ok 
+ 31 J3  newcomer  import shared {"authority":"hint-only","capability":"1480925 exp=0  got=0     0.202s ok 
+ 32 J3  newcomer  refs                                                         exp=0  got=0     0.189s ok 
+ 33 J4  newcomer  read shared                                                  exp=0  got=0     1.637s ok 
+ 34 J4  check     field 2 absent before the write                              exp=-  got=-         -s ok 
+ 35 J4  newcomer  invoke first-action shared create 2 1                        exp=0  got=0     1.870s ok 
+ 36 J4  newcomer  submit first-action                                          exp=0  got=0     2.996s ok 
+ 37 J4  check     write installed                                              exp=-  got=-         -s ok 
+ 38 J4  newcomer  (script) whoami;read shared;                                 exp=0  got=0     1.582s ok 
+ 39 J4  check     script-mode read back: field 2 = 1                           exp=-  got=-         -s ok 
+ 40 J4  newcomer  (tty)  r e a \t s h \t \r h i s \t \r e x i t \r             exp=0  got=0    16.025s ok 
+ 41 J4  check     tty: Tab completed 'read shared' and the Host answered field exp=-  got=-         -s ok 
+ 42 J5  third     keygen mini.key                                              exp=0  got=0     0.183s ok 
+ 43 J5  OPERATOR  CUSTODY: copy third secret into sponsor home for the co-sign exp=0  got=0     0.007s ok 
+ 44 J5  sponsor   enroll plan third-1 third-1.key                              exp=0  got=0     4.186s ok 
+ 45 J5  sponsor   enroll seal third-1                                          exp=0  got=0     1.225s ok 
+ 46 J5  sponsor   enroll submit third-1                                        exp=0  got=0     2.987s ok 
+ 47 J5  third     init mini.key 17768843426024353880                           exp=0  got=0     0.178s ok 
+ 48 J5  third     import stolen object 12014773799689856118 148092596625562404 exp=0  got=0     0.192s ok 
+ 49 J5  third     read stolen                                                  exp=3  got=3     2.209s ok refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+ 50 J5  third     invoke third-write stolen create 3 1                         exp=3  got=3     3.013s ok refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+ 51 J5  third     import owner object 12014773799689856118 1551848340565678204 exp=0  got=0     0.629s ok 
+ 52 J5  third     read owner                                                   exp=3  got=3     2.712s ok refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+ 53 J5  stranger  keygen mini.key                                              exp=0  got=0     0.274s ok 
+ 54 J5  stranger  init mini.key 4242424242                                     exp=0  got=0     0.266s ok 
+ 55 J5  stranger  import stolen object 12014773799689856118 148092596625562404 exp=0  got=0     0.253s ok 
+ 56 J5  stranger  read stolen                                                  exp=3  got=3     0.928s ok refused: phase "observation" detail "observation refused" (Host refused challenge, reply byte 255)
+ 57 J5  stranger  invoke stranger-write stolen create 3 1                      exp=3  got=3     0.998s ok refused: phase "observation" detail "observation refused" (Host refused challenge, reply byte 255)
+ 58 J5  newcomer  read shared                                                  exp=0  got=0     1.500s ok 
+ 59 J5  check     control: newcomer still reads field 2 = 1                    exp=-  got=-         -s ok 
+ 60 J6  OPERATOR  stop the service and reopen the same Store (pinned mini serv exp=0  got=0     0.386s ok 
+ 61 J6  sponsor   enroll lookup newcomer-1                                     exp=0  got=0     4.457s ok 
+ 62 J6  check     enrollment receipt recovered unchanged                       exp=-  got=-         -s ok 
+ 63 J6  newcomer  read shared                                                  exp=0  got=0     1.581s ok 
+ 64 J6  check     J4 value recovered: field 2 = 1                              exp=-  got=-         -s ok 
+ 65 J6  newcomer  retry first-action                                           exp=0  got=0     0.604s ok 
+ 66 J6  check     exact retry returns the original receipt, replayed           exp=-  got=-         -s ok 
+ 67 J6  newcomer  history                                                      exp=0  got=0     0.164s ok 
+ 68 J7  sponsor   law law-v2 shared {"type":"not","predicate":{"type":"any","p exp=0  got=0     1.723s ok 
+ 69 J7  sponsor   submit law-v2                                                exp=0  got=0     2.470s ok 
+ 70 J7  check     law installed as record 6: the J6 retry caused no second eff exp=-  got=-         -s ok 
+ 71 J7  sponsor   describe shared                                              exp=0  got=0     1.455s ok 
+ 72 J7  check     law is not(any[]) at version 1                               exp=-  got=-         -s ok 
+ 73 J7  newcomer  invoke after-law-v2 shared write 2 7 1                       exp=0  got=0     1.442s ok 
+ 74 J7  newcomer  submit after-law-v2                                          exp=0  got=0     2.870s ok 
+ 75 J7  check     newcomer's existing grant still writes                       exp=-  got=-         -s ok 
+ 76 J7  newcomer  read shared                                                  exp=0  got=0     1.379s ok 
+ 77 J7  check     field 2 = 7                                                  exp=-  got=-         -s ok 
+ 78 J8  sponsor   law lockout shared {"type":"any","predicates":[]}            exp=0  got=0     1.474s ok 
+ 79 J8  sponsor   submit lockout                                               exp=0  got=0     3.104s ok 
+ 80 J8  check     deny-all installed                                           exp=-  got=-         -s ok 
+ 81 J8  newcomer  read shared                                                  exp=3  got=3     1.513s ok refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+ 82 J8  newcomer  invoke after-lock shared write 2 8 7                         exp=3  got=3     1.465s ok refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+ 83 J8  sponsor   read shared                                                  exp=3  got=3     1.398s ok refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+ 84 J8  sponsor   law repair shared {"type":"all","predicates":[]}             exp=3  got=3     1.449s ok refused: phase "observation" detail "observation refused" (Host refused query, reply byte 255)
+ 85 J8  check     each refused frame is retained with the Host's own decoding  exp=-  got=-         -s ok 
+ 86 J8  newcomer  lookup after-law-v2                                          exp=0  got=0     0.581s ok 
+ 87 J8  check     historical lookup still answers, replayed                    exp=-  got=-         -s ok 
+ 88 END OPERATOR  stop sshd                                                    exp=0  got=0     0.009s ok 
+ 89 END OPERATOR  stop the Mini service                                        exp=0  got=0     0.147s ok 
+
+journey verdicts:
+J0 PASS
+J1 PASS
+J2 PASS
+J3 PASS
+J4 PASS
+J5 PASS
+J6 PASS
+J7 PASS
+J8 PASS
+step table: /home/ember/build/mini-product-20260930/m4-shell/run/journey-3/log/steps.tsv
