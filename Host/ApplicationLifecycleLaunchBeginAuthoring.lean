@@ -107,7 +107,7 @@ def runningWitnessStream : StreamCodec RunningWitness :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product NativeHostCodec.receiptStream
-        (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+        (StreamCodec.product IntStream.intStream
           (StreamCodec.product bytesStream
             (StreamCodec.product bytesStream
               (StreamCodec.product bytesStream

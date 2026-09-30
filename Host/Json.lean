@@ -1220,9 +1220,7 @@ private def birthParts (path : String)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
     if storage = "content" then
-      pure ⟨.content, CellState.materialize HyperdocumentContentPageMaterializer.materializer
-        (HyperdocumentContentPageMaterializer.stateOfOption
-          (some (ContentResource.initialPage source.deployment.domain target)))⟩
+      pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectPageMaterializer.materializer
@@ -2719,7 +2717,7 @@ private def contentEntryJson (entry : HyperdocumentContentPageMaterializer.Entry
       ("canonical", canonical)]
 
 private def contentPageJson (root : Digest)
-    (page : HyperdocumentContentPageMaterializer.Page) : Lean.Json := .mkObj
+    (page : ContentResource.ContentStore) : Lean.Json := .mkObj
   [("root", decimal root.value), ("contentDomain", decimal page.contentDomain.value),
    ("document", decimal page.document.digest.value), ("pageNumber", decimal page.pageNumber),
    ("canonicalPage", hexJson (HyperdocumentContentPageMaterializer.pageStream.encode page)),

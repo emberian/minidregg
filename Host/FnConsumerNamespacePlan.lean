@@ -109,7 +109,7 @@ gateway preparation separately proves that cell's outer root is current. -/
 def currentRoots (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (pin : NativeHost.FnGatewayPin) : Except String (Digest × Digest) := do
   let authorityRoot := opened.durable.snapshot.model.roots
-    config.deployment.authorityAnchor.catalogueCellId
+    (CredentialAuthorityDomainReceiver.cellIdOf config.deployment)
   let probe : DeclaredResourceController.Target :=
     ⟨.object, pin.target, pin.capability, 1, ⟨0⟩, .content ⟨[]⟩, none⟩
   let .present cell := opened.directory.directory.slots pin.target
