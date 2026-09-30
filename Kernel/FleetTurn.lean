@@ -4,10 +4,11 @@ base tariff from the paying account to the deployment collector in the one
 canonical Book. It may also move value to another registered account, and it
 may append one event to a topic stream owned by the paying account.
 
-A topic stream is the existing typed append-only causal event log
-(`eventHistory` pages, four slots each), not a side channel. Its stream id,
-page cell ids, sequence position and parent event are derived by this source
-from the paying account, the topic bytes and the current pages; the event
+A topic stream is the existing typed append-only causal event log: one
+`eventHistory` cell per stream (a StoreCodec cell, unbounded), not a side
+channel. Its stream id, cell id, sequence position and parent event are
+derived by this source from the paying account, the topic bytes and the
+current cell; the event
 record binds the exact payload digest, this turn's transaction id and effect
 digest, the Book roots around the turn and the typed author. The payload bytes
 themselves stay in the signed ingress retained by the accepted journal.
@@ -15,8 +16,9 @@ themselves stay in the signed ingress retained by the accepted journal.
 Authority is the ordinary account capability path: one native signature by
 the current holder of a `transfer` capability over the paying account, checked
 against that account's current installed law. Receiving value needs no
-authority. The operation marker is consumed in the authority cell, so an exact
-repeat replays and a changed command under the same identity conflicts.
+authority. The operation marker is the intent's durable nullifier (the Store's
+consumed set; the authority cell is not written), so an exact repeat replays
+and a changed command under the same identity conflicts.
 -/
 import Kernel.ParticipantKeyEnrollment
 import Compiler.NativeHostCodec
@@ -40,6 +42,7 @@ open Minidregg.Theory.CredentialAuthorityEffects
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.PolicyInstall
 open Minidregg.Theory.ResourceBirth
+open Minidregg.Theory.Store (Store Patch Op Address)
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -48,16 +51,19 @@ abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
-abbrev AuthorityMaterializer := CredentialAuthorityStateCodec.materializer
-abbrev EventPage := HyperdocumentEventPageMaterializer.Page
-abbrev EventEntry := HyperdocumentEventPageMaterializer.Entry
+abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
+abbrev EventStore := Minidregg.Theory.Store.Store HyperdocumentEventLog.Sparse.layout
+
+/-- One recorded topic event: its derived event key and its record. -/
+structure EventEntry where
+  key : Hyperdocument.VersionEventId
+  record : Hyperdocument.VersionEventRecord
 
 /-- Topic labels are bytes chosen by the account holder. They name a stream
 of that account only; the same label under another account is another stream. -/
 def maxTopicBytes : Nat := 64
-/-- Payloads ride in the signed ingress; the page stores only their digest. -/
+/-- Payloads ride in the signed ingress; the topic cell stores only their digest. -/
 def maxPayloadBytes : Nat := 16384
-def pageCapacity : Nat := 4
 
 structure Transfer where
   destination : Nat
@@ -191,9 +197,9 @@ def streamDigest (domain : Digest) (payer : Nat) (topic : List UInt8) : Digest :
     ((StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat bytesStream)).encode
       (domain, payer, topic))
 
-def pageCellId (stream : Digest) (page : Nat) : Nat :=
-  (cshake "DREGG.FLEET.TOPIC.PAGE/v1"
-    ((StreamCodec.product digestStream StreamCodec.nat).encode (stream, page))).value
+/-- The one event cell of a stream. -/
+def topicCellId (stream : Digest) : Nat :=
+  (cshake "DREGG.FLEET.TOPIC.CELL/v1" (digestStream.encode stream)).value
 
 def payloadDigest (domain : Digest) (payload : List UInt8) : Digest :=
   cshake "DREGG.FLEET.TOPIC.PAYLOAD/v1"
@@ -203,8 +209,6 @@ def payloadDigest (domain : Digest) (payload : List UInt8) : Digest :=
 def eventSchema : CausalVersionDag.SchemaRef :=
   ⟨cshake "DREGG.FLEET.TOPIC.EVENT-SCHEMA/v1" [], 1⟩
 
-def pageOf (sequence : Nat) : Nat := (sequence - 1) / pageCapacity
-def slotOf (sequence : Nat) : Nat := (sequence - 1) % pageCapacity
 
 structure Declaration where
   expectedPreRoot : Digest
@@ -222,16 +226,15 @@ def declarationCodec : LawfulCodec Declaration :=
 def declaration (snapshot : Snapshot) (semantics : Digest) (command : Command) : Declaration :=
   ⟨snapshot.cell.root, marker snapshot.domain semantics command⟩
 
-def Declaration.patch (d : Declaration) : Patch CredentialAuthorityState.schema Digest where
-  expectedPreRoot := d.expectedPreRoot
-  fieldFootprint := {.nullifier d.operationNullifier}
-  resourceFootprint := ∅
-  fieldWrites := [⟨.nullifier d.operationNullifier, some true⟩]
-  resourceWrites := []
+/-- A fleet turn writes nothing in the authority cell: its only authority
+effect is consuming the operation marker, and that is the intent's durable
+nullifier (the Store's consumed set), not an authority-cell plane. The empty
+patch is quoted at the pre-root, so the turn is still bound to the authority
+state it was authorized against. -/
+def Declaration.patch (_ : Declaration) : Patch CredentialAuthorityState.layout := []
 
 structure Mode {M : Materializer} (pre : Cell M) (d : Declaration) : Type where
   rootExact : d.expectedPreRoot = pre.root
-  fresh : isNullified pre d.operationNullifier = false
 
 /-- The effect is determined by the exact command under the current law, so
 its digest is computable from the retained ingress alone. The consumed marker
@@ -275,7 +278,7 @@ def request (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
     (marker snapshot.domain semantics command) (declaration snapshot semantics command)).2
 
 def family (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (command : Command) :
-    SemanticEffectFamily CredentialAuthorityState.schema AuthorityMaterializer Nat where
+    SemanticEffectFamily CredentialAuthorityState.layout AuthorityMaterializer Nat where
   Declaration := Declaration
   declarationCodec := declarationCodec
   pre := snapshot.cell
@@ -294,9 +297,6 @@ def family (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (comma
   ReleaseAuthorization := fun _ _ _ => Unit
   DisclosureAllowed := fun _ _ => sealedOnly
 
-def edits (snapshot : Snapshot) (d : Declaration) : List CredentialAuthorityDomain.Edit :=
-  [CredentialAuthorityDomain.nullifierEdit snapshot d.operationNullifier]
-
 /-- The Book leg: the fee first, then the optional transfer, each reading the
 Book left by the previous posting. -/
 def batch (tariff : CreationTariff) (command : Command) : CanonicalResourceKernel.Batch where
@@ -309,8 +309,8 @@ def batch (tariff : CreationTariff) (command : Command) : CanonicalResourceKerne
 inductive Reject where
   | malformedIngress | malformedCommand | feeMismatch
   | directoryUnavailable | authorityUnavailable | bookUnavailable | bookRefused
-  | topicPageUnavailable | sequenceTaken | sequenceGap
-  | replayedMarker | authorityPreparation | validation | refinement | physicalPreparation
+  | topicUnavailable | sequenceTaken | sequenceGap
+  | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr
@@ -319,74 +319,62 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
   | none => .error reason
   | some value => .ok value
 
-/-! ## Topic pages -/
+/-! ## Topic cells -/
 
-def slotAt (page : EventPage) : Nat → Option EventEntry
-  | 0 => page.slot0
-  | 1 => page.slot1
-  | 2 => page.slot2
-  | 3 => page.slot3
-  | _ => none
+/-- The events of one topic cell, in canonical store order. -/
+def storedEvents (store : EventStore) : List EventEntry :=
+  (StoreCodec.entries HyperdocumentCell.eventWire store).map fun entry => ⟨entry.1.2, entry.2⟩
 
-def withSlot (page : EventPage) (slot : Nat) (entry : EventEntry) : EventPage :=
-  match slot with
-  | 0 => { page with slot0 := some entry }
-  | 1 => { page with slot1 := some entry }
-  | 2 => { page with slot2 := some entry }
-  | _ => { page with slot3 := some entry }
+/-- The recorded event at one stream position. -/
+def eventAt (store : EventStore) (sequence : Nat) : Option EventEntry :=
+  (storedEvents store).find? fun entry => entry.record.semanticVersion == sequence
 
-def filledBelow (page : EventPage) (slot : Nat) : Bool :=
-  (List.range slot).all fun index => (slotAt page index).isSome
+def topicCell (store : EventStore) : PackedCell Registry :=
+  ⟨.eventHistory, CellState.materialize HyperdocumentCell.eventMaterializer store⟩
 
-def emptyPage (domain stream : Digest) (pageNumber : Nat) : EventPage :=
-  ⟨domain, ⟨stream⟩, pageNumber, none, none, none, none⟩
-
-def pageCell (page : EventPage) : PackedCell Registry :=
-  ⟨.eventHistory, CellState.materialize HyperdocumentEventPageMaterializer.materializer
-    (HyperdocumentEventPageMaterializer.stateOfOption (some page))⟩
-
-/-- The current occupant of one derived page id. A present cell of another kind
-or an empty event cell is not a topic page. -/
-inductive PageRead where
+/-- The current occupant of one derived topic cell id. A present cell of
+another kind, or one that fails the event-history law, is not a topic. -/
+inductive TopicRead where
   | fresh
-  | live (cell : PackedCell Registry) (page : EventPage)
+  | live (cell : PackedCell Registry) (store : EventStore)
 
-def readPage (deployment : Deployment) (directory : Directory Nat Registry) (cellId : Nat) :
-    Option PageRead :=
+def readTopic (deployment : Deployment) (directory : Directory Nat Registry) (cellId : Nat) :
+    Option TopicRead :=
   match directory.slots cellId with
   | .absent => some .fresh
   | .present _ =>
       match ResourceBirthController.Concrete.observeCell deployment directory cellId .eventHistory with
       | none => none
-      | some observed =>
-          match HyperdocumentEventPageMaterializer.pageAt observed.payload.logical with
-          | none => none
-          | some page => some (.live ⟨.eventHistory, observed.payload⟩ page)
+      | some observed => some (.live ⟨.eventHistory, observed.payload⟩ observed.payload.logical)
 
-def PageRead.image : PageRead → LifecycleImage Registry
+/-- The number of recorded events of a stream. Positions are admitted only in
+order (`planTopic`), so a stream of `n` events holds exactly positions `1..n`. -/
+def TopicRead.count : TopicRead → Nat
+  | .fresh => 0
+  | .live _ store => (storedEvents store).length
+
+def TopicRead.store : TopicRead → EventStore
+  | .fresh => 0
+  | .live _ store => store
+
+def TopicRead.image : TopicRead → LifecycleImage Registry
   | .fresh => .fresh
   | .live cell _ => .live cell
 
-/-- Source-derived placement of one topic event. `guards` pins a previous page
-that supplied the parent event but is not written. -/
+/-- Source-derived placement of one topic event: the stream's one cell, before
+and after the append. -/
 structure TopicPlan where
   stream : Digest
   cellId : Nat
   pre : LifecycleImage Registry
-  post : EventPage
+  post : EventStore
   entry : EventEntry
-  guards : List ReadGuard
 
 def TopicPlan.write (plan : TopicPlan) : DataWrite where
   cellId := ⟨plan.cellId⟩
   expectedPre := physicalRoot plan.pre
-  exactPost := physicalRoot (.live (pageCell plan.post))
-  canonicalPostBytes := LifecycleImage.bytes Registry (.live (pageCell plan.post))
-
-def TopicPlan.freshIds (plan : TopicPlan) : List Nat :=
-  match plan.pre with
-  | .fresh => [plan.cellId]
-  | _ => []
+  exactPost := physicalRoot (.live (topicCell plan.post))
+  canonicalPostBytes := LifecycleImage.bytes Registry (.live (topicCell plan.post))
 
 def eventRecord (domain stream : Digest) (sequence : Nat) (payload : Digest)
     (parents : List Hyperdocument.VersionEventId) (bookPre bookPost txId effect : Digest)
@@ -404,53 +392,32 @@ def eventRecord (domain stream : Digest) (sequence : Nat) (payload : Digest)
   author := author
 
 def eventEntry (record : Hyperdocument.VersionEventRecord) : EventEntry :=
-  ⟨Hyperdocument.deriveVersionEventId HyperdocumentEventPageMaterializer.eventPreimageCodec
-    HyperdocumentEventPageMaterializer.eventDerivation record, record⟩
+  ⟨Hyperdocument.deriveVersionEventId HyperdocumentCell.eventPreimageStream.toLawful
+    HyperdocumentCell.eventDerivation record, record⟩
 
-/-- Sequence `n` lives at page `(n-1)/4`, slot `(n-1)%4`. It is admitted only
-as the stream's next position: every earlier slot of its page is occupied, its
-own slot is empty, and a first slot beyond page zero follows a full previous
-page. The parent is exactly the previous event. -/
+/-- Sequence `n` is admitted only as the stream's next position: the stream
+holds exactly `n - 1` events and none at `n`. The parent is exactly the event
+at `n - 1`; the first event has none. A live cell must be this stream's. -/
 def planTopic (deployment : Deployment) (directory : Directory Nat Registry)
     (domain : Digest) (payer : Nat) (publication : Publication)
     (author : Hyperdocument.PrincipalRef) (bookPre bookPost txId effect : Digest) :
     Except Reject TopicPlan := do
   let stream := streamDigest domain payer publication.topic
-  let pageNumber := pageOf publication.sequence
-  let slot := slotOf publication.sequence
-  let cellId := pageCellId stream pageNumber
-  let current ← requireSome .topicPageUnavailable (readPage deployment directory cellId)
-  let (pre, prePage, parents, guards) ← match current with
-    | .fresh =>
-        if slot ≠ 0 then throw .sequenceGap
-        else if pageNumber = 0 then
-          pure ((.fresh : LifecycleImage Registry), emptyPage domain stream 0,
-            ([] : List Hyperdocument.VersionEventId), ([] : List ReadGuard))
-        else
-          let previousId := pageCellId stream (pageNumber - 1)
-          match readPage deployment directory previousId with
-          | some (.live previousCell previousPage) =>
-              if previousPage.document = ⟨stream⟩ ∧ previousPage.pageNumber = pageNumber - 1 then
-                match previousPage.slot3 with
-                | some last =>
-                    pure (.fresh, emptyPage domain stream pageNumber, [last.key],
-                      [⟨⟨previousId⟩, physicalRoot (.live previousCell)⟩])
-                | none => throw .sequenceGap
-              else throw .topicPageUnavailable
-          | _ => throw .sequenceGap
-    | .live cell page =>
-        if page.document = ⟨stream⟩ ∧ page.pageNumber = pageNumber then
-          if (slotAt page slot).isSome then throw .sequenceTaken
-          else if slot = 0 ∨ !(filledBelow page slot) then throw .sequenceGap
-          else
-            match slotAt page (slot - 1) with
-            | some previous => pure (.live cell, page, [previous.key], [])
-            | none => throw .sequenceGap
-        else throw .topicPageUnavailable
+  let cellId := topicCellId stream
+  let current ← requireSome .topicUnavailable (readTopic deployment directory cellId)
+  let store := current.store
+  unless (storedEvents store).all (fun entry => entry.record.document == ⟨stream⟩) do
+    throw .topicUnavailable
+  if (eventAt store publication.sequence).isSome then throw .sequenceTaken
+  if publication.sequence = 0 ∨ current.count + 1 ≠ publication.sequence then throw .sequenceGap
+  let parents ← if publication.sequence = 1 then pure ([] : List Hyperdocument.VersionEventId)
+    else match eventAt store (publication.sequence - 1) with
+      | some previous => pure [previous.key]
+      | none => throw .sequenceGap
   let record := eventRecord domain stream publication.sequence
     (payloadDigest domain publication.payload) parents bookPre bookPost txId effect author
   let entry := eventEntry record
-  pure ⟨stream, cellId, pre, withSlot prePage slot entry, entry, guards⟩
+  pure ⟨stream, cellId, current.image, store.update ⟨.events, entry.key⟩ (some record), entry⟩
 
 /-! ## Preparation, authorization, plan -/
 
@@ -461,19 +428,13 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   shape : command.shapeOk = true
   feeExact : command.fee = tariff.base
   directory : LoadedDirectory durable
-  authority : Loaded deployment.authorityAnchor durable.snapshot
+  authority : Loaded deployment durable.snapshot
   book : ResourceBirthController.Concrete.ObservedCell deployment directory.directory
     deployment.resourceBookId .resourceBook
   resources : CanonicalResourceKernel.AcceptedBatch book.payload (batch tariff command)
   topic : Option TopicPlan
   candidate : Candidate (family authority.snapshot profile.semantics ambient command)
     authority.snapshot.cell (declaration authority.snapshot profile.semantics command) ()
-  update : CredentialAuthorityDomain.Prepared authority.snapshot
-    (edits authority.snapshot (declaration authority.snapshot profile.semantics command))
-  postExact : update.postLogical = candidate.validated.apply.logical
-  physical : Lowered directory authority
-    (edits authority.snapshot (declaration authority.snapshot profile.semantics command)) update
-    ((topic.map TopicPlan.freshIds).getD [])
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨command.payer⟩
       (authority.snapshot.authState.policyRevision ⟨command.payer⟩))
@@ -502,16 +463,10 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                 book.payload.root resources.post.root
                 ⟨marker snapshot.domain profile.semantics command⟩
                 (effectDigest snapshot.domain profile.semantics command)).map some
-        if fresh : isNullified snapshot.cell d.operationNullifier = false then
-          let update ← requireSome .authorityPreparation
-            (CredentialAuthorityDomain.prepare snapshot (edits snapshot d))
-          match validate AuthorityMaterializer snapshot.cell d.patch with
+        if snapshot.spent d.operationNullifier = false then
+          match validate AuthorityMaterializer snapshot.cell snapshot.cell.root d.patch with
           | .rejected _ => throw .validation
           | .accepted validated =>
-            if same : CredentialAuthorityStateCodec.encode update.postLogical =
-                CredentialAuthorityStateCodec.encode validated.apply.logical then
-              let physical ← requireSome .physicalPreparation
-                (lower directory authority update ((topic.map TopicPlan.freshIds).getD []))
               let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
                 snapshot.domain directory.directory
                 (snapshot.authState.policyAddress ⟨command.payer⟩
@@ -519,12 +474,10 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
               let candidate : Candidate (family snapshot profile.semantics ambient command)
                   snapshot.cell d () :=
                 { preStateBound := rfl
-                  modeEvidence := ⟨rfl, fresh⟩
+                  modeEvidence := ⟨rfl⟩
                   validated := validated
                   postcondition := validated.resultAt }
-              pure ⟨shape, feeExact, directory, authority, book, resources, topic, candidate,
-                update, CredentialAuthorityStateCodec.encode_injective same, physical, source⟩
-            else throw .refinement
+              pure ⟨shape, feeExact, directory, authority, book, resources, topic, candidate, source⟩
         else throw .replayedMarker
       else throw .bookRefused
     else throw .feeMismatch
@@ -542,7 +495,7 @@ def balanceSlot (label : String) (book : CanonicalResourceKernel.Book) (account 
 destination, the paying account's fee-asset balance before and after the Book
 leg, the complete command bytes and the presented spend grant. -/
 def project (prepared : Prepared deployment profile tariff ambient durable command)
-    (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) : Minidregg.Pred.State :=
+    (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
   let before := CanonicalResourceKernel.logicalBook prepared.book.payload.logical
   let after := CanonicalResourceKernel.logicalBook prepared.resources.post.logical
   let (destination, asset, amount) := match command.transfer with
@@ -660,35 +613,27 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 
 /-! ## Topic reading -/
 
-/-- The stream head: the highest occupied sequence, found by walking pages
-from zero until an unoccupied slot. Bounded by `maxPages` page reads. -/
+/-- The stream head: the highest occupied sequence, which is the number of
+recorded events (positions are admitted only in order). -/
 def streamHead (deployment : Deployment) (directory : Directory Nat Registry)
-    (stream : Digest) (maxPages : Nat) : Nat :=
-  let rec walk : Nat → Nat → Nat
-    | 0, _ => 0
-    | fuel + 1, pageNumber =>
-        match readPage deployment directory (pageCellId stream pageNumber) with
-        | some (.live _ page) =>
-            let count := (List.range pageCapacity).countP fun slot => (slotAt page slot).isSome
-            if count = pageCapacity then walk fuel (pageNumber + 1)
-            else pageNumber * pageCapacity + count
-        | _ => pageNumber * pageCapacity
-  walk maxPages 0
+    (stream : Digest) : Nat :=
+  match readTopic deployment directory (topicCellId stream) with
+  | some current => current.count
+  | none => 0
 
 /-- Events of one stream with sequence strictly above `cursor`, in order, at
-most `limit` of them. Only occupied slots are returned; a gap ends the read. -/
+most `limit` of them. A gap ends the read. -/
 def eventsSince (deployment : Deployment) (directory : Directory Nat Registry)
     (stream : Digest) (cursor limit : Nat) : List EventEntry :=
-  let rec collect : Nat → Nat → List EventEntry → List EventEntry
-    | 0, _, acc => acc.reverse
-    | fuel + 1, sequence, acc =>
-        if acc.length ≥ limit then acc.reverse else
-        match readPage deployment directory (pageCellId stream (pageOf sequence)) with
-        | some (.live _ page) =>
-            match slotAt page (slotOf sequence) with
+  match readTopic deployment directory (topicCellId stream) with
+  | some (.live _ store) =>
+      let rec collect : Nat → Nat → List EventEntry → List EventEntry
+        | 0, _, acc => acc.reverse
+        | fuel + 1, sequence, acc =>
+            match eventAt store sequence with
             | some entry => collect fuel (sequence + 1) (entry :: acc)
             | none => acc.reverse
-        | _ => acc.reverse
-  collect (limit + 1) (cursor + 1) []
+      collect limit (cursor + 1) []
+  | _ => []
 
 end Minidregg.Kernel.FleetTurn

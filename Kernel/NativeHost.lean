@@ -590,9 +590,6 @@ def provisionSubmitLoaded (config : Config) (opened : Opened config)
 
 /-! ## Fleet turns: plan, assembly, submit, lookup, topic reads, heads -/
 
-/-- Bound on page reads when walking one topic stream (4 events per page). -/
-def fleetMaxPages : Nat := 4096
-
 /-- The finalized command fills exactly two draft fields: the pinned base
 tariff and, when the draft's publication position is zero, the stream's next
 position on this image. Every other field is the draft's. -/
@@ -602,7 +599,6 @@ def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.
     if publication.sequence = 0 then
       let head := FleetTurn.streamHead config.deployment opened.directory.directory
         (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
-        fleetMaxPages
       { publication with sequence := head + 1 }
     else publication
   { draft with fee := config.tariff.base, publication := publication }
@@ -779,7 +775,7 @@ def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
       let entries := FleetTurn.eventsSince config.deployment directory stream cursor
         (min limit fleetPollMax)
       return .ok ⟨subject, payer, topic, stream, cursor,
-        FleetTurn.streamHead config.deployment directory stream fleetMaxPages,
+        FleetTurn.streamHead config.deployment directory stream,
         entries.map (fleetPolledEvent config opened)⟩
 
 structure FleetHeadView where

@@ -3082,7 +3082,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
 private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
    ("acceptedCount", decimal receipt.acceptedCount),
-   ("imageBoundary", decimal receipt.imageBoundary.value)]
+   ("worldRoot", decimal receipt.worldRoot.value)]
 
 /-- The topic poll view. `payload` is null when the accepted ingress does not
 reproduce the committed digest; the reader must then treat the event as unreadable. -/

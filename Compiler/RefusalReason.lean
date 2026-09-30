@@ -11,8 +11,8 @@ Disclosure order. A requester learns only what it is entitled to learn:
 
 * before its key is selected, only `malformed` or `unknownKey` (enrollment is
   a public coordinate of the challenge);
-* a challenge that no longer matches the current image is `staleRoot`
-  (the image boundary is itself a public challenge field);
+* a challenge that no longer matches the current world root, authority root
+  or height is `staleRoot` (all three are public challenge fields);
 * after its signature verifies, every capability failure up to and including
   holder coverage and native use is `noGrant`. Absent, stolen, out-of-scope
   and other-target capabilities are therefore indistinguishable, so a key
@@ -41,7 +41,7 @@ inductive RefusalReason where
   | malformed
   /-- The requesting subject has no enrolled, usable current key. -/
   | unknownKey
-  /-- The signed challenge names an image that is no longer current. -/
+  /-- The signed challenge or plan names a world root, authority read or height that is no longer current. -/
   | staleRoot
   /-- The signature does not verify for the selected key and exact request. -/
   | badSignature
@@ -141,17 +141,26 @@ def stream : StreamCodec RefusalReason where
 theorem stream_unknown_tag (suffix : List UInt8) :
     stream.decodePrefix (12 :: suffix) = none := rfl
 
-/-- The signature adapter's typed rejection, named. Key absence and unusable
-key records are `unknownKey`; a moved subject-key epoch is `staleRoot`; every
-envelope and binding failure is `badSignature`. -/
+/-- The signature adapter's typed rejection, named. Key absence, unusable key
+records and a key version that is unregistered or revoked (its standing in the
+authority cell) are `unknownKey`: the subject has no usable current key. A
+moved subject-key epoch, a signed footprint whose authority read has changed,
+and a plan past its signed `validUntil` height are `staleRoot`: the signed plan
+no longer describes the current state. A footprint that does not decode is
+`malformed`; every envelope and binding failure is `badSignature`. -/
 def ofSignature : CredentialSignatureAdmission.Reject → RefusalReason
   | .wrongDomain => .malformed
   | .missingCurrentKey => .unknownKey
   | .subjectKeyEpoch => .staleRoot
+  | .unregisteredKey => .unknownKey
+  | .revokedKey => .unknownKey
   | .unsupportedAlgorithm => .unknownKey
   | .publicKeyLength => .unknownKey
   | .envelope _ => .badSignature
   | .sourceBinding => .badSignature
+  | .malformedFootprint => .malformed
+  | .footprintStale _ => .staleRoot
+  | .expired _ _ => .staleRoot
 
 theorem ofSignature_missingCurrentKey :
     ofSignature .missingCurrentKey = .unknownKey := rfl

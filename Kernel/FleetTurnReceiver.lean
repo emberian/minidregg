@@ -48,27 +48,21 @@ def topicWrites (prepared : Prepared deployment profile tariff ambient durable c
   prepared.topic.toList.map TopicPlan.write
 
 def writes (prepared : Prepared deployment profile tariff ambient durable command) : List DataWrite :=
-  bookWrite prepared :: (topicWrites prepared ++ prepared.physical.writes ++
-    prepared.physical.placement.auxiliaryCreates.map ResourceBirthController.birthWrite)
+  bookWrite prepared :: topicWrites prepared
 
 def policyGuard (prepared : Prepared deployment profile tariff ambient durable command) : ReadGuard :=
   ⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩
 
-def topicGuards (prepared : Prepared deployment profile tariff ambient durable command) :
-    List ReadGuard :=
-  (prepared.topic.toList.map TopicPlan.guards).flatten
-
 def readGuards (prepared : Prepared deployment profile tariff ambient durable command) :
     List ReadGuard :=
-  policyGuard prepared :: (topicGuards prepared ++
-    readonlyGuards prepared.authority.readGuards (writes prepared))
+  policyGuard prepared ::
+    prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile tariff ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
     (∀ write ∈ writes prepared, write.expectedPre = durable.snapshot.model.roots write.cellId) ∧
     (∀ write ∈ writes prepared, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) ∧
     (policyGuard prepared).cellId ∉ (writes prepared).map DataWrite.cellId ∧
-    (∀ guard ∈ topicGuards prepared, guard.cellId ∉ (writes prepared).map DataWrite.cellId) ∧
     (∀ guard ∈ readGuards prepared, guard.expectedRoot = durable.snapshot.model.roots guard.cellId)
 
 instance physicalShapeDecidable
@@ -82,24 +76,15 @@ theorem writes_roots_bound (prepared : Prepared deployment profile tariff ambien
     rootBytes write.canonicalPostBytes = write.exactPost := by
   rcases List.mem_cons.mp member with rfl | rest
   · rfl
-  · rcases List.mem_append.mp rest with ordinary | allocation
-    · rcases List.mem_append.mp ordinary with topic | authority
-      · obtain ⟨plan, _, rfl⟩ := List.mem_map.mp topic
-        rfl
-      · exact planWrites_roots_bound deployment.authorityAnchor durable.snapshot
-          prepared.authority.snapshot.catalogue prepared.update.postPages
-          prepared.physical.placement write authority
-    · obtain ⟨request, _, rfl⟩ := List.mem_map.mp allocation
-      exact ResourceBirthController.birthWrite_root_bound request
+  · obtain ⟨plan, _, rfl⟩ := List.mem_map.mp rest
+    rfl
 
 theorem readGuards_readonly (prepared : Prepared deployment profile tariff ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
     guard.cellId ∉ (writes prepared).map DataWrite.cellId := by
   rcases List.mem_cons.mp member with rfl | rest
   · exact shape.2.2.2.1
-  · rcases List.mem_append.mp rest with topic | authority
-    · exact shape.2.2.2.2.1 guard topic
-    · exact of_decide_eq_true (List.mem_filter.mp authority).2
+  · simpa using (List.mem_filter.mp rest).2
 
 structure AcceptedTurn [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (tariff : CreationTariff) (ambient : Ambient)

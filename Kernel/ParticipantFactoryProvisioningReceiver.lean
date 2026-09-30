@@ -38,8 +38,7 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {command : Command}
 
 def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
-  prepared.physical.writes ++
-    prepared.physical.placement.auxiliaryCreates.map ResourceBirthController.birthWrite
+  prepared.authority.writes prepared.authorityPost
 
 def resourceGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
   ⟨⟨deployment.factoryId⟩,
@@ -50,7 +49,7 @@ def policyGuard (prepared : Prepared deployment profile ambient durable command)
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   resourceGuard prepared :: policyGuard prepared ::
-    readonlyGuards prepared.authority.readGuards (writes prepared)
+    prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
@@ -68,12 +67,9 @@ instance physicalShapeDecidable (prepared : Prepared deployment profile ambient 
 theorem writes_roots_bound (prepared : Prepared deployment profile ambient durable command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  rcases List.mem_append.mp member with authority | allocation
-  · exact planWrites_roots_bound deployment.authorityAnchor durable.snapshot
-      prepared.authority.snapshot.catalogue prepared.update.postPages
-      prepared.physical.placement write authority
-  · obtain ⟨request, _, rfl⟩ := List.mem_map.mp allocation
-    exact ResourceBirthController.birthWrite_root_bound request
+  simp only [writes, Loaded.writes, List.mem_singleton] at member
+  subst write
+  exact prepared.authority.write_root_bound _
 
 theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
@@ -82,7 +78,7 @@ theorem readGuards_readonly (prepared : Prepared deployment profile ambient dura
   · exact shape.2.2.2.1
   · rcases List.mem_cons.mp rest with rfl | authority
     · exact shape.2.2.2.2.1
-    · exact of_decide_eq_true (List.mem_filter.mp authority).2
+    · simpa using (List.mem_filter.mp authority).2
 
 structure AcceptedProvisioning [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)

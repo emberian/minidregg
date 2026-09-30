@@ -31,6 +31,7 @@ open Minidregg.Theory.CredentialAuthorityEffects
 open Minidregg.Theory.CredentialLineageAdmission
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.PolicyInstall
+open Minidregg.Theory.Store (Store Patch Op Address)
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -39,7 +40,7 @@ abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
-abbrev AuthorityMaterializer := CredentialAuthorityStateCodec.materializer
+abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
 
 /-- The caller names the sponsor's control capability, the enrolled holder and
 a fresh capability identifier. Every other capability field is derived by the
@@ -204,19 +205,10 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
     (Sp800185Cshake256.hash "DREGG.PARTICIPANT.FACTORY-OBSERVE.ARGS/v1".toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
-/-- The issued capability's own revocation key joins the projection universe,
-exactly as for the grants issued by a resource birth. -/
-def grantUniverse (snapshot : Snapshot) (command : Command) : ProjectionUniverse :=
-  snapshot.extendedUniverse {RevocationKey.capability command.capability}
-
-theorem grantUniverse_authState_exact (snapshot : Snapshot) (command : Command) :
-    authState (grantUniverse snapshot command) snapshot.cell = snapshot.authState :=
-  snapshot.authState_extension_exact _
-
 abbrev family (deployment : Deployment)
     (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (command : Command) :
-    SemanticEffectFamily CredentialAuthorityState.schema AuthorityMaterializer Nat :=
-  issueFamily (grantUniverse snapshot command) snapshot.cell declarationCodec
+    SemanticEffectFamily CredentialAuthorityState.layout AuthorityMaterializer Nat :=
+  issueFamily snapshot.cell declarationCodec
     (effectDigest snapshot.domain semantics command)
     (context deployment snapshot semantics ambient command)
 
@@ -228,17 +220,10 @@ def request (deployment : Deployment) (template : CanonicalRuntimeProfile.Factor
     (marker snapshot.domain semantics command)
     (declaration deployment template snapshot.domain semantics snapshot.cell ambient command)).2
 
-def edits (deployment : Deployment) (template : CanonicalRuntimeProfile.FactoryTemplate)
-    (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (command : Command) :
-    List CredentialAuthorityDomain.Edit :=
-  [⟨none, .capability .object
-      ⟨observeCapability deployment template snapshot.cell ambient command, []⟩⟩,
-   CredentialAuthorityDomain.nullifierEdit snapshot (marker snapshot.domain semantics command)]
-
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable
   | staleAuthority | holderNotEnrolled | capabilityExists | capabilityRevoked | replayedMarker
-  | authorityPreparation | validation | refinement | physicalPreparation
+  | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr
@@ -252,22 +237,16 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     (command : Command) where
   private mk ::
   directory : LoadedDirectory durable
-  authority : Loaded deployment.authorityAnchor durable.snapshot
+  authority : Loaded deployment durable.snapshot
   factory : ResourceTargetAdmission.Observed deployment directory.directory .object
     deployment.factoryId command.expectedFactoryRoot
   holderEnrolled :
-    (authority.snapshot.logical.fields (.subjectKeyEpoch command.holder)).isSome = true
+    (show Option Epoch from authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true
   candidate : Candidate
     (family deployment authority.snapshot profile.semantics ambient command)
     authority.snapshot.cell
     (declaration deployment profile.template authority.snapshot.domain profile.semantics
       authority.snapshot.cell ambient command) ()
-  update : CredentialAuthorityDomain.Prepared authority.snapshot
-    (edits deployment profile.template authority.snapshot profile.semantics ambient command)
-  postExact : update.postLogical = candidate.validated.apply.logical
-  physical : Lowered directory authority
-    (edits deployment profile.template authority.snapshot profile.semantics ambient command)
-    update []
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
@@ -286,34 +265,27 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     ambient command
   if rootExact : command.expectedAuthorityRoot = snapshot.cell.root then
     if holderEnrolled :
-        (snapshot.logical.fields (.subjectKeyEpoch command.holder)).isSome = true then
+        (show Option Epoch from snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true then
       if fresh : capabilityIdFreshCheck snapshot.cell command.capability = true then
         if live : isRevoked snapshot.cell (.capability command.capability) = false then
-          if unused : isNullified snapshot.cell (marker snapshot.domain profile.semantics command) =
-              false then
-            let update ← requireSome .authorityPreparation
-              (CredentialAuthorityDomain.prepare snapshot
-                (edits deployment template snapshot profile.semantics ambient command))
-            match validate AuthorityMaterializer snapshot.cell d.patch with
+         if unregistered : isRegistered snapshot.cell (.capability command.capability) = false then
+          if snapshot.spent (marker snapshot.domain profile.semantics command) = false then
+            match validate AuthorityMaterializer snapshot.cell snapshot.cell.root (d.patch snapshot.cell.logical) with
             | .rejected _ => throw .validation
             | .accepted validated =>
-              if same : CredentialAuthorityStateCodec.encode update.postLogical =
-                  CredentialAuthorityStateCodec.encode validated.apply.logical then
-                let physical ← requireSome .physicalPreparation (lower directory authority update [])
                 let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
                   snapshot.domain directory.directory
                   (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
                     (snapshot.authState.policyRevision ⟨deployment.factoryId⟩)))
-                let evidence : IssueEvidence (grantUniverse snapshot command) snapshot.cell d :=
+                let evidence : IssueEvidence snapshot.cell d :=
                   { preRootExact := rootExact
                     slotFresh := (capabilityIdFreshCheck_iff snapshot.cell command.capability).mp fresh
-                    nullifierFresh := unused
                     rootParent := rfl
                     rootSelf := rfl
                     rootAncestors := rfl
                     issuerCurrent := rfl
                     policyCurrent := rfl
-                    selfRegistered := Finset.mem_union_right _ (Finset.mem_singleton_self _)
+                    selfUnregistered := unregistered
                     channelsRegistered := fun _ member => absurd member (Finset.notMem_empty _)
                     selfLive := live
                     channelsLive := fun _ member => absurd member (Finset.notMem_empty _) }
@@ -324,10 +296,9 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                     modeEvidence := evidence
                     validated := validated
                     postcondition := validated.resultAt }
-                pure ⟨directory, authority, factory, holderEnrolled, candidate, update,
-                  CredentialAuthorityStateCodec.encode_injective same, physical, source⟩
-              else throw .refinement
+                pure ⟨directory, authority, factory, holderEnrolled, candidate, source⟩
           else throw .replayedMarker
+         else throw .capabilityExists
         else throw .capabilityRevoked
       else throw .capabilityExists
     else throw .holderNotEnrolled
@@ -337,11 +308,18 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
   {command : Command}
 
+/-- The authority cell after provisioning: the validated issuance patch applied
+to the loaded cell. It is the one authority write; the operation marker is the
+intent's durable nullifier. -/
+def Prepared.authorityPost (prepared : Prepared deployment profile ambient durable command) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.candidate.validated.apply
+
 /-- The factory law sees the operation label, the exact command, the factory
 cell it will govern and the presented control grant. Unrelated authority
 records are not projected. -/
 def project (prepared : Prepared deployment profile ambient durable command)
-    (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) : Minidregg.Pred.State :=
+    (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots
       (request deployment profile.template prepared.authority.snapshot profile.semantics
         ambient command) ++
@@ -473,7 +451,8 @@ theorem observeCapability_targets_factory (deployment : Deployment)
 
 /-- A prepared provisioning always names an enrolled holder. -/
 theorem Prepared.holder_enrolled (prepared : Prepared deployment profile ambient durable command) :
-    (prepared.authority.snapshot.logical.fields (.subjectKeyEpoch command.holder)).isSome = true :=
+    (show Option Epoch from
+      prepared.authority.snapshot.logical ⟨.subjectKeyEpoch, command.holder⟩).isSome = true :=
   prepared.holderEnrolled
 
 /-- An accepted provisioning was authorized through capability mode naming the
