@@ -176,7 +176,7 @@ def request {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
 inductive Reject where
   | malformedCommand | directoryUnavailable | authorityUnavailable | targetUnavailable
   | staleAuthority | victimUnavailable | victimPolicy | alreadyRevoked | replayedMarker
-  | validation
+  | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr

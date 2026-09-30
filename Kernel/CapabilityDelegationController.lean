@@ -158,7 +158,7 @@ theorem universe_authState_exact {kind : ResourceKind} (snapshot : Snapshot) (co
 inductive Reject where
   | malformedCommand | directoryUnavailable | authorityUnavailable | targetUnavailable
   | staleTarget | staleAuthority | identity | parentUnavailable | lineage | descent
-  | shape | validation
+  | shape | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | parentSubstitution
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr

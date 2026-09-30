@@ -35,10 +35,9 @@ open Minidregg.Kernel.DurableDataIntent
 set_option autoImplicit false
 
 abbrev PhysicalSnapshot := DataSnapshot ResourceBirthCodec.rootBytes
-abbrev Deployment := CanonicalCellRegistry.Deployment
 
 /-- The durable identifier of the deployment's one authority cell. -/
-def cellIdOf (deployment : Deployment) : CellId := ⟨deployment.authorityCellId⟩
+def cellIdOf (deployment : CanonicalCellRegistry.Deployment) : CellId := ⟨deployment.authorityCellId⟩
 
 def packedCell (cell : CredentialAuthorityDomain.Cell) : PackedCell registry := ⟨.authority, cell⟩
 
@@ -76,14 +75,14 @@ theorem decodeCell_canonical {bytes : List UInt8} {cell : CredentialAuthorityDom
 /-- The loaded authority domain.  The constructor is private: `load` is the
 only route, so the snapshot is exactly the cell at the pinned identifier of one
 physical snapshot, read in the deployment's domain. -/
-structure Loaded (deployment : Deployment) (physical : PhysicalSnapshot) where
+structure Loaded (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) where
   private mk ::
   snapshot : CredentialAuthorityDomain.Snapshot
   valid : deployment.Valid
   domainExact : snapshot.domain = deployment.domain
   observed : physical.canonicalBytes (cellIdOf deployment) = cellBytes snapshot.cell
 
-def loadDeployment (deployment : Deployment) (physical : PhysicalSnapshot) :
+def loadDeployment (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot) :
     Option (Loaded deployment physical) :=
   if valid : deployment.Valid then
     match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
@@ -95,7 +94,7 @@ def loadDeployment (deployment : Deployment) (physical : PhysicalSnapshot) :
 /-- Refuting pole: a pinned identifier that does not hold a live authority cell
 (a retired image, a fresh slot, another role, or a retired catalogue frame)
 loads nothing. -/
-theorem loadDeployment_refuses (deployment : Deployment) (physical : PhysicalSnapshot)
+theorem loadDeployment_refuses (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
     (undecodable : decodeCell (physical.canonicalBytes (cellIdOf deployment)) = none) :
     loadDeployment deployment physical = none := by
   unfold loadDeployment
@@ -108,7 +107,7 @@ theorem loadDeployment_refuses (deployment : Deployment) (physical : PhysicalSna
   · rfl
 
 /-- Satisfiable pole: the cell the physical snapshot holds is loaded exactly. -/
-theorem loadDeployment_exact (deployment : Deployment) (physical : PhysicalSnapshot)
+theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (physical : PhysicalSnapshot)
     (valid : deployment.Valid) (cell : CredentialAuthorityDomain.Cell)
     (holds : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell) :
     ∃ loaded, loadDeployment deployment physical = some loaded ∧ loaded.snapshot.cell = cell := by
@@ -122,7 +121,7 @@ theorem loadDeployment_exact (deployment : Deployment) (physical : PhysicalSnaps
     rw [holds, decodeCell_bytes] at decoded
     exact ⟨_, rfl, (Option.some.inj decoded).symm⟩
 
-theorem Loaded.root_exact {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :
     cellRoot loaded.snapshot.cell = physical.model.roots (cellIdOf deployment) := by
   unfold cellRoot
@@ -130,21 +129,21 @@ theorem Loaded.root_exact {deployment : Deployment} {physical : PhysicalSnapshot
   exact physical.coherent _
 
 /-- The loaded cell satisfies the registry's own law for the authority role. -/
-theorem Loaded.cellLaw {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.cellLaw {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :
     CanonicalCellRegistry.CellLaw deployment deployment.authorityCellId
       (packedCell loaded.snapshot.cell) :=
   ⟨loaded.valid, rfl⟩
 
 /-- The one read dependency of the authority domain. -/
-def Loaded.readGuard {deployment : Deployment} {physical : PhysicalSnapshot}
+def Loaded.readGuard {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (_loaded : Loaded deployment physical) : ReadGuard :=
   { cellId := cellIdOf deployment, expectedRoot := physical.model.roots (cellIdOf deployment) }
 
-def Loaded.readGuards {deployment : Deployment} {physical : PhysicalSnapshot}
+def Loaded.readGuards {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) : List ReadGuard := [loaded.readGuard]
 
-theorem Loaded.readGuards_exact {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.readGuards_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (guard : ReadGuard) (member : guard ∈ loaded.readGuards) :
     guard.expectedRoot = physical.model.roots guard.cellId := by
   simp only [Loaded.readGuards, List.mem_singleton] at member
@@ -155,36 +154,36 @@ theorem Loaded.readGuards_exact {deployment : Deployment} {physical : PhysicalSn
 
 /-- The post cell, written at the pinned identifier and guarded at the loaded
 root of that same cell. -/
-def Loaded.write {deployment : Deployment} {physical : PhysicalSnapshot}
+def Loaded.write {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (_loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) : DataWrite where
   cellId := cellIdOf deployment
   expectedPre := physical.model.roots (cellIdOf deployment)
   exactPost := cellRoot post
   canonicalPostBytes := cellBytes post
 
-def Loaded.writes {deployment : Deployment} {physical : PhysicalSnapshot}
+def Loaded.writes {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) : List DataWrite :=
   [loaded.write post]
 
-theorem Loaded.write_root_bound {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.write_root_bound {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
     ResourceBirthCodec.rootBytes (loaded.write post).canonicalPostBytes = (loaded.write post).exactPost :=
   rfl
 
-theorem Loaded.write_pre_exact {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.write_pre_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
     (loaded.write post).expectedPre = physical.model.roots (loaded.write post).cellId :=
   rfl
 
 /-- The write's guard is the loaded cell's own root: an authority write
 cannot be applied over any other authority state. -/
-theorem Loaded.write_pre_is_loaded_root {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.write_pre_is_loaded_root {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
     (loaded.write post).expectedPre = cellRoot loaded.snapshot.cell :=
   loaded.root_exact.symm
 
 /-- The write reads back as exactly the post cell. -/
-theorem Loaded.write_decodes {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.write_decodes {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
     decodeCell (loaded.write post).canonicalPostBytes = some post :=
   decodeCell_bytes post
@@ -194,7 +193,7 @@ post cells that agree at every authority address produce the same physical
 write: the same bytes, the same root, at the same identifier, under the same
 guard.  No catalogue revision, placement cursor or shard numbering enters it,
 so an update rewrites exactly one cell and nothing else. -/
-theorem write_of_planes {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem write_of_planes {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (left right : CredentialAuthorityDomain.Cell)
     (planes : ∀ address, left.logical address = right.logical address) :
     loaded.write left = loaded.write right := by
@@ -206,7 +205,7 @@ theorem cellRoot_of_planes (left right : CredentialAuthorityDomain.Cell)
     cellRoot left = cellRoot right := by
   rw [Materialized.ext (DFinsupp.ext planes)]
 
-theorem Loaded.writes_single {deployment : Deployment} {physical : PhysicalSnapshot}
+theorem Loaded.writes_single {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
     (loaded.writes post).map DataWrite.cellId = [cellIdOf deployment] := rfl
 
@@ -373,7 +372,7 @@ replaces that cell. -/
 structure PreparedGrantBatch {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : Deployment) (loaded : Loaded deployment durable.snapshot)
+    (deployment : CanonicalCellRegistry.Deployment) (loaded : Loaded deployment durable.snapshot)
     (descriptor : Descriptor registry) where
   private mk ::
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
@@ -383,7 +382,7 @@ structure PreparedGrantBatch {F : Type} [Field F]
 def prepareGrantBatch {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : Deployment) (loaded : Loaded deployment durable.snapshot)
+    (deployment : CanonicalCellRegistry.Deployment) (loaded : Loaded deployment durable.snapshot)
     (descriptor : Descriptor registry) :
     Option (PreparedGrantBatch profile deployment loaded descriptor) := do
   let initialSources ← PolicySourceCell.checkInitials deployment.domain profile descriptor.initialPolicies
@@ -396,7 +395,7 @@ section GrantBatch
 variable {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : Deployment} {loaded : Loaded deployment durable.snapshot}
+    {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
     {descriptor : Descriptor registry}
 
 def PreparedGrantBatch.post (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
