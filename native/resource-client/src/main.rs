@@ -36,6 +36,8 @@ mod participant_enrollment;
 #[cfg(unix)]
 mod participant_namespace;
 #[cfg(unix)]
+mod participant_provisioning;
+#[cfg(unix)]
 mod prepare_refusal;
 #[cfg(unix)]
 mod publisher;
