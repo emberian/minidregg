@@ -2771,15 +2771,78 @@ private def atomKindJson : Hyperdocument.AtomKind → Lean.Json
   | .text => .mkObj [("type", "text")]
   | .inlineObject schema => .mkObj [("type", "inlineObject"), ("schema", decimal schema.value)]
 
+private def identifierJson {version : Hyperdocument.CodecVersion} {domain : Hyperdocument.IdDomain}
+    (value : Hyperdocument.Identifier version domain) : Lean.Json :=
+  decimal value.digest.value
+
+private def optionalIdentifierJson {version : Hyperdocument.CodecVersion}
+    {domain : Hyperdocument.IdDomain} :
+    Option (Hyperdocument.Identifier version domain) → Lean.Json
+  | some value => identifierJson value
+  | none => .null
+
+private def deathPolicyJson : Hyperdocument.EndpointDeathPolicy → Lean.Json
+  | .invalidate => "invalidate"
+  | .keepTombstone => "keepTombstone"
+  | .preferPrevious => "preferPrevious"
+  | .preferNext => "preferNext"
+  | .preferPreviousThenNext => "preferPreviousThenNext"
+  | .preferNextThenPrevious => "preferNextThenPrevious"
+
+/-- The inverse spelling of `stablePoint`/`stableRange` above: what a reader of a
+content page sees is exactly what an author would write. -/
+private def stablePointJson (point : Hyperdocument.StablePoint) : Lean.Json := .mkObj
+  [("run", identifierJson point.run), ("neighbor", optionalIdentifierJson point.neighbor),
+   ("bias", match point.bias with | .before => "before" | .after => "after"),
+   ("death", deathPolicyJson point.death)]
+
+private def stableRangeJson (range : Hyperdocument.StableRange) : Lean.Json := .mkObj
+  [("start", stablePointJson range.start), ("finish", stablePointJson range.finish)]
+
+private def pageRefJson (page : HyperdocumentContentPageMaterializer.PageRef) : Lean.Json := .mkObj
+  [("contentDomain", decimal page.contentDomain.value), ("pageNumber", decimal page.pageNumber),
+   ("expectedRoot", decimal page.expectedRoot.value)]
+
+/-- The inverse spelling of `forwardTarget`. -/
+private def forwardTargetJson : HyperdocumentContentPageMaterializer.ForwardTarget → Lean.Json
+  | .document page documentId => .mkObj [("type", "document"), ("page", pageRefJson page),
+      ("id", identifierJson documentId)]
+  | .element page elementId => .mkObj [("type", "element"), ("page", pageRefJson page),
+      ("id", identifierJson elementId)]
+  | .range page document range => .mkObj [("type", "range"), ("page", pageRefJson page),
+      ("document", identifierJson document), ("range", stableRangeJson range)]
+  | .external scheme authority path => .mkObj [("type", "external"),
+      ("scheme", hexJson scheme), ("authority", hexJson authority), ("path", hexJson path)]
+
+private def elementBodyJson : Hyperdocument.ElementBody → Lean.Json
+  | .container children => .mkObj [("type", "container"),
+      ("children", .arr <| children.toArray.map identifierJson)]
+  | .runs runs => .mkObj [("type", "runs"), ("runs", .arr <| runs.toArray.map identifierJson)]
+  | .embed reference => .mkObj [("type", "embed"), ("document", identifierJson reference.document),
+      ("element", optionalIdentifierJson reference.element),
+      ("snapshot", optionalIdentifierJson reference.snapshot)]
+  | .opaque schema payload => .mkObj [("type", "opaque"), ("schema", decimal schema.value),
+      ("payload", hexJson payload)]
+
 private def contentEntryJson (entry : HyperdocumentContentPageMaterializer.Entry) : Lean.Json :=
   let canonical := hexJson (HyperdocumentContentPageMaterializer.entryStream.encode entry)
   match entry with
-  | .document identifier _ => .mkObj [("type", "document"),
-      ("id", decimal identifier.digest.value), ("canonical", canonical)]
-  | .element identifier _ => .mkObj [("type", "element"),
-      ("id", decimal identifier.digest.value), ("canonical", canonical)]
-  | .link identifier _ => .mkObj [("type", "link"),
-      ("id", decimal identifier.digest.value), ("canonical", canonical)]
+  | .document identifier record => .mkObj [("type", "document"),
+      ("id", decimal identifier.digest.value), ("rootElement", identifierJson record.rootElement),
+      ("schema", decimal record.schema.value), ("createdBy", principalJson record.createdBy),
+      ("createdAt", identifierJson record.createdAt), ("canonical", canonical)]
+  | .element identifier record => .mkObj [("type", "element"),
+      ("id", decimal identifier.digest.value), ("document", identifierJson record.document),
+      ("parent", optionalIdentifierJson record.parent), ("body", elementBodyJson record.body),
+      ("createdBy", principalJson record.createdBy), ("createdAt", identifierJson record.createdAt),
+      ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
+  | .link identifier record => .mkObj [("type", "link"),
+      ("id", decimal identifier.digest.value),
+      ("document", identifierJson record.sourceDocument),
+      ("source", match record.source with | some range => stableRangeJson range | none => .null),
+      ("target", forwardTargetJson record.target), ("relation", decimal record.relation.value),
+      ("createdBy", principalJson record.author), ("createdAt", identifierJson record.operation),
+      ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
   | .atom identifier record => .mkObj [("type", "atom"),
       ("id", decimal identifier.digest.value), ("document", decimal record.document.digest.value),
       ("kind", atomKindJson record.kind), ("payload", hexJson record.payload),
