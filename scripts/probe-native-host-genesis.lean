@@ -5,6 +5,7 @@ the acceptance below does not claim proof of their corresponding possession.
 -/
 import Kernel.NativeHostGenesis
 import Compiler.NativeHostProfile
+import Compiler.NativeHostCodec
 
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
@@ -77,7 +78,8 @@ def run (alice bob : List UInt8) : IO Unit := do
   require "seed restores exact actual receiving image"
     (built.image.restore ResourceBirthCodec.rootBytes).isSome
   let encoded := DurableReceiverCodec.encode built.image
-  let reopened ← match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes encoded with
+  let reopened ← match DurableReceiverIO.loadBytes ResourceBirthCodec.rootBytes
+      (NativeHostCodec.logRoot0 cfg.deployment.domain profile.semantics) encoded with
     | .ok loaded => pure loaded
     | .error message => throw (IO.userError s!"FAIL reopen: {message}")
   require "reopened complete authority"
