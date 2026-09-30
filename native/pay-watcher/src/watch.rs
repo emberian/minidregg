@@ -182,7 +182,7 @@ fn view_index(
     let mut seen: BTreeMap<Sig, SigEntry> = BTreeMap::new();
     for account in &accounts {
         let mut before: Option<Sig> = None;
-        'pages: for page in 0..cfg.max_pages {
+        for page in 0..cfg.max_pages {
             let mut opts = json!({ "commitment": "finalized", "limit": cfg.page_size });
             if let Some(b) = before {
                 opts["before"] = Value::String(base58(&b));
@@ -191,13 +191,17 @@ fn view_index(
                 &t.call("getSignaturesForAddress", json!([base58(account), opts]))?,
             )?;
             for e in &entries {
+                // A receipt saves this signature's getTransaction, and nothing else: paging
+                // continues, because an OLDER transfer that was not emitted on an earlier run
+                // (endpoints disagreed, or it was pruned) has no receipt and must be read
+                // again. Stopping at the first receipt would lose it for good.
                 if receipts.contains(&e.signature) {
                     view.notes.push((
                         Reason::AlreadyRetained,
                         Some(e.signature),
-                        "a receipt is retained; older history is not read".into(),
+                        "a receipt is retained; not fetched".into(),
                     ));
-                    break 'pages;
+                    continue;
                 }
                 // Not yet under the common tip: another endpoint may not have it. Next run.
                 if e.slot > tip.slot {
