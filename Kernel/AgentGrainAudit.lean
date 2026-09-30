@@ -104,10 +104,10 @@ theorem worker_cannot_submit_input :
 #guard_msgs (whitespace := lax) in
 #print axioms hard_trip_invalidates_generation
 
-/-- info: 'Minidregg.Kernel.AgentGrain.operation_target_actions_exact' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.AgentGrain.operation_target_actions_exact' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms operation_target_actions_exact
-/-- info: 'Minidregg.Kernel.AgentGrain.operation_command_retains_publications' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.AgentGrain.operation_command_retains_publications' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms operation_command_retains_publications
 /-- info: 'Minidregg.Kernel.AgentGrain.interrupted_worker_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/

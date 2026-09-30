@@ -16,7 +16,7 @@ namespace Minidregg.Kernel.AgentGrain
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.EffectDeclaration
 open Minidregg.Theory.DeclaredActionLowering
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Theory.Store (Store Address)
 open Minidregg.Pred
 set_option autoImplicit false
 
@@ -32,41 +32,74 @@ def State.values (s : State) : List Int :=
 
 def key (task : Nat) (field : Nat) : StateKey := .objectField ⟨task⟩ ⟨field⟩
 
-def State.page (s : State) (domain : Digest) (task : Nat) : Page :=
-  ⟨domain, task % shardCount,
-    some ⟨key task 0, s.generation⟩, some ⟨key task 1, s.status⟩,
-    some ⟨key task 2, s.remaining⟩, some ⟨key task 3, s.reserved⟩⟩
+/-- The four coordinates in the store's canonical order: the byte order of the
+field keys' encodings, in which field 0 (encoded `[255]`) sorts after 1–3. -/
+def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
+  [(1,s.status),(2,s.remaining),(3,s.reserved),(0,s.generation)]
 
-def initialPage (domain : Digest) (task budget : Nat) : Page :=
-  (⟨0,0,Int.ofNat budget,0⟩ : State).page domain task
+/-- The task's four fields, in canonical address order. -/
+def State.entries (s : State) (task : Nat) : List (Compiler.StoreCodec.Entry effectLayout) :=
+  s.coordinates.map fun pair => ⟨(key task pair.1).address, pair.2⟩
 
-def readState (task : Nat) (page : Page) : Option State := do
-  let read := fun n => (page.entries.find? (fun e => e.key == key task n)).map (·.value)
+/-- The task resource as a declared-effect store. -/
+def State.store (s : State) (task : Nat) : Store effectLayout :=
+  Compiler.StoreCodec.fromEntries (s.entries task)
+
+def initialStore (task budget : Nat) : Store effectLayout :=
+  (⟨0, 0, Int.ofNat budget, 0⟩ : State).store task
+
+def readState (task : Nat) (store : Store effectLayout) : Option State := do
+  let read := fun n => (show Option Int from store (key task n).address)
   return ⟨← read 0, ← read 1, ← read 2, ← read 3⟩
 
 /-- Every operation compares all four old coordinates, including unchanged
 ones. The generic declared receiver checks these writes against the durable
-page and binds the exact actions into authorization and replay identity. -/
+store and binds the exact actions into authorization and replay identity. -/
 def actions (task : Nat) (before after : State) : List Action :=
   (List.range 4).zipWith (fun n pair =>
     .write (key task n) (some pair.1) pair.2) (before.values.zip after.values)
 
 /-- Projection vocabulary required in the generic resource receiver. Both
-sides are decoded from canonical pages, never supplied as decision bits by a
-host. Deltas preserve arithmetic over the exact integer state. -/
-def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
-  [(0,s.generation),(1,s.status),(2,s.remaining),(3,s.reserved)]
-
+sides are read from the task's canonical store, never supplied as decision bits
+by a host. Deltas preserve arithmetic over the exact integer state. -/
 def slots (before after : State) : List (String × Int) :=
   DeclaredResourceProjection.scalarSlots before.coordinates after.coordinates
 
 def project := DeclaredResourceProjection.project
 
-theorem page_projection_exact (domain : Digest) (task : Nat) (before after : State) :
-    DeclaredResourceProjection.project task (before.page domain task) (after.page domain task) =
+private theorem key_addressKey (task field : Nat) :
+    Compiler.StoreCodec.addressKey Compiler.DeclaredEffectCell.wire (key task field).address =
+      ((0 :: Compiler.Tower256ConcreteBackend.StreamCodec.nat.encode task).map UInt8.toNat) ++
+        (Compiler.Tower256ConcreteBackend.digestStream.encode ⟨field⟩).map UInt8.toNat := by
+  simp [Compiler.StoreCodec.addressKey, Compiler.StoreCodec.addressStream, Compiler.FiniteDependentMapCodec.entryStream,
+    Compiler.DeclaredEffectCell.wire, key, StateKey.address, Compiler.DeclaredEffectCell.stateKeyStream,
+    Compiler.StoreCodec.unitStream, List.map_append]
+
+private theorem field_lt (task i j : Nat)
+    (ordered : (Compiler.Tower256ConcreteBackend.digestStream.encode ⟨i⟩).map UInt8.toNat < (Compiler.Tower256ConcreteBackend.digestStream.encode ⟨j⟩).map UInt8.toNat) :
+    Compiler.StoreCodec.addressKey Compiler.DeclaredEffectCell.wire (key task i).address <
+      Compiler.StoreCodec.addressKey Compiler.DeclaredEffectCell.wire (key task j).address := by
+  rw [key_addressKey, key_addressKey]
+  exact List.append_left_lt ordered
+
+theorem State.entries_ordered (s : State) (task : Nat) :
+    (s.entries task).Pairwise (Compiler.StoreCodec.AddressLT Compiler.DeclaredEffectCell.wire) := by
+  simp only [State.entries, State.coordinates, List.map_cons, List.map_nil]
+  refine List.Pairwise.cons ?_ (List.Pairwise.cons ?_ (List.Pairwise.cons ?_
+    (List.Pairwise.cons ?_ List.Pairwise.nil)))
+  all_goals
+    intro other member
+    simp only [List.mem_cons, List.not_mem_nil, or_false] at member
+    try (rcases member with rfl | rfl | rfl <;> (apply field_lt; decide))
+
+/-- The policy view of a task resource is exactly its four coordinates. -/
+theorem store_projection_exact (task : Nat) (before after : State) :
+    DeclaredResourceProjection.project task (before.store task) (after.store task) =
       slots before after := by
-  simp [DeclaredResourceProjection.project, DeclaredResourceProjection.values,
-    Page.entries, State.page, key, slots, State.coordinates]
+  unfold DeclaredResourceProjection.project DeclaredResourceProjection.values State.store
+  rw [Compiler.StoreCodec.entries_fromEntries_of_pairwise _ _ (State.entries_ordered before task),
+    Compiler.StoreCodec.entries_fromEntries_of_pairwise _ _ (State.entries_ordered after task)]
+  simp [State.entries, State.coordinates, key, StateKey.address, slots]
 
 private def nonnegative (slot : String) : Pred := .not (.le slot (-1))
 private def unchangedBudget : Pred := .all [
