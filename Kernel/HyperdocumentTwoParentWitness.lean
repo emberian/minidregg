@@ -611,7 +611,7 @@ noncomputable def mergeCapabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simp [capability, HyperdocumentCausalFamily.Witness.declaration,
+        simp [TargetSet.Covers, capability, HyperdocumentCausalFamily.Witness.declaration,
           HyperdocumentCausalFamily.Witness.intent,
           HyperdocumentOperations.Declaration.toRequest, mergeDeclaration,
           mergeIntent, HyperdocumentMerge.Declaration.toRequest]
@@ -710,7 +710,7 @@ noncomputable def eventCapabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simp [capability, HyperdocumentCausalFamily.Witness.declaration,
+        simp [TargetSet.Covers, capability, HyperdocumentCausalFamily.Witness.declaration,
           HyperdocumentCausalFamily.Witness.intent,
           HyperdocumentOperations.Declaration.toRequest,
           HyperdocumentMergePublication.derivedEventDeclaration,

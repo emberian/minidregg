@@ -30,6 +30,7 @@ import Theory.CellSlot  -- stable heterogeneous absent/present slots, canonical 
 import Theory.CanonicalReactiveView  -- observer-indexed typed lenses advance directly from canonical deltas; accepted guarded holes retain eager nullifiers without a parallel uniform post
 import Theory.TypedAuthorization  -- complete-request-indexed authority evidence, explicit bearer/subject holders, exact epochs/revocation, and monotone capability attenuation
 import Theory.AuthorizationDeclaration  -- first-order authorization plans compiled to indexed programs; accepted plans construct the request-indexed Authorized proposition
+import Theory.RoomAuthorization  -- K-ROOM: `under R` target sets decided at the system cell's parent projection; room_confidentiality (refusal form) and room_admission_traces_to_root (lineage form), narrows_stable with its refused-before-birth tooth, all poles by `decide`
 import Theory.CredentialAuthorityFamily  -- signature/proof/capability/token carriers share exact request digests, holder/scope/current-policy semantics, and proof-relevant strict attenuation without mode bypasses
 import Theory.EffectDeclaration  -- target-indexed effects derive exact footprints and full-width resource deltas; only authorized, balanced declarations yield an AuthorizedEffect token
 import Theory.DeclaredActionLowering  -- a closed create/write/move action language lowers into exact accepted semantic effects without reviving the legacy runtime

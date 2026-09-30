@@ -43,7 +43,7 @@ are retired.  Schema id 14 is the document schema every hyperdocument witness
 names (`HyperdocumentOperationIntent.documentSchema`); `documentSchema_deployed`
 checks the two against each other. -/
 def declaredEffectSchemaRef : SchemaRef := ⟨⟨11⟩, 2⟩
-def credentialAuthoritySchemaRef : SchemaRef := ⟨⟨12⟩, 2⟩
+def credentialAuthoritySchemaRef : SchemaRef := ⟨⟨12⟩, 3⟩
 def hyperdocumentContentSchemaRef : SchemaRef := ⟨⟨14⟩, 2⟩
 def hyperdocumentEventSchemaRef : SchemaRef := ⟨⟨15⟩, 2⟩
 

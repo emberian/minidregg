@@ -250,7 +250,7 @@ structure AuthenticatedPrincipal
       principal.capabilityId = some stored
   idBound : stored.head.id = principal.capabilityId
   holderBound : stored.head.holder = .subject principal.subject
-  lineage : LineageValid stored
+  lineage : LineageValid (authState authorityCell).parent stored
   validFrom : stored.head.notBefore ≤ height
   validUntil : height ≤ stored.head.notAfter
   issuerCurrent : stored.head.issuerEpoch =

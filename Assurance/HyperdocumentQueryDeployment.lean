@@ -260,6 +260,7 @@ def authState : AuthState where
   -- Both positive reads select the initial revision of this closed authority fixture.
   policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
+  parent := fun _ => none
 
 def issuer : IssuerId := ⟨91004⟩
 def subject : SubjectId := ⟨91005⟩
@@ -320,7 +321,7 @@ def capability : Capability .object where
   issuer := issuer
   holder := .subject subject
   scope :=
-    { targets := {request.target}
+    { targets := .explicit {request.target}
       verbs := {.observeObject}
       maxCost := 1 }
   notBefore := 0
@@ -334,7 +335,7 @@ def capability : Capability .object where
 theorem capability_admissible : capability.Admissible authState request where
   holder := rfl
   scope :=
-    { target := by simp [capability]
+    { target := by simp [capability, TargetSet.Covers]
       verb := by simp [capability, request, declaration,
         QueryDeclaration.toRequest]
       cost := by simp [capability, request, declaration,
@@ -480,7 +481,7 @@ def capability : Capability .object where
   issuer := issuer
   holder := .subject subject
   scope :=
-    { targets := {request.target}
+    { targets := .explicit {request.target}
       verbs := {.observeObject}
       maxCost := 1 }
   notBefore := 0
@@ -494,7 +495,7 @@ def capability : Capability .object where
 theorem capability_admissible : capability.Admissible authState request where
   holder := rfl
   scope :=
-    { target := by simp [capability]
+    { target := by simp [capability, TargetSet.Covers]
       verb := by simp [capability, request, declaration,
         QueryDeclaration.toRequest]
       cost := by simp [capability, request, declaration,
@@ -625,13 +626,13 @@ theorem reserved_version_rejected :
 
 def offScopeCapability : Capability .object :=
   { Content.capability with
-    scope := { Content.capability.scope with targets := ∅ } }
+    scope := { Content.capability.scope with targets := .explicit ∅ } }
 
 theorem outside_scope_rejected :
     IsEmpty (QuerySuccess queryConfig portal authState Content.pre
       Content.declaration Content.request offScopeCapability) := by
   apply no_query_success_outside_scope
-  simp [offScopeCapability]
+  simp [offScopeCapability, TargetSet.Covers]
 
 def wrongTarget : ResourceId .object :=
   ⟨Content.request.target.value + 1⟩

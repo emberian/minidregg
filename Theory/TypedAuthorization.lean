@@ -138,33 +138,166 @@ def Holder.Covers (holder : Holder) (subject : SubjectId) : Prop :=
   | .bearer => True
   | .subject bound => bound = subject
 
+/-- The system cell's parent projection. `parentage c = some room` records that
+cell `c` was created under the room cell `room`. Resource and room identifiers
+are compared by their raw cell values. The projection is append-only in the
+world: a recorded parent is never rewritten or removed. -/
+abbrev Parentage := Nat → Option Nat
+
+/-- The targets a scope names: an explicit finite set, or every cell whose
+parent is `room` (`under room`). The room cell itself is not under itself. -/
+inductive TargetSet (kind : ResourceKind) where
+  | explicit (targets : Finset (ResourceId kind))
+  | under (room : Nat)
+  deriving DecidableEq
+
+namespace TargetSet
+
+variable {kind : ResourceKind}
+
+def Covers (targets : TargetSet kind) (parentage : Parentage)
+    (target : ResourceId kind) : Prop :=
+  match targets with
+  | .explicit ts => target ∈ ts
+  | .under room => parentage target.value = some room
+
+instance coversDecidable (targets : TargetSet kind) (parentage : Parentage)
+    (target : ResourceId kind) : Decidable (targets.Covers parentage target) := by
+  cases targets <;> unfold Covers <;> infer_instance
+
+/-- Target narrowing. An explicit set narrows `under p` only when every named
+cell already has parent `p`; `under` never narrows to an explicit set. -/
+def Narrows (child parent : TargetSet kind) (parentage : Parentage) : Prop :=
+  match child, parent with
+  | .explicit c, .explicit p => c ⊆ p
+  | .under c, .under p => c = p
+  | .explicit c, .under p => ∀ t ∈ c, parentage t.value = some p
+  | .under _, .explicit _ => False
+
+instance narrowsDecidable (child parent : TargetSet kind) (parentage : Parentage) :
+    Decidable (child.Narrows parent parentage) := by
+  cases child <;> cases parent <;> unfold Narrows <;> infer_instance
+
+theorem Narrows.refl (targets : TargetSet kind) (parentage : Parentage) :
+    targets.Narrows targets parentage := by
+  cases targets with
+  | explicit ts => exact Finset.Subset.refl ts
+  | under room => exact rfl
+
+theorem Narrows.trans {young middle old : TargetSet kind} {parentage : Parentage}
+    (first : young.Narrows middle parentage) (second : middle.Narrows old parentage) :
+    young.Narrows old parentage := by
+  match young, middle, old, first, second with
+  | .explicit _, .explicit _, .explicit _, first, second =>
+      exact Finset.Subset.trans first second
+  | .explicit _, .explicit _, .under _, first, second =>
+      exact fun t member => second t (first member)
+  | .explicit _, .under _, .explicit _, _, second => exact False.elim second
+  | .explicit _, .under _, .under _, first, second =>
+      exact fun t member => Eq.trans (first t member) (congrArg some second)
+  | .under _, .explicit _, _, first, _ => exact False.elim first
+  | .under _, .under _, .explicit _, _, second => exact False.elim second
+  | .under _, .under _, .under _, first, second => exact Eq.trans first second
+
+theorem covers_of_narrows {child parent : TargetSet kind} {parentage : Parentage}
+    {target : ResourceId kind} (narrows : child.Narrows parent parentage)
+    (covers : child.Covers parentage target) : parent.Covers parentage target := by
+  match child, parent, narrows, covers with
+  | .explicit _, .explicit _, narrows, covers => exact narrows covers
+  | .explicit _, .under _, narrows, covers => exact narrows target covers
+  | .under _, .explicit _, narrows, _ => exact False.elim narrows
+  | .under _, .under _, narrows, covers =>
+      exact (show _ = _ from covers).trans (congrArg some narrows)
+
+/-- Coverage only grows as parents are recorded. -/
+theorem covers_mono {targets : TargetSet kind} {first second : Parentage}
+    (grows : ∀ c p, first c = some p → second c = some p)
+    {target : ResourceId kind} (covers : targets.Covers first target) :
+    targets.Covers second target := by
+  cases targets with
+  | explicit ts => exact covers
+  | under room => exact grows _ _ covers
+
+theorem narrows_mono {child parent : TargetSet kind} {first second : Parentage}
+    (grows : ∀ c p, first c = some p → second c = some p)
+    (narrows : child.Narrows parent first) : child.Narrows parent second := by
+  match child, parent, narrows with
+  | .explicit _, .explicit _, narrows => exact narrows
+  | .explicit _, .under _, narrows => exact fun t member => grows _ _ (narrows t member)
+  | .under _, .explicit _, narrows => exact narrows
+  | .under _, .under _, narrows => exact narrows
+
+end TargetSet
+
 /-- A finite, typed authority scope. -/
 structure Scope (kind : ResourceKind) where
-  targets : Finset (ResourceId kind)
+  targets : TargetSet kind
   verbs : Finset (Verb kind)
   maxCost : Nat
   deriving DecidableEq
 
 structure Scope.Covers {kind : ResourceKind} (scope : Scope kind)
-    (request : Request kind) : Prop where
-  target : request.target ∈ scope.targets
+    (parentage : Parentage) (request : Request kind) : Prop where
+  target : scope.targets.Covers parentage request.target
   verb : request.verb ∈ scope.verbs
   cost : request.cost ≤ scope.maxCost
 
-/-- `child.Narrows parent` is the authority preorder: fewer targets, fewer
-verbs, and no larger budget. -/
-structure Scope.Narrows {kind : ResourceKind} (child parent : Scope kind) : Prop where
-  targets : child.targets ⊆ parent.targets
+/-- `child.Narrows parent parentage` is the authority preorder at one parent
+projection: fewer targets, fewer verbs, and no larger budget. -/
+structure Scope.Narrows {kind : ResourceKind} (child parent : Scope kind)
+    (parentage : Parentage) : Prop where
+  targets : child.targets.Narrows parent.targets parentage
   verbs : child.verbs ⊆ parent.verbs
   maxCost : child.maxCost ≤ parent.maxCost
 
+theorem Scope.covers_iff_components {kind : ResourceKind} (scope : Scope kind)
+    (parentage : Parentage) (request : Request kind) :
+    scope.Covers parentage request ↔
+      scope.targets.Covers parentage request.target ∧ request.verb ∈ scope.verbs ∧
+        request.cost ≤ scope.maxCost :=
+  ⟨fun covers => ⟨covers.target, covers.verb, covers.cost⟩,
+    fun ⟨target, verb, cost⟩ => ⟨target, verb, cost⟩⟩
+
+instance Scope.coversDecidable {kind : ResourceKind} (scope : Scope kind)
+    (parentage : Parentage) (request : Request kind) :
+    Decidable (scope.Covers parentage request) :=
+  decidable_of_iff _ (Scope.covers_iff_components scope parentage request).symm
+
+theorem Scope.narrows_iff_components {kind : ResourceKind} (child parent : Scope kind)
+    (parentage : Parentage) :
+    child.Narrows parent parentage ↔
+      child.targets.Narrows parent.targets parentage ∧ child.verbs ⊆ parent.verbs ∧
+        child.maxCost ≤ parent.maxCost :=
+  ⟨fun narrows => ⟨narrows.targets, narrows.verbs, narrows.maxCost⟩,
+    fun ⟨targets, verbs, cost⟩ => ⟨targets, verbs, cost⟩⟩
+
+instance Scope.narrowsDecidable {kind : ResourceKind} (child parent : Scope kind)
+    (parentage : Parentage) : Decidable (child.Narrows parent parentage) :=
+  decidable_of_iff _ (Scope.narrows_iff_components child parent parentage).symm
+
+theorem Scope.Narrows.refl {kind : ResourceKind} (scope : Scope kind)
+    (parentage : Parentage) : scope.Narrows scope parentage :=
+  ⟨TargetSet.Narrows.refl _ _, Finset.Subset.refl _, le_rfl⟩
+
+theorem Scope.Narrows.trans {kind : ResourceKind} {young middle old : Scope kind}
+    {parentage : Parentage} (first : young.Narrows middle parentage)
+    (second : middle.Narrows old parentage) : young.Narrows old parentage :=
+  ⟨first.targets.trans second.targets, Finset.Subset.trans first.verbs second.verbs,
+    le_trans first.maxCost second.maxCost⟩
+
 theorem Scope.covers_of_narrows {kind : ResourceKind}
-    {child parent : Scope kind} {request : Request kind}
-    (hn : child.Narrows parent) (hc : child.Covers request) :
-    parent.Covers request :=
-  { target := hn.targets hc.target
+    {child parent : Scope kind} {parentage : Parentage} {request : Request kind}
+    (hn : child.Narrows parent parentage) (hc : child.Covers parentage request) :
+    parent.Covers parentage request :=
+  { target := TargetSet.covers_of_narrows hn.targets hc.target
     verb := hn.verbs hc.verb
     cost := le_trans hc.cost hn.maxCost }
+
+theorem Scope.covers_mono {kind : ResourceKind} {scope : Scope kind}
+    {first second : Parentage} (grows : ∀ c p, first c = some p → second c = some p)
+    {request : Request kind} (covers : scope.Covers first request) :
+    scope.Covers second request :=
+  ⟨TargetSet.covers_mono grows covers.target, covers.verb, covers.cost⟩
 
 /-! ## §3. Capabilities and current committed authorization state. -/
 
@@ -210,6 +343,10 @@ structure AuthState where
   policyEpoch : PolicyId → Epoch
   policyRevision : PolicyId → PolicyRevision
   subjectKeyEpoch : SubjectId → Epoch
+  /-- The system cell's parent projection: which room each cell was created
+  under. It decides `TargetSet.under` coverage and explicit-under-room
+  narrowing. -/
+  parent : Parentage
 
 namespace Capability
 
@@ -217,7 +354,7 @@ namespace Capability
 structure Admissible {kind : ResourceKind} (cap : Capability kind)
     (state : AuthState) (request : Request kind) : Prop where
   holder : cap.holder.Covers request.subject
-  scope : cap.scope.Covers request
+  scope : cap.scope.Covers state.parent request
   validFrom : cap.notBefore ≤ request.height
   validUntil : request.height ≤ cap.notAfter
   policyId : cap.policyId = request.policyId
@@ -234,12 +371,14 @@ structure Admissible {kind : ResourceKind} (cap : Capability kind)
 
 /-- A derived capability commits its exact parent/root lineage, retains the
 issuer and both epochs, narrows scope/time, records the parent plus every prior
-ancestor, and may only ADD revocation channels. -/
-structure Attenuates {kind : ResourceKind} (child parent : Capability kind) : Prop where
+ancestor, and may only ADD revocation channels.  Scope narrowing is decided
+at the parent projection `parentage` of the state the edge is checked in. -/
+structure Attenuates {kind : ResourceKind} (child parent : Capability kind)
+    (parentage : Parentage) : Prop where
   parentId : child.parent = some parent.id
   root : child.root = parent.root
   issuer : child.issuer = parent.issuer
-  scopeNarrows : child.scope.Narrows parent.scope
+  scopeNarrows : child.scope.Narrows parent.scope parentage
   notBefore : parent.notBefore ≤ child.notBefore
   notAfter : child.notAfter ≤ parent.notAfter
   issuerEpoch : child.issuerEpoch = parent.issuerEpoch
@@ -251,10 +390,20 @@ structure Attenuates {kind : ResourceKind} (child parent : Capability kind) : Pr
 /-- The central attenuation law: anything inside the child scope was already
 inside the parent scope. -/
 theorem attenuation_scope_monotone {kind : ResourceKind}
-    {child parent : Capability kind} {request : Request kind}
-    (ha : child.Attenuates parent) (hc : child.scope.Covers request) :
-    parent.scope.Covers request :=
+    {child parent : Capability kind} {parentage : Parentage} {request : Request kind}
+    (ha : child.Attenuates parent parentage) (hc : child.scope.Covers parentage request) :
+    parent.scope.Covers parentage request :=
   Scope.covers_of_narrows ha.scopeNarrows hc
+
+/-- Parents are append-only, so an edge checked at one projection stays an
+attenuation at every later one. -/
+theorem Attenuates.mono {kind : ResourceKind} {child parent : Capability kind}
+    {first second : Parentage} (grows : ∀ c p, first c = some p → second c = some p)
+    (ha : child.Attenuates parent first) : child.Attenuates parent second :=
+  { ha with
+    scopeNarrows :=
+      ⟨TargetSet.narrows_mono grows ha.scopeNarrows.targets, ha.scopeNarrows.verbs,
+        ha.scopeNarrows.maxCost⟩ }
 
 /-- Full semantic monotonicity.  Holder delegation is intentionally explicit:
 the caller must show that the parent holder covers the presented subject.  All
@@ -263,7 +412,7 @@ the parent's revocation status because the parent id is a committed ancestor. -/
 theorem attenuation_admits_subset {kind : ResourceKind}
     {child parent : Capability kind} {state : AuthState}
     {request : Request kind}
-    (ha : child.Attenuates parent)
+    (ha : child.Attenuates parent state.parent)
     (hc : child.Admissible state request)
     (parentHolder : parent.holder.Covers request.subject) :
     parent.Admissible state request := by
@@ -298,6 +447,17 @@ theorem attenuation_admits_subset {kind : ResourceKind}
     exact hc.channelNotRevoked channel (ha.channels hmem)
 
 end Capability
+
+/-- A narrowing checked once stays a narrowing while parents are only ever
+added: every recorded `(cell, room)` pair of the earlier projection is still
+recorded in the later one. An explicit target that had no recorded parent at
+the check was refused then; later growth cannot reach back into that check. -/
+theorem Scope.narrows_stable {kind : ResourceKind} {state₁ state₂ : AuthState}
+    {child parent : Scope kind}
+    (grows : ∀ c p, state₁.parent c = some p → state₂.parent c = some p)
+    (narrows : child.Narrows parent state₁.parent) :
+    child.Narrows parent state₂.parent :=
+  ⟨TargetSet.narrows_mono grows narrows.targets, narrows.verbs, narrows.maxCost⟩
 
 /-! ## §4. Explicit verifier portals and request-indexed evidence. -/
 
@@ -452,11 +612,13 @@ theorem Capability.Admissible.at_policy_revision {kind : ResourceKind}
     (sameRevocations : after.revoked = before.revoked)
     (sameIssuer : after.issuerEpoch cap.issuer = before.issuerEpoch cap.issuer)
     (sameGeneration : after.policyEpoch cap.policyId = before.policyEpoch cap.policyId)
+    (parentsGrow : ∀ c p, before.parent c = some p → after.parent c = some p)
     (revision : PolicyRevision) (preRoot : Digest) :
     cap.Admissible after
       { request with policyRevision := revision, preStateRoot := preRoot } where
   holder := admitted.holder
-  scope := ⟨admitted.scope.target, admitted.scope.verb, admitted.scope.cost⟩
+  scope := Scope.covers_mono parentsGrow
+    ⟨admitted.scope.target, admitted.scope.verb, admitted.scope.cost⟩
   validFrom := admitted.validFrom
   validUntil := admitted.validUntil
   policyId := admitted.policyId
@@ -493,7 +655,7 @@ theorem Authorized.current_policy_address {portal : Portal} {state : AuthState}
 scope. -/
 theorem target_substitution_rejected {kind : ResourceKind}
     (cap : Capability kind) (state : AuthState) (request : Request kind)
-    (target : ResourceId kind) (outside : target ∉ cap.scope.targets) :
+    (target : ResourceId kind) (outside : ¬ cap.scope.targets.Covers state.parent target) :
     ¬ cap.Admissible state (request.retarget target) := by
   intro admitted
   apply outside
@@ -579,7 +741,7 @@ def demoRequest : Request .object where
   cost := 4
 
 def demoScope : Scope .object where
-  targets := {demoTarget}
+  targets := .explicit {demoTarget}
   verbs := {.mutateObject}
   maxCost := 8
 
@@ -608,6 +770,7 @@ def demoState : AuthState where
   policyEpoch := fun _ => 5
   policyRevision := fun _ => 11
   subjectKeyEpoch := fun _ => 2
+  parent := fun _ => none
 
 theorem demoCapability_admissible :
     demoCapability.Admissible demoState demoRequest := by
@@ -625,7 +788,7 @@ theorem demoCapability_admissible :
       channelNotRevoked := ?_ }
   · simp [Holder.Covers, demoCapability, demoRequest]
   · exact
-      { target := by simp [demoCapability, demoScope, demoRequest, demoTarget]
+      { target := by simp [TargetSet.Covers, demoCapability, demoScope, demoRequest, demoTarget]
         verb := by simp [demoCapability, demoScope, demoRequest]
         cost := by norm_num [demoCapability, demoScope, demoRequest] }
   · norm_num [demoCapability, demoRequest]
@@ -689,7 +852,7 @@ theorem demo_target_substitution_rejected :
     ¬ demoCapability.Admissible demoState
       (demoRequest.retarget demoOtherTarget) := by
   apply target_substitution_rejected
-  simp [demoCapability, demoScope, demoOtherTarget, demoTarget]
+  simp [TargetSet.Covers, demoCapability, demoScope, demoOtherTarget, demoTarget]
 
 def demoForwardEpochCapability : Capability .object :=
   { demoCapability with issuerEpoch := 4 }
@@ -725,7 +888,8 @@ theorem demo_existing_grant_survives_source_update :
       { demoState with policyRevision := fun _ => 12, policyAddress := fun _ _ => ⟨35⟩ }
       { demoRequest with policyRevision := 12, preStateRoot := ⟨36⟩ } :=
   demoCapability_admissible.at_policy_revision
-    (after := { demoState with policyRevision := fun _ => 12, policyAddress := fun _ _ => ⟨35⟩ }) rfl rfl rfl 12 ⟨36⟩
+    (after := { demoState with policyRevision := fun _ => 12, policyAddress := fun _ _ => ⟨35⟩ }) rfl rfl rfl
+    (fun _ _ recorded => recorded) 12 ⟨36⟩
 
 theorem demo_stale_revision_rejected :
     ¬ Nonempty (Authorized demoPortal

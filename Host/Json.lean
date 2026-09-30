@@ -293,11 +293,18 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
 
 private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) :
     Result (Capability kind) := do
-  let names := ["id", "root", "parent", "issuer", "holder", "targets", "verbs", "maxCost",
+  -- A scope names its targets either explicitly (`targets`) or as a room
+  -- (`room`); exactly one of the two keys is accepted.
+  let targetKey := if ((← object path json).get? "room").isSome then "room" else "targets"
+  let names := ["id", "root", "parent", "issuer", "holder", targetKey, "verbs", "maxCost",
     "notBefore", "notAfter", "issuerEpoch", "policyId", "policyEpoch", "ancestors", "channels"]
   let obj ← exactObject path names json
-  let targets ← list (path ++ ".targets")
-    (fun p j => ResourceId.mk <$> nat p j) (← field path "targets" obj)
+  let targets : TargetSet kind ← if targetKey = "room" then
+      TargetSet.under <$> nat (path ++ ".room") (← field path "room" obj)
+    else do
+      let explicit ← list (path ++ ".targets")
+        (fun p j => ResourceId.mk <$> nat p j) (← field path "targets" obj)
+      pure (TargetSet.explicit explicit.toFinset)
   let verbs ← list (path ++ ".verbs") (verb kind) (← field path "verbs" obj)
   let ancestors ← list (path ++ ".ancestors")
     (fun p j => CapabilityId.mk <$> nat p j) (← field path "ancestors" obj)
@@ -309,7 +316,7 @@ private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) 
     parent := (← optional (path ++ ".parent") nat (← field path "parent" obj)).map CapabilityId.mk
     issuer := ⟨← nat (path ++ ".issuer") (← field path "issuer" obj)⟩
     holder := ← holder (path ++ ".holder") (← field path "holder" obj)
-    scope := ⟨targets.toFinset, verbs.toFinset,
+    scope := ⟨targets, verbs.toFinset,
       ← nat (path ++ ".maxCost") (← field path "maxCost" obj)⟩
     notBefore := ← nat (path ++ ".notBefore") (← field path "notBefore" obj)
     notAfter := ← nat (path ++ ".notAfter") (← field path "notAfter" obj)

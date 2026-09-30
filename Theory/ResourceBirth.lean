@@ -449,7 +449,7 @@ source-owned factory-template checks. -/
 def AuthorityGrant.NativeForBirth {registry : TypeRegistry Digest}
     (grant : AuthorityGrant) (item : BirthItem registry) : Prop :=
   grant.kind = item.resourceKind ∧
-    grant.capability.head.scope.targets = {⟨item.create.cellId⟩} ∧
+    grant.capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} ∧
     grant.capability.head.policyId.value = item.create.cellId ∧
     grant.capability.head.policyEpoch = 0
 
@@ -460,7 +460,7 @@ def AuthorityGrant.PolicyControlForBirth {registry : TypeRegistry Digest}
     (grant : AuthorityGrant) (item : BirthItem registry) : Prop :=
   match grant with
   | ⟨.program, capability⟩ =>
-      capability.head.scope.targets = {⟨item.create.cellId⟩} ∧
+      capability.head.scope.targets = .explicit {⟨item.create.cellId⟩} ∧
         capability.head.scope.verbs = {Verb.installPolicy, Verb.revokeCapability} ∧
         capability.head.policyId.value = item.create.cellId ∧
         capability.head.policyEpoch = 0

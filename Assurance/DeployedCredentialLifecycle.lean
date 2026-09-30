@@ -211,12 +211,12 @@ noncomputable def adminAuthorization (pre : Cell AuthorityMaterializer) (effects
 /-! ## Issue and strict attenuation -/
 
 def rootScope : Scope .object where
-  targets := {⟨700⟩, ⟨701⟩}
+  targets := .explicit {⟨700⟩, ⟨701⟩}
   verbs := {.observeObject, .mutateObject}
   maxCost := 10
 
 def childScope : Scope .object where
-  targets := {⟨700⟩}
+  targets := .explicit {⟨700⟩}
   verbs := {.mutateObject}
   maxCost := 4
 
@@ -250,7 +250,8 @@ def childCapability : Capability .object where
   ancestors := {rootCapability.id}
   channels := rootCapability.channels
 
-theorem strict_edge : childCapability.StrictAttenuates rootCapability := by
+theorem strict_edge :
+    childCapability.StrictAttenuates rootCapability CredentialAuthorityState.noParents := by
   refine
     { payload :=
         { parentId := rfl
@@ -267,12 +268,8 @@ theorem strict_edge : childCapability.StrictAttenuates rootCapability := by
       holder := ?_ }
   · exact
       { targets := by
-          intro target member
-          change target ∈ childScope.targets at member
-          have exact : target = ⟨700⟩ := by simpa [childScope] using member
-          subst target
-          change ⟨700⟩ ∈ rootScope.targets
-          simp [rootScope]
+          change (TargetSet.explicit {⟨700⟩}).Narrows (TargetSet.explicit {⟨700⟩, ⟨701⟩}) _
+          decide
         verbs := by
           intro verb member
           change verb ∈ childScope.verbs at member
@@ -393,7 +390,8 @@ noncomputable abbrev attenuatedCell : Cell AuthorityMaterializer :=
   attenuation_post_registered attenuated
 
 theorem attenuated_child_lineage :
-    LineageValid (descendedCapability childCapability parentStored) :=
+    LineageValid CredentialAuthorityState.noParents
+      (descendedCapability childCapability parentStored) :=
   attenuateEvidence.childLineageValid
 
 /-! ## Capability transport and one exact token use -/
@@ -443,7 +441,8 @@ theorem child_admissible_for_use :
   refine
     { holder := by simp [childCapability, useRequest, adminRequest, Holder.Covers]
       scope :=
-        { target := by simp [childCapability, childScope, useRequest, adminRequest]
+        { target := by
+            simp [TargetSet.Covers, childCapability, childScope, useRequest, adminRequest]
           verb := by simp [childCapability, childScope, useRequest, adminRequest]
           cost := by simp [childCapability, childScope, useRequest, adminRequest] }
       validFrom := by simp [childCapability, useRequest, adminRequest]
@@ -503,7 +502,7 @@ def tokenAuthorization :
 def requestDigestScheme : RequestDigestScheme where
   digestWire := fun wire => ⟨wire.nonce + wire.effectsDigest⟩
 
-def childLineage : childCapability.Lineage :=
+def childLineage : childCapability.Lineage CredentialAuthorityState.noParents :=
   .attenuate childCapability rootCapability (.root rootCapability rfl rfl rfl)
     strict_edge
 
@@ -646,7 +645,7 @@ theorem wrong_scope_rejected :
       (useRequest.retarget ⟨701⟩) := by
   apply target_substitution_rejected childCapability
     (authState attenuatedCell) useRequest ⟨701⟩
-  simp [childCapability, childScope]
+  simp [TargetSet.Covers, childCapability, childScope]
 
 /-! ## Replay and stale-root teeth at the semantic effect boundary -/
 

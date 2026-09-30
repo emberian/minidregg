@@ -317,7 +317,7 @@ theorem canonical_token_request_binding :
 /-- The successful wire names the same child whose proof-relevant lineage
 contains the strict attenuation edge. -/
 theorem canonical_token_strict_attenuation :
-    childCapability.StrictAttenuates rootCapability :=
+    childCapability.StrictAttenuates rootCapability CredentialAuthorityState.noParents :=
   strict_edge
 
 /-! ## Persistent local authority record -/
@@ -578,7 +578,7 @@ theorem first_use_semantic_join :
     plan (NativeError := Unit) initialRecordBytes canonicalUseBytes =
         .ok firstUsePlan /\
       acceptedToken.carrier = .token /\
-      childCapability.StrictAttenuates rootCapability /\
+      childCapability.StrictAttenuates rootCapability CredentialAuthorityState.noParents /\
       acceptedToken.requestBinding.wire = canonicalRequestWire /\
       guardedUseIntent.readGuards =
         [{ cellId := authorityCellId, expectedRoot := attenuatedCell.root }] /\
