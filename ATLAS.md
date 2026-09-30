@@ -271,6 +271,8 @@ minidregg/
   Assurance/     — generated: namespace pins, keystone audit (satisfiable+teeth+premise),
                    carrier registry with realizer slots, Bound/Forced types, floor doc
                    with both soundness numbers. No hand-maintained ledger anywhere.
+                   (PLANNED, not built: as of 2026-09-30 every Assurance/ file is
+                   hand-written and nothing is generated; see the lakefile note.)
   Distributed/   — blocklace + strand + LaceMerge + the finality gate (@[export] from
                    day one, fail-closed); Stingray budget; CapTP; migration. ~10K.
   Apps/          — factories + the widened toolkit; apps are declarations + RED

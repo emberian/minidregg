@@ -62,7 +62,8 @@ name = "Compiler"
 [[lean_lib]]
 name = "Selvage"
 
-# Assurance/ — generated ledger machinery; no hand-maintained ledger anywhere.
+# Assurance/ — cross-boundary apex theorems. Hand-written; axiom pins are
+# `#guard_msgs in #print axioms` lines beside each theorem, not generated.
 [[lean_lib]]
 name = "Assurance"
 

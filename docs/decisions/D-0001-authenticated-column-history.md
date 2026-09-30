@@ -15,7 +15,7 @@ Semantic history uses a dual-root schedule: commit the exact link word before `g
 checkpoint. WARP-shaped accumulation remains the semantic/history accumulator; additive FRI is its
 checkpoint/PCS backend, not a replacement semantic accumulator. The retained-history BCS game now
 reconstructs exact genesis/chain/link words and challenges and keeps its PCS, binding, and ROM
-premises on one history coin. `SemanticHistoryTower256CheckpointGame` now joins that history
+premises on one history coin. (⛑ DELETED 2026-09-30: this module was quantified over `MerklePcs ell`, which `Tower256MerkleCardinalityCore.merklePcs_empty_of_positive` proves empty at every positive height, so its results held of nothing. The live path is the raw-history family (`RawSemanticHistoryCheckpointGame`, `Tower256AdditiveFriRawAdmission`).) `SemanticHistoryTower256CheckpointGame` joined that history
 boundary to the Tower256 additive controller on one `Omega`, one existing ledger, exact root and
 schedule equality, and one four-event bound without independence. The history event is now the
 literal retained-history Fiat--Shamir verifier/knowledge failure; the additive event is literal
@@ -69,9 +69,7 @@ subsumes both WARP link attribution and additive checkpoints in the required tra
 - `Assurance/SemanticHistoryStraightlinePcs.lean`
 - `Assurance/SemanticAdditiveFriCheckpoint.lean`
 - `Assurance/SemanticHistoryBcsGame.lean`
-- `Assurance/SemanticHistoryTower256CheckpointGame.lean`
-- `Assurance/SemanticHistoryTower256DeployedBcs.lean`
-- `Assurance/Tower256AdditiveFriActualReduction.lean`
+- `Assurance/RawSemanticHistoryCheckpointGame.lean` (replaces the deleted `SemanticHistoryTower256CheckpointGame`, `SemanticHistoryTower256DeployedBcs` and `Tower256AdditiveFriActualReduction`)
 - `Compiler/Tower256CshakeMerkleController.lean`
 - `Compiler/Tower256LogupClauseDispatch.lean`
 - `Compiler/AdditiveFriReceiptClause.lean`

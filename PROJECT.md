@@ -334,7 +334,9 @@ challenges from the retained trace; binds roots/opened columns to that exact tra
 PCS, binding, and ROM `Good` events on one history coin. Exact finality is indexed by head, entry,
 occurrence, and derived receipt root.
 
-`SemanticHistoryTower256DeployedBcs` replaces the external history proxy with the literal retained-
+⛑ DELETED 2026-09-30: this module was quantified over `MerklePcs ell`, which `Tower256MerkleCardinalityCore.merklePcs_empty_of_positive` proves empty at every positive height, so its results held of nothing. The live path is the raw-history family (`RawSemanticHistoryCheckpointGame`, `Tower256AdditiveFriRawAdmission`). What follows describes the deleted module.
+
+`SemanticHistoryTower256DeployedBcs` replaced the external history proxy with the literal retained-
 history Fiat–Shamir verifier/knowledge-failure event, states its exact native-game price and common-
 coin transport, and joins that actual event to the additive controller on one four-event game. The
 remaining `PcsCrRomReduction.classify` is now precisely the same-coin computational obligation:

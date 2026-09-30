@@ -8,14 +8,17 @@ root is a 256-bit cSHAKE digest, while a positive-height Tower256 column has
 strictly more than `2 ^ 256` possible words.  Pigeonhole therefore refutes the
 carrier itself: `MerklePcs ell` is EMPTY for every `0 < ell`.
 
-This module holds only that cardinality argument, and it sits directly above
-`Compiler.Tower256AdditiveFriController` **so that every module quantified over
-`MerklePcs` can import it and carry its own machine-checked retraction.**  The
-argument used to live in `Assurance.Tower256MerkleBindingCardinality`, which
-also imports the semantic-history checkpoint game and is therefore *downstream*
-of the admission modules it refutes — the refutation could not be stated in the
-files that needed it.  `Tower256MerkleBindingCardinality` now imports this file
-and keeps the `JointGameFamily` consequence.
+This module holds only that cardinality argument.  It sits directly above
+`Compiler.Tower256AdditiveFriController`, the one place `MerklePcs` is still
+defined.  Six Assurance modules were quantified over the carrier:
+`SemanticHistoryTower256CheckpointGame`, `SemanticHistoryTower256DeployedBcs`,
+`SemanticHistoryPcsEventRealization`, `Tower256MerkleBindingCardinality`
+(which refuted the checkpoint game's `JointGameFamily` from this file),
+`Tower256AdditiveFriControllerAdmission` and `Tower256AdditiveFriActualReduction`.
+All six were deleted on 2026-09-30.  Nothing outside that chain consumed them,
+and the raw-history modules (`RawSemanticHistoryCheckpointGame`,
+`Tower256AdditiveFriRawAdmission` and their successors) are the replacement,
+which retains extracted collision events instead of assuming binding.
 
 ⚑ What this does NOT say: nothing here rules out `MerklePcs 0`.  At height zero
 the level-zero word space is a single `Tower256` element, exactly `2 ^ 256`
