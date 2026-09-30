@@ -12,7 +12,7 @@ import Kernel.ResourceObservationAdmission
 namespace Minidregg.Kernel.ApplicationLifecycleClaimCurrent
 
 open Minidregg.Compiler
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 open Minidregg.Compiler.CanonicalCellRegistry
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
@@ -31,7 +31,7 @@ def appState (app : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
     Option ApplicationGrain.State := do
   match cell with
   | ⟨.declaredObject, payload⟩ =>
-      let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       ApplicationGrain.readState app page
   | _ => none
 

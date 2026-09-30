@@ -10,7 +10,6 @@ namespace Minidregg.Kernel.ApplicationGrainSessionEnrollmentConstruction
 
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.TypedAuthorization
@@ -41,14 +40,14 @@ private def sessionState (session : Nat)
     Option ApplicationGrainSession.State := do
   match cell with
   | ⟨.declaredObject, payload⟩ =>
-      let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       ApplicationGrainSession.readState session page
   | _ => none
 
 private def descriptorPage (cell : PackedCell CanonicalCellRegistry.registry) :
-    Option HyperdocumentContentPageMaterializer.Page := do
+    Option ContentResource.ContentStore := do
   match cell with
-  | ⟨.content, payload⟩ => HyperdocumentContentPageMaterializer.pageAt payload.logical
+  | ⟨.content, payload⟩ => some payload.logical
   | _ => none
 
 def prepare (config : Config) (opened : Opened config)
@@ -106,11 +105,10 @@ def prepare (config : Config) (opened : Opened config)
     (cellAt config opened descriptor)
   let page ← NativeHost.need "current descriptor page absent"
     (descriptorPage descriptorCell)
-  if page.contentDomain != config.deployment.domain ||
-      page.document != ⟨⟨descriptor⟩⟩ then
-    throw "session descriptor identity differs"
-  let previous := Hyperdocument.lookup page.toCanonicalState .atoms
+  let previous := Hyperdocument.lookup page .atoms
     (enrollmentAtom config.deployment.domain session)
+  if previous.any (fun record => record.document != ⟨⟨descriptor⟩⟩) then
+    throw "session descriptor identity differs"
   if before.status == .inactive then
     if before.generation != 0 || previous.isSome then
       throw "initial enrollment has a prior atom or generation"

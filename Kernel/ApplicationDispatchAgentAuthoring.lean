@@ -67,7 +67,7 @@ private def stateAt (task : Nat)
     (cell : PackedCell CanonicalCellRegistry.registry) : Option AgentGrain.State := do
   match cell with
   | ⟨.declaredObject, payload⟩ =>
-      let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       AgentGrain.readState task page
   | _ => none
 

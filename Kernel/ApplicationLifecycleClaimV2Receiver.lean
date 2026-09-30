@@ -64,7 +64,7 @@ def Reservation.projection {config : Config} (reservation : Reservation config) 
         packagePhysicalRoot :=
           tip.snapshot.model.roots ⟨source.begin.source.packageManifest⟩
         authorityPhysicalRoot :=
-          tip.snapshot.model.roots ⟨config.deployment.authorityCatalogueId⟩
+          tip.snapshot.model.roots ⟨config.deployment.authorityCellId⟩
         postImageBoundary := reservation.receipt.imageBoundary }
     descriptor := reservation.ingress.originalBegin.descriptor }
 

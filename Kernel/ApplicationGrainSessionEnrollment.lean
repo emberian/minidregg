@@ -13,8 +13,7 @@ namespace Minidregg.Kernel.ApplicationGrainSessionEnrollment
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.ResourceBirthCodec
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.Hyperdocument
@@ -158,14 +157,14 @@ def enrollmentAtom (domain : Digest) (session : Nat) : AtomId :=
 
 /-- Parse the stable atom and require its payload to match the current session
 generation. An old payload fails even though its atom address remains stable.
-Selecting that page/root and proving the session-policy target binding remain
+Selecting that cell/root and proving the session-policy target binding remain
 native read-guard obligations. -/
 def decodeInstalled (domain : Digest) (descriptorResource session : Nat)
-    (generation : Int) (page : HyperdocumentContentPageMaterializer.Page) : Option Enrollment := do
-  if page.contentDomain != domain || page.document != ⟨⟨descriptorResource⟩⟩ then none else
-  let record ← Hyperdocument.lookup page.toCanonicalState .atoms
+    (generation : Int) (page : ContentResource.ContentStore) : Option Enrollment := do
+  let record ← Hyperdocument.lookup page .atoms
     (enrollmentAtom domain session)
-  if record.kind != .inlineObject ⟨14⟩ || record.tombstonedAt.isSome then none else
+  if record.document != ⟨⟨descriptorResource⟩⟩ || record.kind != .inlineObject ⟨14⟩ ||
+      record.tombstonedAt.isSome then none else
   let enrollment ← enrollmentCodec.decode record.payload
   if enrollment.session == session &&
      enrollment.descriptorResource == descriptorResource &&
@@ -177,13 +176,12 @@ def decodeInstalled (domain : Digest) (descriptorResource session : Nat)
 requires that exact epoch in the canonical payload. An old payload cannot be
 accepted as the current enrollment. -/
 theorem installed_generation_exact (domain : Digest) (descriptorResource session : Nat)
-    (generation : Int) (page : HyperdocumentContentPageMaterializer.Page)
+    (generation : Int) (page : ContentResource.ContentStore)
     (enrollment : Enrollment)
     (accepted : decodeInstalled domain descriptorResource session generation page =
       some enrollment) : enrollment.sessionGeneration = generation := by
   unfold decodeInstalled at accepted
-  split at accepted <;> simp_all
-  cases hrecord : Hyperdocument.lookup page.toCanonicalState .atoms
+  cases hrecord : Hyperdocument.lookup page .atoms
       (enrollmentAtom domain session) with
   | none => simp [hrecord] at accepted
   | some record =>

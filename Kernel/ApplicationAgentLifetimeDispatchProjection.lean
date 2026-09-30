@@ -101,7 +101,7 @@ def ofLifetimeDispatchAt {config : Config} {opened : Opened config}
     | _ => none
   let ⟨.declaredObject, payload⟩ := cell
     | none
-  let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+  let page := payload.logical
   let state ← AgentGrain.readState task page
   if state != claimed.state || payload.root != claimed.root ||
       state.remaining < 0 || state.reserved < 0 then none else

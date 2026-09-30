@@ -18,7 +18,6 @@ namespace Minidregg.Kernel.ApplicationDispatchAuthority
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.ResourceBirthCodec
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.Hyperdocument
@@ -46,7 +45,7 @@ structure Scope where
 def scopeStream : StreamCodec Scope :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+      (StreamCodec.product IntStream.intStream
           (StreamCodec.product digestStream
             (StreamCodec.product StreamCodec.nat
               (StreamCodec.product StreamCodec.nat
@@ -150,10 +149,9 @@ def ticketAtom (domain : Digest) (resource : Nat) : AtomId :=
     "DREGG/APPLICATION/SHARE-TICKET-ATOM/v2".toUTF8.toList preimage).digest.value⟩⟩
 
 def decodeInstalled (domain : Digest) (resource : Nat)
-    (page : HyperdocumentContentPageMaterializer.Page) : Option Ticket := do
-  if page.contentDomain != domain || page.document != ⟨⟨resource⟩⟩ then none else
-  let record ← Hyperdocument.lookup page.toCanonicalState .atoms (ticketAtom domain resource)
-  if record.document != page.document || record.kind != .inlineObject ⟨15⟩ ||
+    (page : ContentResource.ContentStore) : Option Ticket := do
+  let record ← Hyperdocument.lookup page .atoms (ticketAtom domain resource)
+  if record.document != ⟨⟨resource⟩⟩ || record.kind != .inlineObject ⟨15⟩ ||
       record.tombstonedAt.isSome then none else
   let ticket ← ticketCodec.decode record.payload
   if ticket.resource == resource && ticket.ceiling.valid then some ticket else none

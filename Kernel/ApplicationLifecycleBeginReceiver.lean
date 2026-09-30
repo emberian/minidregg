@@ -242,13 +242,10 @@ def installedPackageMatches (deployment : Deployment) (source : Source)
   if source.kind == .start || source.kind == .stop then
     match cell with
     | ⟨.content, payload⟩ =>
-        match HyperdocumentContentPageMaterializer.pageAt payload.logical with
+        match ApplicationDispatchManifest.decodeInstalled deployment.domain
+            source.packageManifest source.app source.before.packageVersion payload.logical with
         | none => false
-        | some page =>
-            match ApplicationDispatchManifest.decodeInstalled deployment.domain
-                source.packageManifest source.app source.before.packageVersion page with
-            | none => false
-            | some manifest => manifest.packageRoot == source.packageDigest
+        | some manifest => manifest.packageRoot == source.packageDigest
     | _ => false
   else true
 

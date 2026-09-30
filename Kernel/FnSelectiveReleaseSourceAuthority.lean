@@ -40,12 +40,8 @@ private def currentContent (context : Context deployment durable)
       spec.packet.release.source.resource | none
   match packed with
   | ⟨.content, materialized⟩ =>
-      let page ← HyperdocumentContentPageMaterializer.pageAt materialized.logical
       let atom : AtomId := ⟨⟨spec.packet.release.source.atom⟩⟩
-      let record ← page.entries.findSome? fun entry => match entry with
-        | HyperdocumentContentPageMaterializer.Entry.atom atomId record =>
-            if atomId == atom then some record else none
-        | _ => none
+      let record ← Hyperdocument.lookup materialized.logical .atoms atom
       if record.tombstonedAt.isNone then some (materialized.root, record.payload)
       else none
   | _ => none
@@ -106,7 +102,7 @@ def Prepared.wanted (_prepared : Prepared context profile federation height spec
     context.authority.snapshot.authState height spec
 
 def project (prepared : Prepared context profile federation height spec)
-    (logical : LogicalState (CanonicalCellRegistry.schema prepared.observed.before.kind)) :
+    (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec) ++

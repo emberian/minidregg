@@ -86,7 +86,7 @@ variable {context : Context deployment durable}
   {descriptor : ResourceBirth.Descriptor CanonicalCellRegistry.registry}
 
 def project (prepared : Prepared context profile federation height spec descriptor)
-    (logical : LogicalState (CanonicalCellRegistry.schema prepared.observed.before.kind)) :
+    (logical : Store.Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
     Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots prepared.wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 (sourceBytes spec descriptor) ++

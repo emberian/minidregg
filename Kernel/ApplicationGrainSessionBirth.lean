@@ -17,8 +17,7 @@ open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Theory.TypedAuthorization
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 set_option autoImplicit false
 
 structure Spec where
@@ -61,18 +60,13 @@ theorem Ready.targets_distinct (ready : Ready) : ready.spec.targets.Nodup := rea
 theorem Ready.capabilities_distinct (ready : Ready) :
     ready.spec.capabilities.Nodup := ready.valid.2
 
-private def sessionCell (config : NativeHostGenesis.Config) (spec : Spec) :
+private def sessionCell (_config : NativeHostGenesis.Config) (spec : Spec) :
     PackedCell CanonicalCellRegistry.registry :=
-  ⟨.declaredObject, materialize DeclaredEffectPageMaterializer.materializer
-    (DeclaredEffectPageMaterializer.stateOfOption
-      (some (ApplicationGrainSession.initialPage config.deployment.domain
-        spec.session spec.app spec.kind)))⟩
+  ⟨.declaredObject, materialize DeclaredEffectCell.materializer (ApplicationGrainSession.initialStore spec.session spec.app spec.kind)⟩
 
-private def descriptorCell (config : NativeHostGenesis.Config) (target : Nat) :
+private def descriptorCell (_config : NativeHostGenesis.Config) (_target : Nat) :
     PackedCell CanonicalCellRegistry.registry :=
-  ⟨.content, materialize HyperdocumentContentPageMaterializer.materializer
-    (HyperdocumentContentPageMaterializer.stateOfOption
-      (some (ContentResource.initialPage config.deployment.domain target)))⟩
+  ⟨.content, materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
 
 private def birthItem (target : Nat) (owner : SubjectId)
     (cell : PackedCell CanonicalCellRegistry.registry) :

@@ -57,7 +57,7 @@ def check {config : NativeHost.Config} {target : NativeHost.Durable}
       (ingressCodec.encode ingress).length ≤ 16384 &&
       ingress.expectedAuthorityRoot ==
         verified.opened.durable.snapshot.model.roots
-          config.deployment.authorityAnchor.catalogueCellId do
+          (CredentialAuthorityDomainReceiver.cellIdOf config.deployment) do
     return .error "selected fn poll testimony refused"
   let some pin := config.fnGateway
     | return .error "selected fn poll testimony refused"

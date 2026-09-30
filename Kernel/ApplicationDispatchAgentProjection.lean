@@ -36,10 +36,10 @@ structure Parent where
 def parentStream : StreamCodec Parent :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product DeclaredEffectPageMaterializer.intStream
-        (StreamCodec.product DeclaredEffectPageMaterializer.intStream
-          (StreamCodec.product DeclaredEffectPageMaterializer.intStream
-            (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+      (StreamCodec.product IntStream.intStream
+        (StreamCodec.product IntStream.intStream
+          (StreamCodec.product IntStream.intStream
+            (StreamCodec.product IntStream.intStream
               (StreamCodec.product digestStream digestStream))))))
     (fun parent => (parent.task, parent.generation, parent.status,
       parent.remaining, parent.reserved, parent.innerRoot, parent.physicalRoot))
@@ -85,7 +85,7 @@ def ofDispatchAt {config : Config} {opened : Opened config}
     | _ => none
   let ⟨.declaredObject, payload⟩ := cell
     | none
-  let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+  let page := payload.logical
   let state ← AgentGrain.readState task page
   if state != claimed.state || payload.root != claimed.root ||
       state.remaining < 0 || state.reserved < 0 then none else

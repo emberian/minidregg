@@ -15,8 +15,7 @@ open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Theory.TypedAuthorization
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 set_option autoImplicit false
 
 /-- Six independent capability identities are required by the existing
@@ -62,17 +61,13 @@ def prepare (spec : Spec) : Except String Ready :=
 theorem Ready.targets_distinct (ready : Ready) : ready.spec.targets.Nodup := ready.valid.1
 theorem Ready.capabilities_distinct (ready : Ready) : ready.spec.capabilities.Nodup := ready.valid.2
 
-private def appCell (config : NativeHostGenesis.Config) (app : Nat) :
+private def appCell (_config : NativeHostGenesis.Config) (app : Nat) :
     PackedCell CanonicalCellRegistry.registry :=
-  ⟨.declaredObject, materialize DeclaredEffectPageMaterializer.materializer
-    (DeclaredEffectPageMaterializer.stateOfOption
-      (some (ApplicationGrain.initialPage config.deployment.domain app)))⟩
+  ⟨.declaredObject, materialize DeclaredEffectCell.materializer (ApplicationGrain.initialStore app)⟩
 
-private def manifestCell (config : NativeHostGenesis.Config) (target : Nat) :
+private def manifestCell (_config : NativeHostGenesis.Config) (_target : Nat) :
     PackedCell CanonicalCellRegistry.registry :=
-  ⟨.content, materialize HyperdocumentContentPageMaterializer.materializer
-    (HyperdocumentContentPageMaterializer.stateOfOption
-      (some (ContentResource.initialPage config.deployment.domain target)))⟩
+  ⟨.content, materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
 
 private def birthItem (target : Nat) (owner : SubjectId)
     (cell : PackedCell CanonicalCellRegistry.registry) :

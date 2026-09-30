@@ -15,7 +15,6 @@ namespace Minidregg.Kernel.ApplicationLifecycleCompletionAdmission
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalCellRegistry
 open Minidregg.Compiler.CredentialAuthorityDomain
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
@@ -49,10 +48,11 @@ def packageAtom (domain : Digest) (resource app : Nat)
     (cell : PackedCell CanonicalCellRegistry.registry) : Option (Option AtomRecord) := do
   match cell with
   | ⟨.content, payload⟩ =>
-      let page ← HyperdocumentContentPageMaterializer.pageAt payload.logical
-      if page.contentDomain != domain || page.document != ⟨⟨resource⟩⟩ then none
-      else some (Hyperdocument.lookup page.toCanonicalState .atoms
-        (ApplicationDispatchManifest.manifestAtom domain app))
+      match Hyperdocument.lookup payload.logical .atoms
+          (ApplicationDispatchManifest.manifestAtom domain app) with
+      | none => some none
+      | some record =>
+          if record.document != ⟨⟨resource⟩⟩ then none else some (some record)
   | _ => none
 
 /-- An installed version is read from the actual current content cell, not
@@ -65,12 +65,9 @@ def packageMatches (deployment : CanonicalCellRegistry.Deployment)
   else
     match cell with
     | ⟨.content, payload⟩ =>
-        match HyperdocumentContentPageMaterializer.pageAt payload.logical with
-        | none => false
-        | some page =>
             ApplicationDispatchManifest.decodeInstalled deployment.domain
               source.originalBegin.base.source.packageManifest source.app
-              source.claimedState.packageVersion page ==
+              source.claimedState.packageVersion payload.logical ==
                 some (ApplicationLifecycleBeginV2Ingress.prospectiveManifest
                   source.originalBegin)
     | _ => false

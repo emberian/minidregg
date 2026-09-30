@@ -17,7 +17,6 @@ open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.Hyperdocument
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Kernel.ApplicationDispatchCodec
 open Minidregg.Kernel.ApplicationPermissionSchema
 
@@ -79,7 +78,7 @@ structure Manifest where
 def manifestStream : StreamCodec Manifest :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+      (StreamCodec.product IntStream.intStream
         (StreamCodec.product digestStream (StreamCodec.list interfaceStream))))
     (fun manifest => (manifest.app, manifest.packageVersion,
       manifest.packageRoot, manifest.interfaces))
@@ -116,21 +115,20 @@ def Manifest.valid (manifest : Manifest) : Bool :=
 
 /-- One stable typed atom slot per application. A package upgrade edits this
 atom's canonical payload, whose `packageVersion` is checked against the
-currently witnessed app page. A version-derived atom would exhaust the
-bounded content page after a few upgrades. The native receiver must still
+currently witnessed app record. One stable atom keeps the manifest address
+fixed across upgrades. The native receiver must still
 derive the manifest resource from the governed app birth/policy and read-guard
-its current physical root; a caller-supplied page is not authority. -/
+its current physical root; a caller-supplied store is not authority. -/
 def manifestAtom (domain : Digest) (app : Nat) : AtomId :=
   let preimage := (StreamCodec.product digestStream StreamCodec.nat).encode (domain, app)
   ⟨⟨(Sp800185Cshake256.hash
     "DREGG/APPLICATION/MANIFEST-ATOM/v1".toUTF8.toList preimage).digest.value⟩⟩
 
 def decodeInstalled (domain : Digest) (manifestResource app : Nat) (version : Int)
-    (page : Page) : Option Manifest := do
-  if page.contentDomain != domain || page.document != ⟨⟨manifestResource⟩⟩ then none else
-  let record ← Hyperdocument.lookup page.toCanonicalState .atoms
+    (page : ContentResource.ContentStore) : Option Manifest := do
+  let record ← Hyperdocument.lookup page .atoms
     (manifestAtom domain app)
-  if record.document != page.document || record.kind != .inlineObject ⟨13⟩ ||
+  if record.document != ⟨⟨manifestResource⟩⟩ || record.kind != .inlineObject ⟨13⟩ ||
       record.tombstonedAt.isSome then none else
   let manifest ← manifestCodec.decode record.payload
   if manifest.app == app && manifest.packageVersion == version && manifest.valid then

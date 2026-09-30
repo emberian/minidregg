@@ -87,8 +87,8 @@ def requestStream : StreamCodec Request :=
         (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
           (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
             (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
-              (StreamCodec.product DeclaredEffectPageMaterializer.intStream
-                (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+              (StreamCodec.product IntStream.intStream
+                (StreamCodec.product IntStream.intStream
                   StreamCodec.nat)))))))
     (fun request => (request.base, request.purseTask, request.purseCapability,
       request.purseObserve, request.payerSubject, request.reserveAmount,

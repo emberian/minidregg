@@ -106,7 +106,7 @@ private def sessionState (session : Nat)
     Option ApplicationGrainSession.State := do
   match cell with
   | ⟨.declaredObject, payload⟩ =>
-      let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       ApplicationGrainSession.readState session page
   | _ => none
 
@@ -290,8 +290,7 @@ def prepareWithLifetimeGrant (config : Config) {target : Durable}
     (cellAt config verified.opened parentTask)
   let ⟨.declaredObject, payload⟩ := cell
     | throw "lifetime parent is not a grain"
-  let page ← NativeHost.need "lifetime parent page unavailable"
-    (DeclaredEffectPageMaterializer.pageAt payload.logical)
+  let page := payload.logical
   let state ← NativeHost.need "lifetime parent state unavailable"
     (AgentGrain.readState parentTask page)
   if !(state.status == 3 || state.status == 4) ||

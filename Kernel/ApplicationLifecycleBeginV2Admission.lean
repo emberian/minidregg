@@ -12,7 +12,6 @@ namespace Minidregg.Kernel.ApplicationLifecycleBeginV2Admission
 open Minidregg.Compiler
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Compiler.CanonicalCellRegistry
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.IndexedProgram
@@ -32,9 +31,7 @@ def installedExact (deployment : CanonicalCellRegistry.Deployment)
   if source.kind == .start || source.kind == .stop then
     match cell with
     | ⟨.content, payload⟩ =>
-        match HyperdocumentContentPageMaterializer.pageAt payload.logical with
-        | none => false
-        | some page =>
+        let page := payload.logical
             match ApplicationDispatchManifest.decodeInstalled deployment.domain
                 source.packageManifest source.app source.before.packageVersion page with
             | none => false

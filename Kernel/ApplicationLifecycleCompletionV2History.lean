@@ -43,7 +43,7 @@ def projection {config : Config} {opened : Opened config} {index : Nat}
         appPhysicalRoot := post.snapshot.model.roots ⟨begin.app⟩
         packagePhysicalRoot := post.snapshot.model.roots ⟨begin.packageManifest⟩
         authorityPhysicalRoot :=
-          post.snapshot.model.roots ⟨config.deployment.authorityCatalogueId⟩
+          post.snapshot.model.roots ⟨config.deployment.authorityCellId⟩
         postImageBoundary := receipt.imageBoundary }
     originalClaim := source.originalClaim }
 

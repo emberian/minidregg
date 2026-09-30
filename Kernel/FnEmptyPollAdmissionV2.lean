@@ -53,7 +53,7 @@ def check {config : NativeHost.Config} {target : NativeHost.Durable}
       (ingressCodec.encode ingress).length ≤ 12288 &&
       ingress.expectedAuthorityRoot ==
         verified.opened.durable.snapshot.model.roots
-          config.deployment.authorityAnchor.catalogueCellId do
+          (CredentialAuthorityDomainReceiver.cellIdOf config.deployment) do
     return .error "ordered empty fn page refused"
   let some pin := config.fnGateway
     | return .error "ordered empty fn page refused"

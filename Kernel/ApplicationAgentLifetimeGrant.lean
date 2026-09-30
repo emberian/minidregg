@@ -63,7 +63,7 @@ def participantStream : StreamCodec Participant :=
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
           (StreamCodec.product StreamCodec.nat
-            (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+            (StreamCodec.product IntStream.intStream
               CredentialAuthorityEntryCodec.capabilityIdStream)))))
     (fun participant => (participant.app, participant.session,
       participant.subject, participant.parentTask, participant.originalGeneration,
@@ -148,10 +148,9 @@ must have installed the exact atom under its own historical certificate, and
 event26 must check this current physical cell, current law/capabilities, and
 the separate current parent/purse states. -/
 def decodeInstalled (domain : Digest) (resource : Nat)
-    (page : HyperdocumentContentPageMaterializer.Page) : Option Grant := do
-  if page.contentDomain != domain || page.document != ⟨⟨resource⟩⟩ then none else
-  let record ← Hyperdocument.lookup page.toCanonicalState .atoms (grantAtom domain resource)
-  if record.document != page.document || record.kind != .inlineObject ⟨16⟩ ||
+    (page : ContentResource.ContentStore) : Option Grant := do
+  let record ← Hyperdocument.lookup page .atoms (grantAtom domain resource)
+  if record.document != ⟨⟨resource⟩⟩ || record.kind != .inlineObject ⟨16⟩ ||
       record.tombstonedAt.isSome then none else
   let grant ← codec.decode record.payload
   if grant.source.resource == resource && grant.approval.ceiling.valid then

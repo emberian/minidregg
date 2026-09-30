@@ -26,20 +26,17 @@ set_option maxHeartbeats 1000000
 attribute [local irreducible] NativeHost.Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 
 /-- Fresh preparation is performed against exactly the durable image that
-was replay-verified into `opened`. Both authority views are complete loads
-of that image; the explicit field equalities make this source identity
-available to later authorization rather than comparing only roots. -/
+was replay-verified into `opened`. Both authority views are loads of the one
+pinned cell from that image, so they are the same snapshot
+(`Loaded.snapshot_unique`); no runtime comparison is needed. -/
 structure Prepared (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : FnSelectiveReleaseIngress.Ingress) where
   operation : DeclaredResourceController.PreparedInvocation config.deployment
     config.profile ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩
     opened.durable (FnSelectiveReleaseIngress.command ingress)
-  catalogueExact : operation.authority.snapshot.catalogue = opened.authority.snapshot.catalogue
-  pagesExact : operation.authority.snapshot.pages = opened.authority.snapshot.pages
 
 inductive PrepareReject where
   | ordinary (reason : DeclaredResourceController.Reject)
-  | authorityMismatch
 
 def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : FnSelectiveReleaseIngress.Ingress) :
@@ -47,21 +44,20 @@ def prepare (config : NativeHost.Config) (opened : NativeHost.Opened config)
   let operation ← (DeclaredResourceController.prepare config.deployment config.profile
       ⟨config.federation, NativeHost.logicalHeight config opened.durable⟩ opened.durable
       (FnSelectiveReleaseIngress.command ingress)).mapError .ordinary
-  if catalogueExact : operation.authority.snapshot.catalogue =
-      opened.authority.snapshot.catalogue then
-    if pagesExact : operation.authority.snapshot.pages =
-        opened.authority.snapshot.pages then
-      .ok ⟨operation, catalogueExact, pagesExact⟩
-    else .error .authorityMismatch
-  else .error .authorityMismatch
+  .ok ⟨operation⟩
+
+theorem Prepared.snapshotExact (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (ingress : FnSelectiveReleaseIngress.Ingress)
+    (prepared : Prepared config opened ingress) :
+    prepared.operation.authority.snapshot = opened.authority.snapshot :=
+  CredentialAuthorityDomainReceiver.Loaded.snapshot_unique _ _
 
 theorem Prepared.logicalExact (config : NativeHost.Config)
     (opened : NativeHost.Opened config) (ingress : FnSelectiveReleaseIngress.Ingress)
     (prepared : Prepared config opened ingress) :
     prepared.operation.authority.snapshot.logical =
       opened.authority.snapshot.logical := by
-  simp [CredentialAuthorityDomain.Snapshot.logical,
-    CredentialAuthorityDomain.Snapshot.entries, prepared.pagesExact]
+  rw [prepared.snapshotExact]
 
 /-- The expected request must be the actual source-derived incidence request
 of the owner packet's content command. The outer capability/root selectors
@@ -232,7 +228,6 @@ inductive Reject where
   | collision
   | invalidPhysicalShape
   | targetAuthority
-  | catalogueAuthority
 
 def admit (config : NativeHost.Config) (opened : NativeHost.Opened config)
     (ingress : FnSelectiveReleaseIngress.Ingress) :

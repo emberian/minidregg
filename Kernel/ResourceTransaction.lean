@@ -33,6 +33,13 @@ inductive Payload where
   | content (command : ContentResource.Command)
   deriving DecidableEq
 
+/-- A content command shows as its canonical command bytes. -/
+instance : Repr Payload where
+  reprPrec payload prec := match payload with
+    | .scalar actions => Repr.addAppParen ("Payload.scalar " ++ reprArg actions) prec
+    | .content command =>
+        Repr.addAppParen ("Payload.content " ++ reprArg (ContentResource.commandCodec.encode command)) prec
+
 structure Target where
   kind : ResourceKind
   target : Nat
@@ -43,14 +50,14 @@ structure Target where
   payload : Payload
   /-- Current observation authority for any value exposed to another resource law. -/
   observeCapability : Option CapabilityId := none
-  deriving DecidableEq
+  deriving DecidableEq, Repr
 
 structure Command where
   subject : SubjectId
   expectedAuthorityRoot : Digest
   nonce : Nat
   targets : List Target
-  deriving DecidableEq
+  deriving DecidableEq, Repr
 
 def Command.TargetsValid (command : Command) : Prop :=
   command.targets ≠ [] ∧ (command.targets.map Target.target).Nodup

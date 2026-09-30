@@ -14,7 +14,6 @@ open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
@@ -180,28 +179,27 @@ theorem appRequest_delegate (domain semantics : Digest)
 as an otherwise ordinary empty content-resource birth. The issuer's content
 capability alone cannot authorize lifetime app delegation. -/
 def grantPage (domain : Digest) (spec : Spec) (operation : Nat) :
-    Except String HyperdocumentContentPageMaterializer.Page := do
-  match ContentResource.step
+    Except String ContentResource.ContentStore := do
+  match ContentResource.run
       ⟨spec.grant.approval.issuer, .object, spec.grantOwnerCapability⟩
-      ⟨⟨operation⟩⟩
-      (ContentResource.initialPage domain spec.grant.source.resource)
-      (ApplicationAgentLifetimeGrant.initialAction domain spec.grant) with
-  | .ok page => pure page
+      ⟨⟨operation⟩⟩ (ContentResource.documentOf spec.grant.source.resource)
+      ContentResource.initialStore
+      ⟨[ApplicationAgentLifetimeGrant.initialAction domain spec.grant]⟩ with
+  | .ok progress => pure progress.1
   | .error _ => throw "lifetime grant initial atom refused"
 
-private def bornCell (page : HyperdocumentContentPageMaterializer.Page) :
+private def bornCell (page : ContentResource.ContentStore) :
     PackedCell CanonicalCellRegistry.registry :=
-  ⟨.content, materialize HyperdocumentContentPageMaterializer.materializer
-    (HyperdocumentContentPageMaterializer.stateOfOption (some page))⟩
+  ⟨.content, materialize HyperdocumentCell.contentMaterializer page⟩
 
 structure Ready (domain : Digest) (spec : Spec) (operation : Nat) where
   private mk ::
   valid : spec.valid
-  page : HyperdocumentContentPageMaterializer.Page
+  page : ContentResource.ContentStore
   pageExact : grantPage domain spec operation = .ok page
   payloadAtLeast :
     (PackedCell.bytes CanonicalCellRegistry.registry
-      (bornCell (ContentResource.initialPage domain spec.grant.source.resource))).length ≤
+      (bornCell ContentResource.initialStore)).length ≤
     (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length
 
 def prepare {F : Type} [Field F]
@@ -218,8 +216,7 @@ def prepare {F : Type} [Field F]
     | .error detail => .error detail
     | .ok page =>
       if size : (PackedCell.bytes CanonicalCellRegistry.registry
-          (bornCell (ContentResource.initialPage config.deployment.domain
-            spec.grant.source.resource))).length ≤
+          (bornCell ContentResource.initialStore)).length ≤
           (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length then
         .ok ⟨valid, page, exact, size⟩
       else .error "lifetime grant final payload shorter than empty birth"
@@ -230,7 +227,7 @@ variable {domain : Digest} {spec : Spec} {operation : Nat}
 def Ready.birth (_ready : Ready domain spec operation) :
     BirthItem CanonicalCellRegistry.registry :=
   ⟨⟨spec.grant.source.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
-      bornCell (ContentResource.initialPage domain spec.grant.source.resource)⟩,
+      bornCell ContentResource.initialStore⟩,
     .object, spec.grant.approval.issuer⟩
 
 def Ready.initializedCell (ready : Ready domain spec operation) :

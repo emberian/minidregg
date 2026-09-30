@@ -102,9 +102,9 @@ def keyStream : StreamCodec Key :=
   StreamCodec.product digestStream
     (StreamCodec.product digestStream
       (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product DeclaredEffectPageMaterializer.intStream
+        (StreamCodec.product IntStream.intStream
           (StreamCodec.product StreamCodec.nat
-            (StreamCodec.product DeclaredEffectPageMaterializer.intStream StreamCodec.nat)))))
+            (StreamCodec.product IntStream.intStream StreamCodec.nat)))))
 
 def key (ingress : Ingress) : Key :=
     (ingress.domain, ingress.semantics, ingress.dispatch.app.resource,

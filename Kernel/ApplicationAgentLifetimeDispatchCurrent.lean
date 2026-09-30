@@ -26,7 +26,7 @@ def grantAt (domain : Digest) (resource : Nat)
     Option ApplicationAgentLifetimeGrant.Grant := do
   let ⟨.content, payload⟩ := cell
     | none
-  let page ← HyperdocumentContentPageMaterializer.pageAt payload.logical
+  let page := payload.logical
   ApplicationAgentLifetimeGrant.decodeInstalled domain resource page
 
 /-- Unlike event21's `parentMatches`, this tests the physical current parent

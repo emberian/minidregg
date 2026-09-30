@@ -91,8 +91,7 @@ private def currentAgent (config : NativeHost.Config)
     | throw "grain-backed issue task unavailable"
   match cell with
   | ⟨.declaredObject, payload⟩ =>
-      let some page := DeclaredEffectPageMaterializer.pageAt payload.logical
-        | throw "grain-backed issue task page unavailable"
+      let page := payload.logical
       let some state := AgentGrain.readState task page
         | throw "grain-backed issue task state unavailable"
       return (payload.root, state)

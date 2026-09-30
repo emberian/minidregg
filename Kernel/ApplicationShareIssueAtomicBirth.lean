@@ -93,15 +93,18 @@ structure Checked {domain : Digest} {spec : Spec} {operation : Nat}
   private mk ::
   token : Unit
   originalPresent : ResourceBirthController.birthWrite ready.birth.create ∈ writes
-  initializedLaw : ResourceBirthController.Concrete.PhysicalPostLaw deployment
-    (initializedWrite ready)
+  /-- The physical post law of the substituted image, as its decision. The
+  Boolean form keeps elaboration from unfolding the law's codec match, whose
+  store frame hashes the layout descriptor. -/
+  initializedLaw : decide (ResourceBirthController.Concrete.PhysicalPostLaw deployment
+    (initializedWrite ready)) = true
 
 def check {domain : Digest} {spec : Spec} {operation : Nat}
     (ready : Ready domain spec operation) (deployment : CanonicalCellRegistry.Deployment)
     (writes : List DataWrite) : Option (Checked ready deployment writes) :=
   if present : ResourceBirthController.birthWrite ready.birth.create ∈ writes then
-    if law : ResourceBirthController.Concrete.PhysicalPostLaw deployment
-        (initializedWrite ready) then
+    if law : decide (ResourceBirthController.Concrete.PhysicalPostLaw deployment
+        (initializedWrite ready)) = true then
       some ⟨(), present, law⟩
     else none
   else none
@@ -117,6 +120,12 @@ theorem Checked.ids {domain : Digest} {spec : Spec} {operation : Nat}
     {writes : List DataWrite} (checked : Checked ready deployment writes) :
     checked.writes.map DataWrite.cellId = writes.map DataWrite.cellId :=
   ids_preserved _ _ _ (initialized_id ready)
+
+theorem Checked.initialized_law {domain : Digest} {spec : Spec} {operation : Nat}
+    {ready : Ready domain spec operation} {deployment : CanonicalCellRegistry.Deployment}
+    {writes : List DataWrite} (checked : Checked ready deployment writes) :
+    ResourceBirthController.Concrete.PhysicalPostLaw deployment (initializedWrite ready) :=
+  of_decide_eq_true checked.initializedLaw
 
 theorem Checked.initialized_present {domain : Digest} {spec : Spec} {operation : Nat}
     {ready : Ready domain spec operation} {deployment : CanonicalCellRegistry.Deployment}

@@ -20,18 +20,18 @@ open Minidregg.Kernel.NativeHost
 
 set_option autoImplicit false
 
-/-- Current authority support is used to refuse an ordinary command that
-purports to target an authority cell. An ordinary invocation's admitted marker
+/-- The authority cell and every current policy source cell (one per recorded
+policy address; superseded addresses are freed) are used to refuse an ordinary
+command that purports to target an authority cell. An ordinary invocation's admitted marker
 does write an authority nullifier, so these cells must not be used as a blunt
 physical-write exclusion for otherwise unrelated invocations. -/
 def authorityCells {config : Config} (session : NativeHostSession.Session config) :
     List CellId :=
   let snapshot := session.opened.authority.snapshot
-  ⟨config.deployment.authorityCatalogueId⟩ ::
-    snapshot.catalogue.pages.map (·.cellId) ++
-    snapshot.entries.filterMap (fun entry =>
+  ⟨config.deployment.authorityCellId⟩ ::
+    (StoreCodec.entries CredentialAuthorityCell.wire snapshot.logical).filterMap (fun entry =>
       match entry with
-      | .policy _ _ _ address =>
+      | ⟨⟨.policyAddress, _⟩, address⟩ =>
           some ⟨PolicySourceCell.physicalId config.deployment.domain address⟩
       | _ => none)
 

@@ -121,6 +121,29 @@ theorem loadDeployment_exact (deployment : CanonicalCellRegistry.Deployment) (ph
     rw [holds, decodeCell_bytes] at decoded
     exact ⟨_, rfl, (Option.some.inj decoded).symm⟩
 
+/-- Two loads of the same deployment from the same physical snapshot are the
+same authority snapshot: the pinned cell's bytes determine it. -/
+theorem Loaded.snapshot_unique {deployment : CanonicalCellRegistry.Deployment}
+    {physical : PhysicalSnapshot} (left right : Loaded deployment physical) :
+    left.snapshot = right.snapshot := by
+  have cells : left.snapshot.cell = right.snapshot.cell := by
+    have decoded := decodeCell_bytes left.snapshot.cell
+    rw [← left.observed, right.observed, decodeCell_bytes] at decoded
+    exact (Option.some.inj decoded).symm
+  cases hl : left.snapshot with
+  | mk leftDomain leftCell =>
+      cases hr : right.snapshot with
+      | mk rightDomain rightCell =>
+          have domains : leftDomain = rightDomain := by
+            have l := left.domainExact
+            have r := right.domainExact
+            rw [hl] at l
+            rw [hr] at r
+            exact l.trans r.symm
+          rw [hl, hr] at cells
+          simp only at cells
+          rw [domains, cells]
+
 theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
     (loaded : Loaded deployment physical) :
     cellRoot loaded.snapshot.cell = physical.model.roots (cellIdOf deployment) := by
@@ -418,6 +441,8 @@ theorem PreparedGrantBatch.post_logical
 
 end GrantBatch
 
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.Loaded.snapshot_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Loaded.snapshot_unique
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.write_of_planes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms write_of_planes
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.loadDeployment_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/

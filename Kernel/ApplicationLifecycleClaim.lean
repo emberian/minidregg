@@ -11,7 +11,7 @@ namespace Minidregg.Kernel.ApplicationLifecycleClaim
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.ResourceBirthCodec
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 open Minidregg.Theory
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization

@@ -19,8 +19,7 @@ open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 open Minidregg.Compiler.CredentialAuthorityDomain
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.TypedAuthorization
@@ -77,7 +76,7 @@ def appState (app : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
     Option ApplicationGrain.State := do
   match cell with
   | ⟨.declaredObject, payload⟩ =>
-      let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       ApplicationGrain.readState app page
   | _ => none
 
@@ -86,7 +85,7 @@ def installedManifest (domain : Digest) (manifestResource app : Nat)
     Option ApplicationDispatchManifest.Manifest := do
   match cell with
   | ⟨.content, payload⟩ =>
-      let page ← HyperdocumentContentPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       ApplicationDispatchManifest.decodeInstalled domain manifestResource app version page
   | _ => none
 
@@ -95,7 +94,7 @@ def installedEnrollment (domain : Digest) (descriptorResource session : Nat)
     Option ApplicationGrainSessionEnrollment.Enrollment := do
   match cell with
   | ⟨.content, payload⟩ =>
-      let page ← HyperdocumentContentPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       ApplicationGrainSessionEnrollment.decodeInstalled domain descriptorResource session
         generation page
   | _ => none
@@ -105,7 +104,7 @@ def installedTicket (domain : Digest) (ticketResource : Nat)
     Option ApplicationDispatchAuthority.Ticket := do
   match cell with
   | ⟨.content, payload⟩ =>
-      let page ← HyperdocumentContentPageMaterializer.pageAt payload.logical
+      let page := payload.logical
       ApplicationDispatchAuthority.decodeInstalled domain ticketResource page
   | _ => none
 

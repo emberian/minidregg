@@ -13,7 +13,7 @@ namespace Minidregg.Kernel.ApplicationDispatchAgentPayer
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Compiler.ResourceBirthCodec
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.TypedAuthorization
@@ -31,7 +31,7 @@ def stateAt (task : Nat) (cell : PackedCell CanonicalCellRegistry.registry) :
     Option AgentGrain.State := do
   let ⟨.declaredObject, payload⟩ := cell
     | none
-  let page ← DeclaredEffectPageMaterializer.pageAt payload.logical
+  let page := payload.logical
   AgentGrain.readState task page
 
 structure Checked (config : Config) (opened : Opened config)

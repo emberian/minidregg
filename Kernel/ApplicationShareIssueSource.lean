@@ -15,7 +15,6 @@ namespace Minidregg.Kernel.ApplicationShareIssueSource
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
@@ -136,27 +135,28 @@ instance validDecidable (spec : Spec) : Decidable spec.valid := by
   unfold Spec.valid
   infer_instance
 
-/-- Source-derived final page for the special atomic issue. Ordinary birth
-itself installs only `ContentResource.initialPage`; the special receiver
-incorporates this checked insertion into that birth's single final write. -/
+/-- Source-derived final content store for the special atomic issue. Ordinary
+birth itself installs only the empty `ContentResource.initialStore`; the special
+receiver incorporates this checked insertion into that birth's single final
+write. The insertion is the content run of the one initial action at the
+ticket resource's own document. -/
 def ticketPage (domain : Digest) (spec : Spec) (operation : Nat) :
-    Except ContentResource.Reject HyperdocumentContentPageMaterializer.Page :=
-  ContentResource.step ⟨spec.issuer, .object, spec.ticketOwnerCapability⟩ ⟨⟨operation⟩⟩
-    (ContentResource.initialPage domain spec.ticket.resource)
-    (ApplicationDispatchAuthority.initialAction domain spec.ticket)
+    Except ContentResource.Reject ContentResource.ContentStore :=
+  (ContentResource.run ⟨spec.issuer, .object, spec.ticketOwnerCapability⟩ ⟨⟨operation⟩⟩
+    (ContentResource.documentOf spec.ticket.resource) ContentResource.initialStore
+    ⟨[ApplicationDispatchAuthority.initialAction domain spec.ticket]⟩).map (·.1)
 
-private def bornCell (page : HyperdocumentContentPageMaterializer.Page) :
+private def bornCell (page : ContentResource.ContentStore) :
     PackedCell CanonicalCellRegistry.registry :=
-  ⟨.content, materialize HyperdocumentContentPageMaterializer.materializer
-    (HyperdocumentContentPageMaterializer.stateOfOption (some page))⟩
+  ⟨.content, materialize HyperdocumentCell.contentMaterializer page⟩
 
 structure Ready (domain : Digest) (spec : Spec) (operation : Nat) where
   private mk ::
   valid : spec.valid
-  page : HyperdocumentContentPageMaterializer.Page
+  page : ContentResource.ContentStore
   pageExact : ticketPage domain spec operation = .ok page
   payloadAtLeast : (PackedCell.bytes CanonicalCellRegistry.registry
-    (bornCell (ContentResource.initialPage domain spec.ticket.resource))).length ≤
+    (bornCell ContentResource.initialStore)).length ≤
     (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length
 
 def prepare {F : Type} [Field F]
@@ -173,8 +173,7 @@ def prepare {F : Type} [Field F]
     | .error _ => .error "share ticket initial page refused"
     | .ok page =>
         if payloadAtLeast : (PackedCell.bytes CanonicalCellRegistry.registry
-            (bornCell (ContentResource.initialPage config.deployment.domain
-              spec.ticket.resource))).length ≤
+            (bornCell ContentResource.initialStore)).length ≤
             (PackedCell.bytes CanonicalCellRegistry.registry (bornCell page)).length then
           .ok ⟨valid, page, exact, payloadAtLeast⟩
         else .error "share ticket final payload shorter than empty birth"
@@ -182,10 +181,10 @@ def prepare {F : Type} [Field F]
 
 variable {domain : Digest} {spec : Spec} {operation : Nat}
 
-def Ready.birth (ready : Ready domain spec operation) :
+def Ready.birth (_ready : Ready domain spec operation) :
     BirthItem CanonicalCellRegistry.registry :=
   ⟨⟨spec.ticket.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
-      bornCell (ContentResource.initialPage domain spec.ticket.resource)⟩,
+      bornCell ContentResource.initialStore⟩,
     .object, spec.issuer⟩
 
 /-- The initialized physical cell is never a second birth item. It is the
@@ -234,8 +233,8 @@ theorem Ready.effective_asset (ready : Ready domain spec operation)
     (ready.effectiveTariff tariff).asset = tariff.asset := by
   simp [Ready.effectiveTariff]
 
-theorem Ready.birth_empty (ready : Ready domain spec operation) :
-    (ContentResource.initialPage domain spec.ticket.resource).entries = [] := by
+theorem Ready.birth_empty (_ready : Ready domain spec operation) :
+    ContentResource.initialStore.support = ∅ := by
   rfl
 
 def Ready.births (ready : Ready domain spec operation) :
@@ -314,8 +313,8 @@ first atom into that same allocation write after checking app delegation. -/
 def Ready.descriptor {F : Type} [Field F]
     (ready : Ready domain spec operation) (profile : CanonicalRuntimeProfile.Profile F)
     (config : NativeHost.Config) (authority : AuthState) (height : Nat)
-    (domainBound : domain = config.deployment.domain)
-    (operationBound : operation =
+    (_domainBound : domain = config.deployment.domain)
+    (_operationBound : operation =
       (ResourceBirthController.Concrete.sourceIdentity profile.compilerProfile
         config.deployment spec.issuer spec.ticket.issueNonce).value)
     (payer : Nat) (funding : List InitialFunding := []) :
