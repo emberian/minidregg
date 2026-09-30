@@ -2652,7 +2652,8 @@ private def outcomeJson : Outcome → Lean.Json
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
       ("acceptedCount", decimal receipt.acceptedCount), ("imageBoundary", decimal receipt.imageBoundary.value)]
-  | .refused phase detail => .mkObj [("type", "refused"), ("phase", hexJson phase), ("detail", hexJson detail)]
+  | .refused reason phase detail => .mkObj [("type", "refused"), ("reason", reason.name),
+      ("phase", hexJson phase), ("detail", hexJson detail)]
   | .contention => .mkObj [("type", "contention")]
   | .unavailable detail => .mkObj [("type", "unavailable"), ("detail", hexJson detail)]
   | .uncertain detail => .mkObj [("type", "uncertain"), ("detail", hexJson detail)]

@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn historical_outcome_cannot_be_fresh_callback() {
         let mut reply = Vec::new();
-        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v1:replayed";
+        let payload = b"DREGG/NATIVE-HOST/OUTCOME/v2:replayed";
         reply.extend_from_slice(&(payload.len() as u32 + 1).to_le_bytes());
         reply.push(26);
         reply.extend_from_slice(payload);

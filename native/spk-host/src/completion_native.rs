@@ -641,7 +641,7 @@ mod tests {
         let mut trailing = plan.clone();
         trailing.push(0);
         assert!(reply_payload(&trailing, 44).is_err());
-        let outcome = frame(38, b"DREGG/NATIVE-HOST/OUTCOME/v1");
+        let outcome = frame(38, b"DREGG/NATIVE-HOST/OUTCOME/v2");
         assert!(reply_payload(&outcome, 44).is_err());
         assert_eq!(reply_payload(&outcome, 38).unwrap(), &outcome[5..]);
     }

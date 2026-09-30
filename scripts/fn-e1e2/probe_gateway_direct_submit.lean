@@ -102,7 +102,7 @@ def run : IO Unit := do
     (callCodec.encode call).toByteArray
   let outcome ← NativeHost.submitLoaded config opened call
   match outcome with
-  | .refused phase detail =>
+  | .refused _ phase detail =>
       let detailText := String.fromUTF8! detail.toByteArray
       unless phase == "invoke".toUTF8.toList &&
           (detailText.splitOn "policyRejected").length > 1 do
@@ -110,8 +110,8 @@ def run : IO Unit := do
   | _ => throw (IO.userError "ordinary signed call was not policy-refused")
   let publicOutcome ← NativeHost.submit config (callCodec.encode call)
   match publicOutcome with
-  | .refused phase detail =>
-      unless phase == "admission".toUTF8.toList &&
+  | .refused reason phase detail =>
+      unless reason == .undisclosed && phase == "admission".toUTF8.toList &&
           detail == "request refused".toUTF8.toList do
         throw (IO.userError "public submission exposed unexpected refusal")
   | _ => throw (IO.userError "public direct submit did not refuse")

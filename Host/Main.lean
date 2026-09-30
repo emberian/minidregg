@@ -750,8 +750,12 @@ def description (config : NativeHost.Config) : IO Lean.Json := do
   discard <| IO.ofExcept (← NativeHost.openExisting config)
   return descriptionLoaded config
 
-def failure (phase detail : String) : List UInt8 :=
-  outcomeCodec.encode (.refused phase.toUTF8.toList detail.toUTF8.toList)
+def failure (reason : RefusalReason) (phase detail : String) : List UInt8 :=
+  outcomeCodec.encode (.refused reason phase.toUTF8.toList detail.toUTF8.toList)
+
+/-- The refused signed request's own frame, naming the deciding reason. -/
+def refusalFrame (phase : String) (refusal : Refusal) : List UInt8 :=
+  outcomeCodec.encode (NativeHost.refusalOutcome phase refusal)
 
 def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) :
     IO (UInt8 × List UInt8) := do
@@ -762,17 +766,17 @@ def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UI
   | 1 =>
       match ← NativeHost.prepare config payload with
       | .ok plan => pure (1, signingPlanCodec.encode plan)
-      | .error detail => pure (255, failure "prepare" detail)
+      | .error detail => pure (255, refusalFrame "prepare" detail)
   | 2 => pure (2, outcomeCodec.encode (← NativeHost.submit config payload))
   | 3 => pure (3, outcomeCodec.encode (← NativeHost.lookup config payload))
   | 4 =>
       match ← NativeHost.challenge config payload with
       | .ok challenge => pure (4, NativeObservationCodec.challengeCodec.encode challenge)
-      | .error detail => pure (255, failure "observation" detail)
+      | .error detail => pure (255, refusalFrame "observation" detail)
   | 5 =>
       match ← NativeHost.query config payload with
       | .ok view => pure (5, view)
-      | .error detail => pure (255, failure "observation" detail)
+      | .error detail => pure (255, refusalFrame "observation" detail)
   | _ => throw (IO.userError "unsupported native host operation")
 
 /-- Session state is poisoned on any physical read, decode, prefix, or replay
@@ -829,9 +833,9 @@ def selectedReleaseSubmitSession (config : NativeHost.Config)
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
     | .rejected _ =>
-        pure (.refused "selected-release".toUTF8.toList "request refused".toUTF8.toList)
+        pure (.refused .operationRejected "selected-release".toUTF8.toList "request refused".toUTF8.toList)
     | .transactionConflict =>
-        pure (.refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
+        pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
     | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
@@ -844,11 +848,11 @@ def selectedReleaseLookupSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let opened ← sessionOpened config state
   let some ingress := FnSelectiveReleaseIngress.ingressCodec.decode payload
-    | return .refused "selected-release".toUTF8.toList "noncanonical ingress".toUTF8.toList
+    | return .refused .malformed "selected-release".toUTF8.toList "noncanonical ingress".toUTF8.toList
   match FnSelectiveReleaseReceiver.replay config opened ingress with
   | none => return .absent
   | some (.error _) =>
-      return .refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
       match NativeHost.historicalReceipt config opened.durable
           receipt.transactionId receipt.eventId with
@@ -862,7 +866,7 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
   let some _ := ApplicationLifecycleBeginV3Ingress.codec.decode payload
-    | return .refused "application-lifecycle-begin".toUTF8.toList
+    | return .refused .malformed "application-lifecycle-begin".toUTF8.toList
         "fresh BEGIN requires canonical launch-bound v3 ingress".toUTF8.toList
   let result ← ApplicationLifecycleBeginV3Receiver.receiveVerified config
     session.verified payload
@@ -871,7 +875,7 @@ def applicationLifecycleBeginSubmitSession (config : NativeHost.Config)
         state.set (some ⟨_, confirmed.verified⟩)
         return .confirmed confirmed.confirmation confirmed.receipt
     | .rejected _ =>
-        return .refused "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
+        return .refused .operationRejected "application-lifecycle-begin".toUTF8.toList "request refused".toUTF8.toList
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
     | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -892,10 +896,10 @@ def applicationLifecycleBeginLookupSession (config : NativeHost.Config)
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
-      return .refused "application-lifecycle-begin".toUTF8.toList
+      return .refused .malformed "application-lifecycle-begin".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   | .error .transactionConflict =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "original lifecycle BEGIN receipt unavailable".toUTF8.toList
@@ -916,10 +920,10 @@ def applicationLifecycleClaimLookupSession (config : NativeHost.Config)
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
-      return .refused "application-lifecycle-claim".toUTF8.toList
+      return .refused .malformed "application-lifecycle-claim".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   | .error .transactionConflict =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "original lifecycle claim receipt unavailable".toUTF8.toList
@@ -932,7 +936,7 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
   let some _ := ApplicationLifecycleCompletionV2Ingress.codec.decode payload
-    | return .refused "application-lifecycle-completion".toUTF8.toList
+    | return .refused .malformed "application-lifecycle-completion".toUTF8.toList
         "fresh completion requires canonical launch-bound v2 ingress".toUTF8.toList
   let result ← ApplicationLifecycleCompletionV2Receiver.receiveVerified config
     session.verified payload
@@ -941,7 +945,7 @@ def applicationLifecycleCompletionSubmitSession (config : NativeHost.Config)
       state.set (some ⟨_, confirmed.verified⟩)
       return .confirmed confirmed.confirmation confirmed.receipt
   | .rejected detail =>
-      return .refused "application-lifecycle-completion".toUTF8.toList
+      return .refused .operationRejected "application-lifecycle-completion".toUTF8.toList
         detail.toUTF8.toList
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
@@ -963,10 +967,10 @@ def applicationLifecycleCompletionLookupSession (config : NativeHost.Config)
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
-      return .refused "application-lifecycle-completion".toUTF8.toList
+      return .refused .malformed "application-lifecycle-completion".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   | .error .transactionConflict =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "original lifecycle completion receipt unavailable".toUTF8.toList
@@ -983,10 +987,10 @@ def fnConsumerNamespaceSubmitSession (config : NativeHost.Config)
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
   | .rejected _ =>
-      pure (.refused "fn-consumer-namespace".toUTF8.toList
+      pure (.refused .operationRejected "fn-consumer-namespace".toUTF8.toList
         "request refused".toUTF8.toList)
   | .transactionConflict =>
-      pure (.refused "replay".toUTF8.toList
+      pure (.refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
@@ -999,7 +1003,7 @@ def fnConsumerNamespaceLookupSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
   let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode payload
-    | return .refused "fn-consumer-namespace".toUTF8.toList
+    | return .refused .malformed "fn-consumer-namespace".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   match FnConsumerNamespaceReceiver.lookupVerified session.verified ingress with
   | none => return .absent
@@ -1017,9 +1021,9 @@ def fnSelectedPollSubmitSession (config : NativeHost.Config)
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
   | .rejected _ =>
-      pure (.refused "fn-selected-poll".toUTF8.toList "request refused".toUTF8.toList)
+      pure (.refused .operationRejected "fn-selected-poll".toUTF8.toList "request refused".toUTF8.toList)
   | .transactionConflict =>
-      pure (.refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
+      pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
@@ -1030,7 +1034,7 @@ def fnSelectedPollLookupSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
   let some ingress := FnSelectedPollCoverage.ingressCodec.decode payload
-    | return .refused "fn-selected-poll".toUTF8.toList
+    | return .refused .malformed "fn-selected-poll".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   match FnSelectedPollReceiver.lookupVerified session.verified ingress with
   | none => return .absent
@@ -1047,9 +1051,9 @@ def fnEmptyPollSubmitSession (config : NativeHost.Config)
   | .confirmed kind receipt =>
       sessionConfirmed config state kind receipt.transactionId receipt.eventId
   | .rejected _ =>
-      pure (.refused "fn-empty-poll-v2".toUTF8.toList "request refused".toUTF8.toList)
+      pure (.refused .operationRejected "fn-empty-poll-v2".toUTF8.toList "request refused".toUTF8.toList)
   | .transactionConflict =>
-      pure (.refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
+      pure (.refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList)
   | .contention => pure .contention
   | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
   | .uncertain detail => pure (.uncertain detail.toUTF8.toList)
@@ -1060,7 +1064,7 @@ def fnEmptyPollLookupSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let session ← sessionCurrent config state
   let some ingress := FnEmptyPollProgressV2.ingressCodec.decode payload
-    | return .refused "fn-empty-poll-v2".toUTF8.toList
+    | return .refused .malformed "fn-empty-poll-v2".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   match FnEmptyPollReceiverV2.lookupVerified session.verified ingress with
   | none => return .absent
@@ -1077,9 +1081,9 @@ def selectedSourcePublicationSubmitSession (config : NativeHost.Config)
   let outcome ← match result with
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused "selected-source-publication".toUTF8.toList
+    | .rejected _ => pure (.refused .operationRejected "selected-source-publication".toUTF8.toList
         "request refused".toUTF8.toList)
-    | .transactionConflict => pure (.refused "replay".toUTF8.toList
+    | .transactionConflict => pure (.refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
@@ -1091,12 +1095,12 @@ def selectedSourcePublicationLookupSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let opened ← sessionOpened config state
   let some ingress := FnSelectiveReleaseSourcePublication.ingressCodec.decode payload
-    | return .refused "selected-source-publication".toUTF8.toList
+    | return .refused .malformed "selected-source-publication".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   match FnSelectiveReleaseSourceReceiver.replay opened ingress with
   | none => return .absent
   | some (.error _) =>
-      return .refused "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
       match NativeHost.historicalReceipt config opened.durable
           receipt.transactionId receipt.eventId with
@@ -1118,7 +1122,7 @@ def applicationShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused "application-share-issue".toUTF8.toList
+    | .rejected _ => pure (.refused .operationRejected "application-share-issue".toUTF8.toList
         "request refused".toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
@@ -1130,16 +1134,16 @@ def applicationShareIssueLookupSession (config : NativeHost.Config)
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let opened ← sessionOpened config state
   let some ingress := ApplicationShareIssueSource.ingressCodec.decode payload
-    | return .refused "application-share-issue".toUTF8.toList
+    | return .refused .malformed "application-share-issue".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   let some birth := ResourceBirthPolicyController.Concrete.decodeIngress ingress.birthIngress
-    | return .refused "application-share-issue".toUTF8.toList
+    | return .refused .malformed "application-share-issue".toUTF8.toList
         "noncanonical birth ingress".toUTF8.toList
   match ApplicationShareIssueReceiver.replay opened.durable config.deployment.domain
       ingress birth with
   | none => return .absent
   | some (.error _) =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | some (.ok receipt) =>
       match NativeHost.historicalReceipt config opened.durable
@@ -1163,7 +1167,7 @@ def applicationGrainShareIssueSubmitSession (config : NativeHost.Config)
         sessionConfirmed config state .replayed receipt.transactionId receipt.eventId
     | .confirmed kind receipt =>
         sessionConfirmed config state kind receipt.transactionId receipt.eventId
-    | .rejected _ => pure (.refused "application-grain-share-issue".toUTF8.toList
+    | .rejected _ => pure (.refused .operationRejected "application-grain-share-issue".toUTF8.toList
         "request refused".toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
@@ -1178,10 +1182,10 @@ def applicationGrainShareIssueLookupSession (config : NativeHost.Config)
   let opened ← sessionOpened config state
   match ← ApplicationShareIssueGrainLookup.lookupOriginal config opened.durable payload with
   | .error .malformed =>
-      return .refused "application-grain-share-issue".toUTF8.toList
+      return .refused .malformed "application-grain-share-issue".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   | .error .transactionConflict =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "original grain share issue history unavailable".toUTF8.toList
@@ -1201,9 +1205,9 @@ def applicationSessionEnrollmentSubmitSession (config : NativeHost.Config)
         state.set (some ⟨_, confirmed.verified⟩)
         pure (.confirmed confirmed.confirmation confirmed.receipt)
     | .historical receipt => pure (.confirmed .replayed receipt)
-    | .rejected detail => pure (.refused "application-session-enrollment".toUTF8.toList
+    | .rejected detail => pure (.refused .operationRejected "application-session-enrollment".toUTF8.toList
         detail.toUTF8.toList)
-    | .transactionConflict => pure (.refused "replay".toUTF8.toList
+    | .transactionConflict => pure (.refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList)
     | .contention => pure .contention
     | .unavailable detail => pure (.unavailable detail.toUTF8.toList)
@@ -1215,17 +1219,17 @@ def applicationSessionEnrollmentLookupSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (payload : List UInt8) : IO NativeHostCodec.Outcome := do
   let some ingress := ApplicationGrainSessionEnrollmentSource.ingressCodec.decode payload
-    | return .refused "application-session-enrollment".toUTF8.toList
+    | return .refused .malformed "application-session-enrollment".toUTF8.toList
         "noncanonical ingress".toUTF8.toList
   unless ingress.canonicalBytes.toByteArray == payload.toByteArray do
-    return .refused "application-session-enrollment".toUTF8.toList
+    return .refused .malformed "application-session-enrollment".toUTF8.toList
       "noncanonical ingress".toUTF8.toList
   let session ← sessionCurrent config state
   match ApplicationGrainSessionEnrollmentReceiver.lookupVerified session.verified ingress with
   | none => return .absent
   | some (.ok receipt) => return .confirmed .replayed receipt
   | some (.error _) =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
 
 /-- Event27 grant installation is a durable Mini receipt, never a dispatch
@@ -1239,9 +1243,9 @@ def agentLifetimeGrantSubmitSession (config : NativeHost.Config)
     session.verified payload
   let outcome : NativeHostCodec.Outcome := match result with
     | .confirmed kind receipt _ _ => .confirmed kind receipt
-    | .rejected _ => .refused "application-agent-lifetime-grant".toUTF8.toList
+    | .rejected _ => .refused .operationRejected "application-agent-lifetime-grant".toUTF8.toList
         "request refused".toUTF8.toList
-    | .transactionConflict => .refused "replay".toUTF8.toList
+    | .transactionConflict => .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
     | .contention => .contention
     | .unavailable detail => .unavailable detail.toUTF8.toList
@@ -1256,7 +1260,7 @@ def agentLifetimeGrantLookupSession (config : NativeHost.Config)
   let session ← sessionCurrent config state
   match ApplicationAgentLifetimeGrantLookup.lookupVerified session.verified payload with
   | .error _ =>
-      return .refused "application-agent-lifetime-grant".toUTF8.toList
+      return .refused .malformed "application-agent-lifetime-grant".toUTF8.toList
         "noncanonical or conflicting lookup ingress".toUTF8.toList
   | .ok none => return .absent
   | .ok (some original) => return .confirmed .replayed original.receipt
@@ -1272,10 +1276,10 @@ def applicationDispatchLookupSession (config : NativeHost.Config)
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
-      return .refused "application-dispatch".toUTF8.toList
+      return .refused .malformed "application-dispatch".toUTF8.toList
         "noncanonical lookup ingress".toUTF8.toList
   | .error .transactionConflict =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "dispatch original history unavailable".toUTF8.toList
@@ -1290,10 +1294,10 @@ def applicationAgentDispatchLookupSession (config : NativeHost.Config)
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
-      return .refused "application-agent-dispatch".toUTF8.toList
+      return .refused .malformed "application-agent-dispatch".toUTF8.toList
         "noncanonical paid dispatch lookup ingress".toUTF8.toList
   | .error .transactionConflict =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "paid dispatch transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "paid dispatch original history unavailable".toUTF8.toList
@@ -1308,10 +1312,10 @@ def applicationAgentLifetimeDispatchLookupSession (config : NativeHost.Config)
   | .ok none => return .absent
   | .ok (some receipt) => return .confirmed .replayed receipt
   | .error .malformed =>
-      return .refused "application-agent-lifetime-dispatch".toUTF8.toList
+      return .refused .malformed "application-agent-lifetime-dispatch".toUTF8.toList
         "noncanonical lifetime dispatch lookup ingress".toUTF8.toList
   | .error .transactionConflict =>
-      return .refused "replay".toUTF8.toList
+      return .refused .conflict "replay".toUTF8.toList
         "lifetime dispatch transaction identity conflict".toUTF8.toList
   | .error .nativeHistoryUnavailable =>
       return .uncertain "lifetime dispatch original history unavailable".toUTF8.toList
@@ -1373,11 +1377,11 @@ def dispatchSession (config : NativeHost.Config)
       let opened ← sessionOpened config state
       match ← NativeHost.prepareAuthorizedLoaded config opened payload with
       | .ok plan => return (1, signingPlanCodec.encode plan)
-      | .error detail => return (255, failure "prepare" detail)
+      | .error detail => return (255, refusalFrame "prepare" detail)
   | 2 =>
       let session ← sessionCurrent config state
       let result ← match callCodec.decode payload with
-        | none => pure (NativeHostCodec.Outcome.refused "wire".toUTF8.toList
+        | none => pure (NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList
             "noncanonical or unsupported native host call".toUTF8.toList)
         | some call =>
             NativeHost.submitVerifiedLoadedWith config session.verified call
@@ -1386,19 +1390,19 @@ def dispatchSession (config : NativeHost.Config)
   | 3 =>
       let opened ← sessionOpened config state
       let result := match callCodec.decode payload with
-        | none => NativeHostCodec.Outcome.refused "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList
+        | none => NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList "noncanonical native host call".toUTF8.toList
         | some call => NativeHost.lookupLoaded config opened call
       return (3, outcomeCodec.encode result)
   | 4 =>
       let opened ← sessionOpened config state
       match NativeHost.challengeLoaded config opened payload with
       | .ok challenge => return (4, NativeObservationCodec.challengeCodec.encode challenge)
-      | .error detail => return (255, failure "observation" detail)
+      | .error detail => return (255, refusalFrame "observation" detail)
   | 5 =>
       let opened ← sessionOpened config state
       match ← NativeHost.queryLoaded config opened payload with
       | .ok view => return (5, view)
-      | .error detail => return (255, failure "observation" detail)
+      | .error detail => return (255, refusalFrame "observation" detail)
   | 6 =>
       unless payload.isEmpty do throw (IO.userError "profile does not accept a payload")
       return (6, meteringProfile.compress.toUTF8.toList)
@@ -1465,7 +1469,7 @@ def dispatchSession (config : NativeHost.Config)
       let session ← sessionCurrent config state
       match ApplicationDispatchAuthoring.prepareRequestVerified config session.verified payload with
       | .ok plan => return (36, ApplicationDispatchAuthoring.planCodec.encode plan)
-      | .error detail => return (255, failure "application-dispatch-author" detail)
+      | .error detail => return (255, failure .operationRejected "application-dispatch-author" detail)
   | 37 =>
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationDispatchAuthoring.planCodec.decode planBytes
@@ -1685,7 +1689,7 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
   | .rejected _ =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
-          (.refused "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
+          (.refused .operationRejected "application-dispatch".toUTF8.toList "request refused".toUTF8.toList)
   | .contention =>
       writeSessionFrame output 34 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome .contention
@@ -1716,7 +1720,7 @@ def dispatchAgentSubmitSession (config : NativeHost.Config)
   | .rejected _ =>
       writeSessionFrame output 46 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
-          (.refused "application-agent-dispatch".toUTF8.toList
+          (.refused .operationRejected "application-agent-dispatch".toUTF8.toList
             "request refused".toUTF8.toList)
   | .contention =>
       writeSessionFrame output 46 <| outcomeCodec.encode <|
@@ -1749,7 +1753,7 @@ def dispatchAgentLifetimeSubmitSession (config : NativeHost.Config)
   | .rejected _ =>
       writeSessionFrame output 76 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
-          (.refused "application-agent-lifetime-dispatch".toUTF8.toList
+          (.refused .operationRejected "application-agent-lifetime-dispatch".toUTF8.toList
             "request refused".toUTF8.toList)
   | .contention =>
       writeSessionFrame output 76 <| outcomeCodec.encode <|
@@ -1771,7 +1775,7 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
   let some _ := ApplicationLifecycleClaimV3Ingress.codec.decode payload
     | writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
-          (.refused "application-lifecycle-claim".toUTF8.toList
+          (.refused .malformed "application-lifecycle-claim".toUTF8.toList
             "fresh claim requires canonical launch-bound v3 ingress".toUTF8.toList)
       return
   let result ← ApplicationLifecycleClaimV3Receiver.receiveVerified config
@@ -1801,7 +1805,7 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
   | .rejected _ =>
       writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome
-          (.refused "application-lifecycle-claim".toUTF8.toList
+          (.refused .operationRejected "application-lifecycle-claim".toUTF8.toList
             "request refused".toUTF8.toList)
   | .contention =>
       writeSessionFrame output 26 <| outcomeCodec.encode <|
@@ -4937,7 +4941,7 @@ def run (arguments : List String) : IO UInt32 := do
                         match operation with
                         | 12 | 13 =>
                             let some selected := service
-                              | return ((255 : UInt8), failure "fn-poll"
+                              | return ((255 : UInt8), failure .operationRejected "fn-poll"
                                   "fn consumer poll service is not configured")
                             if operation == 12 then
                               runFnPollSession pinnedConfig state selected payload
@@ -4956,23 +4960,23 @@ def run (arguments : List String) : IO UInt32 := do
                                   runFnReplyPollSession pinnedConfig state selected payload
                                 else
                                   runFnReplyAckSession pinnedConfig state selected none payload
-                            | _, _ => return ((255 : UInt8), failure "fn-reply-poll"
+                            | _, _ => return ((255 : UInt8), failure .operationRejected "fn-reply-poll"
                                 "exactly one A reply poll service must be configured")
                         | 16 =>
                             let some selected := catalogService
-                              | return ((255 : UInt8), failure "fn-origin-outbox"
+                              | return ((255 : UInt8), failure .operationRejected "fn-origin-outbox"
                                   "A origin outbox service is not configured")
                             runFnOriginOutboxSession pinnedConfig state selected payload
                         | 17 =>
                             let providerIds ← IO.ofExcept settings.continuityIds
                             if providerIds.isEmpty then
-                              return ((255 : UInt8), failure "provider-continuity"
+                              return ((255 : UInt8), failure .operationRejected "provider-continuity"
                                 "provider continuity resource is not configured")
                             runProviderContinuitySession pinnedConfig state
                               providerIds payload
                         | 18 =>
                             unless catalogService.isSome do
-                              return ((255 : UInt8), failure "fn-origin-outbox"
+                              return ((255 : UInt8), failure .operationRejected "fn-origin-outbox"
                                 "A origin outbox service is not configured")
                             runFnOriginOutboxExportSession pinnedConfig state payload
                         | 19 =>
@@ -4990,7 +4994,7 @@ def run (arguments : List String) : IO UInt32 := do
                             | .ok report =>
                                 return ((19 : UInt8), report.compress.toUTF8.toList)
                             | .error reason =>
-                                return ((255 : UInt8), failure "provider-metering" reason)
+                                return ((255 : UInt8), failure .operationRejected "provider-metering" reason)
                         | 28 =>
                             let outcome ← applicationShareIssueSubmitSession
                               pinnedConfig state payload
@@ -5051,7 +5055,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((63 : UInt8), outcomeCodec.encode outcome)
                         | 64 =>
                             let some service := service
-                              | return ((255 : UInt8), failure "fn-frontier-plan"
+                              | return ((255 : UInt8), failure .operationRejected "fn-frontier-plan"
                                   "fn consumer service is not configured")
                             let some releaseKey := fnFrontierPlanRequestCodec.decode payload
                               | throw (IO.userError "noncanonical fn frontier plan request")
@@ -5063,7 +5067,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((64 : UInt8), bytes)
                         | 65 =>
                             let some service := service
-                              | return ((255 : UInt8), failure "fn-frontier-assemble"
+                              | return ((255 : UInt8), failure .operationRejected "fn-frontier-assemble"
                                   "fn consumer service is not configured")
                             let (planBytes, signature) ← splitPair payload
                             let some plan := FnConsumerFrontierPlan.planCodec.decode planBytes
@@ -5141,12 +5145,12 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((57 : UInt8), ingress)
                         | 40 =>
                             let some selected := service
-                              | return ((255 : UInt8), failure "fn-consumer-namespace"
+                              | return ((255 : UInt8), failure .operationRejected "fn-consumer-namespace"
                                   "fn consumer service is not configured")
                             let some ingress := FnConsumerNamespaceRegistration.ingressCodec.decode
                                 payload
                               | return ((40 : UInt8), outcomeCodec.encode <|
-                                  .refused "fn-consumer-namespace".toUTF8.toList
+                                  .refused .malformed "fn-consumer-namespace".toUTF8.toList
                                     "noncanonical ingress".toUTF8.toList)
                             let (scope, binding) ← fnNamespaceLocalZero pinnedConfig selected
                             unless ingress.spec.consumerNamespace.scope == scope &&
@@ -5159,7 +5163,7 @@ def run (arguments : List String) : IO UInt32 := do
                             unless payload.isEmpty do
                               throw (IO.userError "fn namespace plan takes no caller selectors")
                             let some selected := service
-                              | return ((255 : UInt8), failure "fn-consumer-namespace"
+                              | return ((255 : UInt8), failure .operationRejected "fn-consumer-namespace"
                                   "fn consumer service is not configured")
                             let (scope, binding) ← fnNamespaceLocalZero pinnedConfig selected
                             let gateway ← requireGateway pinnedConfig
@@ -5172,7 +5176,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((42 : UInt8), FnConsumerNamespacePlan.planCodec.encode plan)
                         | 43 =>
                             let some selected := service
-                              | return ((255 : UInt8), failure "fn-consumer-namespace"
+                              | return ((255 : UInt8), failure .operationRejected "fn-consumer-namespace"
                                   "fn consumer service is not configured")
                             let (planBytes, gatewaySignature) ← splitPair payload
                             let some plan := FnConsumerNamespacePlan.planCodec.decode planBytes
@@ -5191,7 +5195,7 @@ def run (arguments : List String) : IO UInt32 := do
                               FnConsumerNamespaceRegistration.ingressCodec.encode ingress)
                         | 44 =>
                             let some custody := settings.completionManagement
-                              | return ((255 : UInt8), failure "application-lifecycle-completion-author"
+                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-completion-author"
                                   "completion management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
@@ -5214,7 +5218,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((45 : UInt8), ingress)
                         | 50 =>
                             let some custody := settings.residentBeginManagement
-                              | return ((255 : UInt8), failure "application-lifecycle-resident-begin-author"
+                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-resident-begin-author"
                                   "resident BEGIN management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
@@ -5237,7 +5241,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((51 : UInt8), ingress)
                         | 52 =>
                             let some custody := settings.residentClaimManagement
-                              | return ((255 : UInt8), failure "application-lifecycle-claim-author"
+                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-claim-author"
                                   "resident claim management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
@@ -5260,7 +5264,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((53 : UInt8), ingress)
                         | 66 =>
                             let some custody := settings.residentBeginManagement
-                              | return ((255 : UInt8), failure "application-lifecycle-launch-begin-author"
+                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-begin-author"
                                   "resident BEGIN management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
                             let bytes ← if let some request :=
@@ -5302,7 +5306,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((67 : UInt8), ingress)
                         | 68 =>
                             let some custody := settings.residentClaimManagement
-                              | return ((255 : UInt8), failure "application-lifecycle-launch-claim-author"
+                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-claim-author"
                                   "resident claim management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
@@ -5325,7 +5329,7 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((69 : UInt8), ingress)
                         | 70 =>
                             let some custody := settings.completionManagement
-                              | return ((255 : UInt8), failure "application-lifecycle-launch-completion-author"
+                              | return ((255 : UInt8), failure .operationRejected "application-lifecycle-launch-completion-author"
                                   "completion management pin is not configured")
                             let session ← sessionCurrent pinnedConfig state
                             let plan ← IO.ofExcept <|
@@ -5393,8 +5397,11 @@ def run (arguments : List String) : IO UInt32 := do
                         | 86 =>
                             let (observationBytes, commandBytes) ← splitPair payload
                             let opened ← sessionOpened pinnedConfig state
-                            let plan ← IO.ofExcept (← NativeHost.enrollmentPlanAuthorizedLoaded
-                              pinnedConfig opened observationBytes commandBytes)
+                            let plan ← match ← NativeHost.enrollmentPlanAuthorizedLoaded
+                                pinnedConfig opened observationBytes commandBytes with
+                              | .ok plan => pure plan
+                              | .error refusal =>
+                                  return ((255 : UInt8), refusalFrame "enrollment-plan" refusal)
                             let bytes := ParticipantKeyEnrollment.signingPlanCodec.encode plan
                             unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "participant enrollment plan exceeds host frame bound")
@@ -5412,19 +5419,19 @@ def run (arguments : List String) : IO UInt32 := do
                             return ((87 : UInt8), ingress)
                         | 48 | 49 | 58 | 59 =>
                             let some custody := settings.agentDispatchFixed
-                              | return ((255 : UInt8), failure "application-agent-dispatch-author"
+                              | return ((255 : UInt8), failure .operationRejected "application-agent-dispatch-author"
                                   "agent dispatch operator pin is not configured")
                             agentDispatchAuthorSession pinnedConfig state custody.selectors
                               operation payload
                         | 78 | 79 | 80 | 81 =>
                             let custody ← IO.ofExcept settings.lifetimeDispatchPins
                             if custody.isEmpty then
-                              return ((255 : UInt8), failure "application-agent-lifetime-author"
+                              return ((255 : UInt8), failure .operationRejected "application-agent-lifetime-author"
                                 "lifetime dispatch operator pin is not configured")
                             agentLifetimeDispatchAuthorSession pinnedConfig state
                               custody operation payload
                         | _ => throw (IO.userError "unsupported native host operation")
-                      catch error => return ((255 : UInt8), failure "fn-session" s!"{error}")
+                      catch error => return ((255 : UInt8), failure .operationRejected "fn-session" s!"{error}")
                   let meteringProfile := profileDescription pinnedConfig
                     (← IO.ofExcept settings.providerMeteringPin)
                     (← IO.ofExcept settings.providerServicePins)
