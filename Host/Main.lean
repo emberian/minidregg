@@ -38,6 +38,10 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 86=private participant key enrollment plan, 87=private detached key assembly,
 88=checked participant key enrollment submit, 89=receipt-only key lookup,
 91=current resource birth intent from verified history.
+92=private fleet turn plan behind a signed account observation, 93=detached fleet
+assembly, 94=checked fleet turn submit, 95=receipt-only fleet lookup, 96=topic
+poll since a cursor behind a signed account observation, 97=agent fleet head
+behind a signed account observation, 98=exact receipt by transaction id.
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -5033,6 +5037,62 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome := NativeHost.enrollmentLookupLoaded
                               pinnedConfig opened payload
                             return ((89 : UInt8), outcomeCodec.encode outcome)
+                        | 92 =>
+                            let (observationBytes, draftBytes) ← splitPair payload
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (← NativeHost.fleetPlanAuthorizedLoaded
+                              pinnedConfig opened observationBytes draftBytes)
+                            let bytes := FleetTurn.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "fleet turn plan exceeds host frame bound")
+                            return ((92 : UInt8), bytes)
+                        | 93 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := FleetTurn.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical fleet turn plan")
+                            let ingress ← IO.ofExcept (NativeHost.fleetAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "fleet turn ingress exceeds host frame bound")
+                            return ((93 : UInt8), ingress)
+                        | 94 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.fleetSubmitLoaded pinnedConfig opened payload
+                            return ((94 : UInt8), outcomeCodec.encode outcome)
+                        | 95 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.fleetLookupLoaded pinnedConfig opened payload
+                            return ((95 : UInt8), outcomeCodec.encode outcome)
+                        | 96 =>
+                            let (observationBytes, requestBytes) ← splitPair payload
+                            let some text := String.fromUTF8? requestBytes.toByteArray
+                              | throw (IO.userError "fleet poll request is not UTF-8")
+                            let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
+                            let (topic, cursor, limit) ← IO.ofExcept
+                              (Minidregg.Host.Json.fleetPollRequest request)
+                            let opened ← sessionOpened pinnedConfig state
+                            match ← NativeHost.fleetPollAuthorizedLoaded pinnedConfig opened
+                                observationBytes topic cursor limit with
+                            | .ok view => return ((96 : UInt8),
+                                (Minidregg.Host.Json.fleetPollJson view).compress.toUTF8.toList)
+                            | .error detail => return ((255 : UInt8), failure "fleet-poll" detail)
+                        | 97 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            match ← NativeHost.fleetHeadAuthorizedLoaded pinnedConfig opened payload with
+                            | .ok view => return ((97 : UInt8),
+                                (Minidregg.Host.Json.fleetHeadJson view).compress.toUTF8.toList)
+                            | .error detail => return ((255 : UInt8), failure "fleet-head" detail)
+                        | 98 =>
+                            let some text := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "transaction id is not UTF-8")
+                            let some transactionId := text.toNat?
+                              | throw (IO.userError "transaction id must be canonical decimal")
+                            unless toString transactionId == text do
+                              throw (IO.userError "transaction id must be canonical decimal")
+                            let opened ← sessionOpened pinnedConfig state
+                            let receipt := NativeHost.receiptByTransactionLoaded pinnedConfig opened
+                              ⟨transactionId⟩
+                            return ((98 : UInt8), (Minidregg.Host.Json.fleetReceiptLookupJson
+                              transactionId receipt).compress.toUTF8.toList)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload
