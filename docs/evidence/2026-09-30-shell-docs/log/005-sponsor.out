@@ -1,0 +1,14 @@
+{
+  "authority": "admitted-key-only",
+  "keyId": "9863287695300853576",
+  "keyPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/h/sponsor/keys/alice.key",
+  "publicKey": "b40de15f9a3ad76b8713e671bb67dfc829d9d42ad37c80d31fb9fc2aace5dafb",
+  "receipt": {
+    "acceptedCount": "23",
+    "eventId": "52083112529647476469962299889881174503884306285273994027034878962892554728342",
+    "imageBoundary": "25061429962633840372876785536142444550516408965783800542050680508321732637565",
+    "transactionId": "103309998153499226781510138085373325271636750601601398361026844801409500972339"
+  },
+  "subject": "13071851949802628462",
+  "type": "minidregg-participant-enrollment-result-v1"
+}

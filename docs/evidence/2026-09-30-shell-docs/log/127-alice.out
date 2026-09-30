@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/proposals/cut-bob/intent.json",
+  "intentSha256": "8e9e79bf89256cde7303388acee3a1774c837def32fef089064551b5f6c97c89",
+  "proposalId": "cut-bob",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

@@ -1,0 +1,4 @@
+# local retained evidence, oldest first; authority: discovery-only
+attempt	b1	confirmed installed acceptedCount=41 tx=57689348746512847581175004049157209275070018611573349783871379236902775065453 (outcome.json of 1 outcome files)
+attempt	b2	confirmed installed acceptedCount=42 tx=46704769903199749788993454209267129088544089555832552432013507767174629757289 (outcome.json of 1 outcome files)
+attempt	l1	confirmed installed acceptedCount=44 tx=85460558791384085256942778707649356251553807018516958255530952697979483794070 (outcome.json of 1 outcome files)

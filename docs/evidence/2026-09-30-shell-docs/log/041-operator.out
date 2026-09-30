@@ -1,0 +1,47 @@
+/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/sources/create-account-eve.authoring/g0001/intent.bin
+{
+  "acceptedCount": "34",
+  "confirmation": "installed",
+  "eventId": "40675903680559726693172728936442060079400285996211951501507311573877663799834",
+  "imageBoundary": "47325805589101914534300590730453999300889247932973151580393627452910846895626",
+  "transactionId": "3958799281526460596902073754251145583485266198650981309407499968882933789576",
+  "type": "confirmed"
+}
+{
+  "account": {
+    "attempt": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/attempts/create-account-eve",
+    "birthReceipt": {
+      "acceptedCount": "34",
+      "confirmation": "installed",
+      "eventId": "40675903680559726693172728936442060079400285996211951501507311573877663799834",
+      "imageBoundary": "47325805589101914534300590730453999300889247932973151580393627452910846895626",
+      "transactionId": "3958799281526460596902073754251145583485266198650981309407499968882933789576",
+      "type": "confirmed"
+    },
+    "controlCapability": "9898675562068829009",
+    "funded": "1000",
+    "ownerCapability": "9886975159315441066",
+    "target": "11685127458219507446"
+  },
+  "authority": "hint-only; the Host checks every grant at use",
+  "birthContext": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/provisions/eve/birth-context.json",
+  "factoryObservation": {
+    "authority": "admitted-factory-observation",
+    "capability": "12167607391370276709",
+    "factory": "10",
+    "holder": "13638194795160528636",
+    "receipt": {
+      "acceptedCount": "33",
+      "eventId": "13014398401816724169177573461814741679967621227189684020792975730998696929452",
+      "imageBoundary": "35105837817153155419305772470788704784734861520083976530488364246885971287759",
+      "transactionId": "50427524389665741650286956636744670064789717416925176704936172371222984242072"
+    },
+    "type": "minidregg-participant-factory-observation-result-v1",
+    "verbs": [
+      "observe"
+    ]
+  },
+  "holder": "13638194795160528636",
+  "name": "eve",
+  "type": "minidregg-participant-provisioning-v1"
+}

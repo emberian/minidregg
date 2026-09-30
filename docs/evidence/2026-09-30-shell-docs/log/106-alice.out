@@ -1,0 +1,17 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": {
+    "childCapability": "10045206319151650610",
+    "domain": "8501",
+    "kind": "object",
+    "name": "tasks",
+    "recipient": "14591131992792524932",
+    "reservation": "0afc39c1c3b8962471ddcd073d799046b5b12575729f1cddc8aa06c7b12118b1",
+    "target": "17364936371424614124"
+  },
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/proposals/g-bob-tasks/intent.json",
+  "intentSha256": "a656500d8eabc740154ec21f5780a45f3c31da875665b12ea752f1ccc39d727e",
+  "proposalId": "g-bob-tasks",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

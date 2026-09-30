@@ -1,0 +1,14 @@
+{
+  "authority": "admitted-key-only",
+  "keyId": "14539402037510000086",
+  "keyPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/h/sponsor/keys/eve.key",
+  "publicKey": "8736c1acd273b8c0ae718b5452e51c49b4f1d7adce6ccdecfb4285b16edd2390",
+  "receipt": {
+    "acceptedCount": "32",
+    "eventId": "83685346200428677763437284899285101679003431208350655789576868703158817177519",
+    "imageBoundary": "23578744943083630420891437508832864875356429371892069184993200773709723778986",
+    "transactionId": "18256045283647149797943796671189986379752451286991094064410416395964181050831"
+  },
+  "subject": "13638194795160528636",
+  "type": "minidregg-participant-enrollment-result-v1"
+}

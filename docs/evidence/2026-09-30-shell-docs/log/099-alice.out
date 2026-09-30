@@ -1,0 +1,31 @@
+/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/sources/create-log.authoring/g0001/intent.bin
+{
+  "acceptedCount": "45",
+  "confirmation": "installed",
+  "eventId": "55842830588654483760078177599317479859332085740314410836202835476456516309156",
+  "imageBoundary": "109666168720378648978633142416564194114029875529917258810508096927614998064549",
+  "transactionId": "36360293538950800680963336877129444558847770163387076347233970140855094003682",
+  "type": "confirmed"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "15128327753238371024",
+  "kind": "object",
+  "name": "log",
+  "observeCapability": "16473360799124305636",
+  "operationCapability": "16473360799124305636",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "45",
+      "confirmation": "installed",
+      "eventId": "55842830588654483760078177599317479859332085740314410836202835476456516309156",
+      "imageBoundary": "109666168720378648978633142416564194114029875529917258810508096927614998064549",
+      "transactionId": "36360293538950800680963336877129444558847770163387076347233970140855094003682",
+      "type": "confirmed"
+    },
+    "reservationDigest": "2d89cd4811a09fab64ecc13473c903aaf08e738ac4724fe775ba12e7f717b6bb",
+    "reservationRecord": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/h/alice/namespace/request-2d89cd4811a09fab64ecc13473c903aaf08e738ac4724fe775ba12e7f717b6bb.json"
+  },
+  "target": "14619179681281311472",
+  "type": "minidregg-participant-reference-v1"
+}
