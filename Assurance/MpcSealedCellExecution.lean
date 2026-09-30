@@ -486,7 +486,7 @@ theorem honestPatch_accepted :
 theorem validated :
     CellState.ValidatedPatch materializer pre pre.root
       (adapter.patch honestRequest honestResult) :=
-  honestPatch_accepted.choose
+  honestPatch_accepted.elim fun validated _ => validated
 
 noncomputable def commonRequest : Request .object :=
   requestContext.request (adapter.completeRequestDigest honestRequest)

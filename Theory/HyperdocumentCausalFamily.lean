@@ -441,7 +441,7 @@ theorem validated : CellState.ValidatedPatch hyperdocumentMaterializer
     hyperdocumentCell (declaration.toRequest config).preStateRoot
     (declaration.patch config) :=
   (CellState.validate_accepts _ _ _ _ semantic.preRootExact
-    semantic.guardsValid).choose
+    semantic.guardsValid).elim fun validated _ => validated
 
 noncomputable def accepted : HyperdocumentOperations.Accepted config projection
     authorityPre hyperdocumentCell permissivePortal declaration :=
