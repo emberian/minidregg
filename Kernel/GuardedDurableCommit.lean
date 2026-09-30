@@ -50,9 +50,9 @@ silently comparing the authority lane under a different root function. -/
 structure SharedDigestAgreement
     (MDoc : Hyperdocument.Materializer Digest)
     (MAuth : CredentialAuthorityState.Materializer)
-    (representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest) :
+    (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer) :
     Prop where
-  eventRootFunction : representation.rootBytes = MDoc.rootBytes
+  eventRootFunction : MLog.rootBytes = MDoc.rootBytes
   authorityRootFunction : MAuth.rootBytes = MDoc.rootBytes
 
 /-! ## Read-only installation invariant -/
@@ -132,13 +132,13 @@ noncomputable def ofHyperdocumentPublication
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
       contentConfig projection authorityPre documentPre contentPortal
       contentDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
     {event : Minidregg.Kernel.HyperdocumentPublication.EventAccepted content
-      representation store eventConfig eventPortal eventDeclaration}
+      MLog store eventConfig eventPortal eventDeclaration}
     {header : Minidregg.Kernel.HyperdocumentPublication.Header}
     {contentCellId eventCellId authorityCellId : Digest}
     {boundary : Minidregg.Kernel.MultiCellHyperedge.HandlerBoundary
@@ -153,7 +153,7 @@ noncomputable def ofHyperdocumentPublication
       (Minidregg.Kernel.HyperdocumentPublication.acceptedLegs content event header
         contentCellId eventCellId)))
     (bounded : BoundedMultiCellCommit publication StableEvent wire.event)
-    (digestAgreement : SharedDigestAgreement MDoc MAuth representation)
+    (digestAgreement : SharedDigestAgreement MDoc MAuth MLog)
     (authorityDistinctContent : authorityCellId ≠ contentCellId)
     (authorityDistinctEvent : authorityCellId ≠ eventCellId) :
     DataIntent MDoc.rootBytes where
@@ -200,13 +200,13 @@ noncomputable def ofHyperdocumentPublication
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
       contentConfig projection authorityPre documentPre contentPortal
       contentDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
     {event : Minidregg.Kernel.HyperdocumentPublication.EventAccepted content
-      representation store eventConfig eventPortal eventDeclaration}
+      MLog store eventConfig eventPortal eventDeclaration}
     {header : Minidregg.Kernel.HyperdocumentPublication.Header}
     {contentCellId eventCellId authorityCellId : Digest}
     {boundary : Minidregg.Kernel.MultiCellHyperedge.HandlerBoundary
@@ -221,13 +221,14 @@ noncomputable def ofHyperdocumentPublication
       (Minidregg.Kernel.HyperdocumentPublication.acceptedLegs content event header
         contentCellId eventCellId)))
     (bounded : BoundedMultiCellCommit publication StableEvent wire.event)
-    (digestAgreement : SharedDigestAgreement MDoc MAuth representation)
+    (digestAgreement : SharedDigestAgreement MDoc MAuth MLog)
     (authorityDistinctContent : authorityCellId ≠ contentCellId)
     (authorityDistinctEvent : authorityCellId ≠ eventCellId) :
     (ofHyperdocumentPublication wire bounded digestAgreement
       authorityDistinctContent authorityDistinctEvent).readGuards =
       [{ cellId := authorityCellId, expectedRoot := authorityPre.root }] := by
   simp [ofHyperdocumentPublication, CellState.Materialized.root,
+    CellState.Materializer.rootOf, CellState.Materialized.bytes,
     digestAgreement.authorityRootFunction]
 
 @[simp] theorem ofHyperdocumentPublication_writes_length
@@ -242,13 +243,13 @@ noncomputable def ofHyperdocumentPublication
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
       contentConfig projection authorityPre documentPre contentPortal
       contentDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
     {event : Minidregg.Kernel.HyperdocumentPublication.EventAccepted content
-      representation store eventConfig eventPortal eventDeclaration}
+      MLog store eventConfig eventPortal eventDeclaration}
     {header : Minidregg.Kernel.HyperdocumentPublication.Header}
     {contentCellId eventCellId authorityCellId : Digest}
     {boundary : Minidregg.Kernel.MultiCellHyperedge.HandlerBoundary
@@ -263,7 +264,7 @@ noncomputable def ofHyperdocumentPublication
       (Minidregg.Kernel.HyperdocumentPublication.acceptedLegs content event header
         contentCellId eventCellId)))
     (bounded : BoundedMultiCellCommit publication StableEvent wire.event)
-    (digestAgreement : SharedDigestAgreement MDoc MAuth representation)
+    (digestAgreement : SharedDigestAgreement MDoc MAuth MLog)
     (authorityDistinctContent : authorityCellId ≠ contentCellId)
     (authorityDistinctEvent : authorityCellId ≠ eventCellId) :
     (ofHyperdocumentPublication wire bounded digestAgreement
@@ -289,13 +290,13 @@ theorem authority_rotation_or_revocation_rejects_old_publication
     {content : Minidregg.Kernel.HyperdocumentPublication.ContentAccepted
       contentConfig projection authorityPre documentPre contentPortal
       contentDeclaration}
-    {representation : Minidregg.Kernel.HyperdocumentEventLog.Representation Digest}
+    {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
     {eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : Minidregg.Kernel.HyperdocumentVersionEffects.Declaration}
     {event : Minidregg.Kernel.HyperdocumentPublication.EventAccepted content
-      representation store eventConfig eventPortal eventDeclaration}
+      MLog store eventConfig eventPortal eventDeclaration}
     {header : Minidregg.Kernel.HyperdocumentPublication.Header}
     {contentCellId eventCellId authorityCellId : Digest}
     {boundary : Minidregg.Kernel.MultiCellHyperedge.HandlerBoundary
@@ -310,7 +311,7 @@ theorem authority_rotation_or_revocation_rejects_old_publication
       (Minidregg.Kernel.HyperdocumentPublication.acceptedLegs content event header
         contentCellId eventCellId)))
     (bounded : BoundedMultiCellCommit publication StableEvent wire.event)
-    (digestAgreement : SharedDigestAgreement MDoc MAuth representation)
+    (digestAgreement : SharedDigestAgreement MDoc MAuth MLog)
     (authorityDistinctContent : authorityCellId ≠ contentCellId)
     (authorityDistinctEvent : authorityCellId ≠ eventCellId)
     (current : DataSnapshot MDoc.rootBytes)
