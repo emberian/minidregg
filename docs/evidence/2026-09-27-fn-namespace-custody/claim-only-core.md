@@ -20,7 +20,9 @@ The overlay symlinks unchanged local OLeans; it does not write to the shared
 `.lake` directory. No full native link was run.
 
 The [claim-only witness](claim-only-witness.lean), SHA-256
-`7c544dcda762df7ffe5a3f96385a976809fb5f21516dbd7c529fe59aed4ca7a5`,
+`7c544dcda762df7ffe5a3f96385a976809fb5f21516dbd7c529fe59aed4ca7a5`
+(the file as run; its `#print axioms` lines were later `#guard_msgs`-pinned, so
+the tracked file now hashes differently and git holds the run's bytes),
 compiled against the overlay with exit zero. Its log at
 `/tmp/mini-eventonly-core/witness.log` has SHA-256
 `331a7eceec650800b7602dfa70191513bf83f56659266b842688c84b9a745336`.

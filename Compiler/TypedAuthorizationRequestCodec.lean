@@ -222,14 +222,22 @@ theorem signedRequestBytes_injective : Function.Injective signedRequestBytes := 
   have decoded := congrArg someRequestCodec.decode samePayload
   simpa only [someRequestCodec.decode_encode, Option.some.injEq] using decoded
 
-#print axioms requestWireOfWords_exact
-#print axioms requestWords_injective
-#print axioms requestWireCodec_canonical
-#print axioms someRequestCodec_canonical
-#print axioms requestCodecFor_canonical
-#print axioms requestStreamFor_wrong_kind
-#print axioms signedRequestBytes_exact
-#print axioms signedRequestBytes_injective
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.requestWireOfWords_exact' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms requestWireOfWords_exact
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.requestWords_injective' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms requestWords_injective
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.requestWireCodec_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestWireCodec_canonical
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.someRequestCodec_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms someRequestCodec_canonical
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.requestCodecFor_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestCodecFor_canonical
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.requestStreamFor_wrong_kind' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestStreamFor_wrong_kind
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.signedRequestBytes_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms signedRequestBytes_exact
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.signedRequestBytes_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms signedRequestBytes_injective
 
 
 private theorem resourceKindTag_of_decoded {tag : Nat} {kind : ResourceKind}
@@ -260,7 +268,8 @@ theorem encodeRequest_of_decodeRequest {wire : RequestWire} {request : SomeReque
       simp_all [encodeRequest]
 
 
-#print axioms encodeRequest_of_decodeRequest
+/-- info: 'Minidregg.Compiler.TypedAuthorizationRequestCodec.encodeRequest_of_decodeRequest' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms encodeRequest_of_decodeRequest
 
 /-- Object clients share the complete kind-tagged codec; no second request layout. -/
 def requestStream : StreamCodec (Request .object) := requestStreamFor .object
