@@ -1,0 +1,10 @@
+{
+  "next": "grant a runner: key grant",
+  "owner": {
+    "publicKey": "7a1cfd5b1013ac4c050877e16b36c13d3e8b6cec73ace9e1f3f03c52fe437ed1",
+    "subject": "21"
+  },
+  "provider": "openrouter",
+  "stored": "sealed",
+  "type": "mini-key-set-v1"
+}

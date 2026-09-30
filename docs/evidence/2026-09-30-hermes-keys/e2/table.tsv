@@ -1,0 +1,14 @@
+store	step	caller	row	http	code	upstream_auth	expected_auth	purse_after	expected_purse	verdict
+store-b	b1	B	openrouter	200	-	sha256:05518a73ba7201be70b7341af2149d5e039f7bfa3b313879657b3b049fbc769b	sha256:05518a73ba7201be70b7341af2149d5e039f7bfa3b313879657b3b049fbc769b	49/0	49/0	PASS
+store-b	b2-after-revoke	B	openrouter	403	no-credential	-	-	49/0	49/0	PASS
+store-a	a1	A	openrouter	200	-	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	49/0	49/0	PASS
+store-a	a2	A	openrouter	200	-	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	48/0	48/0	PASS
+store-a	a3-over-per-call	A	openrouter	403	per-call-cap	-	-	48/0	48/0	PASS
+store-a	a4	A	openrouter	200	-	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	47/0	47/0	PASS
+store-a	a5-over-per-day	A	openrouter	403	per-day-cap	-	-	47/0	47/0	PASS
+store-a	a6-after-regrant	A	openrouter	200	-	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2	46/0	46/0	PASS
+store-a	a7-grant-expired	A	openrouter	403	grant-expired	-	-	46/0	46/0	PASS
+store-c	c1-user-row-no-key	C	openrouter	403	no-credential	-	-	50/0	50/0	PASS
+store-c	c2-pool	C	pool	200	-	sha256:8d08b75cd6e7154a40a619dd8ccb2d1ee3cc4b55287577df9f9687db03f0ad2c	sha256:8d08b75cd6e7154a40a619dd8ccb2d1ee3cc4b55287577df9f9687db03f0ad2c	30/0	30/0	PASS
+store-c	c3-homelab	C	homelab	200	-	homelab:none	homelab:none	10/0	10/0	PASS
+store-c	c4-pool-out-of-credit	C	pool	402	no-credit	-	-	10/0	10/0	PASS

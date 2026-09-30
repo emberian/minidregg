@@ -1,0 +1,10 @@
+{
+  "owner": {
+    "publicKey": "2ac480a0ea293f4504dff042a48f6b7208fb3e92f731826956b227f557ba079b",
+    "subject": "22"
+  },
+  "provider": "openrouter",
+  "removed": false,
+  "runner": null,
+  "type": "mini-key-revoke-v1"
+}
