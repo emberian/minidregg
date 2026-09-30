@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# SSH forced command: one authorized key = one participant session.
+# The connecting key is bound to exactly one workspace and one session home by
+# the authorized_keys line that names this wrapper; the friend cannot choose
+# either. SSH_ORIGINAL_COMMAND, when present, is handed to `mini shell` as one
+# line in the shell's own word syntax. It never reaches a system shell.
+#
+#   ssh -t friend@host              interactive (prompt, Tab completion)
+#   ssh friend@host 'read shared'   one verb; exit code is the verb's
+#   ssh -T friend@host < script     script mode; stops at the first failure
+set -euo pipefail
+if [[ $# -ne 6 ]]; then
+  echo 'usage: mini-shell-ssh ABS_MINI ABS_HOST ABS_CONFIG ABS_SOCKET ABS_WORKSPACE ABS_HOME' >&2
+  exit 64
+fi
+for path in "$@"; do
+  [[ $path == /* ]] || { echo 'mini-shell-ssh paths must be absolute' >&2; exit 64; }
+done
+mini=$1 host=$2 config=$3 socket=$4 workspace=$5 home=$6
+[[ -x $mini ]] || { echo 'mini client is not executable' >&2; exit 66; }
+umask 077
+if [[ -n ${SSH_ORIGINAL_COMMAND-} ]]; then
+  exec "$mini" shell --socket "$socket" --host "$host" --config "$config" \
+    --workspace "$workspace" --home "$home" --line "$SSH_ORIGINAL_COMMAND"
+fi
+exec "$mini" shell --socket "$socket" --host "$host" --config "$config" \
+  --workspace "$workspace" --home "$home"
