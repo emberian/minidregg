@@ -219,6 +219,17 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       let obj ← exactObject path ["type", "slot"] json
       let slot ← string (path ++ ".slot") (← field path "slot" obj)
       pure <| if tag = "writeOnce" then .writeOnce slot else .monotone slot
+  | "eqSlots" | "leSlots" =>
+      let obj ← exactObject path ["type", "left", "right"] json
+      let left ← string (path ++ ".left") (← field path "left" obj)
+      let right ← string (path ++ ".right") (← field path "right" obj)
+      pure <| if tag = "eqSlots" then .eqSlots left right else .leSlots left right
+  | "leSlotsOff" =>
+      let obj ← exactObject path ["type", "left", "right", "offset"] json
+      let left ← string (path ++ ".left") (← field path "left" obj)
+      let right ← string (path ++ ".right") (← field path "right" obj)
+      let offset ← int (path ++ ".offset") (← field path "offset" obj)
+      pure (.leSlotsOff left right offset)
   | "witnessed" =>
       let obj ← exactObject path ["type", "identifier"] json
       pure (.witnessed ⟨← string (path ++ ".identifier") (← field path "identifier" obj)⟩)
@@ -240,6 +251,12 @@ private partial def predicateJson : Pred → Lean.Json
       ("values", .arr (values.toArray.map signedDecimal))]
   | .writeOnce slot => .mkObj [("type", "writeOnce"), ("slot", .str slot)]
   | .monotone slot => .mkObj [("type", "monotone"), ("slot", .str slot)]
+  | .eqSlots left right => .mkObj [("type", "eqSlots"), ("left", .str left),
+      ("right", .str right)]
+  | .leSlots left right => .mkObj [("type", "leSlots"), ("left", .str left),
+      ("right", .str right)]
+  | .leSlotsOff left right offset => .mkObj [("type", "leSlotsOff"), ("left", .str left),
+      ("right", .str right), ("offset", signedDecimal offset)]
   | .witnessed identifier => .mkObj [("type", "witnessed"),
       ("identifier", .str identifier.id)]
   | .not child => .mkObj [("type", "not"), ("predicate", predicateJson child)]

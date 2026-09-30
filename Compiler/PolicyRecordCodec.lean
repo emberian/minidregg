@@ -1,7 +1,7 @@
 /-
 # Compiler.PolicyRecordCodec -- executable, canonical policy source
 
-Version 3 encodes the complete `PolicyRecord`, including every `Pred`
+Version 4 encodes the complete `PolicyRecord`, including every `Pred`
 constructor. Naturals use the shared compact base-255 stream codec; integers
 use the one integer codec, `Compiler.IntStream.intStream` (zigzag base-255,
 no tag byte); strings retain their exact Unicode
@@ -52,10 +52,15 @@ inductive Token where
   | any
   | nil
   | cons
+  | eqSlots (left right : String)
+  | leSlots (left right : String)
+  | leSlotsOff (left right : String) (offset : Int)
   deriving DecidableEq, Repr
 
 def slotIntStream := StreamCodec.product stringStream IntStream.intStream
 def slotListStream := StreamCodec.product stringStream (StreamCodec.list IntStream.intStream)
+def slotPairStream := StreamCodec.product stringStream stringStream
+def slotPairIntStream := StreamCodec.product slotPairStream IntStream.intStream
 
 def encodeToken : Token → List UInt8
   | .eq slot value => 0 :: slotIntStream.encode (slot, value)
@@ -69,6 +74,9 @@ def encodeToken : Token → List UInt8
   | .any => [8]
   | .nil => [9]
   | .cons => [10]
+  | .eqSlots left right => 11 :: slotPairStream.encode (left, right)
+  | .leSlots left right => 12 :: slotPairStream.encode (left, right)
+  | .leSlotsOff left right offset => 13 :: slotPairIntStream.encode ((left, right), offset)
 
 def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 0 :: bytes => do
@@ -94,6 +102,15 @@ def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 8 :: suffix => some (.any, suffix)
   | 9 :: suffix => some (.nil, suffix)
   | 10 :: suffix => some (.cons, suffix)
+  | 11 :: bytes => do
+      let ((left, right), suffix) ← slotPairStream.decodePrefix bytes
+      some (.eqSlots left right, suffix)
+  | 12 :: bytes => do
+      let ((left, right), suffix) ← slotPairStream.decodePrefix bytes
+      some (.leSlots left right, suffix)
+  | 13 :: bytes => do
+      let (((left, right), offset), suffix) ← slotPairIntStream.decodePrefix bytes
+      some (.leSlotsOff left right offset, suffix)
   | _ => none
 
 theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
@@ -115,6 +132,9 @@ def step : Token → Stack → Option Stack
   | .writeOnce slot, stack => some (.inl (.writeOnce slot) :: stack)
   | .monotone slot, stack => some (.inl (.monotone slot) :: stack)
   | .witnessed identifier, stack => some (.inl (.witnessed ⟨identifier⟩) :: stack)
+  | .eqSlots left right, stack => some (.inl (.eqSlots left right) :: stack)
+  | .leSlots left right, stack => some (.inl (.leSlots left right) :: stack)
+  | .leSlotsOff left right offset, stack => some (.inl (.leSlotsOff left right offset) :: stack)
   | .not, .inl predicate :: stack => some (.inl (.not predicate) :: stack)
   | .all, .inr predicates :: stack => some (.inl (.allL predicates) :: stack)
   | .any, .inr predicates :: stack => some (.inl (.anyL predicates) :: stack)
@@ -137,6 +157,9 @@ def tokensInto : Pred → List Token → List Token
   | .memberOf slot values, suffix => .memberOf slot values :: suffix
   | .writeOnce slot, suffix => .writeOnce slot :: suffix
   | .monotone slot, suffix => .monotone slot :: suffix
+  | .eqSlots left right, suffix => .eqSlots left right :: suffix
+  | .leSlots left right, suffix => .leSlots left right :: suffix
+  | .leSlotsOff left right offset, suffix => .leSlotsOff left right offset :: suffix
   | .witnessed vk, suffix => .witnessed vk.id :: suffix
   | .not predicate, suffix => tokensInto predicate (.not :: suffix)
   | .allL predicates, suffix => listTokensInto predicates (.all :: suffix)
@@ -158,6 +181,9 @@ theorem runTokens_tokensInto (predicate : Pred) (suffix : List Token) (stack : S
   | memberOf slot values => rfl
   | writeOnce slot => rfl
   | monotone slot => rfl
+  | eqSlots left right => rfl
+  | leSlots left right => rfl
+  | leSlotsOff left right offset => rfl
   | witnessed vk => cases vk; rfl
   | not predicate =>
       rw [tokensInto, runTokens_tokensInto]
@@ -221,11 +247,11 @@ def recordOfTuple (tuple : RecordTuple) : Option PolicyRecord := do
   cases record
   simp [recordOfTuple, recordTuple]
 
-def sourceVersion : Nat := 3
+def sourceVersion : Nat := 4
 
 def framePrefix : List UInt8 := "LOOM/AUTH/POLICYRECORD".toUTF8.toList
 
-def wireFrame : List UInt8 := framePrefix ++ [3]
+def wireFrame : List UInt8 := framePrefix ++ [4]
 
 def encode (record : PolicyRecord) : List UInt8 :=
   wireFrame ++ recordTupleStream.encode (recordTuple record)
@@ -320,7 +346,77 @@ theorem v2_frame_refused (rest : List UInt8) :
   rw [raw]
   rfl
 
-def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v3".toUTF8.toList
+/-- Version 3 records (the vocabulary without the slot-to-slot atoms) refuse to decode:
+their frame byte is 3. -/
+theorem v3_frame_refused (rest : List UInt8) :
+    decode ((framePrefix ++ [3]) ++ rest) = none := by
+  have taken : ((framePrefix ++ [3]) ++ rest).take wireFrame.length = framePrefix ++ [3] := by
+    rw [wireFrame, List.append_assoc, List.length_append, List.take_length_add_append]
+    rfl
+  have differs : framePrefix ++ [3] ≠ wireFrame := by
+    intro same
+    have := List.append_cancel_left same
+    simp at this
+  have raw : decodeRaw ((framePrefix ++ [3]) ++ rest) = none := by
+    unfold decodeRaw
+    rw [if_neg (by rw [taken]; exact differs)]
+  unfold decode
+  rw [raw]
+  rfl
+
+/-- Conversely every version-4 encoding carries frame byte 4, so a version-3 decoder, whose first
+check is `take wireFrame.length = framePrefix ++ [3]`, refuses every version-4 record — including
+one whose predicate uses a slot-to-slot atom — before reading a token. -/
+theorem encode_not_v3_frame (record : PolicyRecord) :
+    (encode record).take (framePrefix ++ [3]).length ≠ framePrefix ++ [3] := by
+  have hlen : (framePrefix ++ [3]).length = wireFrame.length := by simp [wireFrame]
+  rw [hlen, encode, List.take_left]
+  intro same
+  have := List.append_cancel_left same
+  simp at this
+
+/-- The slot-to-slot atoms round-trip through the canonical record bytes, at every slot pair. -/
+theorem eqSlots_record_round_trip (record : PolicyRecord) (left right : String)
+    (h : record.predicate = .eqSlots left right) :
+    decode (encode record) = some record ∧
+      encodePred record.predicate = [.eqSlots left right] := by
+  exact ⟨decode_encode record, by rw [h]; rfl⟩
+
+theorem leSlots_record_round_trip (record : PolicyRecord) (left right : String)
+    (h : record.predicate = .leSlots left right) :
+    decode (encode record) = some record ∧
+      encodePred record.predicate = [.leSlots left right] := by
+  exact ⟨decode_encode record, by rw [h]; rfl⟩
+
+/-- The two new tags are the bytes 11 and 12, distinct from every version-3 tag (0..10). -/
+theorem slot_pair_tags (left right : String) :
+    (encodeToken (.eqSlots left right)).head? = some 11 ∧
+      (encodeToken (.leSlots left right)).head? = some 12 := ⟨rfl, rfl⟩
+
+/-- The offset order atom round-trips through the canonical record bytes, at every slot pair and
+every offset (negative included). -/
+theorem leSlotsOff_record_round_trip (record : PolicyRecord) (left right : String) (offset : Int)
+    (h : record.predicate = .leSlotsOff left right offset) :
+    decode (encode record) = some record ∧
+      encodePred record.predicate = [.leSlotsOff left right offset] := by
+  exact ⟨decode_encode record, by rw [h]; rfl⟩
+
+/-- `leSlotsOff` is tag 13, added to version 4 without a frame bump: v4 is not yet emitted
+anywhere outside the lane that introduced it, and every tag below 13 keeps its meaning. -/
+theorem leSlotsOff_tag (left right : String) (offset : Int) :
+    (encodeToken (.leSlotsOff left right offset)).head? = some 13 := rfl
+
+/-- The v4 vocabulary is exactly tags 0..13: a token byte of 14 or more refuses to decode, so a
+record from any later vocabulary is refused rather than read. -/
+theorem decodeToken_unknown_tag (tag : UInt8) (htag : 14 ≤ tag.toNat) (rest : List UInt8) :
+    decodeToken (tag :: rest) = none := by
+  unfold decodeToken
+  split <;> first
+    | rfl
+    | (rename_i heq; simp only [List.cons.injEq] at heq; obtain ⟨rfl, -⟩ := heq
+       simp at htag)
+
+def customization : List UInt8 := "LOOM.AUTH.POLICY.RECORD/v4".toUTF8.toList
 
 def hashBytes (bytes : List UInt8) : Digest :=
   (Sp800185Cshake256.hash customization bytes).digest
@@ -338,3 +434,21 @@ end Minidregg.Compiler.PolicyRecordCodec
 /-- info: 'Minidregg.Compiler.PolicyRecordCodec.v2_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Compiler.PolicyRecordCodec.v2_frame_refused
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.v3_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.v3_frame_refused
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.encode_not_v3_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.encode_not_v3_frame
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.eqSlots_record_round_trip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.eqSlots_record_round_trip
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.leSlots_record_round_trip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.leSlots_record_round_trip
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.leSlotsOff_record_round_trip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.leSlotsOff_record_round_trip
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.decodeToken_unknown_tag' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.decodeToken_unknown_tag

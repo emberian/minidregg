@@ -111,6 +111,12 @@ inductive Pred where
   | writeOnce (slot : Slot)
   /-- Monotone: `old[slot] ≤ new[slot]` (append-only counter). -/
   | monotone  (slot : Slot)
+  /-- Slot-to-slot equality: `new[a] = new[b]`, both present. -/
+  | eqSlots   (a b : Slot)
+  /-- Slot-to-slot order: `new[a] ≤ new[b]`, both present. -/
+  | leSlots   (a b : Slot)
+  /-- Slot-to-slot order with a constant offset: `new[a] ≤ new[b] + k`, both present. -/
+  | leSlotsOff (a b : Slot) (k : Int)
   /-- **The escape hatch** — a third-party-discharged claim named by the opaque code `vk`.
   First-party `eval` FAILS CLOSED; admission requires an explicit oracle via `evalWith`. -/
   | witnessed (vk : Vk)
@@ -204,6 +210,15 @@ mutual
                         | some o => o == 0 || decide (new.get s = some o)
     | .monotone s    => match old.get s, new.get s with
                         | some o, some n => decide (o ≤ n)
+                        | _,      _      => false
+    | .eqSlots a b   => match new.get a, new.get b with
+                        | some x, some y => decide (x = y)
+                        | _,      _      => false
+    | .leSlots a b   => match new.get a, new.get b with
+                        | some x, some y => decide (x ≤ y)
+                        | _,      _      => false
+    | .leSlotsOff a b k => match new.get a, new.get b with
+                        | some x, some y => decide (x ≤ y + k)
                         | _,      _      => false
     | .witnessed vk  => O vk old new
     | .not q         => !(evalWith O q old new)
