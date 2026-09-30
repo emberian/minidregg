@@ -17,6 +17,7 @@ import Theory.AcceptedCellEffect
 namespace Minidregg.Theory.PolicyInstall
 
 open CellState
+open Minidregg.Theory.Store
 open IndexedProgram
 open TypedAuthorization
 
@@ -68,27 +69,29 @@ theorem successor_inhabited {Body : Type} (source : Source Body) (current : Head
       { source with version := current.version + 1, previous := some current.address } = true := by
   simp [checkSuccessor, Successor]
 
-universe u v w x y z
+universe u v w y z
 
 /-- The preauthorization face of the same effect: exact pre-state, validated
 source patch and source postcondition. It cannot mint an accepted effect until
 the entire family mode and authorization have subsequently been supplied. -/
 structure PreparedPatch
-    {S : Schema.{u, v, w, x}} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
+    {L : Layout.{u, v, w}}
+    {M : Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier)
     (pre : Materialized M) (declaration : family.Declaration)
     (outcome : family.Outcome declaration) where
   preStateBound : pre = family.pre
-  validated : ValidatedPatch M pre (family.patch declaration outcome)
+  /-- Validated at the canonical pre-cell's own root; `accept` transports it to
+  the root the request quotes, which must be that same root. -/
+  validated : ValidatedPatch M pre pre.root (family.patch declaration outcome)
   postcondition : family.Postcondition declaration outcome validated.apply.logical
 
 namespace PreparedPatch
 
 variable
-    {S : Schema.{u, v, w, x}} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Layout.{u, v, w}}
+    {M : Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {pre : Materialized M} {declaration : family.Declaration}
     {outcome : family.Outcome declaration}
 
@@ -114,9 +117,8 @@ def accept (prepared : PreparedPatch family pre declaration outcome)
   preStateBound := prepared.preStateBound
   requestBound := requestBound
   effectsDigestBound := effects
-  preRootBound := preRoot
   modeEvidence := modeEvidence
-  validated := prepared.validated
+  validated := preRoot ▸ prepared.validated
   postcondition := prepared.postcondition
   disclosure := disclosure
   disclosureAllowed := allowed
@@ -140,22 +142,24 @@ end PreparedPatch
 /-- A candidate is prepared before policy authorization. In particular the
 post-state cannot be an unconstrained witness supplied beside the request. -/
 structure Candidate
-    {S : Schema.{u, v, w, x}} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
+    {L : Layout.{u, v, w}}
+    {M : Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier)
     (pre : Materialized M) (declaration : family.Declaration)
     (outcome : family.Outcome declaration) where
   preStateBound : pre = family.pre
   modeEvidence : family.ModeEvidence declaration outcome
-  validated : ValidatedPatch M pre (family.patch declaration outcome)
+  /-- Validated at the canonical pre-cell's own root; `accept` transports it to
+  the root the request quotes, which must be that same root. -/
+  validated : ValidatedPatch M pre pre.root (family.patch declaration outcome)
   postcondition : family.Postcondition declaration outcome validated.apply.logical
 
 namespace Candidate
 
 variable
-    {S : Schema.{u, v, w, x}} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Layout.{u, v, w}}
+    {M : Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {pre : Materialized M} {declaration : family.Declaration}
     {outcome : family.Outcome declaration}
 
