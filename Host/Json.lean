@@ -2157,7 +2157,12 @@ private def fleetTurnCommand (json : Lean.Json) : Result (List UInt8) := do
       fee := ← nat "$.fee" (← field "$" "fee" obj)
       transfer := transfer
       publication := publication }
-  unless command.shapeOk do
+  -- A draft may leave the topic position zero for the Host plan to assign;
+  -- every other shape rule is the receiver's own.
+  let assigned : FleetTurn.Command := { command with
+    publication := command.publication.map fun (p : FleetTurn.Publication) =>
+      ({ p with sequence := max p.sequence 1 } : FleetTurn.Publication) }
+  unless assigned.shapeOk do
     failAt "$" "a fleet turn needs a positive transfer to another account or a 1..64-byte topic event with at most 16384 payload bytes"
   return FleetTurn.commandCodec.encode command
 
