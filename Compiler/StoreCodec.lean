@@ -654,8 +654,8 @@ canonicity condition itself (the 32 addresses are strictly increasing in
 bytes), and the encoder's output bytes FOLLOW from it
 (`store32_encode_eq`).  The compiled encoder and decoder are then run
 end to end by `native_decide` (`store32_compiled_roundtrip`,
-`store1000_compiled_roundtrip`); those two are confessed by the `_native`
-axiom their `#print axioms` pin shows, and nothing general depends on them. -/
+`store1000_compiled_roundtrip`); each is confessed by the `_native` entry
+pinned in its `#print axioms` guard, and nothing general depends on them. -/
 
 theorem fields32_ordered : fields32.Pairwise (AddressLT wire) := by
   decide +kernel
