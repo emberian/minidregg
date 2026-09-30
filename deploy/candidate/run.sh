@@ -59,6 +59,10 @@ init() {
   check_params "$params"
   state=$(candidate_abs "$state")
   [ ! -e "$state" ] && [ ! -L "$state" ] || candidate_die "refusing existing state directory: $state"
+  # A Unix socket path must fit sockaddr_un.sun_path (108 bytes incl. NUL).
+  socket_path="$state/public/mini.sock"
+  [ "${#socket_path}" -lt 108 ] \
+    || candidate_die "state path too long: $socket_path is ${#socket_path} bytes; a Unix socket path must be under 108"
   mkdir -m 700 "$state"
   mkdir -m 700 "$state/keys" "$state/public" "$state/namespace" "$state/tmp" "$state/logs"
   TMPDIR=$state/tmp

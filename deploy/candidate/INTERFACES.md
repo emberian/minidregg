@@ -147,6 +147,8 @@ clients: mini ... --socket STATE/public/mini.sock   (connect, one request, one r
   `operator-v1`; a public socket is never upgraded to operator mode).
 * A stale socket file whose listener is gone is removed at start; a live one
   is refused.
+* The socket path must be shorter than 108 bytes (`sockaddr_un`), so
+  `STATE` itself must be at most 90 bytes. `run.sh init` refuses a longer one.
 
 **Framing.** Every message in both directions is `u32 little-endian length`
 then that many bytes; length is 1 ..= 12,168,333 (Host frame 12,102,760 + 5 +
@@ -383,7 +385,8 @@ must stay where it was when `init` ran (or re-run `init` on a new Store).
 ## 9. What the operator decides
 
 1. **Placement and paths**: which machine and Unix account hold the candidate,
-   each Store's state directory, and the sponsor key. All scripts take them as
+   each Store's state directory (at most 90 bytes, for the socket), and the
+   sponsor key. All scripts take them as
    arguments; nothing defaults to a shared or temporary location.
 2. **Genesis coordinates** (`genesis-params.json`): identifiers, tariffs,
    budgets, lifetimes, meter allowances and the sponsor's validity window. They

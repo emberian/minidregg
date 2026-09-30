@@ -60,8 +60,9 @@ for role in host mini store verifier; do
   [ "$a" = "$b" ] || fail "$role does not reproduce: candidate $a, reference $b"
 done
 
-# 4. the operator procedure, on its own Store
-S=$D/operator-store
+# 4. the operator procedure, on its own Store. The socket path must stay under
+# 108 bytes, so the Store sits directly under the run root, not the step dir.
+S=$JOURNEY_RUN/m7-store
 cleanup() { "$C/run.sh" stop --state "$S" >"$D/operator-stop.txt" 2>&1 || true; }
 trap cleanup EXIT
 "$C/run.sh" init --manifest "$C/manifest.json" --params "$C/genesis-params.example.json" --state "$S" >"$D/operator-init.txt" 2>&1 || fail "run.sh init failed: $(tail -1 "$D/operator-init.txt")"
