@@ -1,0 +1,11 @@
+mini shell: beta. the store is reset now and then; your keys survive, your resources don't.
+ember announces each reset. your signing key lives on this box, and root can read it.
+
+  help          every verb, and what each one runs
+  help VERB     one verb
+  history       what you did and how it ended
+  exit          leave
+
+endings: usage: (2)  error: (1)  refused: REASON (3)  undecided: (4, `lookup ID`)
+a lock (`law … {"type":"any","predicates":[]}`) is permanent. lock only throwaway things.
+guide: the FRIENDS.md ember sent you. questions: telegram @emberian
