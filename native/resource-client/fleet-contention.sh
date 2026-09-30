@@ -60,6 +60,7 @@ total0=$(now)
 r=1
 while [ "$r" -le "$R" ]; do
   r0=$(now)
+  pids=
   n=1
   while [ "$n" -le "$K" ]; do
     (
@@ -76,9 +77,11 @@ while [ "$r" -le "$R" ]; do
       printf '%s\t%s\t%s\t%s\t%s\n' "$r" "$n" "$(span "$t0" "$(now)")" "$replans" "$result" \
         >>"$OUT/turns.tsv"
     ) &
+    pids="$pids $!"
     n=$((n + 1))
   done
-  wait
+  # Wait for this round's turns only; the service is also a child of this shell.
+  for pid in $pids; do wait "$pid" || true; done
   printf '%s\t%s\n' "$r" "$(span "$r0" "$(now)")" >>"$OUT/rounds.tsv"
   r=$((r + 1))
 done

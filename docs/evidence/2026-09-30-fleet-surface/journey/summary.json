@@ -1,0 +1,11 @@
+{
+  "type": "minidregg-fleet-journey-v1",
+  "agentAccount": "17078191906010218689",
+  "serviceAccount": "12223484429251964864",
+  "fee": "3",
+  "expectedBalances": {
+    "agent": "956",
+    "service": "532"
+  },
+  "result": "pass"
+}
