@@ -1,19 +1,22 @@
 /-
-# Theory.DeployedMaterializerWitness -- the repaired schemas are inhabited
+# Theory.DeployedMaterializerWitness -- the deployed layouts are inhabited
 
 The old total-function field carrier made several deployed schemas provably
-unmaterializable.  The sparse migration is not complete merely because generic
-`DFinsupp` instances exist: this file closes the three Theory-side cases with
-actual lawful codecs, materializers, and materialized empty cells.
+unmaterializable (`MaterializerCardinality.totalEffectMaterializer_isEmpty` keeps
+that tooth).  Every cell is now one `Store L`, a finitely supported dependent
+map, and a `Store L` is countable whenever its namespaces, keys and values are.
+This file closes the three Theory-side layouts (declared effects, canonical
+authority, Hyperdocument) with actual lawful codecs, materializers, and
+materialized empty cells.
 
 The codecs chosen from `Countable` are existence witnesses, not deployment wire
 formats.  Their role is to refute carrier vacuity.  A deployed artifact must
-still select and pin a concrete codec and root function.
+still select and pin a concrete codec and root function (`Compiler.StoreCodec`).
 -/
 import Mathlib.Tactic.DeriveCountable
 import Theory.CredentialAuthorityState
 import Theory.Hyperdocument
-import Theory.SparseLogicalState
+import Theory.MaterializerCardinality
 
 namespace Minidregg.Theory.DeployedMaterializerWitness
 
@@ -22,10 +25,11 @@ open IndexedProgram
 open TypedAuthorization
 open CredentialAuthorityState
 open Hyperdocument
+open Minidregg.Theory.Store
 
 set_option autoImplicit false
 
-/-! ## Countability of the authority value tree -/
+/-! ## Countability of the authority layout -/
 
 deriving instance Countable for SubjectId
 deriving instance Countable for IssuerId
@@ -41,22 +45,17 @@ deriving instance Countable for Holder
 deriving instance Countable for Scope
 deriving instance Countable for Capability
 deriving instance Countable for RevocationKey
-deriving instance Countable for AuthorityField
 deriving instance Countable for Request
 deriving instance Countable for Minidregg.Theory.CredentialAuthorityFamily.LineageOrigin
 deriving instance Countable for Minidregg.Theory.CredentialAuthorityFamily.ParentLink
 deriving instance Countable for StoredCapability
+deriving instance Countable for AuthorityPlane
 
-instance authorityValueCountable (field : AuthorityField) :
-    Countable (AuthorityField.Value field) := by
-  cases field <;> simp only [AuthorityField.Value] <;> infer_instance
+instance authorityKeyCountable (plane : AuthorityPlane) : Countable plane.Key := by
+  cases plane <;> simp only [AuthorityPlane.Key] <;> infer_instance
 
-instance : Countable CredentialAuthorityState.schema.Field :=
-  inferInstanceAs (Countable AuthorityField)
-
-instance (field : CredentialAuthorityState.schema.Field) :
-    Countable (CredentialAuthorityState.schema.FieldType field) :=
-  authorityValueCountable field
+instance authorityValueCountable (plane : AuthorityPlane) : Countable plane.Value := by
+  cases plane <;> simp only [AuthorityPlane.Value] <;> infer_instance
 
 /-! ## Countability of the Hyperdocument value tree -/
 
@@ -111,14 +110,6 @@ instance hyperdocumentValueCountable (space : Hyperdocument.Namespace) :
     Countable (Hyperdocument.Value space) := by
   cases space <;> simp only [Hyperdocument.Value] <;> infer_instance
 
-deriving instance Countable for Hyperdocument.Address
-
-instance : Countable Hyperdocument.cellSchema.Field :=
-  inferInstanceAs (Countable Hyperdocument.Address)
-
-instance (field : Hyperdocument.cellSchema.Field) :
-    Countable (Hyperdocument.cellSchema.FieldType field) :=
-  hyperdocumentValueCountable field.1
 
 /-! ## One honest existence materializer -/
 
@@ -132,80 +123,55 @@ noncomputable def codecOfCountable (alpha : Type)
   Classical.choice
     MaterializerCardinality.nonempty_lawfulCodec_of_countable
 
-noncomputable def logicalCodecOfCountable (S : Schema.{0, 0, 0, 0})
-    [Countable S.Field] [∀ field, Countable (S.FieldType field)]
-    (resourceEmpty : S.Resource → Empty) : LawfulCodec (LogicalState S) := by
-  let fieldCodec := codecOfCountable (FieldStore S)
-  exact
-    { encode := fun state => fieldCodec.encode state.fields
-      decode := fun bytes => (fieldCodec.decode bytes).map fun fields =>
-        { fields := fields
-          resources := fun resource => nomatch resourceEmpty resource }
-      decode_encode := by
-        intro state
-        rw [fieldCodec.decode_encode]
-        apply congrArg some
-        cases state with
-        | mk fields resources =>
-            have resourcesExact :
-                (fun resource => nomatch resourceEmpty resource) = resources := by
-              funext resource
-              exact Empty.elim (resourceEmpty resource)
-            cases resourcesExact
-            rfl }
+/-- The existence materializer of any layout whose namespaces, keys and values
+are countable.  The store type is inhabited by the empty store `0`. -/
+noncomputable def materializerOfCountable (L : Layout.{0, 0, 0})
+    [Countable L.Namespace] [∀ space, Countable (L.Key space)]
+    [∀ space, Countable (L.Value space)] : CellState.Materializer L Digest :=
+  haveI : Nonempty (Store L) := ⟨0⟩
+  { codec := codecOfCountable (Store L)
+    rootBytes := lengthRoot }
 
-noncomputable def materializerOfCountable (S : Schema.{0, 0, 0, 0})
-    [Countable S.Field] [∀ field, Countable (S.FieldType field)]
-    (resourceEmpty : S.Resource → Empty) : Materializer S Digest where
-  codec := logicalCodecOfCountable S resourceEmpty
-  rootBytes := lengthRoot
-
-def emptyLogical (S : Schema.{0, 0, 0, 0})
-    (resourceEmpty : S.Resource → Empty) : LogicalState S where
-  fields := 0
-  resources := fun resource => nomatch resourceEmpty resource
-
-/-! ## The three Theory-side deployed schemas -/
+/-! ## The three Theory-side deployed layouts -/
 
 noncomputable def effectMaterializer :
-    Materializer DeclaredTurn.effectSchema.{0, 0} Digest :=
-  materializerOfCountable DeclaredTurn.effectSchema Empty.elim
+    CellState.Materializer EffectDeclaration.effectLayout Digest :=
+  materializerOfCountable EffectDeclaration.effectLayout
 
 noncomputable def effectCell : Materialized effectMaterializer :=
-  materialize effectMaterializer
-    (emptyLogical DeclaredTurn.effectSchema Empty.elim)
+  materialize effectMaterializer 0
 
-noncomputable def authorityMaterializer :
-    Materializer CredentialAuthorityState.schema.{0, 0} Digest :=
-  materializerOfCountable CredentialAuthorityState.schema Empty.elim
+noncomputable def authorityMaterializer : CredentialAuthorityState.Materializer :=
+  materializerOfCountable CredentialAuthorityState.layout
 
 noncomputable def authorityCell : Materialized authorityMaterializer :=
-  materialize authorityMaterializer
-    (emptyLogical CredentialAuthorityState.schema Empty.elim)
+  materialize authorityMaterializer 0
 
-noncomputable def hyperdocumentMaterializer :
-    Materializer Hyperdocument.cellSchema.{0, 0} Digest :=
-  materializerOfCountable Hyperdocument.cellSchema Empty.elim
+noncomputable def hyperdocumentMaterializer : Hyperdocument.Materializer Digest :=
+  materializerOfCountable Hyperdocument.layout
 
 noncomputable def hyperdocumentCell : Materialized hyperdocumentMaterializer :=
-  materialize hyperdocumentMaterializer
-    (emptyLogical Hyperdocument.cellSchema Empty.elim)
+  materialize hyperdocumentMaterializer 0
 
-/-- The kernel's declared-effect schema has an actual canonical cell. -/
-theorem effect_materializer_nonempty :
-    Nonempty (Materializer DeclaredTurn.effectSchema.{0, 0} Digest) :=
-  ⟨effectMaterializer⟩
-
-/-- The canonical authority schema has an actual canonical cell. -/
+/-- The canonical authority layout has an actual canonical cell. -/
 theorem authority_materializer_nonempty :
-    Nonempty
-      (Materializer CredentialAuthorityState.schema.{0, 0} Digest) :=
+    Nonempty CredentialAuthorityState.Materializer :=
   ⟨authorityMaterializer⟩
 
-/-- The canonical Hyperdocument schema has an actual canonical cell. -/
+/-- The canonical Hyperdocument layout has an actual canonical cell. -/
 theorem hyperdocument_materializer_nonempty :
-    Nonempty (Materializer Hyperdocument.cellSchema.{0, 0} Digest) :=
+    Nonempty (Hyperdocument.Materializer Digest) :=
   ⟨hyperdocumentMaterializer⟩
+
+/-! ## The witnessed cells are the empty store, read exactly
+
+The witnesses are real cells whose typed reads return the absence value (or the
+reader's declared default), not an arbitrary one. -/
+
+@[simp] theorem effectCell_absent
+    (address : Address EffectDeclaration.effectLayout) :
+    effectCell.logical address = none :=
+  rfl
 
 @[simp] theorem authorityCell_capability_absent
     (kind : ResourceKind) (id : CapabilityId) :
@@ -217,17 +183,15 @@ theorem hyperdocument_materializer_nonempty :
     issuerEpochAt authorityCell issuer = 0 ∧
       policyEpochAt authorityCell policy = 0 ∧
       subjectKeyEpochAt authorityCell subject = 0 :=
-  by exact ⟨rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl⟩
 
 @[simp] theorem hyperdocumentCell_absent
     (address : Hyperdocument.Address) :
-    hyperdocumentCell.logical.fields address = none :=
+    hyperdocumentCell.logical address = none :=
   rfl
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Theory.DeployedMaterializerWitness.effect_materializer_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms effect_materializer_nonempty
 /-- info: 'Minidregg.Theory.DeployedMaterializerWitness.authority_materializer_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authority_materializer_nonempty
 /-- info: 'Minidregg.Theory.DeployedMaterializerWitness.hyperdocument_materializer_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
