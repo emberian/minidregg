@@ -253,7 +253,7 @@ fn pin_worker_host_image(state_dir: &Path) -> Result<()> {
 const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-host
 
 usage:
-  mini keygen --secret KEY --public PUBLIC
+  mini keygen --secret KEY --public PUBLIC [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
@@ -576,7 +576,11 @@ fn selected_release_sign(
     result
 }
 
-fn keygen(secret: &Path, public: &Path) -> Result<()> {
+/// `escrow`: `(@FILE|HEX of the sponsor's 32-byte encryption public key,
+/// subject)`. Off by default; when given, the seed is also written to
+/// `<public>.escrow`, sealed to the sponsor and bound to the subject
+/// (`DREGG/SEED-ESCROW/v1`), which lets the sponsor sign as this key.
+fn keygen(secret: &Path, public: &Path, escrow: Option<(OsString, OsString)>) -> Result<()> {
     if secret.exists() {
         return Err(format!("refusing to replace {}", secret.display()));
     }
@@ -588,6 +592,22 @@ fn keygen(secret: &Path, public: &Path) -> Result<()> {
         .and_then(|mut source| source.read_exact(&mut seed))
         .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
     let signing = SigningKey::from_bytes(&seed);
+    let escrowed = match &escrow {
+        None => None,
+        Some((sponsor, subject)) => {
+            let sponsor = sponsor.to_str().ok_or("--escrow-to-sponsor must be UTF-8")?;
+            let text = match sponsor.strip_prefix('@') {
+                Some(file) => fs::read_to_string(file)
+                    .map_err(|error| format!("cannot read sponsor key {file}: {error}"))?,
+                None => sponsor.to_owned(),
+            };
+            let key: [u8; 32] = workspace::private::decode_hex(text.trim())?
+                .try_into()
+                .map_err(|_| "the sponsor encryption key is exactly 32 bytes".to_owned())?;
+            let subject = subject.to_str().ok_or("--escrow-subject must be UTF-8")?;
+            Some(workspace::private::escrow_seed(subject, &seed, &x25519_dalek::PublicKey::from(key))?)
+        }
+    };
     create_private(secret, &seed)?;
     seed.fill(0);
     if let Err(error) = create_public(public, &signing.verifying_key().to_bytes()) {
@@ -599,6 +619,12 @@ fn keygen(secret: &Path, public: &Path) -> Result<()> {
         })?;
         return Err(error);
     }
+    if let Some(wrapped) = escrowed {
+        let mut escrow_path = public.as_os_str().to_owned();
+        escrow_path.push(".escrow");
+        create_private(Path::new(&escrow_path), &wrapped.to_bytes())?;
+    }
+    eprintln!("{}", workspace::private::KEYGEN_NOTICE);
     println!("{}", hex(&signing.verifying_key().to_bytes()));
     Ok(())
 }
@@ -2446,8 +2472,19 @@ fn run(mut args: Args) -> Result<()> {
             }
             let secret = path(args.required("secret")?);
             let public = path(args.required("public")?);
+            let escrow = args.optional("escrow-to-sponsor");
+            let escrow_subject = args.optional("escrow-subject");
             args.finish()?;
-            keygen(&secret, &public)
+            let escrow = match (escrow, escrow_subject) {
+                (None, None) => None,
+                (Some(sponsor), Some(subject)) => Some((sponsor, subject)),
+                _ => {
+                    return Err(
+                        "--escrow-to-sponsor and --escrow-subject go together".to_owned(),
+                    )
+                }
+            };
+            keygen(&secret, &public, escrow)
         }
         "bootstrap" => {
             if SOCKET.get().is_some() {
@@ -3437,11 +3474,11 @@ mod tests {
         fs::write(&secret, b"existing-secret").unwrap();
         fs::write(&public, b"existing-public").unwrap();
 
-        assert!(keygen(&secret, &public).is_err());
+        assert!(keygen(&secret, &public, None).is_err());
         assert_eq!(fs::read(&secret).unwrap(), b"existing-secret");
         assert_eq!(fs::read(&public).unwrap(), b"existing-public");
         fs::remove_file(&secret).unwrap();
-        assert!(keygen(&secret, &public).is_err());
+        assert!(keygen(&secret, &public, None).is_err());
         assert!(!secret.exists());
         assert_eq!(fs::read(&public).unwrap(), b"existing-public");
 
