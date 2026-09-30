@@ -3,19 +3,34 @@
 //!
 //! Everything the entrance pins is read from the participant's retained,
 //! Mini-accepted evidence: the session birth (session, descriptor, subject,
-//! kind), the event22 ticket issue (ticket resource, admitted issue index,
-//! observe capabilities) and the event28 session enrollment (observe
-//! selectors). The dispatch signer slots come from a real, effect-free op36
-//! plan preview. None of it confers authority: every HTTP request is still
-//! authored, signed and admitted by Mini (op36/37/34) before fd3 delivery.
+//! kind, owner capabilities) and the event22 ticket issue (ticket resource,
+//! admitted issue index). The session enrollment is not an input: it binds the
+//! session to one serving app generation, so the participant enrolls (and
+//! renews after every restart) against the running app, after START. None of
+//! this confers authority: every HTTP request is still authored, signed and
+//! admitted by Mini (op36/37/34), including the current enrollment, before
+//! fd3 delivery.
 
 use crate::dispatch_author::FixedAuthoring;
-use crate::dispatch_inspection::{HttpProjection, Route};
 use crate::dispatch_native::{private_dir, write_new};
 use crate::grain::HostView;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::fs::{self, DirBuilder, File};
+
+/// Human dispatch signing slots in Mini's plan order: the one session target's
+/// invocation (4:0; a single target needs no role-8 observation), the
+/// authority leg (1:0), then the app, manifest, enrollment and ticket
+/// observations (9:0..9:3). Mini's plan inspection is decisive: any other
+/// shape refuses before a header is signed.
+const DISPATCH_SLOTS: &[(&str, &str)] = &[
+    ("4", "0"),
+    ("1", "0"),
+    ("9", "0"),
+    ("9", "1"),
+    ("9", "2"),
+    ("9", "3"),
+];
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -94,7 +109,6 @@ struct RouteRequest {
     session_source: PathBuf,
     session_receipt: PathBuf,
     ticket_issue: PathBuf,
-    enrollment: PathBuf,
     participant_key: ParticipantKey,
 }
 
@@ -110,7 +124,11 @@ struct Derived {
     enrollment_observe: String,
 }
 
-fn derive(app: &str, request: &RouteRequest) -> io::Result<Derived> {
+fn derive(
+    app: &str,
+    selector: &crate::lifecycle_selector::LifecycleSelector,
+    request: &RouteRequest,
+) -> io::Result<Derived> {
     let session_source = read_json(&request.session_source)?;
     let session = session_source
         .pointer("/applicationSessionGrainBirth/applicationSessionBirth/session")
@@ -144,14 +162,6 @@ fn derive(app: &str, request: &RouteRequest) -> io::Result<Derived> {
     }
     let ticket = number(&ticket_request, "/spec/ticket/resource")?;
     let issue_index = (accepted - 1).to_string();
-    let enrollment_source = read_json(&request.enrollment.join("source.json"))?;
-    let enrollment_receipt = read_json(&request.enrollment.join("receipt.json"))?;
-    if number(&enrollment_source, "/issueIndex")? != issue_index
-        || number(&enrollment_source, "/ticketResource")? != ticket
-        || enrollment_receipt.is_null()
-    {
-        return Err(invalid("session enrollment differs from the ticket issue"));
-    }
     Ok(Derived {
         subject,
         session: session_id,
@@ -159,9 +169,9 @@ fn derive(app: &str, request: &RouteRequest) -> io::Result<Derived> {
         kind,
         ticket,
         issue_index,
-        session_observe: number(&enrollment_source, "/sessionObserveCapability")?,
-        manifest_observe: number(&enrollment_source, "/manifestObserveCapability")?,
-        enrollment_observe: number(&enrollment_source, "/descriptorObserveCapability")?,
+        session_observe: number(session, "/sessionOwnerCapability")?,
+        manifest_observe: selector.package_observe_capability.clone(),
+        enrollment_observe: number(session, "/descriptorOwnerCapability")?,
     })
 }
 
@@ -191,85 +201,6 @@ fn custody_json(
     })
 }
 
-/// Effect-free op36 authoring: the plan's ordered signing slots are the only
-/// ones this custody will ever sign; each must name the participant's key.
-fn preview_slots(
-    host: &HostView<'_>,
-    app: &str,
-    selector: &crate::lifecycle_selector::LifecycleSelector,
-    derived: &Derived,
-    key: &ParticipantKey,
-    signed_api_path: Option<&str>,
-    preview_dir: &Path,
-) -> io::Result<Vec<(String, String)>> {
-    let provisional: FixedAuthoring = serde_json::from_value(custody_json(
-        app,
-        selector,
-        derived,
-        key,
-        &[("0".into(), "0".into())],
-    ))?;
-    let headers: Vec<(String, String)> = Vec::new();
-    let route = if derived.kind == "api" {
-        Route::Api {
-            signed_path: signed_api_path.ok_or_else(|| invalid("package has no signed API path"))?,
-        }
-    } else {
-        Route::Browser
-    };
-    let http = HttpProjection {
-        method: "GET",
-        path_and_query: "",
-        ordered_headers: &headers,
-        body: b"",
-        route,
-    };
-    let request = provisional.request_json("1", &http)?;
-    let request_path = write_new(preview_dir, "request.json", &serde_json::to_vec(&request)?)?;
-    let request_bytes = host.operator.tool(
-        "author",
-        "application-dispatch-request",
-        &request_path,
-        &preview_dir.join("request.bin"),
-    )?;
-    let reply = host.operator.invoke(36, &request_bytes)?;
-    if reply.get(4) != Some(&36) {
-        let _ = write_new(preview_dir, "op36-refusal.bin", &reply);
-        return Err(invalid(
-            "Mini refused the dispatch plan preview (session, ticket or enrollment not current)",
-        ));
-    }
-    let plan = write_new(preview_dir, "plan.bin", &reply[5..])?;
-    let inspected = host.operator.tool(
-        "inspect",
-        "application-dispatch-plan",
-        &plan,
-        &preview_dir.join("plan.json"),
-    )?;
-    let view: Value = serde_json::from_slice(&inspected)?;
-    let slots = view
-        .get("slots")
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid("dispatch plan preview lacks slots"))?;
-    let mut pins = Vec::with_capacity(slots.len());
-    for slot in slots {
-        let role = text(slot, "/role")?;
-        let index = text(slot, "/index")?;
-        if text(slot, "/signing/keyId")? != key.key_id
-            || text(slot, "/signing/keyEpoch")? != key.key_epoch
-        {
-            return Err(invalid(
-                "a dispatch slot names a key other than the participant's",
-            ));
-        }
-        pins.push((role.to_owned(), index.to_owned()));
-    }
-    if pins.is_empty() {
-        return Err(invalid("dispatch plan preview has no slots"));
-    }
-    Ok(pins)
-}
-
 pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::Result<Value> {
     let request: RouteRequest = serde_json::from_slice(&fs::read(request_path)?)?;
     if request.protocol != "mini-spk-grain-route-request-v1"
@@ -287,7 +218,7 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     let app_dir = host.state_root.join("apps").join(app);
     private_dir(&app_dir)?;
     let placement = crate::grain::load_placement(&app_dir.join("placement.json"))?;
-    let derived = derive(app, &request)?;
+    let derived = derive(app, &placement.selector, &request)?;
     let installed = crate::materialize::verify_installed_spk(
         &PathBuf::from(format!(
             "/var/lib/minidregg/spk/packages/sha256-{}",
@@ -310,21 +241,14 @@ pub(crate) fn route(host: &HostView<'_>, app: &str, request_path: &Path) -> io::
     }
     private_dir(&routes)?;
     let directory = routes.join(&request.name);
-    let preview = app_dir.join(format!("route-preview-{}", request.name));
+    if derived.kind == "api" && bridge.api_path.is_none() {
+        return Err(invalid("package has no signed API path for an api route"));
+    }
     if !directory.exists() {
-        if preview.exists() {
-            fs::remove_dir_all(&preview)?;
-        }
-        DirBuilder::new().mode(0o700).create(&preview)?;
-        let slots = preview_slots(
-            host,
-            app,
-            &placement.selector,
-            &derived,
-            &request.participant_key,
-            bridge.api_path.as_deref(),
-            &preview,
-        )?;
+        let slots: Vec<(String, String)> = DISPATCH_SLOTS
+            .iter()
+            .map(|(role, index)| ((*role).to_owned(), (*index).to_owned()))
+            .collect();
         let staging = routes.join(format!(".{}.staging", request.name));
         if staging.exists() {
             fs::remove_dir_all(&staging)?;

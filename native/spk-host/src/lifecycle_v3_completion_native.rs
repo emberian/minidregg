@@ -93,8 +93,8 @@ impl FixedLaunchCompletionSigners {
             .get("slots")
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("v3 completion signing slots absent"))?;
-        if slots.len() != self.signers.len() {
-            return Err(invalid("v3 completion signing slot count differs"));
+        if slots.len() > self.signers.len() {
+            return Err(invalid("v3 completion signing slot count exceeds custody pins"));
         }
         Ok(slots)
     }

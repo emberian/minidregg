@@ -101,6 +101,7 @@ query() (
     --arg v "$view" \
     '{subject:$s,nonce:$n,purpose:{type:"query",kind:"object",target:$t,view:$v},
       grants:[{kind:"object",target:$t,capability:$c}]}' >"$EV/$name-intent.json"
+  rm -rf "$EV/$name"
   "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$PSOCK" \
     --intent "$EV/$name-intent.json" --key "$key" --view "$view" \
     --dir "$EV/$name" >"$EV/$name.stdout"
@@ -250,19 +251,22 @@ share() (
   query "$label-app-state" 8 "$app" "$appcap" "$WR/tool.key" "$((nonce + 300))"
   pversion=$(jq -er '[.page.entries[] | select(.key.field == "2")][0].value' \
     "$EV/$label-app-state/view.json")
-  T=$EV/$label-ticket
+  T=$EV/$label-ticket-$ticket
   mkdir -p -m 700 "$T"
+  # The installed manifest's package root is the signed launch descriptor's
+  # root (BEGIN v3 prospectiveManifest), not the package identity root.
+  launchroot=$(jq -er .root "$RUN/host/apps/$app/install/launch-descriptor/launch-inspection.json")
   if [ ! -s "$T/issue/receipt-anchor.json" ]; then
-    grain_op "$label-ticket-reserve" 8 7902 81 "$WR/tool.key" "$((nonce + 400))" \
+    grain_op "$label-ticket-$ticket-reserve" 8 7902 81 "$WR/tool.key" "$((nonce + 400))" \
       '{"type":"reserve","amount":"3"}'
     jq -n --arg app "$app" --arg session "$session" --arg descriptor "$descriptor" \
       --arg ticket "$ticket" --arg kind "$kind" --arg appcap "$appcap" \
-      --arg scap "$cap" --arg tcap "$((cap + 10))" --arg nonce "$((nonce + 500))" \
+      --arg scap "$cap" --arg tcap "$((cap + ticket % 100))" --arg nonce "$((nonce + 500))" \
       --arg pversion "$pversion" --arg schema "$schema" --arg version "$version" \
-      --slurpfile pkg "$pkgdir/descriptor-inspection.json" '
+      --arg launchroot "$launchroot" --slurpfile pkg "$pkgdir/descriptor-inspection.json" '
       ([$pkg[0].interfaces[] | select(.kind == $kind)][0]) as $i |
       {spec:{ticket:{resource:$ticket,scope:{app:$app,packageVersion:$pversion,
-          packageRoot:$pkg[0].root,interfaceId:$i.id,interfaceVersion:$i.version,
+          packageRoot:$launchroot,interfaceId:$i.id,interfaceVersion:$i.version,
           interfaceRoot:$i.root,schemaRoot:$schema,schemaVersion:$version},
           participant:{session:$session,descriptorResource:$descriptor,kind:$kind,
             subject:"8",origin:{type:"human"},sessionCapability:$scap,
@@ -295,46 +299,84 @@ share() (
         >"$T/submit.stdout" || echo "ticket submit uncertain; exact lookup follows" >&2
     "$MINI" grain-share-issue-lookup --socket "$OSOCK" --attempt "$T/issue" >"$T/lookup.stdout"
   fi
-  count=$(jq -er .receipt.acceptedCount "$T/issue/receipt-anchor.json")
-  N=$EV/$label-enroll
-  if [ ! -s "$N/receipt.json" ]; then
-    jq -n --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$pkg" \
-      --arg dcap "$((cap + 2))" --arg scap "$cap" --arg mcap "$pkgcap" \
-      --arg schema "$schema" --arg version "$version" --arg nonce "$((nonce + 600))" '
-      {issueIndex:$index,ticketResource:$ticket,packageManifest:$pkg,
-       role:{basis:{type:"role",id:"0"},added:[],removed:[],
-         roleSchemaRoot:$schema,roleVersion:$version},
-       descriptorCapability:$dcap,sessionObserveCapability:$scap,
-       descriptorObserveCapability:$dcap,manifestObserveCapability:$mcap,nonce:$nonce}' \
-      >"$EV/$label-enroll-request.json"
-    if [ ! -e "$N/seal.json" ]; then
-      rm -rf "$N"
-      "$MINI" session-enrollment-plan --host "$HOST" --config "$CONFIG" \
-        --operator-socket "$OSOCK" --request "$EV/$label-enroll-request.json" --dir "$N" \
-        >"$EV/$label-enroll-plan.stdout"
-      approve "$N/plan-inspected.json" headerHex "$EV/$label-enroll-approval.json" "$(jq -nc \
-        --arg r "$(sha "$N/request.bin")" --arg p "$(sha "$N/plan.bin")" \
-        --arg i "$(sha "$N/plan-inspected.json")" '
-        {type:"minidregg-session-enrollment-approval-v1",requestSha256:$r,planSha256:$p,
-         planInspectionSha256:$i}')"
-      "$MINI" session-enrollment-seal --attempt "$N" \
-        --approval "$EV/$label-enroll-approval.json" >"$EV/$label-enroll-seal.stdout"
-    fi
-    [ -e "$N/submit-marker.json" ] ||
-      "$MINI" session-enrollment-submit --attempt "$N" >"$EV/$label-enroll-submit.stdout" ||
-      echo "enrollment submit uncertain; exact lookup follows" >&2
-    "$MINI" session-enrollment-lookup --attempt "$N" >"$EV/$label-enroll-lookup.stdout"
-  fi
   jq -n --arg name "owner-$kind" --arg session "$EV/$label-session-author/source.json" \
     --arg receipt "$EV/$label-session-attempt/outcome.json" --arg ticket "$T/issue" \
-    --arg enroll "$N" --arg seed "$WR/tool.key" \
+    --arg seed "$WR/tool.key" \
     --arg public "$(od -An -tx1 -v "$WR/tool.pub" | tr -d ' \n')" '
     {protocol:"mini-spk-grain-route-request-v1",name:$name,expectedHost:"grain.test",
      displayName:"Grain owner",preferredHandle:"owner",sessionSource:$session,
-     sessionReceipt:$receipt,ticketIssue:$ticket,enrollment:$enroll,
+     sessionReceipt:$receipt,ticketIssue:$ticket,
      participantKey:{keyId:"8008",keyEpoch:"2",publicKeyHex:$public,seedPath:$seed}}' \
     >"$EV/$label-route-request.json"
   "$SPK_HOST" grain route "$PROFILE" "$app" "$EV/$label-route-request.json"
+)
+
+# enroll LABEL APP SESSION TICKET CAP NONCE: bind participant 8's session to
+# the app's current serving generation (event28). A session still active for
+# an older generation is first closed by its owner; renewal then re-enrolls.
+enroll() (
+  label=$1 app=$2 session=$3 ticket=$4 cap=$5 nonce=$6
+  pkgcap=$(jq -er .applicationGrainBirth.applicationBirth.application.packageOwnerCapability \
+    "$EV/$label-app-author/source.json")
+  appcap=$(jq -er .applicationGrainBirth.applicationBirth.application.appOwnerCapability \
+    "$EV/$label-app-author/source.json")
+  pkgdir=$RUN/host/apps/$app/install/launch-descriptor/package-v1
+  schema=$(jq -er .root "$pkgdir/schema-inspection.json")
+  version=$(jq -er .version "$pkgdir/schema-inspection.json")
+  query "$label-enroll-app-$nonce" 8 "$app" "$appcap" "$WR/tool.key" "$nonce"
+  gen=$(jq -er '[.page.entries[] | select(.key.field == "0")][0].value' \
+    "$EV/$label-enroll-app-$nonce/view.json")
+  N=$EV/$label-enroll-g$gen
+  [ ! -s "$N/receipt.json" ] || exit 0
+  query "$label-session-$nonce" 8 "$session" "$cap" "$WR/tool.key" "$((nonce + 1))"
+  sview=$EV/$label-session-$nonce/view.json
+  sgen=$(jq -er '[.page.entries[] | select(.key.field == "2")][0].value' "$sview")
+  status=$(jq -er '[.page.entries[] | select(.key.field == "3")][0].value' "$sview")
+  if [ "$status" = 5 ]; then
+    jq -n --arg s "$session" --arg c "$cap" --arg n "$((nonce + 2))" --arg g "$sgen" \
+      --arg g1 "$((sgen + 1))" --slurpfile read "$sview" \
+      --slurpfile challenge "$EV/$label-session-$nonce/challenge.json" '
+      {subject:"8",nonce:$n,grants:[{kind:"object",target:$s,capability:$c}],
+       purpose:{type:"prepare",draft:{type:"invoke",command:{subject:"8",nonce:$n,
+         expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+         targets:[{kind:"object",target:$s,capability:$c,observeCapability:$c,
+           schemaVersion:"1",expectedTargetRoot:$read[0].page.root,
+           payload:{type:"scalar",actions:[
+             {type:"write",key:{type:"object",resource:$s,field:"2"},expected:$g,value:$g1},
+             {type:"write",key:{type:"object",resource:$s,field:"3"},expected:"5",value:"6"}]}}]}}}}' \
+      >"$EV/$label-close-g$gen-intent.json"
+    "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$PSOCK" \
+      --intent "$EV/$label-close-g$gen-intent.json" --key "$WR/tool.key" \
+      --dir "$EV/$label-close-g$gen-attempt" >"$EV/$label-close-g$gen.stdout"
+    confirmed "$EV/$label-close-g$gen-attempt/outcome.json"
+  fi
+  count=$(jq -er .receipt.acceptedCount "$EV/$label-ticket-$ticket/issue/receipt-anchor.json")
+  jq -n --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
+    --arg dcap "$((cap + 2))" --arg scap "$cap" --arg mcap "$pkgcap" \
+    --arg schema "$schema" --arg version "$version" --arg nonce "$((nonce + 3))" '
+    {issueIndex:$index,ticketResource:$ticket,packageManifest:$pkg,
+     role:{basis:{type:"role",id:"0"},added:[],removed:[],
+       roleSchemaRoot:$schema,roleVersion:$version},
+     descriptorCapability:$dcap,sessionObserveCapability:$scap,
+     descriptorObserveCapability:$dcap,manifestObserveCapability:$mcap,nonce:$nonce}' \
+    >"$N-request.json"
+  if [ ! -e "$N/seal.json" ]; then
+    rm -rf "$N"
+    "$MINI" session-enrollment-plan --host "$HOST" --config "$CONFIG" \
+      --operator-socket "$OSOCK" --request "$N-request.json" --dir "$N" >"$N-plan.stdout"
+    approve "$N/plan-inspected.json" headerHex "$N-approval.json" "$(jq -nc \
+      --arg r "$(sha "$N/request.bin")" --arg p "$(sha "$N/plan.bin")" \
+      --arg i "$(sha "$N/plan-inspected.json")" '
+      {type:"minidregg-session-enrollment-approval-v1",requestSha256:$r,planSha256:$p,
+       planInspectionSha256:$i}')"
+    "$MINI" session-enrollment-seal --attempt "$N" --approval "$N-approval.json" \
+      >"$N-seal.stdout"
+  fi
+  [ -e "$N/submit-marker.json" ] ||
+    "$MINI" session-enrollment-submit --attempt "$N" >"$N-submit.stdout" ||
+    echo "enrollment submit uncertain; exact lookup follows" >&2
+  "$MINI" session-enrollment-lookup --attempt "$N" >"$N-lookup.stdout"
+  [ -s "$N/receipt.json" ]
 )
 
 # One authenticated request through the resident's route: the resident asks
@@ -387,9 +429,16 @@ run_phase() {
     status-a) step status-a "$SPK_HOST" grain status "$PROFILE" 9101 ;;
     share-a) step share-a share a 9101 9110 9120 3111 52000 api ;;
     share-b) step share-b share b 9201 9210 9220 3211 62000 api ;;
+    share-b2) step share-b2 share b 9201 9210 9230 3211 64000 api ;;
+    start-b2) step start-b2 "$SPK_HOST" grain start "$PROFILE" 9201 ;;
+    enroll-b2) step enroll-b2 enroll b 9201 9210 9230 3211 65000 ;;
+    get-b2) step get-b2 http_get get-b2-body 9201 /v1/health ;;
     status-b) step status-b "$SPK_HOST" grain status "$PROFILE" 9201 ;;
     start-b) step start-b "$SPK_HOST" grain start "$PROFILE" 9201 ;;
     stop-b) step stop-b "$SPK_HOST" grain stop "$PROFILE" 9201 ;;
+    enroll-a) step enroll-a enroll a 9101 9110 9120 3111 53000 ;;
+    enroll-a2) step enroll-a2 enroll a 9101 9110 9120 3111 54000 ;;
+    enroll-b) step enroll-b enroll b 9201 9210 9220 3211 63000 ;;
     get-a) step get-a http_get get-a-body 9101 /v1/health ;;
     get-a2) step get-a2 http_get get-a2-body 9101 /v1/health ;;
     get-b) step get-b http_get get-b-body 9201 /v1/health ;;
@@ -408,8 +457,8 @@ case "$MODE" in
   stop-services) stop_services ;;
   all)
     for phase in store services workroom profile birth-a install-a share-a start-a \
-        get-a stop-a start-a2 get-a2 birth-b install-b share-b start-b get-b \
-        status-a status-b stop-b stop-a2; do
+        enroll-a get-a stop-a start-a2 enroll-a2 get-a2 birth-b install-b share-b \
+        start-b enroll-b get-b status-a status-b stop-b stop-a2; do
       run_phase "$phase"
     done ;;
   *) usage ;;

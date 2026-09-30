@@ -175,8 +175,8 @@ impl FixedLaunchClaimSigners {
             .get("slots")
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("v3 claim signing slots absent"))?;
-        if slots.len() != self.signers.len() {
-            return Err(invalid("v3 claim signer count differs"));
+        if slots.len() > self.signers.len() {
+            return Err(invalid("v3 claim signing slot count exceeds custody pins"));
         }
         Ok(slots)
     }

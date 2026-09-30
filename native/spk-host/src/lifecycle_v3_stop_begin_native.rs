@@ -102,7 +102,7 @@ fn checked_plan<'a>(
         || text(base, "type")? != "application-lifecycle-launch-begin-plan-v1"
         || text(base, "canonicalRequestHex")? != hex(request)
         || text(request_view, "kind")? != "stop"
-        || text(base, "clientOperationId")? != client_operation_id
+        || text(request_view, "clientOperationId")? != client_operation_id
         || text(request_view, "descriptorHex")? != hex(&launch.descriptor().canonical)
         || text(base, "descriptorRoot")? != launch.descriptor().root
         || text(base, "app")? != fixed.selector.app

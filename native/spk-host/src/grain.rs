@@ -263,10 +263,6 @@ impl Host {
         })
     }
 
-    fn operator(&self) -> PrivateOperator {
-        operator_of(&self.profile)
-    }
-
     fn app_dir(&self, app: &str) -> PathBuf {
         self.profile.state_root.join("apps").join(app)
     }
@@ -777,6 +773,9 @@ fn install(host: &Host, source: &Path, receipt: &Path, spk: &Path) -> io::Result
 /// One resident generation directory `g<N>` holds START (and, later, its STOP).
 #[derive(Debug, PartialEq, Eq)]
 enum RunState {
+    /// Configured, but no BEGIN was ever requested: nothing reached Mini, so
+    /// the same generation may be started again.
+    NeverBegun,
     Running,
     Stopped,
     Uncertain(String),
@@ -842,10 +841,13 @@ fn scan_runs(app_dir: &Path) -> io::Result<Vec<Run>> {
             } else {
                 RunState::Running
             }
-        } else if exists(&admitted)? || exists(&dir.join("begin-attempt"))? {
+        } else if exists(&admitted)?
+            || exists(&dir.join("begin-attempt"))?
+            || exists(&dir.join("lifecycle-begin-v3-active.json"))?
+        {
             RunState::Uncertain("START attempted without a completion record".into())
         } else {
-            RunState::Uncertain("START configured but never admitted".into())
+            RunState::NeverBegun
         };
         if let Some(admitted_generation) = if exists(&admitted)? {
             decimal_u64(read_json(&admitted)?.pointer("/begin/processGeneration"))
@@ -876,6 +878,51 @@ fn unit_active(unit: &str) -> io::Result<String> {
         .stdin(Stdio::null())
         .output()?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+const RUNTIME_UNITS: &str = "/run/systemd/system";
+
+/// The resident's system unit is installed (as a runtime unit) rather than
+/// transient: systemd unloads a stopped transient unit, and STOP must audit a
+/// loaded, inactive unit with no invocation and an empty exact cgroup. The
+/// file is derived from the host profile and the generation's resident config;
+/// it is not enabled, so boot does not start it (a later `grain start` does).
+fn ensure_unit(host: &Host, unit: &str, config_path: &Path) -> io::Result<()> {
+    let text = format!(
+        "[Unit]\nDescription=Mini SPK resident {unit}\n\n[Service]\nType=exec\n\
+         ExecStart={} resident-run {}\nKillMode=control-group\nMemoryMax=2G\n\
+         TasksMax=512\nNoNewPrivileges=yes\nUMask=0077\n",
+        host.profile.spk_host.display(),
+        config_path.display(),
+    );
+    let path = Path::new(RUNTIME_UNITS).join(unit);
+    let current = fs::read(&path).ok();
+    if current.as_deref() != Some(text.as_bytes()) {
+        if current.is_some() {
+            return Err(invalid(format!(
+                "runtime unit {} differs from its derivation",
+                path.display()
+            )));
+        }
+        let temp = Path::new(RUNTIME_UNITS).join(format!(".{unit}.tmp"));
+        let _ = fs::remove_file(&temp);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .open(&temp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temp, &path)?;
+    }
+    let status = Command::new("/usr/bin/systemctl")
+        .args(["--system", "daemon-reload"])
+        .stdin(Stdio::null())
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other("systemctl daemon-reload failed"));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -952,16 +999,9 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
                     run.dir.display()
                 )));
             }
-            RunState::Stopped => {}
+            RunState::Stopped | RunState::NeverBegun => {}
         }
     }
-    let latest = runs
-        .iter()
-        .flat_map(|run| [Some(run.generation), run.stop_generation])
-        .flatten()
-        .chain([install_generation])
-        .max()
-        .unwrap_or(install_generation);
     if runs
         .iter()
         .any(|run| run.state == RunState::Stopped && run.stop_generation.is_none())
@@ -970,8 +1010,41 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
             "a stopped generation lacks its retained STOP BEGIN generation",
         ));
     }
-    let generation = latest + 1;
-    let start_action = match runs.iter().find(|run| run.create) {
+    // A never-begun generation is reused; its descriptor authoring was pure
+    // (no Store effect) and is set aside so the resident starts fresh.
+    let reuse = runs
+        .iter()
+        .find(|run| run.state == RunState::NeverBegun)
+        .map(|run| run.generation);
+    if let Some(generation) = reuse {
+        let dir = app_dir.join(format!("g{generation}"));
+        let descriptor = dir.join("descriptor-attempt");
+        if exists(&descriptor)? {
+            let mut random = [0u8; 8];
+            File::open("/dev/urandom")?.read_exact(&mut random)?;
+            fs::rename(
+                &descriptor,
+                dir.join(format!(
+                    "descriptor-attempt-never-begun-{}",
+                    random.iter().map(|b| format!("{b:02x}")).collect::<String>()
+                )),
+            )?;
+            File::open(&dir)?.sync_all()?;
+        }
+    }
+    let latest = runs
+        .iter()
+        .filter(|run| run.state != RunState::NeverBegun)
+        .flat_map(|run| [Some(run.generation), run.stop_generation])
+        .flatten()
+        .chain([install_generation])
+        .max()
+        .unwrap_or(install_generation);
+    let generation = reuse.unwrap_or(latest + 1);
+    let start_action = match runs
+        .iter()
+        .find(|run| run.create && run.state != RunState::NeverBegun)
+    {
         None => json!({"kind":"create","index":0}),
         Some(created) => {
             let completed = read_json(&created.dir.join("start-completed-v3.json"))?;
@@ -1044,27 +1117,16 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+    ensure_unit(host, &unit, &config_path)?;
     let started = Instant::now();
-    let status = Command::new("/usr/bin/systemd-run")
-        .args([
-            "--system",
-            &format!("--unit={unit}"),
-            "--property=Type=exec",
-            "--property=KillMode=control-group",
-            "--property=MemoryMax=2G",
-            "--property=TasksMax=512",
-            "--property=NoNewPrivileges=yes",
-            "--",
-        ])
-        .arg(&host.profile.spk_host)
-        .arg("resident-run")
-        .arg(&config_path)
+    let status = Command::new("/usr/bin/systemctl")
+        .args(["--system", "start", &unit])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()?;
-    if !status.success() {
-        return Err(io::Error::other(format!("systemd-run {unit} failed")));
+    if !status.success() && !matches!(unit_active(&unit)?.as_str(), "failed" | "inactive") {
+        return Err(io::Error::other(format!("systemctl start {unit} failed")));
     }
     let completed = journal.join("start-completed-v3.json");
     loop {
@@ -1129,9 +1191,16 @@ fn stop(host: &Host, app: &str) -> io::Result<Value> {
         "completionAttemptDir":journal.join("stop-completion"),
     });
     derived_file(&config_path, &serde_json::to_vec_pretty(&config)?)?;
+    let unit = format!("mini-spk-a{app}-g{}.service", target.generation);
+    ensure_unit(host, &unit, &journal.join("resident.json"))?;
+    // STOP consumes a fresh root volume witness, like START.
+    let placement = load_placement(&app_dir.join("placement.json"))?;
+    run_helper(
+        &host.profile.volume_helper,
+        &["attest", &placement.volume_resource],
+    )?;
     let started = Instant::now();
     crate::lifecycle_v3_stop_service::run(&config_path)?;
-    let unit = format!("mini-spk-a{app}-g{}.service", target.generation);
     Ok(json!({
         "protocol":"mini-spk-grain-stop-v1",
         "app":app,
@@ -1158,6 +1227,7 @@ fn status(host: &Host, app: &str) -> io::Result<Value> {
         "runs":runs.iter().map(|run| json!({
             "generation":run.generation.to_string(),
             "state":match &run.state {
+                RunState::NeverBegun => "never-begun".to_owned(),
                 RunState::Running => "running".to_owned(),
                 RunState::Stopped => "stopped".to_owned(),
                 RunState::Uncertain(reason) => format!("uncertain: {reason}"),
@@ -1198,13 +1268,11 @@ pub fn run(args: &[String]) -> io::Result<Value> {
 /// The subset of the host a route derivation may read.
 pub(crate) struct HostView<'a> {
     pub state_root: &'a Path,
-    pub operator: PrivateOperator,
 }
 
 fn host_view(host: &Host) -> HostView<'_> {
     HostView {
         state_root: &host.profile.state_root,
-        operator: host.operator(),
     }
 }
 

@@ -868,7 +868,7 @@ fn assemble_completion(
         .get("slots")
         .and_then(Value::as_array)
         .ok_or_else(|| invalid("STOP completion signing slots absent"))?;
-    if slots.len() != fixed.signers.len() {
+    if slots.len() > fixed.signers.len() {
         return Err(invalid("STOP completion slot count differs"));
     }
     let signatures = sign_pinned_slots(slots, &fixed.signers)?;
@@ -1112,6 +1112,54 @@ fn complete_once_or_lookup(
 /// Callable operator entry for one resident STOP. The supervisor intentionally
 /// has no API for choosing the old running unit, source event, or volume.
 /// Those come from the current verifier-selected STOP plan and exact journal.
+/// A STOP BEGIN attempt that only authored its op66 plan changed nothing in
+/// Mini: no signatures were assembled (op67) and nothing was submitted (op22).
+/// Set it and its matching active marker aside so a new STOP may begin. Any
+/// later marker, a differing active marker or other attempt keeps the audit.
+fn set_aside_pure_begin(config: &StopConfig, journal_dir: &Path) -> io::Result<()> {
+    let attempt = &config.begin_attempt_dir;
+    let active = journal_dir.join("lifecycle-stop-begin-v3-active.json");
+    if absent(attempt)? {
+        return Ok(());
+    }
+    private_dir(attempt)?;
+    for later in ["op67-requested.bin", "op22-requested.json", "begin-v3.bin"] {
+        if !absent(&attempt.join(later))? {
+            return Ok(());
+        }
+    }
+    for other in [
+        &config.claim_author_attempt_dir,
+        &config.claim_attempt_dir,
+        &config.report_attempt_dir,
+        &config.completion_attempt_dir,
+        &journal_dir.join("lifecycle-stop-claim-v3-active.json"),
+    ] {
+        if !absent(other)? {
+            return Ok(());
+        }
+    }
+    let requested = attempt.join("op66-requested.json");
+    if absent(&requested)? {
+        return Ok(());
+    }
+    let marker = read_private(&requested, MAX_CONFIG)?;
+    if !absent(&active)? && read_private(&active, MAX_CONFIG)? != marker {
+        return Ok(());
+    }
+    let mut random = [0u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    let aside = journal_dir.join(format!("stop-begin-plan-only-{}", hex(&random)));
+    fs::rename(attempt, &aside)?;
+    File::open(journal_dir)?.sync_all()?;
+    if !absent(&active)? {
+        fs::rename(&active, aside.join("active-marker.json"))?;
+        File::open(&aside)?.sync_all()?;
+        File::open(journal_dir)?.sync_all()?;
+    }
+    Ok(())
+}
+
 pub fn run(config_path: &Path) -> io::Result<()> {
     let (config, pins) = load_config(config_path)?;
     private_dir(&pins.journal_dir)?;
@@ -1161,6 +1209,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .phase;
     let audit = match phase {
         Phase::Running => {
+            set_aside_pure_begin(&config, &pins.journal_dir)?;
             // Any prior source or physical marker makes this run an uncertain
             // attempt. It cannot be converted into a second fresh op26.
             for path in [

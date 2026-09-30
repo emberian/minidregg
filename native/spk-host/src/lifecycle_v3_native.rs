@@ -117,12 +117,27 @@ fn hold_begin_attempt(parent: &Path, active: &[u8]) -> io::Result<()> {
 
 /// Sign only source-inspected, ordered Ed25519 headers pinned to exact
 /// operator custody. Both v3 BEGIN and v3 claim plans use this slot grammar.
+///
+/// The pins are the complete set of slots this custody may ever sign. One
+/// management custody serves INSTALL, START and STOP plans whose slot lists
+/// differ (only INSTALL writes the package manifest), so each Mini slot must
+/// match exactly one distinct pin by role and index, never the reverse.
 pub(crate) fn sign_pinned_slots(slots: &[Value], pins: &[SignerPin]) -> io::Result<Value> {
-    if slots.len() != pins.len() {
-        return Err(invalid("v3 lifecycle signing slot count differs"));
+    if slots.is_empty() || slots.len() > pins.len() {
+        return Err(invalid("v3 lifecycle signing slot count exceeds custody pins"));
     }
+    let mut used = vec![false; pins.len()];
     let mut signatures = Vec::with_capacity(slots.len());
-    for (slot, pin) in slots.iter().zip(pins) {
+    for slot in slots {
+        let role = text(slot, "role")?;
+        let index = text(slot, "index")?;
+        let position = pins
+            .iter()
+            .enumerate()
+            .position(|(at, pin)| !used[at] && pin.role == role && pin.index == index)
+            .ok_or_else(|| invalid("v3 lifecycle slot has no custody pin"))?;
+        used[position] = true;
+        let pin = &pins[position];
         let signing = slot
             .get("signing")
             .ok_or_else(|| invalid("v3 lifecycle signing decode absent"))?;
@@ -348,8 +363,8 @@ impl FixedLaunchBeginSigners {
             .get("slots")
             .and_then(Value::as_array)
             .ok_or_else(|| invalid("v3 BEGIN signing slots absent"))?;
-        if slots.len() != self.signers.len() {
-            return Err(invalid("v3 BEGIN signing slot count differs"));
+        if slots.len() > self.signers.len() {
+            return Err(invalid("v3 BEGIN signing slot count exceeds custody pins"));
         }
         Ok((slots, prior_create))
     }
@@ -586,6 +601,25 @@ mod tests {
             &launch
         )
         .is_err());
+    }
+
+    #[test]
+    fn pinned_slots_are_a_permitted_set_not_a_sequence() {
+        let pin = |role: &str, index: &str| SignerPin {
+            role: role.into(),
+            index: index.into(),
+            key_id: "8008".into(),
+            key_epoch: "2".into(),
+            public_key_hex: "00".repeat(32),
+            seed_path: "/nonexistent/seed".into(),
+        };
+        let slot = |role: &str, index: &str| json!({"role":role,"index":index});
+        let pins = [pin("4", "0"), pin("1", "0")];
+        assert!(sign_pinned_slots(&[], &pins).is_err());
+        assert!(sign_pinned_slots(&[slot("9", "0")], &pins).is_err());
+        assert!(
+            sign_pinned_slots(&[slot("4", "0"), slot("1", "0"), slot("4", "0")], &pins).is_err()
+        );
     }
 
     #[test]

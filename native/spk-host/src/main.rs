@@ -15,6 +15,12 @@ fn main() {
         out
     }
 
+    // Every artifact spk-host or its pinned Mini Host helper writes is owner
+    // private; later custody reads refuse anything else, whatever the caller's
+    // or service manager's umask.
+    unsafe {
+        libc::umask(0o077);
+    }
     let args: Vec<_> = std::env::args().collect();
     if args.len() == 3 && args[1] == "qualify-launch" {
         match qualify_launch(Path::new(&args[2])) {
