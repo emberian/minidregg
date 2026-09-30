@@ -1,0 +1,170 @@
+{
+  "format": "minidregg-grain-runtime-v1",
+  "binding": {
+    "config": {
+      "capability": "8761",
+      "commands": [
+        {
+          "args": [
+            "--workspace",
+            "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/worker-work",
+            "--runtime-root",
+            "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/worker-runtime",
+            "--network",
+            "none",
+            "--",
+            "/agent/hermes-acp"
+          ],
+          "charge": "1",
+          "name": "hermes-acp",
+          "program": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/launcher/bwrap",
+          "reserve": "3",
+          "systemdScope": true,
+          "wallTimeSeconds": 600
+        }
+      ],
+      "controlSocket": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/control.sock",
+      "custodyKey": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/keys/hermes-host.key",
+      "cwd": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes",
+      "host": "/home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3",
+      "hostConfig": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/store/deployment/pinned-config.json",
+      "hostSocket": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/store/public/mini.sock",
+      "mini": "/home/ember/build/minidregg-recovery-20260928/mini-0007925/bin/mini-0007925",
+      "policyControlCapability": "8762",
+      "providerTask": null,
+      "queryCapability": "8761",
+      "stateDir": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state",
+      "subject": "8",
+      "task": "8751",
+      "toolTask": {
+        "allowedPublications": [],
+        "allowedReads": [],
+        "capability": "8771",
+        "charge": "1",
+        "custodyKey": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/keys/hermes.key",
+        "parentCapability": "15289742686952130536",
+        "parentObserveCapability": "15289742686952130536",
+        "queryCapability": "8771",
+        "reserve": "2",
+        "resourceWorkspace": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/resource-workspace",
+        "subject": "9",
+        "task": "8752"
+      }
+    },
+    "configPath": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/controller.json"
+  },
+  "nextOperationId": 43,
+  "connection": "detached",
+  "pending": null,
+  "toolPending": null,
+  "providerPending": null,
+  "hardReconnectPending": false,
+  "child": null,
+  "settlementDue": null,
+  "parentHold": null,
+  "toolHold": null,
+  "dispatchPending": null,
+  "dispatchHold": null,
+  "dispatchAttempt": null,
+  "applicationApiAttempt": null,
+  "applicationApiHistory": [],
+  "providerHold": null,
+  "providerAttempt": null,
+  "providerSettlement": null,
+  "providerReplays": [],
+  "foregroundAttempt": null,
+  "foregroundHistory": [],
+  "publicationReceipts": [],
+  "birthNextOrdinal": {},
+  "birthOperation": null,
+  "birthPending": null,
+  "bornResources": [],
+  "workspaceProposals": [
+    {
+      "id": 13,
+      "requestSha256": "9201151fa34671f1e34508066899bfa568a6aab4321ebaa024901d427579df32",
+      "intentSha256": "70400b1da6c8789a11fe51baaeb6b315b89c0736512554af0612d9d1d8b4bc26",
+      "submitted": true
+    }
+  ],
+  "workspaceAttempt": null,
+  "workspaceBirth": null,
+  "workspaceResolutions": [
+    {
+      "operationId": 14,
+      "proposalId": 13,
+      "intentSha256": "c06a5070218451a0d2351e482a1d9f040cee98505d4a89bb5bc33de680f5c40e",
+      "attempt": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/resource-workspace/attempts/14",
+      "resolution": "refused",
+      "basis": "absent-after-submitter-stop",
+      "outcome": {
+        "type": "absent"
+      },
+      "toolCharge": "1",
+      "resolvedBy": "restart-recovery",
+      "authored": "13-x14"
+    }
+  ],
+  "managedLawGeneration": "1",
+  "reconciliationLog": [
+    {
+      "action": "recover-gated-worker",
+      "decisionId": "21",
+      "machineProven": true,
+      "operationId": "11",
+      "stage": "physical-stop-verified",
+      "unit": "mini-grain-t8751-o11"
+    },
+    {
+      "action": "settle-held-allowance",
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "34",
+      "externalEffectsAcknowledged": false,
+      "originAudited": false,
+      "originProof": "own-managed-law",
+      "reserveAttempt": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/attempt-0000000000000009",
+      "stage": "requested"
+    },
+    {
+      "authority": "parent",
+      "charge": "1",
+      "decisionId": "34",
+      "stage": "signed-settlement-confirmed"
+    },
+    {
+      "action": "derive-no-unaccounted-external-effects",
+      "automatic": true,
+      "basis": "derived: scoped --network none worker whose only external channel is the Mini broker; every Mini attempt resolved; no provider or dispatch attempt outstanding",
+      "decisionId": "42",
+      "details": [
+        "worker operation 11 stopped after controller restart; external effects need acknowledgement",
+        "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
+        "parent reserved operation may have external effects; explicit operator acknowledgement required"
+      ],
+      "externalEffectsAcknowledged": true,
+      "stage": "acknowledged"
+    },
+    {
+      "action": "startup-recovery",
+      "automatic": true,
+      "connection": "detached",
+      "decisionId": "43",
+      "priorRunProof": null,
+      "priorRunStopped": true,
+      "result": "recovered",
+      "unresolvedExternal": []
+    }
+  ],
+  "hermesSession": {
+    "id": "deterministic-d4d1353388d4b94d",
+    "workspace": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/worker-work",
+    "loadVerified": false,
+    "stateFingerprint": null,
+    "retentionIssue": "first prompt has not yet been retained",
+    "pendingPrompt": true
+  },
+  "priorHermesSessions": [],
+  "promptWitness": null,
+  "unresolvedExternal": []
+}

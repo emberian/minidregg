@@ -1,0 +1,17 @@
+{
+  "authority": "hint-only",
+  "capability": "9370342982000704572",
+  "kind": "object",
+  "proposalSha256": "cbf45d3fd6f1f0a226d7fce40100b6f2d2db1f16c99f43e61f30bdeb6d60b968",
+  "receipt": {
+    "acceptedCount": "5",
+    "confirmation": "replayed",
+    "eventId": "6263968248474101962125287788325882246060837059593387837838050756657549660085",
+    "imageBoundary": "15792757177869692120013096694219202992232909528584283155390635431237905602991",
+    "transactionId": "94950401641453205201355350621628058074597803537797111321328041954526877688342",
+    "type": "confirmed"
+  },
+  "recipient": "9",
+  "target": "16737146640964662003",
+  "type": "minidregg-delegated-reference-v1"
+}

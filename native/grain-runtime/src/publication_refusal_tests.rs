@@ -266,6 +266,7 @@ fn workspace_recovery_releases_only_verified_prepare_refusal() {
             attempt: attempt.clone(),
             definite: false,
             no_submit: false,
+            authored: None,
         });
         runtime.save().unwrap();
     };

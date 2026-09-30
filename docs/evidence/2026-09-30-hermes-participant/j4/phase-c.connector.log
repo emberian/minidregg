@@ -1,0 +1,8 @@
+attached soft to Mini grain 8751
+step @delegate shared 11632635962349928183 observe 50000
+delegation 67: performed
+step @export friend-shared-ref.json
+exported reference to friend-shared-ref.json
+step @attempts
+attempt 68 proposal 67: performed (native-outcome; submit)
+attempt 14 proposal 13: performed (exact-lookup; restart-recovery)

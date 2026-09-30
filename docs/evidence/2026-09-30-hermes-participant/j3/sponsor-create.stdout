@@ -1,0 +1,31 @@
+/home/ember/build/mini-product-20260930/m5-hermes/run/j3/store/sponsor/sources/create-shared.current/intent.bin
+{
+  "acceptedCount": "4",
+  "confirmation": "installed",
+  "eventId": "32850448697460772551616886930418232027297434537619886145483447725584414173317",
+  "imageBoundary": "33481199082035761459717179635437730687048140275081276266336196178297293743119",
+  "transactionId": "109869053186144745067143008561136189853432813339064594590775297226636337566082",
+  "type": "confirmed"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "10431026090206564532",
+  "kind": "object",
+  "name": "shared",
+  "observeCapability": "17237329904300612037",
+  "operationCapability": "17237329904300612037",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "4",
+      "confirmation": "installed",
+      "eventId": "32850448697460772551616886930418232027297434537619886145483447725584414173317",
+      "imageBoundary": "33481199082035761459717179635437730687048140275081276266336196178297293743119",
+      "transactionId": "109869053186144745067143008561136189853432813339064594590775297226636337566082",
+      "type": "confirmed"
+    },
+    "reservationDigest": "a197fbc376c0d9b978358a7de25ed3a8dd6bec297ac02dfbad3cea82a15b616b",
+    "reservationRecord": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/store/namespace/request-a197fbc376c0d9b978358a7de25ed3a8dd6bec297ac02dfbad3cea82a15b616b.json"
+  },
+  "target": "16737146640964662003",
+  "type": "minidregg-participant-reference-v1"
+}

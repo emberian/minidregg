@@ -503,6 +503,11 @@ struct WorkspaceAttempt {
     definite: bool,
     #[serde(default)]
     no_submit: bool,
+    /// Client proposal directory holding the intent actually submitted. The
+    /// controller authors it from the retained typed request only after its
+    /// own purse transitions, so none of them can make it stale.
+    #[serde(default)]
+    authored: Option<String>,
 }
 
 const MAX_WORKSPACE_RESOLUTIONS: usize = 256;
@@ -604,6 +609,8 @@ struct WorkspaceResolution {
     outcome: Value,
     tool_charge: String,
     resolved_by: String,
+    #[serde(default)]
+    authored: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -1748,11 +1755,22 @@ impl Journal {
                 || !self.workspace_proposals.iter().any(|proposal| {
                     proposal.id == pending.proposal_id
                         && proposal.submitted
-                        && proposal.intent_sha256 == pending.intent_sha256
+                        && (pending.authored.is_some()
+                            || proposal.intent_sha256 == pending.intent_sha256)
                 })
                 || (pending.no_submit && pending.attempt.exists())
             {
                 return Err("workspace attempt differs from submitted proposal".into());
+            }
+            if let Some(authored) = &pending.authored {
+                if authored != &format!("{}-x{}", pending.proposal_id, pending.operation_id)
+                    || sha256_bytes(&bounded_regular_file(
+                        &root.join("proposals").join(authored).join("intent.json"),
+                        262_144,
+                    )?)? != pending.intent_sha256
+                {
+                    return Err("workspace authored intent differs from its attempt".into());
+                }
             }
         }
         if self.workspace_attempt.is_some() && self.workspace_birth.is_some() {
@@ -10995,15 +11013,63 @@ impl Runtime {
             .find(|saved| saved.id == proposal_id)
             .ok_or("workspace proposal disappeared")?
             .submitted = true;
+        // Nothing can be sent until `no_submit` is durably cleared below.
         self.journal.workspace_attempt = Some(WorkspaceAttempt {
             operation_id,
             proposal_id,
-            intent_sha256: proposal.intent_sha256,
+            intent_sha256: proposal.intent_sha256.clone(),
             attempt: attempt.clone(),
             definite: false,
-            no_submit: false,
+            no_submit: true,
+            authored: None,
         });
         self.save()?;
+        // The attach and reserve above are Mini events. Author the exact
+        // intent now, from the retained typed request and current signed
+        // state, so this controller's own transitions cannot make it stale.
+        let authored = format!("{proposal_id}-x{operation_id}");
+        let authoring = (|| -> Result<String> {
+            let mut command = Command::new(&self.config.mini);
+            command
+                .arg("workspace")
+                .arg("--action")
+                .arg("propose")
+                .arg("--dir")
+                .arg(&root)
+                .arg("--request")
+                .arg(&request_path)
+                .arg("--proposal-id")
+                .arg(&authored);
+            let result = self.supervised_json_command(command)?;
+            let intent = root.join("proposals").join(&authored).join("intent.json");
+            let digest = sha256_bytes(&bounded_regular_file(&intent, 262_144)?)?;
+            if result["intentSha256"].as_str() != Some(digest.as_str()) {
+                return Err("authored workspace intent differs from its summary".into());
+            }
+            Ok(digest)
+        })();
+        let digest = match authoring {
+            Ok(digest) => digest,
+            Err(error) => {
+                // Authoring reads and signs nothing: no call exists. Settle
+                // the purse at zero and record the refusal.
+                let _ = self.workspace_recover_operation(operation_id, false);
+                return Err(format!("workspace proposal could not be authored against current state; nothing was submitted: {error}"));
+            }
+        };
+        self.check_not_cancelled()?;
+        {
+            let pending = self
+                .journal
+                .workspace_attempt
+                .as_mut()
+                .ok_or("workspace attempt disappeared")?;
+            pending.authored = Some(authored.clone());
+            pending.intent_sha256 = digest;
+            pending.no_submit = false;
+        }
+        self.save()?;
+        let intent_path = root.join("proposals").join(&authored).join("intent.json");
         let args = [
             "workspace",
             "--action",
@@ -11050,8 +11116,15 @@ impl Runtime {
         if pending.attempt != root.join("attempts").join(operation_id.to_string()) {
             return Err("workspace attempt path differs from its controller operation ID".into());
         }
-        let (intent_path, _) = self.workspace_proposal_paths(pending.proposal_id)?;
-        if sha256_bytes(&bounded_regular_file(&intent_path, 262_144)?)? != pending.intent_sha256 {
+        let intent_path = match &pending.authored {
+            Some(authored) => root.join("proposals").join(authored).join("intent.json"),
+            None => self.workspace_proposal_paths(pending.proposal_id)?.0,
+        };
+        // Before the authored intent exists nothing was sent; its digest is
+        // checked only once a submission could have used it.
+        if (!pending.no_submit || pending.authored.is_some())
+            && sha256_bytes(&bounded_regular_file(&intent_path, 262_144)?)? != pending.intent_sha256
+        {
             return Err("workspace operation source changed after reservation".into());
         }
         let configured_charge = self
@@ -11065,7 +11138,7 @@ impl Runtime {
         let decided: (&str, &str, Value, String) = if pending.no_submit {
             (
                 "refused",
-                "custody-not-spawned",
+                "not-submitted",
                 json!({"type":"not-submitted"}),
                 "0".to_owned(),
             )
@@ -11243,6 +11316,7 @@ impl Runtime {
             outcome,
             tool_charge: charge,
             resolved_by: resolved_by.to_owned(),
+            authored: pending.authored.clone(),
         };
         self.push_workspace_resolution(record.clone());
         self.journal.workspace_attempt = None;
@@ -11520,7 +11594,11 @@ impl Runtime {
             ));
         }
         let root = self.workspace_root()?;
-        let proposal = root.join("proposals").join(proposal_id.to_string());
+        let client_proposal = record
+            .authored
+            .clone()
+            .unwrap_or_else(|| proposal_id.to_string());
+        let proposal = root.join("proposals").join(&client_proposal);
         let summary: Value =
             serde_json::from_slice(&bounded_regular_file(&proposal.join("proposal.json"), 65_536)?)
                 .map_err(|e| format!("workspace proposal summary: {e}"))?;
@@ -11537,7 +11615,7 @@ impl Runtime {
             .arg("--dir")
             .arg(&root)
             .arg("--proposal-id")
-            .arg(proposal_id.to_string())
+            .arg(&client_proposal)
             .arg("--attempt")
             .arg(&record.attempt);
         self.supervised_text_command(command)?;
@@ -13187,6 +13265,21 @@ impl Runtime {
         Ok(())
     }
     fn attach(&mut self, soft: bool) -> Result<()> {
+        // A tripped breaker or lost reply leaves the task fenced. The owner's
+        // reattach first runs the same provable recovery the controller runs
+        // at startup; whatever it cannot prove keeps the task fenced.
+        if self.journal.connection == Connection::Fenced
+            && self.child.is_none()
+            && self.needs_startup_recovery()
+        {
+            let result = self.recover().and_then(|()| self.automatic_reconcile());
+            let decision = self.journal.next_operation_id;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":decision.to_string(),"action":"attach-recovery","automatic":true,
+                "result":match &result { Ok(()) => "recovered".to_owned(), Err(e) => e.clone() }}));
+            self.save()?;
+            result?;
+        }
         if self.journal.connection == Connection::Fenced
             || self.journal.child.is_some()
             || self.journal.foreground_attempt.is_some()
@@ -13415,7 +13508,18 @@ impl Runtime {
                 self.journal.connection = Connection::Detached;
                 self.journal.hard_reconnect_pending = false;
                 self.journal.prompt_witness = None;
-                self.save()
+                self.save()?;
+                // The breaker tripped and the worker is physically stopped.
+                // Settle what is provable so the owner can simply reattach;
+                // anything unprovable stays held for the operator.
+                if let Err(error) = self.automatic_reconcile() {
+                    let decision = self.journal.next_operation_id;
+                    self.journal.reconciliation_log.push(json!({
+                        "decisionId":decision.to_string(),"action":"post-disconnect-reconcile",
+                        "automatic":true,"result":error}));
+                    self.save()?;
+                }
+                Ok(())
             }
             (a, b, c, d, e) => Err(format!(
                 "hard disconnect unresolved: local stop={a:?}; Mini fence={b:?}; tool fence={c:?}; dispatch fence={d:?}; provider fence={e:?}"
@@ -17851,6 +17955,7 @@ mod tests {
             attempt: root.join("forged-attempt"),
             definite: false,
             no_submit: false,
+            authored: None,
         });
         assert!(journal.validate_workspace(&config).is_err());
         journal.workspace_attempt.as_mut().unwrap().attempt = workspace.join("attempts").join("2");
@@ -19125,6 +19230,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","imageBoundary":"3
             attempt,
             definite: false,
             no_submit: false,
+            authored: None,
         });
         runtime.journal.tool_hold = Some(HeldCharge {
             reserve: "3".into(),
