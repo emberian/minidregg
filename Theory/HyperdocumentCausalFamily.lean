@@ -339,12 +339,9 @@ def storedCapability : StoredCapability .object := ⟨capability, []⟩
 def projection : ProjectionUniverse where
   revocationKeys := {.capability capability.id}
 
-noncomputable def authorityLogical :
-    CellState.LogicalState CredentialAuthorityState.schema :=
-  { fields :=
-      (0 : CellState.FieldStore CredentialAuthorityState.schema).write
-        (.capability .object capability.id) storedCapability
-    resources := fun resource => nomatch resource }
+def authorityLogical : Store.Store CredentialAuthorityState.layout :=
+  (0 : Store.Store CredentialAuthorityState.layout).set
+    ⟨.capability .object, capability.id⟩ (some storedCapability)
 
 noncomputable def authorityPre :
     CredentialAuthorityState.Cell authorityMaterializer :=
@@ -352,9 +349,9 @@ noncomputable def authorityPre :
 
 theorem capability_opened :
     readCapability authorityPre .object capability.id = some storedCapability := by
-  change authorityLogical.fields (.capability .object capability.id) =
+  change authorityLogical ⟨.capability .object, capability.id⟩ =
     some storedCapability
-  exact FieldStore.write_self _ _ _
+  exact Store.Store.set_eq _ _ _
 
 def principal : AuthenticatedPrincipal projection authorityPre
     requestEnvelope.height author where
@@ -373,10 +370,9 @@ def principal : AuthenticatedPrincipal projection authorityPre
     have notRevoked : CredentialAuthorityState.isRevoked authorityPre
         (.capability storedCapability.head.id) = false := by
       change
-        (((0 : CellState.FieldStore CredentialAuthorityState.schema).write
-          (.capability .object capability.id) storedCapability)
-          (.revoked (.capability storedCapability.head.id))).getD false = false
-      rw [FieldStore.write_other (different := by simp)]
+        (authorityLogical ⟨.revoked, .capability storedCapability.head.id⟩).getD
+          false = false
+      rw [authorityLogical, Store.Store.set_ne _ _ _ _ (by intro same; cases same)]
       rfl
     exact Bool.false_ne_true (notRevoked.symm.trans member.2)
   ancestorsNotRevoked := by
@@ -427,48 +423,30 @@ def semantic : HyperdocumentOperations.ValidOperation config
       objectCapability := rfl }
   preRootExact := rfl
   writesUnique := by
-    simp [declaration, action,
-      HyperdocumentOperations.Declaration.packedWrites,
-      HyperdocumentOperations.Action.packedWrites,
-      HyperdocumentOperations.createWrites,
-      HyperdocumentOperations.PackedWrite.address]
-  expectedExact := by
-    intro write member
-    simp [declaration, action,
-      HyperdocumentOperations.Declaration.packedWrites,
-      HyperdocumentOperations.Action.packedWrites,
-      HyperdocumentOperations.createWrites] at member
-    rcases member with rfl | rfl <;>
-      rfl
+    simp [declaration, action, HyperdocumentOperations.Declaration.patch,
+      HyperdocumentOperations.Action.ops, HyperdocumentOperations.createWrites]
+  guardsValid := by
+    simp only [HyperdocumentOperations.Declaration.patch, declaration, action,
+      HyperdocumentOperations.Action.ops, HyperdocumentOperations.createWrites,
+      HyperdocumentOperations.guardedSet, Store.Patch.ValidFrom, Store.Op.Enabled,
+      Store.Op.apply, Store.Store.Fresh]
+    refine ⟨⟨by decide, hyperdocumentCell_absent _⟩, ⟨by decide, ?_⟩, trivial⟩
+    rw [Store.Store.set_ne _ _ _ _ (by intro same; cases same)]
+    exact hyperdocumentCell_absent _
   rangesValid := trivial
 
-theorem validated_nonempty :
-    Nonempty (CellState.ValidatedPatch hyperdocumentMaterializer
-      hyperdocumentCell (declaration.patch config)) := by
-  generalize exactOutcome : CellState.validate hyperdocumentMaterializer
-    hyperdocumentCell (declaration.patch config) = outcome
-  cases outcome with
-  | accepted validated => exact ⟨validated⟩
-  | rejected reason =>
-      have rootExact : (declaration.patch config).expectedPreRoot =
-          hyperdocumentCell.root := semantic.preRootExact
-      have fieldsExact : (declaration.patch config).fieldFootprint =
-          (declaration.patch config).namedFields :=
-        (HyperdocumentOperations.Declaration.patch_namedFields
-          config declaration).symm
-      have resourcesExact : (declaration.patch config).resourceFootprint =
-          (declaration.patch config).namedResources :=
-        (HyperdocumentOperations.Declaration.patch_namedResources
-          config declaration).symm
-      unfold CellState.validate at exactOutcome
-      rw [dif_pos rootExact, dif_pos fieldsExact, dif_pos resourcesExact]
-        at exactOutcome
-      cases exactOutcome
+/-- The create patch validates at the root the intent quotes: validation is
+the root check plus `ValidFrom`, both supplied by `semantic`. -/
+theorem validated : CellState.ValidatedPatch hyperdocumentMaterializer
+    hyperdocumentCell (declaration.toRequest config).preStateRoot
+    (declaration.patch config) :=
+  (CellState.validate_accepts _ _ _ _ semantic.preRootExact
+    semantic.guardsValid).choose
 
 noncomputable def accepted : HyperdocumentOperations.Accepted config projection
     authorityPre hyperdocumentCell permissivePortal declaration :=
   HyperdocumentOperations.accept principal semantic namedCapabilityAdmissible
-    authorization (Classical.choice validated_nonempty)
+    authorization validated
 
 noncomputable def eventEvidence : EventEvidence hyperdocumentMaterializer config projection authorityPre permissivePortal
     accepted.causalPreimage where
@@ -532,21 +510,10 @@ noncomputable def history :
           schema := ⟨14⟩
           createdBy := author
           createdAt := declaration.operationId config } := by
-  exact accepted.post_contains_fieldWrite
-    (HyperdocumentOperations.PackedWrite.toFieldWrite
-      ⟨.documents,
-        { key := documentId
-          expected := none
-          replacement :=
-            { rootElement := elementId
-              schema := ⟨14⟩
-              createdBy := author
-              createdAt := declaration.operationId config } }⟩)
-    (by simp [declaration, action,
-      HyperdocumentOperations.Declaration.fieldWrites,
-      HyperdocumentOperations.Declaration.packedWrites,
-      HyperdocumentOperations.Action.packedWrites,
-      HyperdocumentOperations.createWrites, intent, author])
+  exact accepted.post_contains_guardedSet (expected := none)
+    (by simp [declaration, action, HyperdocumentOperations.Declaration.patch,
+      HyperdocumentOperations.Action.ops, HyperdocumentOperations.createWrites,
+      intent, author])
 
 /-- A cell with a different canonical root cannot be substituted into this
 causal step.  Root collision resistance is deliberately not assumed, so exact
