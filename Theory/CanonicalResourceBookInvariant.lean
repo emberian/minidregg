@@ -83,7 +83,7 @@ theorem Operation.apply_accountSupported (operation : Operation) (book : Book)
     admitted.sourcePresent admitted.destinationPresent
   cases operation <;> exact posting
 
-theorem Accepted.accountSupported {M : CellState.Materializer schema Digest}
+theorem Accepted.accountSupported {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {operation : Operation}
     (accepted : Accepted pre operation)
     (supported : (logicalBook pre.logical).AccountSupported) :
@@ -162,7 +162,7 @@ theorem Batch.run_accountSupported (batch : Batch) (book post : Book)
   obtain ⟨admitted, rfl⟩ := (batch.run_accepts_iff book post).mp accepted
   exact batch.apply_accountSupported book supported admitted
 
-theorem AcceptedBatch.accountSupported {M : CellState.Materializer schema Digest}
+theorem AcceptedBatch.accountSupported {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {batch : Batch}
     (accepted : AcceptedBatch pre batch)
     (supported : (logicalBook pre.logical).AccountSupported) :
