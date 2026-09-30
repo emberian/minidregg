@@ -24,13 +24,12 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y z
+universe u v w y z
 
 variable
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {n : Nat} {F : Type*} [Field F] [DecidableEq F] [Finite F]
 
 /-- A fixed finite-word `HistoryProjection` cannot cover a stream of canonical
