@@ -465,6 +465,20 @@ theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev}
           cases h
           exact ⟨height, logRoot, rfl, by simpa using hJ, hV, rfl, rfl⟩
 
+/-- The converse of `admit_ok`: every premise it names is also sufficient. -/
+theorem admit_of {w : World R TxId D} {t : Turn R TxId Ev} {height : Nat} {logRoot : D}
+    {cells : Cells R} (shaped : Shaped t) (hh : w.head = some (height, logRoot))
+    (hj : w.journal t.txId = none)
+    (hv : Patch.ValidFrom w.system (sysPatch H t height logRoot))
+    (hc : applyCells w.cells t = .ok cells) :
+    World.admit H w t = .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot)⟩ := by
+  obtain ⟨hE, hL, hC, hR⟩ := shaped
+  unfold World.admit
+  rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR)]
+  simp only [hh]
+  rw [if_neg (by simp [hj]), if_neg (not_not.mpr hv)]
+  simp only [hc]
+
 omit [DecidableEq TxId] in
 theorem applyCells_ok {cells cells' : Cells R} {t : Turn R TxId Ev}
     (h : applyCells cells t = .ok cells') :
@@ -744,6 +758,19 @@ theorem sysPatch_valid_creates {s : Store (sysLayout TxId D)} {t : Turn R TxId E
   unfold sysPatch at hv
   rw [List.append_assoc, List.append_assoc, Patch.validFrom_append] at hv
   exact (validFrom_createReads s t.creates).1 hv.1
+
+/-- The system patch of a turn with no creates or retires is valid exactly
+when the id is fresh and the head is where the patch quotes it. -/
+theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev}
+    {height : Nat} {logRoot : D} (hc : t.creates = []) (hr : t.retires = [])
+    (hj : s ⟨SysSpace.journal, t.txId⟩ = none)
+    (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot)) :
+    Patch.ValidFrom s (sysPatch H t height logRoot) := by
+  simp only [sysPatch, hc, hr, List.map_nil, List.nil_append]
+  refine ⟨⟨fun e => Discipline.noConfusion e, hj⟩, ⟨rfl, ?_⟩, trivial⟩
+  show (s.set ⟨SysSpace.journal, t.txId⟩ (some (height, H.turnDigest t))) ⟨SysSpace.head, ()⟩ = _
+  rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)), hh]
+  rfl
 
 end Decompose
 
@@ -1340,6 +1367,8 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms step_eq_some
 /-- info: 'Minidregg.Kernel.World.admit_ok' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms admit_ok
+/-- info: 'Minidregg.Kernel.World.admit_of' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms admit_of
 /-- info: 'Minidregg.Kernel.World.applyCells_ok' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms applyCells_ok
 /-- info: 'Minidregg.Kernel.World.applyCreates_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -1386,6 +1415,8 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms sysPost_retired
 /-- info: 'Minidregg.Kernel.World.sysPatch_valid_creates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms sysPatch_valid_creates
+/-- info: 'Minidregg.Kernel.World.sysPatch_valid_plain' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sysPatch_valid_plain
 /-- info: 'Minidregg.Kernel.World.step_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms step_frame
 /-- info: 'Minidregg.Kernel.World.step_leg' depends on axioms: [propext, Classical.choice, Quot.sound] -/
