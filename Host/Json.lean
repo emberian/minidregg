@@ -32,6 +32,7 @@ import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
 import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
+import Kernel.PayObservationReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -291,6 +292,7 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .program, "delegate" => pure .delegateProgram
   | .program, "installPolicy" => pure .installPolicy
   | .program, "revokeCapability" => pure .revokeCapability
+  | .program, "observePayment" => pure .observePayment
   | _, _ => failAt path "verb is not defined for this resource kind"
 
 private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) :
@@ -720,7 +722,16 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
     "factoryControllerCapability", "meterAllowance"]
-  let obj ← exactObject path names json
+  let observed := (json.getObjVal? "payObserver").toOption.isSome
+  let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
+  let payObserver ← if observed then do
+      let observerPath := path ++ ".payObserver"
+      let observer ← exactObject observerPath ["subject", "capability"]
+        (← field path "payObserver" obj)
+      pure (some (⟨⟨← nat (observerPath ++ ".subject") (← field observerPath "subject" observer)⟩,
+        ⟨← nat (observerPath ++ ".capability") (← field observerPath "capability" observer)⟩⟩ :
+          NativeHostGenesis.PayObserver))
+    else pure none
   pure {
     deployment := ⟨⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
       ← nat (path ++ ".factoryId") (← field path "factoryId" obj),
@@ -742,7 +753,8 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
       (← field path "factoryControllerSubject" obj)⟩,
       ⟨← nat (path ++ ".factoryControllerCapability")
       (← field path "factoryControllerCapability" obj)⟩⟩
-    meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj) }
+    meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj)
+    payObserver := payObserver }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json
@@ -2171,6 +2183,53 @@ private def payAssign (json : Lean.Json) : Result (List UInt8) := do
       expectedPayRoot := ⟨← nat "$.expectedPayRoot" (← field "$" "expectedPayRoot" obj)⟩ }
   return PayAssignmentReceiver.commandCodec.encode command
 
+/-- A natural number as the pay watcher emits it (a JSON integer) or as the
+Host's own JSON writes it (a canonical unsigned decimal string). -/
+private def natOrNumber (path : String) (json : Lean.Json) : Result Nat :=
+  match json with
+  | .num number =>
+      if number.exponent = 0 ∧ 0 ≤ number.mantissa then pure number.mantissa.toNat
+      else failAt path "unsigned integer expected"
+  | _ => nat path json
+
+/-- One observation in the pay watcher's record shape (lane P1
+`observations.json`): byte fields are lowercase hex of the raw bytes. -/
+private def payObservationRecord (path : String) (json : Lean.Json) :
+    Result PayObservation.Observation := do
+  let obj ← exactObject path ["index", "address", "signature", "slot", "blockTime", "amount",
+    "mint", "tokenProgram"] json
+  pure
+    { index := ← natOrNumber s!"{path}.index" (← field path "index" obj)
+      address := ← decodeHex s!"{path}.address" (← field path "address" obj)
+      signature := ← decodeHex s!"{path}.signature" (← field path "signature" obj)
+      slot := ← natOrNumber s!"{path}.slot" (← field path "slot" obj)
+      blockTime := ← natOrNumber s!"{path}.blockTime" (← field path "blockTime" obj)
+      amount := ← natOrNumber s!"{path}.amount" (← field path "amount" obj)
+      mint := ← decodeHex s!"{path}.mint" (← field path "mint" obj)
+      tokenProgram := ← decodeHex s!"{path}.tokenProgram" (← field path "tokenProgram" obj) }
+
+private def payClock (path : String) (json : Lean.Json) : Result PayCell.Clock := do
+  let obj ← exactObject path ["slot", "blockTime"] json
+  pure ⟨← natOrNumber s!"{path}.slot" (← field path "slot" obj),
+    ← natOrNumber s!"{path}.blockTime" (← field path "blockTime" obj)⟩
+
+/-- The observer's report: the watcher's `tip` and `observations` (`[]` is a
+heartbeat) under the observer, its capability, a nonce and the two roots it
+read.  The bytes claim nothing: the receiver decides every credit. -/
+private def payObservationCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["observer", "capability", "nonce", "expectedAuthorityRoot",
+    "expectedPayRoot", "tip", "observations"] json
+  let command : PayObservation.Command :=
+    { observer := ⟨← nat "$.observer" (← field "$" "observer" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩
+      expectedPayRoot := ⟨← nat "$.expectedPayRoot" (← field "$" "expectedPayRoot" obj)⟩
+      tip := ← payClock "$.tip" (← field "$" "tip" obj)
+      observations := ← list "$.observations" payObservationRecord (← field "$" "observations" obj) }
+  return PayObservation.commandCodec.encode command
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none) : Result (List UInt8) :=
@@ -2197,6 +2256,7 @@ def author (kind : String) (json : Lean.Json)
   | "participant-key-enrollment" => participantKeyEnrollment json
   | "pay-book" => payBook json
   | "pay-assign" => payAssign json
+  | "pay-observation" => payObservationCommand json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2380,13 +2440,38 @@ private def payAssignCommandJson (command : PayAssignmentReceiver.Command) : Lea
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
    ("expectedPayRoot", decimal command.expectedPayRoot.value)]
 
+private def payClockJson (clock : PayCell.Clock) : Lean.Json :=
+  .mkObj [("slot", decimal clock.slot), ("blockTime", decimal clock.blockTime)]
+
+private def payObservationRecordJson (o : PayObservation.Observation) : Lean.Json := .mkObj
+  [("index", decimal o.index), ("address", hexJson o.address),
+   ("signature", hexJson o.signature), ("slot", decimal o.slot),
+   ("blockTime", decimal o.blockTime), ("amount", decimal o.amount),
+   ("mint", hexJson o.mint), ("tokenProgram", hexJson o.tokenProgram),
+   ("nullifierBytes", hexJson (PayObservation.nullifierBytes o))]
+
+private def payObservationCommandJson (command : PayObservation.Command) : Lean.Json := .mkObj
+  [("type", "pay-observation-v1"),
+   ("canonical", hexJson (PayObservation.commandCodec.encode command)),
+   ("observer", decimal command.observer.value),
+   ("capability", decimal command.capability.value),
+   ("nonce", decimal command.nonce),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
+   ("expectedPayRoot", decimal command.expectedPayRoot.value),
+   ("tip", payClockJson command.tip),
+   ("heartbeat", .bool command.observations.isEmpty),
+   ("observations", .arr (command.observations.map payObservationRecordJson).toArray)]
+
 private def payCommandJson (bytes : List UInt8) : Lean.Json :=
   match PayBookReceiver.commandCodec.decode bytes with
   | some command => payBookCommandJson command
   | none =>
       match PayAssignmentReceiver.commandCodec.decode bytes with
       | some command => payAssignCommandJson command
-      | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
+      | none =>
+          match PayObservation.commandCodec.decode bytes with
+          | some command => payObservationCommandJson command
+          | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
 
 /-- The public pay view: roots to pin, tariff, clock, next free index and the
 published deposit book (index order, lowercase hex). -/
@@ -2404,6 +2489,22 @@ def payViewJson (view : PayCellDomain.View) : Lean.Json := .mkObj
    ("nextFree", decimal view.nextFree),
    ("bookSize", decimal view.book.length),
    ("book", .arr (view.book.map hexJson).toArray)]
+
+/-- The operator's local ledger read (`minidregg-host CONFIG pay-ledger`). -/
+def payLedgerJson (ledger : NativeHost.PayLedger) : Lean.Json := .mkObj
+  [("type", "pay-ledger-v1"),
+   ("payRoot", decimal ledger.payRoot.value),
+   ("tariff", match ledger.tariff with
+     | none => .null
+     | some tariff => payTariffJson tariff),
+   ("clock", match ledger.clock with
+     | none => .null
+     | some clock => payClockJson clock),
+   ("asset", decimal ledger.asset),
+   ("well", .str (toString ledger.well)),
+   ("payers", .arr (ledger.rows.map fun row => Lean.Json.mkObj
+     [("index", decimal row.index), ("account", decimal row.account),
+      ("balance", .str (toString row.balance))]).toArray)]
 
 private def participantKeyCommandJson
     (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj
@@ -2982,6 +3083,14 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "pay-assign" => payAssignCommandJson <$>
       decoded "pay-assign" PayAssignmentReceiver.commandCodec bytes
   | "pay-view" => payViewJson <$> decoded "pay-view" PayCellDomain.viewCodec bytes
+  | "pay-observation" => payObservationCommandJson <$>
+      decoded "pay-observation" PayObservation.commandCodec bytes
+  | "pay-observation-ingress" => do
+      let ingress ← decoded "pay-observation-ingress" PayObservation.ingressCodec bytes
+      let command ← decoded "pay-observation-ingress" PayObservation.commandCodec
+        ingress.commandBytes
+      pure <| .mkObj [("type", "pay-observation-ingress-v1"),
+        ("command", payObservationCommandJson command), ("envelope", hexJson ingress.envelope)]
   | "pay-plan" => do
       let plan ← decoded "pay-plan" PayCellDomain.signingPlanCodec bytes
       pure <| .mkObj
