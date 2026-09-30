@@ -1,0 +1,42 @@
+Running as unit: spk-sandbox-floor-audit-20260930T063048Z-pre-floor.service
+
+running 1 test
+test resident_launch::tests::root_probe_breaches_under_pre_floor_arguments ... {"euid":65534,"gid_map":"65534 0 1","pid":2,"probe":"spk-sandbox-probe","uid":65534,"uid_map":"65534 0 1"}
+{"check":"capabilities-all-zero","detail":{"CapAmb":"0000000000000000","CapBnd":"0000000000000000","CapEff":"0000000000000000","CapInh":"0000000000000000","CapPrm":"0000000000000000","NoNewPrivs":"1","Seccomp":"0","Seccomp_filters":"0"},"held":true}
+{"check":"seccomp-filter-active","detail":{"CapAmb":"0000000000000000","CapBnd":"0000000000000000","CapEff":"0000000000000000","CapInh":"0000000000000000","CapPrm":"0000000000000000","NoNewPrivs":"1","Seccomp":"0","Seccomp_filters":"0"},"held":false}
+{"check":"no-new-privs","detail":{"CapAmb":"0000000000000000","CapBnd":"0000000000000000","CapEff":"0000000000000000","CapInh":"0000000000000000","CapPrm":"0000000000000000","NoNewPrivs":"1","Seccomp":"0","Seccomp_filters":"0"},"held":true}
+{"check":"fd-census-self","detail":[{"directory":false,"fd":0,"target":"/dev/null"},{"directory":false,"fd":1,"target":"pipe:[2309442375]"},{"directory":false,"fd":2,"target":"pipe:[2309442375]"},{"directory":false,"fd":3,"target":"socket:[2309442374]"},{"directory":false,"fd":6,"target":"/memfd:spk-resident-seccomp (deleted)"}],"held":false}
+{"check":"fd-census-pid1-no-directory","detail":[{"directory":false,"fd":0,"target":"/dev/null"},{"directory":false,"fd":1,"target":"pipe:[2309442375]"},{"directory":false,"fd":2,"target":"pipe:[2309442375]"},{"directory":false,"fd":8,"target":"anon_inode:[eventfd]"}],"held":true}
+{"check":"dotdot-from-inherited-fd","detail":{"fd4":{"errno":9,"error":"Bad file descriptor (os error 9)"},"fd5":{"errno":9,"error":"Bad file descriptor (os error 9)"},"walked":[]},"held":true}
+{"check":"network-public-connect","detail":{"ipv4":"Err(101)","ipv6":"Err(101)"},"held":true}
+{"check":"network-loopback-only","detail":{"127.0.0.1:1":"Err(111)"},"held":true}
+{"check":"socket-netlink-refused","detail":{"ok":4},"held":false}
+{"check":"socket-packet-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":false}
+{"check":"socket-vsock-refused","detail":{"errno":94,"error":"Socket type not supported (os error 94)"},"held":false}
+{"check":"mount-refused","detail":{"errno":1,"error":"Operation not permitted (os error 1)"},"held":true}
+{"check":"ptrace-traceme-refused","detail":{"ok":0},"held":false}
+{"check":"bpf-refused","detail":{"errno":22,"error":"Invalid argument (os error 22)"},"held":false}
+{"check":"io_uring_setup-refused","detail":{"errno":14,"error":"Bad address (os error 14)"},"held":false}
+{"check":"keyctl-refused","detail":{"errno":22,"error":"Invalid argument (os error 22)"},"held":false}
+{"check":"open_by_handle_at-refused","detail":{"errno":14,"error":"Bad address (os error 14)"},"held":false}
+{"check":"personality-addr-no-randomize-refused","detail":{"ok":0},"held":false}
+{"check":"ioctl-tiocsti-high-word-refused","detail":{"errno":25,"error":"Inappropriate ioctl for device (os error 25)"},"held":false}
+{"check":"unlisted-syscall-refused","detail":{"errno":38,"error":"Function not implemented (os error 38)"},"held":true}
+{"check":"web-app-positive-control","detail":{"fork":true,"image-root-read-only":true,"loopback-listener":true,"thread":true,"tmp-write":true,"var-write":true},"held":true}
+{"check":"userns-unshare-refused","detail":{"ok":0},"held":false}
+{"check":"userns-clone-refused","detail":{"ok":16},"held":false}
+{"check":"setns-refused","detail":{"errno":22,"error":"Invalid argument (os error 22)"},"held":false}
+{"info":"max_user_namespaces","value":"2147483647"}
+{"checks":24,"failures":["seccomp-filter-active","fd-census-self","socket-netlink-refused","socket-packet-refused","socket-vsock-refused","ptrace-traceme-refused","bpf-refused","io_uring_setup-refused","keyctl-refused","open_by_handle_at-refused","personality-addr-no-randomize-refused","ioctl-tiocsti-high-word-refused","userns-unshare-refused","userns-clone-refused","setns-refused"],"verdict":"floor-breached"}
+
+bwrap-wait-status=0x100 exited=true code=1 signaled=false signal=0
+output-summary kept=3942 discarded=0
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 194 filtered out; finished in 0.03s
+
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 64ms
+CPU time consumed: 35ms
+Memory peak: 4.2M (swap: 0B)
