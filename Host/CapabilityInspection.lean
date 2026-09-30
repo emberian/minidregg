@@ -40,7 +40,9 @@ def headJson {kind : ResourceKind} (cap : Capability kind) : Json := .mkObj
    ("holder", match cap.holder with
      | .bearer => .mkObj [("type", "bearer")]
      | .subject s => .mkObj [("type", "subject"), ("subject", decimal s.value)]),
-   ("targets", numbers (cap.scope.targets.image (·.value))),
+   (match cap.scope.targets with
+     | .explicit targets => ("targets", numbers (targets.image (·.value)))
+     | .under room => ("room", decimal room)),
    ("verbs", .arr <| ((cap.scope.verbs.image verbTag).sort (· ≤ ·)).toArray.map
      (fun tag => verbName (verbOfTag kind tag))),
    ("maxCost", decimal cap.scope.maxCost),

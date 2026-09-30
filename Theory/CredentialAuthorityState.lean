@@ -221,26 +221,27 @@ def isRegistered {M : Materializer} (pre : Cell M) (key : RevocationKey) : Bool 
 /-- Every stored edge retains its explicit origin and its matching static
 relation. The terminal record is a root; historical operation authorization
 is supplied by the accepted state transition, not by the serialized marker. -/
-inductive LineageValid {kind : ResourceKind} : StoredCapability kind → Prop
+inductive LineageValid {kind : ResourceKind} (parentage : Parentage) :
+    StoredCapability kind → Prop
   | root (cap : Capability kind)
       (parentNone : cap.parent = none)
       (rootSelf : cap.root = cap.id)
       (ancestorsEmpty : cap.ancestors = ∅) :
-      LineageValid ⟨cap, []⟩
+      LineageValid parentage ⟨cap, []⟩
   | attenuate (child parent : Capability kind)
       (tail : List (ParentLink kind))
-      (parentValid : LineageValid ⟨parent, tail⟩)
-      (edge : child.StrictAttenuates parent) :
-      LineageValid ⟨child, ⟨parent, .strict⟩ :: tail⟩
+      (parentValid : LineageValid parentage ⟨parent, tail⟩)
+      (edge : child.StrictAttenuates parent parentage) :
+      LineageValid parentage ⟨child, ⟨parent, .strict⟩ :: tail⟩
   | delegate (child parent : Capability kind)
       (tail : List (ParentLink kind)) (request : Request kind)
-      (parentValid : LineageValid ⟨parent, tail⟩)
-      (shape : DelegationShape request child parent) :
-      LineageValid ⟨child, ⟨parent, .delegated request⟩ :: tail⟩
+      (parentValid : LineageValid parentage ⟨parent, tail⟩)
+      (shape : DelegationShape request child parent parentage) :
+      LineageValid parentage ⟨child, ⟨parent, .delegated request⟩ :: tail⟩
 
 theorem LineageValid.root_admissible_of_strict {kind : ResourceKind}
     {stored : StoredCapability kind} {state : AuthState}
-    {request : Request kind} (valid : LineageValid stored)
+    {request : Request kind} (valid : LineageValid state.parent stored)
     (strict : stored.IsStrict)
     (admitted : stored.head.Admissible state request) :
     ∃ root : Capability kind,
@@ -255,12 +256,13 @@ theorem LineageValid.root_admissible_of_strict {kind : ResourceKind}
       cases strict.1
 
 theorem LineageValid.root_bounds {kind : ResourceKind}
-    {stored : StoredCapability kind} (valid : LineageValid stored) :
+    {parentage : Parentage} {stored : StoredCapability kind}
+    (valid : LineageValid parentage stored) :
     ∃ root : Capability kind, root.parent = none ∧ root.root = root.id ∧
-      Capability.LineageBounds stored.head root := by
+      Capability.LineageBounds stored.head root parentage := by
   induction valid with
   | root cap parentNone rootSelf ancestorsEmpty =>
-      exact ⟨cap, parentNone, rootSelf, Capability.LineageBounds.refl cap⟩
+      exact ⟨cap, parentNone, rootSelf, Capability.LineageBounds.refl cap parentage⟩
   | attenuate child parent tail parentValid edge ih =>
       obtain ⟨root, parentNone, rootSelf, bound⟩ := ih
       exact ⟨root, parentNone, rootSelf, edge.payload.lineageBounds.trans bound⟩
@@ -269,8 +271,9 @@ theorem LineageValid.root_bounds {kind : ResourceKind}
       exact ⟨root, parentNone, rootSelf, shape.payload.lineageBounds.trans bound⟩
 
 theorem LineageValid.nonempty_lineage {kind : ResourceKind}
-    {stored : StoredCapability kind} (valid : LineageValid stored) :
-    Nonempty stored.head.Lineage := by
+    {parentage : Parentage} {stored : StoredCapability kind}
+    (valid : LineageValid parentage stored) :
+    Nonempty (stored.head.Lineage parentage) := by
   induction valid with
   | root cap parentNone rootSelf ancestorsEmpty =>
       exact ⟨.root cap parentNone rootSelf ancestorsEmpty⟩
@@ -282,6 +285,11 @@ theorem LineageValid.nonempty_lineage {kind : ResourceKind}
       exact ⟨.delegate child parent request lineage shape⟩
 
 /-! ## Exact projection into the common authorization judgment -/
+
+/-- The authority cell records no room parents; the system cell's parent
+projection is not threaded into this projection yet. With no parent recorded,
+`TargetSet.under` covers nothing and explicit-under-room narrowing is refused. -/
+def noParents : Parentage := fun _ => none
 
 /-- A deployment declares the finite revocation keys whose sparse cells are
 part of this authority domain.  Issuer/policy/subject epoch reads remain total
@@ -318,7 +326,8 @@ def StateProjection.authState {L : Layout.{0, 0, 0}}
     policyRevision := fun policy =>
       (logical ⟨.policyRevision, policy⟩).getD (show PolicyRevision from 0)
     subjectKeyEpoch := fun subject =>
-      (logical ⟨.subjectKeyEpoch, subject⟩).getD (show Epoch from 0) }
+      (logical ⟨.subjectKeyEpoch, subject⟩).getD (show Epoch from 0)
+    parent := noParents }
 
 /-- The unbounded canonical authority layout is the identity instance of the
 same state-derived view. Existing clients keep this exact interpretation. -/
@@ -346,6 +355,7 @@ def authState {M : Materializer} (domain : ProjectionUniverse)
   policyEpoch := policyEpochAt pre
   policyRevision := policyRevisionAt pre
   subjectKeyEpoch := subjectKeyEpochAt pre
+  parent := noParents
 
 @[simp] theorem authState_identity_projection
     {M : CellState.Materializer layout Digest}

@@ -500,7 +500,7 @@ structure DescentEvidence {M : Materializer} (domain : ProjectionUniverse)
   preRootExact : expectedPreRoot = pre.root
   parentExact : readCapability pre kind parentId = some parent
   parentIdExact : parent.head.id = parentId
-  parentLineageValid : LineageValid parent
+  parentLineageValid : LineageValid (authState domain pre).parent parent
   parentLineageAnchored : LineageAnchored pre parent
   childSlotFresh : CapabilityIdFresh pre child.id
   nullifierFresh : isNullified pre operationNullifier = false
@@ -578,7 +578,7 @@ structure AttenuateEvidence {M : Materializer} (domain : ProjectionUniverse)
     (declaration : AttenuateDeclaration kind) (parent : StoredCapability kind)
     extends DescentEvidence domain pre declaration.expectedPreRoot declaration.parentId
       declaration.child declaration.operationNullifier parent where
-  strict : declaration.child.StrictAttenuates parent.head
+  strict : declaration.child.StrictAttenuates parent.head (authState domain pre).parent
 
 theorem AttenuateEvidence.childLineageAnchored {M : Materializer}
     {domain : ProjectionUniverse} {pre : Cell M} {kind : ResourceKind}
@@ -662,7 +662,8 @@ theorem AttenuateEvidence.childLineageValid {M : Materializer}
     {declaration : AttenuateDeclaration kind}
     {parent : StoredCapability kind}
     (evidence : AttenuateEvidence domain pre declaration parent) :
-    LineageValid (descendedCapability declaration.child parent) :=
+    LineageValid (authState domain pre).parent
+      (descendedCapability declaration.child parent) :=
   .attenuate declaration.child parent.head parent.ancestry
     evidence.parentLineageValid evidence.strict
 
@@ -756,7 +757,7 @@ structure DelegationEvidence {M : Materializer} (domain : ProjectionUniverse)
   parentNamed : parentAuthorization.evidence.capabilityValue =
     some (parent.head, parentCommitment)
   shape : DelegationShape (context.request codec effectDigest pre declaration)
-    declaration.child parent.head
+    declaration.child parent.head (authState domain pre).parent
 
 theorem DelegationEvidence.childLineageValid {M : Materializer}
     {domain : ProjectionUniverse} {pre : Cell M} {portal : Portal}
@@ -765,7 +766,7 @@ theorem DelegationEvidence.childLineageValid {M : Materializer}
     {effectDigest : DelegateDeclaration kind → Digest}
     {declaration : DelegateDeclaration kind} {parent : StoredCapability kind}
     (evidence : DelegationEvidence domain pre portal context codec effectDigest declaration parent) :
-    LineageValid (delegatedCapability declaration.child parent
+    LineageValid (authState domain pre).parent (delegatedCapability declaration.child parent
       (context.request codec effectDigest pre declaration)) :=
   .delegate declaration.child parent.head parent.ancestry
     (context.request codec effectDigest pre declaration)
@@ -902,7 +903,7 @@ theorem DelegationEvidence.parent_exact
     readCapability pre kind declaration.parentId = some parent ∧
       mode.parentAuthorization.evidence.capabilityValue =
         some (parent.head, mode.parentCommitment) ∧
-      LineageValid parent ∧ LineageAnchored pre parent :=
+      LineageValid (authState domain pre).parent parent ∧ LineageAnchored pre parent :=
   ⟨mode.parentExact, mode.parentNamed, mode.parentLineageValid, mode.parentLineageAnchored⟩
 
 theorem DelegationEvidence.reject_wrong_parent
@@ -924,7 +925,7 @@ theorem DelegationEvidence.reject_bearer_child
 
 theorem DelegationEvidence.child_bounds
     (mode : DelegationEvidence domain pre portal context codec effectDigest declaration parent) :
-    Capability.LineageBounds declaration.child parent.head :=
+    Capability.LineageBounds declaration.child parent.head (authState domain pre).parent :=
   mode.shape.payload.lineageBounds
 
 end DelegationObligations
@@ -979,7 +980,8 @@ theorem delegation_post_lineage_valid {M : Materializer}
       (delegateFamily domain pre portal context codec parentCodec effectDigest)
       (context.request codec effectDigest pre declaration) pre declaration parent) :
     ∃ stored, readCapability accepted.prepared.post kind declaration.child.id = some stored ∧
-      LineageValid stored ∧ LineageAnchored accepted.prepared.post stored := by
+      LineageValid (authState domain pre).parent stored ∧
+        LineageAnchored accepted.prepared.post stored := by
   exact ⟨_, delegation_post_capability_exact accepted,
     accepted.modeEvidence.childLineageValid, accepted.postcondition.2⟩
 
@@ -1299,7 +1301,8 @@ theorem issue_post_lineage_valid
       (authState := authState domain pre)
       (issueFamily domain pre codec effectDigest context) request pre declaration ()) :
     ∃ stored, readCapability accepted.prepared.post kind declaration.capability.id = some stored ∧
-      LineageValid stored ∧ LineageAnchored accepted.prepared.post stored := by
+      LineageValid (authState domain pre).parent stored ∧
+        LineageAnchored accepted.prepared.post stored := by
   refine ⟨⟨declaration.capability, []⟩, issue_post_capability_exact accepted, ?_, trivial⟩
   exact .root declaration.capability accepted.modeEvidence.rootParent
     accepted.modeEvidence.rootSelf accepted.modeEvidence.rootAncestors
@@ -1337,7 +1340,7 @@ theorem attenuation_post_lineage_valid
       request pre declaration parent) :
     ∃ stored,
       readCapability accepted.prepared.post kind declaration.child.id = some stored ∧
-      LineageValid stored := by
+      LineageValid (authState domain pre).parent stored := by
   exact ⟨descendedCapability declaration.child parent,
     attenuation_post_capability_exact accepted,
     accepted.modeEvidence.childLineageValid⟩

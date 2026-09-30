@@ -67,6 +67,7 @@ def authState : AuthState where
   policyEpoch := fun _ => 0
   policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
+  parent := fun _ => none
 
 /-- One complete request, quoting the state's policy epoch exactly. -/
 def request : Request .object where
@@ -170,7 +171,7 @@ def capability : Capability .object where
   issuer := ⟨200⟩
   holder := .subject ⟨4⟩
   scope :=
-    { targets := {⟨5⟩}
+    { targets := .explicit {⟨5⟩}
       verbs := {.mutateObject}
       maxCost := 20 }
   notBefore := 0

@@ -192,9 +192,16 @@ instance descentReadyDecidable {kind : ResourceKind} (snapshot : Snapshot)
   unfold DescentReady
   infer_instance
 
+/-- The parent projection every lineage and delegation check of this controller
+is decided at: the one carried by the authority projection it admits against. -/
+abbrev parentage {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind) :
+    Parentage :=
+  (authState (projectionUniverse snapshot command) snapshot.cell).parent
+
 def descentEvidence {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind)
     (parent : StoredCapability kind) (ready : DescentReady snapshot command parent)
-    (valid : LineageValid parent) (anchored : LineageAnchored snapshot.cell parent) :
+    (valid : LineageValid (parentage snapshot command) parent)
+    (anchored : LineageAnchored snapshot.cell parent) :
     DescentEvidence (projectionUniverse snapshot command) snapshot.cell command.declaration.expectedPreRoot
       command.declaration.parentId command.declaration.child command.declaration.operationNullifier parent := by
   rcases ready with ⟨root, lookup, parentId, fresh, marker, issuer, generation,
@@ -223,6 +230,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     command.declaration.operationNullifier parent
   shape : CredentialAuthorityFamily.DelegationShape
     (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head
+    (parentage authority.snapshot command)
   policyTarget : command.declaration.child.policyId = ⟨command.declaration.target.value⟩
   identity : command.declaration.operationNullifier = operationMarker authority.snapshot.domain profile.semantics command
   validated : ValidatedPatch AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
@@ -241,9 +249,11 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   let target ← requireSome .targetUnavailable (observeTarget deployment directory.directory command)
   let parent ← requireSome .parentUnavailable (readCapability authority.snapshot.cell kind command.declaration.parentId)
   if ready : DescentReady authority.snapshot command parent then
-    if lineage : storedLineageCheck authority.snapshot.cell parent = true then
+    if lineage : storedLineageCheck authority.snapshot.cell
+        (parentage authority.snapshot command) parent = true then
       if shape : CredentialAuthorityFamily.DelegationShape
-          (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head then
+          (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head
+          (parentage authority.snapshot command) then
         if policyTarget : command.declaration.child.policyId = ⟨command.declaration.target.value⟩ then
           if identity : command.declaration.operationNullifier = operationMarker authority.snapshot.domain profile.semantics command then
             match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
@@ -255,7 +265,8 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                   authority.snapshot.domain directory.directory
                   (authority.snapshot.authState.policyAddress command.declaration.child.policyId
                     (authority.snapshot.authState.policyRevision command.declaration.child.policyId)))
-                let facts := (storedLineageCheck_iff authority.snapshot.cell parent).mp lineage
+                let facts := (storedLineageCheck_iff authority.snapshot.cell
+                  (parentage authority.snapshot command) parent).mp lineage
                 .ok ⟨directory, authority, target, parent,
                   descentEvidence authority.snapshot command parent ready facts.1 facts.2,
                   shape, policyTarget, identity, validated, source⟩
@@ -498,7 +509,8 @@ theorem Accepted.post_exact [DecidableEq F]
 theorem Accepted.child_lineage [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
-    LineageValid (child prepared.authority.snapshot profile.semantics ambient command prepared.parent) :=
+    LineageValid (parentage prepared.authority.snapshot command)
+      (child prepared.authority.snapshot profile.semantics ambient command prepared.parent) :=
   (mode prepared accepted.authorization accepted.parentNamed).childLineageValid
 
 theorem Accepted.parent_authorized [DecidableEq F]

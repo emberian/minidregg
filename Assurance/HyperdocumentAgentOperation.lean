@@ -374,8 +374,9 @@ theorem no_wrong_version
 theorem no_outside_scope
     {interfaceId : InterfaceId}
     (outside :
-      (⟨contentDeclaration.intent.document.digest.value⟩ : ResourceId .object) ∉
-        (contentCapability content).scope.targets) :
+      ¬ (contentCapability content).scope.targets.Covers
+        (CredentialAuthorityState.authState projection authorityPre).parent
+        (⟨contentDeclaration.intent.document.digest.value⟩ : ResourceId .object)) :
     IsEmpty (AcceptedAt interfaceId) :=
   ⟨fun operation =>
     (no_action_success_outside_scope outside).false operation.negotiation⟩

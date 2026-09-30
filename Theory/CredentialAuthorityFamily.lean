@@ -51,38 +51,38 @@ structure ParentLink (kind : ResourceKind) where
 requires actual exact-parent capability authorization in the effect mode.
 Historical grantor keys are deliberately not reauthorized at descendant use. -/
 structure DelegationShape {kind : ResourceKind} (request : Request kind)
-    (child parent : Capability kind) : Prop where
-  payload : child.Attenuates parent
+    (child parent : Capability kind) (parentage : Parentage) : Prop where
+  payload : child.Attenuates parent parentage
   grantor : parent.holder = .subject request.subject
   recipient : child.holder ≠ .bearer
   delegate : request.verb = delegateVerb kind
-  target : child.scope.targets = {request.target}
-  parentScope : parent.scope.Covers request
+  target : child.scope.targets = .explicit {request.target}
+  parentScope : parent.scope.Covers parentage request
   validFrom : parent.notBefore ≤ request.height
   validUntil : request.height ≤ parent.notAfter
   policyId : parent.policyId = request.policyId
   policyEpoch : parent.policyEpoch = request.policyEpoch
 
 theorem DelegationShape.recipient_is_subject {kind : ResourceKind}
-    {request : Request kind} {child parent : Capability kind}
-    (shape : DelegationShape request child parent) :
+    {request : Request kind} {child parent : Capability kind} {parentage : Parentage}
+    (shape : DelegationShape request child parent parentage) :
     ∃ subject, child.holder = .subject subject := by
   cases holder : child.holder with
   | bearer => exact False.elim (shape.recipient holder)
   | subject subject => exact ⟨subject, rfl⟩
 
 theorem DelegationShape.requires_delegate_verb {kind : ResourceKind}
-    {request : Request kind} {child parent : Capability kind}
-    (shape : DelegationShape request child parent) :
+    {request : Request kind} {child parent : Capability kind} {parentage : Parentage}
+    (shape : DelegationShape request child parent parentage) :
     delegateVerb kind ∈ parent.scope.verbs := by
   simpa only [shape.delegate] using shape.parentScope.verb
 
 theorem DelegationShape.no_other_target {kind : ResourceKind}
-    {request : Request kind} {child parent : Capability kind}
-    (shape : DelegationShape request child parent)
-    (target : ResourceId kind) (member : target ∈ child.scope.targets) :
+    {request : Request kind} {child parent : Capability kind} {parentage : Parentage}
+    (shape : DelegationShape request child parent parentage)
+    (target : ResourceId kind) (member : child.scope.targets.Covers parentage target) :
     target = request.target := by
-  simpa only [shape.target, Finset.mem_singleton] using member
+  simpa only [shape.target, TargetSet.Covers, Finset.mem_singleton] using member
 
 /-! ## 1. An exact canonical request word underneath every deployment digest -/
 
@@ -198,8 +198,8 @@ namespace Minidregg.Theory.TypedAuthorization.Capability
 /-- Complete attenuation adds the holder order omitted by the transport-level
 `Capability.Attenuates` record. -/
 structure StrictAttenuates {kind : ResourceKind}
-    (child parent : Capability kind) : Prop where
-  payload : child.Attenuates parent
+    (child parent : Capability kind) (parentage : Parentage) : Prop where
+  payload : child.Attenuates parent parentage
   holder : child.holder.Narrows parent.holder
 
 /-- Strict attenuation is fully monotone; no extra caller-supplied parent-holder
@@ -207,7 +207,7 @@ premise remains. -/
 theorem strict_attenuation_admits_subset {kind : ResourceKind}
     {child parent : Capability kind} {state : AuthState}
     {request : Request kind}
-    (edge : child.StrictAttenuates parent)
+    (edge : child.StrictAttenuates parent state.parent)
     (admitted : child.Admissible state request) :
     parent.Admissible state request :=
   Capability.attenuation_admits_subset edge.payload admitted
@@ -216,10 +216,11 @@ theorem strict_attenuation_admits_subset {kind : ResourceKind}
 /-- The transitive payload bounds of a lineage, forgetting only the immediate
 parent marker and holder. This is a theorem projection, not another admission
 or executable authority relation. -/
-structure LineageBounds {kind : ResourceKind} (child ancestor : Capability kind) : Prop where
+structure LineageBounds {kind : ResourceKind} (child ancestor : Capability kind)
+    (parentage : Parentage) : Prop where
   root : child.root = ancestor.root
   issuer : child.issuer = ancestor.issuer
-  scope : child.scope.Narrows ancestor.scope
+  scope : child.scope.Narrows ancestor.scope parentage
   notBefore : ancestor.notBefore ≤ child.notBefore
   notAfter : child.notAfter ≤ ancestor.notAfter
   issuerEpoch : child.issuerEpoch = ancestor.issuerEpoch
@@ -228,21 +229,19 @@ structure LineageBounds {kind : ResourceKind} (child ancestor : Capability kind)
   ancestors : ancestor.ancestors ⊆ child.ancestors
   channels : ancestor.channels ⊆ child.channels
 
-theorem LineageBounds.refl {kind : ResourceKind} (capability : Capability kind) :
-    LineageBounds capability capability :=
-  ⟨rfl, rfl, ⟨fun _ member => member, fun _ member => member, le_rfl⟩,
+theorem LineageBounds.refl {kind : ResourceKind} (capability : Capability kind)
+    (parentage : Parentage) : LineageBounds capability capability parentage :=
+  ⟨rfl, rfl, Scope.Narrows.refl _ _,
     le_rfl, le_rfl, rfl, rfl, rfl, fun _ member => member, fun _ member => member⟩
 
 theorem LineageBounds.trans {kind : ResourceKind}
-    {young middle old : Capability kind}
-    (first : LineageBounds young middle) (second : LineageBounds middle old) :
-    LineageBounds young old where
+    {young middle old : Capability kind} {parentage : Parentage}
+    (first : LineageBounds young middle parentage)
+    (second : LineageBounds middle old parentage) :
+    LineageBounds young old parentage where
   root := first.root.trans second.root
   issuer := first.issuer.trans second.issuer
-  scope :=
-    ⟨fun _ member => second.scope.targets (first.scope.targets member),
-      fun _ member => second.scope.verbs (first.scope.verbs member),
-      le_trans first.scope.maxCost second.scope.maxCost⟩
+  scope := first.scope.trans second.scope
   notBefore := le_trans second.notBefore first.notBefore
   notAfter := le_trans first.notAfter second.notAfter
   issuerEpoch := first.issuerEpoch.trans second.issuerEpoch
@@ -252,8 +251,9 @@ theorem LineageBounds.trans {kind : ResourceKind}
   channels := fun _ member => first.channels (second.channels member)
 
 theorem Attenuates.lineageBounds {kind : ResourceKind}
-    {child parent : Capability kind} (edge : child.Attenuates parent) :
-    LineageBounds child parent where
+    {child parent : Capability kind} {parentage : Parentage}
+    (edge : child.Attenuates parent parentage) :
+    LineageBounds child parent parentage where
   root := edge.root
   issuer := edge.issuer
   scope := edge.scopeNarrows
@@ -271,33 +271,36 @@ theorem Attenuates.lineageBounds {kind : ResourceKind}
 /-- A capability's parent/root identifiers become meaningful only with this
 proof-relevant derivation. Each edge retains its actual parent and either strict
 holder narrowing or the static shape of an explicit subject delegation. -/
-inductive Lineage {kind : ResourceKind} : Capability kind → Type
+inductive Lineage {kind : ResourceKind} (parentage : Parentage) : Capability kind → Type
   | root (cap : Capability kind)
       (parentNone : cap.parent = none)
       (rootSelf : cap.root = cap.id)
-      (ancestorsEmpty : cap.ancestors = ∅) : cap.Lineage
+      (ancestorsEmpty : cap.ancestors = ∅) : Lineage parentage cap
   | attenuate (child parent : Capability kind)
-      (parentLineage : parent.Lineage)
-      (edge : child.StrictAttenuates parent) : child.Lineage
+      (parentLineage : Lineage parentage parent)
+      (edge : child.StrictAttenuates parent parentage) : Lineage parentage child
   | delegate (child parent : Capability kind) (request : Request kind)
-      (parentLineage : parent.Lineage)
-      (shape : CredentialAuthorityFamily.DelegationShape request child parent) : child.Lineage
+      (parentLineage : Lineage parentage parent)
+      (shape : CredentialAuthorityFamily.DelegationShape request child parent parentage) :
+      Lineage parentage child
 
-def Lineage.rootCapability {kind : ResourceKind}
-    {cap : Capability kind} : cap.Lineage → Capability kind
+def Lineage.rootCapability {kind : ResourceKind} {parentage : Parentage}
+    {cap : Capability kind} : cap.Lineage parentage → Capability kind
   | .root rootCap _ _ _ => rootCap
   | .attenuate _ _ parentLineage _ => parentLineage.rootCapability
   | .delegate _ _ _ parentLineage _ => parentLineage.rootCapability
 
-def Lineage.IsStrict {kind : ResourceKind} {cap : Capability kind} : cap.Lineage → Prop
+def Lineage.IsStrict {kind : ResourceKind} {parentage : Parentage}
+    {cap : Capability kind} : cap.Lineage parentage → Prop
   | .root .. => True
   | .attenuate _ _ parentLineage _ => parentLineage.IsStrict
   | .delegate .. => False
 
-theorem Lineage.root_bounds {kind : ResourceKind} {cap : Capability kind}
-    (lineage : cap.Lineage) : LineageBounds cap lineage.rootCapability := by
+theorem Lineage.root_bounds {kind : ResourceKind} {parentage : Parentage}
+    {cap : Capability kind} (lineage : cap.Lineage parentage) :
+    LineageBounds cap lineage.rootCapability parentage := by
   induction lineage with
-  | root rootCap _ _ _ => exact LineageBounds.refl rootCap
+  | root rootCap _ _ _ => exact LineageBounds.refl rootCap parentage
   | attenuate child parent parentLineage edge induction =>
       exact edge.payload.lineageBounds.trans induction
   | delegate child parent request parentLineage shape induction =>
@@ -308,7 +311,7 @@ Subject transfer deliberately changes who may use the child, so mixed lineage
 has `root_bounds` instead of a false same-holder monotonicity claim. -/
 theorem Lineage.root_admissible_of_strict {kind : ResourceKind}
     {cap : Capability kind} {state : AuthState} {request : Request kind}
-    (lineage : cap.Lineage) (strict : lineage.IsStrict)
+    (lineage : cap.Lineage state.parent) (strict : lineage.IsStrict)
     (admitted : cap.Admissible state request) :
     lineage.rootCapability.Admissible state request := by
   induction lineage with
@@ -330,13 +333,14 @@ open AuthorizationDeclaration
 /-- Direct signature/proof authority covers exactly one target and one verb, with
 exactly the request's budget.  It cannot silently authorize a wider effect. -/
 def exactRequestScope {kind : ResourceKind} (request : Request kind) : Scope kind where
-  targets := {request.target}
+  targets := .explicit {request.target}
   verbs := {request.verb}
   maxCost := request.cost
 
-theorem exactRequestScope_covers {kind : ResourceKind} (request : Request kind) :
-    (exactRequestScope request).Covers request := by
-  exact ⟨by simp [exactRequestScope], by simp [exactRequestScope], by simp [exactRequestScope]⟩
+theorem exactRequestScope_covers {kind : ResourceKind} (request : Request kind)
+    (parentage : Parentage) : (exactRequestScope request).Covers parentage request := by
+  exact ⟨by simp [exactRequestScope, TargetSet.Covers], by simp [exactRequestScope],
+    by simp [exactRequestScope]⟩
 
 end Minidregg.Theory.CredentialAuthorityFamily
 
@@ -381,13 +385,13 @@ def LineageRequirement {portal : Portal} {state : AuthState}
     Evidence portal state request → Type
   | .signature .. => PUnit
   | .proof .. => PUnit
-  | .capability cap .. => cap.Lineage
+  | .capability cap .. => cap.Lineage state.parent
 
 structure SemanticEnvelope {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (evidence : Evidence portal state request) : Prop where
   holder : evidence.authorityHolder.Covers request.subject
-  scope : evidence.authorityScope.Covers request
+  scope : evidence.authorityScope.Covers state.parent request
   current : evidence.Current
 
 theorem semanticEnvelope {portal : Portal} {state : AuthState}
@@ -395,10 +399,10 @@ theorem semanticEnvelope {portal : Portal} {state : AuthState}
     (evidence : Evidence portal state request) : evidence.SemanticEnvelope := by
   cases evidence with
   | signature witness keyEpochExact verified =>
-      exact ⟨rfl, CredentialAuthorityFamily.exactRequestScope_covers request,
+      exact ⟨rfl, CredentialAuthorityFamily.exactRequestScope_covers request _,
         keyEpochExact⟩
   | proof witness verified =>
-      exact ⟨rfl, CredentialAuthorityFamily.exactRequestScope_covers request,
+      exact ⟨rfl, CredentialAuthorityFamily.exactRequestScope_covers request _,
         trivial⟩
   | capability cap commitment commitmentWitness membershipWitness issuerWitness
       selfRevocationWitness useWitness semantic useVerified
@@ -503,7 +507,7 @@ theorem AcceptedCredential.effect_scope_and_budget
     {scheme : RequestDigestScheme} {portal : Portal} {state : AuthState}
     {kind : ResourceKind} {request : Request kind}
     (accepted : AcceptedCredential scheme portal state request) :
-    accepted.authorization.evidence.authorityScope.Covers request :=
+    accepted.authorization.evidence.authorityScope.Covers state.parent request :=
   accepted.authorization.evidence.semanticEnvelope.scope
 
 theorem AcceptedCredential.current
@@ -556,7 +560,7 @@ theorem AcceptedCredential.token_current
 def demoDigestScheme : RequestDigestScheme where
   digestWire := fun wire => ⟨wire.domain + wire.semantics + wire.target + wire.nonce⟩
 
-def demoCapabilityLineage : demoCapability.Lineage :=
+def demoCapabilityLineage : demoCapability.Lineage demoState.parent :=
   .root demoCapability rfl rfl rfl
 
 /-- This is deliberately only a semantic/API pole.  `demoDigestScheme` is not a

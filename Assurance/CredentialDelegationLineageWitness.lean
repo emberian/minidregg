@@ -25,7 +25,7 @@ def parent : Capability .object where
   parent := none
   issuer := ⟨70⟩
   holder := .subject alice
-  scope := ⟨{⟨200⟩, ⟨201⟩}, {.observeObject, .mutateObject, .delegateObject}, 100⟩
+  scope := ⟨.explicit {⟨200⟩, ⟨201⟩}, {.observeObject, .mutateObject, .delegateObject}, 100⟩
   notBefore := 0
   notAfter := 100
   issuerEpoch := 0
@@ -39,7 +39,7 @@ def child : Capability .object :=
     id := ⟨101⟩
     parent := some parent.id
     holder := .subject bob
-    scope := ⟨{⟨200⟩}, {.observeObject, .mutateObject}, 20⟩
+    scope := ⟨.explicit {⟨200⟩}, {.observeObject, .mutateObject}, 20⟩
     notBefore := 1
     notAfter := 80
     ancestors := {parent.id} }
@@ -84,9 +84,9 @@ theorem parent_present (M : Materializer) :
       ⟨.capability .object, child.id⟩ by decide), Store.set_eq]
   rfl
 
-theorem explicit_transfer_shape : DelegationShape request child parent := by decide
+theorem explicit_transfer_shape : DelegationShape request child parent noParents := by decide
 
-theorem explicit_transfer_valid : LineageValid delegatedStored :=
+theorem explicit_transfer_valid : LineageValid noParents delegatedStored :=
   .delegate child parent [] request (.root parent rfl rfl rfl) explicit_transfer_shape
 
 theorem explicit_transfer_anchored (M : Materializer) :
@@ -94,8 +94,8 @@ theorem explicit_transfer_anchored (M : Materializer) :
   LineageAnchored.cons child parent [] (.delegated request) (parent_present M) trivial
 
 theorem explicit_transfer_accepted (M : Materializer) :
-    storedLineageCheck (pre M) delegatedStored = true :=
-  (storedLineageCheck_iff (pre M) delegatedStored).mpr
+    storedLineageCheck (pre M) noParents delegatedStored = true :=
+  (storedLineageCheck_iff (pre M) noParents delegatedStored).mpr
     ⟨explicit_transfer_valid, explicit_transfer_anchored M⟩
 
 def rotatedPre (M : Materializer) : Cell M :=
@@ -111,20 +111,20 @@ theorem grantor_rotation_preserves_capability_reads (M : Materializer)
   rw [Store.set_ne _ _ _ _ (by simp)]
 
 theorem grantor_rotation_keeps_historical_lineage (M : Materializer) :
-    storedLineageCheck (rotatedPre M) delegatedStored = true := by
+    storedLineageCheck (rotatedPre M) noParents delegatedStored = true := by
   rw [← storedLineageCheck_congr (pre M) (rotatedPre M)
     (grantor_rotation_preserves_capability_reads M)]
   exact explicit_transfer_accepted M
 
 theorem strict_same_holder_accepted (M : Materializer) :
-    storedLineageCheck (pre M) strictStored = true := by
-  apply (storedLineageCheck_iff (pre M) strictStored).mpr
+    storedLineageCheck (pre M) noParents strictStored = true := by
+  apply (storedLineageCheck_iff (pre M) noParents strictStored).mpr
   refine ⟨?_, ?_⟩
   · exact .attenuate _ parent [] (.root parent rfl rfl rfl) (by decide)
   · exact LineageAnchored.cons _ parent [] .strict (parent_present M) trivial
 
 theorem unmarked_transfer_refused (M : Materializer) :
-    storedLineageCheck (pre M) unmarkedStored = false := by
+    storedLineageCheck (pre M) noParents unmarkedStored = false := by
   change (false && _) = false
   rfl
 
@@ -132,22 +132,23 @@ def noDelegateParent : Capability .object :=
   {parent with scope := {parent.scope with verbs := {.observeObject, .mutateObject}}}
 
 theorem absent_delegation_permission_refused :
-    delegationShapeCheck request child noDelegateParent = false :=
-  delegationShapeCheck_refuses_missing_delegate request child noDelegateParent (by decide)
+    delegationShapeCheck request child noDelegateParent noParents = false :=
+  delegationShapeCheck_refuses_missing_delegate request child noDelegateParent noParents
+    (by decide)
 
 theorem bearer_transfer_refused :
-    delegationShapeCheck request {child with holder := .bearer} parent = false :=
-  delegationShapeCheck_refuses_bearer request _ parent rfl
+    delegationShapeCheck request {child with holder := .bearer} parent noParents = false :=
+  delegationShapeCheck_refuses_bearer request _ parent noParents rfl
 
 def substitutedParent : Capability .object := {parent with notAfter := 99}
 def substitutedStored : StoredCapability .object :=
   ⟨child, [⟨substitutedParent, .delegated request⟩]⟩
 
-theorem substituted_parent_still_well_shaped : LineageValid substitutedStored :=
+theorem substituted_parent_still_well_shaped : LineageValid noParents substitutedStored :=
   .delegate child substitutedParent [] request (.root substitutedParent rfl rfl rfl) (by decide)
 
 theorem substituted_parent_refused (M : Materializer) :
-    storedLineageCheck (pre M) substitutedStored = false := by
+    storedLineageCheck (pre M) noParents substitutedStored = false := by
   apply storedLineageCheck_refuses_unanchored
   intro anchored
   have exactParent := anchored.parent_exact
@@ -162,7 +163,7 @@ def emptyPre (M : Materializer) : Cell M :=
   materialize M 0
 
 theorem orphaned_transfer_refused (M : Materializer) :
-    storedLineageCheck (emptyPre M) delegatedStored = false := by
+    storedLineageCheck (emptyPre M) noParents delegatedStored = false := by
   apply storedLineageCheck_refuses_unanchored
   intro anchored
   have exactParent := anchored.parent_exact
@@ -182,6 +183,7 @@ def state : AuthState where
   policyEpoch := fun _ => 0
   policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
+  parent := noParents
 
 theorem recipient_semantically_admitted : child.Admissible state recipientRequest :=
   (AuthorizationDeclaration.capabilityAdmissibleCheck_eq_true_iff _ _ _).mp (by decide)
@@ -189,7 +191,7 @@ theorem recipient_semantically_admitted : child.Admissible state recipientReques
 /-- The old unconditional root-admission claim is false after an authorized
 subject transfer. The strict-only theorem remains the correct statement. -/
 theorem mixed_lineage_does_not_imply_root_admission :
-    LineageValid delegatedStored ∧ child.Admissible state recipientRequest ∧
+    LineageValid noParents delegatedStored ∧ child.Admissible state recipientRequest ∧
       ¬parent.Admissible state recipientRequest := by
   refine ⟨explicit_transfer_valid, recipient_semantically_admitted, ?_⟩
   intro admitted

@@ -142,7 +142,7 @@ def keyCodecId : AuthorityPlane → String
   | .registered => "revocation-key/tagged-v1"
 
 def valueCodecId : AuthorityPlane → String
-  | .capability _ => "stored-capability/v1"
+  | .capability _ => "stored-capability/v2"
   | .issuerEpoch => "nat/base255"
   | .policyEpoch => "nat/base255"
   | .policyRevision => "nat/base255"
@@ -434,7 +434,39 @@ theorem retired_page_frame_refused (payload : List UInt8) :
     materializer.codec.decode (retiredPageFrame ++ payload) = none := by
   exact decode_other_first_byte wire 76 (retiredPageFrame.drop 1 ++ payload) (by decide)
 
+/-- The authority wire as it stood before scopes carried a target-set tag:
+identical except that capability values were declared `stored-capability/v1`,
+whose scope frame began directly with the explicit target list. -/
+def retiredCapabilityWireV1 : Wire layout :=
+  { wire with
+    valueCodecId := fun plane =>
+      match plane with
+      | .capability _ => "stored-capability/v1"
+      | other => valueCodecId other }
+
+/-- The retired descriptor is a different descriptor, decided on its bytes. -/
+theorem retired_capability_v1_descriptor_differs :
+    descriptor retiredCapabilityWireV1 ≠ descriptor wire := by
+  decide +kernel
+
+/-- Every authority cell written under the v1 capability codec refuses to
+decode, whatever its payload. The premise is the frame's one cryptographic
+premise instantiated at these two descriptors (which differ,
+`retired_capability_v1_descriptor_differs`): cSHAKE256 separates them. -/
+theorem retired_capability_v1_frame_refused
+    (separated : layoutDigest retiredCapabilityWireV1 ≠ layoutDigest wire)
+    (payload : List UInt8) :
+    materializer.codec.decode (frame retiredCapabilityWireV1 ++ payload) = none :=
+  decode_other_header wire (frame retiredCapabilityWireV1) payload
+    (by rw [frame_length, frame_length])
+    (by simp [frame, separated])
+
 /-! ## Axiom audit -/
+
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v1_descriptor_differs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_capability_v1_descriptor_differs
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v1_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_capability_v1_frame_refused
 
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.unrevoke_rejected_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms unrevoke_rejected_at_cell

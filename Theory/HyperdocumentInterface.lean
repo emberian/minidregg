@@ -495,8 +495,8 @@ theorem no_query_success_outside_scope
     {pre : Hyperdocument.Cell M} {declaration : QueryDeclaration}
     {request : Request .object} {capability : Capability .object}
     (outside :
-      (⟨declaration.argument.document.digest.value⟩ : ResourceId .object) ∉
-        capability.scope.targets) :
+      ¬ capability.scope.targets.Covers authState.parent
+        (⟨declaration.argument.document.digest.value⟩ : ResourceId .object)) :
     IsEmpty (QuerySuccess config portal authState pre declaration request
       capability) := by
   constructor
@@ -537,8 +537,8 @@ theorem no_action_success_outside_scope
     {pre : Hyperdocument.Cell M} {invocation : ActionInvocation}
     {request : Request .object} {capability : Capability .object}
     (outside :
-      (⟨invocation.declaration.intent.document.digest.value⟩ :
-        ResourceId .object) ∉ capability.scope.targets) :
+      ¬ capability.scope.targets.Covers authState.parent
+        (⟨invocation.declaration.intent.document.digest.value⟩ : ResourceId .object)) :
     IsEmpty (ActionSuccess config portal authState pre invocation request
       capability) := by
   constructor
