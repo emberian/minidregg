@@ -1,11 +1,10 @@
 /-
 # Kernel.EventLogMaterializerLimit -- regression tooth for total event logs
 
-The live Hyperdocument event log now uses a structurally finite
-`SparseAuthenticatedState.Store`, and its `CellState` view uses the same finite
-dependent map.  This module retains the former cardinality failure against
-`MaterializerCardinality.TotalLogicalState`: if either layer regresses to a
-total function, the event-log materializer becomes empty again.
+The live Hyperdocument event log is a structurally finite `Store` over
+`HyperdocumentEventLog.Sparse.layout`.  This module retains the former
+cardinality failure against `MaterializerCardinality.TotalStore`: if the cell
+regresses to a total function, the event-log materializer becomes empty again.
 -/
 import Kernel.HyperdocumentEventLog
 import Theory.MaterializerCardinality
@@ -34,16 +33,15 @@ def sampleEvent (semanticVersion : Nat) : Hyperdocument.VersionEventRecord where
 
 /-- The deleted total carrier can encode every Boolean stream in event values. -/
 def totalEventStateOf (marked : Nat → Bool) :
-    TotalLogicalState HyperdocumentEventLog.cellSchema where
-  fields := fun address =>
-    if marked address.2.digest.value then sampleEvent 1 else sampleEvent 0
-  resources := fun resource => resource.elim
+    TotalStore HyperdocumentEventLog.Sparse.layout :=
+  fun address =>
+    show Hyperdocument.VersionEventRecord from
+      if marked address.2.digest.value then sampleEvent 1 else sampleEvent 0
 
 theorem totalEventStateOf_injective : Function.Injective totalEventStateOf := by
   intro left right same
   funext index
-  have fields := congrArg TotalLogicalState.fields same
-  have point := congrFun fields ⟨.events, ⟨⟨index⟩⟩⟩
+  have point := congrFun same ⟨.events, ⟨⟨index⟩⟩⟩
   have version := congrArg Hyperdocument.VersionEventRecord.semanticVersion point
   simp only [totalEventStateOf, sampleEvent] at version
   by_cases hleft : left index = true
@@ -59,7 +57,7 @@ theorem totalEventStateOf_injective : Function.Injective totalEventStateOf := by
 impossible again.  This theorem is about the regression model, not the live
 sparse cell. -/
 theorem totalEventLogMaterializer_isEmpty :
-    IsEmpty (TotalMaterializer HyperdocumentEventLog.cellSchema.{0, 0} Digest) :=
+    IsEmpty (TotalMaterializer HyperdocumentEventLog.Sparse.layout Digest) :=
   totalMaterializer_isEmpty_of_natBool_embedding totalEventStateOf
     totalEventStateOf_injective
 

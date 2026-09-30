@@ -30,6 +30,8 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.Hyperdocument
 open Minidregg.Theory.HyperdocumentOperationIntent
 open Minidregg.Theory.CausalVersionAncestry
+open Minidregg.Theory.HyperdocumentOperations (guardedSet run_guardedSet_of_nodup)
+open Minidregg.Theory.Store (Op Patch)
 
 set_option autoImplicit false
 
@@ -160,63 +162,29 @@ def FieldPlan.conflictRecord (operation : OperationId)
   regime := plan.regime
   recordedAt := operation
 
-def FieldPlan.packedWrites (config : Config) (operation : OperationId)
-    (plan : FieldPlan) : List Minidregg.Theory.HyperdocumentOperations.PackedWrite :=
+/-- A field plan's guarded operations: one exact field write for a single
+source, one fresh conflict record for two or more. -/
+def FieldPlan.ops (config : Config) (operation : OperationId)
+    (plan : FieldPlan) : Patch layout :=
   match plan.sources with
   | [] => []
   | [source] =>
-      [⟨.fields,
-        { key := plan.field
-          expected := plan.expected
-          replacement := source.toFieldRecord plan.regime }⟩]
+      [guardedSet .fields plan.field plan.expected (source.toFieldRecord plan.regime)]
   | _ :: _ :: _ =>
-      [⟨.conflicts,
-        { key := plan.conflictId config operation
-          expected := none
-          replacement := plan.conflictRecord operation }⟩]
+      [guardedSet .conflicts (plan.conflictId config operation) none
+        (plan.conflictRecord operation)]
 
-def StableOverlay.packedWrite
-    (overlay : StableOverlay) :
-    Minidregg.Theory.HyperdocumentOperations.PackedWrite :=
+def StableOverlay.op (overlay : StableOverlay) : Op layout :=
   match overlay with
-  | .mark _ id expected replacement =>
-      ⟨.marks, { key := id, expected := expected, replacement := replacement }⟩
+  | .mark _ id expected replacement => guardedSet .marks id expected replacement
   | .annotation _ id expected replacement =>
-      ⟨.annotations,
-        { key := id, expected := expected, replacement := replacement }⟩
+      guardedSet .annotations id expected replacement
 
-def Declaration.packedWrites (config : Config)
-    (declaration : Declaration) :
-    List Minidregg.Theory.HyperdocumentOperations.PackedWrite :=
+/-- The merge's one guarded patch. -/
+def Declaration.patch (config : Config) (declaration : Declaration) : Patch layout :=
   let operation := declaration.operationId config
-  declaration.body.fields.flatMap (FieldPlan.packedWrites config operation) ++
-    declaration.body.overlays.map StableOverlay.packedWrite
-
-def Declaration.fieldWrites (config : Config) (declaration : Declaration) :
-    List (CellState.FieldWrite cellSchema) :=
-  (declaration.packedWrites config).map
-    Minidregg.Theory.HyperdocumentOperations.PackedWrite.toFieldWrite
-
-def Declaration.patch (config : Config) (declaration : Declaration) :
-    CellState.Patch cellSchema Digest where
-  expectedPreRoot := declaration.intent.expectedContentRoot
-  fieldFootprint :=
-    (declaration.fieldWrites config).map CellState.FieldWrite.field |>.toFinset
-  resourceFootprint := ∅
-  fieldWrites := declaration.fieldWrites config
-  resourceWrites := []
-
-@[simp] theorem Declaration.patch_namedFields
-    (config : Config) (declaration : Declaration) :
-    (declaration.patch config).namedFields =
-      (declaration.patch config).fieldFootprint :=
-  rfl
-
-@[simp] theorem Declaration.patch_namedResources
-    (config : Config) (declaration : Declaration) :
-    (declaration.patch config).namedResources =
-      (declaration.patch config).resourceFootprint := by
-  simp [Declaration.patch, CellState.Patch.namedResources]
+  declaration.body.fields.flatMap (FieldPlan.ops config operation) ++
+    declaration.body.overlays.map StableOverlay.op
 
 def Declaration.effectDigest (config : Config)
     (declaration : Declaration) : Digest :=
@@ -269,11 +237,6 @@ def StableOverlay.ParentExact (parents : List Parent)
     parent.record.operation = overlay.operation ∧
     parent.record.document = overlay.document
 
-def Minidregg.Theory.HyperdocumentOperations.PackedWrite.ExpectedAt
-    (pre : CellState.LogicalState cellSchema)
-    (write : Minidregg.Theory.HyperdocumentOperations.PackedWrite) : Prop :=
-  pre.fields write.address = write.write.expected
-
 /-- The complete merge law at one canonical content cell.  Parent admission
 against a causal history is retained separately by `CurrentParentEvidence`.
 This structure checks the deterministic patch and all object compatibility
@@ -303,11 +266,12 @@ structure ValidMerge
     overlay.ParentExact declaration.body.parents
   overlaysDocumentExact : ∀ overlay, overlay ∈ declaration.body.overlays →
     overlay.document = declaration.intent.document
-  writesUnique :
-    ((declaration.packedWrites config).map
-      Minidregg.Theory.HyperdocumentOperations.PackedWrite.address).Nodup
-  expectedExact : ∀ write, write ∈ declaration.packedWrites config →
-    write.ExpectedAt pre.logical
+  /-- Each address is written at most once, so every write's replacement is
+  the value its address holds after the patch. -/
+  writesUnique : ((declaration.patch config).map Op.address).Nodup
+  /-- Every guard holds at the store its prefix produced; each expected prior
+  value, absence included, is exact. -/
+  guardsValid : Patch.ValidFrom pre.logical (declaration.patch config)
 
 /-! ## Actual causal admission/currentness evidence -/
 
@@ -536,7 +500,7 @@ def sealedOnly : DisclosureDecision Unit Unit (fun _ => Unit) -> Prop
 
 def family {M : Hyperdocument.Materializer Digest} (config : Config)
     (pre : Hyperdocument.Cell M) :
-    SemanticEffectFamily cellSchema M Nat where
+    SemanticEffectFamily layout M Nat where
   Declaration := Declaration
   declarationCodec := config.declarationCodec
   pre := pre
@@ -607,7 +571,7 @@ def accept
       (CredentialAuthorityState.authState projection authorityPre)
       (declaration.toRequest config))
     (validated : CellState.ValidatedPatch MDoc documentPre
-      (declaration.patch config)) :
+      (declaration.toRequest config).preStateRoot (declaration.patch config)) :
     Accepted history config projection authorityPre documentPre portal declaration where
   principal := principal
   semantic := semantic
@@ -621,7 +585,6 @@ def accept
       preStateBound := rfl
       requestBound := rfl
       effectsDigestBound := rfl
-      preRootBound := semantic.preRootExact
       modeEvidence := ⟨semantic⟩
       validated := validated
       postcondition := validated.resultAt
@@ -630,7 +593,7 @@ def accept
 
 /-! ## Exact post, frame, and no-ghost facts -/
 
-theorem Accepted.post_contains_write
+theorem Accepted.post_contains_guardedSet
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {history : CausalVersionDag.History (scheme := scheme)
@@ -641,22 +604,14 @@ theorem Accepted.post_contains_write
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
     (accepted : Accepted history config projection authorityPre documentPre portal declaration)
-    (write : Minidregg.Theory.HyperdocumentOperations.PackedWrite)
-    (member : write ∈ declaration.packedWrites config) :
-    accepted.accepted.prepared.post.logical.fields write.address =
-      some write.write.replacement := by
-  have writesUnique :
-      ((declaration.fieldWrites config).map CellState.FieldWrite.field).Nodup := by
-    simpa [Declaration.fieldWrites, List.map_map, Function.comp_def,
-      Minidregg.Theory.HyperdocumentOperations.PackedWrite.toFieldWrite] using
-      accepted.semantic.writesUnique
-  exact Minidregg.Theory.HyperdocumentOperations.applyFieldWrites_member_of_nodup
-    (declaration.fieldWrites config) documentPre.logical.fields writesUnique
-    write.toFieldWrite (by
-      unfold Declaration.fieldWrites
-      exact List.mem_map.2 ⟨write, member, rfl⟩)
+    {space : Namespace} {key : Key space}
+    {expected : Option (Value space)} {replacement : Value space}
+    (member : guardedSet space key expected replacement ∈ declaration.patch config) :
+    lookup accepted.accepted.prepared.post.logical space key = some replacement :=
+  run_guardedSet_of_nodup (declaration.patch config) documentPre.logical
+    accepted.semantic.writesUnique member
 
-theorem Accepted.field_frame
+theorem Accepted.frame
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {history : CausalVersionDag.History (scheme := scheme)
@@ -668,11 +623,9 @@ theorem Accepted.field_frame
     {portal : Portal} {declaration : Declaration}
     (accepted : Accepted history config projection authorityPre documentPre portal declaration)
     (address : Address)
-    (outside : address ∉
-      ((family (M := MDoc) config documentPre).patch declaration ()).fieldFootprint) :
-    accepted.accepted.prepared.post.logical.fields address =
-      documentPre.logical.fields address :=
-  accepted.accepted.field_frame address outside
+    (outside : address ∉ Patch.writeFootprint (declaration.patch config)) :
+    accepted.accepted.prepared.post.logical address = documentPre.logical address :=
+  accepted.accepted.frame address outside
 
 theorem Accepted.changed_only_declared
     {MDoc : Hyperdocument.Materializer Digest}
@@ -686,11 +639,10 @@ theorem Accepted.changed_only_declared
     {portal : Portal} {declaration : Declaration}
     (accepted : Accepted history config projection authorityPre documentPre portal declaration)
     (address : Address)
-    (changed : accepted.accepted.prepared.post.logical.fields address ≠
-      documentPre.logical.fields address) :
-    address ∈
-      ((family (M := MDoc) config documentPre).patch declaration ()).fieldFootprint :=
-  accepted.accepted.field_changed_only_declared address changed
+    (changed : accepted.accepted.prepared.post.logical address ≠
+      documentPre.logical address) :
+    address ∈ Patch.writeFootprint (declaration.patch config) :=
+  accepted.accepted.changed_only_declared address changed
 
 theorem Accepted.post_contains_mark
     {MDoc : Hyperdocument.Materializer Digest}
@@ -709,13 +661,10 @@ theorem Accepted.post_contains_mark
       declaration.body.overlays) :
     lookup accepted.accepted.prepared.post.logical .marks id =
       some replacement := by
-  have contains := accepted.post_contains_write
-    (StableOverlay.packedWrite
-      (.mark parent id expected replacement)) (by
-      unfold Declaration.packedWrites
-      apply List.mem_append_right
-      exact List.mem_map.2 ⟨.mark parent id expected replacement, member, rfl⟩)
-  exact contains
+  apply accepted.post_contains_guardedSet (space := .marks) (key := id) (expected := expected)
+  unfold Declaration.patch
+  apply List.mem_append_right
+  exact List.mem_map.2 ⟨.mark parent id expected replacement, member, rfl⟩
 
 theorem Accepted.post_contains_annotation
     {MDoc : Hyperdocument.Materializer Digest}
@@ -734,35 +683,28 @@ theorem Accepted.post_contains_annotation
       declaration.body.overlays) :
     lookup accepted.accepted.prepared.post.logical .annotations id =
       some replacement := by
-  have contains := accepted.post_contains_write
-    (StableOverlay.packedWrite
-      (.annotation parent id expected replacement)) (by
-      unfold Declaration.packedWrites
-      apply List.mem_append_right
-      exact List.mem_map.2
-        ⟨.annotation parent id expected replacement, member, rfl⟩)
-  exact contains
+  apply accepted.post_contains_guardedSet (space := .annotations) (key := id)
+    (expected := expected)
+  unfold Declaration.patch
+  apply List.mem_append_right
+  exact List.mem_map.2 ⟨.annotation parent id expected replacement, member, rfl⟩
 
 /-! ## Conflict retention teeth -/
 
-def ConflictFree
-    (writes : List Minidregg.Theory.HyperdocumentOperations.PackedWrite) : Prop :=
-  ∀ write, write ∈ writes → write.space ≠ .conflicts
+/-- A patch writes no conflict record. -/
+def ConflictFree (patch : Patch layout) : Prop :=
+  ∀ op, op ∈ patch → op.address.1 ≠ .conflicts
 
 theorem FieldPlan.two_sources_not_conflict_free
     (config : Config) (operation : OperationId) (plan : FieldPlan)
     (first second : FieldSource) (rest : List FieldSource)
     (sourcesExact : plan.sources = first :: second :: rest) :
-    ¬ ConflictFree (plan.packedWrites config operation) := by
+    ¬ ConflictFree (plan.ops config operation) := by
   intro conflictFree
   have member :
-      (⟨.conflicts,
-        { key := plan.conflictId config operation
-          expected := none
-          replacement := plan.conflictRecord operation }⟩ :
-        Minidregg.Theory.HyperdocumentOperations.PackedWrite) ∈
-        plan.packedWrites config operation := by
-    simp [FieldPlan.packedWrites, sourcesExact]
+      guardedSet .conflicts (plan.conflictId config operation) none
+        (plan.conflictRecord operation) ∈ plan.ops config operation := by
+    simp [FieldPlan.ops, sourcesExact]
   exact conflictFree _ member rfl
 
 /-- The same tooth at declaration scope: embedding a two-or-more-source plan
@@ -772,15 +714,15 @@ theorem Declaration.conflicting_plan_not_conflict_free
     (planPresent : plan ∈ declaration.body.fields)
     (first second : FieldSource) (rest : List FieldSource)
     (sourcesExact : plan.sources = first :: second :: rest) :
-    ¬ ConflictFree (declaration.packedWrites config) := by
+    ¬ ConflictFree (declaration.patch config) := by
   intro declarationConflictFree
   apply plan.two_sources_not_conflict_free config
     (declaration.operationId config) first second rest sourcesExact
-  intro write writePresent
-  apply declarationConflictFree write
-  unfold Declaration.packedWrites
+  intro op opPresent
+  apply declarationConflictFree op
+  unfold Declaration.patch
   apply List.mem_append_left
-  exact List.mem_flatMap.2 ⟨plan, planPresent, writePresent⟩
+  exact List.mem_flatMap.2 ⟨plan, planPresent, opPresent⟩
 
 /-- Positive offline-sibling shape: two canonically ordered sibling
 contributions deterministically produce the exact conflict value containing
@@ -792,11 +734,9 @@ theorem concurrent_sibling_conflict_positive
     let plan : FieldPlan :=
       { field := field, expected := expected, base := base, regime := regime,
         sources := [left, right] }
-    plan.packedWrites config operation =
-      [⟨.conflicts,
-        { key := plan.conflictId config operation
-          expected := none
-          replacement := plan.conflictRecord operation }⟩] := by
+    plan.ops config operation =
+      [guardedSet .conflicts (plan.conflictId config operation) none
+        (plan.conflictRecord operation)] := by
   dsimp
   rfl
 
@@ -925,21 +865,21 @@ structure PublicationInputs
 
 /-- info: 'Minidregg.Kernel.HyperdocumentMerge.canonicalPair_swap' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms canonicalPair_swap
-/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.post_contains_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_write
-/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.field_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Accepted.field_frame
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.post_contains_guardedSet' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_guardedSet
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Accepted.frame
 /-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.changed_only_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.changed_only_declared
 /-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.post_contains_mark' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_mark
 /-- info: 'Minidregg.Kernel.HyperdocumentMerge.Accepted.post_contains_annotation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.post_contains_annotation
-/-- info: 'Minidregg.Kernel.HyperdocumentMerge.FieldPlan.two_sources_not_conflict_free' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.FieldPlan.two_sources_not_conflict_free' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms FieldPlan.two_sources_not_conflict_free
-/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Declaration.conflicting_plan_not_conflict_free' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.Declaration.conflicting_plan_not_conflict_free' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Declaration.conflicting_plan_not_conflict_free
-/-- info: 'Minidregg.Kernel.HyperdocumentMerge.concurrent_sibling_conflict_positive' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.HyperdocumentMerge.concurrent_sibling_conflict_positive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms concurrent_sibling_conflict_positive
 /-- info: 'Minidregg.Kernel.HyperdocumentMerge.LowestCommonBase.selected_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms LowestCommonBase.selected_unique
