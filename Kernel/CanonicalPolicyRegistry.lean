@@ -40,8 +40,7 @@ open Minidregg.Kernel.DurableDataIntent
 
 set_option autoImplicit false
 
-universe u v w x
-variable {S : CellState.Schema.{u, v, w, x}}
+variable {S : Store.Layout.{0, 0, 0}}
 
 /-! ## Canonical registry cell and content payload boundary -/
 
@@ -54,8 +53,8 @@ abbrev RegistryCell (M : CellState.Materializer S Digest) :=
 def addressAt {M : CellState.Materializer S Digest}
     (projection : CredentialAuthorityState.StateProjection S) (cell : RegistryCell M)
     (policyId : PolicyId) (revision : PolicyRevision) : Digest :=
-  ((projection.toCanonicalState cell.logical).fields
-    (.policyAddress policyId revision)).getD ⟨0⟩
+  (show Option Digest from
+    projection.toCanonicalState cell.logical ⟨.policyAddress, (policyId, revision)⟩).getD ⟨0⟩
 
 @[simp] theorem projected_policy_root {M : CellState.Materializer S Digest}
     (projection : CredentialAuthorityState.StateProjection S)
