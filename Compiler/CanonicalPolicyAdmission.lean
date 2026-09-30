@@ -92,21 +92,20 @@ structure PolicyStepContext where
 concrete receiving API must not accept either from a host or a request. Mode
 evidence and patch validation precede policy authorization, avoiding a cycle. -/
 def PolicyStepContext.ofCandidate
-    {S : Minidregg.Theory.CellState.Schema}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : Minidregg.Theory.CellState.Materializer S Digest}
+    {L : Minidregg.Theory.Store.Layout}
+    {M : Minidregg.Theory.CellState.Materializer L Digest}
     {Nullifier : Type}
-    {family : Minidregg.Theory.SemanticEffectFamily S M Nullifier}
+    {family : Minidregg.Theory.SemanticEffectFamily L M Nullifier}
     {pre : Minidregg.Theory.CellState.Materialized M}
     {declaration : family.Declaration} {outcome : family.Outcome declaration}
-    (project : Minidregg.Theory.CellState.LogicalState S → State)
+    (project : Minidregg.Theory.Store.Store L → State)
     (semantics : Digest)
     (candidate : Minidregg.Theory.PolicyInstall.Candidate family pre declaration outcome) :
     PolicyStepContext :=
   ⟨pre.root, family.effectDigest declaration, semantics,
     project pre.logical, project candidate.post.logical⟩
 
-universe u v w x y z
+universe u v w y z
 
 /-- Joint policy inputs come from the same source-owned preparation plan that
 later produces the existing heterogeneous turn. The primary incidence chooses
@@ -118,12 +117,12 @@ an unchanged factory cell can inspect changed authority and resource cells
 without a caller supplying independent old/new predicate views. -/
 def PolicyStepContext.ofPreparedTuple
     {Incidence : Type z}
-    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, z} Incidence}
     {Source : Type z}
-    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, y, z}
       layout Source}
     (project : Source →
-      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) →
+      ((incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence)) →
       State)
     (semantics : Digest)
     (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan) : PolicyStepContext :=
@@ -136,15 +135,15 @@ construction of unrelated request fields. Both selectors must equal the
 original tuple at every incidence; neither may choose independent policy data. -/
 def PolicyStepContext.ofPreparedTupleExact
     {Incidence : Type z}
-    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, z} Incidence}
     {Source : Type z}
-    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z} layout Source}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, y, z} layout Source}
     (project : Source →
-      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) → State)
+      ((incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence)) → State)
     (semantics : Digest)
     (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan)
     (pre : (incidence : Incidence) → Minidregg.Theory.CellState.Materialized (layout.materializer incidence))
-    (post : (incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence))
+    (post : (incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence))
     (_preExact : ∀ incidence, pre incidence = prepared.pre incidence)
     (_postExact : ∀ incidence, post incidence = prepared.logicalPost incidence) : PolicyStepContext :=
   ⟨(pre prepared.primary).root, plan.legEffectsDigest prepared.source prepared.primary, semantics,
@@ -154,15 +153,15 @@ def PolicyStepContext.ofPreparedTupleExact
 one. Its equality premises are erased only after the kernel checks them. -/
 theorem PolicyStepContext.ofPreparedTupleExact_eq
     {Incidence : Type z}
-    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, z} Incidence}
     {Source : Type z}
-    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z} layout Source}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, y, z} layout Source}
     (project : Source →
-      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) → State)
+      ((incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence)) → State)
     (semantics : Digest)
     (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan)
     (pre : (incidence : Incidence) → Minidregg.Theory.CellState.Materialized (layout.materializer incidence))
-    (post : (incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence))
+    (post : (incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence))
     (preExact : ∀ incidence, pre incidence = prepared.pre incidence)
     (postExact : ∀ incidence, post incidence = prepared.logicalPost incidence) :
     ofPreparedTupleExact project semantics prepared pre post preExact postExact =
@@ -175,12 +174,12 @@ theorem PolicyStepContext.ofPreparedTupleExact_eq
 
 theorem PolicyStepContext.prepared_tuple_exact
     {Incidence : Type z}
-    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, x, z} Incidence}
+    {layout : Minidregg.Kernel.MultiCellHyperedge.CellLayout.{u, v, w, z} Incidence}
     {Source : Type z}
-    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, x, y, z}
+    {plan : Minidregg.Kernel.MultiCellHyperedge.PreparationPlan.{u, v, w, y, z}
       layout Source}
     (project : Source →
-      ((incidence : Incidence) → Minidregg.Theory.CellState.LogicalState (layout.schema incidence)) →
+      ((incidence : Incidence) → Minidregg.Theory.Store.Store (layout.storeLayout incidence)) →
       State)
     (semantics : Digest)
     (prepared : Minidregg.Kernel.MultiCellHyperedge.PreparedTuple plan) :
