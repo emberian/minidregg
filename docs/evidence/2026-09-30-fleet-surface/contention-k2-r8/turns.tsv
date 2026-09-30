@@ -1,0 +1,17 @@
+round	agent	seconds	replans	result
+1	2	4.032	0	admitted
+1	1	7.626	1	admitted
+2	1	4.000	0	admitted
+2	2	7.672	1	admitted
+3	1	4.571	0	admitted
+3	2	8.724	1	admitted
+4	2	7.054	0	admitted
+4	1	12.340	1	admitted
+5	1	6.100	0	admitted
+5	2	11.171	1	admitted
+6	1	6.465	0	admitted
+6	2	12.165	1	admitted
+7	2	6.663	0	admitted
+7	1	12.827	1	admitted
+8	2	7.093	0	admitted
+8	1	13.245	1	admitted

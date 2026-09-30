@@ -2,7 +2,15 @@
 //! chooses both canonical signing bytes; Rust retains them, signs the sponsor
 //! header and the distinct raw possession frame, and never resubmits an
 //! uncertain ingress. An admitted key conveys no resource grant.
+//!
+//! A *home identity* enrollment admits a principal whose key and subject
+//! number belong to another Store (a selected-release owner, for example).
+//! The sponsor plans with only the public key and the explicit home subject;
+//! the principal signs the Host-chosen possession header in its own process
+//! (`--action possess`); the sponsor seals with that detached signature. No
+//! process ever holds both secrets.
 use crate::agent_reserve::{bounded, digest, field, private_bytes, private_socket};
+use ed25519_dalek::{Verifier, VerifyingKey};
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::*;
 use serde_json::{json, Value};
@@ -14,7 +22,7 @@ const PLAN_KIND: &str = "participant-key-enrollment-plan";
 const INGRESS_KIND: &str = "participant-key-enrollment-ingress";
 const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 
-fn json_private(path: &Path) -> Result<Value> {
+pub(crate) fn json_private(path: &Path) -> Result<Value> {
     serde_json::from_slice(&private_bytes(path, 256 * 1024)?).map_err(|error| {
         format!(
             "invalid private enrollment JSON {}: {error}",
@@ -23,7 +31,7 @@ fn json_private(path: &Path) -> Result<Value> {
     })
 }
 
-fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
+pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     let path = PathBuf::from(field(value, key)?);
     if !path.is_absolute() {
         return Err(format!("enrollment {key} must be absolute"));
@@ -31,7 +39,7 @@ fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn decimal(value: &str, label: &str) -> Result<()> {
+pub(crate) fn decimal(value: &str, label: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 80
         || value.starts_with('0') && value != "0"
@@ -54,7 +62,7 @@ fn identity_name(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn key(path: &Path) -> Result<SigningKey> {
+pub(crate) fn key(path: &Path) -> Result<SigningKey> {
     let mut bytes: [u8; 32] = private_bytes(path, 32)?
         .try_into()
         .map_err(|_| "enrollment key must contain exactly 32 raw bytes")?;
@@ -63,7 +71,7 @@ fn key(path: &Path) -> Result<SigningKey> {
     Ok(signing)
 }
 
-fn nonce() -> Result<String> {
+pub(crate) fn nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
@@ -71,7 +79,7 @@ fn nonce() -> Result<String> {
     Ok(u128::from_be_bytes(bytes).to_string())
 }
 
-fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
     let length: u32 = first
         .len()
         .try_into()
@@ -85,26 +93,32 @@ fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
+pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, ..] | [254, ..] => Err(format!(
-            "enrollment Host refused op{operation}; exact frame retained"
-        )),
+        [byte @ (255 | 254), encoded @ ..] => {
+            note_host_decision(HostDecision::RefusedFrame {
+                command: format!("enrollment op{operation}"),
+                byte: *byte,
+                encoded: encoded.to_vec(),
+                decoded: None,
+            });
+            Err(format!(
+                "enrollment Host refused op{operation}; exact frame retained"
+            ))
+        }
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
-        _ => Err(format!(
-            "enrollment op{operation} returned an invalid frame"
-        )),
+        _ => Err(format!("Host op{operation} returned an invalid frame")),
     }
 }
 
-fn save_json(path: &Path, value: &Value) -> Result<()> {
+pub(crate) fn save_json(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     create_private(path, &bytes)?;
     sync_directory_ancestors(path.parent().ok_or("enrollment file lacks parent")?)
 }
 
-fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
     if path.exists() {
         if bounded(path, LIMIT)? != bytes {
             return Err(format!(
@@ -118,7 +132,7 @@ fn retain_exact(path: &Path, bytes: &[u8]) -> Result<()> {
     sync_directory_ancestors(path.parent().ok_or("enrollment file lacks parent")?)
 }
 
-fn save_json_staged(path: &Path, value: &Value) -> Result<()> {
+pub(crate) fn save_json_staged(path: &Path, value: &Value) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     retain_exact(path, &bytes)
@@ -151,12 +165,15 @@ fn retained_request(directory: &Path, expected: &Value) -> Result<Value> {
     ] {
         pinned(&request, field_name, field(expected, field_name)?)?;
     }
+    if request.get("homeSubject") != expected.get("homeSubject") {
+        return Err("enrollment homeSubject pin changed".into());
+    }
     decimal(field(&request, "nonce")?, "enrollment nonce")?;
     save_json_staged(&path, &request)?;
     Ok(request)
 }
 
-fn transform(
+pub(crate) fn transform(
     host: &Path,
     socket: &Path,
     config: &Path,
@@ -194,7 +211,7 @@ fn transform(
     retain_exact(output, body)
 }
 
-fn inspect(
+pub(crate) fn inspect(
     host: &Path,
     socket: &Path,
     config: &Path,
@@ -207,14 +224,19 @@ fn inspect(
         .map_err(|error| format!("invalid enrollment Host inspection: {error}"))
 }
 
-fn retained_frame(directory: &Path, stem: &str, frame: &[u8], operation: u8) -> Result<Vec<u8>> {
+pub(crate) fn retained_frame(
+    directory: &Path,
+    stem: &str,
+    frame: &[u8],
+    operation: u8,
+) -> Result<Vec<u8>> {
     retain_exact(&directory.join(format!("{stem}.frame")), frame)?;
     let body = reply(frame, operation)?.to_vec();
     retain_exact(&directory.join(format!("{stem}.bin")), &body)?;
     Ok(body)
 }
 
-fn staged_invoke(
+pub(crate) fn staged_invoke(
     host: &Path,
     socket: &Path,
     config: &Path,
@@ -226,7 +248,7 @@ fn staged_invoke(
     let frame_path = directory.join(format!("{stem}.frame"));
     let frame = if frame_path.exists() {
         let retained = bounded(&frame_path, transport::HOST_MAX_FRAME)?;
-        if operation == 86 {
+        if operation == 86 || operation == 92 {
             let current =
                 session_invoke(host, socket, config, operation, payload).map_err(|error| {
                     format!("retained enrollment plan is stale; start a new request with a new --name label: {error}")
@@ -245,7 +267,7 @@ fn staged_invoke(
     retained_frame(directory, stem, &frame, operation)
 }
 
-fn pinned(value: &Value, key: &str, expected: &str) -> Result<()> {
+pub(crate) fn pinned(value: &Value, key: &str, expected: &str) -> Result<()> {
     if field(value, key)? != expected {
         return Err(format!("enrollment {key} pin changed"));
     }
@@ -258,12 +280,38 @@ struct Pin {
     public_socket: PathBuf,
     operation_socket: PathBuf,
     sponsor_key: PathBuf,
-    new_key: PathBuf,
+    /// `None` for a home-identity enrollment: the new secret never enters
+    /// this process and possession arrives as a detached signature.
+    new_key: Option<PathBuf>,
     subject: String,
     key_id: String,
     public_key: String,
     plan: Vec<u8>,
     command: Vec<u8>,
+}
+
+/// A home identity keeps its origin subject number, so only the Store-local
+/// key id is reserved; the Host still refuses any subject already present.
+fn enrollment_roles(home: bool) -> Vec<Role> {
+    let mut roles = Vec::new();
+    if !home {
+        roles.push(Role {
+            label: "subject".into(),
+            kind: IdKind::Subject,
+        });
+    }
+    roles.push(Role {
+        label: "keyId".into(),
+        kind: IdKind::Key,
+    });
+    roles
+}
+
+fn public_key_file(path: &Path) -> Result<VerifyingKey> {
+    let bytes: [u8; 32] = bounded(path, 32)?
+        .try_into()
+        .map_err(|_| "enrollment public key must contain exactly 32 raw bytes")?;
+    VerifyingKey::from_bytes(&bytes).map_err(|_| "enrollment public key is not a valid Ed25519 point".into())
 }
 
 fn load_pin(directory: &Path) -> Result<Pin> {
@@ -275,7 +323,15 @@ fn load_pin(directory: &Path) -> Result<Pin> {
     let public_socket = member_path(&pin, "publicSocket")?;
     let operation_socket = member_path(&pin, "operationSocket")?;
     let sponsor_key = member_path(&pin, "sponsorKey")?;
-    let new_key = member_path(&pin, "newKey")?;
+    let home = pin.get("homeSubject").and_then(Value::as_bool) == Some(true);
+    let new_key = if home {
+        if !pin.get("newKey").is_some_and(Value::is_null) {
+            return Err("home-identity enrollment pin must not name a new secret key".into());
+        }
+        None
+    } else {
+        Some(member_path(&pin, "newKey")?)
+    };
     let namespace_root = member_path(&pin, "namespaceRoot")?;
     if pin.get("operatorOnly").and_then(Value::as_bool) == Some(true) {
         private_socket(&operation_socket)?;
@@ -316,16 +372,7 @@ fn load_pin(directory: &Path) -> Result<Pin> {
                 .or_else(|| value.as_u64().map(|number| number.to_string()))
         })
         .ok_or("enrollment config lacks deployment domain")?;
-    let roles = [
-        Role {
-            label: "subject".into(),
-            kind: IdKind::Subject,
-        },
-        Role {
-            label: "keyId".into(),
-            kind: IdKind::Key,
-        },
-    ];
+    let roles = enrollment_roles(home);
     let reservation = participant_namespace::reserve(
         &namespace_root,
         &domain,
@@ -335,7 +382,12 @@ fn load_pin(directory: &Path) -> Result<Pin> {
         &roles,
     )?;
     pinned(&pin, "reservationDigest", &reservation.request_digest)?;
-    if reservation.ids["subject"] != subject
+    let reserved_subject = if home {
+        field(&request, "homeSubject")?
+    } else {
+        reservation.ids["subject"].as_str()
+    };
+    if reserved_subject != subject
         || reservation.ids["keyId"] != key_id
         || member_path(&pin, "reservationRecord")? != reservation.record_path
     {
@@ -357,6 +409,120 @@ fn load_pin(directory: &Path) -> Result<Pin> {
     })
 }
 
+/// A sponsor-signed factory resource observation retained under `directory`.
+/// Returns the exact signed observation and the factory and authority roots it
+/// observed. Every Host frame is retained before its body is used.
+pub(crate) struct FactoryObservation<'a> {
+    pub(crate) host: &'a Path,
+    pub(crate) socket: &'a Path,
+    pub(crate) config: &'a Path,
+    pub(crate) directory: &'a Path,
+    pub(crate) sponsor: &'a str,
+    pub(crate) nonce: &'a str,
+    pub(crate) factory: &'a str,
+    pub(crate) observe: &'a str,
+}
+
+pub(crate) fn signed_factory_observation(
+    input: &FactoryObservation<'_>,
+    signing: &SigningKey,
+) -> Result<(Vec<u8>, String, String)> {
+    let query = json!({"subject":input.sponsor,"nonce":input.nonce,
+        "purpose":{"type":"query","kind":"object","target":input.factory,"view":"resource"},
+        "grants":[{"kind":"object","target":input.factory,"capability":input.observe}]});
+    save_json_staged(&input.directory.join("query.json"), &query)?;
+    transform(
+        input.host,
+        input.socket,
+        input.config,
+        7,
+        Some("intent"),
+        &input.directory.join("query.json"),
+        &input.directory.join("query.bin"),
+    )?;
+    let query_bytes = private_bytes(&input.directory.join("query.bin"), LIMIT)?;
+    let observation = input.directory.join("observation");
+    match fs::DirBuilder::new().mode(0o700).create(&observation) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            drain::private_dir(&observation)?;
+        }
+        Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
+    }
+    let challenge = staged_invoke(
+        input.host,
+        input.socket,
+        input.config,
+        &observation,
+        "challenge",
+        4,
+        &query_bytes,
+    )?;
+    let challenge_json = inspect(
+        input.host,
+        input.socket,
+        input.config,
+        "challenge",
+        &observation.join("challenge.bin"),
+        &observation.join("challenge.json"),
+    )?;
+    let headers = challenge_headers(&challenge_json)?;
+    if headers.is_empty() {
+        return Err("factory observation has no signing header".into());
+    }
+    let signatures = sign_headers(signing, &headers);
+    save_json_staged(&observation.join("signatures.json"), &signatures)?;
+    transform(
+        input.host,
+        input.socket,
+        input.config,
+        9,
+        None,
+        &observation.join("signatures.json"),
+        &observation.join("signatures.bin"),
+    )?;
+    let signature_bytes = private_bytes(&observation.join("signatures.bin"), 4096)?;
+    let signed = staged_invoke(
+        input.host,
+        input.socket,
+        input.config,
+        &observation,
+        "signed-observation",
+        10,
+        &pair(&challenge, &signature_bytes)?,
+    )?;
+    let _view = staged_invoke(
+        input.host,
+        input.socket,
+        input.config,
+        &observation,
+        "view",
+        5,
+        &signed,
+    )?;
+    let view_json = inspect(
+        input.host,
+        input.socket,
+        input.config,
+        "view-resource",
+        &observation.join("view.bin"),
+        &observation.join("view.json"),
+    )?;
+    pinned(&view_json, "type", "resource")?;
+    let factory_root = view_json
+        .get("cell")
+        .and_then(|cell| cell.get("root"))
+        .and_then(Value::as_str)
+        .ok_or("signed factory view lacks root")?;
+    decimal(factory_root, "factory root")?;
+    let authority_root = challenge_json
+        .get("authorityRoot")
+        .and_then(Value::as_str)
+        .ok_or("signed factory challenge lacks authority root")?;
+    decimal(authority_root, "authority root")?;
+    Ok((signed, factory_root.to_owned(), authority_root.to_owned()))
+}
+
 fn plan(mut args: Args) -> Result<()> {
     let workspace = absolute(&path(args.required("sponsor-workspace")?))?;
     let factory_name = args
@@ -367,7 +533,34 @@ fn plan(mut args: Args) -> Result<()> {
         .required("name")?
         .into_string()
         .map_err(|_| "enrollment name must be UTF-8")?;
-    let new_key = absolute(&path(args.required("new-key")?))?;
+    let new_key = args
+        .optional("new-key")
+        .map(|value| absolute(&path(value)))
+        .transpose()?;
+    let new_public = args
+        .optional("new-public-key")
+        .map(|value| absolute(&path(value)))
+        .transpose()?;
+    let home_subject = args
+        .optional("home-subject")
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| "home subject must be UTF-8".to_owned())
+        })
+        .transpose()?;
+    let home = match (&new_key, &new_public, &home_subject) {
+        (Some(_), None, None) => false,
+        (None, Some(_), Some(subject)) => {
+            decimal(subject, "home subject")?;
+            true
+        }
+        _ => {
+            return Err(
+                "enrollment takes either --new-key, or --new-public-key with --home-subject".into(),
+            )
+        }
+    };
     let operator_override = args
         .optional("operator-socket")
         .map(path)
@@ -431,8 +624,14 @@ fn plan(mut args: Args) -> Result<()> {
         return Err("factory reference differs from deployed factory".into());
     }
     let sponsor_signing = key(&sponsor_key)?;
-    let new_signing = key(&new_key)?;
-    let public_key = hex(&new_signing.verifying_key().to_bytes());
+    let public_key = match (&new_key, &new_public) {
+        (Some(secret), _) => hex(&key(secret)?.verifying_key().to_bytes()),
+        (None, Some(public)) => hex(&public_key_file(public)?.to_bytes()),
+        _ => unreachable!("enrollment key inputs validated above"),
+    };
+    if public_key == hex(&sponsor_signing.verifying_key().to_bytes()) {
+        return Err("enrolled key must differ from the sponsor key".into());
+    }
     match fs::DirBuilder::new().mode(0o700).create(&directory) {
         Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -457,22 +656,19 @@ fn plan(mut args: Args) -> Result<()> {
     } else {
         nonce()?
     };
-    let expected_request = json!({"type":"minidregg-participant-enrollment-request-v1",
+    let mut expected_request = json!({"type":"minidregg-participant-enrollment-request-v1",
         "name":name,"sponsor":sponsor,"control":control,"factory":factory_target,
         "observeCapability":observe,"newPublicKey":public_key,
         "nonce":request_nonce,"hostSha256":host_image_sha256(&host)?,
         "configSha256":digest(&config_bytes)});
+    if let Some(subject) = &home_subject {
+        if *subject == sponsor {
+            return Err("home subject equals the sponsor subject".into());
+        }
+        expected_request["homeSubject"] = json!(subject);
+    }
     let request = retained_request(&directory, &expected_request)?;
-    let roles = [
-        Role {
-            label: "subject".into(),
-            kind: IdKind::Subject,
-        },
-        Role {
-            label: "keyId".into(),
-            kind: IdKind::Key,
-        },
-    ];
+    let roles = enrollment_roles(home);
     let request_bytes = private_bytes(&directory.join("request.json"), 256 * 1024)?;
     let reservation = participant_namespace::reserve(
         &namespace_root,
@@ -482,106 +678,32 @@ fn plan(mut args: Args) -> Result<()> {
         &request_bytes,
         &roles,
     )?;
+    let subject = match &home_subject {
+        Some(subject) => subject.clone(),
+        None => reservation.ids["subject"].clone(),
+    };
     retain_exact(&directory.join("config.json"), &config_bytes)?;
     let retained_config = directory.join("config.json");
-    let query = json!({"subject":sponsor,"nonce":field(&request,"nonce")?,
-        "purpose":{"type":"query","kind":"object","target":factory_target,"view":"resource"},
-        "grants":[{"kind":"object","target":factory_target,"capability":observe}]});
-    save_json_staged(&directory.join("query.json"), &query)?;
-    transform(
-        &host,
-        &public_socket,
-        &retained_config,
-        7,
-        Some("intent"),
-        &directory.join("query.json"),
-        &directory.join("query.bin"),
+    let (signed, factory_root, authority_root) = signed_factory_observation(
+        &FactoryObservation {
+            host: &host,
+            socket: &public_socket,
+            config: &retained_config,
+            directory: &directory,
+            sponsor: &sponsor,
+            nonce: field(&request, "nonce")?,
+            factory: &factory_target,
+            observe: &observe,
+        },
+        &sponsor_signing,
     )?;
-    let query_bytes = private_bytes(&directory.join("query.bin"), LIMIT)?;
-    let observation = directory.join("observation");
-    match fs::DirBuilder::new().mode(0o700).create(&observation) {
-        Ok(()) => (),
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            drain::private_dir(&observation)?;
-        }
-        Err(error) => return Err(format!("cannot create enrollment observation: {error}")),
-    }
-    let challenge = staged_invoke(
-        &host,
-        &public_socket,
-        &retained_config,
-        &observation,
-        "challenge",
-        4,
-        &query_bytes,
-    )?;
-    let challenge_json = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        "challenge",
-        &observation.join("challenge.bin"),
-        &observation.join("challenge.json"),
-    )?;
-    let headers = challenge_headers(&challenge_json)?;
-    if headers.is_empty() {
-        return Err("factory observation has no signing header".into());
-    }
-    let signatures = sign_headers(&sponsor_signing, &headers);
-    save_json_staged(&observation.join("signatures.json"), &signatures)?;
-    transform(
-        &host,
-        &public_socket,
-        &retained_config,
-        9,
-        None,
-        &observation.join("signatures.json"),
-        &observation.join("signatures.bin"),
-    )?;
-    let signature_bytes = private_bytes(&observation.join("signatures.bin"), 4096)?;
-    let signed = staged_invoke(
-        &host,
-        &public_socket,
-        &retained_config,
-        &observation,
-        "signed-observation",
-        10,
-        &pair(&challenge, &signature_bytes)?,
-    )?;
-    let _view = staged_invoke(
-        &host,
-        &public_socket,
-        &retained_config,
-        &observation,
-        "view",
-        5,
-        &signed,
-    )?;
-    let view_json = inspect(
-        &host,
-        &public_socket,
-        &retained_config,
-        "view-resource",
-        &observation.join("view.bin"),
-        &observation.join("view.json"),
-    )?;
-    pinned(&view_json, "type", "resource")?;
-    let factory_root = view_json
-        .get("cell")
-        .and_then(|page| page.get("root"))
-        .and_then(Value::as_str)
-        .ok_or("signed factory view lacks root")?;
-    decimal(factory_root, "factory root")?;
-    let authority_root = challenge_json
-        .get("authorityRoot")
-        .and_then(Value::as_str)
-        .ok_or("signed factory challenge lacks authority root")?;
-    decimal(authority_root, "authority root")?;
+    let factory_root = factory_root.as_str();
+    let authority_root = authority_root.as_str();
     let command_source = json!({"sponsor":sponsor,"control":control,
         "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
         "expectedAuthorityRoot":authority_root,
         "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
-            "subject":reservation.ids["subject"],"publicKey":public_key,
+            "subject":subject,"publicKey":public_key,
             "activeFrom":"0","activeUntil":u64::MAX.to_string()}});
     save_json_staged(&directory.join("source.json"), &command_source)?;
     transform(
@@ -641,8 +763,8 @@ fn plan(mut args: Args) -> Result<()> {
         "config":retained_config,"configSha256":digest(&config_bytes),
         "publicSocket":public_socket,"operationSocket":operation_socket,
         "operatorOnly":operator_override.is_some(),
-        "sponsorKey":sponsor_key,"newKey":new_key,"namespaceRoot":namespace_root,
-        "name":name,"sponsor":sponsor,"subject":reservation.ids["subject"],
+        "sponsorKey":sponsor_key,"newKey":new_key,"homeSubject":home,"namespaceRoot":namespace_root,
+        "name":name,"sponsor":sponsor,"subject":subject,
         "keyId":reservation.ids["keyId"],"publicKey":public_key,
         "requestSha256":digest(&request_bytes),"commandSha256":command_sha,
         "planSha256":digest(&plan),"reservationDigest":reservation.request_digest,
@@ -650,7 +772,7 @@ fn plan(mut args: Args) -> Result<()> {
     )?;
     print_json(
         &json!({"type":"minidregg-participant-enrollment-plan-custody-v1",
-        "subject":reservation.ids["subject"],"keyId":reservation.ids["keyId"],
+        "subject":subject,"keyId":reservation.ids["keyId"],
         "publicKey":public_key,"plan":plan_view,"authority":"candidate-only"}),
     )
 }
@@ -678,7 +800,53 @@ fn validate_plan(view: &Value, command: &[u8], plan: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn seal(directory: &Path) -> Result<()> {
+/// Run by the enrolled principal, in its own process, over the sponsor's
+/// retained Plan and canonical command inspection. It signs only the Host's
+/// possession header, and only when the command names this key at the
+/// expected home subject. The sponsor's secret is never read.
+fn possess(mut args: Args) -> Result<()> {
+    let directory = absolute(&path(args.required("dir")?))?;
+    let key_path = absolute(&path(args.required("key")?))?;
+    let subject = args
+        .required("subject")?
+        .into_string()
+        .map_err(|_| "home subject must be UTF-8")?;
+    let output = absolute(&path(args.required("output")?))?;
+    args.finish()?;
+    print_json(&possess_at(&directory, &key_path, &subject, &output)?)
+}
+
+fn possess_at(directory: &Path, key_path: &Path, subject: &str, output: &Path) -> Result<Value> {
+    let signing = key(key_path)?;
+    decimal(subject, "home subject")?;
+    if output.exists() {
+        return Err("possession signature output already exists".into());
+    }
+    let plan_view: Value = serde_json::from_slice(&bounded(&directory.join("plan.json"), 8 * transport::HOST_MAX_FRAME)?)
+        .map_err(|error| format!("invalid enrollment Plan inspection: {error}"))?;
+    let command_view: Value = serde_json::from_slice(&bounded(&directory.join("command.json"), 8 * transport::HOST_MAX_FRAME)?)
+        .map_err(|error| format!("invalid enrollment command inspection: {error}"))?;
+    let public_key = hex(&signing.verifying_key().to_bytes());
+    let key_record = command_view.get("key").ok_or("enrollment command names no key")?;
+    if field(&command_view, "type")? != "participant-key-enrollment-v1"
+        || field(&plan_view, "type")? != "participant-key-enrollment-plan-v1"
+        || field(&plan_view, "commandBytes")? != field(&command_view, "canonical")?
+        || field(key_record, "publicKey")? != public_key
+        || field(key_record, "subject")? != subject
+    {
+        return Err("enrollment Plan does not name this key at the expected home subject".into());
+    }
+    let header = decode_hex(field(&plan_view, "possessionHeader")?)?;
+    let signature = signing.sign(&header).to_bytes();
+    create_private(output, &signature)?;
+    sync_directory_ancestors(output.parent().ok_or("possession output lacks parent")?)?;
+    Ok(json!({"type":"minidregg-participant-possession-signature-v1",
+        "subject":subject,"publicKey":public_key,
+        "commandSha256":digest(&decode_hex(field(&command_view, "canonical")?)?),
+        "possessionHeaderSha256":digest(&header),"signatureSha256":digest(&signature)}))
+}
+
+fn seal(directory: &Path, detached: Option<&Path>) -> Result<()> {
     let directory = absolute(directory)?;
     let _lock = transport::service_lock(&directory.join("enrollment.lock"))?;
     if directory.join("submit-marker.json").exists() {
@@ -687,8 +855,19 @@ fn seal(directory: &Path) -> Result<()> {
         );
     }
     let pin = load_pin(&directory)?;
-    if hex(&key(&pin.new_key)?.verifying_key().to_bytes()) != pin.public_key {
-        return Err("new enrollment key changed after plan".into());
+    match (&pin.new_key, detached) {
+        (Some(new_key), None) => {
+            if hex(&key(new_key)?.verifying_key().to_bytes()) != pin.public_key {
+                return Err("new enrollment key changed after plan".into());
+            }
+        }
+        (None, Some(_)) => (),
+        (Some(_), Some(_)) => {
+            return Err("a local-key enrollment signs its own possession header".into())
+        }
+        (None, None) => {
+            return Err("home-identity enrollment requires --possession-signature".into())
+        }
     }
     let plan_view = json_private(&directory.join("plan.json"))?;
     validate_plan(&plan_view, &pin.command, &pin.plan)?;
@@ -706,9 +885,27 @@ fn seal(directory: &Path) -> Result<()> {
     let sponsor_header = decode_hex(field(&plan_view["sponsorHeader"], "canonical")?)?;
     let possession_header = decode_hex(field(&plan_view, "possessionHeader")?)?;
     let sponsor = key(&pin.sponsor_key)?;
-    let new = key(&pin.new_key)?;
     let sponsor_signature = sponsor.sign(&sponsor_header).to_bytes();
-    let possession_signature = new.sign(&possession_header).to_bytes();
+    let possession_signature: [u8; 64] = match (&pin.new_key, detached) {
+        (Some(new_key), _) => key(new_key)?.sign(&possession_header).to_bytes(),
+        (None, Some(file)) => {
+            let bytes: [u8; 64] = bounded(&absolute(file)?, 64)?
+                .try_into()
+                .map_err(|_| "possession signature must contain exactly 64 bytes")?;
+            let public: [u8; 32] = decode_hex(&pin.public_key)?
+                .try_into()
+                .map_err(|_| "pinned enrollment public key is not 32 bytes")?;
+            VerifyingKey::from_bytes(&public)
+                .map_err(|_| "pinned enrollment public key is invalid")?
+                .verify(
+                    &possession_header,
+                    &ed25519_dalek::Signature::from_bytes(&bytes),
+                )
+                .map_err(|_| "detached possession signature does not verify for the pinned key")?;
+            bytes
+        }
+        (None, None) => unreachable!("detached input checked above"),
+    };
     retain_exact(&directory.join("sponsor-signature.bin"), &sponsor_signature)?;
     retain_exact(
         &directory.join("possession-signature.bin"),
@@ -787,7 +984,7 @@ fn outcome(directory: &Path, pin: &Pin, stem: &str, frame: &[u8], operation: u8)
     Ok(value)
 }
 
-fn confirmed(value: &Value) -> Result<()> {
+pub(crate) fn confirmed(value: &Value) -> Result<()> {
     if field(value, "type")? != "confirmed"
         || !matches!(field(value, "confirmation")?, "installed" | "replayed")
     {
@@ -886,16 +1083,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .map_err(|_| "enrollment action must be UTF-8")?;
     match action.as_str() {
         "plan" => plan(args),
-        "seal" | "submit" | "lookup" => {
+        "possess" => possess(args),
+        "seal" => {
+            let directory = path(args.required("dir")?);
+            let detached = args.optional("possession-signature").map(path);
+            args.finish()?;
+            seal(&directory, detached.as_deref())
+        }
+        "submit" | "lookup" => {
             let directory = path(args.required("dir")?);
             args.finish()?;
             match action.as_str() {
-                "seal" => seal(&directory),
                 "submit" => submit(&directory),
                 _ => lookup(&directory),
             }
         }
-        _ => Err("enrollment action must be plan, seal, submit or lookup".into()),
+        _ => Err("enrollment action must be plan, possess, seal, submit or lookup".into()),
     }
 }
 
@@ -911,6 +1114,48 @@ mod tests {
         ));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn possession_signs_only_its_own_key_at_the_named_home_subject() {
+        let root = scratch("possess");
+        let secret = [7u8; 32];
+        create_private(&root.join("owner.key"), &secret).unwrap();
+        let other = [9u8; 32];
+        create_private(&root.join("other.key"), &other).unwrap();
+        let public = hex(&SigningKey::from_bytes(&secret).verifying_key().to_bytes());
+        save_json(
+            &root.join("command.json"),
+            &json!({"type":"participant-key-enrollment-v1","canonical":"abcd",
+                "key":{"subject":"7","publicKey":public}}),
+        )
+        .unwrap();
+        save_json(
+            &root.join("plan.json"),
+            &json!({"type":"participant-key-enrollment-plan-v1","commandBytes":"abcd",
+                "possessionHeader":"0102"}),
+        )
+        .unwrap();
+        let wrong_subject = possess_at(&root, &root.join("owner.key"), "8", &root.join("a.sig"));
+        assert!(wrong_subject.unwrap_err().contains("does not name this key"));
+        let wrong_key = possess_at(&root, &root.join("other.key"), "7", &root.join("b.sig"));
+        assert!(wrong_key.unwrap_err().contains("does not name this key"));
+        assert!(!root.join("a.sig").exists() && !root.join("b.sig").exists());
+        possess_at(&root, &root.join("owner.key"), "7", &root.join("c.sig")).unwrap();
+        let signature: [u8; 64] = fs::read(root.join("c.sig")).unwrap().try_into().unwrap();
+        SigningKey::from_bytes(&secret)
+            .verifying_key()
+            .verify(&[1, 2], &ed25519_dalek::Signature::from_bytes(&signature))
+            .unwrap();
+        assert!(possess_at(&root, &root.join("owner.key"), "7", &root.join("c.sig")).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn home_identity_reserves_only_a_key_id() {
+        assert_eq!(enrollment_roles(true).len(), 1);
+        assert_eq!(enrollment_roles(true)[0].label, "keyId");
+        assert_eq!(enrollment_roles(false).len(), 2);
     }
 
     #[test]
@@ -1020,7 +1265,7 @@ mod tests {
             public_socket: PathBuf::new(),
             operation_socket: PathBuf::new(),
             sponsor_key: PathBuf::new(),
-            new_key: PathBuf::from("/private/new.key"),
+            new_key: Some(PathBuf::from("/private/new.key")),
             subject: "42".into(),
             key_id: "99".into(),
             public_key: "aa".repeat(32),

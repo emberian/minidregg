@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 const MAX_RECORD: u64 = 256 * 1024;
 
-fn decimal(value: &str, field: &str) -> Result<()> {
+pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 39
         || (value.len() > 1 && value.starts_with('0'))
@@ -65,7 +65,7 @@ fn readable_delegation_verbs(selected: &[Value], parent: &[Value]) -> Result<()>
     Ok(())
 }
 
-fn validate_name(value: &str) -> Result<()> {
+pub(crate) fn validate_name(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 64
         || !value
@@ -95,7 +95,7 @@ fn private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn make_private_dir(path: &Path) -> Result<()> {
+pub(crate) fn make_private_dir(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.mode(0o700);
     builder
@@ -104,7 +104,7 @@ fn make_private_dir(path: &Path) -> Result<()> {
     private_dir(path)
 }
 
-fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -122,7 +122,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn bounded_json(path: &Path) -> Result<Value> {
+pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD {
@@ -141,14 +141,14 @@ fn bounded_json(path: &Path) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
 }
 
-fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
+pub(crate) fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     value
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("workspace record lacks {key}"))
 }
 
-fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
+pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     let path = PathBuf::from(member(value, key)?);
     if !path.is_absolute() {
         return Err(format!("workspace {key} is not absolute"));
@@ -162,7 +162,7 @@ fn os_string(value: OsString, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} must be UTF-8"))
 }
 
-fn random_nonce() -> Result<String> {
+pub(crate) fn random_nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
@@ -170,7 +170,7 @@ fn random_nonce() -> Result<String> {
     Ok(u128::from_be_bytes(bytes).to_string())
 }
 
-fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
+pub(crate) fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     for _ in 0..8 {
         let nonce = random_nonce()?;
         let attempt = root.join("attempts").join(format!("a-{nonce}"));
@@ -181,7 +181,7 @@ fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     Err("could not allocate a distinct workspace attempt name".into())
 }
 
-fn load(root: &Path) -> Result<Value> {
+pub(crate) fn load(root: &Path) -> Result<Value> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -214,13 +214,13 @@ fn load(root: &Path) -> Result<Value> {
     Ok(value)
 }
 
-struct InitIdentity<'a> {
-    key: Option<&'a Path>,
-    subject: Option<&'a str>,
-    enrollment: Option<&'a Path>,
+pub(crate) struct InitIdentity<'a> {
+    pub(crate) key: Option<&'a Path>,
+    pub(crate) subject: Option<&'a str>,
+    pub(crate) enrollment: Option<&'a Path>,
 }
 
-fn init(
+pub(crate) fn init(
     root: &Path,
     host: &Path,
     config: &Path,
@@ -325,7 +325,7 @@ fn init(
     Ok(())
 }
 
-fn reference(root: &Path, name: &str) -> Result<Value> {
+pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
     validate_name(name)?;
     let value = bounded_json(&root.join("refs").join(format!("{name}.json")))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
@@ -351,17 +351,17 @@ fn reference(root: &Path, name: &str) -> Result<Value> {
     Ok(value)
 }
 
-struct ImportInput<'a> {
-    name: &'a str,
-    kind: &'a str,
-    target: &'a str,
-    observe: &'a str,
-    operation: Option<&'a str>,
-    control: Option<&'a str>,
-    provenance: Option<&'a Path>,
+pub(crate) struct ImportInput<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) kind: &'a str,
+    pub(crate) target: &'a str,
+    pub(crate) observe: &'a str,
+    pub(crate) operation: Option<&'a str>,
+    pub(crate) control: Option<&'a str>,
+    pub(crate) provenance: Option<&'a Path>,
 }
 
-fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
+pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
     let ImportInput {
         name: name_value,
         kind,
@@ -477,7 +477,7 @@ fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Resu
     )
 }
 
-fn signed_view(
+pub(crate) fn signed_view(
     root: &Path,
     workspace: &Value,
     reference: &Value,
@@ -1006,7 +1006,7 @@ fn recover(root: &Path, attempt: &Path) -> Result<()> {
     retry(&candidate, "lookup", false)
 }
 
-fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
+pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
     let mut names = Vec::new();
     for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -1100,7 +1100,7 @@ fn complete_birth(
     source: &Value,
     receipt: &Value,
     reservation: &participant_namespace::Reservation,
-) -> Result<()> {
+) -> Result<Value> {
     let birth = source.get("birth").ok_or("retained birth source absent")?;
     let parts = birth
         .get("resources")
@@ -1120,7 +1120,7 @@ fn complete_birth(
     if reference_path.exists() {
         let prior = reference(root, name_value)?;
         if member(&prior, "target")? == target && member(&prior, "observeCapability")? == owner {
-            return Ok(());
+            return Ok(prior);
         }
         return Err("confirmed birth conflicts with existing workspace reference".into());
     }
@@ -1137,32 +1137,151 @@ fn complete_birth(
         "{}",
         serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
     );
-    Ok(())
+    Ok(value)
 }
 
-fn create(
+/// The shape of one newborn resource. `owner` receives both root grants;
+/// it need not be the creator. `funding` moves that amount from the context's
+/// fee payer into the newborn, which the Host admits only for an account.
+struct BirthShape<'a> {
+    kind: &'a str,
+    storage: &'a str,
+    owner: &'a str,
+    predicate: &'a Value,
+    funding: Option<&'a str>,
+}
+
+/// Immutable authoring generations of one reserved birth request, in order.
+fn authoring_generations(base: &Path) -> Result<Vec<PathBuf>> {
+    let mut numbers = Vec::new();
+    for entry in fs::read_dir(base).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or("non-UTF-8 authoring generation")?;
+        let number = name
+            .strip_prefix('g')
+            .filter(|digits| digits.len() == 4 && digits.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|digits| digits.parse::<u32>().ok())
+            .filter(|number| *number > 0)
+            .ok_or_else(|| format!("unknown entry in authoring generations: {name}"))?;
+        numbers.push(number);
+    }
+    numbers.sort_unstable();
+    for (index, number) in numbers.iter().enumerate() {
+        if *number != index as u32 + 1 {
+            return Err("authoring generations are not contiguous".into());
+        }
+    }
+    Ok(numbers
+        .into_iter()
+        .map(|number| base.join(format!("g{number:04}")))
+        .collect())
+}
+
+/// A retained Host reply that is an explicit refusal, never an intent.
+fn authoring_refused(generation: &Path) -> Result<bool> {
+    let reply = generation.join("reply.frame");
+    if !reply.exists() {
+        return Ok(false);
+    }
+    let bytes = fs::read(&reply).map_err(|error| error.to_string())?;
+    Ok(bytes.first() == Some(&255))
+}
+
+/// Author the reserved source through op91 in versioned generations.
+///
+/// A generation retains exactly one signed factory observation and at most one
+/// Host reply; it is never rewritten. When the latest generation's retained
+/// reply is a refusal, and no custody attempt is bound for this request, a new
+/// generation authors the SAME source with a fresh observation. At most one
+/// generation is superseded per call, and never one whose observation was
+/// taken in this same call. Once a generation holds an intent, it is final.
+fn author_generations(
+    base: &Path,
+    reservation: &participant_namespace::Reservation,
+    mut observe: impl FnMut() -> Result<PathBuf>,
+    mut author_one: impl FnMut(&Path, Option<&Path>) -> Result<()>,
+) -> Result<PathBuf> {
+    if !base.exists() {
+        make_private_dir(base)?;
+    }
+    private_dir(base)?;
+    let mut superseded = false;
+    let mut observed_now = false;
+    loop {
+        let generations = authoring_generations(base)?;
+        let current = match generations.last() {
+            Some(current) => current.clone(),
+            None => {
+                let first = base.join("g0001");
+                make_private_dir(&first)?;
+                first
+            }
+        };
+        private_dir(&current)?;
+        if authoring_refused(&current)? {
+            if observed_now || superseded {
+                return Err(format!(
+                    "current birth authoring refused with a fresh factory observation; retained {}",
+                    current.join("reply.frame").display()
+                ));
+            }
+            if participant_namespace::is_bound(reservation)? {
+                return Err(
+                    "refused authoring generation has a bound attempt; exact custody only".into(),
+                );
+            }
+            make_private_dir(&base.join(format!("g{:04}", generations.len() + 1)))?;
+            superseded = true;
+            continue;
+        }
+        if current.join("reply.frame").exists() {
+            return Ok(current);
+        }
+        let observation = if current.join("factory-observation.bin").exists() {
+            None
+        } else {
+            observed_now = true;
+            Some(observe()?)
+        };
+        match author_one(&current, observation.as_deref()) {
+            Ok(()) => return Ok(current),
+            Err(error) if authoring_refused(&current)? => {
+                eprintln!(
+                    "workspace birth authoring refused in {}: {error}",
+                    current.display()
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Reserve, author and submit one birth under a workspace name. Returns the
+/// retained source, the confirmed receipt and the namespace reservation.
+fn birth(
     root: &Path,
     workspace: &Value,
     name_value: &str,
-    storage: &str,
-    predicate_path: &Path,
-) -> Result<()> {
+    shape: &BirthShape<'_>,
+) -> Result<(Value, Value, participant_namespace::Reservation)> {
     validate_name(name_value)?;
-    if !matches!(storage, "content" | "declared") {
+    if !matches!(shape.storage, "content" | "declared") {
         return Err("supported resource storage is content or declared".into());
     }
+    decimal(shape.owner, "birth owner")?;
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = member_path(workspace, "namespaceRoot")?;
     let context = bounded_json(&context_path)?;
     if member(&context, "type")? != "minidregg-participant-birth-context-v1" {
         return Err("unknown birth context version".into());
     }
-    let predicate = bounded_json(predicate_path)?;
     let request_path = root
         .join("sources")
         .join(format!("create-{name_value}.request.json"));
-    let requested_core = json!({"type":"minidregg-workspace-create-request-v1",
-        "name":name_value,"storage":storage,"predicate":predicate,"context":context,
+    let requested_core = json!({"type":"minidregg-workspace-create-request-v2",
+        "name":name_value,"kind":shape.kind,"storage":shape.storage,"owner":shape.owner,
+        "funding":shape.funding,"predicate":shape.predicate,"context":context,
         "subject":member(workspace,"subject")?});
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
@@ -1204,6 +1323,45 @@ fn create(
         &stable_request,
         &roles,
     )?;
+    let (funding, source_capabilities) = match shape.funding {
+        None => (
+            context["funding"].clone(),
+            context["sourceCapabilities"].clone(),
+        ),
+        Some(amount) => {
+            field_decimal(amount, "funding amount")?;
+            if context["funding"]
+                .as_array()
+                .is_none_or(|moves| !moves.is_empty())
+            {
+                return Err("funded birth requires a context without prior funding".into());
+            }
+            let payer = member(&context, "feePayer")?;
+            let payer_capability = context["grants"]
+                .as_array()
+                .and_then(|grants| {
+                    grants.iter().find(|grant| {
+                        grant.get("kind").and_then(Value::as_str) == Some("account")
+                            && grant.get("target").and_then(Value::as_str) == Some(payer)
+                    })
+                })
+                .and_then(|grant| grant.get("capability").cloned())
+                .ok_or("birth context lacks the fee payer's account grant")?;
+            let mut capabilities = vec![payer_capability];
+            capabilities.extend(
+                context["sourceCapabilities"]
+                    .as_array()
+                    .ok_or("birth context lacks source capabilities")?
+                    .iter()
+                    .cloned(),
+            );
+            (
+                json!([{"source":payer,"destination":reservation.ids["target"],
+                    "asset":member(&context["genesis"],"asset")?,"amount":amount}]),
+                Value::Array(capabilities),
+            )
+        }
+    };
     let source_path = root
         .join("sources")
         .join(format!("create-{name_value}.json"));
@@ -1211,13 +1369,13 @@ fn create(
     let expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
-                "resources":[{"kind":"object","storage":storage,
-                    "target":reservation.ids["target"],"owner":member(workspace,"subject")?,
+                "resources":[{"kind":shape.kind,"storage":shape.storage,
+                    "target":reservation.ids["target"],"owner":shape.owner,
                     "ownerCapability":reservation.ids["ownerCapability"],
                     "controlCapability":reservation.ids["controlCapability"],
-                    "predicate":predicate}],
-                "sourceCapabilities":context["sourceCapabilities"],
-                "funding":context["funding"],"feePayer":context["feePayer"]},
+                    "predicate":shape.predicate}],
+                "sourceCapabilities":source_capabilities,
+                "funding":funding,"feePayer":context["feePayer"]},
             "grants":context["grants"]});
     let source = if source_path.exists() {
         let saved = bounded_json(&source_path)?;
@@ -1245,44 +1403,52 @@ fn create(
     let socket = SOCKET
         .get()
         .ok_or("workspace create requires a pinned persistent Host socket")?;
-    let author_dir = root
+    let authoring = root
         .join("sources")
-        .join(format!("create-{name_value}.current"));
+        .join(format!("create-{name_value}.authoring"));
     let attempt = root.join("attempts").join(format!("create-{name_value}"));
-    if !attempt.exists() {
-        let signed_factory = if author_dir.join("factory-observation.bin").exists() {
-            None
-        } else {
-            let factory = member(&context["genesis"], "factoryId")?;
-            let grants = context
-                .get("grants")
-                .and_then(Value::as_array)
-                .ok_or("birth context lacks grants")?;
-            let matching: Vec<_> = grants
-                .iter()
-                .filter(|grant| {
-                    grant.get("kind").and_then(Value::as_str) == Some("object")
-                        && grant.get("target").and_then(Value::as_str) == Some(factory)
-                })
-                .collect();
-            if matching.len() != 1 {
-                return Err("birth context needs one factory resource observation grant".into());
-            }
-            let factory_ref = json!({"kind":"object","target":factory,
+    let host = member_path(workspace, "host")?;
+    let config = member_path(workspace, "config")?;
+    let author_dir = if attempt.exists() {
+        authoring_generations(&authoring)?
+            .last()
+            .cloned()
+            .ok_or("birth attempt exists without an authoring generation")?
+    } else {
+        let factory = member(&context["genesis"], "factoryId")?;
+        let grants = context
+            .get("grants")
+            .and_then(Value::as_array)
+            .ok_or("birth context lacks grants")?;
+        let matching: Vec<_> = grants
+            .iter()
+            .filter(|grant| {
+                grant.get("kind").and_then(Value::as_str) == Some("object")
+                    && grant.get("target").and_then(Value::as_str) == Some(factory)
+            })
+            .collect();
+        if matching.len() != 1 {
+            return Err("birth context needs one factory resource observation grant".into());
+        }
+        let factory_ref = json!({"kind":"object","target":factory,
             "observeCapability":member(matching[0],"capability")?});
-            let (_, _, signed_factory) = signed_view(root, workspace, &factory_ref, "resource")?;
-            Some(signed_factory)
-        };
-        current_birth::author(
-            &member_path(workspace, "host")?,
-            &member_path(workspace, "config")?,
-            socket,
-            &source_path,
-            signed_factory.as_deref(),
-            &author_dir,
-            current_birth::Route::Resource,
-        )?;
-    }
+        author_generations(
+            &authoring,
+            &reservation,
+            || Ok(signed_view(root, workspace, &factory_ref, "resource")?.2),
+            |generation, observation| {
+                current_birth::author(
+                    &host,
+                    &config,
+                    socket,
+                    &source_path,
+                    observation,
+                    generation,
+                    current_birth::Route::Resource,
+                )
+            },
+        )?
+    };
     let intent_path = current_birth::retained_intent(&author_dir, current_birth::Route::Resource)?;
     if fs::read(author_dir.join("source.json")).map_err(|error| error.to_string())?
         != fs::read(&source_path).map_err(|error| error.to_string())?
@@ -1311,17 +1477,17 @@ fn create(
             ));
         }
         if let Some(receipt) = accepted_outcome(&attempt)? {
-            return complete_birth(root, name_value, &source, &receipt, &reservation);
+            return Ok((source, receipt, reservation));
         }
         retry(&attempt, "lookup", false)?;
         let receipt = accepted_outcome(&attempt)?
             .ok_or("historical create lookup did not confirm installed birth")?;
-        return complete_birth(root, name_value, &source, &receipt, &reservation);
+        return Ok((source, receipt, reservation));
     }
     eprintln!("workspace birth attempt: {}", attempt.display());
     submit(
-        &member_path(workspace, "host")?,
-        &member_path(workspace, "config")?,
+        &host,
+        &config,
         &intent_path,
         OsStr::new("binary"),
         &member_path(workspace, "key")?,
@@ -1329,7 +1495,228 @@ fn create(
         false,
     )?;
     let receipt = accepted_outcome(&attempt)?.ok_or("birth returned without installed receipt")?;
-    complete_birth(root, name_value, &source, &receipt, &reservation)
+    Ok((source, receipt, reservation))
+}
+
+fn create(
+    root: &Path,
+    workspace: &Value,
+    name_value: &str,
+    storage: &str,
+    predicate_path: &Path,
+) -> Result<()> {
+    let predicate = bounded_json(predicate_path)?;
+    let subject = member(workspace, "subject")?.to_owned();
+    let (source, receipt, reservation) = birth(
+        root,
+        workspace,
+        name_value,
+        &BirthShape {
+            kind: "object",
+            storage,
+            owner: &subject,
+            predicate: &predicate,
+            funding: None,
+        },
+    )?;
+    complete_birth(root, name_value, &source, &receipt, &reservation).map(|_| ())
+}
+
+/// A declared account the sponsor births for another admitted subject, funded
+/// from the context fee payer (the shape `provision` uses). The owner holds
+/// both root grants, so this workspace retains only a hint-only handoff record
+/// for that owner, never a reference it cannot use.
+pub(crate) fn create_funded_account(
+    root: &Path,
+    workspace: &Value,
+    name_value: &str,
+    predicate: &Value,
+    owner: &str,
+    amount: &str,
+) -> Result<Value> {
+    let (source, receipt, reservation) = birth(
+        root,
+        workspace,
+        name_value,
+        &BirthShape {
+            kind: "account",
+            storage: "declared",
+            owner,
+            predicate,
+            funding: Some(amount),
+        },
+    )?;
+    let resource = &source["birth"]["resources"][0];
+    let target = member(resource, "target")?;
+    let owner_capability = member(resource, "ownerCapability")?;
+    let control = member(resource, "controlCapability")?;
+    let value = json!({"type":"minidregg-fleet-account-handoff-v1","name":name_value,
+        "owner":owner,"kind":"account","target":target,"observeCapability":owner_capability,
+        "operationCapability":owner_capability,"controlCapability":control,"funding":amount,
+        "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,
+            "reservationRecord":reservation.record_path},"authority":"hint-only"});
+    retain_or_compare(
+        &root
+            .join("sources")
+            .join(format!("create-{name_value}.handoff.json")),
+        &value,
+    )?;
+    Ok(value)
+}
+
+fn retain_or_compare(path: &Path, value: &Value) -> Result<()> {
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    if path.exists() {
+        if bounded_json(path)? != *value {
+            return Err(format!("retained {} differs", path.display()));
+        }
+        return Ok(());
+    }
+    private_file(path, &bytes)
+}
+
+struct Provision<'a> {
+    name: &'a str,
+    holder: &'a str,
+    funding: &'a str,
+    predicate: &'a Path,
+    factory_ref: &'a str,
+}
+
+/// Sponsor-side provisioning of an enrolled subject for independent creation:
+/// (1) the source-owned factory-observation grant, which the Host refuses for
+/// a subject that is not enrolled; (2) an ordinary birth of an account OWNED by
+/// that subject, funded from the sponsor's payer. Both are admitted by the Host
+/// under current authority. The emitted birth context is a discovery hint for
+/// the holder, not a grant.
+fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<()> {
+    validate_name(request.name)?;
+    decimal(request.holder, "provisioned holder")?;
+    if request.holder == member(workspace, "subject")? {
+        return Err("a sponsor does not provision itself".into());
+    }
+    let predicate = bounded_json(request.predicate)?;
+    let provisions = root.join("provisions");
+    if !provisions.exists() {
+        make_private_dir(&provisions)?;
+    }
+    let directory = provisions.join(request.name);
+    if !directory.exists() {
+        make_private_dir(&directory)?;
+    }
+    private_dir(&directory)?;
+    let factory = reference(root, request.factory_ref)?;
+    let context = bounded_json(&member_path(workspace, "birthContext")?)?;
+    if member(&factory, "target")? != member(&context["genesis"], "factoryId")? {
+        return Err("factory reference differs from the birth context factory".into());
+    }
+    let control = factory
+        .get("controlCapability")
+        .and_then(Value::as_str)
+        .ok_or("factory reference lacks a control capability")?;
+    let observed = crate::participant_provisioning::observe_grant(
+        &crate::participant_provisioning::ObserveGrant {
+            host: &member_path(workspace, "host")?,
+            config: &member_path(workspace, "config")?,
+            socket: SOCKET
+                .get()
+                .ok_or("provisioning requires a pinned persistent Host socket")?,
+            sponsor_key: &member_path(workspace, "key")?,
+            namespace_root: &member_path(workspace, "namespaceRoot")?,
+            domain: member(&context["genesis"], "domain")?,
+            name: request.name,
+            sponsor: member(workspace, "subject")?,
+            control,
+            observe: member(&factory, "observeCapability")?,
+            factory: member(&factory, "target")?,
+            holder: request.holder,
+            directory: &directory.join("observe"),
+        },
+    )?;
+    let account_name = format!("account-{}", request.name);
+    let (source, account_receipt, _) = birth(
+        root,
+        workspace,
+        &account_name,
+        &BirthShape {
+            kind: "account",
+            storage: "declared",
+            owner: request.holder,
+            predicate: &predicate,
+            funding: Some(request.funding),
+        },
+    )?;
+    let account = &source["birth"]["resources"][0];
+    let account_target = member(account, "target")?;
+    let account_owner = member(account, "ownerCapability")?;
+    let holder_context = json!({"type":"minidregg-participant-birth-context-v1",
+        "genesis":context["genesis"],"template":context["template"],
+        "sourceCapabilities":[account_owner],"funding":[],"feePayer":account_target,
+        "grants":[{"kind":"object","target":member(&factory,"target")?,
+                "capability":member(&observed,"capability")?},
+            {"kind":"account","target":account_target,"capability":account_owner}]});
+    let context_path = directory.join("birth-context.json");
+    retain_or_compare(&context_path, &holder_context)?;
+    let summary = json!({"type":"minidregg-participant-provisioning-v1",
+        "name":request.name,"holder":request.holder,
+        "account":{"target":account_target,"ownerCapability":account_owner,
+            "controlCapability":member(account,"controlCapability")?,
+            "funded":request.funding,"birthReceipt":account_receipt,
+            "attempt":root.join("attempts").join(format!("create-{account_name}"))},
+        "factoryObservation":observed,"birthContext":context_path,
+        "authority":"hint-only; the Host checks every grant at use"});
+    retain_or_compare(&directory.join("provision.json"), &summary)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&summary).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// Receipt-only replay of both provisioning operations after a restart.
+fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &str) -> Result<()> {
+    validate_name(name)?;
+    let directory = root.join("provisions").join(name);
+    let summary = bounded_json(&directory.join("provision.json"))?;
+    let factory = reference(root, factory_ref)?;
+    let context = bounded_json(&member_path(workspace, "birthContext")?)?;
+    retry(
+        &member_path(&summary["account"], "attempt")?,
+        "lookup",
+        false,
+    )?;
+    let observed = crate::participant_provisioning::observe_lookup(
+        &crate::participant_provisioning::ObserveGrant {
+            host: &member_path(workspace, "host")?,
+            config: &member_path(workspace, "config")?,
+            socket: SOCKET
+                .get()
+                .ok_or("provisioning requires a pinned persistent Host socket")?,
+            sponsor_key: &member_path(workspace, "key")?,
+            namespace_root: &member_path(workspace, "namespaceRoot")?,
+            domain: member(&context["genesis"], "domain")?,
+            name,
+            sponsor: member(workspace, "subject")?,
+            control: factory
+                .get("controlCapability")
+                .and_then(Value::as_str)
+                .ok_or("factory reference lacks a control capability")?,
+            observe: member(&factory, "observeCapability")?,
+            factory: member(&factory, "target")?,
+            holder: member(&summary, "holder")?,
+            directory: &directory.join("observe"),
+        },
+    )?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(
+            &json!({"type":"minidregg-participant-provisioning-lookup-v1",
+            "factoryObservation":observed})
+        )
+        .map_err(|error| error.to_string())?
+    );
+    Ok(())
 }
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
@@ -1450,6 +1837,31 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             create(&root, &workspace, &name, &storage, &predicate)
         }
+        "provision" => {
+            let name = os_string(args.required("name")?, "provision name")?;
+            let holder = os_string(args.required("holder")?, "holder subject")?;
+            let funding = os_string(args.required("funding")?, "funding amount")?;
+            let predicate = path(args.required("account-predicate")?);
+            let factory_ref = os_string(args.required("factory-ref")?, "factory reference")?;
+            args.finish()?;
+            provision(
+                &root,
+                &workspace,
+                &Provision {
+                    name: &name,
+                    holder: &holder,
+                    funding: &funding,
+                    predicate: &predicate,
+                    factory_ref: &factory_ref,
+                },
+            )
+        }
+        "provision-lookup" => {
+            let name = os_string(args.required("name")?, "provision name")?;
+            let factory_ref = os_string(args.required("factory-ref")?, "factory reference")?;
+            args.finish()?;
+            provision_lookup(&root, &workspace, &name, &factory_ref)
+        }
         "recover" => {
             let attempt = path(args.required("attempt")?);
             args.finish()?;
@@ -1462,7 +1874,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             publish_delegation(&root, &proposal_id, &attempt)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit or recover".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover or publish-delegation".into(),
         ),
     }
 }
@@ -1470,6 +1882,175 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn generation_fixture(label: &str) -> (PathBuf, PathBuf, participant_namespace::Reservation) {
+        let root = std::env::temp_dir().join(format!(
+            "mini-generations-{label}-{}-{}",
+            std::process::id(),
+            random_nonce().unwrap()
+        ));
+        make_private_dir(&root).unwrap();
+        let namespace = root.join("namespace");
+        make_private_dir(&namespace).unwrap();
+        let reservation = participant_namespace::Reservation {
+            request_digest: "d".repeat(64),
+            ids: Default::default(),
+            record_path: namespace.join(format!("request-{}.json", "d".repeat(64))),
+        };
+        (root.clone(), root.join("create-x.authoring"), reservation)
+    }
+
+    fn observation_file(root: &Path, count: &std::cell::Cell<u32>) -> Result<PathBuf> {
+        count.set(count.get() + 1);
+        let path = root.join(format!("observation-{}.bin", count.get()));
+        fs::write(&path, format!("signed observation {}", count.get())).unwrap();
+        Ok(path)
+    }
+
+    /// A fake op91 that refuses any generation authored from `stale`.
+    fn fake_author(generation: &Path, observation: Option<&Path>, stale: &[u8]) -> Result<()> {
+        let retained = generation.join("factory-observation.bin");
+        if !retained.exists() {
+            fs::copy(
+                observation.expect("fresh generation needs observation"),
+                &retained,
+            )
+            .unwrap();
+        }
+        let bytes = fs::read(&retained).unwrap();
+        let reply: Vec<u8> = if bytes == stale {
+            vec![255, 1]
+        } else {
+            vec![91, 7]
+        };
+        fs::write(generation.join("reply.frame"), &reply).unwrap();
+        if reply[0] == 255 {
+            Err("current resource birth authoring refused".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn retained_stale_observation_is_superseded_once_and_prior_generation_kept() {
+        let (root, base, reservation) = generation_fixture("stale");
+        make_private_dir(&base).unwrap();
+        make_private_dir(&base.join("g0001")).unwrap();
+        fs::write(base.join("g0001/factory-observation.bin"), b"stale").unwrap();
+        let observed = std::cell::Cell::new(0);
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"stale"),
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0002"));
+        assert_eq!(observed.get(), 1);
+        assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [255, 1]);
+        assert_eq!(
+            fs::read(base.join("g0001/factory-observation.bin")).unwrap(),
+            b"stale"
+        );
+        assert_eq!(fs::read(base.join("g0002/reply.frame")).unwrap(), [91, 7]);
+        // A final generation is reused without another observation or authoring.
+        let again = author_generations(
+            &base,
+            &reservation,
+            || panic!("no observation after an intent"),
+            |_, _| panic!("no authoring after an intent"),
+        )
+        .unwrap();
+        assert_eq!(again, base.join("g0002"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retained_refusal_before_any_call_no_longer_blocks_same_name_create() {
+        let (root, base, reservation) = generation_fixture("refused");
+        make_private_dir(&base).unwrap();
+        make_private_dir(&base.join("g0001")).unwrap();
+        fs::write(base.join("g0001/factory-observation.bin"), b"stale").unwrap();
+        fs::write(base.join("g0001/reply.frame"), [255, 1]).unwrap();
+        let observed = std::cell::Cell::new(0);
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"stale"),
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0002"));
+        assert_eq!(authoring_generations(&base).unwrap().len(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refusal_with_fresh_observation_is_reported_not_retried_in_a_loop() {
+        let (root, base, reservation) = generation_fixture("fresh-refusal");
+        let observed = std::cell::Cell::new(0);
+        let refused = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, _| {
+                fs::write(generation.join("reply.frame"), [255, 3]).unwrap();
+                Err("refused".into())
+            },
+        );
+        assert!(refused.is_err());
+        assert_eq!(observed.get(), 1);
+        assert_eq!(authoring_generations(&base).unwrap().len(), 1);
+        // The next call supersedes that refusal exactly once.
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"never"),
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0002"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn bound_attempt_forbids_superseding_a_refused_generation() {
+        let (root, base, reservation) = generation_fixture("bound");
+        make_private_dir(&base).unwrap();
+        make_private_dir(&base.join("g0001")).unwrap();
+        fs::write(base.join("g0001/reply.frame"), [255, 1]).unwrap();
+        fs::write(
+            reservation
+                .record_path
+                .parent()
+                .unwrap()
+                .join(format!("binding-{}.json", reservation.request_digest)),
+            b"{}",
+        )
+        .unwrap();
+        let refused = author_generations(
+            &base,
+            &reservation,
+            || panic!("no observation under bound custody"),
+            |_, _| panic!("no authoring under bound custody"),
+        );
+        assert!(refused.is_err());
+        assert_eq!(authoring_generations(&base).unwrap().len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generation_names_are_contiguous_and_closed() {
+        let (root, base, _) = generation_fixture("names");
+        make_private_dir(&base).unwrap();
+        make_private_dir(&base.join("g0001")).unwrap();
+        make_private_dir(&base.join("g0003")).unwrap();
+        assert!(authoring_generations(&base).is_err());
+        fs::remove_dir_all(base.join("g0003")).unwrap();
+        fs::write(base.join("notes"), b"x").unwrap();
+        assert!(authoring_generations(&base).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn untrusted_reference_cannot_escape_scoped_workspace_or_replace_existing_name() {

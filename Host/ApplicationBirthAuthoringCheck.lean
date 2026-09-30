@@ -260,6 +260,6 @@ def main : IO Unit := do
   IO.println "application birth JSON authoring: ok"
   configuredChecks
 
-end Minidregg.Host.ApplicationBirthAuthoringCheck
+#eval main
 
-def main : IO Unit := Minidregg.Host.ApplicationBirthAuthoringCheck.main
+end Minidregg.Host.ApplicationBirthAuthoringCheck

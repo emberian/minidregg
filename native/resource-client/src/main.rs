@@ -8,7 +8,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(unix)]
@@ -24,6 +24,8 @@ mod drain;
 #[cfg(unix)]
 mod fn_frontier;
 #[cfg(unix)]
+mod fleet;
+#[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
@@ -35,6 +37,8 @@ mod meter;
 mod participant_enrollment;
 #[cfg(unix)]
 mod participant_namespace;
+#[cfg(unix)]
+mod participant_provisioning;
 #[cfg(unix)]
 mod prepare_refusal;
 #[cfg(unix)]
@@ -52,6 +56,8 @@ mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
 #[cfg(unix)]
+mod shell;
+#[cfg(unix)]
 mod transport;
 #[cfg(unix)]
 mod worker;
@@ -62,6 +68,94 @@ static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
+
+/// The Host's own verdict on the latest request, retained as data at the point
+/// where the Host answered, so a caller (`mini shell`) can tell a Host decision
+/// from a client error without reading error prose.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum HostDecision {
+    /// The Host session reply carried a refusal byte; `encoded` is the rest of
+    /// the frame (an outcome encoded by the Host's own codec). `decoded` is the
+    /// Host's own `inspect outcome` of that frame over the same session, when
+    /// it could be asked; the client never decodes the frame itself.
+    RefusedFrame {
+        command: String,
+        byte: u8,
+        encoded: Vec<u8>,
+        decoded: Option<Value>,
+    },
+    /// The Host returned a decoded outcome whose type is not `confirmed`.
+    Outcome(Value),
+}
+
+static HOST_DECISION: Mutex<Option<HostDecision>> = Mutex::new(None);
+
+pub(crate) fn note_host_decision(decision: HostDecision) {
+    *HOST_DECISION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(decision);
+}
+
+pub(crate) fn take_host_decision() -> Option<HostDecision> {
+    HOST_DECISION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
+
+/// Exit code for a request the Host refused.
+pub(crate) const EXIT_REFUSED: u8 = 3;
+
+/// A hex field of a Host outcome JSON as text, or `hex …` when it is not
+/// printable UTF-8.
+pub(crate) fn outcome_text(value: Option<&Value>) -> String {
+    let Some(hex) = value.and_then(Value::as_str) else {
+        return "(absent)".into();
+    };
+    match decode_hex(hex)
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok())
+    {
+        Some(text) if !text.chars().any(char::is_control) => text,
+        _ => format!("hex {hex}"),
+    }
+}
+
+/// `refused: <reason>: <text>` for a Host outcome of type `refused`. The
+/// reason is the Host's named `RefusalReason`, read from the Host's own
+/// decoding; it is never inferred from the text.
+pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
+    if outcome.get("type").and_then(Value::as_str) != Some("refused") {
+        return None;
+    }
+    let reason = outcome
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or("unnamed");
+    Some(format!(
+        "refused: {reason}: {} (phase {})",
+        outcome_text(outcome.get("detail")),
+        outcome_text(outcome.get("phase"))
+    ))
+}
+
+/// The line `mini` prints when the Host decided a refusal, from the recorded
+/// decision only.
+fn host_refusal_ending(decision: &HostDecision) -> Option<String> {
+    match decision {
+        HostDecision::RefusedFrame {
+            command,
+            byte,
+            decoded: Some(outcome),
+            ..
+        } => refusal_line(outcome)
+            .map(|line| format!("{line}\n  Host refused {command}, reply byte {byte}")),
+        HostDecision::RefusedFrame { command, byte, .. } => Some(format!(
+            "refused: Host refused {command}, reply byte {byte}; the frame was not decoded"
+        )),
+        HostDecision::Outcome(outcome) => refusal_line(outcome),
+    }
+}
 
 #[cfg(unix)]
 fn host_image_sha256(host: &Path) -> Result<String> {
@@ -150,6 +244,13 @@ usage:
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
+  mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
+  mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
+  mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
+  mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
+  mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
+  mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
+  mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -580,14 +681,35 @@ fn socket_process(
     };
     let reply = session_invoke(host, socket, config, operation, &payload)?;
     if reply[0] == 255 {
+        // Ask the same Host session to decode its own frame (op 8, `inspect
+        // outcome`). A failed decode leaves the decision undecoded; it is
+        // never reconstructed here.
+        let decoded = kind_payload(OsStr::new("outcome"), reply[1..].to_vec())
+            .and_then(|request| session_invoke(host, socket, config, 8, &request))
+            .ok()
+            .filter(|inspected| inspected.first() == Some(&8))
+            .and_then(|inspected| serde_json::from_slice::<Value>(&inspected[1..]).ok());
+        let line = decoded.as_ref().and_then(refusal_line);
+        note_host_decision(HostDecision::RefusedFrame {
+            command: command.to_owned(),
+            byte: 255,
+            encoded: reply[1..].to_vec(),
+            decoded,
+        });
         if command == "prepare" {
             let destination = Path::new(arguments[2]);
             prepare_refusal::retain(destination, &payload, config, &reply)?;
         }
-        return Err(format!(
-            "host refused {command}; encoded refusal: {}",
-            hex(&reply[1..])
-        ));
+        return Err(match line {
+            Some(line) => format!(
+                "host refused {command}: {line}; encoded refusal: {}",
+                hex(&reply[1..])
+            ),
+            None => format!(
+                "host refused {command}; encoded refusal: {}",
+                hex(&reply[1..])
+            ),
+        });
     }
     if let Some(destination) = destination {
         write_new(Path::new(destination), &reply[1..])?;
@@ -951,6 +1073,9 @@ fn print_json(value: &Value) -> Result<()> {
 
 fn print_confirmed_outcome(value: &Value) -> Result<()> {
     print_json(value)?;
+    if value.get("type").and_then(Value::as_str) != Some("confirmed") {
+        note_host_decision(HostDecision::Outcome(value.clone()));
+    }
     match value.get("type").and_then(Value::as_str) {
         Some("confirmed") => Ok(()),
         Some(kind) => Err(format!(
@@ -1971,14 +2096,18 @@ fn continuity(
 }
 
 fn run(mut args: Args) -> Result<()> {
-    if let Some(socket) = args.optional("socket") {
-        let _ = SOCKET.set(path(socket));
+    let socket_argument = args.optional("socket");
+    if let Some(socket) = &socket_argument {
+        let _ = SOCKET.set(path(socket.clone()));
     }
     match args.command.to_string_lossy().as_ref() {
         #[cfg(unix)]
         "workspace" => workspace::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
+        #[cfg(unix)]
+        "shell" => shell::run(args),
+        "fleet" => fleet::run(args),
         #[cfg(unix)]
         "selected-exchange" => {
             let phase = args.required("phase")?;
@@ -2297,7 +2426,9 @@ fn run(mut args: Args) -> Result<()> {
                 .map_err(|e| format!("cannot print host output: {e}"))
         }
         "keygen" => {
-            if SOCKET.get().is_some() {
+            // Refuse a socket named for this command; a session (`mini shell`)
+            // may already have pinned one for its other verbs.
+            if socket_argument.is_some() {
                 return Err("keygen does not use a host socket".to_owned());
             }
             let secret = path(args.required("secret")?);
@@ -2957,10 +3088,16 @@ fn main() -> ExitCode {
             print!("{error}");
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            eprintln!("mini: {error}");
-            ExitCode::FAILURE
-        }
+        Err(error) => match take_host_decision().as_ref().and_then(host_refusal_ending) {
+            Some(line) => {
+                eprintln!("{line}\n  client: {error}");
+                ExitCode::from(EXIT_REFUSED)
+            }
+            None => {
+                eprintln!("mini: {error}");
+                ExitCode::FAILURE
+            }
+        },
     }
 }
 
@@ -3235,6 +3372,40 @@ mod tests {
         assert!(plan_headers(&json!({"slots": [{"header": "zz"}]})).is_err());
         assert!(print_confirmed_outcome(&json!({"type": "confirmed"})).is_ok());
         assert!(print_confirmed_outcome(&json!({"type": "refused"})).is_err());
+    }
+
+    #[test]
+    fn refusal_reason_is_rendered_from_the_host_decoding_only() {
+        let revoked = json!({"type":"refused","reason":"revoked",
+            "phase":hex(b"observation"),"detail":hex(b"the grant is revoked")});
+        assert_eq!(
+            refusal_line(&revoked).unwrap(),
+            "refused: revoked: the grant is revoked (phase observation)"
+        );
+        let decision = HostDecision::RefusedFrame {
+            command: "query".into(),
+            byte: 255,
+            encoded: vec![1],
+            decoded: Some(revoked),
+        };
+        assert!(host_refusal_ending(&decision)
+            .unwrap()
+            .starts_with("refused: revoked: the grant is revoked (phase observation)\n"));
+        // Prose that names a reason is not a reason.
+        let prose = json!({"type":"refused","phase":hex(b"x"),"detail":hex(b"revoked")});
+        assert!(refusal_line(&prose)
+            .unwrap()
+            .starts_with("refused: unnamed: revoked"));
+        let undecoded = HostDecision::RefusedFrame {
+            command: "query".into(),
+            byte: 255,
+            encoded: vec![1],
+            decoded: None,
+        };
+        assert!(host_refusal_ending(&undecoded)
+            .unwrap()
+            .starts_with("refused: Host refused query, reply byte 255"));
+        assert!(host_refusal_ending(&HostDecision::Outcome(json!({"type":"uncertain"}))).is_none());
     }
 
     #[test]

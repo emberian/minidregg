@@ -148,6 +148,27 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 !plan.is_empty() && sponsor.len() == 64 && possession.len() == 64
             }),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // Factory-observation provisioning: sponsor-observed plan, one detached
+        // sponsor signature, and exact submit/lookup. The Host rechecks all.
+        [92, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [93, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [94 | 95, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // Fleet turns: plan and topic poll carry one signed account observation
+        // and one canonical body; assembly carries one plan and one raw
+        // signature; submit/lookup carry one signed ingress; head carries one
+        // signed observation; receipt carries one canonical decimal id.
+        [96 | 100, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [97, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
+        [98 | 99 | 101, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [102, digits @ ..] => {
+            !digits.is_empty()
+                && digits.len() <= 80
+                && digits.iter().all(u8::is_ascii_digit)
+                && (digits.len() == 1 || digits[0] != b'0')
+        }
         _ => false,
     }
 }
@@ -205,6 +226,10 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             })
             .unwrap_or(false),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        [92, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [93, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [94 | 95, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
         [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
         [33, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;
@@ -1084,6 +1109,34 @@ mod tests {
             assert!(allowed_operator_operation(&[operation, b'I']));
             assert!(!allowed_operator_operation(&[operation]));
             assert!(allowed_operation(&[operation, b'I'], false));
+        }
+    }
+
+    #[test]
+    fn factory_observation_provisioning_uses_strict_pairs_and_one_signature() {
+        let mut plan = vec![92];
+        plan.extend_from_slice(&1u32.to_le_bytes());
+        plan.extend_from_slice(b"SC");
+        assert!(allowed_operator_operation(&plan));
+        assert!(allowed_operation(&plan, false));
+        assert!(!allowed_operation(&[92, 1, 0, 0, 0, b'S'], false));
+
+        let mut seal = vec![93];
+        seal.extend_from_slice(&1u32.to_le_bytes());
+        seal.push(b'P');
+        seal.extend_from_slice(&[1u8; 64]);
+        assert!(allowed_operator_operation(&seal));
+        assert!(allowed_operation(&seal, false));
+        seal.pop();
+        assert!(!allowed_operator_operation(&seal));
+        assert!(!allowed_operation(&seal, false));
+        seal.extend_from_slice(&[1u8; 2]);
+        assert!(!allowed_operation(&seal, false));
+        for operation in [94, 95] {
+            assert!(allowed_operator_operation(&[operation, b'I']));
+            assert!(!allowed_operator_operation(&[operation]));
+            assert!(allowed_operation(&[operation, b'I'], false));
+            assert!(!allowed_operation(&[operation], false));
         }
     }
 

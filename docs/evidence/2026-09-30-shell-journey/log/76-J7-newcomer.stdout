@@ -1,0 +1,27 @@
+{
+  "balances": [],
+  "page": {
+    "effectDomain": "8501",
+    "entries": [
+      {
+        "key": {
+          "field": "1",
+          "resource": "12014773799689856118",
+          "type": "object"
+        },
+        "value": "0"
+      },
+      {
+        "key": {
+          "field": "2",
+          "resource": "12014773799689856118",
+          "type": "object"
+        },
+        "value": "7"
+      }
+    ],
+    "root": "114863735909585113518973995005034055034566095808712934349135953146132204597692",
+    "shardNumber": "6"
+  },
+  "type": "resource"
+}

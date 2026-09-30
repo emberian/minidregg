@@ -1,0 +1,67 @@
+{
+  "type": "minidregg-selected-exchange-two-credentials-v1",
+  "storeA": {
+    "domain": "8611",
+    "sponsorSubject": "7",
+    "sponsorPublicKey": "32c35063264dba3e42176e4448d336103fc41a67c6b93c6ba5d5d756584807bb",
+    "notes": "10714172608866371214"
+  },
+  "storeB": {
+    "domain": "8612",
+    "sponsorSubject": "8",
+    "sponsorPublicKey": "af1aa3f533a8a9be50758f3edda83c2bb9b1c2b761b87702c39d2e8658276dc9",
+    "inbox": "10504888637012766587",
+    "homeIdentityEnrollmentSha256": "2914c2e38ed5935cc4f1297415c591b06770e4db9cc074b18ff220e6e9d6efa2",
+    "recipientCapability": "14187484279792257386",
+    "logicalImageSha256": "fc11c70f1e9ef39f3dafdb2cafd9e553d4369308104c23eef9620dfa2d5ac3a8",
+    "sponsorReadAfterReleaseLaw": "B-sponsor-read-after-law: refused"
+  },
+  "packetSha256": "083ae998b101f081a14d80127c7626fed60db97c15259b40a30630781f6ba99b",
+  "articleSha256": "9aa67d4a08738b5e80455be3f3edea8ff16ef1bde3cf4c0261cb4efeb493c8cb",
+  "fnStoredArticleSha256": "2326c02bc02027657a07d340d9b40b8e47eb563391bf71719bd01d1e249d12a0",
+  "fnReportSha256": "d0daafc6ebb14d9fa25246137b30d9d8106291d1723cad4a644a2e76fe35212f",
+  "recipientReceipt": {
+    "acceptedCount": "5",
+    "eventId": "81442599787838077706218083500482412302009989953889020490759042605612706536714",
+    "imageBoundary": "78376631292392673094295113533925064241887293043408016682996396659290837104978",
+    "transactionId": "10259611883041273727857910079077833078408496879473780068089509269879894538480"
+  },
+  "readbackObservationSha256": "a944200334e24296b601ac05918bb4caa5bea5bec2f800629f2ff6352159982a",
+  "disclosure": {
+    "packetSelected": 1,
+    "packetUnselected": 0,
+    "fnStoredBodyEqualsPacket": true,
+    "fnStoredBodySelected": 1,
+    "fnStoredBodyUnselected": 0
+  },
+  "refusals": {
+    "tamperedExpectedArticle": {
+      "boundary": "Host selected-release-fn-legacy-poll",
+      "stderr": "minidregg-host: fn stored article lacks exact selected owner source suffix",
+      "packetOrIngressWritten": false
+    },
+    "tamperedPacket": {
+      "detail": "726571756573742072656675736564",
+      "phase": "61646d697373696f6e",
+      "type": "refused"
+    },
+    "wrongSigner": {
+      "detail": "726571756573742072656675736564",
+      "phase": "61646d697373696f6e",
+      "type": "refused"
+    },
+    "wrongRoot": {
+      "detail": "726571756573742072656675736564",
+      "phase": "61646d697373696f6e",
+      "type": "refused"
+    },
+    "bImageUnchangedByRefusals": true
+  },
+  "positiveControl": {
+    "confirmation": "installed",
+    "transactionId": "23573572036449039888677806215856419506859885535540286761707203469368278076961",
+    "eventId": "10397853233215193694810925940522647345587320536447668149332252600481767941368",
+    "acceptedCount": "6"
+  },
+  "claims": "transport only: no fn-e verdict, event17 coverage or fn cursor ACK"
+}

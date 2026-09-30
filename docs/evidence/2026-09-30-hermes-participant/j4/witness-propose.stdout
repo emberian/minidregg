@@ -1,0 +1,17 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": {
+    "childCapability": "15955908978350248959",
+    "domain": "8501",
+    "kind": "object",
+    "name": "parent",
+    "recipient": "9",
+    "reservation": "55e68be5aedc584a274b005998c5866a38eb0838e0d88c81bf7e5a119747168c",
+    "target": "8751"
+  },
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/m5-hermes/run/j4/host-workspace/proposals/witness/intent.json",
+  "intentSha256": "7e598eb3f5afec3b570aabd5aeaf56b720cb66e186368570cd1ddc477917893f",
+  "proposalId": "witness",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

@@ -64,14 +64,20 @@ def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin
           return ← DurableReceiverIO.bootstrap config.transport
             ResourceBirthCodec.rootBytes durable.image.seed
 
-private def refused (phase detail : String) : Outcome :=
-  .refused phase.toUTF8.toList detail.toUTF8.toList
+private def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
+  .refused reason phase.toUTF8.toList detail.toUTF8.toList
 
 private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
   | .admission reason => s!"admission: {repr reason}"
   | .durable reason => s!"durable: {repr reason}"
+
+private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
+  | .malformedIngress => .malformed
+  | .transactionConflict => .conflict
+  | .admission _ => .operationRejected
+  | .durable _ => .operationRejected
 
 private def slot (snapshot : CredentialAuthorityDomain.Snapshot) (marker role index : Nat)
     (wanted : PackedEffectRequest) : Except String SigningSlot := do
@@ -191,33 +197,37 @@ def enrollmentPlanLoaded (config : Config) (opened : Opened config)
     ParticipantKeyEnrollment.possessionFrame config.deployment.domain
       config.profile.semantics command⟩
 
+/-- The sponsor's signed factory observation authorizes the plan. Byte-level
+mismatches between the command and the observation are `malformed`; the
+observation's own refusal is passed through unchanged; a refused plan on an
+authorized observation is `operationRejected` with the controller's reason. -/
 def enrollmentPlanAuthorizedLoaded (config : Config) (opened : Opened config)
     (signedObservationBytes commandBytes : List UInt8) :
-    IO (Except String ParticipantKeyEnrollment.SigningPlan) := do
+    IO (Except Refusal ParticipantKeyEnrollment.SigningPlan) := do
   let some command := ParticipantKeyEnrollment.commandCodec.decode commandBytes
-    | return .error "enrollment observation refused"
+    | return .error (.of .malformed)
   let some signed := NativeObservationCodec.signedCodec.decode signedObservationBytes
-    | return .error "enrollment observation refused"
+    | return .error (.of .malformed)
   if signed.challenge.intent.subject != command.sponsor then
-    return .error "enrollment observation refused"
+    return .error (.of .malformed)
   match signed.challenge.intent.purpose with
   | .query query =>
       if query.kind != .object || query.target != config.deployment.factoryId ||
           query.view != .resource then
-        return .error "enrollment observation refused"
-  | .prepare _ => return .error "enrollment observation refused"
+        return .error (.of .malformed)
+  | .prepare _ => return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature
       ⟨opened.directory, opened.authority⟩ config.profile config.federation
       config.genesisHeight signed with
-  | .error _ => return .error "enrollment observation refused"
-  | .ok _ => return enrollmentPlanLoaded config opened commandBytes
+  | .error refusal => return .error refusal
+  | .ok _ => return ((enrollmentPlanLoaded config opened commandBytes).mapError
+      fun detail => ⟨.operationRejected, detail⟩)
 
+/-- One-shot form. An unopenable Store is an error, never a refusal. -/
 def enrollmentPlan (config : Config) (signedObservationBytes commandBytes : List UInt8) :
-    IO (Except String ParticipantKeyEnrollment.SigningPlan) := do
-  match ← openExisting config with
-  | .error _ => return .error "enrollment observation refused"
-  | .ok opened =>
-      enrollmentPlanAuthorizedLoaded config opened signedObservationBytes commandBytes
+    IO (Except Refusal ParticipantKeyEnrollment.SigningPlan) := do
+  let opened ← IO.ofExcept (← openExisting config)
+  enrollmentPlanAuthorizedLoaded config opened signedObservationBytes commandBytes
 
 /-- Assembly transports two detached signatures. Native submission rechecks
 both, the current factory law, exact old state and fresh subject. -/
@@ -236,6 +246,62 @@ def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
   pure (ParticipantKeyEnrollment.ingressCodec.encode
     ⟨plan.commandBytes, envelope, possessionSignature⟩)
 
+/-- Source-authored factory-observation provisioning plan on one verified
+image. The single slot is the sponsor's ordinary current-authority header for
+the factory-management request; the capability fields are source-derived. -/
+def provisionPlanLoaded (config : Config) (opened : Opened config)
+    (commandBytes : List UInt8) : Except String ParticipantFactoryProvisioning.SigningPlan := do
+  let command ← need "noncanonical participant provisioning command"
+    (ParticipantFactoryProvisioning.commandCodec.decode commandBytes)
+  let ambient : ParticipantFactoryProvisioning.Ambient :=
+    ⟨config.federation, logicalHeight config opened.durable⟩
+  let prepared ← (ParticipantFactoryProvisioning.prepare config.deployment config.profile ambient
+    opened.durable command).mapError (fun reason => s!"provisioning preparation: {repr reason}")
+  let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
+    (ParticipantFactoryProvisioning.marker config.deployment.domain config.profile.semantics command)
+    ⟨.program, ParticipantFactoryProvisioning.request config.deployment config.profile.template
+      prepared.authority.snapshot config.profile.semantics ambient command⟩).mapError
+        (fun reason => s!"provisioning sponsor key: {repr reason}")
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode selected⟩
+
+/-- As for key enrollment, detailed preparation is disclosed only after a
+sponsor-signed factory resource observation on this same opened image. -/
+def provisionPlanAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes commandBytes : List UInt8) :
+    IO (Except Refusal ParticipantFactoryProvisioning.SigningPlan) := do
+  let some command := ParticipantFactoryProvisioning.commandCodec.decode commandBytes
+    | return .error (.of .malformed)
+  let some signed := NativeObservationCodec.signedCodec.decode signedObservationBytes
+    | return .error (.of .malformed)
+  if signed.challenge.intent.subject != command.sponsor then
+    return .error (.of .malformed)
+  match signed.challenge.intent.purpose with
+  | .query query =>
+      if query.kind != .object || query.target != config.deployment.factoryId ||
+          query.view != .resource then
+        return .error (.of .malformed)
+  | .prepare _ => return .error (.of .malformed)
+  match ← NativeObservationController.authorize config.signature
+      ⟨opened.directory, opened.authority⟩ config.profile config.federation
+      config.genesisHeight signed with
+  | .error refusal => return .error refusal
+  | .ok _ => return ((provisionPlanLoaded config opened commandBytes).mapError
+      fun detail => ⟨.operationRejected, detail⟩)
+
+/-- Assembly transports one detached sponsor signature; native submission
+rechecks it, the current factory law, the exact old state and the holder. -/
+def provisionAssemble (plan : ParticipantFactoryProvisioning.SigningPlan)
+    (sponsorSignature : List UInt8) : Except String (List UInt8) := do
+  check (decide (sponsorSignature.length = 64)) "sponsor signature must be 64 bytes"
+  let header ← need "noncanonical provisioning sponsor header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.sponsorHeader)
+  let _ ← need "noncanonical provisioning plan command"
+    (ParticipantFactoryProvisioning.commandCodec.decode plan.commandBytes)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode
+    ⟨header, sponsorSignature⟩
+  pure (ParticipantFactoryProvisioning.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
 def observationContext (config : Config) (opened : Opened config) :
     NativeObservationController.Context config.deployment opened.durable :=
   ⟨opened.directory, opened.authority⟩
@@ -243,54 +309,81 @@ def observationContext (config : Config) (opened : Opened config) :
 /-- Only commitments and explicitly public request/key/policy coordinates
 escape this pre-authorization step; the controller derives every header. -/
 def challengeLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
-    Except String NativeObservationCodec.Challenge := do
+    Except Refusal NativeObservationCodec.Challenge := do
   let some intent := NativeObservationCodec.intentCodec.decode bytes
-    | throw "observation refused"
+    | throw (.of .malformed)
   (NativeObservationController.challenge (observationContext config opened)
     config.profile config.federation config.genesisHeight intent).mapError
-      (fun _ => "observation refused")
+      NativeObservationController.preAuthentication
 
+/-- A challenge refusal is an unauthenticated answer: it names only a
+`preAuthentication` reason, or `malformed` for bytes that do not decode. -/
+theorem challengeLoaded_public (config : Config) (opened : Opened config) (bytes : List UInt8)
+    (refusal : Refusal) (refused : challengeLoaded config opened bytes = .error refusal) :
+    refusal = .of .malformed ∨ ∃ inner, refusal = NativeObservationController.preAuthentication inner := by
+  unfold challengeLoaded at refused
+  cases decoded : NativeObservationCodec.intentCodec.decode bytes with
+  | none =>
+      simp only [decoded] at refused
+      cases refused
+      exact Or.inl rfl
+  | some intent =>
+      simp only [decoded] at refused
+      cases decided : NativeObservationController.challenge (observationContext config opened)
+          config.profile config.federation config.genesisHeight intent with
+      | error inner =>
+          rw [decided] at refused
+          cases refused
+          exact Or.inr ⟨inner, rfl⟩
+      | ok value =>
+          rw [decided] at refused
+          cases refused
+
+/-- One-shot form. An unopenable Store is an error, never a refusal. -/
 def challenge (config : Config) (bytes : List UInt8) :
-    IO (Except String NativeObservationCodec.Challenge) := do
-  match ← openExisting config with
-  | .error _ => return .error "observation refused"
-  | .ok opened => return challengeLoaded config opened bytes
+    IO (Except Refusal NativeObservationCodec.Challenge) := do
+  let opened ← IO.ofExcept (← openExisting config)
+  return challengeLoaded config opened bytes
 
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
 def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
-    (bytes : List UInt8) : IO (Except String SigningPlan) := do
+    (bytes : List UInt8) : IO (Except Refusal SigningPlan) := do
   let some signed := NativeObservationCodec.signedCodec.decode bytes
-    | return .error "observation refused"
+    | return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature (observationContext config opened)
       config.profile config.federation config.genesisHeight signed with
-  | .error _ => return .error "observation refused"
+  | .error refusal => return .error refusal
   | .ok _ =>
       match signed.challenge.intent.purpose with
-      | .prepare draft => return prepareLoaded config opened draft
-      | .query _ => return .error "signed observation purpose is not preparation"
+      | .prepare draft => return ((prepareLoaded config opened draft).mapError
+          fun detail => ⟨.operationRejected, detail⟩)
+      | .query _ => return .error (.of .malformed)
 
-def prepare (config : Config) (bytes : List UInt8) : IO (Except String SigningPlan) := do
-  match ← openExisting config with
-  | .error _ => return .error "observation refused"
-  | .ok opened => prepareAuthorizedLoaded config opened bytes
+/-- One-shot form. An unopenable Store is an error, never a refusal. -/
+def prepare (config : Config) (bytes : List UInt8) : IO (Except Refusal SigningPlan) := do
+  let opened ← IO.ofExcept (← openExisting config)
+  prepareAuthorizedLoaded config opened bytes
 
 /-- The controller projects the authorized logical resource/account cut. Raw
 snapshots, whole Books, and unrelated authority pages never escape this API. -/
 def queryLoaded (config : Config) (opened : Opened config)
-    (bytes : List UInt8) : IO (Except String (List UInt8)) := do
+    (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
   let some signed := NativeObservationCodec.signedCodec.decode bytes
-    | return .error "observation refused"
+    | return .error (.of .malformed)
   match ← NativeObservationController.authorize config.signature (observationContext config opened)
       config.profile config.federation config.genesisHeight signed with
-  | .error _ => return .error "observation refused"
-  | .ok token => return need "signed observation purpose is not a query" token.queryResult
+  | .error refusal => return .error refusal
+  | .ok token =>
+      match token.queryResult with
+      | some view => return .ok view
+      | none => return .error (.of .malformed)
 
-def query (config : Config) (bytes : List UInt8) : IO (Except String (List UInt8)) := do
-  match ← openExisting config with
-  | .error _ => return .error "observation refused"
-  | .ok opened => queryLoaded config opened bytes
+/-- One-shot form. An unopenable Store is an error, never a refusal. -/
+def query (config : Config) (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do
+  let opened ← IO.ofExcept (← openExisting config)
+  queryLoaded config opened bytes
 
 /-- Custody signs each exact canonical header outside the host. Assembly only
 places signatures into the source-owned ingress; submission checks them anew. -/
@@ -450,9 +543,9 @@ def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
       config.transport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
-  | .rejected reason => return refused "enroll-key" s!"{repr reason}"
-  | .transactionConflict => return refused "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused "durable" s!"{repr reason}"
+  | .rejected reason => return refused .operationRejected "enroll-key" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -466,7 +559,7 @@ def enrollmentSubmit (config : Config) (bytes : List UInt8) : IO Outcome := do
 def enrollmentLookupLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : Outcome :=
   match ParticipantKeyEnrollment.decodeIngress bytes with
-  | none => refused "enroll-key" "noncanonical signed ingress"
+  | none => refused .malformed "enroll-key" "noncanonical signed ingress"
   | some ingress =>
     match ParticipantKeyEnrollmentReceiver.replay config.deployment.domain
         config.profile.semantics opened.durable ingress with
@@ -474,13 +567,243 @@ def enrollmentLookupLoaded (config : Config) (opened : Opened config)
         match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
         | some original => .confirmed .replayed original
         | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
-    | some (.error _) => refused "replay" "transaction identity conflict"
+    | some (.error _) => refused .conflict "replay" "transaction identity conflict"
     | none => .absent
 
 def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   match ← openExisting config with
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok opened => return enrollmentLookupLoaded config opened bytes
+
+def provisionSubmitLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← ParticipantFactoryProvisioningReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
+      config.storage.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "provision-factory-observe" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-! ## Fleet turns: plan, assembly, submit, lookup, topic reads, heads -/
+
+/-- Bound on page reads when walking one topic stream (4 events per page). -/
+def fleetMaxPages : Nat := 4096
+
+/-- The finalized command fills exactly two draft fields: the pinned base
+tariff and, when the draft's publication position is zero, the stream's next
+position on this image. Every other field is the draft's. -/
+def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.Command) :
+    FleetTurn.Command :=
+  let publication := draft.publication.map fun publication =>
+    if publication.sequence = 0 then
+      let head := FleetTurn.streamHead config.deployment opened.directory.directory
+        (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
+        fleetMaxPages
+      { publication with sequence := head + 1 }
+    else publication
+  { draft with fee := config.tariff.base, publication := publication }
+
+def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetTurn.Command) :
+    Except String FleetTurn.SigningPlan := do
+  let ambient : FleetTurn.Ambient := ⟨config.federation, logicalHeight config opened.durable⟩
+  let prepared ← (FleetTurn.prepare config.deployment config.profile config.tariff ambient
+    opened.durable command).mapError (fun reason => s!"fleet turn preparation: {repr reason}")
+  let selected ← (CredentialSignatureAdmission.signingHeader prepared.authority.snapshot
+    (FleetTurn.marker config.deployment.domain config.profile.semantics command)
+    ⟨.account, FleetTurn.request prepared.authority.snapshot config.profile.semantics ambient
+      command⟩).mapError (fun reason => s!"fleet turn signer key: {repr reason}")
+  pure ⟨config.deployment.domain, config.profile.semantics, FleetTurn.commandCodec.encode command,
+    CredentialSignedEnvelopeController.headerCodec.encode selected⟩
+
+/-- Planning reads the paying account's balance and topic pages, so it is
+released only behind a current signed observation of that account by the
+turn's own signer. -/
+def fleetObservedAccount (config : Config) (opened : Opened config)
+    (signedObservationBytes : List UInt8) : IO (Except Refusal (SubjectId × Nat)) := do
+  let some signed := NativeObservationCodec.signedCodec.decode signedObservationBytes
+    | return .error (.of .malformed)
+  match signed.challenge.intent.purpose with
+  | .query query =>
+      if query.kind != .account || query.view != .resource then
+        return .error (.of .malformed)
+      match ← NativeObservationController.authorize config.signature
+          ⟨opened.directory, opened.authority⟩ config.profile config.federation
+          config.genesisHeight signed with
+      | .error refusal => return .error refusal
+      | .ok _ => return .ok (signed.challenge.intent.subject, query.target)
+  | .prepare _ => return .error (.of .malformed)
+
+def fleetPlanAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes draftBytes : List UInt8) :
+    IO (Except Refusal FleetTurn.SigningPlan) := do
+  let some draft := FleetTurn.commandCodec.decode draftBytes
+    | return .error ⟨.malformed, "noncanonical fleet turn draft"⟩
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error refusal => return .error refusal
+  | .ok (subject, account) =>
+      if subject != draft.subject || account != draft.payer then
+        return .error (.of .malformed)
+      return ((fleetPlanLoaded config opened (fleetFinalize config opened draft)).mapError
+        fun detail => ⟨.operationRejected, detail⟩)
+
+def fleetAssemble (plan : FleetTurn.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "fleet signature must be 64 bytes"
+  let header ← need "noncanonical fleet turn header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let _ ← need "noncanonical fleet turn plan command"
+    (FleetTurn.commandCodec.decode plan.commandBytes)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (FleetTurn.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+/-- `confirm` seals the original receipt from the image the caller already
+tracks (a session refreshes by the appended delta); it never substitutes a
+different admission. -/
+def fleetSubmitLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO Outcome := do
+  match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile config.tariff
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
+      config.storage.transport opened.durable bytes with
+  | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
+  -- The signed header names an authority root older than the loaded one: the
+  -- plan was made against an earlier image and nothing moved. That is the
+  -- typed contention outcome (re-plan against the new state), decided from the
+  -- header's root before any signature is examined.
+  | .rejected (.signature (.envelope .staleAuthority)) => return .contention
+  | .rejected reason => return refused .operationRejected "fleet-turn" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup. Absence never submits fresh work. -/
+def provisionLookupLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : Outcome :=
+  match ParticipantFactoryProvisioning.decodeIngress bytes with
+  | none => refused .malformed "provision-factory-observe" "noncanonical signed ingress"
+  | some ingress =>
+    match ParticipantFactoryProvisioningReceiver.replay config.deployment.domain
+        config.profile.semantics opened.durable ingress with
+    | some (.ok receipt) =>
+        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+        | some original => .confirmed .replayed original
+        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+    | none => .absent
+
+/-- Receipt-only historical lookup of one retained ingress. Absence never
+submits fresh work. -/
+def fleetLookupLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : Outcome :=
+  match FleetTurn.decodeIngress bytes with
+  | none => refused .malformed "fleet-turn" "noncanonical signed ingress"
+  | some ingress =>
+    match FleetTurnReceiver.replay config.deployment.domain
+        config.profile.semantics opened.durable ingress with
+    | some (.ok receipt) =>
+        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+        | some original => .confirmed .replayed original
+        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+    | none => .absent
+
+/-- Exact receipt of one accepted transaction, by transaction id alone. It
+names the original accepted prefix; a later tip does not replace it. -/
+def receiptByTransactionLoaded (config : Config) (opened : Opened config)
+    (transactionId : Digest) : Option Receipt := do
+  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+  historicalReceipt config opened.durable transactionId record.event.eventId
+
+structure FleetPolledEvent where
+  sequence : Nat
+  eventKey : Digest
+  transactionId : Digest
+  effectId : Digest
+  payloadDigest : Digest
+  /-- The exact payload from the accepted signed ingress, present only when
+  its digest equals the one the page committed. -/
+  payload : Option (List UInt8)
+  author : Hyperdocument.PrincipalRef
+  bookPreRoot : Digest
+  bookPostRoot : Digest
+  receipt : Option Receipt
+
+structure FleetPollView where
+  subject : SubjectId
+  payer : Nat
+  topic : List UInt8
+  stream : Digest
+  cursor : Nat
+  head : Nat
+  events : List FleetPolledEvent
+
+def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId : Digest) :
+    Option FleetTurn.DecodedIngress := do
+  let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
+  FleetTurn.decodeIngress record.event.canonicalBytes
+
+def fleetPolledEvent (config : Config) (opened : Opened config)
+    (entry : FleetTurn.EventEntry) : FleetPolledEvent :=
+  let record := entry.record
+  let payload := (fleetJournalTurn opened record.requestId).bind fun ingress =>
+    ingress.command.publication.bind fun publication =>
+      if FleetTurn.payloadDigest config.deployment.domain publication.payload = record.operation.digest
+      then some publication.payload else none
+  let receipt := receiptByTransactionLoaded config opened record.requestId
+  ⟨record.semanticVersion, entry.key.digest, record.requestId, record.effectId,
+    record.operation.digest, payload, record.author, record.preStateRoot, record.postStateRoot,
+    receipt⟩
+
+def fleetPollMax : Nat := 64
+
+/-- Events of `(observed account, topic)` strictly after `cursor`, behind a
+current signed observation of that account. Reading an account's topics is
+the account's own observe grant; a topic label confers nothing. -/
+def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
+    IO (Except Refusal FleetPollView) := do
+  if topic.isEmpty || topic.length > FleetTurn.maxTopicBytes then
+    return .error ⟨.malformed, "fleet topic must be 1..64 bytes"⟩
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error refusal => return .error refusal
+  | .ok (subject, payer) =>
+      let stream := FleetTurn.streamDigest config.deployment.domain payer topic
+      let directory := opened.directory.directory
+      let entries := FleetTurn.eventsSince config.deployment directory stream cursor
+        (min limit fleetPollMax)
+      return .ok ⟨subject, payer, topic, stream, cursor,
+        FleetTurn.streamHead config.deployment directory stream fleetMaxPages,
+        entries.map (fleetPolledEvent config opened)⟩
+
+structure FleetHeadView where
+  subject : SubjectId
+  payer : Nat
+  /-- Accepted fleet turns paid by this account, in journal order. -/
+  turns : Nat
+  head : Option (Digest × Receipt)
+
+/-- The newest accepted fleet turn paid by the observed account. This is a
+scan of the accepted journal, decoding each retained ingress exactly. -/
+def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes : List UInt8) : IO (Except Refusal FleetHeadView) := do
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error refusal => return .error refusal
+  | .ok (subject, payer) =>
+      let paid := opened.durable.image.accepted.filter fun record =>
+        match FleetTurn.decodeIngress record.event.canonicalBytes with
+        | some ingress => ingress.command.payer == payer
+        | none => false
+      let head := paid.getLast?.bind fun record =>
+        (historicalReceipt config opened.durable record.transactionId record.event.eventId).map
+          fun receipt => (record.transactionId, receipt)
+      return .ok ⟨subject, payer, paid.length, head⟩
 
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
@@ -490,9 +813,9 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
           ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused "revoke" s!"{repr reason}"
-      | .transactionConflict => return refused "replay" "transaction identity conflict"
-      | .durableRejected reason => return refused "durable" s!"{repr reason}"
+      | .rejected reason => return refused .operationRejected "revoke" s!"{repr reason}"
+      | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -500,9 +823,9 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       match ← CapabilityDelegationReceiver.receiveLoaded config.deployment config.profile
           ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused "delegate" s!"{repr reason}"
-      | .transactionConflict => return refused "replay" "transaction identity conflict"
-      | .durableRejected reason => return refused "durable" s!"{repr reason}"
+      | .rejected reason => return refused .operationRejected "delegate" s!"{repr reason}"
+      | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -515,14 +838,14 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
             opened.durable bytes with
         | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
         | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
-        | .rejected _ => return refused "grain-birth" "request refused"
+        | .rejected _ => return refused .operationRejected "grain-birth" "request refused"
         | .contention => return .contention
         | .unavailable detail => return .unavailable detail.toUTF8.toList
         | .uncertain detail => return .uncertain detail.toUTF8.toList
       match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
           config.signature config.transport opened.durable height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused "birth" (birthRejection reason)
+      | .rejected reason => return refused (birthReason reason) "birth" (birthRejection reason)
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -530,14 +853,14 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       match ← PolicyInstallReceiver.receiveLoaded config.profile config.deployment config.signature
           config.transport opened.durable config.federation height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
-      | .rejected reason => return refused "install" s!"{repr reason}"
-      | .durableRejected reason => return refused "durable" s!"{repr reason}"
+      | .rejected reason => return refused .operationRejected "install" s!"{repr reason}"
+      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .invoke signed =>
       match DeclaredResourceController.commandCodec.decode signed.commandBytes with
-      | none => return refused "invoke" "noncanonical command"
+      | none => return refused .malformed "invoke" "noncanonical command"
       | some command =>
           match ← DeclaredResourceController.withAcceptedLoaded config.deployment config.profile
               ⟨config.federation, height⟩ config.signature opened.durable signed
@@ -550,8 +873,8 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
                   config.transport ResourceBirthCodec.rootBytes opened.durable intent))
               pure with
           | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
-          | .rejected reason => return refused "invoke" s!"{repr reason}"
-          | .transactionConflict => return refused "replay" "transaction identity conflict"
+          | .rejected reason => return refused .operationRejected "invoke" s!"{repr reason}"
+          | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
           | .unavailable detail => return .unavailable detail.toUTF8.toList
           | .settlement result =>
               match result with
@@ -559,7 +882,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
                   confirm kind
                     (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
                     (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
-              | .rejected reason => return refused "durable" s!"{repr reason}"
+              | .rejected reason => return refused .operationRejected "durable" s!"{repr reason}"
               | .contention => return .contention
               | .unavailable detail => return .unavailable detail.toUTF8.toList
               | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -567,20 +890,37 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
 def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome :=
   submitLoadedWith config opened call (confirmed config)
 
+/-- The outcome frame for a refused signed observation, preparation or
+enrollment plan: it carries the reason of the branch that decided. -/
+def refusalOutcome (phase : String) (refusal : Refusal) : Outcome :=
+  .refused refusal.reason phase.toUTF8.toList refusal.detail.toUTF8.toList
+
+/-- Twin of `public_refusal_uniform`: on the signed requester's own channel the
+decoded frame names exactly the reason the admission path produced (for the
+capability branch, `ResourceObservationAdmission.authorizeChecked_capability_reason`). -/
+theorem signedRefusal_carries_reason (phase : String) (refusal : Refusal) :
+    outcomeCodec.decode (outcomeCodec.encode (refusalOutcome phase refusal)) =
+      some (.refused refusal.reason phase.toUTF8.toList refusal.detail.toUTF8.toList) :=
+  outcome_roundtrip _
+
 /-- A fresh mutation need not confer read authority (blind writes and credits
 remain possible). Its preflight/native/semantic refusal therefore exposes no
 state-dependent reason. This is output non-disclosure, not a timing theorem. -/
 def publicSubmissionOutcome : Outcome → Outcome
-  | .refused _ _ => refused "admission" "request refused"
+  | .refused _ _ _ => refused .undisclosed "admission" "request refused"
   | result => result
 
-theorem public_refusal_uniform (phase detail : List UInt8) :
-    publicSubmissionOutcome (.refused phase detail) =
-      refused "admission" "request refused" := rfl
+/-- Every blind-submission refusal is the same frame, whatever branch refused
+and whatever reason it named, so a submitter without read authority learns
+nothing from it. Its twin for the signed observation channel is
+`signedRefusal_carries_reason`. -/
+theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UInt8) :
+    publicSubmissionOutcome (.refused reason phase detail) =
+      refused .undisclosed "admission" "request refused" := rfl
 
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with
-    | none => pure (refused "wire" "noncanonical or unsupported native host call")
+    | none => pure (refused .malformed "wire" "noncanonical or unsupported native host call")
     | some call =>
         match ← openExisting config with
         | .error detail => pure (.unavailable detail.toUTF8.toList)
@@ -596,53 +936,53 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
   match call with
   | .revoke bytes =>
       match CapabilityRevocationReceiver.decodeIngress bytes with
-      | none => refused "revoke" "noncanonical ingress"
+      | none => refused .malformed "revoke" "noncanonical ingress"
       | some ingress =>
           match CapabilityRevocationReceiver.replay config.deployment.domain config.profile.semantics opened.durable ingress with
           | none => .absent
-          | some (.error _) => refused "replay" "transaction identity conflict"
+          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
           | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .delegate bytes =>
       match CapabilityDelegationReceiver.decodeIngress bytes with
-      | none => refused "delegate" "noncanonical ingress"
+      | none => refused .malformed "delegate" "noncanonical ingress"
       | some ingress =>
           match CapabilityDelegationReceiver.replay config.deployment.domain config.profile.semantics opened.durable ingress with
           | none => .absent
-          | some (.error _) => refused "replay" "transaction identity conflict"
+          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
           | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .birth bytes =>
       match GrainResourceBirthPolicyController.decodeIngress bytes with
       | some ingress =>
           match GrainResourceBirthReceiver.replay opened.durable ingress with
           | none => .absent
-          | some (.error _) => refused "replay" "transaction identity conflict"
+          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
           | some (.ok receipt) => finish receipt.transactionId receipt.eventId
       | none =>
           if bytes.take 7 = GrainResourceBirthPolicyController.ingressFrame.take 7 then
-            refused "grain-birth" "noncanonical ingress"
+            refused .malformed "grain-birth" "noncanonical ingress"
           else
             match ResourceBirthPolicyController.Concrete.decodeIngress bytes with
-            | none => refused "birth" "noncanonical ingress"
+            | none => refused .malformed "birth" "noncanonical ingress"
             | some ingress =>
                 match ResourceBirthReceiver.replay config.deployment.domain opened.durable ingress with
                 | none => .absent
-                | some (.error _) => refused "replay" "transaction identity conflict"
+                | some (.error _) => refused .conflict "replay" "transaction identity conflict"
                 | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .install bytes =>
       match PolicyInstallReceiver.decodeIngress bytes with
-      | none => refused "install" "noncanonical ingress"
+      | none => refused .malformed "install" "noncanonical ingress"
       | some ingress =>
           match PolicyInstallReceiver.replay config.deployment.domain opened.durable ingress with
           | none => .absent
-          | some (.error _) => refused "replay" "transaction identity conflict"
+          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
           | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .invoke signed =>
       match DeclaredResourceController.commandCodec.decode signed.commandBytes with
-      | none => refused "invoke" "noncanonical command"
+      | none => refused .malformed "invoke" "noncanonical command"
       | some command =>
           match DeclaredResourceController.recordedInvocation config.deployment.domain config.profile.semantics
               command signed opened.durable with
-          | .error _ => refused "replay" "transaction identity conflict"
+          | .error _ => refused .conflict "replay" "transaction identity conflict"
           | .ok none => .absent
           | .ok (some record) => finish record.transactionId record.event.event.eventId
 
@@ -672,7 +1012,7 @@ theorem lookupLoaded_composite_conflict (config : Config) (opened : Opened confi
     (decoded : GrainResourceBirthPolicyController.decodeIngress bytes = some ingress)
     (conflict : GrainResourceBirthReceiver.replay opened.durable ingress = some (.error reason)) :
     lookupLoaded config opened (.birth bytes) =
-      refused "replay" "transaction identity conflict" := by
+      refused .conflict "replay" "transaction identity conflict" := by
   simp [lookupLoaded, decoded, conflict]
 
 /-- Once the composite `DREGG/G` family prefix is present, malformed composite
@@ -682,17 +1022,21 @@ theorem lookupLoaded_malformed_composite (config : Config) (opened : Opened conf
     (prefixExact : bytes.take 7 = GrainResourceBirthPolicyController.ingressFrame.take 7)
     (malformed : GrainResourceBirthPolicyController.decodeIngress bytes = none) :
     lookupLoaded config opened (.birth bytes) =
-      refused "grain-birth" "noncanonical ingress" := by
+      refused .malformed "grain-birth" "noncanonical ingress" := by
   simp [lookupLoaded, malformed, prefixExact]
 
-#print axioms lookupLoaded_composite_exact
-#print axioms lookupLoaded_composite_absent
-#print axioms lookupLoaded_composite_conflict
-#print axioms lookupLoaded_malformed_composite
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_composite_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_composite_exact
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_composite_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_composite_absent
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_composite_conflict' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_composite_conflict
+/-- info: 'Minidregg.Kernel.NativeHost.lookupLoaded_malformed_composite' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lookupLoaded_malformed_composite
 
 def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   match callCodec.decode bytes with
-  | none => return refused "wire" "noncanonical native host call"
+  | none => return refused .malformed "wire" "noncanonical native host call"
   | some call =>
       match ← openExisting config with
       | .error detail => return .unavailable detail.toUTF8.toList

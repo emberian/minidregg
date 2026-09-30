@@ -297,6 +297,18 @@ pub(crate) fn reserve(
     })
 }
 
+/// Whether this reservation is already bound to an exact custody attempt.
+/// Once bound, a native attempt may exist and its source is fixed.
+pub(crate) fn is_bound(reservation: &Reservation) -> Result<bool> {
+    let root = reservation
+        .record_path
+        .parent()
+        .ok_or("namespace reservation lacks root")?;
+    Ok(root
+        .join(format!("binding-{}.json", reservation.request_digest))
+        .exists())
+}
+
 /// Bind a reserved request to one exact retained source and one custody
 /// attempt before any call may be submitted. A second controller can find the
 /// original path, but cannot bind a different attempt or source to these IDs.

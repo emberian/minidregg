@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Render one session-bound OpenSSH authorized_keys entry; do not install it.
+# restrict disables forwarding and agent access; pty is re-allowed so that
+# `ssh -t` gets the interactive shell.
+set -euo pipefail
+if [[ $# != 8 ]]; then
+  echo 'usage: render-shell-key ABS_WRAPPER ABS_MINI ABS_HOST ABS_CONFIG ABS_SOCKET ABS_WORKSPACE ABS_HOME FRIEND_PUBKEY_FILE' >&2
+  exit 64
+fi
+public_key=$8
+for path in "${@:1:7}"; do
+  [[ $path =~ ^/[A-Za-z0-9_./-]+$ && $path != */../* && $path != */.. ]] || {
+    echo 'paths must be simple absolute paths without traversal or shell syntax' >&2
+    exit 64
+  }
+done
+[[ -x $1 && -x $2 && -x $3 && -f $4 ]] || {
+  echo 'wrapper, mini and Host must be executable and the config must exist' >&2
+  exit 66
+}
+[[ -f $public_key ]] || exit 66
+read -r key_type key_data _ < "$public_key"
+[[ $key_type == ssh-ed25519 && $key_data =~ ^[A-Za-z0-9+/=]+$ ]] || {
+  echo 'one Ed25519 public key is required' >&2
+  exit 65
+}
+ssh-keygen -lf "$public_key" >/dev/null
+printf 'restrict,pty,command="%s %s %s %s %s %s %s" %s %s\n' \
+  "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$key_type" "$key_data"

@@ -438,6 +438,16 @@ struct Journal {
     workspace_attempt: Option<WorkspaceAttempt>,
     #[serde(default)]
     workspace_birth: Option<WorkspaceBirth>,
+    /// Terminal resolution of every workspace submission, newest last and
+    /// bounded. `performed`, `refused` and `uncertain` are the only values;
+    /// an uncertain record is never resubmitted, only re-looked-up.
+    #[serde(default)]
+    workspace_resolutions: Vec<WorkspaceResolution>,
+    /// Worker generation of the last managed law this controller confirmed
+    /// installing. Renewal recognizes exactly that law as its own after a
+    /// fence advanced the grain generation past it.
+    #[serde(default)]
+    managed_law_generation: Option<String>,
     #[serde(default)]
     reconciliation_log: Vec<Value>,
     #[serde(default)]
@@ -493,6 +503,114 @@ struct WorkspaceAttempt {
     definite: bool,
     #[serde(default)]
     no_submit: bool,
+    /// Client proposal directory holding the intent actually submitted. The
+    /// controller authors it from the retained typed request only after its
+    /// own purse transitions, so none of them can make it stale.
+    #[serde(default)]
+    authored: Option<String>,
+}
+
+const MAX_WORKSPACE_RESOLUTIONS: usize = 256;
+
+/// How a held allowance's signed reservation is shown to be the one this
+/// controller confirmed before it is settled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HoldProof {
+    /// No Mini event since the reserve receipt.
+    SameImage,
+    /// An operator reviewed the exact retained attempts.
+    OperatorAudited,
+    /// Parent only: the installed law is this controller's exact managed
+    /// worker law and no parent attempt is pending.
+    OwnManagedLaw,
+}
+
+impl HoldProof {
+    fn label(self) -> &'static str {
+        match self {
+            Self::SameImage => "same-image",
+            Self::OperatorAudited => "operator-audited",
+            Self::OwnManagedLaw => "own-managed-law",
+        }
+    }
+}
+
+/// Worker generations whose exact managed law a renewal accepts as its own.
+/// A paused grain may carry the law for its current generation or, after an
+/// interrupted renewal, the next one. A hard fence advances the generation
+/// without a law change, so the generation this controller last confirmed
+/// installing is also its own law. Nothing else is: a custom law, or any
+/// other generation, still refuses.
+fn managed_law_candidates(status: &str, desired: u64, own: Option<u64>) -> Result<Vec<u64>> {
+    let mut candidates = if status == "0" {
+        let paused = desired
+            .checked_sub(1)
+            .ok_or("paused generation has no prior value")?;
+        vec![desired, paused]
+    } else {
+        vec![desired]
+    };
+    if let Some(own) = own {
+        if own <= desired && !candidates.contains(&own) {
+            candidates.push(own);
+        }
+    }
+    Ok(candidates)
+}
+
+/// Unresolved-effect notes whose only possible effects, for a network-none
+/// scoped worker with every Mini attempt resolved, are already accounted for.
+fn derivable_effect_note(note: &str) -> bool {
+    (note.starts_with("worker operation ")
+        && note.ends_with(" stopped after controller restart; external effects need acknowledgement"))
+        || note == "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement"
+        || note == "parent reserved operation may have external effects; explicit operator acknowledgement required"
+        || note.starts_with("Hermes prompt ")
+}
+
+/// Startup proof that no process of an earlier run of this controller's
+/// unit survives: this process is the unit's active MainPID and the unit
+/// cgroup lists only this process.
+fn prove_prior_run_stopped(task: &str) -> Result<()> {
+    prove_controller_unit(task)?;
+    let cgroup = fs::read_to_string("/proc/self/cgroup")
+        .map_err(|e| format!("controller cgroup: {e}"))?;
+    let path = cgroup
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .ok_or("controller is not in a unified cgroup")?;
+    if !path.ends_with(&format!("/mini-grain-controller@{task}.service")) || path.contains("..") {
+        return Err("controller cgroup is not its unit".into());
+    }
+    let procs = fs::read_to_string(format!("/sys/fs/cgroup{path}/cgroup.procs"))
+        .map_err(|e| format!("controller cgroup members: {e}"))?;
+    let members: Vec<&str> = procs.split_whitespace().collect();
+    if members != [std::process::id().to_string().as_str()] {
+        return Err(format!(
+            "controller unit cgroup holds other processes: {}",
+            members.join(",")
+        ));
+    }
+    Ok(())
+}
+
+/// The retained terminal state of one workspace submission. `basis` names
+/// the evidence that decided it; `outcome` is the exact native record (or
+/// a marker when no native record exists).
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkspaceResolution {
+    operation_id: u64,
+    proposal_id: u64,
+    intent_sha256: String,
+    attempt: PathBuf,
+    resolution: String,
+    basis: String,
+    outcome: Value,
+    tool_charge: String,
+    resolved_by: String,
+    #[serde(default)]
+    authored: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -1580,6 +1698,25 @@ impl Journal {
         if self.workspace_proposals.len() > 64 {
             return Err("workspace proposal retention bound exceeded".into());
         }
+        if self.workspace_resolutions.len() > MAX_WORKSPACE_RESOLUTIONS {
+            return Err("workspace resolution retention bound exceeded".into());
+        }
+        let mut resolved = std::collections::HashSet::new();
+        for record in &self.workspace_resolutions {
+            if record.operation_id >= self.next_operation_id
+                || !resolved.insert(record.operation_id)
+                || !matches!(
+                    record.resolution.as_str(),
+                    "performed" | "refused" | "uncertain"
+                )
+                || self
+                    .workspace_attempt
+                    .as_ref()
+                    .is_some_and(|pending| pending.operation_id == record.operation_id)
+            {
+                return Err("workspace resolution record is malformed".into());
+            }
+        }
         if self.workspace_proposals.is_empty()
             && self.workspace_attempt.is_none()
             && self.workspace_birth.is_none()
@@ -1618,11 +1755,22 @@ impl Journal {
                 || !self.workspace_proposals.iter().any(|proposal| {
                     proposal.id == pending.proposal_id
                         && proposal.submitted
-                        && proposal.intent_sha256 == pending.intent_sha256
+                        && (pending.authored.is_some()
+                            || proposal.intent_sha256 == pending.intent_sha256)
                 })
                 || (pending.no_submit && pending.attempt.exists())
             {
                 return Err("workspace attempt differs from submitted proposal".into());
+            }
+            if let Some(authored) = &pending.authored {
+                if authored != &format!("{}-x{}", pending.proposal_id, pending.operation_id)
+                    || sha256_bytes(&bounded_regular_file(
+                        &root.join("proposals").join(authored).join("intent.json"),
+                        262_144,
+                    )?)? != pending.intent_sha256
+                {
+                    return Err("workspace authored intent differs from its attempt".into());
+                }
             }
         }
         if self.workspace_attempt.is_some() && self.workspace_birth.is_some() {
@@ -1897,6 +2045,8 @@ impl Journal {
             workspace_proposals: Vec::new(),
             workspace_attempt: None,
             workspace_birth: None,
+            workspace_resolutions: Vec::new(),
+            managed_law_generation: None,
             reconciliation_log: Vec::new(),
             hermes_session: None,
             prior_hermes_sessions: Vec::new(),
@@ -2171,6 +2321,48 @@ fn inspected_pre_submit_refusal(config: &Config, attempt: &Path) -> Result<Optio
     if value["type"] != "refused" || value["phase"] != "70726570617265" {
         return Err("native Outcome is not a prepare-phase refusal".into());
     }
+    Ok(Some(value))
+}
+
+fn valid_workspace_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+fn workspace_resolution_json(record: &WorkspaceResolution) -> Value {
+    json!({"operationId":record.operation_id.to_string(),
+        "proposalId":record.proposal_id.to_string(),
+        "resolution":record.resolution,"basis":record.basis,
+        "outcome":record.outcome,"toolCharge":record.tool_charge,
+        "resolvedBy":record.resolved_by,"historical":true})
+}
+
+fn retained_retry_names(attempt: &Path) -> Result<std::collections::BTreeSet<String>> {
+    let mut names = std::collections::BTreeSet::new();
+    for entry in fs::read_dir(attempt).map_err(|e| format!("retained attempt listing: {e}"))? {
+        let entry = entry.map_err(|e| format!("retained attempt listing: {e}"))?;
+        if let Some(name) = entry.file_name().to_str() {
+            if name.starts_with("retry-") && name.ends_with(".json") {
+                names.insert(name.to_owned());
+            }
+        }
+    }
+    Ok(names)
+}
+
+/// The native record written by the lookup just run, if any. A lookup that
+/// wrote nothing (transport failure) is not an answer.
+fn newest_new_retry(
+    attempt: &Path,
+    before: &std::collections::BTreeSet<String>,
+) -> Result<Option<Value>> {
+    let after = retained_retry_names(attempt)?;
+    let Some(name) = after.difference(before).max() else {
+        return Ok(None);
+    };
+    let value = serde_json::from_slice(&bounded_regular_file(&attempt.join(name), 131_072)?)
+        .map_err(|e| format!("retained lookup record JSON: {e}"))?;
     Ok(Some(value))
 }
 
@@ -2975,6 +3167,15 @@ struct Runtime {
     prompt_active: bool,
     foreground_operation: Option<u64>,
     output: Option<control::OutputHandle>,
+    /// First controller operation ID allocated by this process. Earlier
+    /// attempts were started by a previous process.
+    process_first_operation_id: u64,
+    /// True while `serve` runs its own recovery before accepting input.
+    startup_recovery_active: bool,
+    /// Set only by the startup proof that this controller is the active
+    /// MainPID of its unit and its cgroup holds no other process, so no
+    /// custody child of an earlier controller run can still send a call.
+    prior_run_stopped: bool,
 }
 
 impl Runtime {
@@ -6492,6 +6693,7 @@ impl Runtime {
             atomic_json(&path, &j)?;
             j
         };
+        let process_first_operation_id = journal.next_operation_id;
         let mut rt = Self {
             config,
             config_path,
@@ -6512,6 +6714,9 @@ impl Runtime {
             prompt_active: false,
             foreground_operation: None,
             output: None,
+            process_first_operation_id,
+            startup_recovery_active: false,
+            prior_run_stopped: false,
         };
         // We have no live Child handle after a controller crash. A recycled
         // PID/PGID must never be killed. Fence the task and refuse new work.
@@ -7566,6 +7771,7 @@ impl Runtime {
         match result {
             Ok(()) => {
                 self.journal.pending = None;
+                self.journal.managed_law_generation = Some(generation.clone());
                 self.save()
             }
             Err(error) => {
@@ -7598,17 +7804,12 @@ impl Runtime {
         let current_generation = desired_generation
             .parse::<u64>()
             .map_err(|_| "desired worker generation invalid")?;
-        let candidates = if status == "0" {
-            let paused_generation = current_generation
-                .checked_sub(1)
-                .ok_or("paused generation has no prior value")?;
-            // A paused grain still carries the policy for its signed current
-            // generation. An interrupted renewal may already have installed
-            // the next law; both cases are exact, source-authored bytes.
-            vec![current_generation, paused_generation]
-        } else {
-            vec![current_generation]
-        };
+        let own = self
+            .journal
+            .managed_law_generation
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok());
+        let candidates = managed_law_candidates(status, current_generation, own)?;
         let id = self.next_id()?;
         let dir = self.config.state_dir.join(format!("policy-check-{id:016}"));
         fs::create_dir(&dir).map_err(|e| format!("policy check directory: {e}"))?;
@@ -10811,15 +11012,63 @@ impl Runtime {
             .find(|saved| saved.id == proposal_id)
             .ok_or("workspace proposal disappeared")?
             .submitted = true;
+        // Nothing can be sent until `no_submit` is durably cleared below.
         self.journal.workspace_attempt = Some(WorkspaceAttempt {
             operation_id,
             proposal_id,
-            intent_sha256: proposal.intent_sha256,
+            intent_sha256: proposal.intent_sha256.clone(),
             attempt: attempt.clone(),
             definite: false,
-            no_submit: false,
+            no_submit: true,
+            authored: None,
         });
         self.save()?;
+        // The attach and reserve above are Mini events. Author the exact
+        // intent now, from the retained typed request and current signed
+        // state, so this controller's own transitions cannot make it stale.
+        let authored = format!("{proposal_id}-x{operation_id}");
+        let authoring = (|| -> Result<String> {
+            let mut command = Command::new(&self.config.mini);
+            command
+                .arg("workspace")
+                .arg("--action")
+                .arg("propose")
+                .arg("--dir")
+                .arg(&root)
+                .arg("--request")
+                .arg(&request_path)
+                .arg("--proposal-id")
+                .arg(&authored);
+            let result = self.supervised_json_command(command)?;
+            let intent = root.join("proposals").join(&authored).join("intent.json");
+            let digest = sha256_bytes(&bounded_regular_file(&intent, 262_144)?)?;
+            if result["intentSha256"].as_str() != Some(digest.as_str()) {
+                return Err("authored workspace intent differs from its summary".into());
+            }
+            Ok(digest)
+        })();
+        let digest = match authoring {
+            Ok(digest) => digest,
+            Err(error) => {
+                // Authoring reads and signs nothing: no call exists. Settle
+                // the purse at zero and record the refusal.
+                let _ = self.workspace_recover_operation(operation_id, false);
+                return Err(format!("workspace proposal could not be authored against current state; nothing was submitted: {error}"));
+            }
+        };
+        self.check_not_cancelled()?;
+        {
+            let pending = self
+                .journal
+                .workspace_attempt
+                .as_mut()
+                .ok_or("workspace attempt disappeared")?;
+            pending.authored = Some(authored.clone());
+            pending.intent_sha256 = digest;
+            pending.no_submit = false;
+        }
+        self.save()?;
+        let intent_path = root.join("proposals").join(&authored).join("intent.json");
         let args = [
             "workspace",
             "--action",
@@ -10866,13 +11115,33 @@ impl Runtime {
         if pending.attempt != root.join("attempts").join(operation_id.to_string()) {
             return Err("workspace attempt path differs from its controller operation ID".into());
         }
-        let (intent_path, _) = self.workspace_proposal_paths(pending.proposal_id)?;
-        if sha256_bytes(&bounded_regular_file(&intent_path, 262_144)?)? != pending.intent_sha256 {
+        let intent_path = match &pending.authored {
+            Some(authored) => root.join("proposals").join(authored).join("intent.json"),
+            None => self.workspace_proposal_paths(pending.proposal_id)?.0,
+        };
+        // Before the authored intent exists nothing was sent; its digest is
+        // checked only once a submission could have used it.
+        if (!pending.no_submit || pending.authored.is_some())
+            && sha256_bytes(&bounded_regular_file(&intent_path, 262_144)?)? != pending.intent_sha256
+        {
             return Err("workspace operation source changed after reservation".into());
         }
-        let mut outcome: Option<Value> = None;
-        let mut pre_submit_refused = false;
-        if !pending.no_submit {
+        let configured_charge = self
+            .config
+            .tool_task
+            .as_ref()
+            .ok_or("toolTask absent")?
+            .charge
+            .clone();
+        // (resolution, basis, exact outcome, delegated tool charge)
+        let decided: (&str, &str, Value, String) = if pending.no_submit {
+            (
+                "refused",
+                "not-submitted",
+                json!({"type":"not-submitted"}),
+                "0".to_owned(),
+            )
+        } else {
             let attempt_meta = fs::symlink_metadata(&pending.attempt)
                 .map_err(|e| format!("workspace retained attempt: {e}"))?;
             if !attempt_meta.file_type().is_dir()
@@ -10892,6 +11161,7 @@ impl Runtime {
             if copied_config != pinned_config {
                 return Err("workspace retained attempt Host config differs from pin".into());
             }
+            let mut decided = None;
             let native_outcome = pending.attempt.join("outcome.json");
             if native_outcome.is_file() {
                 bounded_regular_file(&pending.attempt.join("call.bin"), 4_194_304)?;
@@ -10899,47 +11169,96 @@ impl Runtime {
                 let direct: Value =
                     serde_json::from_slice(&bounded_regular_file(&native_outcome, 131_072)?)
                         .map_err(|e| format!("workspace native outcome JSON: {e}"))?;
-                if matches!(direct["type"].as_str(), Some("confirmed" | "refused")) {
-                    outcome = Some(direct);
+                match direct["type"].as_str() {
+                    Some("confirmed") => {
+                        decided = Some(("performed", "native-outcome", direct, configured_charge.clone()))
+                    }
+                    Some("refused") => {
+                        decided = Some(("refused", "native-refusal", direct, configured_charge.clone()))
+                    }
+                    _ => {}
                 }
             }
-            if outcome.is_none() && !pending.attempt.join("call.bin").exists() {
+            if decided.is_none() && !pending.attempt.join("call.bin").exists() {
                 if let Some(refusal) = inspected_pre_submit_refusal(&self.config, &pending.attempt)?
                 {
-                    pre_submit_refused = true;
-                    outcome = Some(refusal);
+                    decided = Some(("refused", "pre-submit-refusal", refusal, "0".to_owned()));
                 }
             }
-            if outcome.is_none() && lookup {
+            if decided.is_none() && lookup {
+                let submitter_stopped = self.workspace_submitter_stopped(operation_id);
                 if !pending.attempt.join("call.bin").is_file() {
-                    return Err("workspace submission has no retained call; physical child audit is required before release".into());
-                }
-                let command = {
-                    let mut command = Command::new(&self.config.mini);
-                    command
-                        .arg("workspace")
-                        .arg("--action")
-                        .arg("recover")
-                        .arg("--dir")
-                        .arg(&root)
-                        .arg("--attempt")
-                        .arg(&pending.attempt);
-                    command
-                };
-                let result = self.supervised_json_command(command)?;
-                if result["type"] == "confirmed" {
-                    outcome = Some(result);
+                    if !submitter_stopped {
+                        return Err("workspace submission has no retained call; physical child audit is required before release".into());
+                    }
+                    // The client writes call.bin before its first send. With
+                    // every process that could have written it proven gone,
+                    // no call for this attempt can ever reach Mini.
+                    decided = Some((
+                        "refused",
+                        "no-call-after-submitter-stop",
+                        json!({"type":"not-submitted"}),
+                        "0".to_owned(),
+                    ));
                 } else {
-                    return Err("workspace exact lookup did not confirm the original call; effect remains uncertain".into());
+                    let before = retained_retry_names(&pending.attempt)?;
+                    let command = {
+                        let mut command = Command::new(&self.config.mini);
+                        command
+                            .arg("workspace")
+                            .arg("--action")
+                            .arg("recover")
+                            .arg("--dir")
+                            .arg(&root)
+                            .arg("--attempt")
+                            .arg(&pending.attempt);
+                        command
+                    };
+                    let transport = self.supervised_json_command(command);
+                    let answer = newest_new_retry(&pending.attempt, &before)?;
+                    match answer.as_ref().and_then(|value| value["type"].as_str()) {
+                        Some("confirmed") => {
+                            decided = Some((
+                                "performed",
+                                "exact-lookup",
+                                answer.unwrap_or(Value::Null),
+                                configured_charge.clone(),
+                            ))
+                        }
+                        // The pinned `mini serve` handles one connection at
+                        // a time in accept order, so an earlier fully sent
+                        // frame was decided before this lookup was read.
+                        // With the submitter gone, absence is final.
+                        Some("absent") if submitter_stopped => {
+                            decided = Some((
+                                "refused",
+                                "absent-after-submitter-stop",
+                                answer.unwrap_or(Value::Null),
+                                configured_charge.clone(),
+                            ))
+                        }
+                        Some("absent") => {
+                            decided = Some((
+                                "uncertain",
+                                "absent-but-submitter-not-proven-stopped",
+                                answer.unwrap_or(Value::Null),
+                                configured_charge.clone(),
+                            ))
+                        }
+                        _ => {
+                            return Err(format!(
+                                "workspace exact lookup gave no definite answer; effect remains pending: {}",
+                                transport.err().unwrap_or_else(|| "unrecognized lookup record".into())
+                            ));
+                        }
+                    }
                 }
             }
-            if outcome.is_none() {
-                return Err(
-                    "workspace submission has no definite native result; exact lookup is required"
-                        .into(),
-                );
-            }
-        }
+            decided.ok_or(
+                "workspace submission has no definite native result; exact lookup is required",
+            )?
+        };
+        let (resolution, basis, outcome, charge) = decided;
         self.journal
             .workspace_attempt
             .as_mut()
@@ -10947,16 +11266,6 @@ impl Runtime {
             .definite = true;
         self.save()?;
         let authority = self.tool()?;
-        let charge = if pending.no_submit || pre_submit_refused {
-            "0".to_owned()
-        } else {
-            self.config
-                .tool_task
-                .as_ref()
-                .ok_or("toolTask absent")?
-                .charge
-                .clone()
-        };
         if self.journal.tool_hold.is_some() {
             self.transition_as(
                 &authority,
@@ -10976,6 +11285,8 @@ impl Runtime {
                 vec![],
             )?,
             Some("0" | "6") => {}
+            // A fenced or held tool purse after controller loss: settle the
+            // retained hold before the definite result can be released.
             _ => return Err("workspace settlement lacks signed terminal tool status".into()),
         }
         let terminal = self.query_as(&authority)?;
@@ -10987,13 +11298,152 @@ impl Runtime {
         {
             return Err("workspace tool remains reserved after settlement".into());
         }
+        let resolved_by = if !lookup {
+            "submit"
+        } else if self.startup_recovery_active {
+            "restart-recovery"
+        } else {
+            "lookup"
+        };
+        let record = WorkspaceResolution {
+            operation_id,
+            proposal_id: pending.proposal_id,
+            intent_sha256: pending.intent_sha256.clone(),
+            attempt: pending.attempt.clone(),
+            resolution: resolution.to_owned(),
+            basis: basis.to_owned(),
+            outcome,
+            tool_charge: charge,
+            resolved_by: resolved_by.to_owned(),
+            authored: pending.authored.clone(),
+        };
+        self.push_workspace_resolution(record.clone());
         self.journal.workspace_attempt = None;
         self.save()?;
-        Ok(
-            json!({"operationId":operation_id.to_string(), "proposalId":pending.proposal_id.to_string(),
-            "outcome":outcome.unwrap_or_else(|| json!({"type":"not-submitted"})),
-            "toolCharge":charge,"historical":true}),
-        )
+        Ok(workspace_resolution_json(&record))
+    }
+
+    fn push_workspace_resolution(&mut self, record: WorkspaceResolution) {
+        if self.journal.workspace_resolutions.len() >= MAX_WORKSPACE_RESOLUTIONS {
+            self.journal.workspace_resolutions.remove(0);
+        }
+        self.journal.workspace_resolutions.push(record);
+    }
+
+    /// True only when no process that could hold this attempt's custody
+    /// child is alive: this process reaps its own children before returning
+    /// from the custody gate, and a previous controller run is covered by
+    /// the startup unit/cgroup proof.
+    fn workspace_submitter_stopped(&self, operation_id: u64) -> bool {
+        if operation_id >= self.process_first_operation_id {
+            self.custody_gate.is_idle()
+        } else {
+            self.prior_run_stopped
+        }
+    }
+
+    /// Read-only: one retained resolution, the pending attempt, or the
+    /// bounded newest-first list. Nothing here touches Mini.
+    fn workspace_attempts(&self, arguments: &Value) -> Result<Value> {
+        let object = arguments
+            .as_object()
+            .ok_or("workspace attempts arguments must be an object")?;
+        let selected = match (object.len(), object.get("operationId")) {
+            (0, _) => None,
+            (1, Some(id)) => {
+                let id = id.as_str().ok_or("operationId must be a decimal string")?;
+                decimal(id, "operationId")?;
+                Some(id.parse::<u64>().map_err(|_| "operationId exceeds u64")?)
+            }
+            _ => return Err("workspace attempts takes only an optional operationId".into()),
+        };
+        let pending = self.journal.workspace_attempt.as_ref().map(|attempt| {
+            json!({"operationId":attempt.operation_id.to_string(),
+                "proposalId":attempt.proposal_id.to_string(),
+                "resolution":"pending","definite":attempt.definite,
+                "detail":"retained for exact recovery; no further effect is admitted until it resolves"})
+        });
+        if let Some(id) = selected {
+            if let Some(attempt) = self.journal.workspace_attempt.as_ref() {
+                if attempt.operation_id == id {
+                    return Ok(pending.unwrap_or(Value::Null));
+                }
+            }
+            let record = self
+                .journal
+                .workspace_resolutions
+                .iter()
+                .find(|record| record.operation_id == id)
+                .ok_or("no retained workspace attempt has this operation ID")?;
+            return Ok(workspace_resolution_json(record));
+        }
+        let records: Vec<Value> = self
+            .journal
+            .workspace_resolutions
+            .iter()
+            .rev()
+            .take(32)
+            .map(workspace_resolution_json)
+            .collect();
+        Ok(json!({"type":"mini-grain-workspace-attempts-v1","pending":pending,
+            "resolutions":records,
+            "authority":"historical record of this grain's own submissions; current state requires a signed read"}))
+    }
+
+    /// Re-look-up a retained `uncertain` resolution. A confirmation upgrades
+    /// it to `performed`; nothing is ever resubmitted and no allowance moves.
+    fn workspace_relookup_uncertain(&mut self, operation_id: u64) -> Result<Value> {
+        let root = self.workspace_root()?;
+        let index = self
+            .journal
+            .workspace_resolutions
+            .iter()
+            .position(|record| record.operation_id == operation_id)
+            .ok_or("no retained workspace attempt for operation ID")?;
+        let record = self.journal.workspace_resolutions[index].clone();
+        if record.resolution != "uncertain" {
+            return Ok(workspace_resolution_json(&record));
+        }
+        if record.attempt != root.join("attempts").join(operation_id.to_string()) {
+            return Err("retained resolution path differs from its operation ID".into());
+        }
+        let before = retained_retry_names(&record.attempt)?;
+        let mut command = Command::new(&self.config.mini);
+        command
+            .arg("workspace")
+            .arg("--action")
+            .arg("recover")
+            .arg("--dir")
+            .arg(&root)
+            .arg("--attempt")
+            .arg(&record.attempt);
+        let _ = self.supervised_json_command(command);
+        let answer = newest_new_retry(&record.attempt, &before)?;
+        let updated = match answer.as_ref().and_then(|value| value["type"].as_str()) {
+            Some("confirmed") => Some((
+                "performed",
+                "later-exact-lookup",
+                answer.clone().unwrap_or(Value::Null),
+            )),
+            Some("absent") if self.workspace_submitter_stopped(operation_id) => Some((
+                "refused",
+                "absent-after-submitter-stop",
+                answer.clone().unwrap_or(Value::Null),
+            )),
+            Some("absent") => None,
+            _ => return Err("workspace exact lookup gave no definite answer".into()),
+        };
+        if let Some((resolution, basis, outcome)) = updated {
+            let saved = &mut self.journal.workspace_resolutions[index];
+            saved.resolution = resolution.into();
+            saved.basis = basis.into();
+            saved.outcome = outcome;
+            saved.resolved_by = "lookup".into();
+            self.save()?;
+        }
+        Ok(workspace_resolution_json(
+            &self.journal.workspace_resolutions[index],
+        ))
     }
 
     fn workspace_recover(&mut self, arguments: &Value) -> Result<Value> {
@@ -11016,9 +11466,169 @@ impl Runtime {
             .is_some_and(|birth| birth.operation_id == id)
         {
             self.workspace_recover_birth(id, true)
-        } else {
+        } else if self
+            .journal
+            .workspace_attempt
+            .as_ref()
+            .is_some_and(|attempt| attempt.operation_id == id)
+        {
             self.workspace_recover_operation(id, true)
+        } else {
+            self.workspace_relookup_uncertain(id)
         }
+    }
+
+    fn supervised_text_command(&self, mut command: Command) -> Result<String> {
+        unsafe {
+            command.pre_exec(|| {
+                libc::umask(0o077);
+                Ok(())
+            });
+        }
+        let output = self
+            .custody_gate
+            .run_capture(&self.cancelled, &mut command)
+            .map_err(|error| format!("supervised workspace client: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "workspace client exited {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        String::from_utf8(output.stdout).map_err(|_| "workspace client output is not UTF-8".into())
+    }
+
+    /// Accept a recipient reference another participant published for this
+    /// grain's subject. The common client checks the recipient and receipt;
+    /// the stored name remains a hint and every use faces Mini admission.
+    fn workspace_import_reference(&mut self, arguments: &Value) -> Result<Value> {
+        let object = arguments
+            .as_object()
+            .ok_or("reference import arguments must be an object")?;
+        if object.len() != 2 {
+            return Err("reference import requires exactly name and reference".into());
+        }
+        let name = object
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or("reference import name absent")?;
+        if !valid_workspace_name(name) {
+            return Err("workspace name is not bounded ASCII".into());
+        }
+        let reference = object
+            .get("reference")
+            .filter(|value| value.is_object())
+            .ok_or("reference import requires a reference object")?;
+        if reference.get("type").and_then(Value::as_str)
+            != Some("minidregg-delegated-reference-v1")
+        {
+            return Err("reference is not a Mini delegated recipient reference".into());
+        }
+        let bytes = serde_json::to_vec(reference).map_err(|e| e.to_string())?;
+        if bytes.len() > 65_536 {
+            return Err("recipient reference exceeds 64 KiB".into());
+        }
+        let root = self.workspace_root()?;
+        let id = self.next_id()?;
+        let source = self
+            .config
+            .state_dir
+            .join(format!("workspace-import-{id:016}.json"));
+        write_new(&source, &bytes)?;
+        let mut command = Command::new(&self.config.mini);
+        command
+            .arg("workspace")
+            .arg("--action")
+            .arg("import")
+            .arg("--dir")
+            .arg(&root)
+            .arg("--name")
+            .arg(name)
+            .arg("--from-ref")
+            .arg(&source);
+        self.supervised_text_command(command)?;
+        let stored: Value = serde_json::from_slice(&bounded_regular_file(
+            &root.join("refs").join(format!("{name}.json")),
+            131_072,
+        )?)
+        .map_err(|e| format!("imported reference JSON: {e}"))?;
+        Ok(json!({"type":"mini-grain-imported-reference-v1","name":name,
+            "kind":stored["kind"],"target":stored["target"],
+            "capability":stored["observeCapability"],
+            "receipt":reference.get("receipt"),
+            "authority":"hint-only; every read or write still faces current Mini admission"}))
+    }
+
+    /// Publish the recipient reference for a delegation this grain proposed
+    /// and whose submission resolved `performed`. The common client does an
+    /// exact historical lookup before writing the reference.
+    fn workspace_export_reference(&mut self, arguments: &Value) -> Result<Value> {
+        let object = arguments
+            .as_object()
+            .ok_or("reference export arguments must be an object")?;
+        if object.len() != 1 {
+            return Err("reference export requires only proposalId".into());
+        }
+        let selected = object
+            .get("proposalId")
+            .and_then(Value::as_str)
+            .ok_or("reference export proposalId absent")?;
+        decimal(selected, "proposalId")?;
+        let proposal_id = selected
+            .parse::<u64>()
+            .map_err(|_| "proposalId exceeds u64")?;
+        let record = self
+            .journal
+            .workspace_resolutions
+            .iter()
+            .rev()
+            .find(|record| record.proposal_id == proposal_id)
+            .ok_or("proposal has no resolved submission in this grain")?
+            .clone();
+        if record.resolution != "performed" {
+            return Err(format!(
+                "delegation submission resolved {}; only a performed delegation has a recipient reference",
+                record.resolution
+            ));
+        }
+        let root = self.workspace_root()?;
+        let client_proposal = record
+            .authored
+            .clone()
+            .unwrap_or_else(|| proposal_id.to_string());
+        let proposal = root.join("proposals").join(&client_proposal);
+        let summary: Value =
+            serde_json::from_slice(&bounded_regular_file(&proposal.join("proposal.json"), 65_536)?)
+                .map_err(|e| format!("workspace proposal summary: {e}"))?;
+        if !summary["delegation"].is_object()
+            || summary["intentSha256"].as_str() != Some(record.intent_sha256.as_str())
+        {
+            return Err("resolved proposal is not this grain's delegation".into());
+        }
+        let mut command = Command::new(&self.config.mini);
+        command
+            .arg("workspace")
+            .arg("--action")
+            .arg("publish-delegation")
+            .arg("--dir")
+            .arg(&root)
+            .arg("--proposal-id")
+            .arg(&client_proposal)
+            .arg("--attempt")
+            .arg(&record.attempt);
+        self.supervised_text_command(command)?;
+        let reference: Value = serde_json::from_slice(&bounded_regular_file(
+            &proposal.join("recipient-reference.json"),
+            65_536,
+        )?)
+        .map_err(|e| format!("recipient reference JSON: {e}"))?;
+        if reference["type"] != "minidregg-delegated-reference-v1" {
+            return Err("client wrote an unknown recipient reference".into());
+        }
+        Ok(json!({"type":"mini-grain-exported-reference-v1",
+            "proposalId":proposal_id.to_string(),"reference":reference,
+            "authority":"hint-only; give it to the recipient, whose own signed reads decide use"}))
     }
 
     fn workspace_create(&mut self, arguments: &Value) -> Result<Value> {
@@ -11381,6 +11991,9 @@ impl Runtime {
         if name == "mini_workspace_recover" {
             return self.workspace_recover(arguments);
         }
+        if name == "mini_workspace_attempts" {
+            return self.workspace_attempts(arguments);
+        }
         if self.journal.workspace_attempt.is_some()
             || self.journal.workspace_birth.is_some()
             || self.journal.tool_pending.is_some()
@@ -11400,6 +12013,8 @@ impl Runtime {
             "mini_workspace_propose" => self.workspace_propose(arguments),
             "mini_workspace_submit" => self.workspace_submit(arguments),
             "mini_workspace_create" => self.workspace_create(arguments),
+            "mini_workspace_import_reference" => self.workspace_import_reference(arguments),
+            "mini_workspace_export_reference" => self.workspace_export_reference(arguments),
             "mini_grain_status" => {
                 if arguments != &json!({}) && !arguments.is_null() {
                     return Err("mini_grain_status takes no arguments".into());
@@ -11765,10 +12380,63 @@ impl Runtime {
                             .journal
                             .workspace_birth
                             .as_ref()
-                            .is_some_and(|birth| birth.operation_id.to_string() == id))
+                            .is_some_and(|birth| birth.operation_id.to_string() == id)
+                        && !self
+                            .journal
+                            .workspace_resolutions
+                            .iter()
+                            .any(|record| record.operation_id.to_string() == id))
                 {
                     return Err("workspace attempt unavailable for recovery".into());
                 }
+            }
+            "mini_workspace_attempts" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("workspace attempts takes an object")?;
+                let valid = match (object.len(), object.get("operationId")) {
+                    (0, _) => true,
+                    (1, Some(id)) => id.as_str().is_some_and(|id| decimal(id, "operationId").is_ok()),
+                    _ => false,
+                };
+                if !valid {
+                    return Err("workspace attempts takes only an optional operationId".into());
+                }
+                self.workspace_root()?;
+            }
+            "mini_workspace_import_reference" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("reference import requires an object")?;
+                let name = object
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or("reference import name absent")?;
+                if object.len() != 2
+                    || !valid_workspace_name(name)
+                    || !object.get("reference").is_some_and(Value::is_object)
+                    || serde_json::to_vec(arguments)
+                        .map_err(|e| e.to_string())?
+                        .len()
+                        > 65_536
+                {
+                    return Err("reference import has invalid typed input".into());
+                }
+                self.workspace_root()?;
+            }
+            "mini_workspace_export_reference" => {
+                let object = arguments
+                    .as_object()
+                    .ok_or("reference export requires proposalId")?;
+                let id = object
+                    .get("proposalId")
+                    .and_then(Value::as_str)
+                    .ok_or("proposalId absent")?;
+                decimal(id, "proposalId")?;
+                if object.len() != 1 {
+                    return Err("reference export requires only proposalId".into());
+                }
+                self.workspace_root()?;
             }
             "mini_grain_status" => {
                 if arguments != &json!({}) && !arguments.is_null() {
@@ -12028,6 +12696,9 @@ impl Runtime {
                 | "mini_workspace_submit"
                 | "mini_workspace_create"
                 | "mini_workspace_recover"
+                | "mini_workspace_attempts"
+                | "mini_workspace_import_reference"
+                | "mini_workspace_export_reference"
                 | "mini_read_resource"
                 | "mini_create_resource"
                 | "mini_create_application"
@@ -12593,6 +13264,21 @@ impl Runtime {
         Ok(())
     }
     fn attach(&mut self, soft: bool) -> Result<()> {
+        // A tripped breaker or lost reply leaves the task fenced. The owner's
+        // reattach first runs the same provable recovery the controller runs
+        // at startup; whatever it cannot prove keeps the task fenced.
+        if self.journal.connection == Connection::Fenced
+            && self.child.is_none()
+            && self.needs_startup_recovery()
+        {
+            let result = self.recover().and_then(|()| self.automatic_reconcile());
+            let decision = self.journal.next_operation_id;
+            self.journal.reconciliation_log.push(json!({
+                "decisionId":decision.to_string(),"action":"attach-recovery","automatic":true,
+                "result":match &result { Ok(()) => "recovered".to_owned(), Err(e) => e.clone() }}));
+            self.save()?;
+            result?;
+        }
         if self.journal.connection == Connection::Fenced
             || self.journal.child.is_some()
             || self.journal.foreground_attempt.is_some()
@@ -12821,7 +13507,18 @@ impl Runtime {
                 self.journal.connection = Connection::Detached;
                 self.journal.hard_reconnect_pending = false;
                 self.journal.prompt_witness = None;
-                self.save()
+                self.save()?;
+                // The breaker tripped and the worker is physically stopped.
+                // Settle what is provable so the owner can simply reattach;
+                // anything unprovable stays held for the operator.
+                if let Err(error) = self.automatic_reconcile() {
+                    let decision = self.journal.next_operation_id;
+                    self.journal.reconciliation_log.push(json!({
+                        "decisionId":decision.to_string(),"action":"post-disconnect-reconcile",
+                        "automatic":true,"result":error}));
+                    self.save()?;
+                }
+                Ok(())
             }
             (a, b, c, d, e) => Err(format!(
                 "hard disconnect unresolved: local stop={a:?}; Mini fence={b:?}; tool fence={c:?}; dispatch fence={d:?}; provider fence={e:?}"
@@ -15133,6 +15830,17 @@ impl Runtime {
         self.save()
     }
     fn reconcile_hold(&mut self, tool: bool, audited: bool) -> Result<()> {
+        self.reconcile_hold_with(
+            tool,
+            if audited {
+                HoldProof::OperatorAudited
+            } else {
+                HoldProof::SameImage
+            },
+        )
+    }
+    fn reconcile_hold_with(&mut self, tool: bool, proof: HoldProof) -> Result<()> {
+        let audited = proof == HoldProof::OperatorAudited;
         if tool && self.journal.birth_operation.is_some() {
             return Err("resource birth has a durable no-dispatch or refused marker; settle it at zero through recover".into());
         }
@@ -15169,6 +15877,7 @@ impl Runtime {
             .push(json!({"decisionId":decision.to_string(),
             "authority":label,"action":"settle-held-allowance","charge":hold.charge,
             "reserveAttempt":hold.reserve_attempt,"originAudited":audited,
+            "originProof":proof.label(),
             "stage":"requested","externalEffectsAcknowledged":false}));
         self.save()?;
         let observed = self.query_as(&authority)?;
@@ -15237,7 +15946,37 @@ impl Runtime {
             && observed.get("worldRoot").and_then(Value::as_str)
                 != hold.reserve_boundary.as_deref()
         {
-            return Err("intervening Mini events prevent automatic reservation identity proof; use audited admin reconciliation after reviewing exact attempts".into());
+            match proof {
+                HoldProof::OperatorAudited => {}
+                HoldProof::SameImage => return Err("intervening Mini events prevent automatic reservation identity proof; use audited admin reconciliation after reviewing exact attempts".into()),
+                HoldProof::OwnManagedLaw => {
+                    // Other resources' events move the image boundary on a
+                    // shared Store. What must not have moved is who can act
+                    // on this grain: its owner key is this controller's
+                    // custody, and the exact managed law admits workers only
+                    // for the pinned-generation witness no-op. No journaled
+                    // parent attempt is pending, so the signed reservation
+                    // is the confirmed one recorded in this hold.
+                    if tool {
+                        return Err("delegated tool reservation has no managed-law origin proof".into());
+                    }
+                    if self.journal.pending.is_some() {
+                        return Err("parent attempt pending; managed-law origin proof unavailable".into());
+                    }
+                    let workers = self.managed_worker_subjects()?;
+                    if workers.is_empty() {
+                        return Err("no managed worker law configured; origin proof unavailable".into());
+                    }
+                    let policy = self.query_policy()?;
+                    let view = policy.get("view").ok_or("signed policy view absent")?.clone();
+                    self.require_managed_worker_policy(
+                        &view,
+                        &workers,
+                        status.as_str(),
+                        &current_gen.to_string(),
+                    )?;
+                }
+            }
         }
         let effects = format!("{label} reserved operation may have external effects; explicit operator acknowledgement required");
         if !self.journal.unresolved_external.contains(&effects) {
@@ -15634,7 +16373,103 @@ impl Runtime {
         }
         self.save()
     }
+    fn needs_startup_recovery(&self) -> bool {
+        let j = &self.journal;
+        j.connection == Connection::Fenced
+            || j.hard_reconnect_pending
+            || j.child.is_some()
+            || j.pending.is_some()
+            || j.tool_pending.is_some()
+            || j.provider_pending.is_some()
+            || j.dispatch_pending.is_some()
+            || j.parent_hold.is_some()
+            || j.tool_hold.is_some()
+            || j.provider_hold.is_some()
+            || j.dispatch_hold.is_some()
+            || j.provider_attempt.is_some()
+            || j.dispatch_attempt.is_some()
+            || j.settlement_due.is_some()
+            || j.workspace_attempt.is_some()
+            || j.workspace_birth.is_some()
+            || j.birth_pending.is_some()
+            || j.birth_operation.is_some()
+            || !j.unresolved_external.is_empty()
+    }
+
+    /// Runs before `serve` admits any input. The supervisor restarted this
+    /// controller; it repairs what it can prove and leaves the rest fenced
+    /// for the operator exactly as before.
+    fn startup_recovery(&mut self) {
+        let proof = prove_prior_run_stopped(&self.config.task);
+        self.prior_run_stopped = proof.is_ok();
+        if !self.needs_startup_recovery() {
+            return;
+        }
+        self.startup_recovery_active = true;
+        let result = self.recover().and_then(|()| self.automatic_reconcile());
+        self.startup_recovery_active = false;
+        let decision = self.journal.next_operation_id;
+        self.journal.reconciliation_log.push(json!({
+            "decisionId":decision.to_string(),"action":"startup-recovery","automatic":true,
+            "priorRunStopped":self.prior_run_stopped,
+            "priorRunProof":proof.err(),
+            "result":match &result { Ok(()) => "recovered".to_owned(), Err(e) => e.clone() },
+            "connection":self.journal.connection,
+            "unresolvedExternal":self.journal.unresolved_external,
+        }));
+        if let Err(error) = self.save() {
+            eprintln!("grain-runtime: startup recovery journal: {error}");
+        }
+        if let Err(error) = result {
+            eprintln!("grain-runtime: startup recovery left the task fenced: {error}");
+        }
+    }
+
+    /// Settle what `recover` fenced when the identity of the held allowance
+    /// is machine-provable, then derive the external-effect acknowledgement
+    /// when every channel the worker had is accounted for.
+    fn automatic_reconcile(&mut self) -> Result<()> {
+        if self.journal.parent_hold.is_some()
+            && self.child.is_none()
+            && self.journal.child.is_none()
+            && self.journal.pending.is_none()
+        {
+            self.reconcile_hold_with(false, HoldProof::OwnManagedLaw)?;
+        }
+        if self.journal.unresolved_external.is_empty() {
+            return Ok(());
+        }
+        let notes = self.journal.unresolved_external.clone();
+        if !notes.iter().all(|note| derivable_effect_note(note)) {
+            return Err("an external-effect note needs operator acknowledgement".into());
+        }
+        let network_none = self.config.commands.iter().all(|command| {
+            command.systemd_scope
+                && command
+                    .args
+                    .windows(2)
+                    .any(|pair| pair[0] == "--network" && pair[1] == "none")
+        });
+        if !network_none {
+            return Err("a configured worker has network access; effects need operator acknowledgement".into());
+        }
+        if self.journal.foreground_attempt.is_some()
+            || self.journal.workspace_attempt.is_some()
+            || self.journal.workspace_birth.is_some()
+            || self.journal.application_api_attempt.is_some()
+        {
+            return Err("an agent effect is still retained for exact recovery".into());
+        }
+        self.acknowledge_effects_with(Some(
+            "derived: scoped --network none worker whose only external channel is the Mini broker; every Mini attempt resolved; no provider or dispatch attempt outstanding",
+        ))
+    }
+
     fn acknowledge_effects(&mut self) -> Result<()> {
+        self.acknowledge_effects_with(None)
+    }
+
+    fn acknowledge_effects_with(&mut self, derived: Option<&str>) -> Result<()> {
         if self.child.is_some()
             || self.journal.child.is_some()
             || self.journal.pending.is_some()
@@ -15690,7 +16525,8 @@ impl Runtime {
         self.journal
             .reconciliation_log
             .push(json!({"decisionId":id.to_string(),
-            "action":"acknowledge-external-effects","stage":"acknowledged",
+            "action":if derived.is_some() {"derive-no-unaccounted-external-effects"} else {"acknowledge-external-effects"},
+            "stage":"acknowledged","automatic":derived.is_some(),"basis":derived,
             "externalEffectsAcknowledged":true,"details":acknowledged}));
         self.save()
     }
@@ -16278,6 +17114,7 @@ fn serve(mut rt: Runtime) -> Result<()> {
         None
     };
     rt.output = Some(server.output_handle());
+    rt.startup_recovery();
     let (tx, input) = mpsc::channel();
     let admin_tx = tx.clone();
     thread::spawn(move || {
@@ -17118,6 +17955,7 @@ mod tests {
             attempt: root.join("forged-attempt"),
             definite: false,
             no_submit: false,
+            authored: None,
         });
         assert!(journal.validate_workspace(&config).is_err());
         journal.workspace_attempt.as_mut().unwrap().attempt = workspace.join("attempts").join("2");
@@ -18223,5 +19061,283 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "descendant survived group stop"
         );
         child.wait().unwrap();
+    }
+
+    #[test]
+    fn managed_law_candidates_recognize_only_own_prior_generation() {
+        // Recorded 09-28 case: grain paused at generation 2 after a hard
+        // fence, installed law still for generation 1 (this controller's).
+        assert_eq!(managed_law_candidates("0", 3, Some(1)).unwrap(), vec![3, 2, 1]);
+        // Without a journaled own install the stale law still refuses.
+        assert_eq!(managed_law_candidates("0", 3, None).unwrap(), vec![3, 2]);
+        // A journaled generation ahead of the grain is never accepted.
+        assert_eq!(managed_law_candidates("5", 2, Some(4)).unwrap(), vec![2]);
+        assert_eq!(managed_law_candidates("5", 2, Some(1)).unwrap(), vec![2, 1]);
+        assert_eq!(managed_law_candidates("2", 2, Some(2)).unwrap(), vec![2]);
+        assert!(managed_law_candidates("0", 0, None).is_err());
+    }
+
+    #[test]
+    fn derived_effect_acknowledgement_covers_only_accounted_channels() {
+        for note in [
+            "worker operation 12 stopped after controller restart; external effects need acknowledgement",
+            "controller restarted with a held allowance but no retained worker completion; effects require acknowledgement",
+            "parent reserved operation may have external effects; explicit operator acknowledgement required",
+            "Hermes prompt 9: ACP stream closed",
+        ] {
+            assert!(derivable_effect_note(note), "{note}");
+        }
+        for note in [
+            "tool reserved operation may have external effects; explicit operator acknowledgement required",
+            "delegated tool reservation fenced with uncertain external effects",
+            "dispatch reservation survived controller restart; app delivery requires exact audit",
+            "provider request 4 crossed durable send boundary before controller restart; upstream result uncertain",
+            "parent confirmed reservation was externally settled; explicit effects acknowledgement required",
+            "worker operation 12 stopped after controller restart; external effects need acknowledgement; and more",
+        ] {
+            assert!(!derivable_effect_note(note), "{note}");
+        }
+    }
+
+    fn restart_resolution_fixture(tag: &str) -> (PathBuf, Runtime) {
+        let root = std::env::temp_dir().join(format!(
+            "grain-restart-resolution-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let state = root.join("state");
+        fs::create_dir(&state).unwrap();
+        fs::set_permissions(&state, fs::Permissions::from_mode(0o700)).unwrap();
+        let sim = root.join("sim");
+        fs::create_dir(&sim).unwrap();
+        fs::write(sim.join("status"), b"3").unwrap();
+        fs::write(sim.join("lookup"), b"absent").unwrap();
+        let mini = root.join("controlled-mini");
+        let script = r#"#!/bin/sh
+set -eu
+sim='__SIM__'
+command=$1
+shift
+dir=
+intent=
+attempt=
+action=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dir) dir=$2; shift 2 ;;
+    --intent) intent=$2; shift 2 ;;
+    --attempt) attempt=$2; shift 2 ;;
+    --action) action=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ "$command" = workspace ] && [ "$action" = recover ]; then
+  n=1
+  while [ -e "$attempt/retry-000$n.json" ]; do n=$((n + 1)); done
+  printf lookup > "$attempt/retry-000$n.bin"
+  if [ "$(cat "$sim/lookup")" = confirmed ]; then
+    printf '%s\n' '{"type":"confirmed","confirmation":"replayed","worldRoot":"300","transactionId":"21","eventId":"22","acceptedCount":"23"}' > "$attempt/retry-000$n.json"
+    cat "$attempt/retry-000$n.json"
+    exit 0
+  fi
+  printf '%s\n' '{"type":"absent"}' > "$attempt/retry-000$n.json"
+  echo 'mini: host returned absent' >&2
+  exit 1
+fi
+mkdir -p "$dir"
+if [ "$command" = query ]; then
+  status=$(cat "$sim/status")
+  reserved=0
+  [ "$status" = 3 ] && reserved=3
+  printf '{"cell":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"%s"}}}\n' "$status" "$reserved" > "$dir/view.json"
+  printf '%s\n' '{"authorityRoot":"200","signing":[{}],"worldRoot":"300"}' > "$dir/challenge.json"
+  exit 0
+fi
+[ "$command" = submit ] || exit 40
+printf call > "$dir/call.bin"
+printf outcome > "$dir/outcome.bin"
+if grep -q '"type": "settle"' "$intent"; then
+  printf 1 > "$sim/status"
+elif grep -q '"type": "disconnect"' "$intent"; then
+  printf 0 > "$sim/status"
+fi
+printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300","transactionId":"11","eventId":"12","acceptedCount":"13"}' > "$dir/outcome.json"
+"#
+        .replace("__SIM__", sim.to_str().unwrap());
+        fs::write(&mini, script).unwrap();
+        fs::set_permissions(&mini, fs::Permissions::from_mode(0o700)).unwrap();
+        let host_config = root.join("host-config.json");
+        fs::write(&host_config, b"{\"pinned\":true}").unwrap();
+        let workspace = state.join("resource-workspace");
+        for dir in [
+            workspace.clone(),
+            workspace.join("refs"),
+            workspace.join("attempts"),
+            workspace.join("sources"),
+            workspace.join("proposals"),
+        ] {
+            fs::create_dir(&dir).unwrap();
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let config: Config = serde_json::from_value(json!({
+            "mini":mini,"host":root.join("host"),"hostConfig":host_config,
+            "controlSocket":state.join("control.sock"),"custodyKey":root.join("parent.key"),
+            "stateDir":state,"cwd":root,"task":"7101","subject":"7",
+            "capability":"71","queryCapability":"74","policyControlCapability":"72",
+            "commands":[],
+            "toolTask":{"task":"7102","subject":"8","capability":"81",
+                "queryCapability":"82","custodyKey":root.join("tool.key"),
+                "parentCapability":"73","parentObserveCapability":"75",
+                "reserve":"3","charge":"1","allowedPublications":[],
+                "resourceWorkspace":workspace}
+        }))
+        .unwrap();
+        let pinned = json!({"type":"minidregg-participant-workspace-v1",
+            "host":config.host,"config":config.host_config,"key":root.join("tool.key"),
+            "subject":"8","socket":null,"birthContext":null,"namespaceRoot":null});
+        let pin_path = workspace.join("workspace.json");
+        fs::write(&pin_path, serde_json::to_vec(&pinned).unwrap()).unwrap();
+        fs::set_permissions(&pin_path, fs::Permissions::from_mode(0o600)).unwrap();
+        let request = b"{\"type\":\"minidregg-workspace-proposal-v1\",\"action\":\"invoke\"}";
+        let intent = b"{\"type\":\"intent\",\"field\":\"2\",\"value\":\"1\"}";
+        write_new(&state.join("workspace-proposal-0000000000000001.json"), request).unwrap();
+        let proposal = workspace.join("proposals").join("1");
+        fs::create_dir(&proposal).unwrap();
+        fs::write(proposal.join("intent.json"), intent).unwrap();
+        let attempt = workspace.join("attempts").join("2");
+        fs::create_dir(&attempt).unwrap();
+        fs::set_permissions(&attempt, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(attempt.join("intent.json"), intent).unwrap();
+        fs::write(attempt.join("config.json"), b"{\"pinned\":true}").unwrap();
+        fs::write(attempt.join("call.bin"), b"exact signed call").unwrap();
+        let mut runtime = Runtime::open(config, root.join("config.json")).unwrap();
+        runtime.journal.next_operation_id = 3;
+        runtime.process_first_operation_id = 3;
+        runtime.journal.workspace_proposals.push(WorkspaceProposal {
+            id: 1,
+            request_sha256: sha256_bytes(request).unwrap(),
+            intent_sha256: sha256_bytes(intent).unwrap(),
+            submitted: true,
+        });
+        runtime.journal.workspace_attempt = Some(WorkspaceAttempt {
+            operation_id: 2,
+            proposal_id: 1,
+            intent_sha256: sha256_bytes(intent).unwrap(),
+            attempt,
+            definite: false,
+            no_submit: false,
+            authored: None,
+        });
+        runtime.journal.tool_hold = Some(HeldCharge {
+            reserve: "3".into(),
+            charge: "1".into(),
+            before_generation: "1".into(),
+            before_target_root: "100".into(),
+            reserve_attempt: None,
+            reserve_confirmed: true,
+            reserve_refused: false,
+            reserve_boundary: Some("300".into()),
+            reserve_call_sha256: None,
+            reserve_source_sha256: None,
+            reserve_outcome_path: None,
+            reserve_outcome_sha256: None,
+            reserve_anchor: None,
+        });
+        runtime.save().unwrap();
+        (root, runtime)
+    }
+
+    #[test]
+    fn restart_lookup_absent_after_proven_stop_resolves_refused_and_settles() {
+        let (root, mut runtime) = restart_resolution_fixture("stopped");
+        runtime.prior_run_stopped = true;
+        runtime.startup_recovery_active = true;
+        let result = runtime.workspace_recover_operation(2, true).unwrap();
+        assert_eq!(result["resolution"], "refused");
+        assert_eq!(result["basis"], "absent-after-submitter-stop");
+        assert_eq!(result["resolvedBy"], "restart-recovery");
+        assert_eq!(result["outcome"]["type"], "absent");
+        assert_eq!(result["toolCharge"], "1");
+        assert!(runtime.journal.workspace_attempt.is_none());
+        assert!(runtime.journal.tool_hold.is_none());
+        let listed = runtime.workspace_attempts(&json!({})).unwrap();
+        assert!(listed["pending"].is_null());
+        assert_eq!(listed["resolutions"][0]["operationId"], "2");
+        let one = runtime
+            .workspace_attempts(&json!({"operationId":"2"}))
+            .unwrap();
+        assert_eq!(one["resolution"], "refused");
+        // Journal validation accepts exactly one terminal record per ID.
+        let config = runtime.config.clone();
+        runtime.journal.validate_workspace(&config).unwrap();
+        let mut forged = runtime.journal.clone();
+        let duplicate = forged.workspace_resolutions[0].clone();
+        forged.workspace_resolutions.push(duplicate);
+        assert!(forged.validate_workspace(&config).is_err());
+        let mut invented = runtime.journal.clone();
+        invented.workspace_resolutions[0].resolution = "maybe".into();
+        assert!(invented.validate_workspace(&config).is_err());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn restart_lookup_absent_without_stop_proof_is_uncertain_until_confirmed() {
+        let (root, mut runtime) = restart_resolution_fixture("unproven");
+        runtime.prior_run_stopped = false;
+        let result = runtime.workspace_recover_operation(2, true).unwrap();
+        assert_eq!(result["resolution"], "uncertain");
+        assert_eq!(result["basis"], "absent-but-submitter-not-proven-stopped");
+        assert_eq!(result["resolvedBy"], "lookup");
+        assert!(runtime.journal.tool_hold.is_none());
+        // Re-lookup never resubmits; a later confirmation upgrades it.
+        let calls_before = fs::read(runtime.journal.workspace_resolutions[0].attempt.join("call.bin")).unwrap();
+        let again = runtime
+            .workspace_recover(&json!({"operationId":"2"}))
+            .unwrap();
+        assert_eq!(again["resolution"], "uncertain");
+        fs::write(root.join("sim").join("lookup"), b"confirmed").unwrap();
+        let upgraded = runtime
+            .workspace_recover(&json!({"operationId":"2"}))
+            .unwrap();
+        assert_eq!(upgraded["resolution"], "performed");
+        assert_eq!(upgraded["basis"], "later-exact-lookup");
+        assert_eq!(upgraded["outcome"]["confirmation"], "replayed");
+        assert_eq!(
+            fs::read(runtime.journal.workspace_resolutions[0].attempt.join("call.bin")).unwrap(),
+            calls_before
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn restart_lookup_confirmed_resolves_performed() {
+        let (root, mut runtime) = restart_resolution_fixture("confirmed");
+        fs::write(root.join("sim").join("lookup"), b"confirmed").unwrap();
+        runtime.prior_run_stopped = false;
+        let result = runtime.workspace_recover_operation(2, true).unwrap();
+        assert_eq!(result["resolution"], "performed");
+        assert_eq!(result["basis"], "exact-lookup");
+        assert_eq!(result["outcome"]["acceptedCount"], "23");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn restart_without_call_needs_stop_proof_to_resolve_refused() {
+        let (root, mut runtime) = restart_resolution_fixture("nocall");
+        let attempt = runtime.journal.workspace_attempt.as_ref().unwrap().attempt.clone();
+        fs::remove_file(attempt.join("call.bin")).unwrap();
+        runtime.prior_run_stopped = false;
+        assert!(runtime.workspace_recover_operation(2, true).is_err());
+        assert!(runtime.journal.workspace_attempt.is_some());
+        runtime.prior_run_stopped = true;
+        let result = runtime.workspace_recover_operation(2, true).unwrap();
+        assert_eq!(result["resolution"], "refused");
+        assert_eq!(result["basis"], "no-call-after-submitter-stop");
+        assert_eq!(result["toolCharge"], "0");
+        fs::remove_dir_all(&root).unwrap();
     }
 }

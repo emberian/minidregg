@@ -1,0 +1,9 @@
+attached soft to Mini grain 8751
+step @tools
+tools: mini_grain_status,mini_read_resource,mini_publish,mini_workspace_list,mini_workspace_describe,mini_workspace_read,mini_workspace_propose,mini_workspace_submit,mini_workspace_recover,mini_workspace_attempts,mini_workspace_import_reference,mini_workspace_export_reference
+step @import shared {"authority":"hint-only","capability":"12361508302303594797","kind":"object","proposalSha256":"9fb8f88f9c
+imported shared: target 18208685746627522383
+step @read shared
+read shared: {"1": "0"}
+step @write shared 2 1
+proposal 13 (create field 2 := 1)

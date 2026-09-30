@@ -1,0 +1,10 @@
+{
+  "action": "startup-recovery",
+  "automatic": true,
+  "connection": "detached",
+  "decisionId": "43",
+  "priorRunProof": null,
+  "priorRunStopped": true,
+  "result": "recovered",
+  "unresolvedExternal": []
+}

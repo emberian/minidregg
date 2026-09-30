@@ -1,0 +1,20 @@
+{
+  "type": "minidregg-m7-result-v1",
+  "candidateCommit": "45a99743272e6601a22a75b98367abbc84d4af44",
+  "referenceCommit": "8e57b9d9a904df55acd53e39e36639295401c410",
+  "candidate": "$FRESH/candidate",
+  "reference": "$REFERENCE",
+  "binaries": {
+    "host": "723940446d3e0256bd446b07ca8d67ea9d67295d8c7cc78e08bb2487ffbe3db2",
+    "mini": "6e74ad4339fea4c36cd03e2787657dcfda43aa46c57d54c2944d4d5dbb5d03b5",
+    "store": "599bc4e6c1a04ab42e4ec4c18f4d47423e9df903006bba1ac2c2b880ff29fbfd",
+    "verifier": "f95f119664a028c15de26687b7853a5ae1e4982a83c14165afbd59ad9ec67336"
+  },
+  "checks": [
+    "sha256sums",
+    "journey-runs-candidate-binaries",
+    "no-tmp-inputs",
+    "reproduces-independent-build",
+    "run.sh-init-start-sponsor-stop"
+  ]
+}

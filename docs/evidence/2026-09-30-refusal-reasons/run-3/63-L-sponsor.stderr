@@ -1,0 +1,6 @@
+workspace read attempt: /home/ember/build/mini-product-20260930/mr-refusals/run/refusals-3/store/sponsor/attempts/a-315640084683782683178185663995044984710
+refused: law-denied: the resource's current law denies this operation (phase observation) (Host refused query, reply byte 255)
+  outcome (decoded by the Host): {"detail":"746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e","phase":"6f62736572766174696f6e","reason":"law-denied","type":"refused"}
+  encoded: 44524547472f4e41544956452d484f53542f4f5554434f4d452f76320100080bff6f62736572766174696f6e30ff746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e
+  evidence: /home/ember/build/mini-product-20260930/mr-refusals/run/refusals-3/homes/sponsor/refusals/1790793437-query-ba9a6a1c22adf2c5.bin
+  client: host refused query: refused: law-denied: the resource's current law denies this operation (phase observation); encoded refusal: 44524547472f4e41544956452d484f53542f4f5554434f4d452f76320100080bff6f62736572766174696f6e30ff746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e

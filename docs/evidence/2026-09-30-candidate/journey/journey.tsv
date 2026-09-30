@@ -1,0 +1,16 @@
+J0	PASS	11.049	$FRESH/journey/world/handoff.json	service up and a signed read answered in 11.014s
+J1	PASS	2.661	$FRESH/journey/world/attempts/newcomer/submit.json	subject 16329558529667836102, record 1; key absent from genesis/config; lookup = same receipt
+J2	PASS	2.221	$FRESH/journey/world/sponsor/attempts/create-shared/outcome.json	object 18412643332189611453 under all[], record 2
+J3	PASS	3.645	$FRESH/journey/world/sponsor/attempts/grant-newcomer/outcome.json	child 11393057549492902502 verbs observe,mutate, record 3
+J4	PASS	3.879	$FRESH/journey/world/newcomer-workspace/attempts/first-action/outcome.json	read 0.706s, write 2.113s, readback field 2 = 1, record 4
+J5	PASS	14.297	$FRESH/journey/steps/J5/refusals.tsv	6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5
+J6	PASS	6.031	$FRESH/journey/steps/J6/retry.out	reopen to first signed read 3.002s; J1 receipt and field 2 = 1 recovered; retry replayed tx, boundary unchanged
+G	FAIL	55.788	$FRESH/journey/steps/G/levels.tsv	at 10: write 4.028s, reopen 8.343s; level 1000 not in JOURNEY_GROWTH_LEVELS, so the exit is unmeasured
+J7	PASS	13.036	$FRESH/journey/world/newcomer-workspace/attempts/after-law-v2/outcome.json	law v1 not(any[]) installed (submit 2.508s); J3 grant wrote 1->7 (submit 3.209s). The new law is still permit-all
+J8	PASS	11.673	$FRESH/journey/steps/J8/refusals.tsv	deny-all installed (submit 3.310s); 5/5 refused: newcomer read/propose/crafted(current root), sponsor read, sponsor repair propose; prior call replays
+K4	FAIL	20.737	$FRESH/journey/steps/K4/s204.err	field 4 of 32 refused by the Host (RejectReason.overflow); the resource holds 4 entries incl. field 1
+M3	UNBUILT	0.002		UNBUILT: no journey.d/m3.sh. Green when: a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)
+M4	UNBUILT	0.002		UNBUILT: no journey.d/m4.sh. Green when: J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)
+M5	UNBUILT	0.003		UNBUILT: no journey.d/m5.sh. Green when: Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)
+M6	UNBUILT	0.003		UNBUILT: no journey.d/m6.sh. Green when: a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)
+M7	PASS	15.749	$FRESH/journey/steps/M7/m7-result.json	M7: candidate 45a99743272e reproduces 8e57b9d9a904 built in another directory (4/4 SHA-256, identical compiled inputs); run.sh served its own Store

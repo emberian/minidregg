@@ -1,0 +1,235 @@
+#!/usr/bin/python3
+"""Deterministic stand-in for Hermes: an ACP agent whose "model" is a script.
+
+It is installed as /agent/hermes-acp inside the real bwrap/systemd worker
+sandbox and speaks the controller's ACP. For each prompt it starts the MCP
+server named in session/new (the keyless mini-grain proxy) and runs the
+directives found in the prompt text, one MCP tools/call per step. It makes no
+inference and holds no key; every effect goes through the MCP tools, which are
+the Mini client contract.
+
+Directives (one per line or separated by ';;', each starting with '@'):
+  @import NAME JSON            mini_workspace_import_reference
+  @read NAME                   mini_workspace_read
+  @write NAME FIELD VALUE      propose invoke (create if FIELD is absent in the
+                               last read of NAME, else write with expected),
+                               then mini_workspace_submit
+  @delegate NAME RECIPIENT VERB[,VERB...] MAXCOST
+                               propose delegate, then submit
+  @export OUTFILE              mini_workspace_export_reference for the last
+                               delegation proposal; writes /workspace/OUTFILE
+  @attempts                    mini_workspace_attempts
+  @tools                       tools/list
+
+Every request and response is appended to /workspace/agent-log.jsonl and to a
+private sqlite transcript at $HOME/.hermes/state.db, which the controller
+fingerprints as this agent's retained session.
+"""
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import time
+
+WORKSPACE = "/workspace" if os.path.isdir("/workspace") else os.getcwd()
+HOME = os.environ.get("HOME", WORKSPACE)
+LOG = os.path.join(WORKSPACE, "agent-log.jsonl")
+os.umask(0o077)
+
+
+def log(kind, **fields):
+    record = {"t": round(time.time(), 3), "kind": kind}
+    record.update(fields)
+    with open(LOG, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def transcript(session, role, text):
+    home = os.path.join(HOME, ".hermes")
+    os.makedirs(home, mode=0o700, exist_ok=True)
+    db = sqlite3.connect(os.path.join(home, "state.db"))
+    db.execute("create table if not exists turns(session text, role text, text text, t real)")
+    db.execute("insert into turns values(?,?,?,?)", (session, role, text, time.time()))
+    db.commit()
+    db.close()
+
+
+def send(frame):
+    sys.stdout.write(json.dumps(frame) + "\n")
+    sys.stdout.flush()
+
+
+def say(session, text):
+    send({"jsonrpc": "2.0", "method": "session/update",
+          "params": {"sessionId": session,
+                     "update": {"sessionUpdate": "agent_message_chunk",
+                                "content": {"type": "text", "text": text + "\n"}}}})
+
+
+class Mcp:
+    def __init__(self, server):
+        self.proc = subprocess.Popen([server["command"]] + list(server.get("args", [])),
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                     text=True, bufsize=1)
+        self.next_id = 1
+        self.request("initialize", {"protocolVersion": "2025-06-18"})
+
+    def request(self, method, params):
+        ident = self.next_id
+        self.next_id += 1
+        frame = {"jsonrpc": "2.0", "id": ident, "method": method, "params": params}
+        log("mcp-request", frame=frame)
+        self.proc.stdin.write(json.dumps(frame) + "\n")
+        self.proc.stdin.flush()
+        line = self.proc.stdout.readline()
+        if not line:
+            raise RuntimeError("MCP server closed")
+        reply = json.loads(line)
+        log("mcp-response", frame=reply)
+        return reply.get("result")
+
+    def call(self, name, arguments):
+        result = self.request("tools/call", {"name": name, "arguments": arguments})
+        text = result["content"][0]["text"]
+        if result.get("isError"):
+            raise ToolError(name, text)
+        try:
+            return json.loads(text)
+        except ValueError:
+            return text
+
+    def close(self):
+        try:
+            self.proc.stdin.close()
+            self.proc.wait(timeout=10)
+        except Exception:
+            self.proc.kill()
+
+
+class ToolError(Exception):
+    def __init__(self, name, text):
+        super().__init__(f"{name}: {text}")
+        self.name = name
+        self.text = text
+
+
+def field_value(view, field):
+    for entry in (view.get("page") or {}).get("entries", []):
+        if entry.get("key", {}).get("field") == field:
+            return entry.get("value")
+    return None
+
+
+def run_prompt(session, server, text):
+    reads = {}
+    last_delegation = None
+    mcp = Mcp(server)
+    try:
+        for raw in text.replace(";;", "\n").splitlines():
+            line = raw.strip()
+            if not line.startswith("@"):
+                continue
+            words = line.split(None, 2) if line.startswith("@import ") else line.split()
+            op = words[0]
+            say(session, f"step {line[:120]}")
+            log("step", directive=line)
+            try:
+                if op == "@tools":
+                    tools = mcp.request("tools/list", {})
+                    say(session, "tools: " + ",".join(t["name"] for t in tools.get("tools", [])))
+                elif op == "@import":
+                    result = mcp.call("mini_workspace_import_reference",
+                                      {"name": words[1], "reference": json.loads(words[2])})
+                    say(session, f"imported {words[1]}: target {result.get('target')}")
+                elif op == "@read":
+                    view = mcp.call("mini_workspace_read", {"name": words[1]})
+                    reads[words[1]] = view
+                    entries = {e["key"]["field"]: e["value"] for e in view["page"]["entries"]}
+                    say(session, f"read {words[1]}: {json.dumps(entries, sort_keys=True)}")
+                elif op == "@write":
+                    name, field, value = words[1], words[2], words[3]
+                    current = field_value(reads.get(name, {}), field)
+                    if current is None:
+                        action = {"type": "create", "key": {"type": "object", "field": field}, "value": value}
+                    else:
+                        action = {"type": "write", "key": {"type": "object", "field": field},
+                                  "value": value, "expected": current}
+                    proposal = mcp.call("mini_workspace_propose", {"request": {
+                        "type": "minidregg-workspace-proposal-v1", "action": "invoke",
+                        "targets": [{"name": name, "payload": {"type": "scalar", "actions": [action]}}]}})
+                    say(session, f"proposal {proposal['proposalId']} ({action['type']} field {field} := {value})")
+                    outcome = mcp.call("mini_workspace_submit", {"proposalId": proposal["proposalId"]})
+                    say(session, f"submission {outcome.get('operationId')}: {outcome.get('resolution')} ({outcome.get('basis')})")
+                elif op == "@delegate":
+                    name, recipient, verbs, max_cost = words[1], words[2], words[3].split(","), words[4]
+                    proposal = mcp.call("mini_workspace_propose", {"request": {
+                        "type": "minidregg-workspace-proposal-v1", "action": "delegate", "name": name,
+                        "recipient": recipient, "verbs": verbs, "maxCost": max_cost}})
+                    last_delegation = proposal["proposalId"]
+                    outcome = mcp.call("mini_workspace_submit", {"proposalId": last_delegation})
+                    say(session, f"delegation {last_delegation}: {outcome.get('resolution')}")
+                elif op == "@export":
+                    if last_delegation is None:
+                        raise ToolError("export", "no delegation in this prompt")
+                    result = mcp.call("mini_workspace_export_reference", {"proposalId": last_delegation})
+                    target = os.path.join(WORKSPACE, os.path.basename(words[1]))
+                    with open(target, "w", encoding="utf-8") as handle:
+                        json.dump(result["reference"], handle, sort_keys=True)
+                    say(session, f"exported reference to {os.path.basename(target)}")
+                elif op == "@attempts":
+                    listed = mcp.call("mini_workspace_attempts", {})
+                    for record in listed.get("resolutions", []):
+                        say(session, f"attempt {record['operationId']} proposal {record['proposalId']}: "
+                                     f"{record['resolution']} ({record['basis']}; {record['resolvedBy']})")
+                    if listed.get("pending"):
+                        say(session, f"pending: {json.dumps(listed['pending'])}")
+                else:
+                    say(session, f"unknown directive {op}")
+            except ToolError as error:
+                log("tool-error", tool=error.name, text=error.text)
+                say(session, f"tool error {error.name}: {error.text[:300]}")
+    finally:
+        mcp.close()
+
+
+def main():
+    session = None
+    server = None
+    for line in sys.stdin:
+        msg = json.loads(line)
+        method = msg.get("method")
+        ident = msg.get("id")
+        log("acp-in", method=method, id=ident)
+        if method == "initialize":
+            send({"jsonrpc": "2.0", "id": ident, "result": {"protocolVersion": 1,
+                  "agentCapabilities": {"loadSession": True}}})
+        elif method in ("session/new", "session/load"):
+            params = msg.get("params", {})
+            servers = params.get("mcpServers") or []
+            server = servers[0] if servers else None
+            if method == "session/new":
+                session = "deterministic-" + os.urandom(8).hex()
+                transcript(session, "system", "session created")
+                send({"jsonrpc": "2.0", "id": ident, "result": {"sessionId": session}})
+            else:
+                session = params.get("sessionId")
+                transcript(session, "system", "session loaded")
+                send({"jsonrpc": "2.0", "id": ident, "result": {}})
+        elif method == "session/prompt":
+            text = "".join(part.get("text", "") for part in msg["params"].get("prompt", []))
+            transcript(session, "user", text)
+            if server is None:
+                send({"jsonrpc": "2.0", "id": ident, "error": {"code": -32000, "message": "no MCP server"}})
+                continue
+            run_prompt(session, server, text)
+            transcript(session, "agent", "turn complete")
+            send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn"}})
+        elif ident is not None:
+            send({"jsonrpc": "2.0", "id": ident, "error": {"code": -32601, "message": "unsupported"}})
+
+
+if __name__ == "__main__":
+    main()

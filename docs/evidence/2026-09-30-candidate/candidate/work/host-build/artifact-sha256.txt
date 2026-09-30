@@ -1,0 +1,4 @@
+723940446d3e0256bd446b07ca8d67ea9d67295d8c7cc78e08bb2487ffbe3db2  $FRESH/candidate/work/host-bin/minidregg-host
+6e63105da7eef19386723ed1d9865bfaaddbfd48db4e18bc1ca6b3593014962d  $FRESH/candidate/work/host-build/minidregg-host.rsp
+e3953c5789594fb695dcc79ac0430a672e0db2fb511abd4d2e0e205841309e4f  $FRESH/candidate/work/host-build/transitive-imports.json
+bc2bd8196d08b6fdb9f6d661ed76ae528661de6ac1955f701f1a6826f15a0899  $FRESH/candidate/work/host-build/reusable-artifact-sha256.txt

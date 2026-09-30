@@ -18,11 +18,9 @@ historical fn authorship verdict and neither phase claims event17 or fn ACK.
 The stronger `receive`/`cover-plan`/`cover-advance`/`ack`/`verify` path remains
 for a schema-1 `fn-e` accepted-article event; it refuses `fn-r`.
 
-The command replaces the GitWeb-specific authority and phase join in
-`scripts/fn-gitweb-preview/join.sh` for new selected content versions. GitWeb
-may still create content and supply provenance, but the authority input here is
-the Mini content atom and signed current read. The old script remains a dated
-fixture. This profile is **public-peerable-v2**; there is no recipient-only
+The command replaced the GitWeb-specific join (`scripts/fn-gitweb-preview/`),
+which is deleted. Content from any application, GitWeb included, enters as a Mini
+content atom, and the authority input is that atom and a signed current read. This profile is **public-peerable-v2**; there is no recipient-only
 encryption or private-history export. Fn acceptance and ACK are transport and
 progress facts, not Mini admission or app installation.
 
@@ -82,3 +80,44 @@ The `fn-r` transport path retains its raw cursor, report, stored article and
 Host result. It never calls fn ACK. A retry after an event13 attempt uses only
 exact op21 lookup. Its signed recipient read proves the selected packet was
 installed; a fn `240` response or retrieved article alone does not.
+
+## Two Stores with independent credentials
+
+[`selected-exchange-journey.sh`](selected-exchange-journey.sh) is the general
+end-to-end journey. Its arguments are the Host, Mini, Store and verifier binaries,
+the fn launcher and runtime image, and a new private root. It bootstraps two
+Stores with `newparticipant-acceptance.sh`. Each has its own domain, sponsor
+subject and sponsor key. It provisions a fresh fn Store and node, then runs the
+phases above. Every service it starts is stopped on exit, and nothing is ACKed
+at fn.
+
+The release names `ownerSubject`, a subject number that is local to each Store.
+The recipient checks the owner signature against *its own* current key for that
+subject. It requires the recipient capability to be held by that subject, and
+its law to be exactly `eq request/subject <ownerSubject>`. An independent
+recipient therefore introduces the source owner as a **home identity**, holding
+the owner's public key at the owner's home subject number:
+
+```sh
+# recipient sponsor, with only the owner's PUBLIC key
+mini enroll --action plan --sponsor-workspace W --factory-ref factory \
+  --name source-owner --new-public-key OWNER.pub --home-subject 7 --dir ATTEMPT
+# source owner, in its own process: checks the Plan names its key at 7, signs possession
+mini enroll --action possess --dir ATTEMPT --key OWNER.key --subject 7 --output POSSESSION.sig
+# recipient sponsor
+mini enroll --action seal --dir ATTEMPT --possession-signature POSSESSION.sig
+mini enroll --action submit --dir ATTEMPT
+```
+
+No process holds both secrets. The recipient's sponsor subject must differ from
+the owner's home subject, because Lean refuses a subject that already exists.
+The recipient then delegates an `observe,mutate` child capability on its inbox
+to that subject and installs the exact owner-subject law.
+
+**Known limit.** Signed reads are policy-admitted, so under that law the
+recipient's own sponsor can no longer read its inbox or observe the policy it
+would need to re-law it. The signed readback in `verify-transport` is therefore
+made by the owner's home identity at the recipient. Admission remains the
+recipient's own law and capability lineage. A law that locks only the mutation
+path needs a Lean extension of `FnGatewayPolicy.subjectLocked` with its own
+implication proof.

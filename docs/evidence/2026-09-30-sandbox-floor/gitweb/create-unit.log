@@ -1,0 +1,22 @@
+Running as unit: m11-gitweb-floor-create.service; invocation ID: de781c765fd6498eb0ad4a67f6ddacc7
+app_output=/run/m11-gitweb-floor/out/spk-app-output-1683903.log
+app_spawned mode=create pid=1690708
+view="" roles=guest[read],developer[read,write]
+api_sessions=developer,guest web_session=owner
+source_commit=75dc709b2bcb57cb26416e2e37d37328c4d79593
+git_rpc method=Get path=info/refs?service=git-receive-pack status=200 bytes=180 sha256=c5dee52783c3db532e0d0080b3474cb4a77b725188bcbd82571259799f901f23
+git_rpc method=Post path=git-receive-pack status=200 bytes=52 sha256=2aee2acc693256606857df29f5a45cce383f5d4299c5af9b41f9f3d6f64e1371
+git_exit=exit status: 0 stdout="To http://127.0.0.1:39003/\n*\tHEAD:refs/heads/master\t[new branch]\nDone\n" stderr=""
+push_post_count=1
+guest_receive_pack_status=403
+git_rpc method=Get path=info/refs?service=git-upload-pack status=200 bytes=351 sha256=acd365b6b8440dced35215d84760e95c937a2fb725bda40f967ce9420f9ec24f
+git_rpc method=Post path=git-upload-pack status=200 bytes=298 sha256=8a137980ea64e2b3fb60544ba269faaf32e6161502c71f09eaea3c78d388354d
+git_exit=exit status: 0 stdout="" stderr=""
+guest_fetched_commit=75dc709b2bcb57cb26416e2e37d37328c4d79593 readme_sha256=fa2447c2dc837cb77e517024df9363e276bd12eae115190fc2dc2c3c95e32403
+browser_path="gitweb.cgi?p=repo.git;a=summary" status=200 mime="text/html; charset=utf-8" bytes=5418 sha256=8e685c2f6d4e1d3b5d4f9bfcb93071d9bf2e7703e7549dcfe8b868be5c77cb70
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 19.988s
+CPU time consumed: 19.932s
+Memory peak: 162M (swap: 0B)
+unit_exit=0

@@ -1,0 +1,14 @@
+{
+  "authority": "admitted-key-only",
+  "keyId": "15997198469827738937",
+  "keyPath": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/homes/sponsor/keys/newcomer-1.key",
+  "publicKey": "5dc913973572b671db67fbcfe37b63e3ebe2a204e6c61e7ec014cbfcf7e53e8c",
+  "receipt": {
+    "acceptedCount": "1",
+    "eventId": "100020274586736632799289496707480457367638165236096555267367991931016085001717",
+    "imageBoundary": "6928081768906551686056596823442785315494579580406737542562973798638910088158",
+    "transactionId": "12235589538308186559123079328372016212300697223481916321732947845398874130674"
+  },
+  "subject": "11033321548135836207",
+  "type": "minidregg-participant-enrollment-result-v1"
+}

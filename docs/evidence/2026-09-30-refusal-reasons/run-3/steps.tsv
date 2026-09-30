@@ -1,0 +1,72 @@
+n	J	who	line	expect	exit	wall_s	verdict	note
+1	S	OPERATOR	bootstrap fresh private Store, sponsor workspace, mini serve	0	0	10.744	ok	
+2	S	OPERATOR	ssh keys, rendered authorized_keys, private sshd on 127.0.0.1:22437	0	0	0.079	ok	
+3	S	newcomer	keygen mini.key	0	0	0.152	ok	
+4	S	OPERATOR	CUSTODY: copy newcomer secret into sponsor home (co-signed enrollment)	0	0	0.007	ok	
+5	S	sponsor	enroll plan newcomer-1 newcomer-1.key	0	0	1.510	ok	
+6	S	sponsor	enroll seal newcomer-1	0	0	0.540	ok	
+7	S	sponsor	enroll submit newcomer-1	0	0	0.577	ok	
+8	S	newcomer	init mini.key 15271171676363863572	0	0	0.147	ok	
+9	S	sponsor	create shared declared {"type":"all","predicates":[]}	0	0	2.745	ok	
+10	S	sponsor	refs	0	0	0.143	ok	
+11	S	sponsor	delegate grant-newcomer shared 15271171676363863572 observe,mutate 50000	0	0	3.480	ok	
+12	S	sponsor	submit grant-newcomer	0	0	2.302	ok	
+13	S	sponsor	publish grant-newcomer	0	0	0.571	ok	
+14	S	sponsor	export grant-newcomer	0	0	0.138	ok	
+15	S	newcomer	import shared {"authority":"hint-only","capability":"17161516641715206294","kind":"object","proposalSha256":"5e85f56ec78cb0dd0f97420f88c05cf27b4ccf1af12a75407c1a0fadff0806cc","receipt":{"acceptedCount":"3","confirmation":"replayed","eventId":"112246426749811056711194203399524102298711385220851952716239446340609665888312","imageBoundary":"42424097747276286266775024267295732803797049616765969513666226662520951344640","transactionId":"99341891786898420897669322601901378707577554030318732943047288650621888045549","type":"confirmed"},"recipient":"15271171676363863572","target":"13579565981568029033","type":"minidregg-delegated-reference-v1"}	0	0	0.221	ok	
+16	S	newcomer	refs	0	0	0.141	ok	
+17	S	newcomer	invoke first shared create 2 1	0	0	1.149	ok	
+18	S	newcomer	submit first	0	0	1.415	ok	
+19	S	newcomer	read shared	0	0	0.820	ok	
+20	S	check	admitted pole: the grant holder reads field 2 = 1	-	-	-	ok	
+21	N	third	keygen mini.key	0	0	0.151	ok	
+22	N	OPERATOR	CUSTODY: copy third secret into sponsor home (co-signed enrollment)	0	0	0.004	ok	
+23	N	sponsor	enroll plan third-1 third-1.key	0	0	1.503	ok	
+24	N	sponsor	enroll seal third-1	0	0	0.496	ok	
+25	N	sponsor	enroll submit third-1	0	0	1.354	ok	
+26	N	third	init mini.key 10947688465217070410	0	0	0.143	ok	
+27	N	third	import stolen object 13579565981568029033 17161516641715206294	0	0	0.151	ok	
+28	N	third	read stolen	3	3	1.036	ok	refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refuse
+29	N	check	Host named no-grant (shell showed: no-grant)	-	-	-	ok	
+30	N	third	invoke third-write stolen create 3 1	3	3	0.879	ok	refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refuse
+31	N	check	Host named no-grant (shell showed: no-grant)	-	-	-	ok	
+32	N	CLI	plain mini query by the third key with the newcomer's capability	3	3	0.676	ok	refused: no-grant: this key holds no grant covering this target and operation (phase observation)
+33	N	third	import owner object 13579565981568029033 17667387486032558209	0	0	0.146	ok	
+34	N	third	read owner	3	3	0.942	ok	refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refuse
+35	N	check	Host named no-grant (shell showed: no-grant)	-	-	-	ok	
+36	U	stranger	keygen mini.key	0	0	0.150	ok	
+37	U	stranger	init mini.key 4242424242	0	0	0.149	ok	
+38	U	stranger	import stolen object 13579565981568029033 17161516641715206294	0	0	0.146	ok	
+39	U	stranger	read stolen	3	3	0.511	ok	refused: unknown-key: this key is not enrolled on this Host (phase observation) (Host refused challenge, reply
+40	U	check	Host named unknown-key (shell showed: unknown-key)	-	-	-	ok	
+41	M	RAW	query with 64 random bytes	3	3	0.162	ok	reason=malformed
+42	M	RAW	prepare with 64 random bytes	3	3	0.152	ok	reason=malformed
+43	B	newcomer	read shared	0	0	0.846	ok	
+44	B	check	the newcomer's read retained its signed observation	-	-	-	ok	
+45	B	RAW	the same observation with its last signature byte flipped	3	3	0.209	ok	reason=bad-signature
+46	B	RAW	admitted pole: the unmodified observation, same image	0	0	0.218	ok	reason=-
+47	R	newcomer	invoke move-on shared write 2 5 1	0	0	0.957	ok	
+48	R	newcomer	submit move-on	0	0	1.595	ok	
+49	R	RAW	the same observation after the image moved	3	3	0.184	ok	reason=stale-root
+50	V	sponsor	read shared	0	0	0.845	ok	
+51	V	OPERATOR	OPERATOR: hand-craft the revocation intent for the newcomer's grant (no revoke verb)	0	0	0.015	ok	
+52	V	OPERATOR	sponsor signs and submits the revocation (mini submit)	0	0	1.613	ok	
+53	V	check	revocation installed	-	-	-	ok	
+54	V	newcomer	read shared	3	3	0.952	ok	refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host
+55	V	check	Host named revoked (shell showed: revoked)	-	-	-	ok	
+56	V	newcomer	invoke after-revoke shared write 2 6 5	3	3	0.937	ok	refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host
+57	V	check	Host named revoked (shell showed: revoked)	-	-	-	ok	
+58	V	sponsor	read shared	0	0	0.876	ok	
+59	V	check	control: the sponsor still reads field 2 = 5	-	-	-	ok	
+60	L	sponsor	law lockout shared {"type":"any","predicates":[]}	0	0	1.033	ok	
+61	L	sponsor	submit lockout	0	0	1.793	ok	
+62	L	check	deny-all installed	-	-	-	ok	
+63	L	sponsor	read shared	3	3	1.002	ok	refused: law-denied: the resource's current law denies this operation (phase observation) (Host refused query,
+64	L	check	Host named law-denied (shell showed: law-denied)	-	-	-	ok	
+65	L	sponsor	law repair shared {"type":"all","predicates":[]}	3	3	0.969	ok	refused: law-denied: the resource's current law denies this operation (phase observation) (Host refused query,
+66	L	check	Host named law-denied (shell showed: law-denied)	-	-	-	ok	
+67	L	third	read owner	3	3	0.955	ok	refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refuse
+68	L	check	Host named no-grant (shell showed: no-grant)	-	-	-	ok	
+69	X	check	every shell refusal frame is retained with the Host's own decoding, naming a reason	-	-	-	ok	
+70	END	OPERATOR	stop sshd	0	0	0.008	ok	
+71	END	OPERATOR	stop the Mini service	0	0	0.131	ok	

@@ -1,0 +1,17 @@
+end_utc=2026-09-30T08:21:06Z
+elapsed_seconds=1629
+git_head=none (source tree is not a git checkout)
+root=$FRESH/candidate/work/src
+lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release)
+toolchain=$ELAN_HOME/toolchains/leanprover--lean4---v4.30.0
+native_target=Linux:x86_64
+umbrella=0
+compiled_source_modules=363
+resumed_prefix_modules=0
+source_modules=363
+package_modules=2933
+response_objects=3296
+reusable_artifact_manifest_sha256=bc2bd8196d08b6fdb9f6d661ed76ae528661de6ac1955f701f1a6826f15a0899
+usage_exit=1
+binary=$FRESH/candidate/work/host-bin/minidregg-host
+binary_sha256=723940446d3e0256bd446b07ca8d67ea9d67295d8c7cc78e08bb2487ffbe3db2

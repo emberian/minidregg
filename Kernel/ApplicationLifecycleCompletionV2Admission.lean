@@ -300,7 +300,7 @@ def prepareConditional (config : Config) (opened : Opened config)
                         (DeclaredResourceController.writes prepared).map DataWrite.cellId then
                     match ← ApplicationLifecycleCompletionV2Policy.admit config.signature
                         prepared ingress.signed physical with
-                    | .error _ => return .error "completion current signed policy admission refused"
+                    | .error reason => return .error s!"completion current signed policy admission refused: {repr reason}"
                     | .ok invocation =>
                         return .ok ⟨profileExact, sourceValid, key, keyPinned,
                           physical, historical, prepared, linked, shape,

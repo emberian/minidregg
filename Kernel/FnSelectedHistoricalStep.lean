@@ -142,10 +142,15 @@ theorem select_verified {config : Config} {target : Durable}
       selected.priorRecords.length = index :=
   select_at verified.accepted_history index within
 
-#print axioms Selected.admitted_record
-#print axioms Selected.prefix_admitted
-#print axioms Selected.signed_ingress_admitted
-#print axioms select_at
-#print axioms select_verified
+/-- info: 'Minidregg.Kernel.FnSelectedHistoricalStep.Selected.admitted_record' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Selected.admitted_record
+/-- info: 'Minidregg.Kernel.FnSelectedHistoricalStep.Selected.prefix_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Selected.prefix_admitted
+/-- info: 'Minidregg.Kernel.FnSelectedHistoricalStep.Selected.signed_ingress_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Selected.signed_ingress_admitted
+/-- info: 'Minidregg.Kernel.FnSelectedHistoricalStep.select_at' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms select_at
+/-- info: 'Minidregg.Kernel.FnSelectedHistoricalStep.select_verified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms select_verified
 
 end Minidregg.Kernel.FnSelectedHistoricalStep

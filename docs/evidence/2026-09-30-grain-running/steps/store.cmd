@@ -1,0 +1,1 @@
+/home/ember/build/mini-product-20260930/m6-grain/src/scripts/spk-platform/grain-store.sh /var/lib/minidregg/grains/m6-r4/store /opt/minidregg-m6-20260930/bin/minidregg-host-m6e /opt/minidregg-m6-20260930/bin/mini /opt/minidregg-m6-20260930/bin/minidregg-link-sqlite-store /opt/minidregg-m6-20260930/bin/minidregg-credential-signature-verifier

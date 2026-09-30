@@ -18,7 +18,7 @@ use std::path::Path;
 const MAX_FRAME: usize = 12_102_760;
 const STOP_PLAN_TAG: &[u8] = b"DREGG/APPLICATION/LAUNCH-STOP-OPERATOR-PLAN/v2";
 const BEGIN_TAG: &[u8] = b"DREGG/APPLICATION/LIFECYCLE-BEGIN-INGRESS/v3";
-const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v3";
+const OUTCOME_TAG: &[u8] = b"DREGG/NATIVE-HOST/OUTCOME/v4";
 
 fn invalid(reason: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
@@ -28,75 +28,23 @@ fn invalid(reason: &'static str) -> io::Error {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedStopBeginSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
-    snapshot_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl FixedStopBeginSigners {
     fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-resident-begin-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || [
-                &self.app,
-                &self.package_manifest,
-                &self.snapshot_manifest,
-                &self.management_subject,
-            ]
-            .iter()
-            .any(|value| !decimal(value))
-        {
+        if self.protocol != "mini-spk-resident-begin-management-v1" {
             return Err(invalid("STOP BEGIN fixed management custody refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("residentBeginManagement")
-            .ok_or_else(|| invalid("STOP BEGIN management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("snapshotManifest", &self.snapshot_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            let actual = manager
-                .get(field)
-                .and_then(|value| {
-                    value
-                        .as_str()
-                        .map(str::to_owned)
-                        .or_else(|| value.as_u64().map(|number| number.to_string()))
-                })
-                .ok_or_else(|| invalid("STOP BEGIN management coordinate absent"))?;
-            if actual != *expected {
-                return Err(invalid("STOP BEGIN management coordinate differs"));
-            }
-        }
-        let key_id = manager
-            .get("managementKeyId")
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| value.as_u64().map(|number| number.to_string()))
-            })
-            .ok_or_else(|| invalid("STOP BEGIN management key absent"))?;
-        for signer in &self.signers {
-            if signer.key_id != key_id {
-                return Err(invalid("STOP BEGIN signer key differs from Mini pin"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("STOP BEGIN signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 }
 
@@ -154,12 +102,12 @@ fn checked_plan<'a>(
         || text(base, "type")? != "application-lifecycle-launch-begin-plan-v1"
         || text(base, "canonicalRequestHex")? != hex(request)
         || text(request_view, "kind")? != "stop"
-        || text(base, "clientOperationId")? != client_operation_id
+        || text(request_view, "clientOperationId")? != client_operation_id
         || text(request_view, "descriptorHex")? != hex(&launch.descriptor().canonical)
         || text(base, "descriptorRoot")? != launch.descriptor().root
-        || text(base, "app")? != fixed.app
-        || text(base, "packageManifest")? != fixed.package_manifest
-        || text(base, "snapshotManifest")? != fixed.snapshot_manifest
+        || text(base, "app")? != fixed.selector.app
+        || text(base, "packageManifest")? != fixed.selector.package_manifest
+        || text(base, "snapshotManifest")? != fixed.selector.snapshot_manifest
         || text(base, "managementSubject")? != fixed.management_subject
         || !decimal(text(base, "authorizationOperationId")?)
         || !decimal(text(base, "worldRoot")?)
@@ -220,7 +168,7 @@ pub(crate) fn submit_once(
     let active_bytes = serde_json::to_vec(&active)?;
     write_new(attempt_dir, "op66-requested.json", &active_bytes)?;
     write_new(parent, "lifecycle-stop-begin-v3-active.json", &active_bytes)?;
-    let reply = operator.invoke(66, &request)?;
+    let reply = operator.invoke(66, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op66-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 66, STOP_PLAN_TAG)?.to_vec();
     let plan_path = write_new(attempt_dir, "stop-plan-v2.bin", &plan)?;

@@ -180,7 +180,12 @@ struct ResidentConfig {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum StartAction {
     Create { index: usize },
     Continue { created_index: String },
@@ -1053,6 +1058,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             return Err(invalid("INSTALL action cannot enter resident START"));
         }
     };
+    let generation: u64 = begin
+        .process_generation
+        .parse()
+        .map_err(|_| invalid("source BEGIN process generation is not decimal"))?;
     let spec = SandboxSpec {
         bwrap: config.bwrap.clone(),
         image_root: package.directory.join("root"),
@@ -1060,6 +1069,11 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         persistent_var_max_bytes: config.persistent_var_max_bytes,
         argv: command.argv.clone(),
         environ: command.environ.clone(),
+        // Root-private journal directory, one new file per app generation.
+        app_output: config.journal_dir.join(format!(
+            "app-output-r{}-g{generation}.log",
+            config.volume_resource
+        )),
     };
     let prepared =
         PreparedResident::prepare(&spec, config.app_uid, config.app_gid, &config.bwrap_sha256)?;
@@ -1156,7 +1170,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     journal.arm(claim.physical_begin.clone())?;
     journal.request_launch(&claim.physical_begin)?;
     let mut resident = prepared.start(&journal, &claim.physical_begin)?;
-    let view = resident.rpc.get_view_info(Duration::from_secs(300))?;
+    // The RPC driver bounds every call (MAX_CALL_TIME, 30 s); a longer
+    // request is refused before it is sent, after the claim is committed.
+    let view = resident.rpc.get_view_info(Duration::from_secs(30))?;
     if view != bridge.view_info {
         return Err(invalid(
             "running app ViewInfo differs from signed bridge schema",

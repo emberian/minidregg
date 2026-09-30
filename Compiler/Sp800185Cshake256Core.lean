@@ -410,7 +410,8 @@ private theorem laneFromBlockUInt64_eq (block : List UInt8) (laneIndex : Nat) :
   exact (laneFromBlockUInt64_eq block laneIndex).symm
 
 /-! The compiled substitution keeps the full little-endian lane law. -/
-#print axioms laneFromBlock_eqUInt64
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.laneFromBlock_eqUInt64' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms laneFromBlock_eqUInt64
 
 def xorRateBlock (state : State) (block : List UInt8) : State :=
   Array.ofFn fun index : Fin 25 =>
@@ -494,7 +495,8 @@ private theorem stateByteUInt64_eq (state : State) (index : Nat) :
   funext state index
   exact (stateByteUInt64_eq state index).symm
 
-#print axioms stateByte_eqUInt64
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.stateByte_eqUInt64' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stateByte_eqUInt64
 
 /-- The first 256 output bits, in Keccak's little-endian lane convention. -/
 def squeeze32 (state : State) : List UInt8 :=

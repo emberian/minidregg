@@ -1,0 +1,27 @@
++ mkdir -p /var/lib/nginx
++ mkdir -p /var/log/nginx
++ mkdir -p /var/run
++ mkdir -p /var/repo.git
++ cd /var/repo.git
++ git --bare init --shared
+Initialized empty shared Git repository in /var/repo.git/
++ ln -sf /opt/app/post-receive-hook.sh hooks/post-receive
++ git config --file config http.receivepack true
++ git config --file config receive.denyNonFastForwards false
++ git update-server-info
++ cat
++ cat config
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = true
+	sharedrepository = 1
+[receive]
+	denyNonFastForwards = false
+[http]
+	receivepack = true
++ cd /
++ /continue.sh
++ /usr/sbin/nginx
++ /usr/sbin/fcgiwrap -f -s tcp:127.0.0.1:9000
++ sleep infinity

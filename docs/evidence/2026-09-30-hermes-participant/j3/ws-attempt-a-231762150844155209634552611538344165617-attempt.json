@@ -1,0 +1,7 @@
+{
+  "config": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/hermes/state/resource-workspace/attempts/a-231762150844155209634552611538344165617/config.json",
+  "format": "minidregg-resource-client-attempt-v1",
+  "host": "/home/ember/build/minidregg-recovery-20260928/native-e22d16b/minidregg-host-e22d16b-r3",
+  "operation": "query",
+  "socket": "/home/ember/build/mini-product-20260930/m5-hermes/run/j3/store/public/mini.sock"
+}

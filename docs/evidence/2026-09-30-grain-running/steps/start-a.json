@@ -1,0 +1,26 @@
+{
+  "app": "9101",
+  "completion": {
+    "admittedSha256": "18f93ccbb5097be3e72aaf2e4c5b7ff0b356a5b2ef964719d7450fe0a92814f5",
+    "completionReceipt": {
+      "acceptedCount": "25",
+      "eventId": "110893634257634442032624800222364872572688993719931261972055437105180814567817",
+      "imageBoundary": "113319372847498365362580151382900644056058859315926669191432877396296538789256",
+      "transactionId": "52898455741894171178289514000841227846000367604597468804624884752014622955552"
+    },
+    "evidenceName": "op38-outcome.json",
+    "evidenceSha256": "9d74cf8827654a2aa88d29370ec03ce6c5a53b8f269595d6706edb73c35ca14e",
+    "protocol": "mini-spk-resident-start-completed-v3"
+  },
+  "elapsedMs": "111064",
+  "generation": "2",
+  "protocol": "mini-spk-grain-start-v1",
+  "routes": [
+    "/var/lib/minidregg/grains/m6-r4/host/apps/9101/routes/owner-api"
+  ],
+  "startAction": {
+    "index": 0,
+    "kind": "create"
+  },
+  "unit": "mini-spk-a9101-g2.service"
+}

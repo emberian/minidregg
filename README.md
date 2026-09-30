@@ -7,11 +7,16 @@ instruments designed on the assumption that AI-scale proving fails silently.**
 · architecture: [`PROJECT.md`](PROJECT.md) · laws: [`ATLAS.md`](ATLAS.md) ·
 evidence ledger: [`GOAL.md`](GOAL.md)
 
-This tree is roughly three weeks old. It contains 420 Lean files; its proof
-system, **Selvage** (`Selvage/`, 96 files, ~48K lines), carries **zero
-`sorry`, zero `axiom` declarations**, and every `#print axioms` in the tree is
-`#guard_msgs`-pinned, so an axiom regression fails the build rather than
-printing into a log nobody reads. The whole tree builds green (3,421 jobs).
+This tree began on 2026-08-07. It tracks 878 Lean files (`git ls-files
+'*.lean'`): 815 library modules, every one imported from the `Minidregg`
+umbrella (`scripts/check-build-closure.sh` fails otherwise), and 63
+standalone `scripts/` programs and `docs/evidence/` probes. Its proof system,
+**Selvage** (`Selvage/`, 150 files, ~77K lines), carries **zero `sorry`, zero
+`axiom` declarations**. Every `#print axioms` in a tracked file is
+`#guard_msgs`-pinned (`scripts/check-proof-hygiene.sh` fails on a bare one), so
+an axiom regression fails the build rather than printing into a log nobody
+reads; eight of those pinned footprints name `native_decide` compiler axioms.
+`lake build Minidregg` builds green (9,294 jobs, Mathlib included).
 Those facts are cheap to state and cheap to check; the interesting part is
 the discipline that makes them mean something.
 
@@ -47,16 +52,19 @@ treat every safeguard as itself needing a demonstration that it can fire:
   H" is acceptable only with either a witness for H or a named, tracked
   obligation. Several of this tree's results exist precisely to close
   premises other developments carry silently.
-- **No `#guard` unit tests in proofs.** A fact worth asserting is worth
+- **No `#guard` in any library module.** A fact worth asserting is worth
   naming: `theorem` + `decide`/`rfl` + a pinned axiom footprint. `#guard` is
-  a compiled evaluation with the name, term, and axiom record deleted.
+  a compiled evaluation with the name, term, and axiom record deleted. (Seven
+  remain in one standalone probe, `scripts/probe-fn-portable-line.lean`, which
+  no build runs.)
 - **Lean authors the artifacts.** Constraint systems, descriptors, and
   protocol data are *emitted from Lean* and consumed by Rust; Rust is
   generated glue or opaque fallible computation, never a semantics. A
   hand-written model "of" an implementation is a twin, and twins drift — the
   emit pipeline makes the checked object and the deployed object the same
   object. (`Compiler/Emit.lean` → JSON descriptors → the native side
-  `include_str!`s them; drift is a CI failure.)
+  `include_str!`s them. The build rewrites every emitted file, and
+  `scripts/local-gates.sh` fails when one differs from its committed copy.)
 
 If you build verification tooling: the instruments are the part of this repo
 we most want challenged.
@@ -163,7 +171,10 @@ and adversarial readings are all welcome; the most valuable contribution is
 a demonstration that one of our theorems is vacuous, because either the
 instruments catch it (good) or they gain a new tooth (better).
 
-Build: `lake build Minidregg`. The import boundary
+Build: `lake build Minidregg`. The gate is `scripts/local-gates.sh`, and
+`.github/workflows/build.yml` runs it on every push: proof hygiene, the
+umbrella build, emitted-file drift (the build may change no tracked file), the build-closure census, and
+`native/resource-client/journey.sh` on any revision that has it. The import boundary
 (`scripts/check-import-boundary.sh`) enforces that `Theory/` is
 candidate-independent (Mathlib-only) and `Selvage/` sits on `Theory` alone.
 Unsigned commits indicate autonomous agent work; the evidence ledger records

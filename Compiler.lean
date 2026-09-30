@@ -37,6 +37,7 @@ import Compiler.PlanFootprintCodec  -- a plan footprint as canonical bytes: (wir
 import Compiler.IntStream  -- the one integer byte codec: zigzag base-255; the Book's Sum codec is deleted
 import Compiler.DeclaredEffectCell  -- declared object/program/account-metadata cells are StoreCodec at the effect wire; the four-slot page is deleted (DATAMODEL §5 B1)
 import Compiler.StoreCodecBook  -- the finite Book as a store at the Book layout: pointwise adapter, round-trip, explicit-zero refusal, transcode from the existing Book codec
+import Compiler.RefusalReason  -- the closed set of named Host refusals and the capability-component classifier
 import Compiler.CredentialAuthorityPolicyRegistry  -- the bounded authority page drives exact compiled-policy selection and a root-guarded durable intent
 import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic receipt declaration -> AIR -> emitted first-order artifact; downstream native code only reads the generated descriptor
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed dialect-clause registry, and history/admission bindings
@@ -105,3 +106,8 @@ import Compiler.CommittedTerminalFiatShamir  -- [CT-fiat-shamir-lanes] + [CT-joi
 import Compiler.CommittedTerminalFactoredProver  -- [CT-factored-prover]: the honest prover for the seven factored openings — dense bit-corner tables + pairwise fold, check7 / check7_accepts, gateProof7_sound, sumcheck7_prob_le, and the bridge gammaBatched_eq_sum_table; Stage 0 compiled, demo decided (check7_complete_demo). Named, not closed: [CT-factored-prover-honest] (FactoredProverHonest : the fold messages read to factoredRounds), with its consumer factoredProver_complete_of_honest PROVED.
 import Compiler.Sp800185Kmac256 -- SP 800-185 KMAC256 on the Lean Keccak core (host checkpoint/log MAC), conformance-pinned
 import Compiler.DurableCheckpointCodec -- DATAMODEL C2: seed/log/checkpoint frames, log MAC chain, sealed checkpoints
+import Compiler.PredCastHashProofs
+import Compiler.PredCompileOrderWitness
+import Compiler.PredOrderGadgetWitness
+import Compiler.ZkmlEltwiseAir
+import Compiler.ZkmlTraceCheck

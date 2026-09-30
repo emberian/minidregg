@@ -1,0 +1,19 @@
+# Mini Store for $FRESH/store. Install as a user unit (systemctl --user) under the
+# account that owns $FRESH/store, or as a system unit with User= set to that account.
+[Unit]
+Description=Mini Store ($FRESH/store)
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=$FRESH/candidate/run.sh serve --state $FRESH/store
+Restart=on-failure
+RestartSec=5
+UMask=0077
+KillMode=control-group
+TimeoutStopSec=60
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

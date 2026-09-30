@@ -1,0 +1,23 @@
+1790748582.327435675	bootstrap start
+1790748622.990829419	bootstrap done: sponsor workspace, public socket
+1790748637.019137830	hosted grain born: parent 8751 owner 8 worker 9, tool 8752 owner 9
+1790748646.304487838	parent witness capability 15289742686952130536 delegated to worker subject 9
+1790748663.479862125	friend enrolled through mini enroll: subject 11925152333604001647
+1790748684.418232383	sponsor created 'shared' and published a recipient reference for subject 9
+1790748685.396656529	controller unit mini-grain-controller@8751 active, MainPID 1327164, Restart=on-failure
+1790748706.738148403	phase-a: attached soft (worker law renewed to generation 1)
+1790748720.480344704	phase-a: prompt running in worker unit mini-grain-t8751-o11
+1790748756.963148481	phase-a: write operation 14 has a retained signed call; outcome.json present: no
+1790748757.003649152	KILL: SIGKILL to controller MainPID 1327164 during write operation 14
+1790748759.360018656	RESTART: systemd started controller MainPID 1351172 (NRestarts=1)
+1790748833.045992592	RESOLVED: operation 14 refused (absent-after-submitter-stop; restart-recovery); connection detached; unresolved external []
+1790748863.035459485	phase-b: attached soft (worker law renewed to generation 3)
+1790748890.223044073	phase-b: prompt running in worker unit mini-grain-t8751-o53
+1790749002.639962528	phase-b: prompt settled
+1790749039.406078861	phase-c: attached soft (worker law renewed to generation 3)
+1790749065.680416667	phase-c: prompt running in worker unit mini-grain-t8751-o80
+1790749192.588663570	phase-c: prompt settled
+1790749196.123371596	friend imported Hermes's reference with the CLI and read: field 2 = 1
+1790749199.566217164	sponsor read of 'shared': field 2 = 1
+1790749199.795976342	PASS: Hermes J4 on the humans' Store through MCP, killed mid-write, restarted by its unit, attempt 14 refused, readback 1, delegation reached the friend
+1790749200.894546921	services stopped

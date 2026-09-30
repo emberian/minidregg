@@ -11,6 +11,7 @@ import Kernel.ResourceBirthReceiver
 import Kernel.CapabilityDelegationReceiver
 import Kernel.CapabilityRevocationReceiver
 import Kernel.WorldRoot
+import Compiler.RefusalReason
 
 namespace Minidregg.Compiler.NativeHostCodec
 
@@ -291,22 +292,23 @@ def confirmationStream : StreamCodec DurableReceiverIO.Confirmation :=
       | .inr _ => .replayed)
     (by intro value; cases value <;> rfl)
 
-/-- Refusal payload is a stable source-selected phase plus a diagnostic. It
-does not contain internal snapshots, journals, capability records or intents. -/
+/-- Refusal payload is a named reason from the closed `RefusalReason` set, a
+stable source-selected phase and a diagnostic. It does not contain internal
+snapshots, journals, capability records or intents. -/
 inductive Outcome where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
-  | refused (phase : List UInt8) (detail : List UInt8)
+  | refused (reason : RefusalReason) (phase : List UInt8) (detail : List UInt8)
   | contention
   | unavailable (detail : List UInt8)
   | uncertain (detail : List UInt8)
   | absent
 
 abbrev OutcomeWire := Sum (DurableReceiverIO.Confirmation × Receipt)
-  (Sum (List UInt8 × List UInt8) (Sum Bool (Sum (List UInt8) (List UInt8))))
+  (Sum (RefusalReason × List UInt8 × List UInt8) (Sum Bool (Sum (List UInt8) (List UInt8))))
 
 def Outcome.toWire : Outcome → OutcomeWire
   | .confirmed kind receipt => .inl (kind, receipt)
-  | .refused phase detail => .inr (.inl (phase, detail))
+  | .refused reason phase detail => .inr (.inl (reason, phase, detail))
   | .contention => .inr (.inr (.inl false))
   | .absent => .inr (.inr (.inl true))
   | .unavailable detail => .inr (.inr (.inr (.inl detail)))
@@ -314,7 +316,7 @@ def Outcome.toWire : Outcome → OutcomeWire
 
 def Outcome.ofWire : OutcomeWire → Outcome
   | .inl (kind, receipt) => .confirmed kind receipt
-  | .inr (.inl (phase, detail)) => .refused phase detail
+  | .inr (.inl (reason, phase, detail)) => .refused reason phase detail
   | .inr (.inr (.inl false)) => .contention
   | .inr (.inr (.inl true)) => .absent
   | .inr (.inr (.inr (.inl detail))) => .unavailable detail
@@ -323,13 +325,15 @@ def Outcome.ofWire : OutcomeWire → Outcome
 def outcomeStream : StreamCodec Outcome :=
   StreamCodec.xmap
     (StreamCodec.sum (StreamCodec.product confirmationStream receiptStream)
-      (StreamCodec.sum (StreamCodec.product bytesStream bytesStream)
+      (StreamCodec.sum (StreamCodec.product RefusalReason.stream
+          (StreamCodec.product bytesStream bytesStream))
         (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
 
-/-- Version 3: receipts bind `(worldRoot, height)`, not the whole-image
-boundary. Version-1 and version-2 outcomes refuse. -/
-def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v3".toUTF8.toList
+/-- Version 4: receipts bind `(worldRoot, height)` (not the whole-image
+boundary), and a refusal carries its closed `RefusalReason`. Version-1,
+version-2 and version-3 outcomes refuse; none is reinterpreted. -/
+def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v4".toUTF8.toList
 
 def outcomeCodec : LawfulCodec Outcome :=
   framed outcomeFrame outcomeStream
@@ -354,6 +358,17 @@ theorem v2_outcome_refused (payload : List UInt8) :
   have lengthExact : outcomeFrame.length = retiredOutcomeFrameV2.length := by decide +kernel
   have different : retiredOutcomeFrameV2 ≠ outcomeFrame := by decide +kernel
   have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrameV2 ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
+
+def retiredOutcomeFrameV3 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v3".toUTF8.toList
+
+/-- A version-3 outcome frame (a refusal without its reason) refuses to decode. -/
+theorem v3_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrameV3 ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrameV3.length := by decide +kernel
+  have different : retiredOutcomeFrameV3 ≠ outcomeFrame := by decide +kernel
+  have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrameV3 ++ payload) = none := by
     simp [framedRaw, lengthExact, different]
   simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
@@ -386,6 +401,17 @@ theorem plan_canonical {bytes : List UInt8} {value : SigningPlan}
     (decoded : signingPlanCodec.decode bytes = some value) : signingPlanCodec.encode value = bytes :=
   framed_canonical _ _ decoded
 
+/-- A framed codec refuses bytes that do not begin with its own frame. -/
+theorem framed_other_frame_refused {α : Type} (frame : List UInt8) (stream : StreamCodec α)
+    (bytes : List UInt8) (other : bytes.take frame.length ≠ frame) :
+    (framed frame stream).decode bytes = none := by
+  simp [framed, ResourceBirthCodec.strictCodec, framedRaw, other]
+
+/-- A refusal frame names its reason: distinct reasons give distinct frames. -/
+theorem outcome_refusal_reason_decoded (reason : RefusalReason) (phase detail : List UInt8) :
+    outcomeCodec.decode (outcomeCodec.encode (.refused reason phase detail)) =
+      some (.refused reason phase detail) := outcomeCodec.decode_encode _
+
 theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
     (decoded : outcomeCodec.decode bytes = some value) : outcomeCodec.encode value = bytes :=
   framed_canonical _ _ decoded
@@ -394,6 +420,8 @@ theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
 #guard_msgs (whitespace := lax) in #print axioms v1_outcome_refused
 /-- info: 'Minidregg.Compiler.NativeHostCodec.v2_outcome_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v2_outcome_refused
+/-- info: 'Minidregg.Compiler.NativeHostCodec.v3_outcome_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v3_outcome_refused
 /-- info: 'Minidregg.Compiler.NativeHostCodec.v3_signingPlan_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v3_signingPlan_refused
 /-- info: 'Minidregg.Compiler.NativeHostCodec.worldRoot_eq_entryRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -402,3 +430,4 @@ theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
 #guard_msgs (whitespace := lax) in #print axioms cell_opens
 
 end Minidregg.Compiler.NativeHostCodec
+

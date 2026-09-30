@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/m4-shell/run/journey-3/store/sponsor/proposals/law-v2/intent.json",
+  "intentSha256": "9587096be90a941f05f5e7717ebffce99a15166294f73d026c3420e3d3e60b74",
+  "proposalId": "law-v2",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

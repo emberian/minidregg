@@ -1,6 +1,5 @@
-/- Exact axiom accounting for source support, genesis, and native rejection. -/
+/- Exact axiom accounting for Book account support and genesis. -/
 import Kernel.NativeHostBookInvariant
-import Kernel.NativeHostBookAdmission
 
 open Minidregg.Theory.CanonicalResourceKernel
 
@@ -48,9 +47,3 @@ open Minidregg.Theory.CanonicalResourceKernel
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.post_book_accountSupported
 /-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.registration_accounts_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.registration_accounts_only
-/-- info: 'Minidregg.Kernel.NativeHost.validateLoaded_cellLaw' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHost.validateLoaded_cellLaw
-/-- info: 'Minidregg.Kernel.NativeHost.validateLoaded_refuses_hidden_book' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHost.validateLoaded_refuses_hidden_book
-/-- info: 'Minidregg.Kernel.NativeHost.validateLoaded_refuses_witnessHiddenBook' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHost.validateLoaded_refuses_witnessHiddenBook

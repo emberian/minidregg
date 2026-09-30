@@ -10,11 +10,21 @@ if [ "$#" -ne 5 ]; then
   exit 2
 fi
 HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 ROOT=$5
+# Each Store is an independent deployment: its domain and its sponsor subject
+# number are operator choices. Two Stores that exchange selected releases need
+# distinct domains, and the recipient enrolls the source owner under its home
+# subject number, so the two sponsor subjects must also differ.
+DOMAIN=${NEWPARTICIPANT_DOMAIN:-8501}
+SUBJECT=${NEWPARTICIPANT_SPONSOR_SUBJECT:-7}
+for value in "$DOMAIN" "$SUBJECT"; do
+  case $value in ""|0?*|*[!0-9]*) echo "domain and sponsor subject must be canonical decimal" >&2; exit 2;; esac
+done
 for executable in "$HOST" "$MINI" "$STORE" "$VERIFIER"; do
   case "$executable" in /*) ;; *) echo "binary path must be absolute: $executable" >&2; exit 2;; esac
   [ -x "$executable" ] || { echo "not executable: $executable" >&2; exit 2; }
 done
 command -v jq >/dev/null 2>&1 || { echo 'jq is required' >&2; exit 2; }
+HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 command -v sha256sum >/dev/null 2>&1 || { echo 'sha256sum is required' >&2; exit 2; }
 case "$ROOT" in /*) ;; *) echo 'fixture path must be absolute' >&2; exit 2;; esac
 [ ! -e "$ROOT" ] && [ ! -L "$ROOT" ] || { echo 'fixture already exists' >&2; exit 2; }
@@ -30,52 +40,19 @@ SPONSOR_PUBLIC=$(od -An -tx1 -v "$ROOT/sponsor.pub" | tr -d ' \n')
 NEWCOMER_PUBLIC=$(od -An -tx1 -v "$ROOT/newcomer.pub" | tr -d ' \n')
 [ "$SPONSOR_PUBLIC" != "$NEWCOMER_PUBLIC" ] || { echo 'keys unexpectedly equal' >&2; exit 1; }
 
-cat >"$ROOT/operator.json" <<EOF
-{"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
- "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
- "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
- "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE",
- "storageRoot":"$ROOT/store","signatureBinary":"$VERIFIER"}
-EOF
-"$HOST" "$ROOT/operator.json" profile >"$ROOT/profile.json"
-SEMANTICS=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' "$ROOT/profile.json")
-
-cat >"$ROOT/genesis.json" <<EOF
-{"domain":"8501","factoryId":"10","resourceBookId":"11",
- "authorityCellId":"12","federation":"9","tariffBase":"3",
- "tariffPerBirth":"2","tariffPerGrant":"1","tariffPerInitialPayloadByte":"0",
- "collector":"99","asset":"0","expectedSemantics":"$SEMANTICS",
- "issuerEpoch":"2","genesisHeight":"10",
- "factoryPredicate":{"type":"all","predicates":[]},
- "enrollments":[{"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1",
-   "subject":"7","publicKey":"$SPONSOR_PUBLIC","activeFrom":"0",
-   "activeUntil":"1000000"},
-   "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
-   "factoryObserveCapabilityId":"54","initialBalance":"100000",
-   "accountPredicate":{"type":"all","predicates":[]}}],
- "factoryControllerSubject":"7","factoryControllerCapability":"53",
- "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
-   "memoryTouches":"10000000","witnessBytes":"10000000",
-   "proofWork":"10000000","storageBytes":"10000000",
-   "networkBytes":"10000000","sideEffectCount":"10000000",
-   "feeDebit":"10000000","leaseByteBlocks":"10000000"}}
-EOF
+# The one genesis template (genesis.sh) from the example params, with this
+# Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS.
+jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" \
+  '.domain = $domain | .sponsor.subject = $subject' \
+  "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
+sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" \
+  "$HOST" "$STORE" "$VERIFIER" "$ROOT"
 
 "$MINI" bootstrap --host "$HOST" --config "$ROOT/operator.json" \
   --source "$ROOT/genesis.json" --dir "$ROOT/deployment" \
   >"$ROOT/bootstrap.stdout"
 CONFIG="$ROOT/deployment/pinned-config.json"
 [ -s "$CONFIG" ] || { echo 'bootstrap produced no pinned config' >&2; exit 1; }
-
-cat >"$ROOT/sponsor-birth-context.json" <<EOF
-{"type":"minidregg-participant-birth-context-v1",
- "genesis":$(cat "$ROOT/genesis.json"),
- "template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
- "sourceCapabilities":["41"],"funding":[],"feePayer":"7",
- "grants":[{"kind":"object","target":"10","capability":"54"},
-   {"kind":"account","target":"7","capability":"41"}]}
-EOF
 
 SOCKET="$ROOT/public/mini.sock"
 nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
@@ -97,7 +74,7 @@ done
 }
 
 "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
-  --socket "$SOCKET" --key "$ROOT/sponsor.key" --subject 7 \
+  --socket "$SOCKET" --key "$ROOT/sponsor.key" --subject "$SUBJECT" \
   --birth-context "$ROOT/sponsor-birth-context.json" \
   --namespace-root "$ROOT/namespace" --dir "$ROOT/sponsor" \
   >"$ROOT/sponsor-workspace.stdout"
@@ -120,6 +97,7 @@ cat >"$ROOT/handoff.json" <<EOF
  "factoryRef":"factory","newKey":"$ROOT/newcomer.key",
  "newPublicKey":"$NEWCOMER_PUBLIC","namespaceRoot":"$ROOT/namespace",
  "enrollmentAttempt":"$ROOT/attempts/newcomer",
+ "domain":"$DOMAIN","sponsorSubject":"$SUBJECT",
  "status":"fresh-genesis-and-sponsor-workspace; no newcomer admitted"}
 EOF
 printf '%s\n' "$ROOT/handoff.json"

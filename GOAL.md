@@ -192,8 +192,8 @@ policy address/membership is now part of authority state and of every authorizat
 the compiler artifact schema and generated Rust/JSON were versioned with it.
 
 The former `JointGameFamily` priority was resolved by refutation, not construction:
-`Tower256MerkleBindingCardinality` proves that its universal `PositionBinding` premise is
-impossible at positive Merkle height.  `RawSemanticHistoryCheckpointGame` is the new
+`Tower256MerkleBindingCardinality` proved that its universal `PositionBinding` premise is
+impossible at positive Merkle height (that module and the family it refuted were deleted 2026-09-30).  `RawSemanticHistoryCheckpointGame` is the new
 target: it retains adversarial openings, extracts a concrete framed-XOF collision, and
 joins history PCS/MCA, additive proximity, collision, and oracle transport on one coin
 without assuming universal binding.
@@ -254,7 +254,7 @@ up through `Kernel/MultiCellHyperedge`, the tree-wide axiom ledger, and the code
 `HyperdocumentOperations.Config`. What remains on the last unexhibited carrier is
 semantic, not mechanical: `Capability.Admissible`.
 
-**One more unexhibited carrier, found on the way out — and note the DIFFERENT status**
+**One more unexhibited carrier, found on the way out — and note the DIFFERENT status** (superseded: `JointGameFamily` was later proved impossible, and on 2026-09-30 it and its two consumers were deleted)
 
 `SemanticHistoryTower256CheckpointGame.JointGameFamily` is defined in one file, consumed
 in two (`SemanticHistoryPcsEventRealization`, `SemanticHistoryTower256DeployedBcs`), and

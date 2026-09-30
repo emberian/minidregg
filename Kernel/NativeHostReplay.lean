@@ -38,6 +38,8 @@ import Kernel.ApplicationLifecycleCompletionV2Core
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
+import Kernel.ParticipantFactoryProvisioningReceiver
+import Kernel.FleetTurnReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -711,6 +713,14 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
+  | participantFactoryProvisioning {ingress : ParticipantFactoryProvisioning.DecodedIngress}
+      (accepted : ParticipantFactoryProvisioningReceiver.AcceptedProvisioning config.deployment
+        config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (ParticipantFactoryProvisioningReceiver.intent accepted)
+  | fleetTurn {ingress : FleetTurn.DecodedIngress}
+      (accepted : FleetTurnReceiver.AcceptedTurn config.deployment config.profile config.tariff
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (FleetTurnReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1489,6 +1499,13 @@ private def derive (config : Config) (opened : Opened config)
     (bytes : List UInt8) :
     IO (Except String (Derived config opened)) := do
   let height := logicalHeight config opened.durable
+  if let some ingress := FleetTurn.decodeIngress bytes then
+    match ← FleetTurnReceiver.admitDecodedNative config.deployment config.profile config.tariff
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"fleet turn refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨FleetTurnReceiver.intent accepted,
+          .fleetTurn accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ParticipantKeyEnrollment.decodeIngress bytes then
     match ← ParticipantKeyEnrollmentReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
@@ -1496,6 +1513,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
           .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := ParticipantFactoryProvisioning.decodeIngress bytes then
+    match ← ParticipantFactoryProvisioningReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"participant factory provisioning refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨ParticipantFactoryProvisioningReceiver.intent accepted,
+          .participantFactoryProvisioning accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
@@ -2738,9 +2762,15 @@ def verifyBytes (config : Config) (bytes : List UInt8) : IO (Except Failure (Sig
 
 end Minidregg.Kernel.NativeHostReplay
 
-#print axioms Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append
-#print axioms Minidregg.Kernel.NativeHostReplay.Verified.accepted_history
-#print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
-#print axioms Minidregg.Kernel.NativeHostReplay.extendExact
-#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
-#print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord
+/-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.AdmittedReplay.append
+/-- info: 'Minidregg.Kernel.NativeHostReplay.Verified.accepted_history' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.Verified.accepted_history
+/-- info: 'Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.SemanticReplay.append_stable
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_receipts' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_receipts
+/-- info: 'Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.extendExact_physicalRecord

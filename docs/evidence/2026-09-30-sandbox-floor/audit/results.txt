@@ -1,0 +1,2 @@
+floor unit=spk-sandbox-floor-audit-20260930T063048Z-floor test=resident_launch::tests::root_probe_holds_inside_resident_sandbox exit=0
+pre-floor unit=spk-sandbox-floor-audit-20260930T063048Z-pre-floor test=resident_launch::tests::root_probe_breaches_under_pre_floor_arguments exit=0

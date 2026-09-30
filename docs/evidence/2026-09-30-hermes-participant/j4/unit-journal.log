@@ -1,0 +1,51 @@
+2026-09-30T01:56:12-04:00 persvati systemd[2877009]: Started mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j2.
+2026-09-30T01:56:42-04:00 persvati systemd-run[1065775]: Running as unit: mini-grain-t8751-o11.service
+2026-09-30T01:57:41-04:00 persvati systemd-run[1065775]: Finished with result: success
+2026-09-30T01:57:41-04:00 persvati systemd-run[1065775]: Main processes terminated with: code=exited, status=0/SUCCESS
+2026-09-30T01:57:41-04:00 persvati systemd-run[1065775]: Service runtime: 58.964s
+2026-09-30T01:57:41-04:00 persvati systemd-run[1065775]: CPU time consumed: 91ms
+2026-09-30T01:57:41-04:00 persvati systemd-run[1065775]: Memory peak: 8M (swap: 0B)
+2026-09-30T02:05:38-04:00 persvati systemd[2877009]: Stopping mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j2...
+2026-09-30T02:05:38-04:00 persvati systemd[2877009]: Stopped mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j2.
+2026-09-30T02:05:38-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Consumed 40.216s CPU time, 340.5M memory peak.
+2026-09-30T02:11:25-04:00 persvati systemd[2877009]: Started mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j3.
+2026-09-30T02:12:00-04:00 persvati systemd-run[1337223]: Running as unit: mini-grain-t8751-o11.service
+2026-09-30T02:12:36-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Sent signal SIGKILL to main process 1327164 (grain-runtime) on client request.
+2026-09-30T02:12:37-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Main process exited, code=killed, status=9/KILL
+2026-09-30T02:12:37-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Failed with result 'signal'.
+2026-09-30T02:12:37-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Consumed 24.204s CPU time, 8.2M memory peak.
+2026-09-30T02:12:39-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Scheduled restart job, restart counter is at 1.
+2026-09-30T02:12:39-04:00 persvati systemd[2877009]: Started mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j3.
+2026-09-30T02:14:50-04:00 persvati systemd-run[1387428]: Running as unit: mini-grain-t8751-o53.service; invocation ID: 8947a6608d904f05b93512b9617733f3
+2026-09-30T02:16:26-04:00 persvati systemd-run[1387428]: Finished with result: success
+2026-09-30T02:16:26-04:00 persvati systemd-run[1387428]: Main processes terminated with: code=exited, status=0/SUCCESS
+2026-09-30T02:16:26-04:00 persvati systemd-run[1387428]: Service runtime: 1min 36.034s
+2026-09-30T02:16:26-04:00 persvati systemd-run[1387428]: CPU time consumed: 140ms
+2026-09-30T02:16:26-04:00 persvati systemd-run[1387428]: Memory peak: 12.1M (swap: 0B)
+2026-09-30T02:17:45-04:00 persvati systemd-run[1436063]: Running as unit: mini-grain-t8751-o80.service; invocation ID: b1a5d7a684724d99a3a421246995780e
+2026-09-30T02:19:59-04:00 persvati systemd[2877009]: Stopping mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j3...
+2026-09-30T02:19:59-04:00 persvati systemd[2877009]: Stopped mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j3.
+2026-09-30T02:19:59-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Consumed 1min 42.565s CPU time, 16.9M memory peak.
+2026-09-30T02:22:46-04:00 persvati systemd[2877009]: Started mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j4.
+2026-09-30T02:23:19-04:00 persvati systemd-run[1538348]: Running as unit: mini-grain-t8751-o11.service
+2026-09-30T02:23:56-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Sent signal SIGKILL to main process 1521650 (grain-runtime) on client request.
+2026-09-30T02:23:56-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Main process exited, code=killed, status=9/KILL
+2026-09-30T02:23:57-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Failed with result 'signal'.
+2026-09-30T02:23:57-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Consumed 22.955s CPU time, 8M memory peak.
+2026-09-30T02:23:59-04:00 persvati systemd[2877009]: mini-grain-controller@8751.service: Scheduled restart job, restart counter is at 1.
+2026-09-30T02:23:59-04:00 persvati systemd[2877009]: Started mini-grain-controller@8751.service - mini-hermes-journey:/home/ember/build/mini-product-20260930/m5-hermes/run/j4.
+2026-09-30T02:25:47-04:00 persvati systemd-run[1593208]: Running as unit: mini-grain-t8751-o53.service
+2026-09-30T02:26:47-04:00 persvati systemd-run[1608947]: Running as unit: mini-grain-t8751-o66.service
+2026-09-30T02:28:25-04:00 persvati systemd-run[1608947]: Finished with result: success
+2026-09-30T02:28:25-04:00 persvati systemd-run[1608947]: Main processes terminated with: code=exited, status=0/SUCCESS
+2026-09-30T02:28:25-04:00 persvati systemd-run[1608947]: Service runtime: 1min 37.779s
+2026-09-30T02:28:25-04:00 persvati systemd-run[1608947]: CPU time consumed: 97ms
+2026-09-30T02:28:25-04:00 persvati systemd-run[1608947]: Memory peak: 8.2M (swap: 0B)
+2026-09-30T02:29:46-04:00 persvati systemd-run[1660075]: Running as unit: mini-grain-t8751-o93.service; invocation ID: 9a781296691446f38a584c842e8bb7bf
+2026-09-30T02:30:53-04:00 persvati grain-runtime[1551758]: grain-runtime: Hermes ACP outcome uncertain: hard disconnect; local stop=Err("no live owned child"); Mini/tool/provider fence=Ok(())
+2026-09-30T02:31:57-04:00 persvati systemd-run[1704256]: Running as unit: mini-grain-t8751-o124.service
+2026-09-30T02:32:04-04:00 persvati systemd-run[1704256]: Finished with result: success
+2026-09-30T02:32:04-04:00 persvati systemd-run[1704256]: Main processes terminated with: code=exited, status=0/SUCCESS
+2026-09-30T02:32:04-04:00 persvati systemd-run[1704256]: Service runtime: 6.366s
+2026-09-30T02:32:04-04:00 persvati systemd-run[1704256]: CPU time consumed: 92ms
+2026-09-30T02:32:04-04:00 persvati systemd-run[1704256]: Memory peak: 7.4M (swap: 0B)

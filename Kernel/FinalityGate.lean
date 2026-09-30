@@ -12,8 +12,8 @@ nothing is exported.  This module is the decider.
   voter, so a presented voter set can be neither inflated (an unvoted node is
   refused) nor thinned into a non-quorum.
 * **`check`** is a bare `&&` of the two positive conditions, decided.  The
-  unfolding lemma `check_eq_true_iff` is the load-bearing statement (the
-  `gateOK_eq_true_iff` role): `true` means exactly quorum ∧ every claimed voter
+  unfolding lemma `check_eq_true_iff` is the load-bearing statement:
+  `true` means exactly quorum ∧ every claimed voter
   recorded this candidate.
 * **Soundness IS construction**: `certificate` turns a `true` verdict into the
   existing `Finalized` certificate (voters := the presented set), so every

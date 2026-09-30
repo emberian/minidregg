@@ -1,0 +1,15 @@
+stamp=20260930T063048Z
+host=persvati kernel=6.17.0-40-generic
+bwrap=/usr/bin/bwrap sha256=7bbffeb19f312d5503232e1502f0f97f2ac4ffcb51dec47d9a58bffbad1f12d5 version=bubblewrap 0.11.0
+bwrap_package=bubblewrap 0.11.0-2ubuntu0.1
+test_elf_sha256=bb7173107b5e6ccd7b5254e0f4ccc2d7cb9344b2fbe0b2076efcc213f15ce949
+probe_sha256=e407c8dbd5447ff5bc0461430071acd1cd4b7ae365572026ece2792526091e2c
+app_uid=65534 app_gid=65534
+image_files:
+6791cc9bdc08295aafcfae01a7d66d788ee5577cbe94db00ace5f1ee04ef2b09  ./lib/x86_64-linux-gnu/libc.so.6
+e21d29dd2609dff45f898b5002c9a2268a0e8eece4eff8417e5087e77d2a136c  ./lib/x86_64-linux-gnu/libgcc_s.so.1
+1577e4ea35a5574f8172eb5c5ca19932b5bb892dfa90831ac6718cfd12dd9f7d  ./lib64/ld-linux-x86-64.so.2
+e407c8dbd5447ff5bc0461430071acd1cd4b7ae365572026ece2792526091e2c  ./spk-sandbox-probe
+var_mount=spk-audit-var tmpfs rw,nosuid,nodev,relatime,size=16384k,mode=700,uid=65534,gid=65534,inode64
+unprivileged_userns_clone=1
+apparmor_restrict_unprivileged_userns=1

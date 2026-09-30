@@ -1,0 +1,24 @@
+{
+  "attempt": "run/j8/agent-a/attempts/a-267917290656481564305115283135291320612",
+  "authority": "admitted-fleet-turn",
+  "confirmation": "installed",
+  "fee": "3",
+  "payer": "17078191906010218689",
+  "publication": {
+    "payloadBytes": "10",
+    "sequence": "1",
+    "topic": "6e657773"
+  },
+  "receipt": {
+    "acceptedCount": "7",
+    "eventId": "19936646222795307249591535860157186089544983447929299991330547954394093929032",
+    "imageBoundary": "35950687133761008354233469568782755568515110027211380238387049923051908423153",
+    "transactionId": "32687680605017904762667757903016617616557159698307211493525268917516942312420"
+  },
+  "replans": "0",
+  "subject": "17197655984830861415",
+  "supersededAttempts": [],
+  "transfer": null,
+  "type": "minidregg-fleet-turn-result-v1",
+  "verb": "publish"
+}

@@ -30,6 +30,8 @@ import Host.ApplicationGrainSessionEnrollmentInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
+import Kernel.ParticipantFactoryProvisioning
+import Kernel.FleetTurn
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -1002,7 +1004,8 @@ theorem grainPolicy_plural_worker_clause (owner : Nat) (subjects : List Nat)
   right
   exact List.mem_map.mpr ⟨subject, named, rfl⟩
 
-#print axioms grainPolicy_plural_worker_clause
+/-- info: 'Minidregg.Host.Json.grainPolicy_plural_worker_clause' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_plural_worker_clause
 
 /-- Plural authoring with one subject retains the exact historical policy
 bytes, so adding a provider cannot silently alter the existing tool rule. -/
@@ -1016,7 +1019,8 @@ theorem grainPolicy_singleton_bytes (owner subject : Nat) (generation : Int) :
         .all [.eq "request/subject" (Int.ofNat subject),
           AgentGrain.witnessCaveat generation]]]) := rfl
 
-#print axioms grainPolicy_singleton_bytes
+/-- info: 'Minidregg.Host.Json.grainPolicy_singleton_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_singleton_bytes
 
 /-- A worker witness with a different old generation cannot satisfy even its
 own clause. This uses the deployed predicate evaluator, not list membership. -/
@@ -1081,7 +1085,8 @@ theorem grainPolicy_stale_worker_refused (owner : Nat) (subjects : List Nat)
           intro worker named
           exact workerFalseWith worker (by simp [named])
 
-#print axioms grainPolicy_stale_worker_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_stale_worker_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_stale_worker_refused
 
 /-- A non-owner subject absent from the bounded worker list cannot mutate
 through the plural resource policy, even when it presents a valid generation. -/
@@ -1123,7 +1128,8 @@ theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
           intro worker named
           exact workerFalseWith worker (by simp [named])
 
-#print axioms grainPolicy_unnamed_worker_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_unnamed_worker_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_unnamed_worker_refused
 
 private def grainWorker (path : String)
     (obj : Std.TreeMap.Raw String Lean.Json compare) : Result (Option (List Nat × Int)) := do
@@ -2095,6 +2101,24 @@ private def participantKeyEnrollment (json : Lean.Json) : Result (List UInt8) :=
       key := ← keyRecord "$.key" (← field "$" "key" obj) }
   return ParticipantKeyEnrollment.commandCodec.encode command
 
+/-- Source-owned authoring for a factory-observation provisioning request.
+These bytes name a holder and a fresh identifier; they do not claim that the
+holder is enrolled, that the identifier is fresh, or that the sponsor may act. -/
+private def participantFactoryProvisioning (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["sponsor", "control", "nonce",
+    "expectedFactoryRoot", "expectedAuthorityRoot", "holder", "capability"] json
+  let command : ParticipantFactoryProvisioning.Command :=
+    { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
+      control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot"
+        (← field "$" "expectedFactoryRoot" obj)⟩
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩
+      holder := ⟨← nat "$.holder" (← field "$" "holder" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩ }
+  return ParticipantFactoryProvisioning.commandCodec.encode command
+
 /-- Encode an operator's chosen issue, role and capability selectors. -/
 private def sessionEnrollmentRequest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$"
@@ -2112,6 +2136,41 @@ private def sessionEnrollmentRequest (json : Lean.Json) : Result (List UInt8) :=
      ⟨← nat "$.manifestObserveCapability" (← field "$" "manifestObserveCapability" obj)⟩,
      ← nat "$.nonce" (← field "$" "nonce" obj)⟩
   pure <| ApplicationGrainSessionEnrollmentSource.requestCodec.encode request
+
+/-- Source-owned authoring for one fleet turn draft. `fee` and a zero
+publication `sequence` are finalized by the Host plan from pinned tariff and
+current topic head; the signer then signs the finalized command. -/
+private def fleetTurnCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "payer", "spend", "nonce", "fee",
+    "transfer", "publication"] json
+  let transfer ← optional "$.transfer" (fun path value => do
+    let t ← exactObject path ["destination", "asset", "amount"] value
+    pure ({ destination := ← nat (path ++ ".destination") (← field path "destination" t)
+            asset := ← nat (path ++ ".asset") (← field path "asset" t)
+            amount := ← nat (path ++ ".amount") (← field path "amount" t) } :
+      FleetTurn.Transfer)) (← field "$" "transfer" obj)
+  let publication ← optional "$.publication" (fun path value => do
+    let p ← exactObject path ["topic", "sequence", "payload"] value
+    pure ({ topic := ← decodeHex (path ++ ".topic") (← field path "topic" p)
+            sequence := ← nat (path ++ ".sequence") (← field path "sequence" p)
+            payload := ← decodeHex (path ++ ".payload") (← field path "payload" p) } :
+      FleetTurn.Publication)) (← field "$" "publication" obj)
+  let command : FleetTurn.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      payer := ← nat "$.payer" (← field "$" "payer" obj)
+      spend := ⟨← nat "$.spend" (← field "$" "spend" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      fee := ← nat "$.fee" (← field "$" "fee" obj)
+      transfer := transfer
+      publication := publication }
+  -- A draft may leave the topic position zero for the Host plan to assign;
+  -- every other shape rule is the receiver's own.
+  let assigned : FleetTurn.Command := { command with
+    publication := command.publication.map fun (p : FleetTurn.Publication) =>
+      ({ p with sequence := max p.sequence 1 } : FleetTurn.Publication) }
+  unless assigned.shapeOk do
+    failAt "$" "a fleet turn needs a positive transfer to another account or a 1..64-byte topic event with at most 16384 payload bytes"
+  return FleetTurn.commandCodec.encode command
 
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json)
@@ -2137,6 +2196,8 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "participant-key-enrollment" => participantKeyEnrollment json
+  | "participant-factory-provisioning" => participantFactoryProvisioning json
+  | "fleet-turn" => fleetTurnCommand json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2226,9 +2287,12 @@ theorem grainPolicy_mixed_worker_forms_refused :
       ("workerSubjects", .arr #[.str "8", .str "9"]),
       ("workerGeneration", .str "1")]) = true := by decide
 
-#print axioms grainPolicy_duplicate_workers_refused
-#print axioms grainPolicy_overbound_workers_refused
-#print axioms grainPolicy_mixed_worker_forms_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_duplicate_workers_refused' depends on axioms: [propext, Classical.choice, Quot.sound, grainPolicy_duplicate_workers_refused._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_duplicate_workers_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_overbound_workers_refused' depends on axioms: [propext, Classical.choice, Quot.sound, grainPolicy_overbound_workers_refused._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_overbound_workers_refused
+/-- info: 'Minidregg.Host.Json.grainPolicy_mixed_worker_forms_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms grainPolicy_mixed_worker_forms_refused
 
 /-- Source-derived, non-authoritative presentation data. This lets clients
 display the resulting grain generation/state without duplicating the state
@@ -2310,6 +2374,18 @@ private def participantKeyCommandJson
    ("expectedFactoryRoot", decimal command.expectedFactoryRoot.value),
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
    ("key", participantKeyRecordJson command.key)]
+
+private def participantProvisioningCommandJson
+    (command : ParticipantFactoryProvisioning.Command) : Lean.Json := .mkObj
+  [("type", "participant-factory-provisioning-v1"),
+   ("canonical", hexJson (ParticipantFactoryProvisioning.commandCodec.encode command)),
+   ("sponsor", decimal command.sponsor.value),
+   ("control", decimal command.control.value),
+   ("nonce", decimal command.nonce),
+   ("expectedFactoryRoot", decimal command.expectedFactoryRoot.value),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
+   ("holder", decimal command.holder.value),
+   ("capability", decimal command.capability.value)]
 
 private def planJson (plan : SigningPlan) : Lean.Json := .mkObj
   [("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
@@ -2646,7 +2722,8 @@ private def outcomeJson : Outcome → Lean.Json
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
       ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
-  | .refused phase detail => .mkObj [("type", "refused"), ("phase", hexJson phase), ("detail", hexJson detail)]
+  | .refused reason phase detail => .mkObj [("type", "refused"), ("reason", reason.name),
+      ("phase", hexJson phase), ("detail", hexJson detail)]
   | .contention => .mkObj [("type", "contention")]
   | .unavailable detail => .mkObj [("type", "unavailable"), ("detail", hexJson detail)]
   | .uncertain detail => .mkObj [("type", "uncertain"), ("detail", hexJson detail)]
@@ -2779,6 +2856,21 @@ private def launchPhysicalReportJson
     ("installedManifestHex", hexJson report.installedManifest),
     ("volumeCustody", custody)]
 
+private def fleetCommandJson (command : FleetTurn.Command) : Lean.Json := .mkObj
+  [("type", "fleet-turn-v1"),
+   ("canonical", hexJson (FleetTurn.commandCodec.encode command)),
+   ("subject", decimal command.subject.value), ("payer", decimal command.payer),
+   ("spend", decimal command.spend.value), ("nonce", decimal command.nonce),
+   ("fee", decimal command.fee),
+   ("transfer", match command.transfer with
+     | none => .null
+     | some t => .mkObj [("destination", decimal t.destination), ("asset", decimal t.asset),
+         ("amount", decimal t.amount)]),
+   ("publication", match command.publication with
+     | none => .null
+     | some p => .mkObj [("topic", hexJson p.topic), ("sequence", decimal p.sequence),
+         ("payload", hexJson p.payload), ("payloadBytes", decimal p.payload.length)])]
+
 /-- Inspect bounded public host products. Header/envelope bytes remain exact hex. -/
 def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   match kind with
@@ -2899,6 +2991,51 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("possessionSignature", hexJson parsed.ingress.possessionSignature),
          ("possessionSignatureLength", decimal parsed.ingress.possessionSignature.length),
          ("signatureVerified", .bool false)]
+  | "participant-factory-provisioning" => do
+      let command ← decoded "participant-factory-provisioning"
+        ParticipantFactoryProvisioning.commandCodec bytes
+      pure (participantProvisioningCommandJson command)
+  | "participant-factory-provisioning-plan" => do
+      let plan ← decoded "participant-factory-provisioning-plan"
+        ParticipantFactoryProvisioning.signingPlanCodec bytes
+      let some command := ParticipantFactoryProvisioning.commandCodec.decode plan.commandBytes
+        | failAt "participant-factory-provisioning-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "participant-factory-provisioning-plan-v1"),
+         ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value),
+         ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("command", participantProvisioningCommandJson command),
+         ("sponsorHeader", signedHeaderJson plan.sponsorHeader)]
+  | "participant-factory-provisioning-ingress" => do
+      let some parsed := ParticipantFactoryProvisioning.decodeIngress bytes
+        | failAt "participant-factory-provisioning-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "participant-factory-provisioning-ingress-v1"),
+         ("canonical", hexJson bytes),
+         ("commandBytes", hexJson parsed.ingress.commandBytes),
+         ("command", participantProvisioningCommandJson parsed.command),
+         ("sponsorEnvelope", hexJson parsed.ingress.sponsorEnvelope),
+         ("signatureVerified", .bool false)]
+  | "fleet-turn" => fleetCommandJson <$> decoded "fleet-turn" FleetTurn.commandCodec bytes
+  | "fleet-turn-plan" => do
+      let plan ← decoded "fleet-turn-plan" FleetTurn.signingPlanCodec bytes
+      let some command := FleetTurn.commandCodec.decode plan.commandBytes
+        | failAt "fleet-turn-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "fleet-turn-plan-v1"), ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes), ("command", fleetCommandJson command),
+         ("header", hexJson plan.header), ("signing", signedHeaderJson plan.header)]
+  | "fleet-turn-ingress" => do
+      let some parsed := FleetTurn.decodeIngress bytes
+        | failAt "fleet-turn-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "fleet-turn-ingress-v1"), ("canonical", hexJson bytes),
+         ("commandBytes", hexJson parsed.ingress.commandBytes),
+         ("command", fleetCommandJson parsed.command),
+         ("envelope", hexJson parsed.ingress.envelope), ("signatureVerified", .bool false)]
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"
@@ -2941,5 +3078,46 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
   | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, or view-capability"
+
+private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
+  [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
+   ("acceptedCount", decimal receipt.acceptedCount),
+   ("imageBoundary", decimal receipt.imageBoundary.value)]
+
+/-- The topic poll view. `payload` is null when the accepted ingress does not
+reproduce the committed digest; the reader must then treat the event as unreadable. -/
+def fleetPollJson (view : NativeHost.FleetPollView) : Lean.Json := .mkObj
+  [("type", "minidregg-fleet-topic-poll-v1"), ("subject", decimal view.subject.value),
+   ("payer", decimal view.payer), ("topic", hexJson view.topic),
+   ("stream", decimal view.stream.value), ("cursor", decimal view.cursor),
+   ("head", decimal view.head),
+   ("events", .arr <| view.events.toArray.map fun event => .mkObj
+     [("sequence", decimal event.sequence), ("eventKey", decimal event.eventKey.value),
+      ("transactionId", decimal event.transactionId.value),
+      ("effectId", decimal event.effectId.value),
+      ("payloadDigest", decimal event.payloadDigest.value),
+      ("payload", match event.payload with | none => .null | some bytes => hexJson bytes),
+      ("author", principalJson event.author),
+      ("bookPreRoot", decimal event.bookPreRoot.value),
+      ("bookPostRoot", decimal event.bookPostRoot.value),
+      ("receipt", match event.receipt with | none => .null | some r => fleetReceiptJson r)])]
+
+def fleetHeadJson (view : NativeHost.FleetHeadView) : Lean.Json := .mkObj
+  [("type", "minidregg-fleet-agent-head-v1"), ("subject", decimal view.subject.value),
+   ("payer", decimal view.payer), ("turns", decimal view.turns),
+   ("head", match view.head with
+     | none => .null
+     | some (_, receipt) => fleetReceiptJson receipt)]
+
+def fleetReceiptLookupJson (transactionId : Nat) (receipt : Option Receipt) : Lean.Json :=
+  match receipt with
+  | none => .mkObj [("type", "absent"), ("transactionId", decimal transactionId)]
+  | some r => .mkObj [("type", "confirmed"), ("receipt", fleetReceiptJson r)]
+
+/-- `{"topic": HEX, "cursor": DECIMAL, "limit": DECIMAL}` -/
+def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := do
+  let obj ← exactObject "$" ["topic", "cursor", "limit"] json
+  pure (← decodeHex "$.topic" (← field "$" "topic" obj),
+    ← nat "$.cursor" (← field "$" "cursor" obj), ← nat "$.limit" (← field "$" "limit" obj))
 
 end Minidregg.Host.Json

@@ -1,0 +1,13 @@
+/-
+# Host — root of the native receiving process's Lean source.
+
+`Host.Main` is the `minidregg-host` executable's root. The `*Check`/`*Audit`
+modules are executable regressions over Host code: each runs its check with
+`#eval` while it elaborates, so a changed result fails `lake build`.
+-/
+import Host.Main
+import Host.ApplicationBirthAuthoringCheck
+import Host.ApplicationPermissionSchemaAuthoringCheck
+import Host.ApplicationPermissionSchemaRouteCheck
+import Host.CapabilityInspectionCheck
+import Host.ProviderUsageAudit

@@ -1,0 +1,6 @@
+# Nested user namespace with and without --disable-userns, NO seccomp (layer measurement, unprivileged, uid 1000, 2026-09-30T06:31:27Z, bubblewrap 0.11.0)
+$ bwrap --die-with-parent --new-session --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --symlink usr/lib64 /lib64 --symlink usr/lib /lib --symlink usr/bin /bin --proc /proc --dev /dev  -- /usr/bin/unshare -U /usr/bin/true
+exit=0
+$ bwrap --die-with-parent --new-session --unshare-user --unshare-pid --unshare-net --ro-bind /usr /usr --symlink usr/lib64 /lib64 --symlink usr/lib /lib --symlink usr/bin /bin --proc /proc --dev /dev --disable-userns -- /usr/bin/unshare -U /usr/bin/true
+unshare: unshare failed: No space left on device
+exit=1

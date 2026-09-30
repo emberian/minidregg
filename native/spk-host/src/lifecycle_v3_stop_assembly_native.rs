@@ -50,68 +50,23 @@ fn previous_index(count: &str) -> io::Result<String> {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FixedStopClaimSigners {
     protocol: String,
-    app: String,
-    package_manifest: String,
+    selector: crate::lifecycle_selector::LifecycleSelector,
     management_subject: String,
     signers: Vec<SignerPin>,
 }
 
 impl FixedStopClaimSigners {
     fn validate(&self, operator: &PrivateOperator, app_uid: u32) -> io::Result<()> {
-        if self.protocol != "mini-spk-resident-claim-management-v1"
-            || self.signers.is_empty()
-            || self.signers.len() > 64
-            || [&self.app, &self.package_manifest, &self.management_subject]
-                .iter()
-                .any(|value| !decimal(value))
-        {
+        if self.protocol != "mini-spk-resident-claim-management-v1" {
             return Err(invalid("STOP claim fixed management custody refused"));
         }
-        let config: Value = serde_json::from_slice(&operator.pinned_config()?)?;
-        let manager = config
-            .get("residentClaimManagement")
-            .ok_or_else(|| invalid("STOP claim management pin absent"))?;
-        for (field, expected) in [
-            ("app", &self.app),
-            ("packageManifest", &self.package_manifest),
-            ("managementSubject", &self.management_subject),
-        ] {
-            let actual = manager
-                .get(field)
-                .and_then(|value| {
-                    value
-                        .as_str()
-                        .map(str::to_owned)
-                        .or_else(|| value.as_u64().map(|number| number.to_string()))
-                })
-                .ok_or_else(|| invalid("STOP claim management coordinate absent"))?;
-            if actual != *expected {
-                return Err(invalid("STOP claim management coordinate differs"));
-            }
-        }
-        let key_id = manager
-            .get("managementKeyId")
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .or_else(|| value.as_u64().map(|number| number.to_string()))
-            })
-            .ok_or_else(|| invalid("STOP claim management key absent"))?;
-        for signer in &self.signers {
-            if signer.key_id != key_id {
-                return Err(invalid("STOP claim signer key differs from Mini pin"));
-            }
-            crate::sandbox::open_protected_directory(
-                signer
-                    .seed_path
-                    .parent()
-                    .ok_or_else(|| invalid("STOP claim signer parent absent"))?,
-                app_uid,
-                false,
-            )?;
-        }
-        Ok(())
+        crate::lifecycle_selector::validate_custody(
+            operator,
+            &self.selector,
+            &self.management_subject,
+            &self.signers,
+            app_uid,
+        )
     }
 }
 
@@ -160,7 +115,7 @@ fn checked_plan<'a>(view: &'a Value, evidence: &ClaimPlanEvidence<'_>) -> io::Re
         || text(view, "authorizationOperationId")? != begin.authorization_operation_id()
         || text(view, "originalIndex")? != *original_index
         || text(view, "queryNonce")? != *query_nonce
-        || text(view, "app")? != fixed.app
+        || text(view, "app")? != fixed.selector.app
         || text(view, "managementSubject")? != fixed.management_subject
         || text(view, "originalBeginTransactionId")? != begin.receipt().transaction_id()
         || text(view, "originalBeginEventId")? != begin.receipt().event_id()
@@ -226,7 +181,7 @@ pub(crate) fn assemble_once(
     let marker = serde_json::to_vec(&marker)?;
     write_new(attempt_dir, "op68-requested.json", &marker)?;
     write_new(parent, "lifecycle-stop-claim-assembly-active.json", &marker)?;
-    let reply = operator.invoke(68, &request)?;
+    let reply = operator.invoke(68, &fixed.selector.framed(&request)?)?;
     write_new(attempt_dir, "op68-frame.bin", &reply)?;
     let plan = framed_payload(&reply, 68, PLAN_TAG)?.to_vec();
     let plan_path = write_new(attempt_dir, "plan.bin", &plan)?;

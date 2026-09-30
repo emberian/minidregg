@@ -1,11 +1,13 @@
 /-
-# Assurance — the apex bridge + generated ledger machinery (ATLAS §7).
+# Assurance — the apex bridge (ATLAS §7).
 
 The only lawful home for cross-boundary apex theorems: `Assurance/` is
 unrestricted, so a kernel object (a receipt word) may meet a proof-system
 object (the code + claim) here — nowhere else.
+
+Every file here is hand-written. Axiom pins are `#guard_msgs in #print axioms`
+lines written beside each theorem; nothing generates them.
 -/
-import Assurance.Placeholder  -- carve marker: pins, keystone audit, carrier registry, Bound/Forced
 import Assurance.CapabilityRevocationAudit
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
 import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Selvage AccClaim fold
@@ -30,13 +32,9 @@ import Assurance.SemanticAdditiveFriCheckpoint  -- canonical zero-padding joins 
 import Assurance.SemanticHistoryWARPAdditiveJoin  -- link roots precede fold challenges, post-challenge fold roots commit exact words, and the terminal root is the additive-FRI initial root
 import Assurance.SemanticHistoryBcsClaimProjection  -- exact carrier reindex transports semantic AccClaims and folds into the existing unshifted BCS reduction
 import Assurance.SemanticHistoryBcsGame  -- retained history derives the exact unshifted BCS schedule; ideal mathematics and common-coin PCS/CR/ROM evidence stay separate
-import Assurance.SemanticHistoryTower256CheckpointGame  -- one coin/ledger and exact root schedule join retained-history BCS evidence to the concrete Tower256 additive checkpoint
-import Assurance.Tower256MerkleCardinalityCore  -- ⚑ MerklePcs is EMPTY at every positive height (256-bit root vs >2^256 words): the pigeonhole, placed directly above the controller so every module quantified over it can import its own retraction
-import Assurance.Tower256MerkleBindingCardinality  -- the old positive-height binding-closed checkpoint carrier is formally impossible, so deployment must retain raw collision events
+import Assurance.Tower256MerkleCardinalityCore  -- ⚑ Compiler MerklePcs is EMPTY at every positive height (256-bit root vs >2^256 words). The six Assurance modules quantified over it (SemanticHistoryTower256CheckpointGame, -DeployedBcs, SemanticHistoryPcsEventRealization, Tower256MerkleBindingCardinality, Tower256AdditiveFriControllerAdmission, -ActualReduction) were DELETED 2026-09-30, not relabelled: nothing outside that chain consumed them, and the Raw* modules below are their replacement
 import Assurance.SameCoinGameProduct  -- exact nonempty product-coin pullbacks compose raw additive, Ext6, note, and BFV ledgers without pretending they share a deployed ROM
 import Assurance.HistoryHeadInhabitation  -- ANTI-VACUITY: the first constructed `VerifiedHistoryHead`, with a real fold round, at closed built parameters — until this, every retained-history theorem quantified over a type nothing in the tree inhabited
-import Assurance.SemanticHistoryTower256DeployedBcs  -- the literal retained-history Fiat--Shamir failure event has its native MCA bound; concrete same-coin PCS/CR/ROM classification remains explicit
-import Assurance.SemanticHistoryPcsEventRealization  -- intrinsic retained-history MCA/PCS extraction failure is charged to `historyPcs` alone, and is proved minimal: the CR/ROM disjuncts cannot secretly discharge it
 import Assurance.RawHistoryBcsOpenings  -- the retained-history carrier BEFORE binding: submitted roots/columns kept as-is over an executable `OpeningScheme`, root-preimage attribution separated out, and the equivocation branch exhibited inhabited rather than refuted
 import Assurance.RawHistoryCollisionBridge  -- that retained equivocation IS the landed `BindingFailure`, and at the concrete cSHAKE Merkle scheme it extracts an exact framed collision; the power-of-two coordinate embedding is the named residual
 import Assurance.RawSemanticHistoryCheckpointGame  -- constructible nonempty same-coin history/additive checkpoint game retains attribution, proximity, extracted collision, and oracle-transport failures
@@ -49,9 +47,7 @@ import Assurance.ProofCompositionGame  -- one prefix-typed shared-oracle schedul
 import Assurance.ExtensibleProofCompositionGame  -- disjoint finite ledger extensions preserve every old event/price and add Ext6's eight failures on the same coin without tag reuse
 import Assurance.Tower256LogupControllerAdmission  -- exact verified Tower256 LogUp control admitted only with the canonical codec, real Merkle binding, and one common-game PCS/CR/ROM coin
 import Assurance.Tower256LogupExtensionDeploymentAdmission  -- clause-404 extension control is non-vacuous while PCS/decider/CR/ROM/history/RAM security remains explicit evidence
-import Assurance.Tower256AdditiveFriControllerAdmission  -- ⛑ RETRACTED, VACUOUS: quantified over MerklePcs, which merklePcs_empty_of_positive proves EMPTY at every folding height; retraction is machine-checked in-file (commonGameFamily_impossible). Use Tower256AdditiveFriRawAdmission
 import Assurance.Tower256AdditiveFriRawAdmission  -- the same-coin cover CONSTRUCTED rather than assumed: ideal additive proximity, an accepted receipt carrying a path-specific `ExtractedCollision`, and one transcript-distribution residual
-import Assurance.Tower256AdditiveFriActualReduction  -- ⛑ RETRACTED, VACUOUS: same empty MerklePcs carrier; its 'exact UD price' and three-event cover hold of no PCS at any folding height (actualReductionFamily_impossible). Use Tower256AdditiveFriRawAdmission / Tower256AdditiveFriCanonicalExecutionGame
 import Assurance.Ext6GateProofControllerAdmission  -- Ext6 gate control concludes descriptor semantics only outside named PCS/subfield/LDT/CR/ROM failures
 import Assurance.Ext6GateProofDeploymentAdmission  -- reflected Ext6 deployment is separated from its exact eight-event semantic security residual
 import Assurance.Ext6GateProofPositiveExecution  -- the exact deployed receipt inhabits ControlledExecution while the eight-event SecurityResidual remains a separate argument
@@ -101,7 +97,7 @@ import Assurance.ReactiveOutboxDelivery  -- the installed reactive outbox become
 import Assurance.AuthenticatedSettlementFinalityWitness  -- concrete authority snapshots witness current, rotated, revoked, and non-conflicting authenticated quorum paths
 import Assurance.DreggNetProviderConsumer  -- a market-bound provider job joins exact lease economics, terminal/refund settlement, retry, and quorum safety
 import Assurance.QuotaGcSettlementWitness  -- an expired unprotected bounded page compacts with exact fee, guards, writes, and no-delete teeth for live/finalized roots
-import Assurance.SelvageV0  -- the v0 CAPSTONE: sound + knowledge-sound + bound + decided, one bundle
+import Assurance.SelvageV0  -- the v0 CAPSTONE: sound + knowledge-sound + binding, one bundle; the commitment is Theory.AuthMap and binding/knowledge are reductions to an exhibited collision (the former BindingCommitment leg was empty at any compressing root; the former 'decided' leg was Iff.rfl and is gone)
 import Assurance.SelvageV0Manifest  -- the machine-checked table of contents: re-exports the whole proved tower
 import Assurance.PrivateReceipt  -- can a turn carry a PRIVATE input? the hiding checkpoint (verdict: yes at the opening layer; [OB-4-hiding-rbr] the full ZK)
 import Assurance.PrivateTurn  -- the private-witness TURN model (Lean-authored): public claim binds, private witness hides; [PRIVATE-TURN-air] the Lean constraint system (not the Rust AIR)
@@ -128,3 +124,4 @@ import Assurance.TwistMemoryFingerprintJoin  -- ⭐ the OFFLINE MEMORY CHECK, bo
 import Assurance.ReleaseGateRouting -- the release-gate routing lemma and its binding control, the handoff's §6B as theorems, joined to the tree at both ends. Routing: an unbound gate that reveals the designated bit of ANY submitted predicate determines the private state (determines_iff_separates; routing_of_projections / routing_of_accept_all; hostReconstruct_exact is the "put secret bit 37 in the output slot" attack, by rfl), and a gate accepting at most one predicate reveals at most one bit (single_predicate_not_determining, pigeonhole; both poles pinned on one carrier). Binding: BindingGate R stateOf outOf gate — acceptance implies the released output stands in the authorized relation to the state — gives routing_refused (an output that is not the authorized function of the public half is refused whatever the private half or proof string) and binding_release_public_only, the gate-level twin of privateTurn_public_indistinguishable; TwoBit instance decided. The tree at both ends: Kernel/PrivateEscrowSettlement's Settlement is a BindingGate BY TYPE (settlement_is_binding_gate, settlement_release_public_only, acceptable_pins_named_relation); and at Stage 0 the relation is y = rt ∧ descriptorHolds evmAddDescriptor (traceOf y) (Iff.rfl), the descriptor FORCES Z = (X + Y) mod 2^256 (stage0_released_output_forced via evmAddDescriptor_means_semantics + fragment_run_eq_iff), the ideal gate refuses every routed Z (stage0_forged_z_refused at Z = 4) while the honest candidate is accepted at the ideal AND the deployed gate (fsProve_complete), and stage0Receipt_is_bound_evidence = fsCheck_ok_fiatShamir ∧ stage0Receipt_price. What the receipt binds: the descriptor and the FULL word, public prefix included, up to the FS price under the ROM. What it does not: hide — the whole word IS the FS statement (stage0_statement_carries_word, rfl); Stage 0 has no private half. Residuals: [RELEASE-hiding], [RELEASE-continuity] (a bound gate does not refuse a replayed stale-but-valid state; the kernel's nullifier/freshness objects are named).
 import Assurance.JointPostconditionWitness
 import Assurance.NativeObservationAudit
+import Assurance.CanonicalResourceBookInvariantAudit

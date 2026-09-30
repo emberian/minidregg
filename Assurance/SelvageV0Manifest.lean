@@ -480,8 +480,9 @@ theorem manifest_lightClientFS_sound
   lightClientFS_sound foldRoot halign hdC hMCA hδ0 hδB hδC herr0 hlen hfalse d
 
 /-- **`decider_sound`** (`Selvage/Decider.lean`). The final one-time check: the
-decider's verdict IS `AccClaim.Satisfies`, definitionally. Both soundness
-and completeness in one `Iff.rfl`. No residual. -/
+decider's verdict IS `AccClaim.Satisfies`, definitionally (`Iff.rfl`). It
+holds of every accumulator and word, so it is indexed as a definition's
+interface, not as a security result, and the v0 capstone does not count it. -/
 theorem manifest_decider_sound {Root : Type*} {F : Type*} [Field F]
     {ι : Type*} {r : ℕ}
     (C : Submodule F (ι → F)) (A : AccClaim Root F ι r) (f : ι → F) :
@@ -566,8 +567,9 @@ INHABITATION witness: root = word, verify = symbol equality, binding a
 two-line theorem. Re-exported as a `def` (it is the witness OBJECT, not a
 `Prop`); confirmed AXIOM-FREE by `#print axioms` below (no `Classical.choice`,
 no `propext`, no `Quot.sound` — it doesn't merely avoid `sorry`, it avoids
-every logical axiom Lean tracks). Residual: `[COMMIT-CR]`, the deployed
-Merkle/sponge realizer, priced only relative to collision-resistance. -/
+every logical axiom Lean tracks). Scope: root = word, so it compresses
+nothing; no `BindingCommitment` exists at a smaller root
+(`isEmpty_of_card_lt`), and the deployed commitment is `Theory.AuthMap`. -/
 noncomputable def manifest_idealCommitment (F ι : Type*) :
     BindingCommitment (ι → F) F ι Unit :=
   idealCommitment F ι
@@ -670,20 +672,22 @@ theorem manifest_receiptClaim_proximity {F : Type} [Field F] [DecidableEq F]
     (rc.proxAcceptSet rt T deg f).card ≤ m * (b * Fintype.card F ^ (m - 1)) :=
   receiptClaim_proximity rc rt T deg hδ hfold hfar
 
-/-- **`loomV0_holds`** (`Assurance/SelvageV0.lean`) — **THE v0 CAPSTONE**: the
-whole tower as ONE theorem. Bundles soundness (`lightClientSound`) and
-knowledge soundness (`lightClientKnowledgeSound_oneProver_committed`,
-`Selvage/LightClientKnowledge.lean`) at ONE prover's data `(f₀, ms, cols)`,
-and binding (`committed_extract_bind`) and decision (`decider_sound`) at the
-shared final accumulator — the proof term IS the four citations, no
-re-derivation. The old decoupling of the soundness slice's claimed words from
-the knowledge slice's transcripts is closed at the word level; the FS
-transport (`[FS-ROM]`) and the deployed commitment (`[COMMIT-CR]`) remain. -/
-theorem manifest_loomV0_holds {Root : Type*} {F : Type} [Field F] {ι : Type*}
-    {r : ℕ} {Op : Type*} [Fintype F] [Nonempty ι] [Fintype ι] [DecidableEq ι]
-    [DecidableEq F]
-    {foldRoot : Root → F → Root → Root} {C : Submodule F (ι → F)}
-    {A₀ : AccClaim Root F ι r} {ch : Chain Root F ι r}
+/-- **`loomV0_holds`** (`Assurance/SelvageV0.lean`) — **THE v0 CAPSTONE**, three
+legs at ONE prover and ONE final accumulator: soundness (`lightClientSound`),
+knowledge soundness through AuthMap openings (`lightClientKnowledgeSound_authMap`,
+bound `n·(err⋆ + 2/|F|)` PLUS the probability that the prover's openings
+exhibit a collision), and binding as a reduction (`authMap_extract_bind`: the
+opened word is the committed one, or an opening exhibits a collision).  The
+former `BindingCommitment` form was empty at every compressing root
+(`BindingCommitment.isEmpty_of_card_lt`); the former "decision" leg was
+`decider_sound`, which is `Iff.rfl`, and is no longer counted.  Residuals:
+`[FS-ROM]` and the efficient-adversary collision-resistance assumption that
+prices the collision event. -/
+theorem manifest_loomV0_holds {F : Type} [Field F] {ι D : Type} {r : ℕ}
+    [Fintype F] [Nonempty ι] [Fintype ι] [DecidableEq ι] [DecidableEq F] [DecidableEq D]
+    {S : Theory.AuthMap.Scheme ι F D}
+    {foldRoot : D → F → D → D} {C : Submodule F (ι → F)}
+    {A₀ : AccClaim D F ι r} {ch : Chain D F ι r}
     {δ dC Bstar : ℝ} {errstar : ℝ → ℝ} {f₀ : ι → F} {ms : Fin ch.length → ι → F}
     (halign : Aligned A₀ ch)
     (hdC : ∀ u ∈ C, ∀ v ∈ C, u ≠ v → dC ≤ relDist u v)
@@ -695,22 +699,49 @@ theorem manifest_loomV0_holds {Root : Type*} {F : Type} [Field F] {ι : Type*}
     (hseam : SeamOk ch) {dom : ι ↪ F} {d t : ℕ} (hdt : d ≤ t) {q : Fin t → ι}
     (hq : Function.Injective (dom ∘ q))
     (hms : ∀ k, ms k ∈ reedSolomonCode dom d)
-    {S : BindingCommitment Root F ι Op}
-    {rts : (Fin ch.length → F) → ℕ → Root}
+    {maps : (Fin ch.length → F) → ℕ → Theory.AuthMap.Map ι F}
     {cols : (Fin ch.length → F) → ℕ → Fin t → F}
-    {ops : (Fin ch.length → F) → ℕ → Fin t → Op}
-    (hrts : ∀ (γv : Fin ch.length → F) (c : ℕ), c ≤ ch.length →
-      rts γv c = S.commit (partialFold (padSched γv) f₀ ms c))
+    {πs : (Fin ch.length → F) → ℕ → Fin t → Theory.AuthMap.Scheme.Opening ι F D}
+    (hmaps : ∀ (γv : Fin ch.length → F) (c : ℕ), c ≤ ch.length →
+      HoldsWord S (maps γv c) (partialFold (padSched γv) f₀ ms c))
     (hver : ∀ (γv : Fin ch.length → F) (c : ℕ), c ≤ ch.length → ∀ j,
-      S.verifyOpen (rts γv c) (q j) (cols γv c j) (ops γv c j))
-    {γs : ℕ → F} {w e : ι → F} {oe : ι → Op}
-    (hrt : (aggregate foldRoot γs A₀ ch).rt = S.commit w)
-    (hopen : ∀ i, S.verifyOpen (aggregate foldRoot γs A₀ ch).rt i (e i) (oe i))
-    (hsat : AccClaim.Satisfies C (aggregate foldRoot γs A₀ ch) e)
-    (f : ι → F) :
-    SelvageV0Guarantee foldRoot C A₀ ch δ errstar f₀ ms dom d q cols γs S w e f :=
-  loomV0_holds halign hdC hMCA hδ0 hδB hδC herr0 hfalse hseam hdt hq hms hrts hver
-    hrt hopen hsat f
+      S.verify (S.root (maps γv c)) (q j) (some (cols γv c j)) (πs γv c j) = true)
+    {γs : ℕ → F} {m : Theory.AuthMap.Map ι F} {w e : ι → F}
+    {πe : ι → Theory.AuthMap.Scheme.Opening ι F D}
+    (hrt : (aggregate foldRoot γs A₀ ch).rt = S.root m) (hm : HoldsWord S m w)
+    (hopen : ∀ i, S.verify (aggregate foldRoot γs A₀ ch).rt i (some (e i)) (πe i) = true)
+    (hsat : AccClaim.Satisfies C (aggregate foldRoot γs A₀ ch) e) :
+    SelvageV0Guarantee S foldRoot C A₀ ch δ errstar f₀ ms dom d q maps cols πs γs m πe
+      w e :=
+  loomV0_holds halign hdC hMCA hδ0 hδB hδC herr0 hfalse hseam hdt hq hms hmaps hver
+    hrt hm hopen hsat
+
+/-- **`authMap_extract_bind`** (`Selvage/AuthMapCommitment.lean`) — the binding
+seam over `Theory.AuthMap`, as a REDUCTION: a word fully opened from the root of
+a map holding `w` is `w` (and satisfaction transfers), or the opening of a
+position where they differ exhibits a collision among the pairs that check
+compared. -/
+theorem manifest_authMap_extract_bind {ι F D : Type} [DecidableEq ι] [DecidableEq D]
+    (S : Theory.AuthMap.Scheme ι F D) [Field F] {r : ℕ}
+    {C : Submodule F (ι → F)} {A : AccClaim D F ι r}
+    {m : Theory.AuthMap.Map ι F} {w e : ι → F}
+    {πe : ι → Theory.AuthMap.Scheme.Opening ι F D}
+    (hrt : A.rt = S.root m) (hm : HoldsWord S m w)
+    (hopen : ∀ i, S.verify A.rt i (some (e i)) (πe i) = true)
+    (hsat : AccClaim.Satisfies C A e) :
+    (e = w ∧ AccClaim.Satisfies C A w) ∨
+      ∃ i, e i ≠ w i ∧ OpeningCollision S m i (some (e i)) (πe i) :=
+  authMap_extract_bind S hrt hm hopen hsat
+
+/-- **`BindingCommitment.isEmpty_of_card_lt`** (`Selvage/Commitment.lean`) — the
+scope of `BindingCommitment`: none exists at a root type smaller than the word
+space, so every entry below that takes one is a statement about
+non-compressing commitments. -/
+theorem manifest_bindingCommitment_isEmpty_of_card_lt {Root F ι Op : Type*}
+    [Fintype Root] [Fintype (ι → F)]
+    (h : Fintype.card Root < Fintype.card (ι → F)) :
+    IsEmpty (BindingCommitment Root F ι Op) :=
+  BindingCommitment.isEmpty_of_card_lt h
 
 /-- **`loomV0_light_client`** (`Assurance/SelvageV0.lean`) — the
 defensibility ONE-LINER: checking a receipt history's aggregate at ONE
@@ -1350,11 +1381,13 @@ zero-instance class):
   handler; the handler is inhabited by `Oracle.empty`, no axiom. The
   uniform→hash-derived transport itself is proved (`lightClientFS_sound`,
   fixed chain; `lightClientGrinding_sound`, grinding).
-* **`[COMMIT-CR]`** — the deployed Merkle/sponge realizes
-  `BindingCommitment` only relative to collision resistance.
-  `idealCommitment` inhabits the abstraction AXIOM-FREE, binding is proven
-  load-bearing, and `NoteSpend` exhibits a toy-hash collision to keep the
-  assumption's necessity concrete.
+* **`[COMMIT-CR]`** — CORRECTED 2026-09-30: a deployed Merkle root cannot
+  realize `BindingCommitment` at all (`isEmpty_of_card_lt`: no inhabitant
+  at a root smaller than the word space). The capstone now commits words as
+  `Theory.AuthMap` maps, and its binding and knowledge legs are reductions to
+  an exhibited collision (`authMap_extract_bind`,
+  `lightClientKnowledgeSound_authMap`). What remains is the efficient-adversary
+  collision-resistance assumption that prices that collision event.
 
 **BEYOND-v0 research, named** (Lean-authorable, genuinely open, none of it
 on the label):
@@ -1410,6 +1443,10 @@ and `eval_agrees_exec` (the arithmetization initiality keystone) needs no
 #guard_msgs (whitespace := lax) in #print axioms manifest_loomV0_holds
 /-- info: 'Minidregg.Assurance.manifest_loomV0_light_client' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms manifest_loomV0_light_client
+/-- info: 'Minidregg.Assurance.manifest_authMap_extract_bind' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_authMap_extract_bind
+/-- info: 'Minidregg.Assurance.manifest_bindingCommitment_isEmpty_of_card_lt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms manifest_bindingCommitment_isEmpty_of_card_lt
 /-- info: 'Minidregg.Assurance.manifest_committed_extract_bind' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms manifest_committed_extract_bind
 /-- info: 'Minidregg.Assurance.manifest_idealCommitment' does not depend on any axioms -/

@@ -1,0 +1,6 @@
+workspace read attempt: /home/ember/build/mini-product-20260930/mr-refusals/run/refusals-3/homes/newcomer/workspace/attempts/a-136157066962799889887089275408032148179
+refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host refused query, reply byte 255)
+  outcome (decoded by the Host): {"detail":"746865206772616e742c206f6e65206f662069747320616e636573746f72732c206f72206f6e65206f6620697473206368616e6e656c73206973207265766f6b6564","phase":"6f62736572766174696f6e","reason":"revoked","type":"refused"}
+  encoded: 44524547472f4e41544956452d484f53542f4f5554434f4d452f76320100050bff6f62736572766174696f6e42ff746865206772616e742c206f6e65206f662069747320616e636573746f72732c206f72206f6e65206f6620697473206368616e6e656c73206973207265766f6b6564
+  evidence: /home/ember/build/mini-product-20260930/mr-refusals/run/refusals-3/homes/newcomer/refusals/1790793431-query-2f04513f8ead9d85.bin
+  client: host refused query: refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation); encoded refusal: 44524547472f4e41544956452d484f53542f4f5554434f4d452f76320100050bff6f62736572766174696f6e42ff746865206772616e742c206f6e65206f662069747320616e636573746f72732c206f72206f6e65206f6620697473206368616e6e656c73206973207265766f6b6564

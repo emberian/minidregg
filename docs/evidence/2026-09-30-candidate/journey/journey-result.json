@@ -1,0 +1,153 @@
+{
+  "type": "mini-journey-result-v1",
+  "runRoot": "$FRESH/journey",
+  "script": "$FRESH/src/native/resource-client/journey.sh",
+  "inputsSha256": [
+    "3bd5ad0635fc49c822cf16e315ecf857f6987b9f96b043f030c6f7042af5e25f  $FRESH/src/native/resource-client/journey.sh",
+    "723940446d3e0256bd446b07ca8d67ea9d67295d8c7cc78e08bb2487ffbe3db2  $FRESH/candidate/bin/minidregg-host",
+    "6e74ad4339fea4c36cd03e2787657dcfda43aa46c57d54c2944d4d5dbb5d03b5  $FRESH/candidate/bin/mini",
+    "599bc4e6c1a04ab42e4ec4c18f4d47423e9df903006bba1ac2c2b880ff29fbfd  $FRESH/candidate/bin/minidregg-link-sqlite-store",
+    "f95f119664a028c15de26687b7853a5ae1e4982a83c14165afbd59ad9ec67336  $FRESH/candidate/bin/minidregg-credential-signature-verifier",
+    "14d100f5e2bb882a3d8fba341c435f4c0627856b6d2abd976086f0214482256c  $FRESH/candidate/provenance.json"
+  ],
+  "acceptedRecords": 22,
+  "wallSeconds": "161.875",
+  "machine": {
+    "host": "development-machine",
+    "cpus": "24",
+    "loadAverageAtStart": "5.24 6.21 6.51",
+    "loadAverageNow": "7.48 7.15 6.83"
+  },
+  "frontier": "G",
+  "reachedEnd": false,
+  "steps": [
+    {
+      "id": "J0",
+      "title": "clean start: private single-authority service, one sponsor",
+      "status": "PASS",
+      "wallSeconds": "11.049",
+      "artifact": "$FRESH/journey/world/handoff.json",
+      "detail": "service up and a signed read answered in 11.014s"
+    },
+    {
+      "id": "J1",
+      "title": "enroll an independently generated newcomer key",
+      "status": "PASS",
+      "wallSeconds": "2.661",
+      "artifact": "$FRESH/journey/world/attempts/newcomer/submit.json",
+      "detail": "subject 16329558529667836102, record 1; key absent from genesis/config; lookup = same receipt"
+    },
+    {
+      "id": "J2",
+      "title": "sponsor creates a resource under a permissive law",
+      "status": "PASS",
+      "wallSeconds": "2.221",
+      "artifact": "$FRESH/journey/world/sponsor/attempts/create-shared/outcome.json",
+      "detail": "object 18412643332189611453 under all[], record 2"
+    },
+    {
+      "id": "J3",
+      "title": "sponsor delegates observe+mutate (no control) to newcomer",
+      "status": "PASS",
+      "wallSeconds": "3.645",
+      "artifact": "$FRESH/journey/world/sponsor/attempts/grant-newcomer/outcome.json",
+      "detail": "child 11393057549492902502 verbs observe,mutate, record 3"
+    },
+    {
+      "id": "J4",
+      "title": "newcomer signed read, writes field to 1, reads back 1",
+      "status": "PASS",
+      "wallSeconds": "3.879",
+      "artifact": "$FRESH/journey/world/newcomer-workspace/attempts/first-action/outcome.json",
+      "detail": "read 0.706s, write 2.113s, readback field 2 = 1, record 4"
+    },
+    {
+      "id": "J5",
+      "title": "a key with no grant: read and write refused",
+      "status": "PASS",
+      "wallSeconds": "14.297",
+      "artifact": "$FRESH/journey/steps/J5/refusals.tsv",
+      "detail": "6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5"
+    },
+    {
+      "id": "J6",
+      "title": "stop/reopen: receipts recovered, exact retry replays",
+      "status": "PASS",
+      "wallSeconds": "6.031",
+      "artifact": "$FRESH/journey/steps/J6/retry.out",
+      "detail": "reopen to first signed read 3.002s; J1 receipt and field 2 = 1 recovered; retry replayed tx, boundary unchanged"
+    },
+    {
+      "id": "G",
+      "title": "growth 10/100/500/1000: write<=5s, reopen<=60s at 1000",
+      "status": "FAIL",
+      "wallSeconds": "55.788",
+      "artifact": "$FRESH/journey/steps/G/levels.tsv",
+      "detail": "at 10: write 4.028s, reopen 8.343s; level 1000 not in JOURNEY_GROWTH_LEVELS, so the exit is unmeasured"
+    },
+    {
+      "id": "J7",
+      "title": "law replaced; newcomer's existing grant still works",
+      "status": "PASS",
+      "wallSeconds": "13.036",
+      "artifact": "$FRESH/journey/world/newcomer-workspace/attempts/after-law-v2/outcome.json",
+      "detail": "law v1 not(any[]) installed (submit 2.508s); J3 grant wrote 1->7 (submit 3.209s). The new law is still permit-all"
+    },
+    {
+      "id": "J8",
+      "title": "deny-all: newcomer refused, sponsor repair refused",
+      "status": "PASS",
+      "wallSeconds": "11.673",
+      "artifact": "$FRESH/journey/steps/J8/refusals.tsv",
+      "detail": "deny-all installed (submit 3.310s); 5/5 refused: newcomer read/propose/crafted(current root), sponsor read, sponsor repair propose; prior call replays"
+    },
+    {
+      "id": "K4",
+      "title": "one resource holds 32 fields and reads them back",
+      "status": "FAIL",
+      "wallSeconds": "20.737",
+      "artifact": "$FRESH/journey/steps/K4/s204.err",
+      "detail": "field 4 of 32 refused by the Host (RejectReason.overflow); the resource holds 4 entries incl. field 1"
+    },
+    {
+      "id": "M3",
+      "title": "newcomer provisions itself and creates, no sponsor step",
+      "status": "UNBUILT",
+      "wallSeconds": "0.002",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m3.sh. Green when: a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"
+    },
+    {
+      "id": "M4",
+      "title": "J1-J8 through the shell over ssh",
+      "status": "UNBUILT",
+      "wallSeconds": "0.002",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m4.sh. Green when: J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)"
+    },
+    {
+      "id": "M5",
+      "title": "Hermes does J4 through the client; killed, restarts, resolves",
+      "status": "UNBUILT",
+      "wallSeconds": "0.003",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m5.sh. Green when: Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)"
+    },
+    {
+      "id": "M6",
+      "title": "a grain: INSTALL -> START -> reachable over http",
+      "status": "UNBUILT",
+      "wallSeconds": "0.003",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m6.sh. Green when: a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)"
+    },
+    {
+      "id": "M7",
+      "title": "candidate built from portable interfaces reproduces hashes",
+      "status": "PASS",
+      "wallSeconds": "15.749",
+      "artifact": "$FRESH/journey/steps/M7/m7-result.json",
+      "detail": "M7: candidate 45a99743272e reproduces 8e57b9d9a904 built in another directory (4/4 SHA-256, identical compiled inputs); run.sh served its own Store"
+    }
+  ]
+}
