@@ -167,7 +167,7 @@ end CanonicalSource
 source cell roots and the durable wrapper roots are both retained by `claim`;
 `computationPostBytes` is an explicit representation refinement between them. -/
 def acceptSealed
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (claim : Claim) (evidence : EvidenceBinding)
     (source : CanonicalSource claim evidence)
     (runtime : SealedRuntime) (computationPostBytes : List UInt8)
@@ -189,7 +189,7 @@ def acceptSealed
 fill authorization: it only packages their exact existing values with a new
 declassification token and terminal/outbox runtime. -/
 def settle
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (sealed : SealedAcceptance CanonicalSource M)
     (fill : Fill M portal authState)
@@ -204,7 +204,7 @@ def settle
   runtime := runtime
 
 theorem settled_source_status
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (settlement : Settlement CanonicalSource M portal authState) :
     settlement.sealed.evidence.mode = .sharedMpc /\
@@ -212,7 +212,7 @@ theorem settled_source_status
   settlement.sealed.source.current_source_is_sharedMpc
 
 theorem settled_keeps_receipt_separate
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (settlement : Settlement CanonicalSource M portal authState) :
     settlement.sealed.runtime.receiptCell ∉

@@ -25,16 +25,6 @@ open Minidregg.Kernel.QuotaGcSettlement
 
 set_option autoImplicit false
 
-local instance canonicalFieldDecidableEq :
-    DecidableEq CanonicalResourceKernel.schema.Field := by
-  change DecidableEq CanonicalResourceKernel.Field
-  infer_instance
-
-local instance canonicalResourceDecidableEq :
-    DecidableEq CanonicalResourceKernel.schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
 def expiredRecord : LeaseRecord where
   holder := 1
   lessor := 2
@@ -50,15 +40,14 @@ def book : Book where
       DFinsupp.single (1, 0) 10
   leaseRecords := DFinsupp.single 8 (some expiredRecord)
 
-def logical : LogicalState CanonicalResourceKernel.schema where
-  fields := (0 : FieldStore CanonicalResourceKernel.schema).write .book book
-  resources := fun resource => nomatch resource
+def logical : Store.Store CanonicalResourceKernel.layout :=
+  (0 : Store.Store CanonicalResourceKernel.layout).set bookAddress (some book)
 
 noncomputable def resourcePre : Materialized CanonicalResourceKernel.materializer :=
   materialize CanonicalResourceKernel.materializer logical
 
 @[simp] theorem resourcePre_book : logicalBook resourcePre.logical = book := by
-  simp [resourcePre, logical, logicalBook, materialize, FieldStore.read]
+  simp [resourcePre, logical, logicalBook, materialize]
 
 def object : Object where
   contentId := 11
