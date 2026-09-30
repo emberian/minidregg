@@ -454,34 +454,36 @@ must not be packed into a second lifecycle envelope by the physical receiver.
 namespace LifecycleSlot
 
 open CellState
+open Minidregg.Theory.Store
 
 variable (registry : TypeRegistry Digest)
 
-def schema : CellState.Schema.{0, 0, 0, 0} where
-  Field := Unit
-  FieldType := fun _ => Option (PackedCell registry)
-  Resource := Empty
-  ResourceType := Empty.elim
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
+/-- Packed cells are compared by their lawful canonical envelope; the codec's
+`decode_encode` makes the envelope injective. -/
+instance packedCellDecidableEq : DecidableEq (PackedCell registry) := fun left right =>
+  decidable_of_iff
+    ((PackedCell.codec registry).encode left = (PackedCell.codec registry).encode right)
+    ⟨fun same => Hyperdocument.lawfulCodec_encode_injective _ same,
+      fun same => same ▸ rfl⟩
 
-instance fieldDecidableEq : DecidableEq (schema registry).Field :=
-  inferInstanceAs (DecidableEq Unit)
+/-- One RAM address holding the lifecycle slot: absent is fresh, `some none` is
+retired, `some (some cell)` is live. -/
+abbrev layout : Store.Layout.{0, 0, 0} where
+  Namespace := Unit
+  Key := fun _ => Unit
+  Value := fun _ => Option (PackedCell registry)
+  discipline := fun _ => .ram
 
-instance resourceDecidableEq : DecidableEq (schema registry).Resource :=
-  fun resource => resource.elim
+/-- The sole address of the lifecycle layout. -/
+def slotAddress : Address (layout registry) := ⟨(), ()⟩
 
-def state : LifecycleImage registry -> LogicalState (schema registry)
-  | .fresh => { fields := 0, resources := fun resource => nomatch resource }
-  | .retired =>
-      { fields := (0 : FieldStore (schema registry)).write () none
-        resources := fun resource => nomatch resource }
-  | .live cell =>
-      { fields := (0 : FieldStore (schema registry)).write () (some cell)
-        resources := fun resource => nomatch resource }
+def state : LifecycleImage registry -> Store (layout registry)
+  | .fresh => 0
+  | .retired => (0 : Store (layout registry)).set (slotAddress registry) (some none)
+  | .live cell => (0 : Store (layout registry)).set (slotAddress registry) (some (some cell))
 
-def image (logical : LogicalState (schema registry)) : LifecycleImage registry :=
-  match logical.fields () with
+def image (logical : Store (layout registry)) : LifecycleImage registry :=
+  match logical (slotAddress registry) with
   | none => .fresh
   | some none => .retired
   | some (some cell) => .live cell
@@ -490,33 +492,22 @@ def image (logical : LogicalState (schema registry)) : LifecycleImage registry :
     image registry (state registry observation) = observation := by
   cases observation <;> simp [image, state]
 
-theorem state_image (logical : LogicalState (schema registry)) :
-    state registry (image registry logical) = logical := by
-  cases logical with
-  | mk fields resources =>
-      have resourcesExact : resources = fun resource => nomatch resource := by
-        funext resource
-        exact Empty.elim resource
-      cases present : fields () with
-      | none =>
-          have fieldsExact : fields = (0 : FieldStore (schema registry)) := by
-            apply DFinsupp.ext
-            intro field
-            cases field
-            simpa using present
-          rw [fieldsExact, resourcesExact]
-          rfl
-      | some value =>
-          have fieldsExact : fields =
-              (0 : FieldStore (schema registry)).write () value := by
-            apply DFinsupp.ext
-            intro field
-            cases field
-            simp [present]
-          rw [fieldsExact, resourcesExact]
-          cases value <;> simp [image, state]
+/-- Every store of the one-address layout is determined by its slot. -/
+theorem ext_slot {left right : Store (layout registry)}
+    (same : left (slotAddress registry) = right (slotAddress registry)) : left = right := by
+  apply DFinsupp.ext
+  rintro ⟨⟨⟩, ⟨⟩⟩
+  exact same
 
-def codec : LawfulCodec (LogicalState (schema registry)) where
+theorem state_image (logical : Store (layout registry)) :
+    state registry (image registry logical) = logical := by
+  apply ext_slot
+  cases present : logical (slotAddress registry) with
+  | none => simp [image, state, present]
+  | some value =>
+      cases value <;> simp [image, state, present]
+
+def codec : LawfulCodec (Store (layout registry)) where
   encode logical := LifecycleImage.bytes registry (image registry logical)
   decode bytes := ((LifecycleImage.codec registry).decode bytes).map (state registry)
   decode_encode := by
@@ -526,14 +517,14 @@ def codec : LawfulCodec (LogicalState (schema registry)) where
       state_image registry logical] using congrArg (Option.map (state registry)) decoded
 
 theorem decode_canonical {bytes : List UInt8}
-    {logical : LogicalState (schema registry)}
+    {logical : Store (layout registry)}
     (decoded : (codec registry).decode bytes = some logical) :
     (codec registry).encode logical = bytes := by
   obtain ⟨observation, observed, same⟩ := Option.map_eq_some_iff.mp decoded
   cases same
   simpa [codec] using LifecycleImage.decode_canonical registry observed
 
-def materializer : Materializer (schema registry) Digest where
+def materializer : Materializer (layout registry) Digest where
   codec := codec registry
   rootBytes := ResourceBirthCodec.rootBytes
 
