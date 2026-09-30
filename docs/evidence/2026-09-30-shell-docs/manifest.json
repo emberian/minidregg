@@ -1,0 +1,15 @@
+{
+  "host": "/home/ember/build/mini-product-20260930/p-shell-docs/bin/minidregg-host-psd1",
+  "mini": "/home/ember/build/mini-product-20260930/p-shell-docs/bin/mini-psd3",
+  "store": "/home/ember/build/mini-product-20260930/product/bin/minidregg-link-sqlite-store",
+  "verifier": "/home/ember/build/mini-product-20260930/product/bin/minidregg-credential-signature-verifier",
+  "shell": "/home/ember/build/mini-product-20260930/p-shell-docs/bin/mini-psd3",
+  "spkHost": "/home/ember/build/mini-product-20260930/product/bin/spk-host",
+  "sha256": {
+    "host": "9d2add7fe09234d0dfbfee37c244baaccb213a0a8c56c6c50e8ba1040950969a",
+    "mini": "f9fd2e69d2d96863df43ab2978c7d0699335e35e178ae4e95a4dd979e78435b2",
+    "shell": "f9fd2e69d2d96863df43ab2978c7d0699335e35e178ae4e95a4dd979e78435b2",
+    "store": "599bc4e6c1a04ab42e4ec4c18f4d47423e9df903006bba1ac2c2b880ff29fbfd",
+    "verifier": "71b8d73424920d18aa26f76b8594cc802de640da38c58ef79e3cc9ae1940b753"
+  }
+}

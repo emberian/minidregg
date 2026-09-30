@@ -4,8 +4,10 @@
 # (deploy/shell/mini-shell-ssh) to its own workspace and session home.
 #
 # Rows marked OPERATOR are things the service operator does outside any
-# participant's shell: bootstrap, sshd, service restart, and the one key-custody
-# step the current enrollment contract needs (see J1). Rows marked check are
+# participant's shell: bootstrap, sshd, service restart, the one key-custody
+# step the current enrollment contract needs (see J1), and provisioning
+# (deploy/shell/OPERATOR.md step 6: the sponsor's `provision`, and delivering
+# its birth context to the participant's HOME/provision/, which `init` binds). Rows marked check are
 # assertions over retained shell output. A step passes when its exit code is
 # the expected one (0 done, 3 refused by the Host) and its checks hold.
 #
@@ -249,6 +251,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# provision WHO SUBJECT: OPERATOR step 6 for one enrolled participant.
+provision() {
+  op "$1" "PROVISION (OPERATOR step 6): factory observation + a funded account owned by $2" \
+    "$SHELL_MINI" workspace --action provision --dir "$R/sponsor" --name "$2" --holder "$3" \
+      --funding 1000 --account-predicate "$RUN/permit-all.json" --factory-ref factory
+  op "$1" "DELIVER (OPERATOR step 6): the birth context into $2's HOME/provision/" \
+    install -D -m 0600 "$R/sponsor/provisions/$2/birth-context.json" "$RUN/homes/$2/provision/birth-context.json"
+}
+printf '%s\n' '{"type":"all","predicates":[]}' >"$RUN/permit-all.json"
+
 # ------------------------------------------------------------- J0
 
 echo "run: $RUN"
@@ -279,6 +291,7 @@ NEW_SUBJ=$(jq -r '.subject' "$J1_LOOKUP")
 check J1 "lookup returns the same receipt as submit" \
   is "$(jq -c .receipt "$J1_SUBMIT")" "$(jq -c .receipt "$J1_LOOKUP")"
 check J1 "enrolled public key is the newcomer's own" is "$(jq -r .publicKey "$J1_LOOKUP")" "$NEW_PUB"
+provision J1 newcomer "$NEW_SUBJ"
 step J1 0 newcomer "init mini.key $NEW_SUBJ"
 step J1 0 newcomer "whoami"
 check J1 "newcomer session is subject $NEW_SUBJ" is "$(jq -r .subject "$LAST")" "$NEW_SUBJ"
@@ -336,7 +349,9 @@ step J5 0 sponsor "enroll plan third-1 third-1.key"
 step J5 0 sponsor "enroll seal third-1"
 step J5 0 sponsor "enroll submit third-1"
 THIRD_SUBJ=$(jq -r .subject "$LAST")
-THIRD_COUNT=$(jq -r .receipt.acceptedCount "$LAST")
+provision J5 third "$THIRD_SUBJ"
+# the newest accepted record is now the third's provisioned account birth
+THIRD_COUNT=$(jq -r .account.birthReceipt.acceptedCount "$R/sponsor/provisions/third/provision.json")
 step J5 0 third "init mini.key $THIRD_SUBJ"
 step J5 0 third "import stolen object $TARGET $CHILD_CAP"
 step J5 3 third "read stolen"
@@ -344,7 +359,14 @@ step J5 3 third "invoke third-write stolen create 3 1"
 step J5 0 third "import owner object $TARGET $OWNER_CAP"
 step J5 3 third "read owner"
 step J5 0 stranger "keygen mini.key"
-step J5 0 stranger "init mini.key 4242424242"
+# A stranger is never enrolled, so never provisioned: the shell's init refuses
+# it, and the operator makes the workspace the stranger's reads are refused from.
+step J5 1 stranger "init mini.key 4242424242"
+check J5 "the shell's init names the missing provisioning and makes no workspace" \
+  bash -c "grep -q '^error: init needs your provisioning at $RUN/homes/stranger/provision/birth-context.json' '${LAST%.stdout}.stderr' && [[ ! -e '$RUN/homes/stranger/workspace' ]]"
+op J5 "an unprovisioned workspace for the unenrolled stranger (plain mini workspace init)" \
+  "$SHELL_MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCK" \
+    --key "$RUN/homes/stranger/keys/mini.key" --subject 4242424242 --dir "$RUN/homes/stranger/workspace"
 step J5 0 stranger "import stolen object $TARGET $CHILD_CAP"
 step J5 3 stranger "read stolen"
 step J5 3 stranger "invoke stranger-write stolen create 3 1"

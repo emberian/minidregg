@@ -1,0 +1,1 @@
+error: doc quote: this store's content cell has no transclusion action (Kernel/ContentResource.lean Action has no transclude; TransclusionRecord with its disclosurePolicy is not in the page entry grammar); needs K-CONTENT-ACTIONS

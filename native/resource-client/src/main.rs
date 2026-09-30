@@ -112,11 +112,20 @@ pub(crate) fn outcome_text(value: Option<&Value>) -> String {
     let Some(hex) = value.and_then(Value::as_str) else {
         return "(absent)".into();
     };
+    // A controller's nested `Reject` is printed by Lean's `repr` across lines;
+    // line breaks and tabs become single spaces. Any other control character
+    // keeps the text out of the terminal: it is shown as hex.
     match decode_hex(hex)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
     {
-        Some(text) if !text.chars().any(char::is_control) => text,
+        Some(text)
+            if !text
+                .chars()
+                .any(|c| c.is_control() && !matches!(c, '\n' | '\t')) =>
+        {
+            text.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
         _ => format!("hex {hex}"),
     }
 }
@@ -3396,6 +3405,14 @@ mod tests {
             .unwrap()
             .starts_with("refused: revoked: the grant is revoked (phase observation)\n"));
         // Prose that names a reason is not a reason.
+        let nested = json!({"type":"refused","reason":"operation-rejected","phase":hex(b"prepare"),
+            "detail":hex(b"invocation preparation: A.Reject.scalar\n  (B.Reject.pageMutation\n    (C.RejectReason.overflow))")});
+        assert_eq!(
+            refusal_line(&nested).unwrap(),
+            "refused: operation-rejected: invocation preparation: A.Reject.scalar (B.Reject.pageMutation (C.RejectReason.overflow)) (phase prepare)"
+        );
+        let escape = json!({"type":"refused","reason":"malformed","phase":hex(b"x"),"detail":hex(b"a\x1b[2Jb")});
+        assert!(refusal_line(&escape).unwrap().starts_with("refused: malformed: hex "));
         let prose = json!({"type":"refused","phase":hex(b"x"),"detail":hex(b"revoked")});
         assert!(refusal_line(&prose)
             .unwrap()

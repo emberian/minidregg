@@ -1,0 +1,17 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": {
+    "childCapability": "16846642456688234317",
+    "domain": "8501",
+    "kind": "object",
+    "name": "paper",
+    "recipient": "14591131992792524932",
+    "reservation": "5c7bb3bad247682a99a3007d5f67fc7e578d5f9b95a923a298c03b6b22852dd1",
+    "target": "15795163771524832050"
+  },
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/proposals/g-bob-paper/intent.json",
+  "intentSha256": "3e792f5c9aee57b991623d332175bdf51780a53ab8141bb8cb136130210c782a",
+  "proposalId": "g-bob-paper",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

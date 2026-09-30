@@ -1,0 +1,9 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/proposals/a2/intent.json",
+  "intentSha256": "c89a5e5c376f54f77b7822b70aa6f691b4fd5ae9b2f4c75be9877e61558578e6",
+  "proposalId": "a2",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

@@ -1,0 +1,17 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": {
+    "childCapability": "18083458856010797081",
+    "domain": "8501",
+    "kind": "object",
+    "name": "index",
+    "recipient": "14591131992792524932",
+    "reservation": "2c79b7c4373d84fa83a76902841b87ddd327fd80e9f901b840d236d99d228ec0",
+    "target": "16456581539530926582"
+  },
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/proposals/g-bob-index/intent.json",
+  "intentSha256": "a2d88ac7b2dab3bc7ab6dfb70ce224b6ef0c781a0d3c5602297d0dace2dbecd9",
+  "proposalId": "g-bob-index",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

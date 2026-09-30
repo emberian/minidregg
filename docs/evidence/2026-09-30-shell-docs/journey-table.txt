@@ -1,0 +1,53 @@
+step  status      wall_s  what / detail / deciding artifact
+J0   PASS        17.557  clean start: private single-authority service, one sponsor
+                          service up and a signed read answered in 17.519s
+                          -> RUN/world/handoff.json
+J1   PASS         5.761  enroll an independently generated newcomer key
+                          subject 15736189107607118814, record 1; key absent from genesis/config; lookup = same receipt
+                          -> RUN/world/attempts/newcomer/submit.json
+J2   PASS         3.228  sponsor creates a resource under a permissive law
+                          object 16869000441535546601 under all[], record 2
+                          -> RUN/world/sponsor/attempts/create-shared/outcome.json
+J3   PASS         5.556  sponsor delegates observe+mutate (no control) to newcomer
+                          child 11551680894180782165 verbs observe,mutate, record 3
+                          -> RUN/world/sponsor/attempts/grant-newcomer/outcome.json
+J4   PASS         4.685  newcomer signed read, writes field to 1, reads back 1
+                          read 0.907s, write 2.612s, readback field 2 = 1, record 4
+                          -> RUN/world/newcomer-workspace/attempts/first-action/outcome.json
+J5   PASS        10.867  a key with no grant: read and write refused
+                          6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5
+                          -> RUN/steps/J5/refusals.tsv
+J6   PASS         5.440  stop/reopen: receipts recovered, exact retry replays
+                          reopen to first signed read 3.120s; J1 receipt and field 2 = 1 recovered; retry replayed tx, boundary unchanged
+                          -> RUN/steps/J6/retry.out
+G    FAIL        37.807  growth 10/100/500/1000: write<=5s, reopen<=60s at 1000
+                          at 10: write 2.922s, reopen 5.256s; level 1000 not in JOURNEY_GROWTH_LEVELS, so the exit is unmeasured
+                          -> RUN/steps/G/levels.tsv
+J7   PASS         9.906  law replaced; newcomer's existing grant still works
+                          law v1 not(any[]) installed (submit 2.107s); J3 grant wrote 1->7 (submit 2.006s). The new law is still permit-all
+                          -> RUN/world/newcomer-workspace/attempts/after-law-v2/outcome.json
+J8   PASS         8.664  deny-all: newcomer refused, sponsor repair refused
+                          deny-all installed (submit 2.307s); 5/5 refused: newcomer read/propose/crafted(current root), sponsor read, sponsor repair propose; prior call replays
+                          -> RUN/steps/J8/refusals.tsv
+K4   FAIL        16.923  one resource holds 32 fields and reads them back
+                          field 4 of 32 refused by the Host (RejectReason.overflow); the resource holds 4 entries incl. field 1
+                          -> RUN/steps/K4/s204.err
+M3   UNBUILT      0.002  newcomer provisions itself and creates, no sponsor step
+                          UNBUILT: no journey.d/m3.sh. Green when: a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)
+M4   UNBUILT      0.002  J1-J8 through the shell over ssh
+                          UNBUILT: no journey.d/m4.sh. Green when: J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)
+M5   UNBUILT      0.003  Hermes does J4 through the client; killed, restarts, resolves
+                          UNBUILT: no journey.d/m5.sh. Green when: Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)
+M6   UNBUILT      0.002  a grain: INSTALL -> START -> reachable over http
+                          UNBUILT: no journey.d/m6.sh. Green when: a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)
+M7   FAIL         0.005  candidate built from portable interfaces reproduces hashes
+                          journey.d/m7.sh exists but the manifest has no .candidate
+J12  PASS       617.576  two friends co-write a document through the shell, with refusals
+                          J12: 134 rows ok (RUN/steps/J12/j12.tsv)
+                          -> RUN/steps/J12/j12.tsv
+J12C  FAIL         0.137  a quote (transclusion) across rooms: four grants, four outcomes
+                          hook exit 1: J12c stub: `doc quote paper wall 1` -> rc 1: error: doc quote: this store's content cell has no transclusion action (Kernel/ContentResource.lean Action has no transclude; TransclusionRecord with its disclosurePolicy is not in the page entry grammar); needs K-CONTENT-ACTIONS
+                          -> RUN/steps/J12C/quote.err
+
+FRONTIER: G   (accepted records: 22; load average start/end: 11.06 11.50 9.74 / 41.81 30.84 18.69 on 24 CPUs; result: RUN/journey-result.json)
+exit=1

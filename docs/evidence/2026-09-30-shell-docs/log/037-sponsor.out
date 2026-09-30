@@ -1,0 +1,7 @@
+{
+  "authority": "awaiting-admission",
+  "ingressSha256": "8d7ba7dac686f3187f09e458240807781c9379a67f5cc6a075b5254d26b5c6b3",
+  "keyId": "14539402037510000086",
+  "subject": "13638194795160528636",
+  "type": "minidregg-participant-enrollment-sealed-v1"
+}

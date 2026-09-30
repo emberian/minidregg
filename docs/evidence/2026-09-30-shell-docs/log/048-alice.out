@@ -1,0 +1,31 @@
+/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/sources/create-paper.authoring/g0001/intent.bin
+{
+  "acceptedCount": "35",
+  "confirmation": "installed",
+  "eventId": "11218209035038394661243738268121086880635431552960208923789187661148833026626",
+  "imageBoundary": "105751027582651840142030191788866935714547037230566373803640042178281644583399",
+  "transactionId": "22809131739870654387576883539423990226705481149222245921398217866339827750762",
+  "type": "confirmed"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "12834625334888924548",
+  "kind": "object",
+  "name": "paper",
+  "observeCapability": "14769978467864741972",
+  "operationCapability": "14769978467864741972",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "35",
+      "confirmation": "installed",
+      "eventId": "11218209035038394661243738268121086880635431552960208923789187661148833026626",
+      "imageBoundary": "105751027582651840142030191788866935714547037230566373803640042178281644583399",
+      "transactionId": "22809131739870654387576883539423990226705481149222245921398217866339827750762",
+      "type": "confirmed"
+    },
+    "reservationDigest": "893ca79023821b325337cc7181d692ccc868713168504c42545c6ca966d6fb72",
+    "reservationRecord": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/h/alice/namespace/request-893ca79023821b325337cc7181d692ccc868713168504c42545c6ca966d6fb72.json"
+  },
+  "target": "15795163771524832050",
+  "type": "minidregg-participant-reference-v1"
+}

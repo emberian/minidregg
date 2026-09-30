@@ -1,0 +1,170 @@
+{
+  "type": "mini-journey-result-v1",
+  "runRoot": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3",
+  "script": "/home/ember/build/mini-product-20260930/p-shell-docs/src/native/resource-client/journey.sh",
+  "inputsSha256": [
+    "c5d81d058356d45c87d2cf920753c742bbd45c38223a871e4ccdf29e5ebc6888  /home/ember/build/mini-product-20260930/p-shell-docs/src/native/resource-client/journey.sh",
+    "9d2add7fe09234d0dfbfee37c244baaccb213a0a8c56c6c50e8ba1040950969a  /home/ember/build/mini-product-20260930/p-shell-docs/bin/minidregg-host-psd1",
+    "f9fd2e69d2d96863df43ab2978c7d0699335e35e178ae4e95a4dd979e78435b2  /home/ember/build/mini-product-20260930/p-shell-docs/bin/mini-psd3",
+    "599bc4e6c1a04ab42e4ec4c18f4d47423e9df903006bba1ac2c2b880ff29fbfd  /home/ember/build/mini-product-20260930/product/bin/minidregg-link-sqlite-store",
+    "71b8d73424920d18aa26f76b8594cc802de640da38c58ef79e3cc9ae1940b753  /home/ember/build/mini-product-20260930/product/bin/minidregg-credential-signature-verifier",
+    "f9fd2e69d2d96863df43ab2978c7d0699335e35e178ae4e95a4dd979e78435b2  /home/ember/build/mini-product-20260930/p-shell-docs/bin/mini-psd3",
+    "f3abd57bd741451bceb47d5ea08f31f1a3d7c720efd3b7cd5bcd745e0daa67ca  /home/ember/build/mini-product-20260930/product/bin/spk-host"
+  ],
+  "acceptedRecords": 22,
+  "wallSeconds": "745.989",
+  "machine": {
+    "host": "persvati",
+    "cpus": "24",
+    "loadAverageAtStart": "11.06 11.50 9.74",
+    "loadAverageNow": "41.81 30.84 18.69"
+  },
+  "frontier": "G",
+  "reachedEnd": false,
+  "steps": [
+    {
+      "id": "J0",
+      "title": "clean start: private single-authority service, one sponsor",
+      "status": "PASS",
+      "wallSeconds": "17.557",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/handoff.json",
+      "detail": "service up and a signed read answered in 17.519s"
+    },
+    {
+      "id": "J1",
+      "title": "enroll an independently generated newcomer key",
+      "status": "PASS",
+      "wallSeconds": "5.761",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/attempts/newcomer/submit.json",
+      "detail": "subject 15736189107607118814, record 1; key absent from genesis/config; lookup = same receipt"
+    },
+    {
+      "id": "J2",
+      "title": "sponsor creates a resource under a permissive law",
+      "status": "PASS",
+      "wallSeconds": "3.228",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/attempts/create-shared/outcome.json",
+      "detail": "object 16869000441535546601 under all[], record 2"
+    },
+    {
+      "id": "J3",
+      "title": "sponsor delegates observe+mutate (no control) to newcomer",
+      "status": "PASS",
+      "wallSeconds": "5.556",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/attempts/grant-newcomer/outcome.json",
+      "detail": "child 11551680894180782165 verbs observe,mutate, record 3"
+    },
+    {
+      "id": "J4",
+      "title": "newcomer signed read, writes field to 1, reads back 1",
+      "status": "PASS",
+      "wallSeconds": "4.685",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/newcomer-workspace/attempts/first-action/outcome.json",
+      "detail": "read 0.907s, write 2.612s, readback field 2 = 1, record 4"
+    },
+    {
+      "id": "J5",
+      "title": "a key with no grant: read and write refused",
+      "status": "PASS",
+      "wallSeconds": "10.867",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J5/refusals.tsv",
+      "detail": "6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5"
+    },
+    {
+      "id": "J6",
+      "title": "stop/reopen: receipts recovered, exact retry replays",
+      "status": "PASS",
+      "wallSeconds": "5.440",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J6/retry.out",
+      "detail": "reopen to first signed read 3.120s; J1 receipt and field 2 = 1 recovered; retry replayed tx, boundary unchanged"
+    },
+    {
+      "id": "G",
+      "title": "growth 10/100/500/1000: write<=5s, reopen<=60s at 1000",
+      "status": "FAIL",
+      "wallSeconds": "37.807",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/G/levels.tsv",
+      "detail": "at 10: write 2.922s, reopen 5.256s; level 1000 not in JOURNEY_GROWTH_LEVELS, so the exit is unmeasured"
+    },
+    {
+      "id": "J7",
+      "title": "law replaced; newcomer's existing grant still works",
+      "status": "PASS",
+      "wallSeconds": "9.906",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/newcomer-workspace/attempts/after-law-v2/outcome.json",
+      "detail": "law v1 not(any[]) installed (submit 2.107s); J3 grant wrote 1->7 (submit 2.006s). The new law is still permit-all"
+    },
+    {
+      "id": "J8",
+      "title": "deny-all: newcomer refused, sponsor repair refused",
+      "status": "PASS",
+      "wallSeconds": "8.664",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J8/refusals.tsv",
+      "detail": "deny-all installed (submit 2.307s); 5/5 refused: newcomer read/propose/crafted(current root), sponsor read, sponsor repair propose; prior call replays"
+    },
+    {
+      "id": "K4",
+      "title": "one resource holds 32 fields and reads them back",
+      "status": "FAIL",
+      "wallSeconds": "16.923",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/K4/s204.err",
+      "detail": "field 4 of 32 refused by the Host (RejectReason.overflow); the resource holds 4 entries incl. field 1"
+    },
+    {
+      "id": "M3",
+      "title": "newcomer provisions itself and creates, no sponsor step",
+      "status": "UNBUILT",
+      "wallSeconds": "0.002",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m3.sh. Green when: a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"
+    },
+    {
+      "id": "M4",
+      "title": "J1-J8 through the shell over ssh",
+      "status": "UNBUILT",
+      "wallSeconds": "0.002",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m4.sh. Green when: J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)"
+    },
+    {
+      "id": "M5",
+      "title": "Hermes does J4 through the client; killed, restarts, resolves",
+      "status": "UNBUILT",
+      "wallSeconds": "0.003",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m5.sh. Green when: Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)"
+    },
+    {
+      "id": "M6",
+      "title": "a grain: INSTALL -> START -> reachable over http",
+      "status": "UNBUILT",
+      "wallSeconds": "0.002",
+      "artifact": "",
+      "detail": "UNBUILT: no journey.d/m6.sh. Green when: a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)"
+    },
+    {
+      "id": "M7",
+      "title": "candidate built from portable interfaces reproduces hashes",
+      "status": "FAIL",
+      "wallSeconds": "0.005",
+      "artifact": "",
+      "detail": "journey.d/m7.sh exists but the manifest has no .candidate"
+    },
+    {
+      "id": "J12",
+      "title": "two friends co-write a document through the shell, with refusals",
+      "status": "PASS",
+      "wallSeconds": "617.576",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/j12.tsv",
+      "detail": "J12: 134 rows ok (/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/j12.tsv)"
+    },
+    {
+      "id": "J12C",
+      "title": "a quote (transclusion) across rooms: four grants, four outcomes",
+      "status": "FAIL",
+      "wallSeconds": "0.137",
+      "artifact": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12C/quote.err",
+      "detail": "hook exit 1: J12c stub: `doc quote paper wall 1` -> rc 1: error: doc quote: this store's content cell has no transclusion action (Kernel/ContentResource.lean Action has no transclude; TransclusionRecord with its disclosurePolicy is not in the page entry grammar); needs K-CONTENT-ACTIONS"
+    }
+  ]
+}

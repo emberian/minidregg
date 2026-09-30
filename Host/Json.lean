@@ -2906,20 +2906,84 @@ private def atomKindJson : Hyperdocument.AtomKind → Lean.Json
 private def optionalOperationJson (value : Option Hyperdocument.OperationId) : Lean.Json :=
   value.map (fun id => decimal id.digest.value) |>.getD .null
 
+private def identifierJson {version : Hyperdocument.CodecVersion} {domain : Hyperdocument.IdDomain}
+    (value : Hyperdocument.Identifier version domain) : Lean.Json :=
+  decimal value.digest.value
+
+private def optionalIdentifierJson {version : Hyperdocument.CodecVersion}
+    {domain : Hyperdocument.IdDomain} :
+    Option (Hyperdocument.Identifier version domain) → Lean.Json
+  | some value => identifierJson value
+  | none => .null
+
+private def deathPolicyJson : Hyperdocument.EndpointDeathPolicy → Lean.Json
+  | .invalidate => "invalidate"
+  | .keepTombstone => "keepTombstone"
+  | .preferPrevious => "preferPrevious"
+  | .preferNext => "preferNext"
+  | .preferPreviousThenNext => "preferPreviousThenNext"
+  | .preferNextThenPrevious => "preferNextThenPrevious"
+
+/-- The inverse spelling of `stablePoint`/`stableRange` above: what a reader of a
+content cell sees is exactly what an author would write. -/
+private def stablePointJson (point : Hyperdocument.StablePoint) : Lean.Json := .mkObj
+  [("run", identifierJson point.run), ("neighbor", optionalIdentifierJson point.neighbor),
+   ("bias", match point.bias with | .before => "before" | .after => "after"),
+   ("death", deathPolicyJson point.death)]
+
+private def stableRangeJson (range : Hyperdocument.StableRange) : Lean.Json := .mkObj
+  [("start", stablePointJson range.start), ("finish", stablePointJson range.finish)]
+
+/-- The inverse spelling of `linkTarget`. A transclusion target is named by its
+id only (its stored reference is not an authoring input). -/
+private def linkTargetJson : Hyperdocument.LinkTarget → Lean.Json
+  | .document target => .mkObj [("type", "document"), ("id", identifierJson target)]
+  | .element target => .mkObj [("type", "element"), ("id", identifierJson target)]
+  | .range document range => .mkObj [("type", "range"), ("document", identifierJson document),
+      ("range", stableRangeJson range)]
+  | .transclusion target _ => .mkObj [("type", "transclusion"), ("id", identifierJson target)]
+  | .external scheme authority path => .mkObj [("type", "external"),
+      ("scheme", hexJson scheme), ("authority", hexJson authority), ("path", hexJson path)]
+
+private def elementBodyJson : Hyperdocument.ElementBody → Lean.Json
+  | .container children => .mkObj [("type", "container"),
+      ("children", .arr <| children.toArray.map identifierJson)]
+  | .runs runs => .mkObj [("type", "runs"), ("runs", .arr <| runs.toArray.map identifierJson)]
+  | .embed reference => .mkObj [("type", "embed"), ("document", identifierJson reference.document),
+      ("element", optionalIdentifierJson reference.element),
+      ("snapshot", optionalIdentifierJson reference.snapshot)]
+  | .opaque schema payload => .mkObj [("type", "opaque"), ("schema", decimal schema.value),
+      ("payload", hexJson payload)]
+
 /-- One entry of a content cell. Documents, elements, links, atoms and runs are
 spelled out; every entry carries its canonical `StoreCodec` entry bytes. -/
 private def contentEntryJson (entry : Minidregg.Theory.Store.Entry Hyperdocument.layout) : Lean.Json :=
   let canonical := hexJson ((StoreCodec.entryStream HyperdocumentCell.contentWire).encode entry)
   match entry with
-  | ⟨⟨.documents, identifier⟩, _⟩ =>
+  | ⟨⟨.documents, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.DocumentId := identifier
-      .mkObj [("type", "document"), ("id", decimal identifier.digest.value), ("canonical", canonical)]
-  | ⟨⟨.elements, identifier⟩, _⟩ =>
+      let record : Hyperdocument.DocumentRecord := record
+      .mkObj [("type", "document"), ("id", decimal identifier.digest.value),
+        ("rootElement", identifierJson record.rootElement), ("schema", decimal record.schema.value),
+        ("createdBy", principalJson record.createdBy), ("createdAt", identifierJson record.createdAt),
+        ("canonical", canonical)]
+  | ⟨⟨.elements, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.ElementId := identifier
-      .mkObj [("type", "element"), ("id", decimal identifier.digest.value), ("canonical", canonical)]
-  | ⟨⟨.links, identifier⟩, _⟩ =>
+      let record : Hyperdocument.ElementRecord := record
+      .mkObj [("type", "element"), ("id", decimal identifier.digest.value),
+        ("document", identifierJson record.document), ("parent", optionalIdentifierJson record.parent),
+        ("body", elementBodyJson record.body), ("createdBy", principalJson record.createdBy),
+        ("createdAt", identifierJson record.createdAt),
+        ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
+  | ⟨⟨.links, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.LinkId := identifier
-      .mkObj [("type", "link"), ("id", decimal identifier.digest.value), ("canonical", canonical)]
+      let record : Hyperdocument.LinkRecord := record
+      .mkObj [("type", "link"), ("id", decimal identifier.digest.value),
+        ("document", identifierJson record.sourceDocument),
+        ("source", match record.source with | some range => stableRangeJson range | none => .null),
+        ("target", linkTargetJson record.target), ("relation", decimal record.relation.value),
+        ("createdBy", principalJson record.author), ("createdAt", identifierJson record.operation),
+        ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
   | ⟨⟨.atoms, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.AtomId := identifier
       let record : Hyperdocument.AtomRecord := record

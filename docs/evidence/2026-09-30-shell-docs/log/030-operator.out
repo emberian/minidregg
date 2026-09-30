@@ -1,0 +1,47 @@
+/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/sources/create-account-rev.authoring/g0001/intent.bin
+{
+  "acceptedCount": "31",
+  "confirmation": "installed",
+  "eventId": "110376232474034388248963355557570926380350021555028594125729043545363386856007",
+  "imageBoundary": "66972014126881189502251343967573316630836361879032580113129667934351523199642",
+  "transactionId": "112668943086987066813527456671973447785192122427537212034379275772473619361620",
+  "type": "confirmed"
+}
+{
+  "account": {
+    "attempt": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/attempts/create-account-rev",
+    "birthReceipt": {
+      "acceptedCount": "31",
+      "confirmation": "installed",
+      "eventId": "110376232474034388248963355557570926380350021555028594125729043545363386856007",
+      "imageBoundary": "66972014126881189502251343967573316630836361879032580113129667934351523199642",
+      "transactionId": "112668943086987066813527456671973447785192122427537212034379275772473619361620",
+      "type": "confirmed"
+    },
+    "controlCapability": "13820071412861395637",
+    "funded": "1000",
+    "ownerCapability": "12744588043954032528",
+    "target": "10011008547290085887"
+  },
+  "authority": "hint-only; the Host checks every grant at use",
+  "birthContext": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/world/sponsor/provisions/rev/birth-context.json",
+  "factoryObservation": {
+    "authority": "admitted-factory-observation",
+    "capability": "11562871595999668908",
+    "factory": "10",
+    "holder": "12588663092545306355",
+    "receipt": {
+      "acceptedCount": "30",
+      "eventId": "49112539837863660564128051477746288079530297570901396562840094798777098895911",
+      "imageBoundary": "143023190811054732809682250066370106927719932926755988911922218328962819315",
+      "transactionId": "113742304021369973142457171390067786031758701521768619362303837442980147570255"
+    },
+    "type": "minidregg-participant-factory-observation-result-v1",
+    "verbs": [
+      "observe"
+    ]
+  },
+  "holder": "12588663092545306355",
+  "name": "rev",
+  "type": "minidregg-participant-provisioning-v1"
+}

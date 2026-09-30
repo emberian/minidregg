@@ -1,0 +1,4 @@
+workspace attempt: /home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/rev/attempts/r1
+refused: undisclosed: request refused (phase admission)
+  outcome: {"detail":"726571756573742072656675736564","phase":"61646d697373696f6e","reason":"undisclosed","type":"refused"}
+  client: host returned refused; exact outcome evidence was retained

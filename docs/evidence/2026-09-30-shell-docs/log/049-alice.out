@@ -1,0 +1,31 @@
+/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/sources/create-index.authoring/g0001/intent.bin
+{
+  "acceptedCount": "36",
+  "confirmation": "installed",
+  "eventId": "76586153387721567381171722960479619841781768093987665040532607991208938068806",
+  "imageBoundary": "52752603235501880398946550216697264829621128622378789657813867409951874090697",
+  "transactionId": "53964837093308639111507451995878800834338099358862490598298979761936991780889",
+  "type": "confirmed"
+}
+{
+  "authority": "hint-only",
+  "controlCapability": "14408028292342910620",
+  "kind": "object",
+  "name": "index",
+  "observeCapability": "13936362186436854891",
+  "operationCapability": "13936362186436854891",
+  "provenance": {
+    "birthReceipt": {
+      "acceptedCount": "36",
+      "confirmation": "installed",
+      "eventId": "76586153387721567381171722960479619841781768093987665040532607991208938068806",
+      "imageBoundary": "52752603235501880398946550216697264829621128622378789657813867409951874090697",
+      "transactionId": "53964837093308639111507451995878800834338099358862490598298979761936991780889",
+      "type": "confirmed"
+    },
+    "reservationDigest": "0ed0b89e337f8a42456fc3d5698515bed8a04c60912039df47a30eb78d145a84",
+    "reservationRecord": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/h/alice/namespace/request-0ed0b89e337f8a42456fc3d5698515bed8a04c60912039df47a30eb78d145a84.json"
+  },
+  "target": "16456581539530926582",
+  "type": "minidregg-participant-reference-v1"
+}

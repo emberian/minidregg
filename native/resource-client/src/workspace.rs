@@ -39,6 +39,21 @@ fn field_decimal(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
+/// A canonical signed decimal, as the Host's `int` parser accepts it: the
+/// declared value is an unbounded `Int` (a subject id above 2^63 is a value).
+fn signed_decimal(value: &str, field: &str) -> Result<()> {
+    let magnitude = value.strip_prefix('-').unwrap_or(value);
+    if magnitude.is_empty()
+        || magnitude.len() > 80
+        || (magnitude.len() > 1 && magnitude.starts_with('0'))
+        || value == "-0"
+        || !magnitude.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(format!("{field} must be a canonical signed decimal"));
+    }
+    Ok(())
+}
+
 fn decimal_leq(left: &str, right: &str) -> bool {
     left.len() < right.len() || left.len() == right.len() && left <= right
 }
@@ -550,22 +565,18 @@ fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
             .ok_or("scalar key lacks field")?;
         decimal(field, "scalar field")?;
         let value = member(action, "value")?;
-        if value.parse::<i64>().is_err() {
-            return Err("scalar value must be a signed integer".into());
-        }
+        signed_decimal(value, "scalar value")?;
         let mut lowered_action = json!({"type":tag,
             "key":{"type":"object","resource":target,"field":field},"value":value});
         if tag == "write" {
             let expected = action
                 .get("expected")
                 .ok_or("write action lacks expected")?;
-            if !expected.is_null()
-                && expected
-                    .as_str()
-                    .and_then(|value| value.parse::<i64>().ok())
-                    .is_none()
-            {
-                return Err("write expected must be null or signed integer".into());
+            if !expected.is_null() {
+                signed_decimal(
+                    expected.as_str().ok_or("write expected must be null or a string")?,
+                    "write expected",
+                )?;
             }
             lowered_action["expected"] = expected.clone();
         }
@@ -574,7 +585,11 @@ fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
     Ok(json!({"type":"scalar","actions":lowered}))
 }
 
-fn content_actions(actions: &Value) -> Result<Value> {
+/// Check content actions against the Host's content grammar. A raw `content`
+/// payload may only create; `editAtom` and `link` name existing records and
+/// other pages, so only the `document` lowering, which takes them from signed
+/// views, may produce them (`from_signed_views`).
+fn content_actions(actions: &Value, from_signed_views: bool) -> Result<Value> {
     let actions = actions
         .as_array()
         .ok_or("content actions must be an array")?;
@@ -589,6 +604,13 @@ fn content_actions(actions: &Value) -> Result<Value> {
             "createAtom" => ("createAtom", &["type", "atom", "kind", "payload"]),
             "createDocument" => ("createDocument", &["type", "rootElement", "schema", "body"]),
             "createRun" => ("createRun", &["type", "run", "atoms"]),
+            "editAtom" if from_signed_views => (
+                "editAtom",
+                &["type", "atom", "before", "kind", "payload", "tombstone"],
+            ),
+            "link" if from_signed_views => {
+                ("link", &["type", "link", "source", "target", "relation"])
+            }
             _ => {
                 return Err(
                     "workspace content proposal supports local creation actions only".into(),
@@ -667,7 +689,12 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 }
                 let lowered = match member(payload, "type")? {
                     "scalar" => scalar_actions(&payload["actions"], target)?,
-                    "content" => content_actions(&payload["actions"])?,
+                    "content" => content_actions(&payload["actions"], false)?,
+                    "document" => content_actions(
+                        &document_actions(root, workspace, local_name, &view,
+                            member(&challenge, "height")?, &payload["actions"])?,
+                        true,
+                    )?,
                     _ => return Err("unsupported workspace payload type".into()),
                 };
                 let capability = member(&reference, "operationCapability")?;
@@ -856,7 +883,40 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                     "child":child}}},
                 "grants":[{"kind":kind,"target":target,"capability":parent_id}]})
         }
-        _ => return Err("proposal action must be invoke, install-policy, or delegate".into()),
+        "revoke" => {
+            let obj = request.as_object().ok_or("proposal must be an object")?;
+            if obj.len() != 4 || !obj.contains_key("name") || !obj.contains_key("recipient") {
+                return Err("revoke proposal may contain only type, action, name, recipient".into());
+            }
+            let reference = reference(root, member(&request, "name")?)?;
+            let recipient = member(&request, "recipient")?;
+            decimal(recipient, "revoke recipient")?;
+            let kind = member(&reference, "kind")?;
+            let target = member(&reference, "target")?;
+            let control = member(&reference, "controlCapability")?;
+            let victim = delegated_capability(root, member(&request, "name")?, target, recipient)?;
+            let (resource, challenge, _) = signed_view(root, workspace, &reference, "resource")?;
+            let target_root = resource
+                .get("cell")
+                .and_then(|cell| cell.get("root"))
+                .and_then(Value::as_str)
+                .ok_or("signed resource view lacks cell root")?;
+            field_decimal(target_root, "revocation target root")?;
+            json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+                "purpose":{"type":"prepare","draft":{"type":"revoke-source",
+                    "command":{"kind":kind,"subject":member(workspace,"subject")?,
+                    "nonce":random_nonce()?,"target":target,"victimKind":kind,
+                    "capability":victim,"controlCapability":control,
+                    "expectedTargetRoot":target_root,
+                    "expectedAuthorityRoot":signed_authority_root(&challenge)?}}},
+                "grants":[{"kind":kind,"target":target,
+                    "capability":member(&reference,"observeCapability")?}]})
+        }
+        _ => {
+            return Err(
+                "proposal action must be invoke, install-policy, delegate, or revoke".into(),
+            )
+        }
     };
     let intent_bytes = serde_json::to_vec_pretty(&intent).map_err(|error| error.to_string())?;
     let intent_sha = format!("{:x}", Sha256::digest(&intent_bytes));
@@ -1719,6 +1779,427 @@ fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &st
     Ok(())
 }
 
+// ---------------------------------------------------------------- documents
+//
+// A document is a content cell (`storage: content`). Its page is what the Host
+// shows in a signed `view-resource`: every entry, spelled by Lean's
+// `contentEntryJson`. The client never decodes an entry's canonical bytes; it
+// reads the Host's JSON, and it lowers line-level document actions into the
+// Host's own content grammar (`Kernel/ContentResource.lean` `Action`).
+//
+// Lines are the page's atom entries in page order (insertion order; the page
+// has 16 entries). `doc show` retains the signed view it rendered under
+// `seen/NAME.json`; an edit carries the line exactly as that read saw it, so an
+// edit of a line someone else changed since is refused by the Host (`staleAtom`)
+// rather than silently overwritten.
+
+/// The cell of a signed content view, or an error naming what the resource is.
+/// A content cell's entries are typed hyperdocument records (`type`); a declared
+/// cell's are `key`/`value` fields. The document a content cell holds is
+/// `documentOf target`, the resource's own id, so it is not read from the cell.
+fn content_page<'a>(view: &'a Value, name: &str) -> Result<&'a Value> {
+    let cell = view.get("cell").ok_or("signed resource view lacks cell")?;
+    let entries = cell
+        .get("entries")
+        .and_then(Value::as_array)
+        .ok_or("signed resource view lacks cell entries")?;
+    if entries.iter().any(|entry| entry.get("type").is_none()) {
+        return Err(format!("{name} is not a document (its storage is not content)"));
+    }
+    Ok(cell)
+}
+
+fn page_entries(page: &Value) -> Result<&Vec<Value>> {
+    page.get("entries")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "content cell lacks entries".to_owned())
+}
+
+/// Atom entries in line order: the document's lines, 1-based. A content cell
+/// is a store (entries in canonical address-byte order, not creation order), so
+/// line order is the numeric order of atom ids; `doc append` mints ids that
+/// grow with the signed read height they were authored against
+/// (`ordered_atom_id`).
+fn page_lines(page: &Value) -> Result<Vec<&Value>> {
+    let mut lines: Vec<&Value> = page_entries(page)?
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("atom"))
+        .collect();
+    lines.sort_by(|left, right| {
+        let key = |entry: &&Value| {
+            let id = entry.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
+            (id.len(), id)
+        };
+        key(left).cmp(&key(right))
+    });
+    Ok(lines)
+}
+
+/// An atom id that sorts after every id minted at a lower signed read height:
+/// `height * 2^64 + index * 2^48 + 48 random bits`, in decimal. Two appenders
+/// reading the same height are ordered by their random bits.
+fn ordered_atom_id(height: &str, index: usize) -> Result<String> {
+    let height: u128 = height
+        .parse()
+        .map_err(|_| format!("signed read height {height} is not a decimal"))?;
+    let random: u128 = random_nonce()?
+        .parse::<u128>()
+        .map_err(|_| "workspace nonce is not a decimal".to_owned())?;
+    let value = (height << 64) | (((index as u128) & 0xffff) << 48) | (random & ((1u128 << 48) - 1));
+    Ok(value.to_string())
+}
+fn unhex(text: &str) -> Result<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return Err("odd hex length".into());
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&text[index..index + 2], 16).map_err(|_| "invalid hex".to_owned())
+        })
+        .collect()
+}
+
+fn atom_text(atom: &Value) -> String {
+    let payload = atom.get("payload").and_then(Value::as_str).unwrap_or("");
+    match unhex(payload) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(_) => format!("<payload {payload}>"),
+    }
+}
+
+/// The exact `AtomRecord` an `editAtom` names as `before`: the Host's atom
+/// entry without its address and canonical bytes.
+fn atom_record(atom: &Value) -> Result<Value> {
+    let mut record = serde_json::Map::new();
+    for key in ["document", "kind", "payload", "createdBy", "createdAt", "tombstonedAt"] {
+        record.insert(
+            key.to_owned(),
+            atom.get(key)
+                .cloned()
+                .ok_or_else(|| format!("atom entry lacks {key}"))?,
+        );
+    }
+    Ok(Value::Object(record))
+}
+
+fn seen_path(root: &Path, name: &str) -> Result<PathBuf> {
+    validate_name(name)?;
+    Ok(root.join("seen").join(format!("{name}.json")))
+}
+
+/// Replace the retained "as I last read it" view of one document.
+fn retain_seen(root: &Path, name: &str, view: &Value, challenge: &Value) -> Result<()> {
+    let dir = root.join("seen");
+    if !dir.exists() {
+        make_private_dir(&dir)?;
+    }
+    private_dir(&dir)?;
+    let path = seen_path(root, name)?;
+    let staged = dir.join(format!(".{name}.{}", random_nonce()?));
+    let value = json!({"type":"minidregg-workspace-seen-document-v1","name":name,
+        "height":challenge.get("height"),"worldRoot":challenge.get("worldRoot"),
+        "view":view});
+    private_file(
+        &staged,
+        &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
+    )?;
+    fs::rename(&staged, &path).map_err(|error| format!("cannot retain {}: {error}", path.display()))
+}
+
+fn text_argument(action: &Value) -> Result<String> {
+    let text = member(action, "text")?;
+    if text.is_empty() || text.len() > 4096 {
+        return Err("document text must be 1..4096 bytes".into());
+    }
+    Ok(hex(text.as_bytes()))
+}
+
+fn line_argument(action: &Value) -> Result<usize> {
+    let line = member(action, "line")?;
+    decimal(line, "document line")?;
+    line.parse::<usize>()
+        .ok()
+        .filter(|value| *value >= 1)
+        .ok_or_else(|| "document line must be 1 or more".to_owned())
+}
+
+/// Lower line-level document actions into the Host's content grammar.
+/// `append {text}` · `edit {line,text}` · `link {to,relation}`.
+fn document_actions(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    view: &Value,
+    height: &str,
+    actions: &Value,
+) -> Result<Value> {
+    let actions = actions
+        .as_array()
+        .ok_or("document actions must be an array")?;
+    if actions.is_empty() || actions.len() > 16 {
+        return Err("document proposal requires 1..16 actions".into());
+    }
+    content_page(view, name)?;
+    let mut lowered = Vec::new();
+    for (index, action) in actions.iter().enumerate() {
+        let obj = action
+            .as_object()
+            .ok_or("document action must be an object")?;
+        let keys: &[&str] = match member(action, "type")? {
+            "append" => &["type", "text"],
+            "edit" => &["type", "line", "text"],
+            "link" => &["type", "to", "relation"],
+            _ => return Err("document action must be append, edit or link".into()),
+        };
+        if obj.len() != keys.len() || keys.iter().any(|key| !obj.contains_key(*key)) {
+            return Err(format!("document action {} has unexpected fields", member(action, "type")?));
+        }
+        lowered.push(match member(action, "type")? {
+            "append" => json!({"type":"createAtom","atom":ordered_atom_id(height, index)?,
+                "kind":{"type":"text"},"payload":text_argument(action)?}),
+            "edit" => {
+                let line = line_argument(action)?;
+                let seen = bounded_json(&seen_path(root, name)?).map_err(|_| {
+                    format!("doc show {name} first: an edit names a line as you last read it")
+                })?;
+                let seen_page = content_page(&seen["view"], name)?;
+                let lines = page_lines(seen_page)?;
+                let atom = lines.get(line - 1).ok_or_else(|| {
+                    format!("{name} had {} line(s) when you last read it", lines.len())
+                })?;
+                let before = atom_record(atom)?;
+                json!({"type":"editAtom","atom":member(atom,"id")?,"before":before,
+                    "kind":before["kind"],"payload":text_argument(action)?,"tombstone":false})
+            }
+            "link" => {
+                let to = member(action, "to")?;
+                let relation = member(action, "relation")?;
+                decimal(relation, "link relation")?;
+                let target_ref = reference(root, to)?;
+                let (target_view, _, _) = signed_view(root, workspace, &target_ref, "resource")?;
+                content_page(&target_view, to)?;
+                json!({"type":"link","link":random_nonce()?,"source":null,
+                    "target":{"type":"document","id":member(&target_ref,"target")?},
+                    "relation":relation})
+            }
+            _ => unreachable!("document action tags were checked"),
+        });
+    }
+    Ok(Value::Array(lowered))
+}
+
+/// The local reference names whose target is `document`, for rendering.
+fn names_for_target(root: &Path, document: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(entries) = fs::read_dir(root.join("refs")) {
+        for entry in entries.flatten() {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            if let Some(stem) = file.strip_suffix(".json") {
+                if let Ok(value) = reference(root, stem) {
+                    if value.get("target").and_then(Value::as_str) == Some(document) {
+                        names.push(stem.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+fn principal_subject(value: &Value) -> String {
+    value
+        .get("subject")
+        .and_then(Value::as_str)
+        .unwrap_or("?")
+        .to_owned()
+}
+
+fn link_target_text(root: &Path, target: &Value) -> String {
+    let kind = target.get("type").and_then(Value::as_str).unwrap_or("?");
+    let document = match kind {
+        "document" => target.get("id"),
+        "range" => target.get("document"),
+        _ => None,
+    }
+    .and_then(Value::as_str);
+    match (kind, document) {
+        (_, Some(document)) => {
+            let names = names_for_target(root, document);
+            if names.is_empty() {
+                format!("{kind} {document}")
+            } else {
+                format!("{} ({kind} {document})", names.join(","))
+            }
+        }
+        ("element", _) => format!(
+            "element {}",
+            target.get("id").and_then(Value::as_str).unwrap_or("?")
+        ),
+        _ => kind.to_owned(),
+    }
+}
+
+/// Render one signed content page as numbered lines with their authors.
+fn render_document(
+    root: &Path,
+    name: &str,
+    document: &str,
+    page: &Value,
+    height: &str,
+) -> Result<String> {
+    let mut out = format!(
+        "# doc {name}: document {document} cell root {} at height {height} (signed read; lines are what `doc edit` takes)\n",
+        member(page, "root")?
+    );
+    let lines = page_lines(page)?;
+    if lines.is_empty() {
+        out.push_str("  (no lines)\n");
+    }
+    for (index, atom) in lines.iter().enumerate() {
+        let by = principal_subject(&atom["createdBy"]);
+        let struck = if atom.get("tombstonedAt").is_some_and(|value| !value.is_null()) {
+            " (struck)"
+        } else {
+            ""
+        };
+        let text = atom_text(atom);
+        let mut rows = text.split('\n');
+        out.push_str(&format!(
+            "{:>3}  created-by {:<20}{struck}  {}\n",
+            index + 1,
+            by,
+            rows.next().unwrap_or("")
+        ));
+        for row in rows {
+            out.push_str(&format!("{:>3}  {:<31}  {row}\n", "", ""));
+        }
+    }
+    for entry in page_entries(page)? {
+        if entry.get("type").and_then(Value::as_str) == Some("link") {
+            out.push_str(&format!(
+                "link {} -> {} relation {} created-by {}\n",
+                member(entry, "id")?,
+                link_target_text(root, &entry["target"]),
+                entry.get("relation").and_then(Value::as_str).unwrap_or("?"),
+                principal_subject(&entry["createdBy"])
+            ));
+        }
+    }
+    out.push_str(&format!(
+        "# {} cell entries; created-by is the atom's creator (an edit keeps it)\n",
+        page_entries(page)?.len()
+    ));
+    Ok(out)
+}
+
+fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
+    let reference = reference(root, name)?;
+    let (view, challenge, _) = signed_view(root, workspace, &reference, "resource")?;
+    let page = content_page(&view, name)?;
+    retain_seen(root, name, &view, &challenge)?;
+    print!(
+        "{}",
+        render_document(root, name, member(&reference, "target")?, page, member(&challenge, "height")?)?
+    );
+    Ok(())
+}
+
+/// Backlinks as a fold over the content pages this workspace can read now:
+/// every link entry, in any readable page, whose target is this document.
+/// A page the Host refuses to show contributes nothing and is named.
+fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
+    let own = reference(root, name)?;
+    let (view, challenge, _) = signed_view(root, workspace, &own, "resource")?;
+    content_page(&view, name)?;
+    let document = member(&own, "target")?.to_owned();
+    let mut names: Vec<String> = fs::read_dir(root.join("refs"))
+        .map_err(|error| error.to_string())?
+        .flatten()
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .strip_suffix(".json")
+                .map(str::to_owned)
+        })
+        .collect();
+    names.sort();
+    println!(
+        "# backlinks to {name} (document {document}) from the documents this workspace can read at height {}",
+        member(&challenge, "height")?
+    );
+    let mut found = 0usize;
+    for source in names {
+        let reference = reference(root, &source)?;
+        let seen = if source == name {
+            Ok(view.clone())
+        } else {
+            signed_view(root, workspace, &reference, "resource").map(|value| value.0)
+        };
+        let page_view = match seen {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = crate::take_host_decision();
+                println!("# {source}: not read ({error})");
+                continue;
+            }
+        };
+        let Ok(page) = content_page(&page_view, &source) else {
+            continue;
+        };
+        for entry in page_entries(page)? {
+            let target = &entry["target"];
+            let hit = entry.get("type").and_then(Value::as_str) == Some("link")
+                && match target.get("type").and_then(Value::as_str) {
+                    Some("document") => target.get("id").and_then(Value::as_str),
+                    Some("range") => target.get("document").and_then(Value::as_str),
+                    _ => None,
+                } == Some(document.as_str());
+            if hit {
+                found += 1;
+                println!(
+                    "{source} link {} relation {} created-by {}",
+                    member(entry, "id")?,
+                    entry.get("relation").and_then(Value::as_str).unwrap_or("?"),
+                    principal_subject(&entry["createdBy"])
+                );
+            }
+        }
+    }
+    println!("# {found} backlink(s)");
+    Ok(())
+}
+
+/// The child capability this workspace delegated on `name` to `recipient`,
+/// from its own retained delegation proposals.
+fn delegated_capability(root: &Path, name: &str, target: &str, recipient: &str) -> Result<String> {
+    let mut found = std::collections::BTreeSet::new();
+    if let Ok(entries) = fs::read_dir(root.join("proposals")) {
+        for entry in entries.flatten() {
+            let Ok(summary) = bounded_json(&entry.path().join("proposal.json")) else {
+                continue;
+            };
+            let delegation = &summary["delegation"];
+            if delegation.get("name").and_then(Value::as_str) == Some(name)
+                && delegation.get("target").and_then(Value::as_str) == Some(target)
+                && delegation.get("recipient").and_then(Value::as_str) == Some(recipient)
+            {
+                found.insert(member(delegation, "childCapability")?.to_owned());
+            }
+        }
+    }
+    match found.len() {
+        0 => Err(format!("this workspace delegated nothing on {name} to {recipient}")),
+        1 => Ok(found.into_iter().next().expect("one element")),
+        _ => Err(format!(
+            "several delegations on {name} to {recipient} ({}); revoke is one capability",
+            found.into_iter().collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
+
 pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = os_string(args.required("action")?, "workspace action")?;
     let root = absolute(&path(args.required("dir")?))?;
@@ -1873,8 +2354,18 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             publish_delegation(&root, &proposal_id, &attempt)
         }
+        "doc-show" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            doc_show(&root, &workspace, &name)
+        }
+        "doc-backlinks" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            doc_backlinks(&root, &workspace, &name)
+        }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover or publish-delegation".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show or doc-backlinks".into(),
         ),
     }
 }
@@ -1882,6 +2373,132 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn atom(id: &str, text: &str, by: &str) -> Value {
+        json!({"type":"atom","id":id,"document":"900","kind":{"type":"text"},
+            "payload":hex(text.as_bytes()),
+            "createdBy":{"subject":by,"capabilityKind":"object","capability":"31"},
+            "createdAt":"55","tombstonedAt":null,"canonical":"00"})
+    }
+
+    fn page(entries: Vec<Value>) -> Value {
+        json!({"type":"resource","cell":{"root":"77","entries":entries},"balances":[]})
+    }
+
+    #[test]
+    fn scalar_values_are_the_hosts_signed_integers() {
+        for good in ["0", "-1", "11033321548135836207", "-9223372036854775809"] {
+            assert!(signed_decimal(good, "v").is_ok(), "{good}");
+        }
+        for bad in ["", "-", "-0", "01", "+1", "1.0", "x"] {
+            assert!(signed_decimal(bad, "v").is_err(), "{bad}");
+        }
+        let lowered = scalar_actions(
+            &json!([{"type":"create","key":{"type":"object","field":"1"},"value":"11033321548135836207"}]),
+            "12",
+        )
+        .unwrap();
+        assert_eq!(lowered["actions"][0]["value"], "11033321548135836207");
+    }
+
+    #[test]
+    fn edits_and_links_come_only_from_the_document_lowering() {
+        let edit = json!([{"type":"editAtom","atom":"1","before":{},"kind":{"type":"text"},
+            "payload":"61","tombstone":false}]);
+        assert!(content_actions(&edit, true).is_ok());
+        assert!(content_actions(&edit, false).is_err());
+        assert!(content_actions(&json!([{"type":"transclude","id":"1"}]), true).is_err());
+        assert!(content_actions(&json!([{"type":"editAtom","atom":"1"}]), true).is_err());
+    }
+
+    #[test]
+    fn document_lines_lower_to_the_hosts_content_grammar() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-doc-{}-{}",
+            std::process::id(),
+            random_nonce().unwrap()
+        ));
+        fs::create_dir_all(root.join("refs")).unwrap();
+        let workspace = json!({"subject":"7"});
+        let current = page(vec![atom("401", "first", "7"), atom("402", "second", "1103")]);
+        let lowered =
+            document_actions(&root, &workspace, "paper", &current, "9", &json!([{"type":"append","text":"hi"}]))
+                .unwrap();
+        assert_eq!(lowered[0]["type"], "createAtom");
+        assert_eq!(lowered[0]["payload"], "6869");
+        assert_eq!(lowered[0]["kind"], json!({"type":"text"}));
+        assert!(content_actions(&lowered, true).is_ok());
+        // An edit names the line as this workspace last read it.
+        let edit = json!([{"type":"edit","line":"2","text":"better"}]);
+        assert!(document_actions(&root, &workspace, "paper", &current, "9", &edit)
+            .unwrap_err()
+            .contains("doc show paper first"));
+        let seen = page(vec![atom("401", "first", "7"), atom("402", "old second", "1103")]);
+        retain_seen(&root, "paper", &seen, &json!({"height":"3","worldRoot":"4"})).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, "9", &edit).unwrap();
+        assert_eq!(lowered[0]["type"], "editAtom");
+        assert_eq!(lowered[0]["atom"], "402");
+        assert_eq!(lowered[0]["payload"], hex(b"better"));
+        assert_eq!(lowered[0]["before"]["payload"], hex(b"old second"));
+        assert_eq!(lowered[0]["before"]["createdBy"]["subject"], "1103");
+        assert!(lowered[0]["before"].get("id").is_none() && lowered[0]["before"].get("canonical").is_none());
+        assert!(content_actions(&lowered, true).is_ok());
+        let past = json!([{"type":"edit","line":"3","text":"x"}]);
+        assert!(document_actions(&root, &workspace, "paper", &current, "9", &past)
+            .unwrap_err()
+            .contains("had 2 line(s)"));
+        // Rereading replaces what an edit names.
+        retain_seen(&root, "paper", &current, &json!({"height":"5","worldRoot":"6"})).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, "9", &edit).unwrap();
+        assert_eq!(lowered[0]["before"]["payload"], hex(b"second"));
+        let declared = json!({"type":"resource","cell":{"root":"1",
+            "entries":[{"key":{"type":"object","field":"0"},"value":"1"}]}});
+        assert!(document_actions(&root, &workspace, "shared", &declared, "9", &edit)
+            .unwrap_err()
+            .contains("not a document"));
+        let text = render_document(&root, "paper", "900", &current["cell"], "9").unwrap();
+        assert!(text.contains("  1  created-by 7                     first\n"), "{text}");
+        assert!(text.contains("  2  created-by 1103                  second\n"), "{text}");
+        assert!(text.contains("# 2 cell entries"));
+        // Line order is atom-id order, not store order.
+        let shuffled = page(vec![atom("402", "second", "1103"), atom("401", "first", "7")]);
+        let lines = page_lines(&shuffled["cell"]).unwrap();
+        assert_eq!(lines[0]["id"], "401");
+        let low = ordered_atom_id("3", 0).unwrap().parse::<u128>().unwrap();
+        let high = ordered_atom_id("4", 0).unwrap().parse::<u128>().unwrap();
+        assert!(low < high);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn revoke_names_the_capability_this_workspace_delegated() {
+        let root = std::env::temp_dir().join(format!(
+            "mini-revoke-{}-{}",
+            std::process::id(),
+            random_nonce().unwrap()
+        ));
+        for (id, recipient, child) in [("g1", "42", "901"), ("g2", "43", "902")] {
+            fs::create_dir_all(root.join("proposals").join(id)).unwrap();
+            fs::write(
+                root.join("proposals").join(id).join("proposal.json"),
+                serde_json::to_vec(&json!({"delegation":{"name":"shared","target":"12",
+                    "recipient":recipient,"childCapability":child}}))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(delegated_capability(&root, "shared", "12", "42").unwrap(), "901");
+        assert!(delegated_capability(&root, "shared", "12", "44").unwrap_err().contains("delegated nothing"));
+        assert!(delegated_capability(&root, "other", "12", "42").is_err());
+        fs::create_dir_all(root.join("proposals").join("g3")).unwrap();
+        fs::write(
+            root.join("proposals").join("g3").join("proposal.json"),
+            br#"{"delegation":{"name":"shared","target":"12","recipient":"42","childCapability":"903"}}"#,
+        )
+        .unwrap();
+        assert!(delegated_capability(&root, "shared", "12", "42").unwrap_err().contains("901, 903"));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn generation_fixture(label: &str) -> (PathBuf, PathBuf, participant_namespace::Reservation) {
         let root = std::env::temp_dir().join(format!(
@@ -2097,8 +2714,8 @@ mod tests {
         .unwrap();
         assert_eq!(lowered["actions"][0]["key"]["resource"], "123");
         assert!(content_actions(&json!([{"type":"link","link":"1","source":null,
-            "target":{"type":"document","page":{"contentDomain":"9","pageNumber":"1","expectedRoot":"3"},"id":"2"},
-            "relation":"0"}])).is_err());
+            "target":{"type":"document","id":"2"},
+            "relation":"0"}]), false).is_err());
     }
 
     #[test]

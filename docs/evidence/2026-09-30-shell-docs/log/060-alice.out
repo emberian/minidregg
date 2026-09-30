@@ -1,0 +1,17 @@
+{
+  "authority": "requires-current-admission",
+  "delegation": {
+    "childCapability": "10803648274796352903",
+    "domain": "8501",
+    "kind": "object",
+    "name": "paper",
+    "recipient": "12588663092545306355",
+    "reservation": "43eabe3ccd16baba2fc137d1ca3ec4bc4cc36de69f3b5a89215877b66f008626",
+    "target": "15795163771524832050"
+  },
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/w/alice/proposals/g-rev/intent.json",
+  "intentSha256": "116ef3cd0a58866376241721c633a6eeb583ad0df4269eb39eed9ee6902ac6c1",
+  "proposalId": "g-rev",
+  "type": "minidregg-workspace-proposal-result-v1"
+}

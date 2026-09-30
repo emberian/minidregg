@@ -1,0 +1,135 @@
+n	step	who	line	expect	rc	verdict	note
+1	setup	alice	keygen mini.key	0	0	ok	
+2	setup	OPERATOR	CUSTODY: copy alice's secret into the sponsor home (enroll plan+seal sign with both keys; m4-shell Deviations 1)	0	0	ok	
+3	setup	sponsor	enroll plan alice alice.key	0	0	ok	
+4	setup	sponsor	enroll seal alice	0	0	ok	
+5	setup	sponsor	enroll submit alice	0	0	ok	
+6	setup	check	alice is enrolled as its own subject	-	-	ok	
+7	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+8	setup	OPERATOR	PROVISION (OPERATOR step 6): factory observation + a funded account owned by alice	0	0	ok	
+9	setup	OPERATOR	DELIVER (OPERATOR step 6): the birth context into alice's HOME/provision/	0	0	ok	
+10	setup	alice	init mini.key 13071851949802628462	0	0	ok	
+11	setup	check	alice's workspace is bound to its birth context and a session namespace	-	-	ok	
+12	setup	bob	keygen mini.key	0	0	ok	
+13	setup	OPERATOR	CUSTODY: copy bob's secret into the sponsor home (enroll plan+seal sign with both keys; m4-shell Deviations 1)	0	0	ok	
+14	setup	sponsor	enroll plan bob bob.key	0	0	ok	
+15	setup	sponsor	enroll seal bob	0	0	ok	
+16	setup	sponsor	enroll submit bob	0	0	ok	
+17	setup	check	bob is enrolled as its own subject	-	-	ok	
+18	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+19	setup	OPERATOR	PROVISION (OPERATOR step 6): factory observation + a funded account owned by bob	0	0	ok	
+20	setup	OPERATOR	DELIVER (OPERATOR step 6): the birth context into bob's HOME/provision/	0	0	ok	
+21	setup	bob	init mini.key 14591131992792524932	0	0	ok	
+22	setup	check	bob's workspace is bound to its birth context and a session namespace	-	-	ok	
+23	setup	rev	keygen mini.key	0	0	ok	
+24	setup	OPERATOR	CUSTODY: copy rev's secret into the sponsor home (enroll plan+seal sign with both keys; m4-shell Deviations 1)	0	0	ok	
+25	setup	sponsor	enroll plan rev rev.key	0	0	ok	
+26	setup	sponsor	enroll seal rev	0	0	ok	
+27	setup	sponsor	enroll submit rev	0	0	ok	
+28	setup	check	rev is enrolled as its own subject	-	-	ok	
+29	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+30	setup	OPERATOR	PROVISION (OPERATOR step 6): factory observation + a funded account owned by rev	0	0	ok	
+31	setup	OPERATOR	DELIVER (OPERATOR step 6): the birth context into rev's HOME/provision/	0	0	ok	
+32	setup	rev	init mini.key 12588663092545306355	0	0	ok	
+33	setup	check	rev's workspace is bound to its birth context and a session namespace	-	-	ok	
+34	setup	eve	keygen mini.key	0	0	ok	
+35	setup	OPERATOR	CUSTODY: copy eve's secret into the sponsor home (enroll plan+seal sign with both keys; m4-shell Deviations 1)	0	0	ok	
+36	setup	sponsor	enroll plan eve eve.key	0	0	ok	
+37	setup	sponsor	enroll seal eve	0	0	ok	
+38	setup	sponsor	enroll submit eve	0	0	ok	
+39	setup	check	eve is enrolled as its own subject	-	-	ok	
+40	setup	OPERATOR	CUSTODY: remove the copy	0	0	ok	
+41	setup	OPERATOR	PROVISION (OPERATOR step 6): factory observation + a funded account owned by eve	0	0	ok	
+42	setup	OPERATOR	DELIVER (OPERATOR step 6): the birth context into eve's HOME/provision/	0	0	ok	
+43	setup	eve	init mini.key 13638194795160528636	0	0	ok	
+44	setup	check	eve's workspace is bound to its birth context and a session namespace	-	-	ok	
+45	setup	early	keygen mini.key	0	0	ok	
+46	setup	early	init mini.key 4242	1	1	ok	error: init needs your provisioning at /home/ember/build/mini-product-20260930/p-shell-docs/run/psd3/steps/J12/h/early/provision/birth-context.json (your sponsor writes it when they provision you); without it this workspace could never create
+47	setup	check	no workspace was made for the unprovisioned session	-	-	ok	
+48	J12	alice	doc new paper	0	0	ok	
+49	J12	alice	doc new index	0	0	ok	
+50	J12	alice	delegate g-bob-paper paper 14591131992792524932 observe,mutate 50000	0	0	ok	
+51	J12	alice	submit g-bob-paper	0	0	ok	
+52	J12	alice	publish g-bob-paper	0	0	ok	
+53	J12	alice	export g-bob-paper	0	0	ok	
+54	J12	bob	import paper {"authority":"hint-only","capability":"16846642456688234317","kind":"object","proposalSha256":"3e792f5c9aee57b991623d332175bdf51780a53ab8141bb8cb136130210c782a","receipt":{"acceptedCount":"37","confirmation":"replayed","eventId":"53410348983938738316272742868882692932371996228008753478012463623064825372409","imageBoundary":"89117673811700519391026109395246002286253434547711192789735877359352199357760","transactionId":"61842748459501696400485167429263119901301111859729465911844137562902809736623","type":"confirmed"},"recipient":"14591131992792524932","target":"15795163771524832050","type":"minidregg-delegated-reference-v1"}	0	0	ok	
+55	J12	alice	delegate g-bob-index index 14591131992792524932 observe,mutate 50000	0	0	ok	
+56	J12	alice	submit g-bob-index	0	0	ok	
+57	J12	alice	publish g-bob-index	0	0	ok	
+58	J12	alice	export g-bob-index	0	0	ok	
+59	J12	bob	import index {"authority":"hint-only","capability":"18083458856010797081","kind":"object","proposalSha256":"a2d88ac7b2dab3bc7ab6dfb70ce224b6ef0c781a0d3c5602297d0dace2dbecd9","receipt":{"acceptedCount":"38","confirmation":"replayed","eventId":"49360600408300525178547129867847739701910327554752324931425242100073274791279","imageBoundary":"106044557560941805316383937429154029515575976395961431345032398375245943524723","transactionId":"53390574031982418496931872789409383151543956100493654147973206333259577568297","type":"confirmed"},"recipient":"14591131992792524932","target":"16456581539530926582","type":"minidregg-delegated-reference-v1"}	0	0	ok	
+60	J12	alice	delegate g-rev paper 12588663092545306355 observe 50000	0	0	ok	
+61	J12	alice	submit g-rev	0	0	ok	
+62	J12	alice	publish g-rev	0	0	ok	
+63	J12	alice	export g-rev	0	0	ok	
+64	J12	rev	import paper {"authority":"hint-only","capability":"10803648274796352903","kind":"object","proposalSha256":"116ef3cd0a58866376241721c633a6eeb583ad0df4269eb39eed9ee6902ac6c1","receipt":{"acceptedCount":"39","confirmation":"replayed","eventId":"53849534053360629231114534054466060268336998051746084663606451371653287063493","imageBoundary":"50864450103729844653998651384952791609830069492294433619174279310622318293039","transactionId":"71797325479059030012027605791042185750925265092899551328167683947191896547777","type":"confirmed"},"recipient":"12588663092545306355","target":"15795163771524832050","type":"minidregg-delegated-reference-v1"}	0	0	ok	
+65	J12	bob	inbox	0	0	ok	
+66	J12	check	bob's inbox: paper addressed to bob, imported	-	-	ok	
+67	J12	alice	doc append a1 paper 'Alice: the first paragraph.'	0	0	ok	
+68	J12	alice	submit a1	0	0	ok	
+69	J12	alice	doc show paper	0	0	ok	
+70	J12	bob	doc show paper	0	0	ok	
+71	J12	check	bob reads alice's line 1	-	-	ok	
+72	J12	bob	doc append b1 paper 'Bob: a second paragraph.'	0	0	ok	
+73	J12	bob	submit b1	0	0	ok	
+74	J12	bob	doc edit b2 paper 1 'Alice: the first paragraph, tightened by Bob.'	0	0	ok	
+75	J12	bob	submit b2	0	0	ok	
+76	J12	alice	doc edit a2 paper 1 'Alice: my own rewrite.'	0	0	ok	
+77	J12	alice	submit a2	3	3	ok	refused: operation-rejected: invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.content (Minidregg.Kernel.ContentResource.Reject.staleAtom) (phase prepare) (Host refused prepare, reply byte 255)
+78	J12	alice	doc show paper	0	0	ok	
+79	J12	check	alice rereads: line 1 is bob's edit	-	-	ok	
+80	J12	alice	doc edit a3 paper 1 'Alice: the first paragraph, tightened by Bob, then Alice.'	0	0	ok	
+81	J12	alice	submit a3	0	0	ok	
+82	J12	bob	doc link l1 index paper	0	0	ok	
+83	J12	bob	submit l1	0	0	ok	
+84	J12	alice	doc show paper	0	0	ok	
+85	J12	check	blame: line 1 created by alice, line 2 created by bob	-	-	ok	
+86	J12	alice	doc show index	0	0	ok	
+87	J12	check	index links to paper, created by bob	-	-	ok	
+88	J12	alice	doc backlinks paper	0	0	ok	
+89	J12	check	backlinks of paper: index's link by bob	-	-	ok	
+90	J12	bob	history	0	0	ok	
+91	J12	check	bob's history holds his three accepted writes	-	-	ok	
+92	J12	eve	import stolen object 15795163771524832050 16846642456688234317	0	0	ok	
+93	J12	eve	doc show stolen	3	3	ok	refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refused query, reply byte 255)
+94	J12	eve	doc append e1 stolen 'Eve was here.'	3	3	ok	refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refused query, reply byte 255)
+95	J12	rev	doc show paper	0	0	ok	
+96	J12	rev	doc append r1 paper 'Reviewer: a note.'	0	0	ok	
+97	J12	rev	submit r1	3	3	ok	refused: undisclosed: request refused (phase admission)
+98	J12d	rev	doc annotate paper 1 'Reviewer: cite this.'	1	1	ok	error: doc annotate: this store's content cell has no annotation action (Kernel/ContentResource.lean Action is createDocument, createAtom, editAtom, link, createRun; Theory/HyperdocumentOperations.lean AnnotatePayload and the annotations namespace are not in the page entry grammar); needs K-CONTENT-ACTIONS, and annotate-but-not-edit needs K-FIELDS
+99	J12	alice	doc new log note	0	0	ok	
+100	J12	alice	doc append n1 log 'Decided: we write the paper together.'	0	0	ok	
+101	J12	alice	submit n1	0	0	ok	
+102	J12	alice	doc show log	0	0	ok	
+103	J12	alice	doc edit n2 log 1 'Decided: something else.'	0	0	ok	
+104	J12	alice	submit n2	3	3	ok	refused: undisclosed: request refused (phase admission)
+105	J12	alice	board new tasks	0	0	ok	
+106	J12	alice	delegate g-bob-tasks tasks 14591131992792524932 observe,mutate 50000	0	0	ok	
+107	J12	alice	submit g-bob-tasks	0	0	ok	
+108	J12	alice	publish g-bob-tasks	0	0	ok	
+109	J12	alice	export g-bob-tasks	0	0	ok	
+110	J12	bob	import tasks {"authority":"hint-only","capability":"10045206319151650610","kind":"object","proposalSha256":"a656500d8eabc740154ec21f5780a45f3c31da875665b12ea752f1ccc39d727e","receipt":{"acceptedCount":"48","confirmation":"replayed","eventId":"13308619579338672876143941879805711057489754072014748941258242078520498638556","imageBoundary":"60113632315977088068105832921025965266896976034928830654908609012002673377284","transactionId":"15894189500193327877484248698288748833987241900523595362316619449871138409492","type":"confirmed"},"recipient":"14591131992792524932","target":"17364936371424614124","type":"minidregg-delegated-reference-v1"}	0	0	ok	
+111	J12	alice	board add t0 tasks 0	0	0	ok	
+112	J12	alice	submit t0	0	0	ok	
+113	J12	bob	board take k0 tasks 0	0	0	ok	
+114	J12	bob	submit k0	0	0	ok	
+115	J12	bob	board move m1 tasks 0 todo doing	0	0	ok	
+116	J12	bob	submit m1	0	0	ok	
+117	J12	bob	board move m2 tasks 0 doing done	0	0	ok	
+118	J12	bob	submit m2	0	0	ok	
+119	J12	bob	read tasks	0	0	ok	
+120	J12	check	task 0 is done (field 2 = 2) and owned by bob (field 3)	-	-	ok	
+121	J12	bob	board move m3 tasks 0 done todo	0	0	ok	
+122	J12	bob	submit m3	3	3	ok	refused: undisclosed: request refused (phase admission)
+123	J12	alice	board add t1 tasks 1	0	0	ok	
+124	J12	alice	submit t1	0	0	ok	
+125	J12	bob	board take k1 tasks 1	0	0	ok	
+126	J12	bob	submit k1	3	3	ok	refused: operation-rejected: invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.scalar (Minidregg.Kernel.DeclaredResourceScalar.Reject.pageMutation (Minidregg.Compiler.DeclaredEffectPageMaterializer.RejectReason.overflow)) (phase prepare) (Host refused prepare, reply byte 255)
+127	J12	alice	revoke cut-bob paper 14591131992792524932	0	0	ok	
+128	J12	alice	submit cut-bob	0	0	ok	
+129	J12	bob	doc show paper	3	3	ok	refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host refused query, reply byte 255)
+130	J12	alice	doc show paper	0	0	ok	
+131	J12	check	control: alice still reads her document	-	-	ok	
+132	J12	bob	help guide	1	1	ok	error: the friends' guide is not installed at /usr/local/lib/mini/FRIENDS.md (No such file or directory (os error 2)); it is deploy/shell/FRIENDS.md in the Mini source, and ember sent you a copy
+133	J12	bob	help	0	0	ok	
+134	J12	check	help's first line is the hosted-custody banner	-	-	ok	
