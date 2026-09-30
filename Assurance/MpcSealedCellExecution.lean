@@ -6,12 +6,14 @@ or as manifest data.  This module gives that mode one complete semantic subject:
 
 * a three-party, threshold-two declaration with an executable Lean portal;
 * an exact input-representation bridge and a declared-quorum agreement relation;
-* one typed patch which stores the committed completion, never the private output;
+* one guarded patch which allocates the committed completion in an append-only
+  cell, never the private output;
 * a concrete `ComputationCellEffect.Adapter`, validated sparse cell, complete
   request-indexed authority, completion, and accepted effect;
 * a redacted public receipt which contains neither the core result nor a release;
 * rejection teeth for an undersized quorum, a disagreeing quorum member, digest
-  substitution, stale-root replay, and output-commitment substitution.
+  substitution, stale-root replay, an input quoting a different pre-root, a
+  second completion on the same cell, and output-commitment substitution.
 
 The agreement proved here is deliberately only agreement of the submitted,
 portal-checked party views.  It is not malicious-MPC security.  Transcript
@@ -56,7 +58,8 @@ def program : Program := ⟨⟨3101⟩⟩
 def relation : Relation := ⟨⟨3102⟩⟩
 
 /-- The semantic input and its mode-native artifact.  `expectedPreRoot` makes
-the canonical cell binding part of the exact computation request.  The shares
+the canonical cell binding part of the exact computation request; it is bound
+to the actual pre-cell by `RootBoundAccepted.inputRootBound`.  The shares
 are trusted Lean data here; no hiding statement follows from this record. -/
 structure SharedInput where
   sessionId : Digest
@@ -213,31 +216,22 @@ structure StoredCompletion where
   effects : List MpcEffect
 deriving DecidableEq, Countable, Nonempty
 
-def schema : CellState.Schema.{0, 0, 0, 0} where
-  Field := Unit
-  FieldType := fun _ => StoredCompletion
-  Resource := Empty
-  ResourceType := Empty.elim
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
+/-- One address holding the completion record.  The cell is append-only: a
+completion is allocated once and never overwritten. -/
+abbrev layout : Theory.Store.Layout.{0, 0, 0} where
+  Namespace := Unit
+  Key := fun _ => Unit
+  Value := fun _ => StoredCompletion
+  discipline := fun _ => .appendOnly
 
-instance : DecidableEq schema.Field := by
-  change DecidableEq Unit
-  infer_instance
-instance : DecidableEq schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-instance : Countable schema.Field := by
-  change Countable Unit
-  infer_instance
-instance (_field : schema.Field) : Countable (schema.FieldType _field) :=
-  inferInstanceAs (Countable StoredCompletion)
+/-- The completion address. -/
+def completionAddress : Theory.Store.Address layout := ⟨(), ()⟩
 
-noncomputable def materializer : CellState.Materializer schema Digest :=
-  materializerOfCountable schema Empty.elim
+noncomputable def materializer : CellState.Materializer layout Digest :=
+  materializerOfCountable layout
 
 noncomputable def pre : CellState.Materialized materializer :=
-  CellState.materialize materializer (emptyLogical schema Empty.elim)
+  CellState.materialize materializer 0
 
 def storedCompletion (request : MpcRequest) (result : MpcResult) :
     StoredCompletion where
@@ -246,16 +240,14 @@ def storedCompletion (request : MpcRequest) (result : MpcResult) :
   transcriptDigest := result.outputRepresentation.transcriptDigest
   effects := request.resourceEffects
 
+/-- Allocate the completion record.  The guard is absence: the patch is valid
+only on a cell that holds no completion yet. -/
 def sealedPatch (request : MpcRequest) (result : MpcResult) :
-    CellState.Patch schema Digest where
-  expectedPreRoot := request.inputValue.expectedPreRoot
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := some (storedCompletion request result) }]
-  resourceWrites := []
+    Theory.Store.Patch layout :=
+  [.allocate () () (storedCompletion request result)]
 
 def RealizesResourceEffects (request : MpcRequest) (result : MpcResult)
-    (patch : CellState.Patch schema Digest) : Prop :=
+    (patch : Theory.Store.Patch layout) : Prop :=
   patch = sealedPatch request result ∧
     (storedCompletion request result).effects = request.resourceEffects
 
@@ -382,7 +374,7 @@ def requestContext : EffectRequestContext where
   cost := 11
 
 noncomputable def adapter :
-    ComputationCellEffect.Adapter (S := schema) declaration where
+    ComputationCellEffect.Adapter (L := layout) declaration where
   requestContext := requestContext
   requestCodec := requestCodec
   resultCodec := resultCodec
@@ -390,16 +382,12 @@ noncomputable def adapter :
   effectIntentCodec := effectIntentCodec
   effectDigestBytes := effectDigestBytes
   patch := sealedPatch
-  fieldFootprint := fun _ => {()}
-  resourceFootprint := fun _ => ∅
+  footprint := fun _ => {completionAddress}
   RealizesResourceEffects := RealizesResourceEffects
   resourceEffectsRealized := by
     intro request result
     exact ⟨rfl, rfl⟩
-  fieldFootprintExact := by
-    intro request result
-    rfl
-  resourceFootprintExact := by
+  footprintExact := by
     intro request result
     rfl
 
@@ -481,25 +469,22 @@ noncomputable def honestCompletion : declaration.Completion honestRequest honest
       exact decide_eq_true honest_accepts
   }
 
-theorem honestPatch_accepted :
-    ∃ validated : CellState.ValidatedPatch materializer pre
-        (adapter.patch honestRequest honestResult),
-      CellState.validate materializer pre
-          (adapter.patch honestRequest honestResult) =
-        CellState.ValidationOutcome.accepted validated := by
-  unfold CellState.validate
-  rw [dif_pos (show
-    (adapter.patch honestRequest honestResult).expectedPreRoot = pre.root from rfl)]
-  rw [dif_pos (show
-    (adapter.patch honestRequest honestResult).fieldFootprint =
-      (adapter.patch honestRequest honestResult).namedFields by rfl)]
-  rw [dif_pos (show
-    (adapter.patch honestRequest honestResult).resourceFootprint =
-      (adapter.patch honestRequest honestResult).namedResources by rfl)]
-  exact ⟨_, rfl⟩
+/-- The allocation is enabled on the empty cell. -/
+theorem honestPatch_valid :
+    Theory.Store.Patch.ValidFrom pre.logical
+      (adapter.patch honestRequest honestResult) :=
+  ⟨⟨by decide, rfl⟩, trivial⟩
 
-noncomputable def validated :
-    CellState.ValidatedPatch materializer pre
+theorem honestPatch_accepted :
+    ∃ validated : CellState.ValidatedPatch materializer pre pre.root
+        (adapter.patch honestRequest honestResult),
+      CellState.validate materializer pre pre.root
+          (adapter.patch honestRequest honestResult) =
+        CellState.ValidationOutcome.accepted validated :=
+  CellState.validate_accepts _ _ _ _ rfl honestPatch_valid
+
+theorem validated :
+    CellState.ValidatedPatch materializer pre pre.root
       (adapter.patch honestRequest honestResult) :=
   honestPatch_accepted.choose
 
@@ -526,7 +511,7 @@ noncomputable def accepted :
       (authState := Minidregg.Theory.TypedAuthorizationWitness.authState)
       declaration adapter commonRequest pre honestRequest honestResult :=
   ComputationCellEffect.accept declaration adapter authorization
-    rfl rfl rfl rfl honestCompletion validated
+    rfl rfl rfl honestCompletion validated
 
 theorem accepted_nonempty : Nonempty
     (ComputationCellEffect.Accepted
@@ -558,18 +543,66 @@ theorem accepted_output_commitment_exact :
 
 theorem accepted_patch_stores_committed_completion :
     adapter.patch honestRequest honestResult =
-      { expectedPreRoot := pre.root
-        fieldFootprint := {()}
-        resourceFootprint := ∅
-        fieldWrites := [{
-          field := ()
-          value := some {
-            sessionId := sessionId
-            outputCommitment := honestOutputArtifact.commitment
-            transcriptDigest := transcriptDigest
-            effects := [honestEffect] } }]
-        resourceWrites := [] } := by
+      [.allocate () ()
+        { sessionId := sessionId
+          outputCommitment := honestOutputArtifact.commitment
+          transcriptDigest := transcriptDigest
+          effects := [honestEffect] }] := by
   rfl
+
+/-- The accepted post holds the committed completion at the completion
+address; the private output is not a field of the stored record. -/
+theorem accepted_post_holds_completion :
+    accepted.cellEffect.prepared.post.logical completionAddress =
+      some (storedCompletion honestRequest honestResult) :=
+  Theory.Store.Store.set_eq _ _ _
+
+/-! ## The computation input's quoted root
+
+The kernel token indexes the validated patch at the common request's
+`preStateRoot`, which the family derives from `pre.root`.  The computation
+input's own `expectedPreRoot` is request data; this wrapper binds it to the
+same pre-cell, so an MPC completion computed against one cell state cannot be
+admitted on another. -/
+
+/-- An accepted sealed MPC effect whose computation input quotes the exact
+pre-root of the cell it is applied to. -/
+structure RootBoundAccepted
+    {portal : Portal} {authState : AuthState}
+    (commonRequest : Request .object)
+    (cell : CellState.Materialized materializer)
+    (request : MpcRequest) (result : MpcResult) where
+  computation : ComputationCellEffect.Accepted (portal := portal)
+    (authState := authState) declaration adapter commonRequest cell request result
+  inputRootBound : request.inputValue.expectedPreRoot = cell.root
+
+noncomputable def rootBoundAccepted :
+    RootBoundAccepted
+      (portal := Minidregg.Theory.TypedAuthorizationWitness.permissivePortal)
+      (authState := Minidregg.Theory.TypedAuthorizationWitness.authState)
+      commonRequest pre honestRequest honestResult :=
+  ⟨accepted, rfl⟩
+
+/-- Refuting pole: an input quoting any other root admits no root-bound
+acceptance on `pre`, whatever the common request. -/
+theorem no_rootBound_of_input_root_mismatch
+    {portal : Portal} {authState : AuthState}
+    {request : Request .object} {mpcRequest : MpcRequest} {result : MpcResult}
+    (mismatch : mpcRequest.inputValue.expectedPreRoot ≠ pre.root) :
+    IsEmpty (RootBoundAccepted (portal := portal) (authState := authState)
+      request pre mpcRequest result) :=
+  ⟨fun candidate => mismatch candidate.inputRootBound⟩
+
+/-- A second completion cannot be allocated on the completed cell: the
+append-only allocation guard refuses the same patch at the accepted post. -/
+theorem completion_not_reallocated :
+    ¬ Theory.Store.Patch.ValidFrom accepted.cellEffect.prepared.post.logical
+      (adapter.patch honestRequest honestResult) := by
+  rintro ⟨⟨_, fresh⟩, _⟩
+  have present := accepted_post_holds_completion
+  rw [show accepted.cellEffect.prepared.post.logical completionAddress = none
+    from fresh] at present
+  cases present
 
 theorem accepted_disclosure_sealed :
     accepted.cellEffect.disclosure = .sealed :=
@@ -766,6 +799,10 @@ theorem wrong_output_commitment_rejected :
 #guard_msgs (whitespace := lax) in #print axioms physical_quorum_output_agreement
 /-- info: 'Minidregg.Assurance.MpcSealedCellExecution.wrong_output_commitment_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms wrong_output_commitment_rejected
+/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.no_rootBound_of_input_root_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_rootBound_of_input_root_mismatch
+/-- info: 'Minidregg.Assurance.MpcSealedCellExecution.completion_not_reallocated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms completion_not_reallocated
 
 end
 
