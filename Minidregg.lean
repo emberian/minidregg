@@ -25,6 +25,7 @@ import Compiler.DistributiveLaw  -- N4 stated and inhabited: DistLaw over a Sign
 -- Library modules no per-directory root imported (found by olean census at wave S4); rooted so the umbrella covers them.
 import Compiler.PredCastHashProofs
 import Compiler.PredCompileOrderWitness
+import Compiler.PredCompileSlotWitness
 import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck

@@ -155,6 +155,8 @@ theorem eval_congr_slot : ∀ (p : Pred) {k : Slot}, singleSlot p = some k →
         eval_congr_slot q (by simpa [singleSlot] using hk) (old := old) (old' := old') h]
   | .writeOnce _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .monotone _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
+  | .eqSlots _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
+  | .leSlots _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .witnessed _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .allL _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .anyL _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
@@ -168,6 +170,8 @@ def NewOnly : Pred → Bool
   | .memberOf _ _ => true
   | .writeOnce _ => false
   | .monotone _ => false
+  | .eqSlots _ _ => true
+  | .leSlots _ _ => true
   | .witnessed _ => false
   | .not q => NewOnly q
   | .allL ps => NewOnlyList ps
@@ -192,6 +196,10 @@ theorem eval_congr_toFun : ∀ (p : Pred), NewOnly p = true →
         (ofRead_injective (congrFun h k))
   | .writeOnce _, hp, _, _, _, _, _ => by simp [NewOnly] at hp
   | .monotone _, hp, _, _, _, _, _ => by simp [NewOnly] at hp
+  | .eqSlots a b, _, _, _, _, _, h => by
+      simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
+  | .leSlots a b, _, _, _, _, _, h => by
+      simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
   | .witnessed _, hp, _, _, _, _, _ => by simp [NewOnly] at hp
   | .not q, hp, old, old', _, _, h => by
       rw [eval_not, eval_not,
@@ -293,6 +301,8 @@ def dial : Pred → Verdict
   | .memberOf _ _ => .free
   | .writeOnce _ => .stepShaped
   | .monotone _ => .stepShaped
+  | .eqSlots _ _ => .free
+  | .leSlots _ _ => .free
   | .witnessed _ => .thirdParty
   | .not q => if (singleSlot q).isSome then .free else Verdict.combine .ordering (dial q)
   | .allL ps => dialList ps
@@ -317,6 +327,20 @@ theorem dial_free_closed : ∀ (p : Pred), dial p = .free → MergeClosed p
       single_slot_closed (.memberOf k xs) rfl old old old s t hs ht
   | .writeOnce _, h => by simp [dial] at h
   | .monotone _, h => by simp [dial] at h
+  | .eqSlots a b, _ => fun old s t hs ht => by
+      simp only [eval, evalWith, get_mergeState] at hs ht ⊢
+      revert hs ht
+      cases s.get a <;> cases s.get b <;> cases t.get a <;> cases t.get b <;>
+        simp only [joinRead, decide_eq_true_eq, Bool.false_eq_true, IsEmpty.forall_iff,
+          imp_self, implies_true]
+      all_goals exact fun h₁ h₂ => h₁ ▸ h₂ ▸ rfl
+  | .leSlots a b, _ => fun old s t hs ht => by
+      simp only [eval, evalWith, get_mergeState] at hs ht ⊢
+      revert hs ht
+      cases s.get a <;> cases s.get b <;> cases t.get a <;> cases t.get b <;>
+        simp only [joinRead, decide_eq_true_eq, Bool.false_eq_true, IsEmpty.forall_iff,
+          imp_self, implies_true]
+      all_goals exact sup_le_sup
   | .witnessed _, h => by simp [dial] at h
   | .not q, h => fun old s t hs ht => by
       have hk : (singleSlot q).isSome = true := by
