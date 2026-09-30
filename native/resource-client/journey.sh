@@ -14,6 +14,7 @@
 #   G      growth at 10/100/500/1000 accepted records; pass = write median
 #          <= 5 s and cold reopen <= 60 s at 1000 (list item 1)
 #   K4     one resource holds 32 fields and reads them back (list item 2)
+#   JJ     K-JOINT-INDEX: journey.d/jjoint.sh (a law reads a participant by position)
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
 #
@@ -23,7 +24,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in m3 m4 m5 m6 m7): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in jjoint m3 m4 m5 m6 m7): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -106,7 +107,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 M3 M4 M5 M6 M7)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 JJ M3 M4 M5 M6 M7)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -119,6 +120,7 @@ TITLE[G]="growth 10/100/500/1000: write<=5s, reopen<=60s at 1000"
 TITLE[J7]="law replaced; newcomer's existing grant still works"
 TITLE[J8]="deny-all: newcomer refused, sponsor repair refused"
 TITLE[K4]="one resource holds 32 fields and reads them back"
+TITLE[JJ]="a law reads another participant by position (joint/index/i)"
 TITLE[M3]="newcomer provisions itself and creates, no sponsor step"
 TITLE[M4]="J1-J8 through the shell over ssh"
 TITLE[M5]="Hermes does J4 through the client; killed, restarts, resolves"
@@ -692,6 +694,7 @@ hook() {
   # The live service must still be ours and alive; a hook may not take it down.
   ours "$(server_pid)" || fail "hook left the journey service stopped" || return
 }
+step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
@@ -711,6 +714,7 @@ run_step G J4
 run_step J7 J4
 run_step J8 J7
 run_step K4 J2
+run_step JJ J2
 run_step M3 J0
 run_step M4 J0
 run_step M5 J0
