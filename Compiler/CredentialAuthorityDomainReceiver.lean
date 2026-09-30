@@ -1,17 +1,19 @@
 /-
-# Compiler.CredentialAuthorityDomainReceiver -- the anchored physical join
+# Compiler.CredentialAuthorityDomainReceiver -- the one authority cell, loaded and written
 
-The fixed production registry decodes one catalogue at a deployment-owned
-anchor and EVERY shard named by that catalogue from one durable snapshot.
-No request supplies a page subset, authority projection, decoder or root
-function. Complete read dependencies accompany the derived semantic cell.
+The receiving deployment pins one authority cell (`authorityCellId`).  `load`
+decodes exactly that cell from one durable snapshot as the registry's
+`.authority` role and pairs it with the deployment's domain.  No request
+supplies a cell, a page subset, a decoder or a root function.
 
-Routed semantic preparation lives in CredentialAuthorityDomain. This module
-owns only its exact physical representation and deterministic allocation of
-new internal authority shards; native authority roots and lifecycle CAS roots
-remain distinct.
+An authority update is one validated patch of that cell.  Its physical
+representation is one `DataWrite`: the post cell's canonical bytes, guarded at
+the snapshot's root of the same cell.  There is no catalogue to rewrite, no
+shard to place and no auxiliary create; the write is a function of the post
+cell's logical content alone (`write_of_planes`).
 -/
 import Compiler.CanonicalCellRegistry
+import Compiler.CredentialAuthorityDomain
 import Compiler.DurableReceiverIO
 import Theory.ResourceBirthAuthority
 
@@ -26,7 +28,6 @@ open Minidregg.Theory.CredentialLineageAdmission
 open Minidregg.Theory.CredentialAuthorityEffects
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Compiler.CredentialAuthorityDomain
-open Minidregg.Compiler.CredentialAuthorityPageMaterializer
 open Minidregg.Compiler.CanonicalCellRegistry (registry)
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Kernel.DurableDataIntent
@@ -34,118 +35,180 @@ open Minidregg.Kernel.DurableDataIntent
 set_option autoImplicit false
 
 abbrev PhysicalSnapshot := DataSnapshot ResourceBirthCodec.rootBytes
+abbrev Deployment := CanonicalCellRegistry.Deployment
 
-def shardCell (page : Page) : PackedCell registry :=
-  ⟨.authorityShard,
-    materialize CredentialAuthorityPageMaterializer.materializer (stateOfOption (some page))⟩
+/-- The durable identifier of the deployment's one authority cell. -/
+def cellIdOf (deployment : Deployment) : CellId := ⟨deployment.authorityCellId⟩
 
-def catalogueCell (catalogue : Catalogue) : PackedCell registry :=
-  ⟨.authorityCatalogue, materialize catalogueMaterializer (catalogueState (some catalogue))⟩
+def packedCell (cell : CredentialAuthorityDomain.Cell) : PackedCell registry := ⟨.authority, cell⟩
 
-def shardBytes (page : Page) : List UInt8 :=
-  LifecycleImage.bytes registry (.live (shardCell page))
+/-- The lifecycle bytes of a live authority cell. -/
+def cellBytes (cell : CredentialAuthorityDomain.Cell) : List UInt8 :=
+  LifecycleImage.bytes registry (.live (packedCell cell))
 
-def catalogueBytes (catalogue : Catalogue) : List UInt8 :=
-  LifecycleImage.bytes registry (.live (catalogueCell catalogue))
+def cellRoot (cell : CredentialAuthorityDomain.Cell) : Digest :=
+  ResourceBirthCodec.rootBytes (cellBytes cell)
 
-def decodeCatalogue (bytes : List UInt8) : Option Catalogue := do
-  let image ← (LifecycleImage.codec registry).decode bytes
-  match image with
-  | .live ⟨.authorityCatalogue, payload⟩ => catalogueAt payload.logical
+/-- Decode a live cell of the authority role; any other role, a retired or a
+fresh image, and non-canonical bytes are refused. -/
+def decodeCell (bytes : List UInt8) : Option CredentialAuthorityDomain.Cell :=
+  match (LifecycleImage.codec registry).decode bytes with
+  | some (.live ⟨.authority, payload⟩) => some payload
   | _ => none
 
-def decodeShard (bytes : List UInt8) : Option Page := do
-  let image ← (LifecycleImage.codec registry).decode bytes
-  match image with
-  | .live ⟨.authorityShard, payload⟩ => pageAt payload.logical
-  | _ => none
+theorem decodeCell_bytes (cell : CredentialAuthorityDomain.Cell) :
+    decodeCell (cellBytes cell) = some cell := by
+  unfold decodeCell cellBytes
+  rw [show LifecycleImage.bytes registry (.live (packedCell cell)) =
+      (LifecycleImage.codec registry).encode (.live (packedCell cell)) from rfl,
+    LifecycleImage.decode_encode]
+  rfl
 
-def decodePages (physical : PhysicalSnapshot) : List Ref → Option (List Page)
-  | [] => some []
-  | reference :: rest => do
-      let page ← decodeShard (physical.canonicalBytes reference.cellId)
-      let pages ← decodePages physical rest
-      some (page :: pages)
+theorem decodeCell_canonical {bytes : List UInt8} {cell : CredentialAuthorityDomain.Cell}
+    (decoded : decodeCell bytes = some cell) : cellBytes cell = bytes := by
+  unfold decodeCell at decoded
+  split at decoded
+  · rename_i payload image
+    cases Option.some.inj decoded
+    exact LifecycleImage.decode_canonical registry image
+  · cases decoded
 
-def PageObserved (physical : PhysicalSnapshot) (reference : Ref) (page : Page) : Prop :=
-  physical.canonicalBytes reference.cellId = shardBytes page ∧
-    reference.physicalRoot = ResourceBirthCodec.rootBytes (shardBytes page)
-
-instance pageObservedDecidable (physical : PhysicalSnapshot) (reference : Ref) (page : Page) :
-    Decidable (PageObserved physical reference page) := by
-  unfold PageObserved
-  infer_instance
-
-def Observed (anchor : Anchor) (physical : PhysicalSnapshot)
-    (snapshot : CredentialAuthorityDomain.Snapshot) : Prop :=
-  snapshot.domain = anchor.domain ∧
-    anchor.catalogueCellId ∉ snapshot.catalogue.pages.map Ref.cellId ∧
-    physical.canonicalBytes anchor.catalogueCellId = catalogueBytes snapshot.catalogue ∧
-    List.Forall₂ (PageObserved physical) snapshot.catalogue.pages snapshot.pages
-
-instance observedDecidable (anchor : Anchor) (physical : PhysicalSnapshot)
-    (snapshot : CredentialAuthorityDomain.Snapshot) : Decidable (Observed anchor physical snapshot) := by
-  unfold Observed
-  infer_instance
-
-/-- The constructor is private: callers load all anchored dependencies from
-one existing physical snapshot. Pure logical `Domain.assemble` does not mint
-this receiving provenance. -/
-structure Loaded (anchor : Anchor) (physical : PhysicalSnapshot) where
+/-- The loaded authority domain.  The constructor is private: `load` is the
+only route, so the snapshot is exactly the cell at the pinned identifier of one
+physical snapshot, read in the deployment's domain. -/
+structure Loaded (deployment : Deployment) (physical : PhysicalSnapshot) where
   private mk ::
   snapshot : CredentialAuthorityDomain.Snapshot
-  observed : Observed anchor physical snapshot
+  valid : deployment.Valid
+  domainExact : snapshot.domain = deployment.domain
+  observed : physical.canonicalBytes (cellIdOf deployment) = cellBytes snapshot.cell
 
-def load (anchor : Anchor) (physical : PhysicalSnapshot) : Option (Loaded anchor physical) := do
-  let catalogue ← decodeCatalogue (physical.canonicalBytes anchor.catalogueCellId)
-  let pages ← decodePages physical catalogue.pages
-  let snapshot ← assemble catalogue pages
-  if observed : Observed anchor physical snapshot then some ⟨snapshot, observed⟩ else none
+def loadDeployment (deployment : Deployment) (physical : PhysicalSnapshot) :
+    Option (Loaded deployment physical) :=
+  if valid : deployment.Valid then
+    match decoded : decodeCell (physical.canonicalBytes (cellIdOf deployment)) with
+    | none => none
+    | some cell =>
+        some ⟨⟨deployment.domain, cell⟩, valid, rfl, (decodeCell_canonical decoded).symm⟩
+  else none
 
-theorem observed_roots (physical : PhysicalSnapshot) {references : List Ref} {pages : List Page}
-    (observed : List.Forall₂ (PageObserved physical) references pages) :
-    ∀ reference ∈ references,
-      reference.physicalRoot = physical.model.roots reference.cellId := by
-  induction observed with
-  | nil => simp
-  | @cons reference page references pages here tail induction =>
-      intro selected member
-      rcases List.mem_cons.mp member with rfl | inTail
-      · exact here.2.trans ((congrArg ResourceBirthCodec.rootBytes here.1.symm).trans
-          (physical.coherent _))
-      · exact induction selected inTail
-
-def Loaded.readGuards {anchor : Anchor} {physical : PhysicalSnapshot}
-    (loaded : Loaded anchor physical) : List ReadGuard :=
-  { cellId := anchor.catalogueCellId,
-    expectedRoot := physical.model.roots anchor.catalogueCellId } ::
-  loaded.snapshot.catalogue.pages.map fun reference =>
-    { cellId := reference.cellId, expectedRoot := reference.physicalRoot }
-
-theorem Loaded.readGuards_exact {anchor : Anchor} {physical : PhysicalSnapshot}
-    (loaded : Loaded anchor physical) (guard : ReadGuard) (member : guard ∈ loaded.readGuards) :
-    guard.expectedRoot = physical.model.roots guard.cellId := by
-  rcases List.mem_cons.mp member with rfl | shard
+/-- Refuting pole: a pinned identifier that does not hold a live authority cell
+(a retired image, a fresh slot, another role, or a retired catalogue frame)
+loads nothing. -/
+theorem loadDeployment_refuses (deployment : Deployment) (physical : PhysicalSnapshot)
+    (undecodable : decodeCell (physical.canonicalBytes (cellIdOf deployment)) = none) :
+    loadDeployment deployment physical = none := by
+  unfold loadDeployment
+  split
+  · split
+    · rfl
+    · rename_i cell decoded
+      rw [undecodable] at decoded
+      cases decoded
   · rfl
-  · obtain ⟨reference, referenceMember, rfl⟩ := List.mem_map.mp shard
-    exact observed_roots physical loaded.observed.2.2.2 reference referenceMember
 
-theorem Loaded.guards_catalogue {anchor : Anchor} {physical : PhysicalSnapshot}
-    (loaded : Loaded anchor physical) :
-    anchor.catalogueCellId ∈ loaded.readGuards.map ReadGuard.cellId := by
-  simp [Loaded.readGuards]
+/-- Satisfiable pole: the cell the physical snapshot holds is loaded exactly. -/
+theorem loadDeployment_exact (deployment : Deployment) (physical : PhysicalSnapshot)
+    (valid : deployment.Valid) (cell : CredentialAuthorityDomain.Cell)
+    (holds : physical.canonicalBytes (cellIdOf deployment) = cellBytes cell) :
+    ∃ loaded, loadDeployment deployment physical = some loaded ∧ loaded.snapshot.cell = cell := by
+  unfold loadDeployment
+  rw [dif_pos valid]
+  split
+  · rename_i decoded
+    rw [holds, decodeCell_bytes] at decoded
+    cases decoded
+  · rename_i found decoded
+    rw [holds, decodeCell_bytes] at decoded
+    exact ⟨_, rfl, (Option.some.inj decoded).symm⟩
 
-theorem Loaded.guards_every_shard {anchor : Anchor} {physical : PhysicalSnapshot}
-    (loaded : Loaded anchor physical) (reference : Ref)
-    (member : reference ∈ loaded.snapshot.catalogue.pages) :
-    reference.cellId ∈ loaded.readGuards.map ReadGuard.cellId := by
-  simp only [Loaded.readGuards, List.map_cons, List.mem_cons, List.map_map]
-  exact Or.inr (List.mem_map.mpr ⟨reference, member, rfl⟩)
+theorem Loaded.root_exact {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) :
+    cellRoot loaded.snapshot.cell = physical.model.roots (cellIdOf deployment) := by
+  unfold cellRoot
+  rw [← loaded.observed]
+  exact physical.coherent _
 
-theorem Loaded.no_anchor_alias {anchor : Anchor} {physical : PhysicalSnapshot}
-    (loaded : Loaded anchor physical) :
-    anchor.catalogueCellId ∉ loaded.snapshot.catalogue.pages.map Ref.cellId :=
-  loaded.observed.2.1
+/-- The loaded cell satisfies the registry's own law for the authority role. -/
+theorem Loaded.cellLaw {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) :
+    CanonicalCellRegistry.CellLaw deployment deployment.authorityCellId
+      (packedCell loaded.snapshot.cell) :=
+  ⟨loaded.valid, rfl⟩
+
+/-- The one read dependency of the authority domain. -/
+def Loaded.readGuard {deployment : Deployment} {physical : PhysicalSnapshot}
+    (_loaded : Loaded deployment physical) : ReadGuard :=
+  { cellId := cellIdOf deployment, expectedRoot := physical.model.roots (cellIdOf deployment) }
+
+def Loaded.readGuards {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) : List ReadGuard := [loaded.readGuard]
+
+theorem Loaded.readGuards_exact {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (guard : ReadGuard) (member : guard ∈ loaded.readGuards) :
+    guard.expectedRoot = physical.model.roots guard.cellId := by
+  simp only [Loaded.readGuards, List.mem_singleton] at member
+  subst guard
+  rfl
+
+/-! ## The one physical write of an authority update -/
+
+/-- The post cell, written at the pinned identifier and guarded at the loaded
+root of that same cell. -/
+def Loaded.write {deployment : Deployment} {physical : PhysicalSnapshot}
+    (_loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) : DataWrite where
+  cellId := cellIdOf deployment
+  expectedPre := physical.model.roots (cellIdOf deployment)
+  exactPost := cellRoot post
+  canonicalPostBytes := cellBytes post
+
+def Loaded.writes {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) : List DataWrite :=
+  [loaded.write post]
+
+theorem Loaded.write_root_bound {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
+    ResourceBirthCodec.rootBytes (loaded.write post).canonicalPostBytes = (loaded.write post).exactPost :=
+  rfl
+
+theorem Loaded.write_pre_exact {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
+    (loaded.write post).expectedPre = physical.model.roots (loaded.write post).cellId :=
+  rfl
+
+/-- The write's guard is the loaded cell's own root: an authority write
+cannot be applied over any other authority state. -/
+theorem Loaded.write_pre_is_loaded_root {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
+    (loaded.write post).expectedPre = cellRoot loaded.snapshot.cell :=
+  loaded.root_exact.symm
+
+/-- The write reads back as exactly the post cell. -/
+theorem Loaded.write_decodes {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
+    decodeCell (loaded.write post).canonicalPostBytes = some post :=
+  decodeCell_bytes post
+
+/-- **The authority root is a function of the planes' logical content.**  Two
+post cells that agree at every authority address produce the same physical
+write: the same bytes, the same root, at the same identifier, under the same
+guard.  No catalogue revision, placement cursor or shard numbering enters it,
+so an update rewrites exactly one cell and nothing else. -/
+theorem write_of_planes {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (left right : CredentialAuthorityDomain.Cell)
+    (planes : ∀ address, left.logical address = right.logical address) :
+    loaded.write left = loaded.write right := by
+  have same : left = right := Materialized.ext (DFinsupp.ext planes)
+  rw [same]
+
+theorem cellRoot_of_planes (left right : CredentialAuthorityDomain.Cell)
+    (planes : ∀ address, left.logical address = right.logical address) :
+    cellRoot left = cellRoot right := by
+  rw [Materialized.ext (DFinsupp.ext planes)]
+
+theorem Loaded.writes_single {deployment : Deployment} {physical : PhysicalSnapshot}
+    (loaded : Loaded deployment physical) (post : CredentialAuthorityDomain.Cell) :
+    (loaded.writes post).map DataWrite.cellId = [cellIdOf deployment] := rfl
 
 /-! ## One complete physical directory, including retired identities -/
 
@@ -154,8 +217,8 @@ def directoryRows (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootByt
   durable.cells.map fun row => (row.1.value, row.2)
 
 /-- The finite support comes from the complete replayed durable image. A
-request cannot supply a reduced directory or discard tombstones to influence
-fresh allocation. The only absent lifecycle representation is `[]`. -/
+request cannot supply a reduced directory or discard tombstones. The only
+absent lifecycle representation is `[]`. -/
 structure LoadedDirectory (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) where
   private mk ::
   directory : Directory Nat registry
@@ -185,8 +248,7 @@ private theorem lookup_enumeration (identifiers : List Digest)
           · have differentBool : (identifier == value) = false := by simp [equal]
             simpa [List.lookup_cons, differentBool, equal, Ne.symm equal] using induction
 
-/-- Global exactness, including identities outside the finite support. This
-is stronger than checking only the cells selected by the incoming request. -/
+/-- Global exactness, including identities outside the finite support. -/
 theorem LoadedDirectory.bytes_exact
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (loaded : LoadedDirectory durable) (identifier : Nat) :
@@ -201,268 +263,7 @@ theorem LoadedDirectory.bytes_exact
     exact (durable.image.outside_support ResourceBirthCodec.rootBytes durable.snapshot
       durable.represented ⟨identifier⟩ outside).trans loaded.absentDefault |>.symm
 
-def LoadedDirectory.freshCursor
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : LoadedDirectory durable) (requestedUserIds : List Nat) : Nat :=
-  (loaded.directory.used ∪ requestedUserIds.toFinset).sup (fun value => value) + 1
-
-theorem LoadedDirectory.cursor_above_used
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : LoadedDirectory durable) (requestedUserIds : List Nat)
-    (identifier : Nat) (used : identifier ∈ loaded.directory.used) :
-    identifier < loaded.freshCursor requestedUserIds := by
-  apply Nat.lt_succ_of_le
-  exact Finset.le_sup (f := fun value : Nat => value) (Finset.mem_union_left _ used)
-
-theorem LoadedDirectory.cursor_above_user
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (loaded : LoadedDirectory durable) (requestedUserIds : List Nat)
-    (identifier : Nat) (requested : identifier ∈ requestedUserIds) :
-    identifier < loaded.freshCursor requestedUserIds := by
-  apply Nat.lt_succ_of_le
-  exact Finset.le_sup (f := fun value : Nat => value)
-    (Finset.mem_union_right _ (List.mem_toFinset.mpr requested))
-
-/-! ## Deterministic physical placement and grouped writes -/
-
-structure Placement where
-  references : List Ref
-  auxiliaryCreates : List (CreateRequest (CellId := Nat) registry)
-
-/-- Existing shard identities are retained. New identities increase from a
-cursor derived from the complete used set and requested user births, never
-from the final descriptor hash (which includes these creates). -/
-def placePages (old : Catalogue) : List Page → Nat → Placement
-  | [], _ => ⟨[], []⟩
-  | page :: rest, cursor =>
-      match old.pages.find? (fun reference => reference.number = page.pageNumber) with
-      | some reference =>
-          let tail := placePages old rest cursor
-          ⟨{ reference with physicalRoot := ResourceBirthCodec.rootBytes (shardBytes page) } ::
-              tail.references, tail.auxiliaryCreates⟩
-      | none =>
-          let tail := placePages old rest (cursor + 1)
-          ⟨⟨page.pageNumber, ⟨cursor⟩, ResourceBirthCodec.rootBytes (shardBytes page)⟩ ::
-              tail.references,
-            { cellId := cursor, expectedPreRoot := CellSlot.root registry .absent,
-              cell := shardCell page } :: tail.auxiliaryCreates⟩
-
-def placedCatalogue (old : Catalogue) (placement : Placement) : Catalogue :=
-  ⟨old.domain, old.revision + 1, placement.references⟩
-
-def shardWrite (reference : Ref) (page : Page) : DataWrite where
-  cellId := reference.cellId
-  expectedPre := reference.physicalRoot
-  exactPost := ResourceBirthCodec.rootBytes (shardBytes page)
-  canonicalPostBytes := shardBytes page
-
-def existingWrites (physical : PhysicalSnapshot) (old : Catalogue) (posts : List Page) :
-    List DataWrite :=
-  posts.filterMap fun page => do
-    let reference ← old.pages.find? (fun reference => reference.number = page.pageNumber)
-    if shardBytes page = physical.canonicalBytes reference.cellId then none
-    else some (shardWrite reference page)
-
-def catalogueWrite (anchor : Anchor) (physical : PhysicalSnapshot) (post : Catalogue) :
-    DataWrite where
-  cellId := anchor.catalogueCellId
-  expectedPre := physical.model.roots anchor.catalogueCellId
-  exactPost := ResourceBirthCodec.rootBytes (catalogueBytes post)
-  canonicalPostBytes := catalogueBytes post
-
-def planWrites (anchor : Anchor) (physical : PhysicalSnapshot) (old : Catalogue)
-    (posts : List Page) (placement : Placement) : List DataWrite :=
-  existingWrites physical old posts ++ [catalogueWrite anchor physical (placedCatalogue old placement)]
-
-theorem planWrites_roots_bound (anchor : Anchor) (physical : PhysicalSnapshot)
-    (old : Catalogue) (posts : List Page) (placement : Placement)
-    (write : DataWrite) (member : write ∈ planWrites anchor physical old posts placement) :
-    ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
-  rcases List.mem_append.mp member with shard | catalogue
-  · obtain ⟨page, _, selected⟩ := List.mem_filterMap.mp shard
-    unfold existingWrites at shard
-    cases found : old.pages.find? (fun reference => reference.number = page.pageNumber) with
-    | none => simp [found] at selected
-    | some reference =>
-        simp only [found, bind, Option.bind] at selected
-        split at selected
-        next => contradiction
-        next => cases Option.some.inj selected; rfl
-  · have same : write = catalogueWrite anchor physical (placedCatalogue old placement) := by
-      simpa using catalogue
-    subst write
-    rfl
-
-def Placement.Fresh {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (directory : LoadedDirectory durable) (requestedUserIds : List Nat)
-    (placement : Placement) : Prop :=
-  (placement.auxiliaryCreates.map (fun request => request.cellId)).Nodup ∧
-    (∀ request ∈ placement.auxiliaryCreates,
-      request.cellId ∉ directory.directory.used ∧ request.cellId ∉ requestedUserIds)
-
-instance placementFreshDecidable {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    (directory : LoadedDirectory durable) (requestedUserIds : List Nat) (placement : Placement) :
-    Decidable (placement.Fresh directory requestedUserIds) := by
-  unfold Placement.Fresh
-  infer_instance
-
-def readonlyGuards (guards : List ReadGuard) (writes : List DataWrite) : List ReadGuard :=
-  guards.filter fun guard => guard.cellId ∉ writes.map DataWrite.cellId
-
-/-- Every post shard is represented by an exact old-cell write, an exact
-derived internal create, or unchanged bytes with a retained read guard.
-Root equality alone is deliberately insufficient at this refinement seam. -/
-def PostPageRepresented (physical : PhysicalSnapshot) (writes : List DataWrite)
-    (guards : List ReadGuard) (creates : List (CreateRequest (CellId := Nat) registry))
-    (reference : Ref) (page : Page) : Prop :=
-  reference.physicalRoot = ResourceBirthCodec.rootBytes (shardBytes page) ∧
-    ((∃ write ∈ writes, write.cellId = reference.cellId ∧
-        write.canonicalPostBytes = shardBytes page) ∨
-      (∃ request ∈ creates, (⟨request.cellId⟩ : Digest) = reference.cellId ∧
-        LifecycleImage.bytes registry (.live request.cell) = shardBytes page) ∨
-      (physical.canonicalBytes reference.cellId = shardBytes page ∧
-        ∃ guard ∈ guards, guard.cellId = reference.cellId))
-
-instance postPageRepresentedDecidable (physical : PhysicalSnapshot) (writes : List DataWrite)
-    (guards : List ReadGuard) (creates : List (CreateRequest (CellId := Nat) registry))
-    (reference : Ref) (page : Page) :
-    Decidable (PostPageRepresented physical writes guards creates reference page) := by
-  unfold PostPageRepresented
-  infer_instance
-
-/-- All data are source-computed. The final shape check also ensures there
-is exactly one physical write per cell and no internal create aliases the
-fixed catalogue anchor. The birth controller must compare its descriptor's
-auxiliary creates byte-for-byte with `placement.auxiliaryCreates`. -/
-structure Lowered {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} (directory : LoadedDirectory durable)
-    (loaded : Loaded anchor durable.snapshot) (edits : List Edit)
-    (prepared : Prepared loaded.snapshot edits) (requestedUserIds : List Nat) where
-  private mk ::
-  placement : Placement
-  placementExact : placement = placePages loaded.snapshot.catalogue prepared.postPages
-    (directory.freshCursor requestedUserIds)
-  fresh : placement.Fresh directory requestedUserIds
-  post : CredentialAuthorityDomain.Snapshot
-  postCatalogue : post.catalogue = placedCatalogue loaded.snapshot.catalogue placement
-  postPages : post.pages = prepared.postPages
-  writesUnique : ((planWrites anchor durable.snapshot loaded.snapshot.catalogue
-    prepared.postPages placement).map DataWrite.cellId).Nodup
-  createsAvoidAnchor : ∀ request ∈ placement.auxiliaryCreates,
-    (⟨request.cellId⟩ : Digest) ≠ anchor.catalogueCellId
-  createsDisjointWrites : ∀ request ∈ placement.auxiliaryCreates,
-    (⟨request.cellId⟩ : Digest) ∉
-      (planWrites anchor durable.snapshot loaded.snapshot.catalogue
-        prepared.postPages placement).map DataWrite.cellId
-  writePreExact : ∀ write ∈ planWrites anchor durable.snapshot loaded.snapshot.catalogue
-      prepared.postPages placement,
-    write.expectedPre = durable.snapshot.model.roots write.cellId
-  represented : List.Forall₂
-    (PostPageRepresented durable.snapshot
-      (planWrites anchor durable.snapshot loaded.snapshot.catalogue prepared.postPages placement)
-      (readonlyGuards loaded.readGuards
-        (planWrites anchor durable.snapshot loaded.snapshot.catalogue prepared.postPages placement))
-      placement.auxiliaryCreates) post.catalogue.pages post.pages
-
-def Lowered.writes {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} {directory : LoadedDirectory durable}
-    {loaded : Loaded anchor durable.snapshot} {edits : List Edit}
-    {prepared : Prepared loaded.snapshot edits} {requestedUserIds : List Nat}
-    (lowered : Lowered directory loaded edits prepared requestedUserIds) : List DataWrite :=
-  planWrites anchor durable.snapshot loaded.snapshot.catalogue prepared.postPages lowered.placement
-
-def Lowered.readGuards {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} {directory : LoadedDirectory durable}
-    {loaded : Loaded anchor durable.snapshot} {edits : List Edit}
-    {prepared : Prepared loaded.snapshot edits} {requestedUserIds : List Nat}
-    (lowered : Lowered directory loaded edits prepared requestedUserIds) : List ReadGuard :=
-  readonlyGuards loaded.readGuards lowered.writes
-
-private theorem assemble_parts {catalogue : Catalogue} {pages : List Page}
-    {snapshot : CredentialAuthorityDomain.Snapshot}
-    (assembled : assemble catalogue pages = some snapshot) :
-    snapshot.catalogue = catalogue ∧ snapshot.pages = pages := by
-  unfold assemble at assembled
-  split at assembled
-  next => cases Option.some.inj assembled; exact ⟨rfl, rfl⟩
-  next => contradiction
-
-def lower {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} (directory : LoadedDirectory durable)
-    (loaded : Loaded anchor durable.snapshot) {edits : List Edit}
-    (prepared : Prepared loaded.snapshot edits) (requestedUserIds : List Nat) :
-    Option (Lowered directory loaded edits prepared requestedUserIds) := do
-  let placement := placePages loaded.snapshot.catalogue prepared.postPages
-    (directory.freshCursor requestedUserIds)
-  if fresh : placement.Fresh directory requestedUserIds then
-    match assembled : assemble (placedCatalogue loaded.snapshot.catalogue placement)
-        prepared.postPages with
-    | none => none
-    | some post =>
-        let writes := planWrites anchor durable.snapshot loaded.snapshot.catalogue
-          prepared.postPages placement
-        if shape : (writes.map DataWrite.cellId).Nodup ∧
-            (∀ request ∈ placement.auxiliaryCreates,
-              (⟨request.cellId⟩ : Digest) ≠ anchor.catalogueCellId) ∧
-            (∀ request ∈ placement.auxiliaryCreates,
-              (⟨request.cellId⟩ : Digest) ∉ writes.map DataWrite.cellId) ∧
-            (∀ write ∈ writes,
-              write.expectedPre = durable.snapshot.model.roots write.cellId) then
-          if represented : List.Forall₂
-              (PostPageRepresented durable.snapshot writes
-                (readonlyGuards loaded.readGuards writes) placement.auxiliaryCreates)
-              post.catalogue.pages post.pages then
-            some ⟨placement, rfl, fresh, post, (assemble_parts assembled).1,
-              (assemble_parts assembled).2, shape.1, shape.2.1, shape.2.2.1,
-              shape.2.2.2, represented⟩
-          else none
-        else none
-  else none
-
-theorem Lowered.projection_exact
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} {directory : LoadedDirectory durable}
-    {loaded : Loaded anchor durable.snapshot} {edits : List Edit}
-    {prepared : Prepared loaded.snapshot edits} {requestedUserIds : List Nat}
-    (lowered : Lowered directory loaded edits prepared requestedUserIds) :
-    lowered.post.logical = prepared.validated.apply.logical := by
-  change logicalOfPages lowered.post.pages = _
-  rw [lowered.postPages]
-  exact prepared.projectionExact
-
-theorem Lowered.readGuards_readonly
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} {directory : LoadedDirectory durable}
-    {loaded : Loaded anchor durable.snapshot} {edits : List Edit}
-    {prepared : Prepared loaded.snapshot edits} {requestedUserIds : List Nat}
-    (lowered : Lowered directory loaded edits prepared requestedUserIds)
-    (guard : ReadGuard) (member : guard ∈ lowered.readGuards) :
-    guard.cellId ∉ lowered.writes.map DataWrite.cellId := by
-  exact of_decide_eq_true (List.mem_filter.mp member).2
-
-theorem Lowered.every_read_covered
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} {directory : LoadedDirectory durable}
-    {loaded : Loaded anchor durable.snapshot} {edits : List Edit}
-    {prepared : Prepared loaded.snapshot edits} {requestedUserIds : List Nat}
-    (lowered : Lowered directory loaded edits prepared requestedUserIds)
-    (guard : ReadGuard) (member : guard ∈ loaded.readGuards) :
-    guard.cellId ∈ lowered.writes.map DataWrite.cellId ∨ guard ∈ lowered.readGuards := by
-  by_cases written : guard.cellId ∈ lowered.writes.map DataWrite.cellId
-  · exact Or.inl written
-  · exact Or.inr (List.mem_filter.mpr ⟨member, by simpa using written⟩)
-
-theorem Lowered.readGuards_exact
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {anchor : Anchor} {directory : LoadedDirectory durable}
-    {loaded : Loaded anchor durable.snapshot} {edits : List Edit}
-    {prepared : Prepared loaded.snapshot edits} {requestedUserIds : List Nat}
-    (lowered : Lowered directory loaded edits prepared requestedUserIds)
-    (guard : ReadGuard) (member : guard ∈ lowered.readGuards) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId :=
-  loaded.readGuards_exact guard (List.mem_filter.mp member).1
-
-/-! ## Concrete preparation of the existing root-issuance batch -/
+/-! ## Concrete preparation of the root-issuance batch -/
 
 def issuanceKeys (grants : List AuthorityGrant) : Finset RevocationKey :=
   (grants.map fun grant => RevocationKey.capability grant.capability.head.id).toFinset
@@ -493,14 +294,21 @@ instance grantReadyDecidable (snapshot : CredentialAuthorityDomain.Snapshot) (gr
   unfold GrantReady
   infer_instance
 
+def policyFresh (snapshot : CredentialAuthorityDomain.Snapshot) (policy : InitialPolicy) : Prop :=
+  generationAt? snapshot.logical policy.policyId = none ∧
+    revisionAt? snapshot.logical policy.policyId = none ∧
+    addressAt? snapshot.logical policy.policyId 0 = none
+
+instance policyFreshDecidable (snapshot : CredentialAuthorityDomain.Snapshot) (policy : InitialPolicy) :
+    Decidable (policyFresh snapshot policy) := by
+  unfold policyFresh
+  infer_instance
+
 def BatchReady (snapshot : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor registry) : Prop :=
-  ((ResourceBirthAuthority.fieldWrites descriptor).map FieldWrite.field).Nodup ∧
+  ((ResourceBirthAuthority.entries descriptor).map Sigma.fst).Nodup ∧
     descriptor.GrantIdsDistinct ∧
-    (∀ policy ∈ descriptor.initialPolicies,
-      snapshot.logical.fields (.policyEpoch policy.policyId) = none ∧
-        snapshot.logical.fields (.policyRevision policy.policyId) = none ∧
-        snapshot.logical.fields (.policyAddress policy.policyId 0) = none) ∧
+    (∀ policy ∈ descriptor.initialPolicies, policyFresh snapshot policy) ∧
     isNullified snapshot.cell descriptor.authorityNullifier = false ∧
     (∀ grant ∈ descriptor.grants, GrantReady snapshot grant)
 
@@ -537,175 +345,66 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
         selfLive := self
         channelsLive := fun channel channelMember => (channels channel channelMember).2 }
 
-def grantEdits (snapshot : CredentialAuthorityDomain.Snapshot) (descriptor : Descriptor registry) :
-    List Edit :=
-  descriptor.initialPolicies.map (fun policy => ⟨none, .policy policy.policyId 0 0 policy.address⟩) ++
-  descriptor.grants.map (fun grant => ⟨none, .capability grant.kind grant.capability⟩) ++
-    [nullifierEdit snapshot descriptor.authorityNullifier]
-
-def requestedUserIds (descriptor : Descriptor registry) : List Nat :=
-  descriptor.births.map fun item => item.create.cellId
-
-/-- Source-cell identities are known from canonical initial-policy addresses
-before the final descriptor commitment. Authority allocation must skip them. -/
-def allocationReservedIds (deployment : CanonicalCellRegistry.Deployment)
-    (descriptor : Descriptor registry) : List Nat :=
-  requestedUserIds descriptor ++
-    PolicySourceCell.initialIds deployment.domain descriptor.initialPolicies
-
-/-- The deployment fixes the anchor. This constructor prepares effects before
-factory/policy authorization. New grants are never used to authorize their
-own birth, and the full semantic family has its own old-domain-root request.
-The enclosing controller must enforce exact auxiliary-create equality before
-authorizing the final complete descriptor. -/
+/-- The deployment fixes the authority cell. This prepares the batch before
+factory/policy authorization. New grants are never used to authorize their own
+birth. The post is the batch patch applied to the loaded cell; its one write
+replaces that cell. -/
 structure PreparedGrantBatch {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : CanonicalCellRegistry.Deployment) (directory : LoadedDirectory durable)
-    (loaded : Loaded deployment.authorityAnchor durable.snapshot)
+    (deployment : Deployment) (loaded : Loaded deployment durable.snapshot)
     (descriptor : Descriptor registry) where
   private mk ::
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
   mode : ResourceBirthAuthority.BatchEvidence (issueUniverse loaded.snapshot descriptor.grants)
     loaded.snapshot.cell descriptor
-  prepared : Prepared loaded.snapshot (grantEdits loaded.snapshot descriptor)
-  physical : Lowered directory loaded (grantEdits loaded.snapshot descriptor) prepared
-    (allocationReservedIds deployment descriptor)
-  semanticExact : physical.post.logical =
-    (ResourceBirthAuthority.post loaded.snapshot.cell descriptor).logical
 
 def prepareGrantBatch {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
-    (deployment : CanonicalCellRegistry.Deployment) (directory : LoadedDirectory durable)
-    (loaded : Loaded deployment.authorityAnchor durable.snapshot)
+    (deployment : Deployment) (loaded : Loaded deployment durable.snapshot)
     (descriptor : Descriptor registry) :
-    Option (PreparedGrantBatch profile deployment directory loaded descriptor) := do
+    Option (PreparedGrantBatch profile deployment loaded descriptor) := do
   let initialSources ← PolicySourceCell.checkInitials deployment.domain profile descriptor.initialPolicies
   if ready : BatchReady loaded.snapshot descriptor then
-    let prepared ← prepare loaded.snapshot (grantEdits loaded.snapshot descriptor)
-    let physical ← lower directory loaded prepared (allocationReservedIds deployment descriptor)
-    if same : CredentialAuthorityStateCodec.encode physical.post.logical =
-        CredentialAuthorityStateCodec.encode
-          (ResourceBirthAuthority.post loaded.snapshot.cell descriptor).logical then
-      some ⟨initialSources, batchEvidence loaded.snapshot descriptor ready, prepared, physical,
-        CredentialAuthorityStateCodec.encode_injective same⟩
-    else none
+    some ⟨initialSources, batchEvidence loaded.snapshot descriptor ready⟩
   else none
 
-def PreparedGrantBatch.auxiliaryCreates {F : Type} [Field F]
+section GrantBatch
+
+variable {F : Type} [Field F]
     {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
     {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment} {directory : LoadedDirectory durable}
-    {loaded : Loaded deployment.authorityAnchor durable.snapshot}
+    {deployment : Deployment} {loaded : Loaded deployment durable.snapshot}
     {descriptor : Descriptor registry}
-    (prepared : PreparedGrantBatch profile deployment directory loaded descriptor) :
+
+def PreparedGrantBatch.post (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    CredentialAuthorityDomain.Cell :=
+  ResourceBirthAuthority.post loaded.snapshot.cell descriptor prepared.mode.nullifierFresh
+
+def PreparedGrantBatch.writes (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    List DataWrite :=
+  loaded.writes prepared.post
+
+def PreparedGrantBatch.auxiliaryCreates
+    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
     List (CreateRequest (CellId := Nat) registry) :=
-  CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records ++
-    prepared.physical.placement.auxiliaryCreates
+  CanonicalCellRegistry.initialSourceCreates deployment.domain prepared.initialSources.records
 
-theorem PreparedGrantBatch.post_exact {F : Type} [Field F]
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {profile : CanonicalPolicyAdmission.PolicyCompilerProfile F}
-    {deployment : CanonicalCellRegistry.Deployment} {directory : LoadedDirectory durable}
-    {loaded : Loaded deployment.authorityAnchor durable.snapshot}
-    {descriptor : Descriptor registry}
-    (prepared : PreparedGrantBatch profile deployment directory loaded descriptor) :
-    prepared.physical.post.cell = ResourceBirthAuthority.post loaded.snapshot.cell descriptor :=
-  Materialized.ext prepared.semanticExact
+theorem PreparedGrantBatch.post_logical
+    (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+    prepared.post.logical = setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor) :=
+  ResourceBirthAuthority.post_logical _ _ _
 
-/-! ## Exact physical lowering of explicit grant-generation rotation -/
+end GrantBatch
 
-/-- The generation changes while the exact selected source revision/address
-remain in the same physical entry. This is preparation, never authorization. -/
-def policyGenerationEdits (snapshot : CredentialAuthorityDomain.Snapshot)
-    (policy : PolicyId) (head : PolicyInstall.Head) (next : Epoch)
-    (marker : Nat) : List Edit :=
-  [⟨some (.policy policy (snapshot.authState.policyEpoch policy) head.version head.address),
-      .policy policy next head.version head.address⟩,
-    nullifierEdit snapshot marker]
-
-structure PreparedPolicyGeneration
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    (directory : LoadedDirectory durable)
-    (loaded : Loaded deployment.authorityAnchor durable.snapshot)
-    (policy : PolicyId) (marker : Nat) where
-  private mk ::
-  head : PolicyInstall.Head
-  headCurrent : loaded.snapshot.currentHead policy = some head
-  declaration : RotateEpochDeclaration
-  targetExact : declaration.target = .policy policy
-  markerExact : declaration.operationNullifier = marker
-  mode : RotateEpochEvidence loaded.snapshot.cell declaration
-  prepared : Prepared loaded.snapshot
-    (policyGenerationEdits loaded.snapshot policy head declaration.nextEpoch marker)
-  physical : Lowered directory loaded
-    (policyGenerationEdits loaded.snapshot policy head declaration.nextEpoch marker) prepared []
-  semantic : ValidatedPatch CredentialAuthorityStateCodec.materializer
-    loaded.snapshot.cell declaration.patch
-  semanticExact : physical.post.logical = semantic.apply.logical
-
-/-- No caller-supplied epoch or head is trusted. The existing source rotation
-patch is validated independently, then exact canonical bytes join the grouped
-physical rewrite to that patch; no root-collision assumption is used. -/
-def preparePolicyGeneration
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    (directory : LoadedDirectory durable)
-    (loaded : Loaded deployment.authorityAnchor durable.snapshot)
-    (policy : PolicyId) (marker : Nat) :
-    Option (PreparedPolicyGeneration directory loaded policy marker) := do
-  match headCurrent : loaded.snapshot.currentHead policy with
-  | none => none
-  | some head =>
-    let generation := loaded.snapshot.authState.policyEpoch policy
-    let declaration : RotateEpochDeclaration :=
-      { target := .policy policy
-        expectedEpoch := generation
-        nextEpoch := generation + 1
-        expectedPreRoot := loaded.snapshot.cell.root
-        operationNullifier := marker }
-    if fresh : isNullified loaded.snapshot.cell marker = false then
-      let prepared ← prepare loaded.snapshot
-        (policyGenerationEdits loaded.snapshot policy head declaration.nextEpoch marker)
-      let physical ← lower directory loaded prepared []
-      match validate CredentialAuthorityStateCodec.materializer loaded.snapshot.cell declaration.patch with
-      | .rejected _ => none
-      | .accepted semantic =>
-        if exactBytes : CredentialAuthorityStateCodec.encode physical.post.logical =
-            CredentialAuthorityStateCodec.encode semantic.apply.logical then
-          some
-            { head := head
-              headCurrent := headCurrent
-              declaration := declaration
-              targetExact := rfl
-              markerExact := rfl
-              mode := ⟨rfl, rfl, rfl, fresh⟩
-              prepared := prepared
-              physical := physical
-              semantic := semantic
-              semanticExact := CredentialAuthorityStateCodec.encode_injective exactBytes }
-        else none
-    else none
-
-theorem PreparedPolicyGeneration.source_framed
-    {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
-    {deployment : CanonicalCellRegistry.Deployment}
-    {directory : LoadedDirectory durable}
-    {loaded : Loaded deployment.authorityAnchor durable.snapshot}
-    {policy : PolicyId} {marker : Nat}
-    (prepared : PreparedPolicyGeneration directory loaded policy marker) :
-    prepared.physical.post.logical.fields (.policyRevision policy) =
-      loaded.snapshot.logical.fields (.policyRevision policy) ∧
-    ∀ revision, prepared.physical.post.logical.fields (.policyAddress policy revision) =
-      loaded.snapshot.logical.fields (.policyAddress policy revision) := by
-  rw [prepared.semanticExact]
-  have framed := prepared.declaration.source_framed prepared.semantic
-  simpa [prepared.targetExact, EpochTarget.SourceFramed] using framed
-
-def loadDeployment (deployment : CanonicalCellRegistry.Deployment)
-    (physical : PhysicalSnapshot) : Option (Loaded deployment.authorityAnchor physical) :=
-  if deployment.Valid then load deployment.authorityAnchor physical else none
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.write_of_planes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms write_of_planes
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.loadDeployment_refuses' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms loadDeployment_refuses
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.loadDeployment_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms loadDeployment_exact
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.Loaded.write_pre_is_loaded_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Loaded.write_pre_is_loaded_root
 
 end Minidregg.Compiler.CredentialAuthorityDomainReceiver
