@@ -19,21 +19,94 @@ length prefix, a back-reference may be spelled inline, and trailing bits are
 ignored, so several byte strings cue to one noun. `canonical` names the one
 `jam` produces and `canonical_unique` says it is unique per noun.
 
-Every function here is structurally recursive, so small instances evaluate by
-`decide` in the kernel; nothing hashes.
+Every specification function here is structurally recursive, so small
+instances evaluate by `decide` in the kernel.
+
+Runtime shape (nockvm's `mug`): every noun carries a 64-bit structural hash
+`mug`, a Lean computed field stored in the constructor and computed once when
+the node is built, so nouns shared by pointer (as `cue` builds them) hash in
+O(1) per node. Logically `mug` is an ordinary recursive function and `Noun` is
+the plain inductive; the kernel never evaluates a hash. Two `@[csimp]`
+theorems swap the specification functions for the fast ones in compiled code:
+`decEq_eq_decEqFast` (pointer equality, then `mug`, then structure; this is
+Nock `%5`'s equality) and `jam_eq_jamFast` (the back-reference table is a
+`Std.HashMap` keyed by `mug`, proved to answer exactly as `lookupPos`).
 -/
 import Mathlib.Tactic.Ring
 import Mathlib.Tactic.Set
 
 namespace Minidregg.Theory
 
-/-- A Nock noun: an atom (any natural) or a cell. -/
+/-- A Nock noun: an atom (any natural) or a cell. `mug` is cached per node. -/
 inductive Noun where
   | atom (n : Nat)
   | cell (h t : Noun)
-  deriving DecidableEq, Repr, Inhabited
+with
+  /-- The structural hash (nockvm's `mug`, not its values): stored in each
+  constructor at runtime, so reading it is O(1). -/
+  @[computed_field] mug : Noun → UInt64
+  | .atom n => hash n
+  | .cell h t => mixHash (mug h) (mug t)
+  deriving Repr, Inhabited
 
 namespace Noun
+
+/-! ## Equality: the structural specification and the mug-first runtime check -/
+
+/-- Structural equality, the specification (`%5`, `lookupPos`). -/
+def decEq : (a b : Noun) → Decidable (a = b)
+  | atom x, atom y =>
+    if h : x = y then isTrue (congrArg atom h) else isFalse (fun e => h (Noun.atom.inj e))
+  | atom _, cell _ _ => isFalse (fun e => Noun.noConfusion e)
+  | cell _ _, atom _ => isFalse (fun e => Noun.noConfusion e)
+  | cell h t, cell h' t' =>
+    match decEq h h' with
+    | isFalse n => isFalse (fun e => n (Noun.cell.inj e).1)
+    | isTrue e1 =>
+      match decEq t t' with
+      | isFalse n => isFalse (fun e => n (Noun.cell.inj e).2)
+      | isTrue e2 => isTrue (e1 ▸ e2 ▸ rfl)
+
+/-- The runtime equality: equal pointers are equal; unequal mugs are unequal;
+only on a mug match is the structure compared (children first by pointer). -/
+def decEqFast (a b : Noun) : Decidable (a = b) :=
+  withPtrEqDecEq a b fun _ =>
+    if hm : a.mug = b.mug then
+      match a, b with
+      | atom x, atom y =>
+        if h : x = y then isTrue (congrArg atom h) else isFalse (fun e => h (Noun.atom.inj e))
+      | atom _, cell _ _ => isFalse (fun e => Noun.noConfusion e)
+      | cell _ _, atom _ => isFalse (fun e => Noun.noConfusion e)
+      | cell h t, cell h' t' =>
+        match decEqFast h h' with
+        | isFalse n => isFalse (fun e => n (Noun.cell.inj e).1)
+        | isTrue e1 =>
+          match decEqFast t t' with
+          | isFalse n => isFalse (fun e => n (Noun.cell.inj e).2)
+          | isTrue e2 => isTrue (e1 ▸ e2 ▸ rfl)
+    else isFalse (fun e => hm (congrArg mug e))
+
+/-- Compiled code decides `Noun` equality by `decEqFast` (a `Decidable` is a
+subsingleton, so the two agree on every input). -/
+@[csimp] theorem decEq_eq_decEqFast : @decEq = @decEqFast := by
+  funext a b; exact Subsingleton.elim _ _
+
+/-- Declared after `decEq_eq_decEqFast`: code that inlines this instance is
+compiled with the replacement in force. -/
+instance : DecidableEq Noun := decEq
+
+/-- Mug equality is necessary for equality; structural equality decides it. -/
+theorem eq_iff_mugEq_and_structEq {a b : Noun} :
+    a = b ↔ a.mug = b.mug ∧ decide (a = b) = true :=
+  ⟨fun e => ⟨congrArg mug e, decide_eq_true e⟩, fun h => of_decide_eq_true h.2⟩
+
+theorem ne_of_mug_ne {a b : Noun} (h : a.mug ≠ b.mug) : a ≠ b :=
+  fun e => h (congrArg mug e)
+
+instance : Hashable Noun := ⟨mug⟩
+
+instance : LawfulHashable Noun where
+  hash_eq {a b} h := by rw [eq_of_beq h]
 
 /-- Number of constructors (the unshared tree size). -/
 def size : Noun → Nat
@@ -105,6 +178,90 @@ def bitLenAux : Nat → Nat → Nat
 
 /-- Hoon's `(met 0 n)`: the number of significant bits (`0` for `0`). -/
 def bitLen (n : Nat) : Nat := bitLenAux n n
+
+/-! ## Fast bit primitives
+
+`bitLen` walks the atom one bit at a time and `natBits` halves it once per bit:
+both are quadratic in the atom's length (a 64 KB atom re-jammed in 52 s and
+48 GB). Compiled code runs `bitLenFast` (`Nat.log2`) and `natBitsFast` (split
+in halves by mask and shift), proved equal. -/
+
+theorem bitLenAux_spec : ∀ k n, n ≤ k →
+    n < 2 ^ bitLenAux k n ∧ (n ≠ 0 → 0 < bitLenAux k n ∧ 2 ^ (bitLenAux k n - 1) ≤ n)
+  | 0, n, h => by simp [bitLenAux]; omega
+  | k + 1, n, h => by
+    by_cases hn : n = 0
+    · subst hn; simp [bitLenAux]
+    · have ih := bitLenAux_spec k (n / 2) (by omega)
+      simp only [bitLenAux, hn, if_false, Nat.add_sub_cancel]
+      refine ⟨?_, fun _ => ⟨by omega, ?_⟩⟩
+      · rw [Nat.pow_succ]; omega
+      · by_cases h2 : n / 2 = 0
+        · have : n = 1 := by omega
+          subst this; simp at *
+          cases k <;> simp [bitLenAux]
+        · have := (ih.2 h2).2
+          have hpos := (ih.2 h2).1
+          have : 2 ^ bitLenAux k (n / 2) = 2 * 2 ^ (bitLenAux k (n / 2) - 1) := by
+            rw [← Nat.pow_succ']; congr 1; omega
+          omega
+
+def bitLenFast (n : Nat) : Nat := if n = 0 then 0 else n.log2 + 1
+
+@[csimp] theorem bitLen_eq_bitLenFast : @bitLen = @bitLenFast := by
+  funext n
+  have hs := bitLenAux_spec n n le_rfl
+  unfold bitLenFast
+  split
+  · rename_i hn; subst hn; rfl
+  · rename_i hn
+    have h1 : n < 2 ^ bitLen n := hs.1
+    have h2 := (hs.2 hn).1
+    have h3 : 2 ^ (bitLen n - 1) ≤ n := (hs.2 hn).2
+    have a := (Nat.log2_lt hn).2 h1
+    have b := (Nat.le_log2 hn).2 h3
+    omega
+
+/-- `natBits`, restated for the base case of `natBitsFast`. -/
+def natBitsLoop : Nat → Nat → List Bool
+  | 0, _ => []
+  | k + 1, n => (n % 2 == 1) :: natBitsLoop k (n / 2)
+
+theorem natBitsLoop_eq : ∀ k n, natBitsLoop k n = natBits k n
+  | 0, _ => rfl
+  | k + 1, n => by simp [natBitsLoop, natBits, natBitsLoop_eq k]
+
+theorem natBits_add : ∀ (a b n : Nat), natBits (a + b) n = natBits a n ++ natBits b (n / 2 ^ a)
+  | 0, b, n => by simp [natBits]
+  | a + 1, b, n => by
+    rw [show a + 1 + b = (a + b) + 1 by omega]
+    simp only [natBits, natBits_add a b (n / 2), List.cons_append, Nat.div_div_eq_div_mul,
+      Nat.pow_succ']
+
+theorem natBits_mod : ∀ (a n : Nat), natBits a (n % 2 ^ a) = natBits a n
+  | 0, _ => rfl
+  | a + 1, n => by
+    simp only [natBits]
+    rw [Nat.pow_succ', Nat.mod_mul_right_div_self, natBits_mod a (n / 2),
+      Nat.mod_mod_of_dvd n (Dvd.intro (2 ^ a) rfl)]
+
+/-- The low `k` bits of `n` by halving `k`: `O(k log k)` word operations. -/
+def natBitsFast (k n : Nat) : List Bool :=
+  if k ≤ 64 then natBitsLoop k n
+  else natBitsFast (k / 2) (n &&& (2 ^ (k / 2) - 1)) ++ natBitsFast (k - k / 2) (n >>> (k / 2))
+termination_by k
+decreasing_by all_goals omega
+
+@[csimp] theorem natBits_eq_natBitsFast : @natBits = @natBitsFast := by
+  funext k n
+  induction k using Nat.strong_induction_on generalizing n with
+  | _ k ih =>
+    rw [natBitsFast]
+    split
+    · exact (natBitsLoop_eq k n).symm
+    · rw [← ih _ (by omega), ← ih _ (by omega), Nat.and_two_pow_sub_one_eq_mod, natBits_mod,
+        Nat.shiftRight_eq_div_pow, ← natBits_add]
+      congr 1; omega
 
 /-- Hoon's `++mat`: `c` zeros, a one, the low `c-1` bits of `b = met 0 n`,
 then the `b` bits of `n`, where `c = met 0 b`; `0` is the single bit `1`. -/
@@ -235,9 +392,6 @@ def cue (bs : List UInt8) : Option Noun :=
   | none => none
   | some (n, _, _) => some n
 
-/-- The byte string `jam` produces for the noun it cues to. -/
-def canonical (bs : List UInt8) : Bool := (cue bs).map jam == some bs
-
 /-! ## Integers -/
 
 /-- Zigzag: `0,-1,1,-2,2,… ↦ 0,1,2,3,4,…`. -/
@@ -303,26 +457,6 @@ theorem natBits_ofBits : ∀ (l : List Bool) (k : Nat), l.length ≤ k →
     simp only [natBits, ofBits, e1, e2, ih, List.length_cons, List.cons_append,
       Nat.add_sub_add_right]
   | _ :: _, 0, h => by simp at h
-
-theorem bitLenAux_spec : ∀ k n, n ≤ k →
-    n < 2 ^ bitLenAux k n ∧ (n ≠ 0 → 0 < bitLenAux k n ∧ 2 ^ (bitLenAux k n - 1) ≤ n)
-  | 0, n, h => by simp [bitLenAux]; omega
-  | k + 1, n, h => by
-    by_cases hn : n = 0
-    · subst hn; simp [bitLenAux]
-    · have ih := bitLenAux_spec k (n / 2) (by omega)
-      simp only [bitLenAux, hn, if_false, Nat.add_sub_cancel]
-      refine ⟨?_, fun _ => ⟨by omega, ?_⟩⟩
-      · rw [Nat.pow_succ]; omega
-      · by_cases h2 : n / 2 = 0
-        · have : n = 1 := by omega
-          subst this; simp at *
-          cases k <;> simp [bitLenAux]
-        · have := (ih.2 h2).2
-          have hpos := (ih.2 h2).1
-          have : 2 ^ bitLenAux k (n / 2) = 2 * 2 ^ (bitLenAux k (n / 2) - 1) := by
-            rw [← Nat.pow_succ']; congr 1; omega
-          omega
 
 theorem lt_two_pow_bitLen (n : Nat) : n < 2 ^ bitLen n := (bitLenAux_spec n n le_rfl).1
 
@@ -693,6 +827,498 @@ theorem Matches.of_toList {B : Array Bool} {L R : List Bool} (h : B.toList = L +
   rw [← Array.getElem?_toList, h, Nat.zero_add, List.getElem?_append_left hj,
     List.getElem?_eq_getElem hj]
 
+/-! ## The fast cue: a byte-indexed reader and a position-keyed hash table
+
+`cue` materialises one `Bool` per bit and a table slot per bit (about 500 bytes
+of heap per input byte). Compiled code runs `cueFast`: bits are read from the
+bytes in place, the table holds only positions where a noun started, and atom
+values are read by halving (`readVal`), so a large atom is `O(b log b)`, not
+quadratic. `cue_eq_cueFast` proves the two equal. -/
+
+/-- Bit `i` of a byte array, byte 0 bit 0 first. -/
+def getBit (D : ByteArray) (i : Nat) : Option Bool :=
+  if h : i / 8 < D.size then some ((D[i / 8].toNat >>> (i % 8)) % 2 == 1) else none
+
+theorem getElem?_natBits : ∀ (k n j : Nat),
+    (natBits k n)[j]? = if j < k then some (n / 2 ^ j % 2 == 1) else none
+  | 0, n, j => by simp [natBits]
+  | k + 1, n, 0 => by simp [natBits]
+  | k + 1, n, j + 1 => by
+    simp only [natBits, List.getElem?_cons_succ, getElem?_natBits k (n / 2) j,
+      Nat.div_div_eq_div_mul, ← Nat.pow_succ']
+    simp
+
+theorem length_fromBytes : ∀ bs : List UInt8, (fromBytes bs).length = 8 * bs.length
+  | [] => rfl
+  | b :: r => by
+    simp [fromBytes, natBits_length, length_fromBytes r]; ring
+
+theorem getElem?_fromBytes : ∀ (bs : List UInt8) (i : Nat),
+    (fromBytes bs)[i]? =
+      if h : i / 8 < bs.length then some (bs[i / 8].toNat / 2 ^ (i % 8) % 2 == 1) else none
+  | [], i => by simp [fromBytes]
+  | b :: r, i => by
+    have hl : (natBits 8 b.toNat).length = 8 := by simp [natBits]
+    simp only [fromBytes]
+    by_cases hi : i < 8
+    · rw [List.getElem?_append_left (by omega), getElem?_natBits]
+      have h0 : i / 8 = 0 := Nat.div_eq_of_lt hi
+      have h1 : i % 8 = i := Nat.mod_eq_of_lt hi
+      simp [hi, h0, h1]
+    · obtain ⟨j, rfl⟩ : ∃ j, i = j + 8 := ⟨i - 8, by omega⟩
+      rw [List.getElem?_append_right (by omega), hl, Nat.add_sub_cancel, getElem?_fromBytes r j]
+      have h0 : (j + 8) / 8 = j / 8 + 1 := Nat.add_div_right j (by omega)
+      have h1 : (j + 8) % 8 = j % 8 := Nat.add_mod_right j 8
+      simp only [h0, h1, List.length_cons, Nat.add_lt_add_iff_right, List.getElem_cons_succ]
+
+theorem getBit_eq (bs : List UInt8) (i : Nat) :
+    getBit ⟨bs.toArray⟩ i = (fromBytes bs).toArray[i]? := by
+  rw [List.getElem?_toArray, getElem?_fromBytes, getBit]
+  by_cases h : i / 8 < bs.length
+  · have h' : i / 8 < (⟨bs.toArray⟩ : ByteArray).size := h
+    rw [dif_pos h', dif_pos h, Nat.shiftRight_eq_div_pow]; rfl
+  · have h' : ¬ i / 8 < (⟨bs.toArray⟩ : ByteArray).size := h
+    rw [dif_neg h', dif_neg h]
+
+def countZerosF (g : Nat → Option Bool) : Nat → Nat → Nat → Option Nat
+  | 0, _, _ => none
+  | k + 1, i, c =>
+    match g i with
+    | none => none
+    | some true => some c
+    | some false => countZerosF g k (i + 1) (c + 1)
+
+theorem countZerosF_eq {B : Array Bool} {g : Nat → Option Bool} (hg : ∀ i, g i = B[i]?) :
+    ∀ k i c, countZerosF g k i c = countZeros B k i c
+  | 0, _, _ => rfl
+  | k + 1, i, c => by
+    simp only [countZerosF, countZeros, hg i]
+    cases B[i]? with
+    | none => rfl
+    | some b => cases b <;> simp [countZerosF_eq hg k]
+
+/-- `l` bits from position `i`, little-endian, one at a time. -/
+def readValLoop (g : Nat → Option Bool) : Nat → Nat → Option Nat
+  | 0, _ => some 0
+  | l + 1, i =>
+    match g i with
+    | none => none
+    | some b => (readValLoop g l (i + 1)).map fun v => (if b then 1 else 0) + 2 * v
+
+theorem readBits_eq_loop {B : Array Bool} {g : Nat → Option Bool} (hg : ∀ i, g i = B[i]?) :
+    ∀ l i acc pw, readBits B l i acc pw = (readValLoop g l i).map fun v => acc + pw * v
+  | 0, _, _, _ => by simp [readBits, readValLoop]
+  | l + 1, i, acc, pw => by
+    simp only [readBits, readValLoop, hg i]
+    cases B[i]? with
+    | none => rfl
+    | some b =>
+      simp only [readBits_eq_loop hg l, Option.map_map]
+      congr 1; funext v; cases b <;> simp <;> ring
+
+theorem readValLoop_add (g : Nat → Option Bool) : ∀ a b i, readValLoop g (a + b) i =
+    (readValLoop g a i).bind fun v₁ => (readValLoop g b (i + a)).map fun v₂ => v₁ + 2 ^ a * v₂
+  | 0, b, i => by simp [readValLoop]
+  | a + 1, b, i => by
+    rw [show a + 1 + b = (a + b) + 1 by omega]
+    simp only [readValLoop]
+    cases g i with
+    | none => rfl
+    | some c =>
+      simp only [readValLoop_add g a b (i + 1), show i + 1 + a = i + (a + 1) by omega]
+      cases readValLoop g a (i + 1) with
+      | none => rfl
+      | some v₁ =>
+        cases readValLoop g b (i + (a + 1)) with
+        | none => rfl
+        | some v₂ => simp only [Option.bind_some, Option.map_some]; congr 1; rw [Nat.pow_succ]; ring
+
+/-- `readValLoop` by halving the width: `O(l log l)` word operations. -/
+def readVal (g : Nat → Option Bool) (l i : Nat) : Option Nat :=
+  if l ≤ 64 then readValLoop g l i
+  else
+    match readVal g (l / 2) i with
+    | none => none
+    | some v₁ =>
+      match readVal g (l - l / 2) (i + l / 2) with
+      | none => none
+      | some v₂ => some (v₁ + (v₂ <<< (l / 2)))
+termination_by l
+decreasing_by all_goals omega
+
+theorem readVal_eq (g : Nat → Option Bool) (l i : Nat) : readVal g l i = readValLoop g l i := by
+  induction l using Nat.strong_induction_on generalizing i with
+  | _ l ih =>
+    rw [readVal]
+    split
+    · rfl
+    · rw [ih _ (by omega), ih _ (by omega),
+        show readValLoop g l i = readValLoop g (l / 2 + (l - l / 2)) i by congr 1; omega,
+        readValLoop_add]
+      cases readValLoop g (l / 2) i with
+      | none => rfl
+      | some v₁ =>
+        cases readValLoop g (l - l / 2) (i + l / 2) with
+        | none => rfl
+        | some v₂ => simp [Nat.shiftLeft_eq, Nat.mul_comm]
+
+/-- `rub` over a bit reader of `lim` bits. -/
+def rubF (g : Nat → Option Bool) (lim i : Nat) : Option (Nat × Nat) :=
+  match countZerosF g lim i 0 with
+  | none => none
+  | some c =>
+    if c = 0 then some (0, i + 1)
+    else
+      match readVal g (c - 1) (i + c + 1) with
+      | none => none
+      | some x =>
+        let b := 2 ^ (c - 1) + x
+        match readVal g b (i + c + c) with
+        | none => none
+        | some v => some (v, i + c + c + b)
+
+theorem rubF_eq {B : Array Bool} {g : Nat → Option Bool} (hg : ∀ i, g i = B[i]?) (i : Nat) :
+    rubF g B.size i = rub B i := by
+  simp only [rubF, rub, countZerosF_eq hg, readVal_eq, readBits_eq_loop hg]
+  cases countZeros B B.size i 0 with
+  | none => rfl
+  | some c =>
+    simp only
+    split
+    · rfl
+    · cases readValLoop g (c - 1) (i + c + 1) with
+      | none => rfl
+      | some x =>
+        simp only [Option.map_some, Nat.zero_add, Nat.one_mul]
+        cases readValLoop g (2 ^ (c - 1) + x) (i + c + c) with
+        | none => rfl
+        | some v => rfl
+
+abbrev FastCue := Std.HashMap Nat Noun
+
+/-- `decode` over a bit reader of `lim` bits, the table keyed by start position. -/
+def decodeF (g : Nat → Option Bool) (lim : Nat) : Nat → Nat → FastCue → Option (Noun × Nat × FastCue)
+  | 0, _, _ => none
+  | k + 1, i, M =>
+    match g i with
+    | none => none
+    | some false =>
+      match rubF g lim (i + 1) with
+      | none => none
+      | some (v, j) => let n := atom v; some (n, j, M.insert i n)
+    | some true =>
+      match g (i + 1) with
+      | none => none
+      | some false =>
+        match decodeF g lim k (i + 2) M with
+        | none => none
+        | some (h, j, M1) =>
+          match decodeF g lim k j M1 with
+          | none => none
+          | some (tl, j2, M2) => let n := cell h tl; some (n, j2, M2.insert i n)
+      | some true =>
+        match rubF g lim (i + 2) with
+        | none => none
+        | some (p, j) =>
+          match M[p]? with
+          | some n => some (n, j, M)
+          | none => none
+
+/-- The array table and the hash table agree on every completed position. -/
+def CueRel (B : Array Bool) (t : CueTable) (M : FastCue) : Prop :=
+  t.size = B.size ∧ ∀ p : Nat, (t[p]? : Option (Option Noun)).bind id = M[p]?
+
+theorem CueRel.insert {B : Array Bool} {t : CueTable} {M : FastCue} (hR : CueRel B t M)
+    {i : Nat} (hi : i < B.size) (n : Noun) :
+    CueRel B (t.setIfInBounds i (some n)) (M.insert i n) := by
+  refine ⟨by simp [hR.1], fun p => ?_⟩
+  rw [Array.getElem?_setIfInBounds, Std.HashMap.getElem?_insert, ← hR.2 p]
+  by_cases h : i = p
+  · subst h; simp [hR.1, hi]
+  · simp [h]
+
+theorem decodeF_rel {B : Array Bool} {g : Nat → Option Bool} (hg : ∀ i, g i = B[i]?) :
+    ∀ fuel i t M, CueRel B t M →
+    Option.Rel (fun r r' => r.1 = r'.1 ∧ r.2.1 = r'.2.1 ∧ CueRel B r.2.2 r'.2.2)
+      (decode B fuel i t) (decodeF g B.size fuel i M)
+  | 0, _, _, _, _ => .none
+  | k + 1, i, t, M, hR => by
+    simp only [decode, decodeF, hg i, rubF_eq hg]
+    cases hb : B[i]? with
+    | none => exact .none
+    | some b =>
+      have hi : i < B.size := by
+        rcases Nat.lt_or_ge i B.size with h | h
+        · exact h
+        · simp [Array.getElem?_eq_none h] at hb
+      cases b with
+      | false =>
+        cases rub B (i + 1) with
+        | none => exact .none
+        | some r => exact .some ⟨rfl, rfl, hR.insert hi _⟩
+      | true =>
+        simp only [hg (i + 1)]
+        cases B[i + 1]? with
+        | none => exact .none
+        | some c =>
+          cases c with
+          | false =>
+            dsimp only
+            have h1 := decodeF_rel hg k (i + 2) t M hR
+            revert h1
+            generalize decode B k (i + 2) t = x
+            generalize decodeF g B.size k (i + 2) M = y
+            intro h1
+            cases h1 with
+            | none => exact .none
+            | @some r r' hr =>
+              obtain ⟨hn, hj, hR1⟩ := hr
+              obtain ⟨h, j, t1⟩ := r
+              obtain ⟨h', j', M1⟩ := r'
+              simp only at hn hj hR1; subst hn hj
+              dsimp only
+              have h2 := decodeF_rel hg k j t1 M1 hR1
+              revert h2
+              generalize decode B k j t1 = x
+              generalize decodeF g B.size k j M1 = y
+              intro h2
+              cases h2 with
+              | none => exact .none
+              | @some s s' hs =>
+                obtain ⟨hn2, hj2, hR2⟩ := hs
+                obtain ⟨tl, j2, t2⟩ := s
+                obtain ⟨tl', j2', M2⟩ := s'
+                simp only at hn2 hj2 hR2; subst hn2 hj2
+                dsimp only
+                exact .some ⟨rfl, rfl, hR2.insert hi _⟩
+          | true =>
+            cases rub B (i + 2) with
+            | none => exact .none
+            | some r =>
+              obtain ⟨p, j⟩ := r
+              simp only
+              have hp := hR.2 p
+              cases htp : t[p]? with
+              | none =>
+                rw [htp] at hp; simp only [Option.bind_none] at hp; rw [← hp]; exact .none
+              | some o =>
+                rw [htp] at hp; simp only [Option.bind_some, id] at hp; rw [← hp]
+                cases o with
+                | none => exact .none
+                | some n => exact .some ⟨rfl, rfl, hR⟩
+
+/-- `cue` through the byte reader and the hash table. -/
+def cueFast (bs : List UInt8) : Option Noun :=
+  let D : ByteArray := ⟨bs.toArray⟩
+  match decodeF (getBit D) (8 * D.size) (8 * D.size) 0 ∅ with
+  | none => none
+  | some (n, _, _) => some n
+
+/-- Compiled code runs `cueFast` for `cue`. -/
+@[csimp] theorem cue_eq_cueFast : @cue = @cueFast := by
+  funext bs
+  have hsz : (fromBytes bs).toArray.size = 8 * (⟨bs.toArray⟩ : ByteArray).size := by
+    simp [length_fromBytes, ByteArray.size]
+  have hR : CueRel (fromBytes bs).toArray
+      (Array.replicate (fromBytes bs).toArray.size none) (∅ : FastCue) := by
+    refine ⟨by simp, fun p => ?_⟩
+    rw [Std.HashMap.getElem?_empty]
+    simp [Array.getElem?_replicate]
+  have h := decodeF_rel (getBit_eq bs) (fromBytes bs).toArray.size 0 _ _ hR
+  simp only [cue, cueFast]
+  rw [← hsz]
+  revert h
+  generalize decode _ _ 0 _ = x
+  generalize decodeF _ _ _ 0 ∅ = y
+  intro h
+  cases h with
+  | none => rfl
+  | @some r r' hr =>
+    obtain ⟨hn, -, -⟩ := hr
+    obtain ⟨n, _, _⟩ := r
+    obtain ⟨n', _, _⟩ := r'
+    simp only at hn; subst hn; rfl
+
+/-! ## The fast jam: a mug-keyed hash table, proved to answer as `lookupPos` -/
+
+abbrev FastTable := Std.HashMap Noun Nat
+
+theorem fastTable_insert {M : FastTable} {m : JamTable} (hM : ∀ a, M[a]? = lookupPos a m)
+    (k : Noun) (v : Nat) : ∀ a, (M.insert k v)[a]? = lookupPos a ((k, v) :: m) := by
+  intro a
+  rw [Std.HashMap.getElem?_insert, hM a]
+  simp only [lookupPos, beq_iff_eq]
+  by_cases h : a = k
+  · subst h; simp
+  · simp [h, Ne.symm h]
+
+/-- A bit writer: completed bytes, and a partial byte `cur` holding `k < 8` bits. -/
+structure BitW where
+  done : Array UInt8
+  cur : Nat
+  k : Nat
+
+namespace BitW
+
+/-- The bits written so far. -/
+def bits (w : BitW) : List Bool := fromBytes w.done.toList ++ natBits w.k w.cur
+
+def Inv (w : BitW) : Prop := w.k < 8 ∧ w.cur < 2 ^ w.k
+
+def push (w : BitW) (b : Bool) : BitW :=
+  let c := w.cur + (if b then 2 ^ w.k else 0)
+  if w.k = 7 then ⟨w.done.push c.toUInt8, 0, 0⟩ else ⟨w.done, c, w.k + 1⟩
+
+def pushAll (w : BitW) : List Bool → BitW
+  | [] => w
+  | b :: bs => (w.push b).pushAll bs
+
+/-- The bytes, the partial byte zero-padded. -/
+def finish (w : BitW) : List UInt8 :=
+  if w.k = 0 then w.done.toList else w.done.toList ++ [w.cur.toUInt8]
+
+end BitW
+
+theorem natBits_snoc {k c : Nat} (hc : c < 2 ^ k) (b : Bool) :
+    natBits (k + 1) (c + (if b then 2 ^ k else 0)) = natBits k c ++ [b] := by
+  rw [natBits_add k 1, ← natBits_mod k]
+  have hp := Nat.two_pow_pos k
+  cases b
+  · simp [Nat.mod_eq_of_lt hc, Nat.div_eq_of_lt hc, natBits]
+  · simp only [if_true, Nat.add_mod_right, Nat.mod_eq_of_lt hc]
+    rw [Nat.add_div_right c hp, Nat.div_eq_of_lt hc]
+    simp [natBits]
+
+theorem fromBytes_append : ∀ (L R : List UInt8), fromBytes (L ++ R) = fromBytes L ++ fromBytes R
+  | [], _ => rfl
+  | b :: L, R => by simp [fromBytes, fromBytes_append L R]
+
+theorem BitW.push_spec {w : BitW} (hw : w.Inv) (b : Bool) :
+    (w.push b).bits = w.bits ++ [b] ∧ (w.push b).Inv := by
+  obtain ⟨hk, hc⟩ := hw
+  have hs := natBits_snoc hc b
+  have hlt : w.cur + (if b then 2 ^ w.k else 0) < 2 ^ (w.k + 1) := by
+    rw [Nat.pow_succ]; cases b <;> simp <;> omega
+  have hp : w.push b = if w.k = 7 then ⟨w.done.push (w.cur + (if b then 2 ^ w.k else 0)).toUInt8, 0, 0⟩
+      else ⟨w.done, w.cur + (if b then 2 ^ w.k else 0), w.k + 1⟩ := rfl
+  generalize w.cur + (if b then 2 ^ w.k else 0) = x at hs hlt hp
+  rw [hp]
+  by_cases h7 : w.k = 7
+  · rw [if_pos h7]
+    rw [h7] at hs hlt
+    have hs8 : natBits 8 x = natBits 7 w.cur ++ [b] := hs
+    refine ⟨?_, by simp [Inv]⟩
+    simp only [bits, Array.toList_push, fromBytes_append, fromBytes, List.append_nil, h7]
+    rw [toUInt8_toNat_of_lt (by simpa using hlt), hs8]
+    simp [natBits]
+  · rw [if_neg h7]
+    exact ⟨by simp only [bits, hs, List.append_assoc], ⟨show w.k + 1 < 8 by omega, hlt⟩⟩
+
+theorem BitW.pushAll_spec : ∀ (e : List Bool) {w : BitW}, w.Inv →
+    (w.pushAll e).bits = w.bits ++ e ∧ (w.pushAll e).Inv
+  | [], _, hw => by simp [pushAll, hw]
+  | b :: e, w, hw => by
+    obtain ⟨h1, h2⟩ := w.push_spec hw b
+    obtain ⟨h3, h4⟩ := pushAll_spec e h2
+    exact ⟨by simp [pushAll, h3, h1], h4⟩
+
+theorem toBytesAux_fromBytes : ∀ (L : List UInt8) (k c f : Nat), k < 8 → c < 2 ^ k →
+    L.length + (if k = 0 then 0 else 1) ≤ f →
+    toBytesAux f (fromBytes L ++ natBits k c) = L ++ (if k = 0 then [] else [c.toUInt8])
+  | [], k, c, f, hk, hc, hf => by
+    by_cases h0 : k = 0
+    · subst h0; cases f <;> simp [fromBytes, natBits, toBytesAux]
+    · obtain ⟨f, rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by simp [h0] at hf; omega⟩
+      have hl := natBits_length k c
+      have hne : natBits k c ≠ [] := by intro h; rw [h] at hl; simp at hl; omega
+      simp only [fromBytes, List.nil_append, toBytesAux, hne, if_false, h0,
+        List.take_of_length_le (show (natBits k c).length ≤ 8 by omega),
+        List.drop_of_length_le (show (natBits k c).length ≤ 8 by omega), ofBits_natBits,
+        Nat.mod_eq_of_lt hc]
+      cases f <;> simp [toBytesAux]
+  | b :: L, k, c, f, hk, hc, hf => by
+    obtain ⟨f, rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by simp at hf; omega⟩
+    have hl : (natBits 8 b.toNat).length = 8 := natBits_length 8 _
+    have hne : natBits 8 b.toNat ++ (fromBytes L ++ natBits k c) ≠ [] := by
+      intro h; have := congrArg List.length h; simp [hl] at this
+    simp only [fromBytes, List.append_assoc, toBytesAux, hne, if_false,
+      List.take_left' hl, List.drop_left' hl, ofBits_natBits]
+    rw [toBytesAux_fromBytes L k c f hk hc (by simp at hf; omega)]
+    simp
+
+theorem BitW.finish_eq {w : BitW} (hw : w.Inv) : w.finish = toBytes w.bits := by
+  have hl : w.bits.length = 8 * w.done.toList.length + w.k := by
+    simp [bits, length_fromBytes, natBits_length]
+  unfold toBytes
+  rw [hl]
+  unfold bits
+  rw [toBytesAux_fromBytes _ _ _ _ hw.1 hw.2 (by split <;> omega), finish]
+  split <;> simp
+
+/-- `jamAux` with the table in a `Std.HashMap` and the bits written straight
+into bytes; returns the writer, the table and the next bit position. The tail is
+a tail call, so a list jams in constant stack. -/
+def jamFastAux : Noun → FastTable → Nat → BitW → BitW × FastTable × Nat
+  | n@(atom a), M, pos, w =>
+    match M[n]? with
+    | some p =>
+      if bitLen a ≤ bitLen p then
+        let e := false :: mat a; (w.pushAll e, M, pos + e.length)
+      else
+        let e := true :: true :: mat p; (w.pushAll e, M, pos + e.length)
+    | none => let e := false :: mat a; (w.pushAll e, M.insert n pos, pos + e.length)
+  | n@(cell h t), M, pos, w =>
+    match M[n]? with
+    | some p => let e := true :: true :: mat p; (w.pushAll e, M, pos + e.length)
+    | none =>
+      let rh := jamFastAux h (M.insert n pos) (pos + 2) ((w.push true).push false)
+      jamFastAux t rh.2.1 rh.2.2 rh.1
+
+/-- `jam` computed through `jamFastAux`. -/
+def jamFast (n : Noun) : List UInt8 := (jamFastAux n ∅ 0 ⟨#[], 0, 0⟩).1.finish
+
+/-- The hash table never lies: under a table that answers as the list table,
+`jamFastAux` writes exactly `jamAux`'s bits, advances the position by their
+length, and leaves a table that again answers as `jamAux`'s. -/
+theorem jamFastAux_spec : ∀ (n : Noun) (M : FastTable) (m : JamTable) (pos : Nat) (w : BitW),
+    w.Inv → (∀ a, M[a]? = lookupPos a m) →
+    (jamFastAux n M pos w).1.bits = w.bits ++ (jamAux n m pos).1 ∧
+    (jamFastAux n M pos w).1.Inv ∧
+    (jamFastAux n M pos w).2.2 = pos + (jamAux n m pos).1.length ∧
+    ∀ a, (jamFastAux n M pos w).2.1[a]? = lookupPos a (jamAux n m pos).2
+  | atom x, M, m, pos, w, hw, hM => by
+    simp only [jamFastAux, jamAux, hM (atom x)]
+    split
+    · split
+      · exact ⟨(w.pushAll_spec _ hw).1, (w.pushAll_spec _ hw).2, rfl, hM⟩
+      · exact ⟨(w.pushAll_spec _ hw).1, (w.pushAll_spec _ hw).2, rfl, hM⟩
+    · exact ⟨(w.pushAll_spec _ hw).1, (w.pushAll_spec _ hw).2, rfl, fastTable_insert hM _ _⟩
+  | cell h t, M, m, pos, w, hw, hM => by
+    simp only [jamFastAux, jamAux, hM (cell h t)]
+    split
+    · exact ⟨(w.pushAll_spec _ hw).1, (w.pushAll_spec _ hw).2, rfl, hM⟩
+    · obtain ⟨p1, i1⟩ := w.push_spec hw true
+      obtain ⟨p2, i2⟩ := (w.push true).push_spec i1 false
+      obtain ⟨h1, hi, h2, h3⟩ := jamFastAux_spec h _ _ (pos + 2) _ i2
+        (fastTable_insert hM (cell h t) pos)
+      rw [h2]
+      obtain ⟨t1, ti, t2, t3⟩ := jamFastAux_spec t _ _ _ _ hi h3
+      refine ⟨?_, ti, ?_, t3⟩
+      · rw [t1, h1, p2, p1]; simp
+      · rw [t2]; simp; omega
+
+/-- Compiled code runs `jamFast` for `jam`. -/
+@[csimp] theorem jam_eq_jamFast : @jam = @jamFast := by
+  funext n
+  have h0 : BitW.Inv ⟨#[], 0, 0⟩ := ⟨by decide, by decide⟩
+  obtain ⟨h1, hi, -, -⟩ := jamFastAux_spec n ∅ [] 0 _ h0 (by intro a; simp [lookupPos])
+  rw [jamFast, BitW.finish_eq hi, h1]
+  rfl
+
+/-- The byte string `jam` produces for the noun it cues to. -/
+def canonical (bs : List UInt8) : Bool := (cue bs).map jam == some bs
+
+
 /-! ## The round trip -/
 
 /-- **cue ∘ jam = id**: Hoon's codec, back-references included, decodes what it
@@ -874,6 +1500,66 @@ theorem edit_into_atom_refused : edit 2 (atom 9) (atom 1) = none := by decide
 #guard_msgs (whitespace := lax) in #print axioms edit_zero_refused
 /-- info: 'Minidregg.Theory.Noun.edit_into_atom_refused' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms edit_into_atom_refused
+
+/-! Pins for the mug / fast-codec layer. -/
+/-- info: 'Minidregg.Theory.Noun.decEq_eq_decEqFast' depends on axioms: [Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decEq_eq_decEqFast
+/-- info: 'Minidregg.Theory.Noun.eq_iff_mugEq_and_structEq' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms eq_iff_mugEq_and_structEq
+/-- info: 'Minidregg.Theory.Noun.ne_of_mug_ne' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms ne_of_mug_ne
+/-- info: 'Minidregg.Theory.Noun.bitLen_eq_bitLenFast' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bitLen_eq_bitLenFast
+/-- info: 'Minidregg.Theory.Noun.natBitsLoop_eq' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms natBitsLoop_eq
+/-- info: 'Minidregg.Theory.Noun.natBits_add' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms natBits_add
+/-- info: 'Minidregg.Theory.Noun.natBits_mod' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms natBits_mod
+/-- info: 'Minidregg.Theory.Noun.natBits_eq_natBitsFast' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms natBits_eq_natBitsFast
+/-- info: 'Minidregg.Theory.Noun.getElem?_natBits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms getElem?_natBits
+/-- info: 'Minidregg.Theory.Noun.length_fromBytes' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms length_fromBytes
+/-- info: 'Minidregg.Theory.Noun.getElem?_fromBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms getElem?_fromBytes
+/-- info: 'Minidregg.Theory.Noun.getBit_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms getBit_eq
+/-- info: 'Minidregg.Theory.Noun.countZerosF_eq' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms countZerosF_eq
+/-- info: 'Minidregg.Theory.Noun.readBits_eq_loop' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms readBits_eq_loop
+/-- info: 'Minidregg.Theory.Noun.readValLoop_add' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms readValLoop_add
+/-- info: 'Minidregg.Theory.Noun.readVal_eq' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms readVal_eq
+/-- info: 'Minidregg.Theory.Noun.rubF_eq' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rubF_eq
+/-- info: 'Minidregg.Theory.Noun.CueRel.insert' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms CueRel.insert
+/-- info: 'Minidregg.Theory.Noun.decodeF_rel' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms decodeF_rel
+/-- info: 'Minidregg.Theory.Noun.cue_eq_cueFast' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cue_eq_cueFast
+/-- info: 'Minidregg.Theory.Noun.fastTable_insert' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fastTable_insert
+/-- info: 'Minidregg.Theory.Noun.natBits_snoc' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms natBits_snoc
+/-- info: 'Minidregg.Theory.Noun.fromBytes_append' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms fromBytes_append
+/-- info: 'Minidregg.Theory.Noun.BitW.push_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BitW.push_spec
+/-- info: 'Minidregg.Theory.Noun.BitW.pushAll_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BitW.pushAll_spec
+/-- info: 'Minidregg.Theory.Noun.toBytesAux_fromBytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms toBytesAux_fromBytes
+/-- info: 'Minidregg.Theory.Noun.BitW.finish_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms BitW.finish_eq
+/-- info: 'Minidregg.Theory.Noun.jamFastAux_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms jamFastAux_spec
+/-- info: 'Minidregg.Theory.Noun.jam_eq_jamFast' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms jam_eq_jamFast
 
 end Noun
 end Minidregg.Theory
