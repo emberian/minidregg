@@ -4,18 +4,21 @@
 The note-spend core already fixes the semantic request, checked completion,
 eager nullifier, and typed spend effect, but previously quantified over an
 arbitrary `ComputationCellEffect.Adapter`.  This module supplies one concrete
-adapter.  Its cell is deliberately coarse grained: one typed slot records the
-complete effect list together with the request commitment and the checked
-output representation.  The core declaration's `Unit` footprint therefore
-lawfully names the exact singleton mutation for every request.
+adapter.  Its cell is deliberately coarse grained: one append-only typed slot
+records the complete effect list together with the request commitment and the
+checked output representation.  The core declaration's `Unit` footprint
+therefore lawfully names the exact singleton allocation for every request, and
+a spent cell refuses a second spend.
 
 The request/result codecs below are lawful countable-carrier witnesses, not a
 stable deployed wire format or codec pin.  Consequently this module closes the
 semantic adapter/patch boundary while leaving codec deployment explicit.
 
-The patch's expected pre-root is the canonical `Digest` embedding of the
-note-spend public root.  A validated patch consequently joins that public root,
-the common request pre-root, and the materialized cell root.  The positive path
+The kernel token validates the patch at the common request's pre-root, which
+is the materialized cell root.  `RootBoundAccepted` additionally binds the
+canonical `Digest` embedding of the note-spend public root to that same root,
+so an accepted spend joins the public root, the common request pre-root, and
+the materialized cell root.  The positive path
 still consumes exactly one common `Authorized` token and is necessarily sealed;
 the computation family has no release carrier.  Proof-suite semantics remain
 conditional on the separately indexed controller admission laws.
@@ -58,17 +61,17 @@ deriving DecidableEq, Repr
 
 /-- `Footprint = Unit` means the honest concrete realization is one coarse
 typed slot.  It avoids pretending that a request-independent footprint can
-name dynamically addressed nullifier and commitment keys. -/
-def schema : CellState.Schema where
-  Field := Unit
-  FieldType := fun _ => CellValue
-  Resource := Empty
-  ResourceType := Empty.elim
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
+name dynamically addressed nullifier and commitment keys.  The slot is
+append-only: the adapter's patch cannot depend on the prior value, so the one
+guarded write it can make is an allocation. -/
+abbrev layout : Theory.Store.Layout.{0, 0, 0} where
+  Namespace := Unit
+  Key := fun _ => Unit
+  Value := fun _ => CellValue
+  discipline := fun _ => .appendOnly
 
-instance : DecidableEq schema.Field := inferInstanceAs (DecidableEq Unit)
-instance : DecidableEq schema.Resource := fun resource => resource.elim
+/-- The spend slot. -/
+def spendAddress : Theory.Store.Address layout := ⟨(), ()⟩
 
 deriving instance Countable for
   Minidregg.Assurance.NoteSpendCoreAcceptedCellEffect.Program
@@ -215,27 +218,24 @@ def cellValue (request : SpendRequest) (result : SpendResult) : CellValue where
   requestOutputCommitment := request.outputCommitment
   outputRepresentation := result.outputRepresentation
 
-/-- One exact singleton patch.  The result is retained in the cell value, but
-only a checked completion may later identify it with the request commitment. -/
+/-- One exact singleton allocation.  The result is retained in the cell value,
+but only a checked completion may later identify it with the request
+commitment. -/
 def spendPatch (request : SpendRequest) (result : SpendResult) :
-    CellState.Patch schema Digest where
-  expectedPreRoot := rootDigest request.inputValue.root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := some (cellValue request result) }]
-  resourceWrites := []
+    Theory.Store.Patch layout :=
+  [.allocate () () (cellValue request result)]
 
 /-- Exact realization relation used by the generic kernel adapter.  It says
 only that this is the one patch constructed from these exact request/result
 values; semantic request restrictions are retained by the accepted wrapper. -/
 def RealizesResourceEffects (request : SpendRequest) (result : SpendResult)
-    (patch : CellState.Patch schema Digest) : Prop :=
+    (patch : Theory.Store.Patch layout) : Prop :=
   patch = spendPatch request result
 
 /-- The caller selects the complete first-order authority scope independently
 of the submitted request; acceptance below checks that request against it. -/
 noncomputable def adapter (requestContext : EffectRequestContext) :
-    ComputationCellEffect.Adapter (S := schema) declaration where
+    ComputationCellEffect.Adapter (L := layout) declaration where
   requestContext := requestContext
   requestCodec := requestCodec
   resultCodec := resultCodec
@@ -243,16 +243,12 @@ noncomputable def adapter (requestContext : EffectRequestContext) :
   effectIntentCodec := effectIntentCodec
   effectDigestBytes := effectDigestBytes
   patch := spendPatch
-  fieldFootprint := fun _ => {()}
-  resourceFootprint := fun _ => ∅
+  footprint := fun _ => {spendAddress}
   RealizesResourceEffects := RealizesResourceEffects
   resourceEffectsRealized := by
     intro request result
     rfl
-  fieldFootprintExact := by
-    intro request result
-    rfl
-  resourceFootprintExact := by
+  footprintExact := by
     intro request result
     rfl
 
@@ -273,14 +269,29 @@ variable {requestContext : EffectRequestContext}
         (request.resourceEffects, request.footprint, request.nullifier)) :=
   rfl
 
+/-! ## The public root is the cell root -/
+
+/-- A concrete accepted note spend whose public note root, embedded as a
+`Digest`, is the root of the cell it is applied to.  The kernel token alone
+binds the common request's pre-root to the cell; this field binds the spend's
+own public root to the same cell. -/
+structure RootBoundAccepted
+    {M : CellState.Materializer layout Digest}
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    (commonRequest : Request kind) (pre : CellState.Materialized M)
+    (request : SpendRequest) (result : SpendResult) where
+  accepted : Accepted (portal := portal) (authState := authState)
+    (adapter requestContext) commonRequest pre request result
+  publicRootBound : rootDigest request.inputValue.root = pre.root
+
 /-! ## The sole positive construction -/
 
 /-- A concrete note spend enters the common kernel through the existing
 positive constructor.  `authorization` is the only transition-authority
-argument; every other premise is exact data, checked completion, or validated
-patch evidence. -/
+argument; every other premise is exact data, checked completion, validated
+patch evidence, or the public-root binding. -/
 def accept
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -291,44 +302,44 @@ def accept
       commonRequest.argsDigest = (adapter requestContext).completeRequestDigest request)
     (effectsDigestBound :
       commonRequest.effectsDigest = (adapter requestContext).completeEffectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : declaration.Completion request result)
     (resourceEffectsExact : request.resourceEffects = [intendedEffect request])
     (eagerNullifierExact : request.nullifier = some request.inputValue.nullifier)
-    (validated : CellState.ValidatedPatch M pre
+    (publicRootBound : rootDigest request.inputValue.root = pre.root)
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       ((adapter requestContext).patch request result)) :
-    Accepted (portal := portal) (authState := authState)
-      (adapter requestContext) commonRequest pre request result :=
-  NoteSpendCoreAcceptedCellEffect.accept (adapter requestContext) authorization requestBound
-    argsDigestBound effectsDigestBound preRootBound completion
+    RootBoundAccepted (requestContext := requestContext) (portal := portal)
+      (authState := authState) commonRequest pre request result where
+  accepted := NoteSpendCoreAcceptedCellEffect.accept (adapter requestContext)
+    authorization requestBound argsDigestBound effectsDigestBound completion
     resourceEffectsExact eagerNullifierExact validated
+  publicRootBound := publicRootBound
 
 /-! ## Exact patch and kernel bindings -/
 
 theorem accepted_preRoot_exact
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
-    (accepted : Accepted (portal := portal) (authState := authState)
-      (adapter requestContext) commonRequest pre request result) :
-    pre.root = rootDigest request.inputValue.root := by
-  have bound := accepted.computation.cellEffect.validated.preRoot_bound
-  exact bound.symm
+    (accepted : RootBoundAccepted (requestContext := requestContext)
+      (portal := portal) (authState := authState) commonRequest pre request result) :
+    pre.root = rootDigest request.inputValue.root :=
+  accepted.publicRootBound.symm
 
 theorem accepted_commonPreRoot_exact
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
-    (accepted : Accepted (portal := portal) (authState := authState)
-      (adapter requestContext) commonRequest pre request result) :
+    (accepted : RootBoundAccepted (requestContext := requestContext)
+      (portal := portal) (authState := authState) commonRequest pre request result) :
     commonRequest.preStateRoot = rootDigest request.inputValue.root :=
-  accepted.computation.cellEffect.preRootBound.trans
+  accepted.accepted.computation.cellEffect.preRootBound.trans
     (accepted_preRoot_exact accepted)
 
 theorem accepted_cellValue_exact
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -347,31 +358,55 @@ theorem accepted_cellValue_exact
   simp [cellValue, accepted.resourceEffectsExact]
 
 theorem accepted_patch_exact
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (accepted : Accepted (portal := portal) (authState := authState)
       (adapter requestContext) commonRequest pre request result) :
     (adapter requestContext).patch request result =
-      { expectedPreRoot := rootDigest request.inputValue.root
-        fieldFootprint := {()}
-        resourceFootprint := ∅
-        fieldWrites := [{
-          field := ()
-          value := some {
-            effects := [intendedEffect request]
-            requestOutputCommitment := request.outputCommitment
-            outputRepresentation := ⟨request.outputCommitment⟩ } }]
-        resourceWrites := [] } := by
+      [.allocate () ()
+        { effects := [intendedEffect request]
+          requestOutputCommitment := request.outputCommitment
+          outputRepresentation := ⟨request.outputCommitment⟩ }] := by
   rw [adapter_patch]
   unfold spendPatch
   rw [accepted_cellValue_exact accepted]
 
+/-- The accepted post holds the spend record in the spend slot. -/
+theorem accepted_post_holds_spend
+    {M : CellState.Materializer layout Digest}
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : SpendRequest} {result : SpendResult}
+    (accepted : Accepted (portal := portal) (authState := authState)
+      (adapter requestContext) commonRequest pre request result) :
+    accepted.computation.cellEffect.prepared.post.logical spendAddress =
+      some (cellValue request result) :=
+  Theory.Store.Store.set_eq _ _ _
+
+/-- A spent cell refuses a second spend: the append-only allocation guard
+fails at the accepted post, for every request and result. -/
+theorem spent_cell_refuses_spend
+    {M : CellState.Materializer layout Digest}
+    {portal : Portal} {authState : AuthState} {kind : ResourceKind}
+    {commonRequest : Request kind} {pre : CellState.Materialized M}
+    {request : SpendRequest} {result : SpendResult}
+    (accepted : Accepted (portal := portal) (authState := authState)
+      (adapter requestContext) commonRequest pre request result)
+    (request' : SpendRequest) (result' : SpendResult) :
+    ¬ Theory.Store.Patch.ValidFrom accepted.computation.cellEffect.prepared.post.logical
+      ((adapter requestContext).patch request' result') := by
+  rintro ⟨⟨_, fresh⟩, _⟩
+  have present := accepted_post_holds_spend accepted
+  rw [show accepted.computation.cellEffect.prepared.post.logical spendAddress = none
+    from fresh] at present
+  cases present
+
 /-! ## Mismatch, replay, and disclosure teeth -/
 
 theorem no_accepted_of_args_mismatch
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -382,7 +417,7 @@ theorem no_accepted_of_args_mismatch
   ⟨fun accepted => mismatch accepted.computation.argsDigestBound⟩
 
 theorem no_accepted_of_effects_mismatch
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -393,18 +428,18 @@ theorem no_accepted_of_effects_mismatch
   ⟨fun accepted => mismatch accepted.computation.cellEffect.effectsDigestBound⟩
 
 theorem no_accepted_of_preRoot_mismatch
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (mismatch : commonRequest.preStateRoot ≠
       rootDigest request.inputValue.root) :
-    IsEmpty (Accepted (portal := portal) (authState := authState)
-      (adapter requestContext) commonRequest pre request result) :=
+    IsEmpty (RootBoundAccepted (requestContext := requestContext) (portal := portal)
+      (authState := authState) commonRequest pre request result) :=
   ⟨fun accepted => mismatch (accepted_commonPreRoot_exact accepted)⟩
 
 theorem no_accepted_of_resourceEffects_mismatch
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -414,7 +449,7 @@ theorem no_accepted_of_resourceEffects_mismatch
   ⟨fun accepted => mismatch accepted.resourceEffectsExact⟩
 
 theorem no_accepted_of_nullifier_mismatch
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -424,7 +459,7 @@ theorem no_accepted_of_nullifier_mismatch
   ⟨fun accepted => mismatch accepted.eagerNullifierExact⟩
 
 theorem no_accepted_of_outputCommitment_mismatch
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -437,7 +472,7 @@ theorem no_accepted_of_outputCommitment_mismatch
 /-- The same authorized common request cannot be replayed against a cell with
 a different canonical root. -/
 theorem no_replay_at_different_preRoot
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind}
     {pre replayedPre : CellState.Materialized M}
@@ -454,7 +489,7 @@ theorem no_replay_at_different_preRoot
     accepted.computation.cellEffect.preRootBound
 
 theorem accepted_disclosure_sealed
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -464,7 +499,7 @@ theorem accepted_disclosure_sealed
   accepted.computation.disclosure_sealed
 
 theorem accepted_has_no_release
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
     (release : (ComputationCellEffect.family (M := M) declaration (adapter requestContext) pre).Release
@@ -478,7 +513,7 @@ cell effect is an index, so admission cannot substitute a second authorization,
 patch, request, or pre-state. -/
 structure SemanticAcceptedCellEffect
     {Omega : Type} [Fintype Omega]
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -494,7 +529,7 @@ structure SemanticAcceptedCellEffect
 namespace SemanticAcceptedCellEffect
 
 variable {Omega : Type} [Fintype Omega]
-variable {M : CellState.Materializer schema Digest}
+variable {M : CellState.Materializer layout Digest}
 variable {portal : Portal} {authState : AuthState} {kind : ResourceKind}
 variable {commonRequest : Request kind} {pre : CellState.Materialized M}
 variable {request : SpendRequest} {result : SpendResult}
@@ -517,7 +552,8 @@ def authorization
 accepted cell effect. -/
 def validatedPatch
     (_semantic : SemanticAcceptedCellEffect accepted bound ledger laws omega) :
-    CellState.ValidatedPatch M pre ((adapter requestContext).patch request result) :=
+    CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      ((adapter requestContext).patch request result) :=
   accepted.validatedPatch
 
 theorem validSpend
@@ -548,7 +584,7 @@ conditional semantic wrapper.  The concrete patch does not weaken the suite
 migration obstruction. -/
 theorem no_current_semanticAcceptedCellEffect
     {Omega : Type} [Fintype Omega]
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : SpendRequest} {result : SpendResult}
@@ -568,6 +604,10 @@ theorem no_current_semanticAcceptedCellEffect
 
 /-- info: 'Minidregg.Assurance.NoteSpendConcreteCellAdapter.accepted_patch_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms accepted_patch_exact
+/-- info: 'Minidregg.Assurance.NoteSpendConcreteCellAdapter.spent_cell_refuses_spend' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms spent_cell_refuses_spend
+/-- info: 'Minidregg.Assurance.NoteSpendConcreteCellAdapter.no_accepted_of_preRoot_mismatch' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms no_accepted_of_preRoot_mismatch
 /-- info: 'Minidregg.Assurance.NoteSpendConcreteCellAdapter.no_replay_at_different_preRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_replay_at_different_preRoot
 /-- info: 'Minidregg.Assurance.NoteSpendConcreteCellAdapter.SemanticAcceptedCellEffect.validSpend' depends on axioms: [propext, Classical.choice, Quot.sound] -/
