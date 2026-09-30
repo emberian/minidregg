@@ -211,14 +211,23 @@ for inserted in "${inserted_modules[@]+"${inserted_modules[@]}"}"; do
   done
 done
 
-for command in git jq lake file find sort join comm xargs shasum uname cmp head awk uniq realpath; do
+for command in jq lake file find sort join comm xargs shasum uname cmp head awk uniq realpath; do
   command -v "$command" >/dev/null 2>&1 || {
     printf 'build-native-host: required command not found: %s\n' "$command" >&2
     exit 69
   }
 done
 
-root=$(git rev-parse --show-toplevel)
+# The source root is this script's parent directory. It is a git checkout only
+# when git names that same directory as its top level: an extracted
+# `git archive` tree has no .git (and may sit inside an unrelated repository),
+# so its provenance is the archive hash recorded by the caller, not git metadata.
+root=$(cd "$(dirname "$0")/.." && pwd -P)
+if [[ "$(git -C "$root" rev-parse --show-toplevel 2>/dev/null)" == "$root" ]]; then
+  source_git=1
+else
+  source_git=0
+fi
 cd "$root"
 
 case "$(uname -s):$(uname -m)" in
@@ -1601,11 +1610,17 @@ fi
 if [[ "$build_umbrella" == 1 ]]; then
   shasum -a 256 "$umbrella_closure" >> "$output_dir/artifact-sha256.txt"
 fi
-git status --short > "$output_dir/git-status.txt"
+if [[ "$source_git" == 1 ]]; then
+  git status --short > "$output_dir/git-status.txt"
+fi
 {
   printf 'end_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'elapsed_seconds=%s\n' "$(( $(date +%s) - start_epoch ))"
-  printf 'git_head=%s\n' "$(git rev-parse HEAD)"
+  if [[ "$source_git" == 1 ]]; then
+    printf 'git_head=%s\n' "$(git rev-parse HEAD)"
+  else
+    printf 'git_head=none (source tree is not a git checkout)\n'
+  fi
   printf 'root=%s\n' "$root"
   printf 'lean=%s\n' "$(lean --version | sed -n '1p')"
   printf 'toolchain=%s\n' "$toolchain"

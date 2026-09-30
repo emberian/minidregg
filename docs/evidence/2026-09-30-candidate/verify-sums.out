@@ -1,0 +1,11 @@
+bin/minidregg-host: OK
+bin/mini: OK
+bin/minidregg-link-sqlite-store: OK
+bin/minidregg-credential-signature-verifier: OK
+provenance.json: OK
+run.sh: OK
+lib.sh: OK
+INTERFACES.md: OK
+genesis-params.example.json: OK
+source.tar: OK
+logs/source-files.sha256: OK

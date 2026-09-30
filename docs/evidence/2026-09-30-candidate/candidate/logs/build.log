@@ -1,0 +1,10 @@
+2026-09-30T07:51:59Z source commit=45a99743272e6601a22a75b98367abbc84d4af44 archive_sha256=b5ea20b156a369b6ee5bc082b568088bf76647d5d15b3665dec62f550c513652 origin=supplied-archive
+info: syncing channel updates for nightly-2026-06-21-x86_64-unknown-linux-gnu
+
+  nightly-2026-06-21-x86_64-unknown-linux-gnu unchanged - rustc 1.98.0-nightly (8b6558a02 2026-06-20)
+
+2026-09-30T07:52:00Z lean=Lean (version 4.30.0, x86_64-unknown-linux-gnu, commit d024af099ca4bf2c86f649261ebf59565dc8c622, Release) rust=nightly-2026-06-21
+2026-09-30T07:53:57Z lean packages + mathlib cache: 117s
+2026-09-30T08:21:06Z native Host: 1629s
+2026-09-30T08:21:52Z Rust binaries: 46s
+2026-09-30T08:21:56Z done: $FRESH/candidate/manifest.json
