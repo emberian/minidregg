@@ -25,6 +25,14 @@ identity, not a resource grant. Initialize the new workspace with
 `--enrollment ATTEMPT/enrollment.json` instead of `--key` and `--subject`. The
 client verifies the retained key matches the result's public key.
 
+A principal whose key and subject number belong to another Store (the owner of a
+selected release, for example) is enrolled as a *home identity*. Pass
+`--new-public-key PUB --home-subject N` instead of `--new-key`. The principal
+runs `mini enroll --action possess --dir ATTEMPT --key KEY --subject N --output SIG`
+in its own process, and the sponsor seals with `--possession-signature SIG`.
+The result records `keyPath: null`, so it does not initialize a workspace. See
+[SELECTED-EXCHANGE.md](SELECTED-EXCHANGE.md#two-stores-with-independent-credentials).
+
 ```sh
 mini workspace --action init --dir /private/alice/workspace \
   --host /absolute/minidregg-host --config /absolute/pinned-config.json \
