@@ -1,0 +1,9 @@
+{
+  "type": "mini-hermes-role-budget-v1",
+  "role": "runner",
+  "fund": "100",
+  "feePerOperation": "tariff.base",
+  "tariffBaseObserved": "3",
+  "maxCostPerTurn": "50000",
+  "whenEmpty": "bookRefused at plan; Hermes stops writing and says so in its stream"
+}

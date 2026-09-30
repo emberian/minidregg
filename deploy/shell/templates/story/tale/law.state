@@ -1,0 +1,9 @@
+any [ subject == {GM}, not (verb == 2) ];
+any [ field 0 in {0,1,2,3,4}, not (verb == 2) ];
+any [ field 0 monotone, not (verb == 2) ];
+any [ field 0 delta == 0,
+      all [ field 0 before == 0, field 0 after == 1 ],
+      all [ field 0 before == 1, field 0 after == 2 ],
+      all [ field 0 before == 1, field 0 after == 3 ],
+      all [ field 0 before == 3, field 0 after == 4 ],
+      not (verb == 2) ]

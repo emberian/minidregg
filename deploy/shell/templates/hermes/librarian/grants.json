@@ -1,0 +1,18 @@
+{
+  "type": "mini-hermes-role-grants-v1",
+  "role": "librarian",
+  "placeholders": {
+    "{ROOM}": "the room name given to summon",
+    "{H}": "Hermes's subject, decimal, from enroll-or-reuse",
+    "{CELL}": "each name in the room's cell list at summon time"
+  },
+  "delegate": [
+    {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{ROOM}-index","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"},
+    {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{ROOM}-digest","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}
+  ],
+  "delegateEach": [
+    {"over": "room cells except {ROOM}-index and {ROOM}-digest",
+     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{CELL}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}}
+  ],
+  "own": ["{ROOM}-stream-{H}"]
+}

@@ -1,0 +1,14 @@
+any [ subject == {S}, not (verb == 2) ];
+any [ all [ field 0 in {0,1,2,3,4}, field 1 in {0,1} ], not (verb == 2) ];
+any [ field 0 monotone, not (verb == 2) ];
+any [ field 0 delta == 0,
+      all [ field 0 before == 0, field 0 after == 1 ],
+      all [ field 0 before == 1, field 0 after == 2 ],
+      all [ field 0 before == 1, field 0 after == 3 ],
+      all [ field 0 before == 3, field 0 after == 4 ],
+      not (verb == 2) ];
+any [ not (field 0 after == 4), field 1 before == 1, not (verb == 2) ];
+any [ field 1 writeOnce, not (verb == 2) ];
+any [ field 1 delta == 0, all [ field 0 before == 1, field 0 delta == 0 ], not (verb == 2) ];
+any [ not (field 1 after == 1), field 1 before == 0, not (field 0 delta == 0), not (verb == 2) ];
+any [ not (field 0 delta == 0), not (field 1 delta == 0), not (verb == 2) ]

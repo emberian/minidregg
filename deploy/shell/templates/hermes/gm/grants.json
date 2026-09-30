@@ -1,0 +1,23 @@
+{
+  "type": "mini-hermes-role-grants-v1",
+  "role": "gm",
+  "placeholders": {
+    "{STORY}": "the story room name given to summon",
+    "{H}": "Hermes's subject, decimal, from enroll-or-reuse",
+    "{N}": "each scene number in story.json",
+    "{S}": "each invited player's subject"
+  },
+  "delegate": [
+    {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-state","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}
+  ],
+  "delegateEach": [
+    {"over": "scenes in story.json",
+     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-scene-{N}","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}},
+    {"over": "invited players",
+     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-player-{S}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}},
+    {"over": "invited players",
+     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-stream-{S}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}}
+  ],
+  "own": ["{STORY}-stream-{H}"],
+  "relaw": ["state", "scene"]
+}
