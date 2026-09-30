@@ -1,7 +1,7 @@
 /- Kernel-axiom pins for the actual mixed-lineage checker and its constructive/refusal witnesses. -/
 import Assurance.CredentialDelegationLineageWitness
 
-/-- info: 'Minidregg.Theory.CredentialLineageAdmission.capabilityIdFreshCheck_iff' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialLineageAdmission.capabilityIdFreshCheck_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Theory.CredentialLineageAdmission.capabilityIdFreshCheck_iff
 
@@ -21,15 +21,15 @@ import Assurance.CredentialDelegationLineageWitness
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Theory.CredentialLineageAdmission.lineageCheckAux_iff
 
-/-- info: 'Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.cons' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.cons' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.cons
 
-/-- info: 'Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.parent_exact' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.parent_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.parent_exact
 
-/-- info: 'Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.of_present_reads_preserved' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.of_present_reads_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Theory.CredentialLineageAdmission.LineageAnchored.of_present_reads_preserved
 

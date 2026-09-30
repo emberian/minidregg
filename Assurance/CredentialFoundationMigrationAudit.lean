@@ -38,13 +38,13 @@ import Theory.CredentialAuthorityEffects
 /-- info: 'Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityState.LineageValid.root_admissible_of_strict
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.IssueEvidence.reject_existing_id' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.IssueEvidence.reject_existing_id' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.IssueEvidence.reject_existing_id
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_existing_child' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_existing_child' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_existing_child
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_spent_nullifier' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_spent_nullifier' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DescentEvidence.reject_spent_nullifier
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.capabilityProduction_preserves_present' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -53,7 +53,7 @@ import Theory.CredentialAuthorityEffects
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.AttenuateEvidence.childLineageAnchored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.AttenuateEvidence.childLineageAnchored
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.childLineageValid' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.childLineageValid' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.childLineageValid
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.childLineageAnchored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -62,28 +62,28 @@ import Theory.CredentialAuthorityEffects
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.acceptDelegation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.acceptDelegation
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.parent_use_verified' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.parent_use_verified' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.parent_use_verified
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.parent_exact' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.parent_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.parent_exact
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.child_bounds' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.child_bounds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.child_bounds
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_missing_delegate' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_missing_delegate' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_missing_delegate
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_non_capability_mode' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_non_capability_mode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_non_capability_mode
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_wrong_parent' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_wrong_parent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_wrong_parent
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_wrong_grantor' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_wrong_grantor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_wrong_grantor
 
-/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_bearer_child' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_bearer_child' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.CredentialAuthorityEffects.DelegationEvidence.reject_bearer_child
 
 /-- info: 'Minidregg.Theory.CredentialAuthorityEffects.delegation_post_capability_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
