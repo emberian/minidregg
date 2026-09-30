@@ -1,7 +1,7 @@
 /-
 An application session is a revocable Mini object, distinct from the shared
 application lifecycle and from a transport connection. The consensus declared
-page has four entries. Its final entry is a checked finite encoding of the
+record has four fields in the declared-effect store. Its final entry is a checked finite encoding of the
 logical status and Web/API kind; there is no arithmetic alias for invalid tags.
 
 The subject, capability provenance, role assignment and human/agent origin live
@@ -9,7 +9,7 @@ in a separately governed enrollment descriptor. The scalar law alone is not a
 HTTP delivery permit. A special receiver must read that descriptor, current
 app manifest and grants, and recompute effective permissions on each admission.
 -/
-import Kernel.DeclaredResourceProjection
+import Kernel.DeclaredFields
 import Kernel.ResourceTransaction
 import Pred.Core
 
@@ -17,7 +17,7 @@ namespace Minidregg.Kernel.ApplicationGrainSession
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.EffectDeclaration
 open Minidregg.Theory.DeclaredActionLowering
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Theory.Store (Store)
 open Minidregg.Pred
 set_option autoImplicit false
 
@@ -71,40 +71,51 @@ structure State where
 def State.values (s : State) : List Int :=
   [s.app, s.appGeneration, s.generation, tag s.kind s.status]
 
-def key (session field : Nat) : StateKey := .objectField ⟨session⟩ ⟨field⟩
+abbrev key (session field : Nat) : StateKey := DeclaredFields.key session field
 
-def State.page (s : State) (domain : Digest) (session : Nat) : Page :=
-  ⟨domain, session % shardCount,
-    some ⟨key session 0, s.app⟩, some ⟨key session 1, s.appGeneration⟩,
-    some ⟨key session 2, s.generation⟩,
-    some ⟨key session 3, tag s.kind s.status⟩⟩
+/-- The four coordinates in the store's canonical order (fields 1, 2, 3, 0;
+see `DeclaredFields`). -/
+def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
+  [(1,s.appGeneration),(2,s.generation),(3,tag s.kind s.status),(0,s.app)]
 
-def initialPage (domain : Digest) (session app : Nat) (kind : Kind) : Page :=
-  (⟨app, 0, 0, .inactive, kind⟩ : State).page domain session
+theorem State.coordinates_four (s : State) :
+    s.coordinates = DeclaredFields.four s.app s.appGeneration s.generation (tag s.kind s.status) :=
+  rfl
 
-def readState (session : Nat) (page : Page) : Option State := do
-  let read := fun n => (page.entries.find? (fun e => e.key == key session n)).map (·.value)
+/-- The session resource as a declared-effect store: exactly its four fields. -/
+def State.store (s : State) (session : Nat) : Store effectLayout :=
+  DeclaredFields.store session s.coordinates
+
+def initialStore (session app : Nat) (kind : Kind) : Store effectLayout :=
+  (⟨app, 0, 0, .inactive, kind⟩ : State).store session
+
+def readState (session : Nat) (store : Store effectLayout) : Option State := do
+  let read := fun n => DeclaredFields.read session n store
   let app ← read 0
   let appGeneration ← read 1
   let generation ← read 2
   let (kind, status) ← decodeTag (← read 3)
   return ⟨app, appGeneration, generation, status, kind⟩
 
+theorem readState_store (session : Nat) (s : State) :
+    readState session (s.store session) = some s := by
+  obtain ⟨r0, r1, r2, r3⟩ :=
+    DeclaredFields.read_four session s.app s.appGeneration s.generation (tag s.kind s.status)
+  simp [readState, State.store, State.coordinates_four, r0, r1, r2, r3, decodeTag_tag]
+
 def actions (session : Nat) (before after : State) : List Action :=
   (List.range 4).zipWith (fun n pair =>
     .write (key session n) (some pair.1) pair.2) (before.values.zip after.values)
 
-def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
-  [(0,s.app),(1,s.appGeneration),(2,s.generation),(3,tag s.kind s.status)]
-
 def slots (before after : State) : List (String × Int) :=
   DeclaredResourceProjection.scalarSlots before.coordinates after.coordinates
 
-theorem page_projection_exact (domain : Digest) (session : Nat) (before after : State) :
-    DeclaredResourceProjection.project session (before.page domain session)
-      (after.page domain session) = slots before after := by
-  simp [DeclaredResourceProjection.project, DeclaredResourceProjection.values,
-    Page.entries, State.page, key, slots, State.coordinates]
+/-- The policy view of a session resource is exactly its four coordinates. -/
+theorem store_projection_exact (session : Nat) (before after : State) :
+    DeclaredResourceProjection.project session (before.store session) (after.store session) =
+      slots before after := by
+  simp only [State.store, slots, State.coordinates_four]
+  exact DeclaredFields.project_four session _ _ _ _ _ _ _ _
 
 private def unchanged (field : Nat) : Pred :=
   .eq (DeclaredResourceProjection.fieldName field "delta") 0

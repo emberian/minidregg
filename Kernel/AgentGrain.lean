@@ -8,7 +8,7 @@ broker must accept only explicitly allocated task resources, never an
 arbitrary caller-authored initial allowance. No field is a policy revision or grant
 revocation generation. A stopped status proves admission fencing, not that
 an external process or provider actually stopped. -/
-import Kernel.DeclaredResourceProjection
+import Kernel.DeclaredFields
 import Kernel.ResourceTransaction
 import Pred.Core
 
@@ -30,27 +30,30 @@ structure State where
 def State.values (s : State) : List Int :=
   [s.generation, s.status, s.remaining, s.reserved]
 
-def key (task : Nat) (field : Nat) : StateKey := .objectField ⟨task⟩ ⟨field⟩
+abbrev key (task : Nat) (field : Nat) : StateKey := DeclaredFields.key task field
 
-/-- The four coordinates in the store's canonical order: the byte order of the
-field keys' encodings, in which field 0 (encoded `[255]`) sorts after 1–3. -/
+/-- The four coordinates in the store's canonical order (fields 1, 2, 3, 0;
+see `DeclaredFields`). -/
 def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
   [(1,s.status),(2,s.remaining),(3,s.reserved),(0,s.generation)]
 
-/-- The task's four fields, in canonical address order. -/
-def State.entries (s : State) (task : Nat) : List (Compiler.StoreCodec.Entry effectLayout) :=
-  s.coordinates.map fun pair => ⟨(key task pair.1).address, pair.2⟩
+theorem State.coordinates_four (s : State) :
+    s.coordinates = DeclaredFields.four s.generation s.status s.remaining s.reserved := rfl
 
-/-- The task resource as a declared-effect store. -/
+/-- The task resource as a declared-effect store: exactly its four fields. -/
 def State.store (s : State) (task : Nat) : Store effectLayout :=
-  Compiler.StoreCodec.fromEntries (s.entries task)
+  DeclaredFields.store task s.coordinates
 
 def initialStore (task budget : Nat) : Store effectLayout :=
   (⟨0, 0, Int.ofNat budget, 0⟩ : State).store task
 
 def readState (task : Nat) (store : Store effectLayout) : Option State := do
-  let read := fun n => (show Option Int from store (key task n).address)
+  let read := fun n => DeclaredFields.read task n store
   return ⟨← read 0, ← read 1, ← read 2, ← read 3⟩
+
+theorem readState_store (task : Nat) (s : State) : readState task (s.store task) = some s := by
+  obtain ⟨r0, r1, r2, r3⟩ := DeclaredFields.read_four task s.generation s.status s.remaining s.reserved
+  simp [readState, State.store, State.coordinates_four, r0, r1, r2, r3]
 
 /-- Every operation compares all four old coordinates, including unchanged
 ones. The generic declared receiver checks these writes against the durable
@@ -67,39 +70,12 @@ def slots (before after : State) : List (String × Int) :=
 
 def project := DeclaredResourceProjection.project
 
-private theorem key_addressKey (task field : Nat) :
-    Compiler.StoreCodec.addressKey Compiler.DeclaredEffectCell.wire (key task field).address =
-      ((0 :: Compiler.Tower256ConcreteBackend.StreamCodec.nat.encode task).map UInt8.toNat) ++
-        (Compiler.Tower256ConcreteBackend.digestStream.encode ⟨field⟩).map UInt8.toNat := by
-  simp [Compiler.StoreCodec.addressKey, Compiler.StoreCodec.addressStream, Compiler.FiniteDependentMapCodec.entryStream,
-    Compiler.DeclaredEffectCell.wire, key, StateKey.address, Compiler.DeclaredEffectCell.stateKeyStream,
-    Compiler.StoreCodec.unitStream, List.map_append]
-
-private theorem field_lt (task i j : Nat)
-    (ordered : (Compiler.Tower256ConcreteBackend.digestStream.encode ⟨i⟩).map UInt8.toNat < (Compiler.Tower256ConcreteBackend.digestStream.encode ⟨j⟩).map UInt8.toNat) :
-    Compiler.StoreCodec.addressKey Compiler.DeclaredEffectCell.wire (key task i).address <
-      Compiler.StoreCodec.addressKey Compiler.DeclaredEffectCell.wire (key task j).address := by
-  rw [key_addressKey, key_addressKey]
-  exact List.append_left_lt ordered
-
-theorem State.entries_ordered (s : State) (task : Nat) :
-    (s.entries task).Pairwise (Compiler.StoreCodec.AddressLT Compiler.DeclaredEffectCell.wire) := by
-  simp only [State.entries, State.coordinates, List.map_cons, List.map_nil]
-  refine List.Pairwise.cons ?_ (List.Pairwise.cons ?_ (List.Pairwise.cons ?_
-    (List.Pairwise.cons ?_ List.Pairwise.nil)))
-  all_goals
-    intro other member
-    simp only [List.mem_cons, List.not_mem_nil, or_false] at member
-    try (rcases member with rfl | rfl | rfl <;> (apply field_lt; decide))
-
 /-- The policy view of a task resource is exactly its four coordinates. -/
 theorem store_projection_exact (task : Nat) (before after : State) :
     DeclaredResourceProjection.project task (before.store task) (after.store task) =
       slots before after := by
-  unfold DeclaredResourceProjection.project DeclaredResourceProjection.values State.store
-  rw [Compiler.StoreCodec.entries_fromEntries_of_pairwise _ _ (State.entries_ordered before task),
-    Compiler.StoreCodec.entries_fromEntries_of_pairwise _ _ (State.entries_ordered after task)]
-  simp [State.entries, State.coordinates, key, StateKey.address, slots]
+  simp only [State.store, slots, State.coordinates_four]
+  exact DeclaredFields.project_four task _ _ _ _ _ _ _ _
 
 private def nonnegative (slot : String) : Pred := .not (.le slot (-1))
 private def unchangedBudget : Pred := .all [
