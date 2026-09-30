@@ -1,0 +1,18 @@
+mini-discord: serving interactions on 127.0.0.1:28793
+mini-discord: 401 invalid request signature
+mini-discord: user 1400000000000000999 is not rostered; line not run
+mini-discord: user 1400000000000000020 session friend ending ok
+mini-discord: user 1400000000000000010 session ember ending ok
+mini-discord: user 1400000000000000010 session ember ending error
+mini-discord: user 1400000000000000020 session friend ending ok
+mini-discord: user 1400000000000000020 session friend ending ok
+mini-discord: user 1400000000000000020 session friend ending refused
+mini-discord: user 1400000000000000020 session friend ending usage
+mini-discord: user 1400000000000000020 session friend ending ok
+mini-discord: user 1400000000000000010 session ember ending ok
+mini-discord: 401 replayed interaction 9000
+mini-discord: user 1400000000000000010 session ember ending ok
+mini-discord: user 1400000000000000010 session ember ending ok
+mini-discord: user 1400000000000000010 session ember ending ok
+mini-discord: user 1400000000000000010 session ember ending ok
+mini-discord: user 1400000000000000010 session ember ending ok

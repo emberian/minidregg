@@ -1,0 +1,6 @@
+--- cleanup
+stopped 1986121: /home/ember/build/mini-product-20260930/mini-discord/run/de-2/bin/mini-discord 
+stopped 1986120: /home/ember/build/mini-product-20260930/mini-discord/run/de-2/bin/fake-discord api 127.0.0.1:28794 /home/ember/build/mini-product-20260930/mini-discord/run/de-2/api 
+stopped mini serve 1985480 (children: 1985540)
+--- processes naming the run directory after cleanup:
+none

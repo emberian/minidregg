@@ -1,0 +1,11 @@
+```
+{
+  "authority": "requires-current-admission",
+  "delegation": null,
+  "effect": "none",
+  "intentPath": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor/proposals/w1/intent.json",
+  "intentSha256": "84804247ea671ffe15788b34d9d00d39aafcb75517fa6d555d786256da0be08a",
+  "proposalId": "w1",
+  "type": "minidregg-workspace-proposal-result-v1"
+}
+```

@@ -1,0 +1,11 @@
+```
+{
+  "authority": "discovery-only",
+  "home": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/sessions/ember",
+  "initialized": true,
+  "socket": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/public/mini.sock",
+  "subject": "7",
+  "type": "minidregg-shell-session-v1",
+  "workspace": "/home/ember/build/mini-product-20260930/mini-discord/run/de-2/store/sponsor"
+}
+```
