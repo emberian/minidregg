@@ -4,6 +4,7 @@
 //! for a durable native reserve and an exact parent witness, then for a
 //! durable send-boundary acknowledgement. The controller owns signing and
 //! reconciliation; this edge owns only a revocable prompt lease and HTTP I/O.
+use crate::credentials::{self, Secret};
 use serde_json::{json, Value};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -30,11 +31,7 @@ pub struct GatewayConfig {
     /// When set, the worker reaches this private socket through a bind mount
     /// and the host TCP address is used only in its isolated loopback profile.
     pub unix_socket: Option<PathBuf>,
-    /// Exact upstream endpoint, including `/v1/chat/completions`.
-    pub upstream_url: String,
     pub pinned_model: String,
-    /// Never pass this to a worker process, its environment, or an HTTP reply.
-    pub provider_key: String,
     pub private_dir: PathBuf,
     pub max_request_bytes: usize,
     pub max_response_bytes: usize,
@@ -68,6 +65,17 @@ pub struct ProviderRequest {
     pub exact_body: Vec<u8>,
 }
 
+/// Where one permitted request goes and with which bearer. The controller
+/// resolves it from the provider table and the credential store at reserve
+/// time; the gateway never chooses an endpoint or a key itself.
+pub struct Route {
+    /// Exact Chat Completions endpoint of that row.
+    pub endpoint: String,
+    /// `None` for a `credential: none` row: no Authorization header at all.
+    /// Never pass this to a worker process, its environment, or an HTTP reply.
+    pub bearer: Option<Secret>,
+}
+
 pub enum ForwardPermit {
     Fresh {
         attempt_id: u64,
@@ -75,6 +83,7 @@ pub enum ForwardPermit {
         /// Must equal the request bytes; a permit is never transferable to a
         /// changed model, request, generation, or prompt.
         exact_body: Vec<u8>,
+        route: Route,
     },
     /// A previously delivered response for these exact request bytes. It
     /// carries no permission to reach the upstream provider again.
@@ -575,16 +584,6 @@ fn validate_config(config: &GatewayConfig) -> Result<(), String> {
     {
         return Err("provider token ceilings must be paired and within bounds".into());
     }
-    if config.provider_key.is_empty()
-        || config.provider_key.len() > 4096
-        || config
-            .provider_key
-            .bytes()
-            .any(|b| !(0x21..=0x7e).contains(&b))
-    {
-        return Err("invalid provider key encoding".into());
-    }
-    validate_upstream(&config.upstream_url)?;
     let meta = fs::symlink_metadata(&config.private_dir).map_err(|e| e.to_string())?;
     if !config.private_dir.is_absolute()
         || !meta.file_type().is_dir()
@@ -725,33 +724,6 @@ fn bounded_chat_request(
     Ok(bytes)
 }
 
-fn validate_upstream(url: &str) -> Result<(), String> {
-    let (scheme, remainder) = url.split_once("://").ok_or("upstream URL lacks scheme")?;
-    let (authority, path) = remainder.split_once('/').ok_or("upstream URL lacks path")?;
-    if !matches!(path, "v1/chat/completions" | "api/v1/chat/completions")
-        || authority.is_empty()
-        || authority
-            .bytes()
-            .any(|b| !(b.is_ascii_alphanumeric() || b".-:[]".contains(&b)))
-        || authority.contains("..")
-        || authority.contains('@')
-    {
-        return Err("upstream must pin one Chat Completions endpoint".into());
-    }
-    if scheme == "http" {
-        if !(authority == "127.0.0.1"
-            || authority.starts_with("127.0.0.1:")
-            || authority == "[::1]"
-            || authority.starts_with("[::1]:"))
-        {
-            return Err("plain HTTP upstream is permitted only on loopback".into());
-        }
-    } else if scheme != "https" {
-        return Err("provider upstream must use verified HTTPS".into());
-    }
-    Ok(())
-}
-
 struct HttpRequest {
     token: String,
     body: Vec<u8>,
@@ -874,6 +846,7 @@ fn write_http(
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        402 => "Payment Required",
         403 => "Forbidden",
         405 => "Method Not Allowed",
         413 => "Content Too Large",
@@ -889,6 +862,29 @@ fn write_http(
 fn error_reply(stream: &mut GatewayStream, status: u16, message: &str) {
     let body = json!({"error":{"message":message,"type":"gateway_error"}}).to_string();
     let _ = write_http(stream, status, "application/json", body.as_bytes());
+}
+
+/// A reserve that did not produce a permit. Named credential refusals and a
+/// purse that Mini refused are told to the worker by code; any other failure
+/// stays the generic 503 (its text may carry controller paths).
+fn refusal_reply(stream: &mut GatewayStream, error: &str) {
+    let code = if let Some(code) = error.strip_prefix(credentials::REFUSED) {
+        Some(code)
+    } else if error.starts_with("provider reserve refused by Mini") {
+        Some("no-credit")
+    } else {
+        None
+    };
+    match code {
+        Some(code) if code.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') => {
+            let status = if code == "no-credit" { 402 } else { 403 };
+            let body = json!({"error":{"message":format!("provider request refused: {code}"),
+                "type":"provider_refused","code":code}})
+            .to_string();
+            let _ = write_http(stream, status, "application/json", body.as_bytes());
+        }
+        _ => error_reply(stream, 503, "provider reserve was refused or interrupted"),
+    }
 }
 
 fn serve_client(
@@ -950,8 +946,8 @@ fn serve_client(
     }
     let permit = match wait_reply(&rx, &control, &lease) {
         Ok(permit) => permit,
-        Err(_) => {
-            error_reply(stream, 503, "provider reserve was refused or interrupted");
+        Err(error) => {
+            refusal_reply(stream, &error);
             return;
         }
     };
@@ -983,15 +979,20 @@ fn serve_client(
             attempt_id,
             lease: permit_lease,
             exact_body,
+            route,
         } => {
-            if attempt_id == 0 || permit_lease != lease || exact_body != request.body {
+            if attempt_id == 0
+                || permit_lease != lease
+                || exact_body != request.body
+                || credentials::validate_endpoint(&route.endpoint).is_err()
+            {
                 error_reply(stream, 503, "provider permit did not bind this request");
                 return;
             }
-            (attempt_id, exact_body)
+            (attempt_id, exact_body, route)
         }
     };
-    let (attempt_id, exact_body) = permit;
+    let (attempt_id, exact_body, route) = permit;
     if shared
         .last_permit_id
         .fetch_max(attempt_id, Ordering::SeqCst)
@@ -1021,7 +1022,15 @@ fn serve_client(
         error_reply(stream, 503, "provider send boundary was not acknowledged");
         return;
     }
-    let outcome = forward(config, shared, &control, &lease, attempt_id, &exact_body);
+    let outcome = forward(
+        config,
+        &route,
+        shared,
+        &control,
+        &lease,
+        attempt_id,
+        &exact_body,
+    );
     let reply = match &outcome {
         ProviderOutcome::Received {
             status,
@@ -1322,13 +1331,17 @@ pub(crate) fn response_headers(bytes: &[u8]) -> Result<(u16, String), String> {
     final_response.ok_or("provider final response absent".into())
 }
 
-fn curl_header_config(key: &str) -> String {
-    let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
+fn curl_header_config(key: &Secret) -> String {
+    let escaped = key
+        .expose()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
     format!("header = \"Authorization: Bearer {escaped}\"\n")
 }
 
 fn forward(
     config: &GatewayConfig,
+    route: &Route,
     shared: &Arc<Shared>,
     control: &GatewayControl,
     lease: &LeaseId,
@@ -1355,7 +1368,7 @@ fn forward(
     {
         return ProviderOutcome::NotSent { reason };
     }
-    let protocol = if config.upstream_url.starts_with("https://") {
+    let protocol = if route.endpoint.starts_with("https://") {
         "=https"
     } else {
         "=http"
@@ -1379,7 +1392,7 @@ fn forward(
         .arg("--output")
         .arg(&body_path)
         .arg("--url")
-        .arg(&config.upstream_url)
+        .arg(&route.endpoint)
         .args(["--config", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -1433,10 +1446,11 @@ fn forward(
             }
         }
     };
-    let credential_written = child_stdin.take().is_some_and(|mut stdin| {
-        stdin
-            .write_all(curl_header_config(&config.provider_key).as_bytes())
-            .is_ok()
+    // A `credential: none` route writes an empty config: curl sends no
+    // Authorization header. Closing stdin either way ends curl's config read.
+    let credential_written = child_stdin.take().is_some_and(|mut stdin| match &route.bearer {
+        Some(bearer) => stdin.write_all(curl_header_config(bearer).as_bytes()).is_ok(),
+        None => true,
     });
     if !credential_written {
         if let Ok(mut slot) = shared.curl.lock() {
@@ -1529,14 +1543,12 @@ fn forward(
             }
         }
     };
-    if headers
-        .windows(config.provider_key.len())
-        .any(|part| part == config.provider_key.as_bytes())
-        || partial_body
-            .windows(config.provider_key.len())
-            .any(|part| part == config.provider_key.as_bytes())
-        || content_type.contains(&config.provider_key)
-    {
+    if route.bearer.as_ref().is_some_and(|bearer| {
+        let secret = bearer.expose().as_bytes();
+        headers.windows(secret.len()).any(|part| part == secret)
+            || partial_body.windows(secret.len()).any(|part| part == secret)
+            || content_type.contains(bearer.expose())
+    }) {
         return ProviderOutcome::Uncertain {
             partial_body,
             reason: "upstream response contained a custody secret and was withheld".into(),
@@ -1568,13 +1580,18 @@ mod tests {
         path
     }
 
-    fn config(dir: PathBuf, upstream: SocketAddr) -> GatewayConfig {
+    fn test_route(endpoint: &str) -> Route {
+        Route {
+            endpoint: endpoint.to_owned(),
+            bearer: Some(Secret::new("private-provider-key".into()).unwrap()),
+        }
+    }
+
+    fn config(dir: PathBuf, _upstream: SocketAddr) -> GatewayConfig {
         GatewayConfig {
             bind: "127.0.0.1:0".parse().unwrap(),
             unix_socket: None,
-            upstream_url: format!("http://{upstream}/v1/chat/completions"),
             pinned_model: "operator-model".into(),
-            provider_key: "private-provider-key".into(),
             private_dir: dir,
             max_request_bytes: 16_384,
             max_response_bytes: 16_384,
@@ -1802,6 +1819,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(20))
             .unwrap();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream.local_addr().unwrap());
         let controller = thread::spawn(move || {
             let ProviderCommand::Reserve { request, reply } =
                 requests.recv_timeout(Duration::from_secs(5)).unwrap()
@@ -1813,6 +1831,7 @@ mod tests {
                     attempt_id: 7,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let ProviderCommand::BeforeSend { reply, .. } =
@@ -1871,17 +1890,6 @@ mod tests {
     fn private_unix_delivery_requires_bridge_write_ack() {
         unix_delivery_case(true);
         unix_delivery_case(false);
-    }
-
-    #[test]
-    fn upstream_endpoint_is_exact_and_openrouter_path_is_supported() {
-        assert!(validate_upstream("https://openrouter.ai/api/v1/chat/completions").is_ok());
-        assert!(validate_upstream("https://example.org/v1/chat/completions").is_ok());
-        assert!(
-            validate_upstream("https://openrouter.ai/api/v1/chat/completions?model=x").is_err()
-        );
-        assert!(validate_upstream("http://openrouter.ai/api/v1/chat/completions").is_err());
-        assert!(validate_upstream("https://openrouter.ai/other").is_err());
     }
 
     fn lease(id: u64, token: &str) -> Lease {
@@ -2000,6 +2008,105 @@ mod tests {
         response
     }
 
+    /// One full permitted exchange whose permit carries `bearer`; returns
+    /// what the upstream saw.
+    fn route_exchange(bearer: Option<&'static str>) -> String {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let upstream_addr = upstream.local_addr().unwrap();
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        let upstream_thread =
+            fake_upstream(upstream, deliveries.clone(), false, br#"{"id":"row"}"#.to_vec());
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway = GatewayEndpoint::start(config(dir.clone(), upstream_addr), tx).unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
+        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"row"}]}"#
+            .to_vec();
+        let endpoint = format!("http://{upstream_addr}/v1/chat/completions");
+        let controller = thread::spawn(move || {
+            for _ in 0..4 {
+                match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+                    ProviderCommand::Reserve { request, reply } => reply
+                        .send(Ok(ForwardPermit::Fresh {
+                            attempt_id: 7,
+                            lease: request.lease,
+                            exact_body: request.exact_body,
+                            route: Route {
+                                endpoint: endpoint.clone(),
+                                bearer: bearer.map(|b| Secret::new(b.into()).unwrap()),
+                            },
+                        }))
+                        .unwrap(),
+                    ProviderCommand::BeforeSend { reply, .. }
+                    | ProviderCommand::Outcome { reply, .. }
+                    | ProviderCommand::Delivery { reply, .. } => reply.send(Ok(())).unwrap(),
+                }
+            }
+        });
+        let response = post(gateway.local_addr(), TOKEN, &body);
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        controller.join().unwrap();
+        let observed = upstream_thread.join().unwrap();
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+        observed
+    }
+
+    #[test]
+    fn each_permit_carries_its_own_bearer_and_a_none_row_sends_none() {
+        let a = route_exchange(Some("sk-friend-A"));
+        assert!(a.contains("Authorization: Bearer sk-friend-A"), "{a}");
+        let b = route_exchange(Some("sk-friend-B"));
+        assert!(b.contains("Authorization: Bearer sk-friend-B") && !b.contains("sk-friend-A"));
+        let none = route_exchange(None);
+        assert!(!none.to_ascii_lowercase().contains("authorization"), "{none}");
+        assert!(!none.contains(TOKEN));
+    }
+
+    fn refused_exchange(error: &'static str) -> String {
+        let dir = test_dir();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (tx, rx) = mpsc::sync_channel(4);
+        let gateway =
+            GatewayEndpoint::start(config(dir.clone(), upstream.local_addr().unwrap()), tx)
+                .unwrap();
+        gateway
+            .control()
+            .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
+            .unwrap();
+        let controller = thread::spawn(move || match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+            ProviderCommand::Reserve { reply, .. } => reply.send(Err(error.into())).unwrap(),
+            _ => panic!("only a reserve may arrive"),
+        });
+        let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"x"}]}"#;
+        let response = post(gateway.local_addr(), TOKEN, body);
+        controller.join().unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        assert!(upstream.accept().is_err(), "a refused reserve reached the upstream");
+        drop(gateway);
+        fs::remove_dir_all(dir).unwrap();
+        response
+    }
+
+    #[test]
+    fn named_refusals_reach_the_worker_and_nothing_reaches_upstream() {
+        for code in ["no-credential", "per-day-cap", "per-call-cap", "grant-expired", "no-route"] {
+            let error: &'static str = Box::leak(format!("provider-refused:{code}").into_boxed_str());
+            let response = refused_exchange(error);
+            assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+            assert!(response.contains(&format!("\"code\":\"{code}\"")), "{response}");
+        }
+        let response = refused_exchange("provider reserve refused by Mini: {\"type\":\"refused\"}");
+        assert!(response.starts_with("HTTP/1.1 402"), "{response}");
+        assert!(response.contains("\"code\":\"no-credit\""), "{response}");
+        let response = refused_exchange("/private/state/path exploded");
+        assert!(response.starts_with("HTTP/1.1 503"), "{response}");
+        assert!(!response.contains("/private/state"), "{response}");
+    }
+
     fn fake_upstream(
         listener: TcpListener,
         deliveries: Arc<AtomicUsize>,
@@ -2082,6 +2189,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream_addr);
         let controller = thread::spawn(move || {
             let ProviderCommand::Reserve { request, reply } =
                 rx.recv_timeout(Duration::from_secs(5)).unwrap()
@@ -2093,6 +2201,7 @@ mod tests {
                     attempt_id: 7,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let ProviderCommand::BeforeSend { reply, .. } =
@@ -2155,6 +2264,7 @@ mod tests {
         let body = br#"{"model":"operator-model","messages":[{"role":"user","content":"local"}]}"#
             .to_vec();
         let expected = body.clone();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream_addr);
         let controller = thread::spawn(move || {
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => {
@@ -2165,6 +2275,7 @@ mod tests {
                             attempt_id: 7,
                             lease: request.lease,
                             exact_body: request.exact_body,
+                            route: test_route(&endpoint),
                         }))
                         .unwrap();
                 }
@@ -2321,6 +2432,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream.local_addr().unwrap());
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -2331,6 +2443,7 @@ mod tests {
                     attempt_id: 21,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2443,6 +2556,7 @@ mod tests {
             .unwrap();
         let (outcome_ready_tx, outcome_ready_rx) = mpsc::channel();
         let (client_closed_tx, client_closed_rx) = mpsc::channel();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream.local_addr().unwrap());
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -2453,6 +2567,7 @@ mod tests {
                     attempt_id: 22,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2551,6 +2666,7 @@ mod tests {
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
         let shared = gateway.control().shared.clone();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream.local_addr().unwrap());
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -2561,6 +2677,7 @@ mod tests {
                 attempt_id: 31,
                 lease: request.lease,
                 exact_body: request.exact_body,
+                route: test_route(&endpoint),
             }));
             assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
         });
@@ -2593,6 +2710,7 @@ mod tests {
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
         let shared = gateway.control().shared.clone();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream.local_addr().unwrap());
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -2603,6 +2721,7 @@ mod tests {
                     attempt_id: 32,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let boundary = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2658,6 +2777,7 @@ mod tests {
             .unwrap();
         let (seen_tx, seen_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream.local_addr().unwrap());
         let controller = thread::spawn(move || {
             let ProviderCommand::Reserve { request, reply } =
                 rx.recv_timeout(Duration::from_secs(5)).unwrap()
@@ -2669,6 +2789,7 @@ mod tests {
                     attempt_id: 41,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             let ProviderCommand::BeforeSend { reply, .. } =
@@ -2730,6 +2851,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream_addr);
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -2740,6 +2862,7 @@ mod tests {
                     attempt_id: 9,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2783,6 +2906,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream_addr);
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -2793,6 +2917,7 @@ mod tests {
                     attempt_id: 10,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -2847,6 +2972,7 @@ mod tests {
             .control()
             .activate(lease(1, TOKEN), Instant::now() + Duration::from_secs(600))
             .unwrap();
+        let endpoint = format!("http://{}/v1/chat/completions", upstream_addr);
         let controller = thread::spawn(move || {
             let (request, reply) = match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
                 ProviderCommand::Reserve { request, reply } => (request, reply),
@@ -2857,6 +2983,7 @@ mod tests {
                     attempt_id: 11,
                     lease: request.lease,
                     exact_body: request.exact_body,
+                    route: test_route(&endpoint),
                 }))
                 .unwrap();
             match rx.recv_timeout(Duration::from_secs(5)).unwrap() {

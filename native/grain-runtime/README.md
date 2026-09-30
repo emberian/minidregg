@@ -105,7 +105,10 @@ bootstrapped native Mini deployment):
 ```
 
 An optional `providerTask` gives a hosted Hermes prompt a separate Mini
-authority and a controller-held provider key. It requires a distinct subject,
+authority and routes its requests through the operator's provider table
+(`deploy/hermes/README.md`): each request's bearer is the pinned friend's own
+credential under their grant (`credential: user`), the operator's pool key
+behind the purse (`pool`), or none (`none`, a homelab row). It requires a distinct subject,
 task, and custody key; the parent grain policy must name both the tool and
 provider subjects at the prompt generation. The selected `hermes-acp` command
 must be the scoped Linux `bwrap` launcher with fixed `--network none` and an
@@ -117,8 +120,10 @@ upstream `hermes-acp` executable. For example, alongside the tool task above:
   "queryCapability":"101", "custodyKey":"/opt/mini/secrets/provider-task.key",
   "parentCapability":"75", "parentObserveCapability":"75",
   "reserve":"3", "charge":"1",
-  "model":"pinned-model", "upstreamUrl":"https://openrouter.ai/api/v1/chat/completions",
-  "providerKeyFile":"/var/lib/mini/grains/task-7001/provider.key",
+  "model":"pinned-model", "providers":"/etc/mini/providers.json",
+  "onBehalfOf":{"subject":"11","publicKey":"<64 hex: the friend's workspace key>"},
+  "credentialsRoot":"/var/lib/mini/credentials",
+  "credentialsKey":"/etc/mini/credentials.key",
   "gatewayBind":"127.0.0.1:18762",
   "maxRequestBytes":1048576, "maxResponseBytes":8388608,
   "timeoutSeconds":30, "maxIterations":2
@@ -141,9 +146,14 @@ Hermes consumed the response.
 
 Older deterministic HTTP loopback fixtures may explicitly set
 `"localFixtureHostNetwork":true` and use `--network host`. That setting is
-refused for an HTTPS upstream and is not a route for real provider credentials.
+refused for a non-loopback provider row and is not a route for real provider
+credentials.
 
-The real provider key stays in the private controller state directory. Each
+Provider keys live in the sealed credential store, never in the worker's
+mounts or environment; the controller resolves the table row and the bearer
+at each reserve against the signed height of the parent read, and a refused
+route (`no-route`, `no-credential`, `grant-expired`, `per-call-cap`,
+`per-day-cap`, `tariff-mismatch`) leaves no attempt, hold or Mini transition. Each
 worker receives only a new prompt token and a generated local Hermes profile.
 Before forwarding one exact request, the controller retains its bytes, gets
 a signed provider-task reserve with a parent-generation witness, and checks

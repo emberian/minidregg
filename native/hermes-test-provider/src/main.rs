@@ -37,6 +37,7 @@ enum Mode {
     MeteredUsage,
     MeteredMissingUsage,
     MeteredHttp422,
+    RouteProbe,
     ContentWorkroom,
     ContentPeerA,
     ContentPeerB,
@@ -848,6 +849,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let method = parts[0];
     let path = parts[1];
     let mut length = None;
+    let mut authorization: Option<String> = None;
     let mut header_bytes = request_line.len();
     loop {
         let line = read_line_bounded(&mut reader)?;
@@ -864,6 +866,12 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
             }
             if name.eq_ignore_ascii_case("transfer-encoding") {
                 return Err("chunked request unsupported".into());
+            }
+            if name.eq_ignore_ascii_case("authorization") {
+                if authorization.is_some() {
+                    return Err("duplicate Authorization header".into());
+                }
+                authorization = Some(value.trim().to_owned());
             }
         }
     }
@@ -885,6 +893,21 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let mut body = vec![0; size];
     reader.read_exact(&mut body).map_err(|e| e.to_string())?;
     let request: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    if matches!(mode, Mode::RouteProbe) {
+        // Which bearer arrived, as a digest: the log names the credential a
+        // request carried without ever holding its value.
+        let auth = match &authorization {
+            None => "none".to_owned(),
+            Some(value) => format!("sha256:{}", sha256_hex(value.as_bytes())),
+        };
+        let id = format!("chatcmpl-mini-route-{}", RESPONSE_ID.fetch_add(1, Ordering::Relaxed));
+        let body = json!({"id":id,"object":"chat.completion","created":1,"model":request.get("model"),
+            "choices":[{"index":0,"message":{"role":"assistant","content":"route probe"},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}).to_string();
+        write_http(&mut stream, "200 OK", "application/json", body.as_bytes()).map_err(|e| e.to_string())?;
+        log_event(log, &format!("route-probe bytes={size} auth={auth}")).map_err(|e| e.to_string())?;
+        return Ok(());
+    }
     if matches!(mode, Mode::MeteredHttp422) {
         let error = json!({"error":{"message":"stream_options is unsupported by this local fixture","type":"invalid_request_error"}}).to_string();
         write_http(&mut stream, "422 Unprocessable Entity", "application/json", error.as_bytes())
@@ -896,7 +919,7 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let mut projection = None;
     let (message, finish, stage) = match match mode {
         Mode::Scalar | Mode::MeteredUsage | Mode::MeteredMissingUsage => reply_for(&request),
-        Mode::MeteredHttp422 => unreachable!("handled before response generation"),
+        Mode::MeteredHttp422 | Mode::RouteProbe => unreachable!("handled before response generation"),
         Mode::ContentWorkroom => content_reply_for(&request),
         Mode::ContentPeerA => peer_reply_for(&request, true),
         Mode::ContentPeerB => peer_reply_for(&request, false),
@@ -946,6 +969,11 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     Ok(())
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn main() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let bind: SocketAddr = args.next().ok_or("usage: mini-hermes-test-provider 127.0.0.1:PORT LOG_PATH")?
@@ -961,6 +989,7 @@ fn main() -> Result<(), String> {
         Some("--metered-usage") => Mode::MeteredUsage,
         Some("--metered-missing-usage") => Mode::MeteredMissingUsage,
         Some("--metered-http-422") => Mode::MeteredHttp422,
+        Some("--route-probe") => Mode::RouteProbe,
         Some("--content-workroom") => Mode::ContentWorkroom,
         Some("--content-peer-a") => Mode::ContentPeerA,
         Some("--content-peer-b") => Mode::ContentPeerB,

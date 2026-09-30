@@ -1,0 +1,46 @@
+# /etc/systemd/system/mini-hermes.service — the hosted Hermes grain controller.
+# Source of truth for DEPLOY-3 (dregg-infra edge/mini/ installs this file).
+#
+# There is no provider key in this unit and no EnvironmentFile. Keys live in
+# the sealed credential store (/var/lib/mini/credentials, key
+# /etc/mini/credentials.key); the controller resolves the row and the bearer
+# per request at reserve time (deploy/hermes/README.md). Workers are bwrap
+# units with --network none and never see the store: the launcher refuses a
+# mount that contains MINI_GRAIN_CREDENTIALS_ROOT or MINI_GRAIN_CREDENTIALS_KEY.
+#
+# Supervision is M5's, verbatim: Restart=on-failure, RestartSec=2s,
+# KillMode=control-group (m5-hermes.md §Design 3).
+[Unit]
+Description=Mini Hermes grain controller
+Documentation=file:///usr/local/lib/mini/HERMES.md
+After=mini-store.service
+Requires=mini-store.service
+ConditionPathExists=/etc/mini/providers.json
+ConditionPathExists=/etc/mini/credentials.key
+ConditionPathExists=/var/lib/mini/candidate/current/bin/grain-runtime
+ConditionPathExists=/var/lib/mini/hermes/controller.json
+
+[Service]
+Type=simple
+User=mini
+Group=mini
+Slice=mini.slice
+Nice=10
+ExecStart=/var/lib/mini/candidate/current/bin/grain-runtime serve /var/lib/mini/hermes/controller.json
+Restart=on-failure
+RestartSec=2s
+KillMode=control-group
+UMask=0077
+TimeoutStopSec=60
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+# credentials: the per-runner day counters are written at reserve time.
+ReadWritePaths=/var/lib/mini/hermes /var/lib/mini/store/node/public /var/lib/mini/credentials
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

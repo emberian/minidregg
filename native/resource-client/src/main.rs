@@ -56,6 +56,8 @@ mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
 #[cfg(unix)]
+mod keys;
+#[cfg(unix)]
 mod shell;
 #[cfg(unix)]
 mod transport;
@@ -244,6 +246,7 @@ usage:
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
+  mini key --action set|grant|revoke|ls (--dir WORKSPACE | --pool true) [--provider NAME] [--secret FILE|-] [--runner SUBJECT --per-call TOKENS --per-day CALLS --until HEIGHT] [--providers TABLE] [--credentials ROOT --credentials-key KEY]
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
@@ -2091,6 +2094,8 @@ fn run(mut args: Args) -> Result<()> {
         "enroll" => participant_enrollment::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
+        #[cfg(unix)]
+        "key" => keys::run(args),
         "fleet" => fleet::run(args),
         #[cfg(unix)]
         "selected-exchange" => {

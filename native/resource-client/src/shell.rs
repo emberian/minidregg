@@ -62,6 +62,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
+    Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB]", operation: "local" },
     Verb { name: "exit", usage: "exit", operation: "local" },
@@ -308,6 +309,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             arity(&w, 0, 0, u)?;
             Plan::Exit
         }
+        "key" => crate::keys::shell_plan(&session.workspace, &session.home, &w)?,
         "history" => {
             arity(&w, 0, 1, u)?;
             match w.get(1).map(String::as_str) {
@@ -1114,6 +1116,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let config = absolute(args.required("config")?, "config")?;
     let one = args.optional("line");
     args.finish()?;
+    let _ = crate::keys::STDIN_FREE.set(one.is_some());
     if super::SOCKET.get().is_none() {
         return Err("shell requires --socket (the deployment's public socket)".into());
     }

@@ -11,10 +11,21 @@ fi
 # tariff, and genesis policy as one operator-owned profile.  This mode stops
 # before the historical 700x end-to-end journey below.
 PROFILE=${BIRTH_BOOTSTRAP_PROFILE:-}
-CONTROLLER_TASK=7001
-TOOL_TASK=7002
-PUBLICATION_TARGET=7003
-PROVIDER_TASK=7004
+# ACCEPTANCE_TASK_BASE moves the four task IDs to BASE+1..BASE+4 so a
+# bootstrap-only Store can run beside a live controller unit for 7001.
+TASK_BASE=${ACCEPTANCE_TASK_BASE:-7000}
+case $TASK_BASE in
+  7000) ;;
+  [1-9][0-9][0-9]0|[1-9][0-9][0-9][0-9]0)
+    [ "${BOOTSTRAP_ONLY:-0}" = 1 ] && [ -z "$PROFILE" ] || {
+      echo 'ACCEPTANCE_TASK_BASE requires BOOTSTRAP_ONLY=1 and no profile' >&2; exit 2;
+    } ;;
+  *) echo 'ACCEPTANCE_TASK_BASE must be a multiple of ten from 1000 to 99990' >&2; exit 2 ;;
+esac
+CONTROLLER_TASK=$((TASK_BASE + 1))
+TOOL_TASK=$((TASK_BASE + 2))
+PUBLICATION_TARGET=$((TASK_BASE + 3))
+PROVIDER_TASK=$((TASK_BASE + 4))
 PROVIDER_BUDGET=50
 if [ -n "$PROFILE" ]; then
   [ "${BOOTSTRAP_ONLY:-0}" = 1 ] && [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] || {
