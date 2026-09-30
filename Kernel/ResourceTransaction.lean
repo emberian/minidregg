@@ -18,39 +18,39 @@ open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CellState
 open Minidregg.Theory.IndexedProgram
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
-abbrev PageCell := DeclaredResourceScalar.PageCell
 abbrev AuthoritySnapshot := CredentialAuthorityDomain.Snapshot
 abbrev Ambient := DeclaredResourceScalar.Ambient
 
 inductive Payload where
   | scalar (actions : List DeclaredActionLowering.Action)
   | content (command : ContentResource.Command)
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
 structure Target where
   kind : ResourceKind
   target : Nat
   capability : CapabilityId
-  /-- Action declaration version, independent of the physical page schema epoch. -/
+  /-- Action declaration version, independent of the cell's wire version. -/
   schemaVersion : Nat
   expectedTargetRoot : Digest
   payload : Payload
   /-- Current observation authority for any value exposed to another resource law. -/
   observeCapability : Option CapabilityId := none
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
 structure Command where
   subject : SubjectId
   expectedAuthorityRoot : Digest
   nonce : Nat
   targets : List Target
-  deriving DecidableEq, Repr
+  deriving DecidableEq
 
 def Command.TargetsValid (command : Command) : Prop :=
   command.targets ≠ [] ∧ (command.targets.map Target.target).Nodup
@@ -206,7 +206,8 @@ theorem requestFor_eq_reference (snapshot : AuthoritySnapshot) (semantics : Dige
       requestForReference snapshot semantics ambient command target preRoot := by
   rfl
 
-#print axioms requestFor_eq_reference
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.requestFor_eq_reference' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms requestFor_eq_reference
 
 def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
     (command : Command) (preRoot : Digest) : Request command.first.kind :=
@@ -214,10 +215,10 @@ def request (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambie
 
 inductive Reject where
   | malformedCommand | emptyTargets | duplicateTargets | emptyActions | unsupportedVersion
-  | missingTarget | wrongRole | invalidPage | staleTarget | staleAuthority
+  | missingTarget | wrongRole | staleTarget | staleAuthority
   | scalar (reason : DeclaredResourceScalar.Reject)
   | content (reason : ContentResource.Reject)
-  | pageValidation | invalidPost | authorityUnavailable | directoryUnavailable
+  | patchValidation | invalidPost | authorityUnavailable | directoryUnavailable
   | nullifierUsed | authorityPreparation | physicalPreparation | policyUnavailable
   | signature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
@@ -228,36 +229,26 @@ inductive Reject where
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
   | none => .error reason | some value => .ok value
 
-def Target.schema (target : Target) : Schema.{0, 0, 0, 0} := match target.payload with
-  | .scalar _ => DeclaredEffectPageMaterializer.schema
-  | .content _ => HyperdocumentContentPageMaterializer.schema
+/-- The store layout of the target's role: a declared-effect cell for scalar
+actions, a hyperdocument content cell for content commands. -/
+def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
+  | .scalar _ => EffectDeclaration.effectLayout
+  | .content _ => Hyperdocument.layout
 
-instance targetFieldEq (target : Target) : DecidableEq target.schema.Field := by
-  unfold Target.schema
-  split <;> infer_instance
-instance targetResourceEq (target : Target) : DecidableEq target.schema.Resource := by
-  unfold Target.schema
-  split <;> infer_instance
-
-def Target.materializer (target : Target) : Materializer target.schema Digest := by
+def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
   | mk kind id capability version root payload observe =>
     cases payload with
-    | scalar _ => exact DeclaredEffectPageMaterializer.materializer
-    | content _ => exact HyperdocumentContentPageMaterializer.materializer
+    | scalar _ => exact DeclaredEffectCell.materializer
+    | content _ => exact HyperdocumentCell.contentMaterializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
 
-def Target.Outcome (target : Target) : Type := match target.payload with
-  | .scalar _ => DeclaredEffectPageMaterializer.Page
-  | .content _ => HyperdocumentContentPageMaterializer.Page
+/-- A target's outcome is its computed post store. -/
+abbrev Target.Outcome (target : Target) : Type := Store target.layout
 
-def Target.outcomeCodec (target : Target) : LawfulCodec target.Outcome := by
-  cases target with
-  | mk kind id capability version root payload observe =>
-    cases payload with
-    | scalar _ => exact DeclaredEffectPageMaterializer.pageStream.toLawful
-    | content _ => exact HyperdocumentContentPageMaterializer.pageStream.toLawful
+def Target.outcomeCodec (target : Target) : LawfulCodec target.Outcome :=
+  target.materializer.codec
 
 def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registry := by
   cases target with
@@ -290,8 +281,9 @@ def contentOperation (snapshot : AuthoritySnapshot) (semantics : Digest) (comman
     Hyperdocument.OperationId := ⟨effectsDigest snapshot.domain semantics command⟩
 
 /-- The only target computation. It invokes source-owned typed operations,
-never a host supplied post. Every branch returns a real source outcome. -/
-def computeTarget (deployment : Deployment) (snapshot : AuthoritySnapshot)
+never a host supplied post. Every branch returns the post store the source
+operation computed at the loaded cell. -/
+def computeTarget (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
     (pre : TargetCell target) : Except Reject target.Outcome := by
   cases target with
@@ -299,44 +291,52 @@ def computeTarget (deployment : Deployment) (snapshot : AuthoritySnapshot)
     cases payload with
     | scalar actions =>
       let projected := scalarCommand command ⟨kind, id, capability, version, root, .scalar actions, observe⟩ actions
-      exact match DeclaredResourceScalar.preparePage deployment snapshot semantics ambient pre projected with
+      exact match DeclaredResourceScalar.prepareCell snapshot semantics ambient pre projected with
         | .error reason => .error (.scalar reason)
         | .ok prepared => .ok prepared.post
     | content content => exact do
         if kind != .object then throw .wrongRole
         if version != ContentResource.commandVersion then throw .unsupportedVersion
         if root != pre.root then throw .staleTarget
-        let before ← requireSome .invalidPage (HyperdocumentContentPageMaterializer.pageAt pre.logical)
-        match ContentResource.preparePage ⟨command.subject, kind, capability⟩
-            (contentOperation snapshot semantics command) before content with
+        match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
+            (contentOperation snapshot semantics command) (ContentResource.documentOf id) pre content with
         | .error reason => .error (.content reason)
-        | .ok prepared => .ok prepared.post
+        | .ok prepared => .ok prepared.post.logical
 
-def targetPatch (target : Target) (pre : TargetCell target) (post : target.Outcome) :
-    Patch target.schema Digest := by
+/-- The target's one guarded patch, generated by its source operation from the
+loaded store: the scalar declaration's own lowering, or the content run's patch. -/
+def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command)
+    (target : Target) (pre : TargetCell target) : Patch target.layout := by
   cases target with
   | mk kind id capability version root payload observe =>
     cases payload with
-    | scalar _ => exact DeclaredResourceScalar.pagePatch pre post
-    | content _ => exact ContentResource.patch pre post
+    | scalar actions =>
+        exact DeclaredResourceScalar.cellPatch (scalarCommand command ⟨kind, id, capability, version, root, .scalar actions, observe⟩ actions)
+    | content content =>
+        let computed := ContentResource.run ⟨command.subject, kind, capability⟩
+          (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+          pre.logical content
+        exact match computed with
+          | .ok progress => progress.2
+          | .error _ => []
 
 /-- One declaration is the complete transaction, fixed by the receiving plan.
 The family outcome is the actual typed result; mode evidence certifies the
 exact command-to-result computation independently of policy authority. -/
-def targetFamily (deployment : Deployment) (snapshot : AuthoritySnapshot)
+def targetFamily (_deployment : Deployment) (snapshot : AuthoritySnapshot)
     (semantics : Digest) (ambient : Ambient) (command : Command) (target : Target)
-    (pre : TargetCell target) : SemanticEffectFamily target.schema target.materializer Nat where
+    (pre : TargetCell target) : SemanticEffectFamily target.layout target.materializer Nat where
   Declaration := Unit
   declarationCodec := DeclaredActionLowering.unitCodec
   pre := pre
   request := fun _ => ⟨target.kind, requestFor snapshot semantics ambient command target pre.root⟩
   Outcome := fun _ => target.Outcome
   outcomeCodec := fun _ => target.outcomeCodec
-  ModeEvidence := fun _ post => PLift (computeTarget deployment snapshot semantics ambient command target pre = .ok post)
-  Postcondition := fun _ post logical =>
-    (targetPatch target pre post).ResultAt pre.logical logical
+  ModeEvidence := fun _ post => PLift (computeTarget snapshot semantics ambient command target pre = .ok post)
+  Postcondition := fun _ _ logical =>
+    (targetPatch snapshot semantics command target pre).ResultAt pre.logical logical
   effectDigest := fun _ => effectsDigest snapshot.domain semantics command
-  patch := fun _ post => targetPatch target pre post
+  patch := fun _ _ => targetPatch snapshot semantics command target pre
   nullifier := fun _ _ => none
   Release := fun _ _ => Empty
   DeclassificationAuthority := fun _ _ => Empty
@@ -354,6 +354,8 @@ structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Re
   post : target.Outcome
   candidate : PolicyInstall.Candidate (targetFamily deployment snapshot semantics ambient command target pre)
     pre () post
+  /-- The computed outcome is exactly the validated post. -/
+  postExact : candidate.post.logical = post
   postLaw : CanonicalCellRegistry.FinalPostLaw deployment target.target before (packTarget target candidate.post)
   source : CanonicalCellRegistry.LoadedPolicySource snapshot.domain directory
     (snapshot.authState.policyAddress ⟨target.target⟩ (snapshot.authState.policyRevision ⟨target.target⟩))
@@ -368,21 +370,24 @@ def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
     match selected : selectTarget deployment target before with
     | none => .error .wrongRole
     | some pre =>
-      match computed : computeTarget deployment snapshot semantics ambient command target pre with
+      match computed : computeTarget snapshot semantics ambient command target pre with
       | .error reason => .error reason
       | .ok post =>
-        match validate target.materializer pre (targetPatch target pre post) with
-        | .rejected _ => .error .pageValidation
+        match validate target.materializer pre pre.root
+            (targetPatch snapshot semantics command target pre) with
+        | .rejected _ => .error .patchValidation
         | .accepted validated =>
           let candidate : PolicyInstall.Candidate
               (targetFamily deployment snapshot semantics ambient command target pre) pre () post :=
             ⟨rfl, ⟨computed⟩, validated, validated.resultAt⟩
-          if postLaw : CanonicalCellRegistry.FinalPostLaw deployment target.target before
-              (packTarget target candidate.post) then
-            let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
-              snapshot.domain directory (snapshot.authState.policyAddress ⟨target.target⟩
-                (snapshot.authState.policyRevision ⟨target.target⟩)))
-            .ok ⟨before, present, pre, selected, post, candidate, postLaw, source⟩
+          if postExact : candidate.post.logical = post then
+            if postLaw : CanonicalCellRegistry.FinalPostLaw deployment target.target before
+                (packTarget target candidate.post) then
+              let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
+                snapshot.domain directory (snapshot.authState.policyAddress ⟨target.target⟩
+                  (snapshot.authState.policyRevision ⟨target.target⟩)))
+              .ok ⟨before, present, pre, selected, post, candidate, postExact, postLaw, source⟩
+            else .error .invalidPost
           else .error .invalidPost
 
 /-- Traverse a finite dependent family without dropping an incidence or
@@ -402,23 +407,20 @@ abbrev Incidence (command : Command) := Option (TargetIndex command)
 def incidences (command : Command) : List (Incidence command) :=
   (List.finRange command.targets.length).map some ++ [none]
 
-def markerEdits (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
-    List CredentialAuthorityDomain.Edit :=
-  [CredentialAuthorityDomain.nullifierEdit snapshot (operationMarker snapshot.domain semantics command)]
-
+/-- The transaction's one authority write: a fresh allocation of its operation
+nullifier in the append-only plane. -/
 def markerPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
-    Patch CredentialAuthorityState.schema.{0, 0} Digest :=
-  CredentialAuthorityDomain.editPatch snapshot (markerEdits snapshot semantics command)
+    Patch CredentialAuthorityState.layout :=
+  [.allocate .nullifier (operationMarker snapshot.domain semantics command) ()]
 
 structure MarkerMode (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) where
   rootExact : command.expectedAuthorityRoot = snapshot.cell.root
   unused : CredentialAuthorityState.isNullified snapshot.cell
     (operationMarker snapshot.domain semantics command) = false
-  prepared : CredentialAuthorityDomain.Prepared snapshot (markerEdits snapshot semantics command)
+  prepared : CredentialAuthorityDomain.Prepared snapshot (markerPatch snapshot semantics command)
 
 def markerFamily (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient) :
-    SemanticEffectFamily CredentialAuthorityState.schema.{0, 0}
-      CredentialAuthorityStateCodec.materializer Nat where
+    SemanticEffectFamily CredentialAuthorityState.layout CredentialAuthorityCell.materializer Nat where
   Declaration := Command
   declarationCodec := commandCodec
   pre := snapshot.cell
@@ -441,7 +443,7 @@ def prepareMarker (snapshot : AuthoritySnapshot) (semantics : Digest) (command :
   if root : command.expectedAuthorityRoot = snapshot.cell.root then
     if unused : CredentialAuthorityState.isNullified snapshot.cell
         (operationMarker snapshot.domain semantics command) = false then
-      match CredentialAuthorityDomain.prepare snapshot (markerEdits snapshot semantics command) with
+      match CredentialAuthorityDomain.prepare snapshot (markerPatch snapshot semantics command) with
       | none => .error .authorityPreparation
       | some prepared => .ok ⟨root, unused, prepared⟩
     else .error .nullifierUsed
@@ -458,12 +460,10 @@ structure PreparedInvocation {F : Type} [Field F]
   nonempty : command.targets ≠ []
   distinct : (command.targets.map Target.target).Nodup
   directory : LoadedDirectory durable
-  authority : Loaded deployment.authorityAnchor durable.snapshot
+  authority : Loaded deployment durable.snapshot
   targets : (i : TargetIndex command) → PreparedTarget deployment directory.directory
     authority.snapshot profile.semantics ambient command command.targets[i]
   marker : MarkerMode authority.snapshot profile.semantics command
-  physical : Lowered directory authority (markerEdits authority.snapshot profile.semantics command)
-    marker.prepared []
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
@@ -476,9 +476,16 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
       let targets ← collect command.targets (prepareTarget deployment directory.directory
         authority.snapshot profile.semantics ambient command)
       let marker ← prepareMarker authority.snapshot profile.semantics command
-      let physical ← requireSome .physicalPreparation (lower directory authority marker.prepared [])
-      .ok ⟨nonempty, distinct, directory, authority, targets, marker, physical⟩
+      .ok ⟨nonempty, distinct, directory, authority, targets, marker⟩
     else .error .duplicateTargets
   else .error .emptyTargets
+
+/-- The authority cell after the transaction: the marker patch applied to the
+loaded cell. -/
+def PreparedInvocation.authorityPost {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.marker.prepared.validated.apply
 
 end Minidregg.Kernel.DeclaredResourceController

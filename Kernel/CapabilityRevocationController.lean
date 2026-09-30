@@ -27,6 +27,7 @@ open Minidregg.Theory.CredentialAuthorityState
 open Minidregg.Theory.CredentialAuthorityEffects
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.PolicyInstall
+open Minidregg.Theory.Store (Store)
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -35,7 +36,7 @@ abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
-abbrev AuthorityMaterializer := CredentialAuthorityStateCodec.materializer
+abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
 
 structure Command (kind : ResourceKind) where
   subject : SubjectId
@@ -172,17 +173,10 @@ def request {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
     (operationMarker snapshot.domain semantics command)
     (declaration snapshot.domain semantics command)).2
 
-def edits {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
-    (command : Command kind) : List CredentialAuthorityDomain.Edit :=
-  [⟨snapshot.entries.find? (fun entry => match entry with
-      | .revocation key _ => decide (key = .capability command.capability)
-      | _ => false), .revocation (.capability command.capability) true⟩,
-    CredentialAuthorityDomain.nullifierEdit snapshot (operationMarker snapshot.domain semantics command)]
-
 inductive Reject where
   | malformedCommand | directoryUnavailable | authorityUnavailable | targetUnavailable
   | staleAuthority | victimUnavailable | victimPolicy | alreadyRevoked | replayedMarker
-  | authorityPreparation | validation | refinement | physicalPreparation
+  | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving Repr
@@ -209,7 +203,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     {kind : ResourceKind} (command : Command kind) where
   private mk ::
   directory : LoadedDirectory durable
-  authority : Loaded deployment.authorityAnchor durable.snapshot
+  authority : Loaded deployment durable.snapshot
   target : ObservedTarget deployment directory.directory command
   victim : StoredCapability command.victimKind
   victimExact : readCapability authority.snapshot.cell command.victimKind command.capability = some victim
@@ -217,9 +211,6 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   victimPolicy : victim.head.policyId = ⟨command.target.value⟩
   candidate : Candidate (family authority.snapshot profile.semantics ambient command)
     authority.snapshot.cell (declaration authority.snapshot.domain profile.semantics command) ()
-  update : CredentialAuthorityDomain.Prepared authority.snapshot (edits authority.snapshot profile.semantics command)
-  postExact : update.postLogical = candidate.validated.apply.logical
-  physical : Lowered directory authority (edits authority.snapshot profile.semantics command) update []
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨command.target.value⟩
       (authority.snapshot.authState.policyRevision ⟨command.target.value⟩))
@@ -240,15 +231,11 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
         if registered : RevocationKey.capability command.capability ∈ authority.snapshot.revocationUniverse.revocationKeys then
           if live : isRevoked authority.snapshot.cell (.capability command.capability) = false then
             if fresh : isNullified authority.snapshot.cell (operationMarker authority.snapshot.domain profile.semantics command) = false then
-              let update ← requireSome .authorityPreparation
-                (CredentialAuthorityDomain.prepare authority.snapshot (edits authority.snapshot profile.semantics command))
-              match validate AuthorityMaterializer authority.snapshot.cell
-                  (declaration authority.snapshot.domain profile.semantics command).patch with
+              match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
+                  ((declaration authority.snapshot.domain profile.semantics command).patch
+                    authority.snapshot.logical) with
               | .rejected _ => .error .validation
               | .accepted validated =>
-                if same : CredentialAuthorityStateCodec.encode update.postLogical =
-                    CredentialAuthorityStateCodec.encode validated.apply.logical then
-                  let physical ← requireSome .physicalPreparation (lower directory authority update [])
                   let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
                     authority.snapshot.domain directory.directory
                     (authority.snapshot.authState.policyAddress ⟨command.target.value⟩
@@ -258,8 +245,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                       modeEvidence := ⟨rootExact, registered, live, fresh⟩
                       validated := validated
                       postcondition := validated.resultAt },
-                    update, CredentialAuthorityStateCodec.encode_injective same, physical, source⟩
-                else .error .refinement
+                    source⟩
             else .error .replayedMarker
           else .error .alreadyRevoked
         else .error .victimUnavailable
@@ -271,8 +257,14 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
   {kind : ResourceKind} {command : Command kind}
 
+/-- The authority cell after the revocation: the family's own validated patch
+applied to the loaded cell. It is the one authority write. -/
+def Prepared.authorityPost (prepared : Prepared deployment profile ambient durable command) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.candidate.validated.apply
+
 def project (prepared : Prepared deployment profile ambient durable command)
-    (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) : Minidregg.Pred.State :=
+    (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots (request prepared.authority.snapshot profile.semantics ambient command) ++
     [("authority/operation/revoke", 1)] ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode ⟨kind, command⟩) ++
@@ -284,14 +276,14 @@ def project (prepared : Prepared deployment profile ambient durable command)
 view. Request/header and target are fixed; only victim/control slots may vary. -/
 theorem project_noninterference (prepared : Prepared deployment profile ambient durable command)
     (left right : ResourceAuthorityProjection.Authority)
-    (victim : left.fields (.capability command.victimKind command.capability) =
-      right.fields (.capability command.victimKind command.capability))
-    (victimRevoked : left.fields (.revoked (.capability command.capability)) =
-      right.fields (.revoked (.capability command.capability)))
-    (control : left.fields (.capability .program command.controlCapability) =
-      right.fields (.capability .program command.controlCapability))
-    (controlRevoked : left.fields (.revoked (.capability command.controlCapability)) =
-      right.fields (.revoked (.capability command.controlCapability))) :
+    (victim : left ⟨.capability command.victimKind, command.capability⟩ =
+      right ⟨.capability command.victimKind, command.capability⟩)
+    (victimRevoked : left ⟨.revoked, .capability command.capability⟩ =
+      right ⟨.revoked, .capability command.capability⟩)
+    (control : left ⟨.capability .program, command.controlCapability⟩ =
+      right ⟨.capability .program, command.controlCapability⟩)
+    (controlRevoked : left ⟨.revoked, .capability command.controlCapability⟩ =
+      right ⟨.revoked, .capability command.controlCapability⟩) :
     project prepared left = project prepared right := by
   unfold project
   rw [ResourceAuthorityProjection.grantSlots_noninterference _ _ _ left right victim victimRevoked,
@@ -407,7 +399,7 @@ theorem Accepted.grants_preserved [DecidableEq F]
     (accepted : Accepted prepared envelope) (other : ResourceKind) (identifier : CapabilityId) :
     readCapability accepted.semantic.prepared.post other identifier =
       readCapability prepared.authority.snapshot.cell other identifier := by
-  exact revoke_frame.{0, 0, 0, 0} accepted.semantic (.capability other identifier)
+  exact revoke_frame accepted.semantic ⟨.capability other, identifier⟩
     (by
       intro member
       rcases Finset.mem_insert.mp member with impossible | member
@@ -421,7 +413,7 @@ theorem Accepted.policy_generation_preserved [DecidableEq F]
     policyEpochAt accepted.semantic.prepared.post policy =
       policyEpochAt prepared.authority.snapshot.cell policy := by
   exact congrArg (fun value : Option Nat => value.getD 0)
-    (revoke_frame.{0, 0, 0, 0} accepted.semantic (.policyEpoch policy)
+    (revoke_frame accepted.semantic ⟨.policyEpoch, policy⟩
       (by
       intro member
       rcases Finset.mem_insert.mp member with impossible | member
@@ -439,7 +431,7 @@ theorem Accepted.current_policy_evaluated [DecidableEq F]
         (prepared.authority.snapshot.authState.policyRevision ⟨command.target.value⟩) = some committed ∧
       Minidregg.Pred.eval committed.record.predicate
         (project prepared prepared.authority.snapshot.logical)
-        (project prepared prepared.update.postLogical) = true := by
+        (project prepared prepared.authorityPost.logical) = true := by
   have verified : (policyConfig prepared).verifies
       (request prepared.authority.snapshot profile.semantics ambient command)
       accepted.semantic.authorization.policyWitness = true :=
@@ -447,10 +439,6 @@ theorem Accepted.current_policy_evaluated [DecidableEq F]
   obtain ⟨committed, resolved, evaluated⟩ :=
     (canonical_context_verifies_sound (step prepared) rfl verified).2.2.2
   refine ⟨committed, resolved, ?_⟩
-  change Minidregg.Pred.eval committed.record.predicate
-    (project prepared prepared.authority.snapshot.logical)
-    (project prepared prepared.candidate.validated.apply.logical) = true at evaluated
-  rw [← prepared.postExact] at evaluated
   exact evaluated
 
 /-- info: 'Minidregg.Kernel.CapabilityRevocationController.Accepted.revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/

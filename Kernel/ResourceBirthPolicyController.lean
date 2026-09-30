@@ -7,7 +7,7 @@ before adding canonical old-policy authorization. These are the existing
 host verdicts. The complete-domain policy adapter consumes this checked result.
 -/
 import Compiler.ResourceBirthCodec
-import Compiler.DeclaredEffectPageMaterializer
+import Compiler.DeclaredEffectCell
 import Theory.PolicyInstall
 import Kernel.ResourceBirthController
 import Compiler.CredentialAuthorityPolicyRegistry
@@ -21,6 +21,7 @@ open Minidregg.Theory
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.ResourceBirth
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -228,15 +229,10 @@ theorem check_wrong_factory {registry : TypeRegistry Digest}
 
 /-! ## The actual typed factory control-cell observation -/
 
-abbrev FactoryCell := CellState.Materialized DeclaredEffectPageMaterializer.materializer
+abbrev FactoryCell := CellState.Materialized DeclaredEffectCell.materializer
 
-def factoryPatch (pre : FactoryCell) :
-    CellState.Patch DeclaredEffectPageMaterializer.schema Digest where
-  expectedPreRoot := pre.root
-  fieldFootprint := ∅
-  resourceFootprint := ∅
-  fieldWrites := []
-  resourceWrites := []
+/-- The factory's observation writes nothing: the empty patch. -/
+def factoryPatch (_pre : FactoryCell) : Patch EffectDeclaration.effectLayout := []
 
 private def unitCodec : LawfulCodec Unit where
   encode := fun _ => []
@@ -245,12 +241,11 @@ private def unitCodec : LawfulCodec Unit where
 
 /-- The factory is an existing control object. Its observation is a no-op
 typed leg, while the complete same descriptor commits all births and payments.
-The receiving catalogue fixes its kind and actual directory identity. -/
+The receiving deployment fixes its kind and actual directory identity. -/
 def factoryFamily {registry : TypeRegistry Digest}
     (pins : FactoryPins) (encoding : SourceEncoding registry)
     (oldAuthority : AuthState) (pre : FactoryCell) (height : Height) :
-    SemanticEffectFamily DeclaredEffectPageMaterializer.schema
-      DeclaredEffectPageMaterializer.materializer Unit where
+    SemanticEffectFamily EffectDeclaration.effectLayout DeclaredEffectCell.materializer Unit where
   Declaration := Descriptor registry
   declarationCodec := encoding.codec
   pre := pre
@@ -268,35 +263,27 @@ def factoryFamily {registry : TypeRegistry Digest}
   ReleaseAuthorization := fun _ _ _ => Empty
   DisclosureAllowed := fun _ _ _ => True
 
+theorem factoryValidated (pre : FactoryCell) :
+    CellState.ValidatedPatch DeclaredEffectCell.materializer pre pre.root (factoryPatch pre) :=
+  (CellState.validate_accepts _ pre pre.root (factoryPatch pre) rfl trivial).choose
+
 def factoryCandidate {registry : TypeRegistry Digest}
     (pins : FactoryPins) (encoding : SourceEncoding registry)
     (oldAuthority : AuthState) (pre : FactoryCell) (height : Height)
     (descriptor : Descriptor registry) :
     PolicyInstall.Candidate (factoryFamily pins encoding oldAuthority pre height)
-      pre descriptor () :=
-  match checked : CellState.validate DeclaredEffectPageMaterializer.materializer
-      pre (factoryPatch pre) with
-  | .accepted validated =>
-      { preStateBound := rfl
-        modeEvidence := ()
-        validated := validated
-        postcondition := by
-          change ({ fields := pre.logical.fields, resources := pre.logical.resources } :
-            CellState.LogicalState DeclaredEffectPageMaterializer.schema) = pre.logical
-          rfl }
-  | .rejected _ => False.elim (by
-      simp [CellState.validate, factoryPatch, CellState.Patch.namedFields,
-        CellState.Patch.namedResources] at checked)
+      pre descriptor () where
+  preStateBound := rfl
+  modeEvidence := ()
+  validated := factoryValidated pre
+  postcondition := rfl
 
 theorem factoryCandidate_preserves_control_cell {registry : TypeRegistry Digest}
     (pins : FactoryPins) (encoding : SourceEncoding registry)
     (oldAuthority : AuthState) (pre : FactoryCell) (height : Height)
     (descriptor : Descriptor registry) :
     (factoryCandidate pins encoding oldAuthority pre height descriptor).post.logical =
-      pre.logical := by
-  change ({ fields := pre.logical.fields, resources := pre.logical.resources } :
-    CellState.LogicalState DeclaredEffectPageMaterializer.schema) = pre.logical
-  rfl
+      pre.logical := rfl
 
 /-! ## One fixed receiving tuple from the actual prepared birth -/
 namespace Concrete
@@ -318,10 +305,9 @@ abbrev Durable := ResourceBirthController.Concrete.Durable
 abbrev PreparedBirth {F : Type} [Field F] :=
   ResourceBirthController.Concrete.PreparedBirth (F := F)
 
-/-- The authority incidence is the full semantic domain. Its physical
-realization is the checked catalogue/shard lowering, not a native blob write.
-Allocation incidences are already outer lifecycle slots and are never packed
-into a second envelope. -/
+/-- The authority incidence is the one authority cell at the deployment's pinned
+identifier. Allocation incidences are already outer lifecycle slots and are
+never packed into a second envelope. -/
 inductive Incidence (count : Nat) where
   | factory
   | book
@@ -332,11 +318,6 @@ inductive Incidence (count : Nat) where
 abbrev Source (descriptor : Descriptor Registry) := { actual : Descriptor Registry // actual = descriptor }
 
 abbrev Legs (descriptor : Descriptor Registry) := Incidence descriptor.createRequests.length
-
-local instance : DecidableEq CanonicalResourceKernel.schema.Field :=
-  inferInstanceAs (DecidableEq CanonicalResourceKernel.Field)
-local instance : DecidableEq CanonicalResourceKernel.schema.Resource :=
-  inferInstanceAs (DecidableEq Empty)
 
 def creation (descriptor : Descriptor Registry) (index : Fin descriptor.createRequests.length) :=
   descriptor.createRequests.get index
@@ -461,33 +442,22 @@ def resourceContexts (prepared : PreparedBirth profile.compilerProfile deploymen
     policyRevision := (oldAuthority prepared).policyRevision policyId }
 
 def layout (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) : CellLayout (Legs descriptor) where
-  schema
-    | .factory => DeclaredEffectPageMaterializer.schema
-    | .book => CanonicalResourceKernel.schema
-    | .authority => CredentialAuthorityState.schema.{0, 0}
-    | .allocation _ => LifecycleSlot.schema Registry
-  fieldDecidableEq incidence := by
-    cases incidence <;> dsimp <;> infer_instance
-  resourceDecidableEq incidence := by
-    cases incidence <;> dsimp <;> infer_instance
+  storeLayout
+    | .factory => EffectDeclaration.effectLayout
+    | .book => CanonicalResourceKernel.layout
+    | .authority => CredentialAuthorityState.layout
+    | .allocation _ => LifecycleSlot.layout Registry
   materializer
-    | .factory => DeclaredEffectPageMaterializer.materializer
+    | .factory => DeclaredEffectCell.materializer
     | .book => CanonicalResourcePageMaterializer.materializer
-    | .authority => CredentialAuthorityStateCodec.materializer
+    | .authority => CredentialAuthorityCell.materializer
     | .allocation _ => LifecycleSlot.materializer Registry
   projectAuthority := fun _ _ => oldAuthority prepared
   cellId
     | .factory => ⟨deployment.factoryId⟩
     | .book => ⟨deployment.resourceBookId⟩
-    | .authority => ⟨deployment.authorityCatalogueId⟩
+    | .authority => ⟨deployment.authorityCellId⟩
     | .allocation index => ⟨(creation descriptor index).cellId⟩
-
-local instance fieldEq (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (incidence : Legs descriptor) : DecidableEq ((layout prepared).schema incidence).Field :=
-  (layout prepared).fieldDecidableEq incidence
-local instance resourceEq (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
-    (incidence : Legs descriptor) : DecidableEq ((layout prepared).schema incidence).Resource :=
-  (layout prepared).resourceDecidableEq incidence
 
 def rawLeg (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height)
     (source : Source descriptor) : (incidence : Legs descriptor) →
@@ -518,7 +488,7 @@ def rawLeg (prepared : PreparedBirth profile.compilerProfile deployment pins dur
         Postcondition := ResourceBirthAuthority.Postcondition source.val }
   | .allocation index =>
       { pre := ResourceBirthController.allocationPre prepared.directory.directory (creation descriptor index)
-        patch := ResourceBirthController.allocationPatch prepared.directory.directory (creation descriptor index)
+        patch := ResourceBirthController.allocationPatch (creation descriptor index)
         request := ⟨.object, ResourceBirthController.allocationRequest pins
           CanonicalCellRegistry.sourceEncoding (oldAuthority prepared) prepared.directory.directory
           (creation descriptor index) height source.val⟩
@@ -564,16 +534,24 @@ def plan (prepared : PreparedBirth profile.compilerProfile deployment pins durab
   legEffectsDigest := fun source _ => CanonicalCellRegistry.sourceEncoding.effectsDigest source.val
   bindFamily := bindFamily prepared height
 
-def validated (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height) :
+/-- Every allocated identity was fresh in the loaded directory: the allocator
+accepted the whole descriptor. -/
+theorem allocationFresh (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
+    (index : Fin descriptor.createRequests.length) :
+    LifecycleImage.view Registry prepared.directory.directory (creation descriptor index).cellId = .fresh :=
+  prepared.allocated.fresh_pre (creation descriptor index) (List.get_mem _ _)
+
+theorem validated (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height) :
     (incidence : Legs descriptor) → ValidatedPatch ((layout prepared).materializer incidence)
       (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).pre
+      (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).request.2.preStateRoot
       (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).patch
-  | .factory => (factoryCandidate pins CanonicalCellRegistry.sourceEncoding
-      (oldAuthority prepared) prepared.factory.payload height descriptor).validated
+  | .factory => factoryValidated prepared.factory.payload
   | .book => prepared.resources.validated
   | .authority => ResourceBirthAuthority.validated prepared.authority.snapshot.cell descriptor
+      prepared.grants.mode.nullifierFresh
   | .allocation index => ResourceBirthController.allocationValidated
-      prepared.directory.directory (creation descriptor index)
+      prepared.directory.directory (creation descriptor index) (allocationFresh prepared index)
 
 theorem postconditions (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (height : Height) :
     ∀ incidence, (rawLeg prepared height ⟨descriptor, rfl⟩ incidence).Postcondition
@@ -587,7 +565,7 @@ theorem postconditions (prepared : PreparedBirth profile.compilerProfile deploym
   | authority => exact prepared.grants.mode.postcondition
   | allocation index =>
       exact ResourceBirthController.allocation_post_exact
-        prepared.directory.directory (creation descriptor index)
+        prepared.directory.directory (creation descriptor index) (allocationFresh prepared index)
 
 /-- This finite check verifies the real deployment/catalogue/allocation IDs.
 It is not a proof supplied by the requester or a presumed hash-injectivity
@@ -600,7 +578,6 @@ def prepareTuple (prepared : PreparedBirth profile.compilerProfile deployment pi
         validated := validated prepared height
         postconditions := postconditions prepared height
         cellIdsDistinct := distinct
-        requestRoots := by intro incidence; cases incidence <;> rfl
         requestEffects := by intro incidence; cases incidence <;> rfl }
   else none
 
@@ -611,7 +588,7 @@ def bytesSlots (stem : String) : Nat → List UInt8 → List (String × Int)
   | offset, byte :: rest =>
       (s!"{stem}/{offset}", Int.ofNat byte.toNat) :: bytesSlots stem (offset + 1) rest
 
-/-- The reviewable user command excludes source-generated authority shards.
+/-- The reviewable user command excludes source-generated auxiliary creates.
 All remaining fields are the exact user-authored draft, not old world state. -/
 def userCommandBytes (source : Descriptor Registry) : List UInt8 :=
   CanonicalCellRegistry.sourceEncoding.codec.encode { source with auxiliaryCreates := [] }
@@ -626,7 +603,7 @@ user predicates. Factory laws see only their own resource; authority and
 physical allocation state never enter this programmable projection. -/
 def policyResourceSlots (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (wanted : PackedEffectRequest)
-    (logical : (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence)) :
+    (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     List (String × Int) :=
   match wanted with
   | ⟨.account, request⟩ =>
@@ -635,7 +612,7 @@ def policyResourceSlots (prepared : PreparedBirth profile.compilerProfile deploy
   | ⟨.object, request⟩ =>
       if request.policyId.value = deployment.factoryId then
         bytesSlots "cell/factory/bytes" 0
-          (DeclaredEffectPageMaterializer.materializer.codec.encode (logical .factory))
+          (DeclaredEffectCell.materializer.codec.encode (logical .factory))
       else []
   | ⟨.program, _⟩ => []
 
@@ -644,7 +621,7 @@ The source descriptor still binds all proposed effects, while no account law
 can inspect another balance via the observable accept/refuse result. -/
 def projectForRequest (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) (_height : Height)
     (wanted : PackedEffectRequest) (source : Source descriptor)
-    (logical : (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence)) :
+    (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
   let header := CanonicalRuntimeProfile.requestSlots wanted.2 ++
     [ ("request/creator", Int.ofNat source.val.creator.value)
@@ -661,7 +638,7 @@ explicit public commitments, not a hiding claim. -/
 theorem account_projection_noninterference
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (wanted : Request .account) (source : Source descriptor)
-    (left right : (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence))
+    (left right : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence))
     (same : ∀ asset,
       (CanonicalResourceKernel.logicalBook (left .book)).balance wanted.target.value asset =
       (CanonicalResourceKernel.logicalBook (right .book)).balance wanted.target.value asset) :
@@ -676,7 +653,7 @@ theorem account_policy_verdict_noninterference
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (wanted : Request .account) (source : Source descriptor)
     (leftOld rightOld leftNew rightNew :
-      (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence))
+      (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence))
     (oldSame : ∀ asset,
       (CanonicalResourceKernel.logicalBook (leftOld .book)).balance wanted.target.value asset =
       (CanonicalResourceKernel.logicalBook (rightOld .book)).balance wanted.target.value asset)
@@ -701,7 +678,7 @@ theorem account_policy_verdict_noninterference
 
 def project (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor)
     (height : Height) (primary : Legs descriptor) (source : Source descriptor)
-    (logical : (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence)) :
+    (logical : (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
   projectForRequest prepared height (rawLeg prepared height source primary).request source logical
 
@@ -849,7 +826,6 @@ def Pending.tuple
   validated := validated prepared height
   postconditions := postconditions prepared height
   cellIdsDistinct := pending.cellIdsDistinct
-  requestRoots := by intro incidence; cases incidence <;> rfl
   requestEffects := by intro incidence; cases incidence <;> rfl
 
 /-- Both the source bytes and their read guard come from the complete original
@@ -874,10 +850,11 @@ def policyPreCell
 the raw leg's request or its descriptor commitments. -/
 def policyPostState
     (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) :
-    (incidence : Legs descriptor) → LogicalState ((layout prepared).schema incidence)
+    (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)
   | .factory => prepared.factory.payload.logical
   | .book => prepared.resources.post.logical
-  | .authority => (ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor).logical
+  | .authority => (ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor
+      prepared.grants.mode.nullifierFresh).logical
   | .allocation index => LifecycleSlot.state Registry (.live (creation descriptor index).cell)
 
 theorem Pending.policyPreCell_exact
@@ -896,7 +873,7 @@ theorem Pending.policyPostState_exact
   | authority => rfl
   | allocation index =>
       exact (ResourceBirthController.allocation_post_exact prepared.directory.directory
-        (creation descriptor index)).symm
+        (creation descriptor index) (allocationFresh prepared index)).symm
 
 def Pending.branchStep
     {prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor}

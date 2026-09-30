@@ -1,7 +1,7 @@
 /-
 An application's stable identity is an ordinary Mini object, independent of its
-process, HTTP connection, and any user's AgentGrain. This four-entry declared
-page records only lifecycle generation, phase, package version and snapshot
+process, HTTP connection, and any user's AgentGrain. This four-field declared
+record (a declared-effect store) records only lifecycle generation, phase, package version and snapshot
 version. Full package and snapshot bytes live in separate canonical content
 resources. A version step is admitted only with a content incidence on the
 corresponding target in the same ordinary resource transaction.
@@ -11,7 +11,7 @@ belongs to the installed policy, current capability, signed ingress and durable
 DeclaredResourceController receiver. In particular, it does not grant an HTTP
 dispatch permit or assert that an external app, package or snapshot is sound.
 -/
-import Kernel.DeclaredResourceProjection
+import Kernel.DeclaredFields
 import Kernel.ResourceTransaction
 import Pred.Core
 
@@ -22,7 +22,8 @@ open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.EffectDeclaration
 open Minidregg.Theory.DeclaredActionLowering
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
+open Minidregg.Theory.Store (Store)
 open Minidregg.Pred
 set_option autoImplicit false
 
@@ -42,36 +43,46 @@ structure State where
 def State.values (s : State) : List Int :=
   [s.generation, s.phase, s.packageVersion, s.snapshotVersion]
 
-def key (app field : Nat) : StateKey := .objectField ⟨app⟩ ⟨field⟩
+abbrev key (app field : Nat) : StateKey := DeclaredFields.key app field
 
-def State.page (s : State) (domain : Digest) (app : Nat) : Page :=
-  ⟨domain, app % shardCount,
-    some ⟨key app 0, s.generation⟩, some ⟨key app 1, s.phase⟩,
-    some ⟨key app 2, s.packageVersion⟩, some ⟨key app 3, s.snapshotVersion⟩⟩
+/-- The four coordinates in the store's canonical order (fields 1, 2, 3, 0;
+see `DeclaredFields`). -/
+def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
+  [(1,s.phase),(2,s.packageVersion),(3,s.snapshotVersion),(0,s.generation)]
 
-def initialPage (domain : Digest) (app : Nat) : Page :=
-  (⟨0, 0, 0, 0⟩ : State).page domain app
+theorem State.coordinates_four (s : State) :
+    s.coordinates = DeclaredFields.four s.generation s.phase s.packageVersion s.snapshotVersion := rfl
 
-def readState (app : Nat) (page : Page) : Option State := do
-  let read := fun n => (page.entries.find? (fun e => e.key == key app n)).map (·.value)
+/-- The application resource as a declared-effect store: exactly its four fields. -/
+def State.store (s : State) (app : Nat) : Store effectLayout :=
+  DeclaredFields.store app s.coordinates
+
+def initialStore (app : Nat) : Store effectLayout :=
+  (⟨0, 0, 0, 0⟩ : State).store app
+
+def readState (app : Nat) (store : Store effectLayout) : Option State := do
+  let read := fun n => DeclaredFields.read app n store
   return ⟨← read 0, ← read 1, ← read 2, ← read 3⟩
+
+theorem readState_store (app : Nat) (s : State) : readState app (s.store app) = some s := by
+  obtain ⟨r0, r1, r2, r3⟩ :=
+    DeclaredFields.read_four app s.generation s.phase s.packageVersion s.snapshotVersion
+  simp [readState, State.store, State.coordinates_four, r0, r1, r2, r3]
 
 /-- Expected-value writes compare every coordinate, including unchanged ones. -/
 def actions (app : Nat) (before after : State) : List Action :=
   (List.range 4).zipWith (fun n pair =>
     .write (key app n) (some pair.1) pair.2) (before.values.zip after.values)
 
-def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
-  [(0,s.generation),(1,s.phase),(2,s.packageVersion),(3,s.snapshotVersion)]
-
 def slots (before after : State) : List (String × Int) :=
   DeclaredResourceProjection.scalarSlots before.coordinates after.coordinates
 
-theorem page_projection_exact (domain : Digest) (app : Nat) (before after : State) :
-    DeclaredResourceProjection.project app (before.page domain app) (after.page domain app) =
+/-- The policy view of an application resource is exactly its four coordinates. -/
+theorem store_projection_exact (app : Nat) (before after : State) :
+    DeclaredResourceProjection.project app (before.store app) (after.store app) =
       slots before after := by
-  simp [DeclaredResourceProjection.project, DeclaredResourceProjection.values,
-    Page.entries, State.page, key, slots, State.coordinates]
+  simp only [State.store, slots, State.coordinates_four]
+  exact DeclaredFields.project_four app _ _ _ _ _ _ _ _
 
 private def nonnegative (slot : String) : Pred := .not (.le slot (-1))
 private def unchanged (field : Nat) : Pred :=

@@ -20,14 +20,6 @@ open Minidregg.Kernel.ResourceBirthPolicyController
 
 set_option autoImplicit false
 
-local instance bookFieldDecidableEq : DecidableEq CanonicalResourceKernel.schema.Field := by
-  change DecidableEq CanonicalResourceKernel.Field
-  infer_instance
-
-local instance bookResourceDecidableEq : DecidableEq CanonicalResourceKernel.schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
-
 abbrev Source := GrainResourceBirthController.Source
 abbrev Tariff := GrainResourceBirthController.Tariff
 
@@ -45,8 +37,7 @@ structure FactoryAuthorization (tariff : Tariff) (source : Source)
 def factoryFamily (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)
     (oldAuthority : AuthState) (pre : FactoryCell) (height : Height) :
-    SemanticEffectFamily DeclaredEffectPageMaterializer.schema
-      DeclaredEffectPageMaterializer.materializer Unit where
+    SemanticEffectFamily EffectDeclaration.effectLayout DeclaredEffectCell.materializer Unit where
   Declaration := Unit
   declarationCodec := DeclaredActionLowering.unitCodec
   pre := pre
@@ -69,7 +60,7 @@ def factoryFamily (tariff : Tariff) (source : Source)
 /-- A conserved Book batch still uses its existing request and exact
 admission. The factory witness is now for the composite request; a bare
 factory token cannot inhabit this evidence. -/
-structure BirthBatchEvidence {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+structure BirthBatchEvidence {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)
     (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState)
@@ -83,14 +74,14 @@ structure BirthBatchEvidence {M : CellState.Materializer CanonicalResourceKernel
     Authorized sourcePortal oldAuthority
       (CanonicalResourceEffect.batchSourceRequest encoding pre contexts source.birth position)
 
-def birthFamily {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+def birthFamily {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)
     (factoryPortal sourcePortal : Portal) (oldAuthority : AuthState)
     (factoryPreRoot : Digest) (height : Height)
     (pre : CellState.Materialized M)
     (contexts : Nat → CanonicalResourceEffect.RequestContext) :
-    SemanticEffectFamily CanonicalResourceKernel.schema M Unit where
+    SemanticEffectFamily CanonicalResourceKernel.layout M Unit where
   Declaration := Unit
   declarationCodec := DeclaredActionLowering.unitCodec
   pre := pre
@@ -119,8 +110,7 @@ def authorityFamily (tariff : Tariff) (source : Source)
     (pins : FactoryPins) (encoding : SourceEncoding CanonicalCellRegistry.registry)
     (snapshot : CredentialAuthorityDomain.Snapshot)
     (semantics : Digest) (height : Height) :
-    SemanticEffectFamily CredentialAuthorityState.schema.{0, 0}
-      CredentialAuthorityStateCodec.materializer Nat where
+    SemanticEffectFamily CredentialAuthorityState.layout CredentialAuthorityCell.materializer Nat where
   Declaration := Unit
   declarationCodec := DeclaredActionLowering.unitCodec
   pre := snapshot.cell
@@ -130,14 +120,11 @@ def authorityFamily (tariff : Tariff) (source : Source)
   outcomeCodec := fun _ => DeclaredActionLowering.unitCodec
   ModeEvidence := fun _ _ => Unit
   Postcondition := fun _ _ logical =>
-    (CredentialAuthorityDomain.editPatch snapshot
-      (source.authorityEdits snapshot semantics tariff)).ResultAt
-      snapshot.cell.logical logical
+    (source.authorityPatch snapshot semantics tariff).ResultAt snapshot.cell.logical logical
   effectDigest := fun _ => encoding.hashBytes
     ("DREGG/GRAIN-RESOURCE-BIRTH/EFFECTS/v1".toUTF8.toList ++
       source.canonicalBytes tariff)
-  patch := fun _ _ => CredentialAuthorityDomain.editPatch snapshot
-    (source.authorityEdits snapshot semantics tariff)
+  patch := fun _ _ => source.authorityPatch snapshot semantics tariff
   nullifier := fun _ _ => some
     (DeclaredResourceController.operationMarker snapshot.domain semantics
       (source.grainCommand tariff))

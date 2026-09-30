@@ -66,7 +66,7 @@ def Config.runtimeParameters (config : Config) : List UInt8 :=
   "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
   (StreamCodec.list StreamCodec.nat).encode
     [config.deployment.domain.value, config.deployment.factoryId,
-     config.deployment.resourceBookId, config.deployment.authorityCatalogueId,
+     config.deployment.resourceBookId, config.deployment.authorityCellId,
      config.federation.value, config.genesisHeight, config.tariff.base,
      config.tariff.perBirth, config.tariff.perGrant, config.tariff.perInitialPayloadByte,
      config.tariff.collector, config.tariff.asset] ++
@@ -89,7 +89,7 @@ theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
       "DREGG.NATIVE-HOST.PARAMETERS/v1".toUTF8.toList ++
         (StreamCodec.list StreamCodec.nat).encode
           [config.deployment.domain.value, config.deployment.factoryId,
-           config.deployment.resourceBookId, config.deployment.authorityCatalogueId,
+           config.deployment.resourceBookId, config.deployment.authorityCellId,
            config.federation.value, config.genesisHeight, config.tariff.base,
            config.tariff.perBirth, config.tariff.perGrant,
            config.tariff.perInitialPayloadByte, config.tariff.collector,
@@ -130,8 +130,10 @@ theorem imageBoundaryCanonical_loaded (config : Config) (durable : Durable) :
       congrArg (imageBoundaryCanonical config) durable.canonical.symm
     _ = imageBoundary config durable.image := imageBoundaryCanonical_encode config durable.image
 
-#print axioms imageBoundaryCanonical_encode
-#print axioms imageBoundaryCanonical_loaded
+/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_encode
+/-- info: 'Minidregg.Kernel.NativeHost.imageBoundaryCanonical_loaded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms imageBoundaryCanonical_loaded
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length
@@ -139,11 +141,31 @@ def logicalHeight (config : Config) (durable : Durable) : Height :=
 theorem logicalHeight_exact (config : Config) (durable : Durable) :
     logicalHeight config durable = config.genesisHeight + durable.image.accepted.length := rfl
 
+/-- Every policy whose revision the authority cell records has a complete
+current head, and that head's address loads a source cell of the same policy,
+the same revision and this runtime's semantics. -/
+def policySourced (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) :
+    Store.Address CredentialAuthorityState.layout → Bool
+  | ⟨.policyRevision, identifier⟩ =>
+      match CredentialAuthorityDomain.headAt logical identifier with
+      | none => false
+      | some head =>
+          match CanonicalCellRegistry.loadPolicySource config.deployment.domain directory head.address with
+          | none => false
+          | some source => decide (source.record.policyId = identifier ∧
+              source.record.version = head.version ∧ source.record.semantics = config.profile.semantics)
+  | _ => true
+
+def policiesSourced (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (logical : Store.Store CredentialAuthorityState.layout) : Bool :=
+  decide (∀ address ∈ logical.support, policySourced config directory logical address = true)
+
 structure Opened (config : Config) where
   private mk ::
   durable : Durable
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
-  authority : CredentialAuthorityDomainReceiver.Loaded config.deployment.authorityAnchor durable.snapshot
+  authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot
   pins : FactoryPins
 
 def need {α : Type} (detail : String) : Option α → Except String α
@@ -169,14 +191,8 @@ def validateLoaded (config : Config) (durable : Durable) : Except String (Opened
     | .absent => true
     | .present cell => CanonicalCellRegistry.cellCheck config.deployment identifier.value cell)
     "native cell role or domain law refused"
-  check (authority.snapshot.entries.all fun entry =>
-    match entry with
-    | .policy identifier _ revision address =>
-        match CanonicalCellRegistry.loadPolicySource config.deployment.domain directory.directory address with
-        | none => false
-        | some source => decide (source.record.policyId = identifier ∧
-            source.record.version = revision ∧ source.record.semantics = config.profile.semantics)
-    | _ => true) "selected policy source/profile mismatch"
+  check (policiesSourced config directory.directory authority.snapshot.logical)
+    "selected policy source/profile mismatch"
   let factoryHead ← need "factory policy head unavailable"
     (CredentialAuthorityDomain.headAt authority.snapshot.logical ⟨config.deployment.factoryId⟩)
   let pins : FactoryPins :=

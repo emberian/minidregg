@@ -2,16 +2,14 @@
 # Kernel.ResourceBirthController -- lifecycle lifting for an accepted joint turn
 
 This is the shared physical projection used by the birth receiving controller.
-It combines the existing checked fresh allocator with an existing complete
-MultiCellHyperedge. Native cell pre/post values become exact lifecycle images;
-native roots are never equated with the outer storage root.
+It lifts the existing checked fresh allocator into typed lifecycle-slot
+candidates, and prepares a concrete birth from one restored physical snapshot:
+allocation writes, the pinned factory and Book, and the one authority cell.
 
 The complete birth application must select its authority and Book families in
 source, construct their accepted incidences from the same Descriptor, and bind
-all old authority dependencies. The generic lift below does not manufacture
-those semantic proofs or call a host verdict. In particular, it is not a public
-raw-DataIntent endpoint. Sharded authority needs its source-owned materialization
-refinement in addition to the one-native-cell/one-physical-cell lift here.
+the old authority cell. Nothing here manufactures those semantic proofs or calls
+a host verdict; it is not a public raw-DataIntent endpoint.
 -/
 import Compiler.ResourceBirthCodec
 import Compiler.CredentialAuthorityReplay
@@ -19,12 +17,12 @@ import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.GrainResourceBirthAuthority
 import Theory.ResourceBirthAuthority
 import Kernel.CanonicalResourceEffect
-import Kernel.MultiCellHyperedge
 import Kernel.DurableDataIntent
 
 namespace Minidregg.Kernel.ResourceBirthController
 
 open Minidregg.Theory
+open Minidregg.Theory.Store
 open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.ResourceBirth
 open Minidregg.Theory.TypedAuthorization
@@ -96,45 +94,52 @@ def AllocationMode {registry : TypeRegistry Digest}
   request ∈ descriptor.createRequests ∧
     ∃ after, ResourceBirth.allocate registry before descriptor.createRequests = .ok after
 
+/-- A fresh allocation of the lifecycle slot.  It is enabled only at an absent
+slot, so it cannot validate over a live or retired identity. -/
 def allocationPatch {registry : TypeRegistry Digest}
-    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry) :
-    CellState.Patch (LifecycleSlot.schema registry) Digest where
-  expectedPreRoot := (allocationPre before request).root
-  fieldWrites := [{ field := (), value := some (some request.cell) }]
-  resourceWrites := []
-  fieldFootprint := {()}
-  resourceFootprint := ∅
+    (request : CreateRequest (CellId := Nat) registry) :
+    Patch (LifecycleSlot.layout registry) :=
+  [.allocate () () (some request.cell)]
 
-private theorem validatedExact {S : CellState.Schema}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {pre : CellState.Materialized M}
-    (patch : CellState.Patch S Digest)
-    (rootExact : patch.expectedPreRoot = pre.root)
-    (fieldsExact : patch.fieldFootprint = patch.namedFields)
-    (resourcesExact : patch.resourceFootprint = patch.namedResources) :
-    CellState.ValidatedPatch M pre patch := by
-  generalize checked : CellState.validate M pre patch = result
-  cases result with
-  | accepted validated => exact validated
-  | rejected reason =>
-      simp [CellState.validate, rootExact, fieldsExact, resourcesExact] at checked
+theorem allocationPatch_valid_iff {registry : TypeRegistry Digest}
+    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry) :
+    Patch.ValidFrom (allocationPre before request).logical (allocationPatch request) ↔
+      LifecycleImage.view registry before request.cellId = .fresh := by
+  change ((.allocate () () (some request.cell) : Op (LifecycleSlot.layout registry)).Enabled
+      (LifecycleSlot.state registry (LifecycleImage.view registry before request.cellId)) ∧ True) ↔ _
+  cases view : LifecycleImage.view registry before request.cellId with
+  | fresh => simp [Op.Enabled, Store.Fresh, LifecycleSlot.state]
+  | retired =>
+      simp [Op.Enabled, Store.Fresh, LifecycleSlot.state, LifecycleSlot.slotAddress]
+  | live cell =>
+      simp [Op.Enabled, Store.Fresh, LifecycleSlot.state, LifecycleSlot.slotAddress]
 
 theorem allocationValidated {registry : TypeRegistry Digest}
-    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry) :
+    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry)
+    (fresh : LifecycleImage.view registry before request.cellId = .fresh) :
     CellState.ValidatedPatch (LifecycleSlot.materializer registry)
-      (allocationPre before request) (allocationPatch before request) := by
-  exact validatedExact (allocationPatch before request) rfl rfl rfl
+      (allocationPre before request) (allocationPre before request).root
+      (allocationPatch request) :=
+  (CellState.validate_accepts _ _ _ _ rfl
+    ((allocationPatch_valid_iff before request).mpr fresh)).choose
+
+/-- Refuting pole: a retired or live identity admits no allocation. -/
+theorem allocation_not_valid_of_used {registry : TypeRegistry Digest}
+    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry)
+    (used : LifecycleImage.view registry before request.cellId ≠ .fresh) :
+    ¬ Patch.ValidFrom (allocationPre before request).logical (allocationPatch request) :=
+  fun valid => used ((allocationPatch_valid_iff before request).mp valid)
 
 theorem allocation_post_exact {registry : TypeRegistry Digest}
-    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry) :
-    (allocationValidated before request).apply.logical =
+    (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry)
+    (fresh : LifecycleImage.view registry before request.cellId = .fresh) :
+    (allocationValidated before request fresh).apply.logical =
       LifecycleSlot.state registry (.live request.cell) := by
-  calc
-    _ = LifecycleSlot.state registry (LifecycleSlot.image registry
-        (allocationValidated before request).apply.logical) :=
-      (LifecycleSlot.state_image registry _).symm
-    _ = _ := by
-      congr 1
+  rw [CellState.ValidatedPatch.apply_logical]
+  change (LifecycleSlot.state registry (LifecycleImage.view registry before request.cellId)).set
+      ⟨(), ()⟩ (some (some request.cell)) = _
+  rw [fresh]
+  rfl
 
 def allocationRequest {registry : TypeRegistry Digest}
     (pins : FactoryPins) (encoding : SourceEncoding registry) (oldAuthority : AuthState)
@@ -162,7 +167,7 @@ def allocationFamily {registry : TypeRegistry Digest}
     (pins : FactoryPins) (encoding : SourceEncoding registry) (oldAuthority : AuthState)
     (before : Directory Nat registry) (request : CreateRequest (CellId := Nat) registry)
     (height : Height) :
-    SemanticEffectFamily (LifecycleSlot.schema registry) (LifecycleSlot.materializer registry)
+    SemanticEffectFamily (LifecycleSlot.layout registry) (LifecycleSlot.materializer registry)
       Nat where
   pre := allocationPre before request
   Declaration := Descriptor registry
@@ -174,7 +179,7 @@ def allocationFamily {registry : TypeRegistry Digest}
   ModeEvidence := fun descriptor _ => PLift (AllocationMode before request descriptor)
   Postcondition := fun _ _ logical => logical = LifecycleSlot.state registry (.live request.cell)
   effectDigest := encoding.effectsDigest
-  patch := fun _ _ => allocationPatch before request
+  patch := fun _ _ => allocationPatch request
   nullifier := fun _ _ => none
   Release := fun _ _ => Unit
   DeclassificationAuthority := fun _ _ => Unit
@@ -192,8 +197,8 @@ def allocationCandidate {registry : TypeRegistry Digest}
       (allocationPre before request) descriptor () where
   preStateBound := rfl
   modeEvidence := ⟨member, allocated.after, allocated.accepted⟩
-  validated := allocationValidated before request
-  postcondition := allocation_post_exact before request
+  validated := allocationValidated before request (allocated.fresh_pre request member)
+  postcondition := allocation_post_exact before request (allocated.fresh_pre request member)
 
 theorem allocation_candidate_physical_pre {registry : TypeRegistry Digest}
     {before : Directory Nat registry} {descriptor : Descriptor registry}
@@ -215,8 +220,8 @@ theorem allocation_candidate_physical_post {registry : TypeRegistry Digest}
     (allocationCandidate pins encoding oldAuthority allocated request member height).post.bytes =
       (birthWrite request).canonicalPostBytes := by
   change (LifecycleSlot.materializer registry).codec.encode
-    (allocationValidated before request).apply.logical = _
-  rw [allocation_post_exact]
+    (allocationValidated before request (allocated.fresh_pre request member)).apply.logical = _
+  rw [allocation_post_exact _ _ (allocated.fresh_pre request member)]
   exact LifecycleSlot.bytes_exact registry (.live request.cell)
 
 theorem no_allocation_mode_of_retired {registry : TypeRegistry Digest}
@@ -227,217 +232,7 @@ theorem no_allocation_mode_of_retired {registry : TypeRegistry Digest}
   exact ResourceBirth.allocate_success_fresh registry before after descriptor.createRequests
     accepted request member used
 
-/-! ## An existing native MultiCellHyperedge, packed without schema erasure -/
-
-/-- The receiving deployment fixes the schema and authority view of each
-native incidence. Its physical identity is the existing natural resource id
-in the common Digest carrier, rather than a second independently supplied id. -/
-structure Layout (registry : TypeRegistry Digest) (count : Nat) where
-  kind : Fin count -> registry.Kind
-  fieldEq : (i : Fin count) -> DecidableEq (registry.schema (kind i)).Field
-  resourceEq : (i : Fin count) -> DecidableEq (registry.schema (kind i)).Resource
-  portal : Fin count -> Portal
-  projectAuthority : (i : Fin count) ->
-    CellState.LogicalState (registry.schema (kind i)) -> AuthState
-  cellId : Fin count -> Nat
-
-def Layout.cells {registry : TypeRegistry Digest} {count : Nat}
-    (layout : Layout registry count) : MultiCellHyperedge.CellFamily (Fin count) where
-  schema i := registry.schema (layout.kind i)
-  fieldDecidableEq := layout.fieldEq
-  resourceDecidableEq := layout.resourceEq
-  materializer i := registry.materializer (layout.kind i)
-  portal := layout.portal
-  projectAuthority := layout.projectAuthority
-  cellId i := ⟨layout.cellId i⟩
-
-local instance layoutFieldEq {registry : TypeRegistry Digest} {count : Nat}
-    (layout : Layout registry count) (i : Fin count) :
-    DecidableEq (layout.cells.schema i).Field := layout.fieldEq i
-
-local instance layoutResourceEq {registry : TypeRegistry Digest} {count : Nat}
-    (layout : Layout registry count) (i : Fin count) :
-    DecidableEq (layout.cells.schema i).Resource := layout.resourceEq i
-
-def nativePre {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (i : Fin count) : PackedCell registry :=
-  ⟨layout.kind i, declaration.pre i⟩
-
-def nativePost {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (accepted : declaration.AcceptedLegs) (i : Fin count) : PackedCell registry :=
-  ⟨layout.kind i, declaration.post accepted i⟩
-
-def nativeWrite {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (accepted : declaration.AcceptedLegs) (i : Fin count) : DataWrite where
-  cellId := ⟨layout.cellId i⟩
-  expectedPre := physicalRoot (.live (nativePre declaration i))
-  exactPost := physicalRoot (.live (nativePost declaration accepted i))
-  canonicalPostBytes := LifecycleImage.bytes registry (.live (nativePost declaration accepted i))
-
-def nativeWrites {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (accepted : declaration.AcceptedLegs) : List DataWrite :=
-  (List.finRange count).map (nativeWrite declaration accepted)
-
-theorem nativeWrite_root_bound {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (accepted : declaration.AcceptedLegs) (i : Fin count) :
-    rootBytes (nativeWrite declaration accepted i).canonicalPostBytes =
-      (nativeWrite declaration accepted i).exactPost := rfl
-
-/-- The semantic post is the accepted patch's actual post, never caller bytes. -/
-theorem nativePost_exact {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (accepted : declaration.AcceptedLegs) (i : Fin count) :
-    (nativePost declaration accepted i).payload = (accepted i).validated.apply := rfl
-
-def NativeObserved {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count} (before : Directory Nat registry)
-    (declaration : MultiCellHyperedge.Declaration layout.cells) : Prop :=
-  ∀ i, before.slots (layout.cellId i) = .present (nativePre declaration i)
-
-theorem native_observed_outer_pre {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count} {before : Directory Nat registry}
-    {declaration : MultiCellHyperedge.Declaration layout.cells}
-    (observed : NativeObserved before declaration)
-    (accepted : declaration.AcceptedLegs) (i : Fin count) :
-    (nativeWrite declaration accepted i).expectedPre =
-      physicalRoot (LifecycleImage.view registry before (layout.cellId i)) := by
-  rw [(LifecycleImage.view_live_iff registry before (layout.cellId i)
-    (nativePre declaration i)).mpr (observed i)]
-  rfl
-
-/-- Actual initial absence and actual observed presence make an allocator/native
-write alias impossible. No digest injectivity assumption is involved. -/
-theorem allocated_native_disjoint {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count} {before : Directory Nat registry}
-    {descriptor : Descriptor registry}
-    (allocated : Allocated registry before descriptor)
-    {declaration : MultiCellHyperedge.Declaration layout.cells}
-    (observed : NativeObserved before declaration)
-    (request : CreateRequest (CellId := Nat) registry)
-    (member : request ∈ descriptor.createRequests) (i : Fin count) :
-    request.cellId ≠ layout.cellId i := by
-  intro same
-  have fresh := ResourceBirth.allocate_success_fresh registry before allocated.after
-    descriptor.createRequests allocated.accepted request member
-  apply fresh
-  rw [same]
-  exact before.present_used (observed i)
-
-/-! ## One existing durable intent, with exact outer bytes -/
-
-def readGuard {registry : TypeRegistry Digest}
-    (before : Directory Nat registry) (cellId : Nat) : ReadGuard where
-  cellId := ⟨cellId⟩
-  expectedRoot := physicalRoot (LifecycleImage.view registry before cellId)
-
-/-- Source-owned projection of all native eager nullifiers. Event payload is
-always the complete birth descriptor and cannot be replaced by a host string.
-The quote is the receiver's metering charge, separate from the actual Book fee. -/
-structure SettlementConfig (registry : TypeRegistry Digest) (Nullifier : Type) where
-  encoding : SourceEncoding registry
-  eventDomain : Digest
-  nullifier : Nullifier -> StableNullifier
-  charge : Descriptor registry -> Charge
-
-def birthEvent {registry : TypeRegistry Digest} {Nullifier : Type}
-    (config : SettlementConfig registry Nullifier) (descriptor : Descriptor registry) : StableEvent where
-  codecVersion := 1
-  domain := config.eventDomain
-  eventId := config.encoding.effectsDigest descriptor
-  canonicalBytes := config.encoding.codec.encode descriptor
-
-def combinedWrites {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count} (descriptor : Descriptor registry)
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (accepted : declaration.AcceptedLegs) : List DataWrite :=
-  allocationWrites descriptor ++ nativeWrites declaration accepted
-
-/-- Canonical executable incidence order for the existing joint-nullifier
-carrier. This avoids extracting the noncomputable `Finset.toList` order used
-by the abstract hyperedge without dropping or adding eager nullifiers. -/
-def nativeNullifiers {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    {declaration : MultiCellHyperedge.Declaration layout.cells}
-    (accepted : declaration.AcceptedLegs) :
-    List (MultiCellHyperedge.JointNullifier accepted) :=
-  (List.finRange count).filterMap fun i =>
-    match (declaration.legs i).family.nullifier
-      (declaration.legs i).declaration (declaration.legs i).outcome with
-    | none => none
-    | some nullifier => some ⟨i, nullifier⟩
-
-theorem nativeNullifiers_retains {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count}
-    {declaration : MultiCellHyperedge.Declaration layout.cells}
-    (accepted : declaration.AcceptedLegs) (i : Fin count)
-    (nullifier : (declaration.legs i).Nullifier)
-    (eager : (declaration.legs i).family.nullifier
-      (declaration.legs i).declaration (declaration.legs i).outcome = some nullifier) :
-    (⟨i, nullifier⟩ : MultiCellHyperedge.JointNullifier accepted) ∈
-      nativeNullifiers accepted := by
-  apply List.mem_filterMap.mpr
-  exact ⟨i, by simp, by rw [eager]; rfl⟩
-
-theorem combinedWrites_bound {registry : TypeRegistry Digest} {count : Nat}
-    {layout : Layout registry count} (descriptor : Descriptor registry)
-    (declaration : MultiCellHyperedge.Declaration layout.cells)
-    (accepted : declaration.AcceptedLegs) :
-    ∀ write ∈ combinedWrites descriptor declaration accepted,
-      rootBytes write.canonicalPostBytes = write.exactPost := by
-  intro write member
-  rcases List.mem_append.mp member with born | native
-  · obtain ⟨request, _, rfl⟩ := List.mem_map.mp born
-    exact birthWrite_root_bound request
-  · obtain ⟨i, _, rfl⟩ := List.mem_map.mp native
-    exact nativeWrite_root_bound declaration accepted i
-
-/-- This adapter receives a complete existing hyperedge commit and a checked
-allocation. The caller is the source-owned birth family join, not an untrusted
-wire handler. It retains every accepted native nullifier and exact descriptor
-bytes in the same DataIntent that carries all post bytes.
-
-Read dependency completeness and sharded materialization are properties of
-that source join; this generic single-cell projection cannot invent them. -/
-def ofAllocatedHyperedge
-    {registry : TypeRegistry Digest} {count : Nat} {layout : Layout registry count}
-    {before : Directory Nat registry} {descriptor : Descriptor registry}
-    (_allocated : Allocated registry before descriptor)
-    {declaration : MultiCellHyperedge.Declaration layout.cells}
-    {accepted : declaration.AcceptedLegs}
-    {law : MultiCellHyperedge.ResourceLaw declaration Nat Int}
-    {boundary : MultiCellHyperedge.HandlerBoundary declaration}
-    (_commit : MultiCellHyperedge.Commit law accepted boundary)
-    (_observed : NativeObserved before declaration)
-    (_turnIdBound : declaration.header.turnId = descriptor.transactionId)
-    (config : SettlementConfig registry (MultiCellHyperedge.JointNullifier accepted))
-    (_effectsBound : ∀ i, (declaration.legs i).request.effectsDigest =
-      config.encoding.effectsDigest descriptor)
-    (readIds : List Nat)
-    (readOnly : ∀ id ∈ readIds,
-      (⟨id⟩ : Digest) ∉ (combinedWrites descriptor declaration accepted).map DataWrite.cellId) :
-    DataIntent rootBytes where
-  transactionId := descriptor.transactionId
-  writes := combinedWrites descriptor declaration accepted
-  readGuards := readIds.map (readGuard before)
-  nullifiers := (nativeNullifiers accepted).map config.nullifier
-  exactCharge := config.charge descriptor
-  event := birthEvent config descriptor
-  postRootsBound := combinedWrites_bound descriptor declaration accepted
-  guardsReadOnly := by
-    intro guard member
-    obtain ⟨identifier, inReads, rfl⟩ := List.mem_map.mp member
-    exact readOnly identifier inReads
+/-! ## Durable execution is all-or-nothing -/
 
 /-- Any install attempt exposes the complete old snapshot or the complete
 data-bearing installation, including on either modeled crash boundary. -/
@@ -502,10 +297,10 @@ def packedWrite (identifier : Nat) (before after : PackedCell Registry) : DataWr
   canonicalPostBytes := LifecycleImage.bytes Registry (.live after)
 
 /-- Each source has one physical owner: allocation emits every new envelope;
-the authority lowering emits only existing shards and its existing catalogue;
-the pinned Book emits one final ordered batch result. -/
+the authority update emits its one cell; the pinned Book emits one final
+ordered batch result. -/
 def planWrites (deployment : Deployment) (descriptor : Descriptor Registry)
-    (factory : CellState.Materialized Compiler.DeclaredEffectPageMaterializer.materializer)
+    (factory : CellState.Materialized Compiler.DeclaredEffectCell.materializer)
     (bookBefore bookAfter : CellState.Materialized
       Compiler.CanonicalResourcePageMaterializer.materializer)
     (authorityWrites : List DataWrite) : List DataWrite :=
@@ -599,18 +394,18 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   policiesBound : descriptor.InitialPoliciesBound
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
   book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot
-  grants : CredentialAuthorityDomainReceiver.PreparedGrantBatch profile deployment directory authority descriptor
+  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+  grants : CredentialAuthorityDomainReceiver.PreparedGrantBatch profile deployment authority descriptor
   auxiliaryExact : descriptor.auxiliaryCreates = grants.auxiliaryCreates
   allocated : Allocated Registry directory.directory descriptor
   resources : CanonicalResourceKernel.AcceptedBatch book.payload descriptor.resourceBatch
   writesUnique : ((planWrites deployment descriptor factory.payload book.payload
-    resources.post grants.physical.writes).map DataWrite.cellId).Nodup
+    resources.post grants.writes).map DataWrite.cellId).Nodup
   writePreExact : ∀ write ∈ planWrites deployment descriptor factory.payload book.payload
-      resources.post grants.physical.writes,
+      resources.post grants.writes,
     write.expectedPre = durable.snapshot.model.roots write.cellId
   finalCells : ∀ write ∈ planWrites deployment descriptor factory.payload book.payload
-      resources.post grants.physical.writes, PhysicalPostLaw deployment write
+      resources.post grants.writes, PhysicalPostLaw deployment write
 
 private def requirePreparation (condition : Prop) [Decidable condition]
     (reason : PreparationReject) : Except PreparationReject (PLift condition) :=
@@ -638,7 +433,7 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   policiesBound : descriptor.InitialPoliciesBound
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
   book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot
+  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
 
 def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) :
@@ -708,13 +503,13 @@ def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (
     Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
   let pre ← preparePreAuthority profile deployment pins durable descriptor
   let grants ← fromOption
-    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment pre.directory
+    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment
       pre.authority descriptor)
     .authorityBatch
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates grants.auxiliaryCreates = true)
     .auxiliaryCreates
-  let post ← preparePostAuthority pre grants.physical.writes
+  let post ← preparePostAuthority pre grants.writes
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
     pre.directory, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
@@ -729,10 +524,10 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
     (descriptor : Descriptor Registry) (operationMarker : Nat) where
   private mk ::
   pre : PreparedPreAuthority profile deployment pins durable descriptor
-  authorityCombined : GrainResourceBirthAuthority.Prepared profile deployment pre.directory
+  authorityCombined : GrainResourceBirthAuthority.Prepared profile deployment
     pre.authority descriptor operationMarker
   auxiliaryExact : descriptor.auxiliaryCreates = authorityCombined.auxiliaryCreates
-  post : PreparedPostAuthority pre authorityCombined.physical.writes
+  post : PreparedPostAuthority pre authorityCombined.writes
 
 def prepareGrainBirth (profile : PolicyCompilerProfile F) (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry)
@@ -741,12 +536,12 @@ def prepareGrainBirth (profile : PolicyCompilerProfile F) (deployment : Deployme
       (PreparedGrainBirth profile deployment pins durable descriptor operationMarker) := do
   let pre ← preparePreAuthority profile deployment pins durable descriptor
   let combined ← fromOption
-    (GrainResourceBirthAuthority.prepare profile deployment pre.directory pre.authority
+    (GrainResourceBirthAuthority.prepare profile deployment pre.authority
       descriptor operationMarker) .authorityBatch
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates combined.auxiliaryCreates = true)
     .auxiliaryCreates
-  let post ← preparePostAuthority pre combined.physical.writes
+  let post ← preparePostAuthority pre combined.writes
   .ok ⟨pre, combined, (sameCreates_iff _ _).mp aux.down, post⟩
 
 def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
@@ -755,18 +550,18 @@ def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
     (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
     List DataWrite :=
   planWrites deployment descriptor prepared.pre.factory.payload prepared.pre.book.payload
-    prepared.post.resources.post prepared.authorityCombined.physical.writes
+    prepared.post.resources.post prepared.authorityCombined.writes
 
 def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
     {descriptor : Descriptor Registry} {operationMarker : Nat}
     (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
     List ReadGuard :=
-  CredentialAuthorityDomainReceiver.readonlyGuards
-    prepared.authorityCombined.physical.readGuards prepared.writes
+  prepared.pre.authority.readGuards.filter fun guard =>
+    guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
-/-- The user draft has no authority-allocated shard creates. The complete
-descriptor returned here is the one that must be signed. -/
+/-- The user draft has no auxiliary creates; only the initial policy sources are
+filled in. The complete descriptor returned here is the one that must be signed. -/
 structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
     (deployment : Deployment) (pins : FactoryPins) (durable : Durable)
     (draft : Descriptor Registry) (operationMarker : Nat) where
@@ -782,11 +577,10 @@ def prepareGrainDraft (profile : PolicyCompilerProfile F) (deployment : Deployme
     Except PreparationReject
       (PreparedGrainDraft profile deployment pins durable draft operationMarker) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
-  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   let combined ← fromOption
-    (GrainResourceBirthAuthority.prepare profile deployment directory authority
+    (GrainResourceBirthAuthority.prepare profile deployment authority
       draft operationMarker) .authorityBatch
   let descriptor := { draft with auxiliaryCreates := combined.auxiliaryCreates }
   let prepared ← prepareGrainBirth profile deployment pins durable descriptor operationMarker
@@ -796,12 +590,13 @@ def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) : List DataWrite :=
   planWrites deployment descriptor prepared.factory.payload prepared.book.payload
-    prepared.resources.post prepared.grants.physical.writes
+    prepared.resources.post prepared.grants.writes
 
 def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) : List ReadGuard :=
-  CredentialAuthorityDomainReceiver.readonlyGuards prepared.grants.physical.readGuards prepared.writes
+  prepared.authority.readGuards.filter fun guard =>
+    guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
@@ -854,11 +649,10 @@ def prepareDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (
     (durable : Durable) (draft : Descriptor Registry) :
     Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
-  let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   let grants ← fromOption
-    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment directory authority draft)
+    (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
     .authorityBatch
   let descriptor := { draft with auxiliaryCreates := grants.auxiliaryCreates }
   let prepared ← prepareBirth profile deployment pins durable descriptor
@@ -887,39 +681,35 @@ theorem PreparedBirth.write_roots_bound {deployment : Deployment} {pins : Factor
       exact birthWrite_root_bound request
     · simp only [List.mem_cons, List.not_mem_nil, or_false] at native
       rcases native with rfl | rfl <;> rfl
-  · exact CredentialAuthorityDomainReceiver.planWrites_roots_bound
-      deployment.authorityAnchor durable.snapshot prepared.authority.snapshot.catalogue
-      prepared.grants.prepared.postPages prepared.grants.physical.placement write authority
+  · simp only [CredentialAuthorityDomainReceiver.PreparedGrantBatch.writes,
+      CredentialAuthorityDomainReceiver.Loaded.writes, List.mem_singleton] at authority
+    subst write
+    exact prepared.authority.write_root_bound _
 
 theorem PreparedBirth.readGuards_readonly {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
     guard.cellId ∉ prepared.writes.map DataWrite.cellId :=
-  of_decide_eq_true (List.mem_filter.mp member).2
+  by simpa using (List.mem_filter.mp member).2
 
 theorem PreparedBirth.readGuards_exact {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
     guard.expectedRoot = durable.snapshot.model.roots guard.cellId :=
-  prepared.grants.physical.readGuards_exact guard (List.mem_filter.mp member).1
+  prepared.authority.readGuards_exact guard (List.mem_filter.mp member).1
 
-/-- Every originally read authority shard and the catalogue remain guarded:
-a changed cell carries its old root in its unique write; an unchanged one
-remains a read guard. Newly allocated shards occur only in allocation writes. -/
+/-- The authority cell's read is covered: it is written under its old root, or
+it remains a read guard. -/
 theorem PreparedBirth.authority_reads_covered {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.authority.readGuards) :
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
-  rcases prepared.grants.physical.every_read_covered guard member with written | readonly
-  · exact Or.inl (by
-      simp only [PreparedBirth.writes, planWrites, List.map_append, List.mem_append]
-      exact Or.inr written)
-  · by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
-    · exact Or.inl written
-    · exact Or.inr (List.mem_filter.mpr ⟨readonly, by simpa using written⟩)
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl written
+  · exact Or.inr (List.mem_filter.mpr ⟨member, by simpa using written⟩)
 
 theorem PreparedBirth.fresh_before {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
@@ -933,9 +723,18 @@ theorem PreparedBirth.fresh_before {deployment : Deployment} {pins : FactoryPins
 theorem PreparedBirth.authority_post_exact {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) :
-    prepared.grants.physical.post.cell =
-      ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor :=
-  prepared.grants.post_exact
+    prepared.grants.post =
+      ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor
+        prepared.grants.mode.nullifierFresh := rfl
+
+/-- The authority cell's one write carries exactly the batch's post, guarded at
+the loaded root of that cell. -/
+theorem PreparedBirth.authority_write_member {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor) :
+    prepared.authority.write prepared.grants.post ∈ prepared.writes := by
+  simp [PreparedBirth.writes, planWrites, CredentialAuthorityDomainReceiver.PreparedGrantBatch.writes,
+    CredentialAuthorityDomainReceiver.Loaded.writes]
 
 /-- Checked source records are actual allocator participants, not staging
 receipts or entries in an unrelated in-memory payload store. -/
@@ -947,7 +746,7 @@ theorem PreparedBirth.initial_source_member {deployment : Deployment} {pins : Fa
   unfold Descriptor.createRequests
   apply List.mem_append_right
   rw [prepared.auxiliaryExact]
-  exact List.mem_append_left _ (List.mem_map.mpr ⟨record, member, rfl⟩)
+  exact List.mem_map.mpr ⟨record, member, rfl⟩
 
 theorem PreparedBirth.initial_source_created {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
@@ -1022,11 +821,8 @@ end Concrete
 
 /-! ## Axiom accounting for the source and receiving laws -/
 
-/-- info: 'Minidregg.Kernel.ResourceBirthController.allocated_native_disjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.allocated_native_disjoint
-
-/-- info: 'Minidregg.Kernel.ResourceBirthController.nativeNullifiers_retains' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.nativeNullifiers_retains
+/-- info: 'Minidregg.Kernel.ResourceBirthController.allocation_not_valid_of_used' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.allocation_not_valid_of_used
 
 /-- info: 'Minidregg.Kernel.ResourceBirthController.settlement_no_partial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.settlement_no_partial

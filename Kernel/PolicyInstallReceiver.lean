@@ -3,9 +3,9 @@
 
 The existing installer determines and admits the semantic authority transition.
 This receiver refines that same declaration into immutable source allocation and
-the existing routed shard/catalogue writes. The internal creates are determined
-by the installed source and page materializer; no caller supplies auxiliary
-payloads, an alternate policy store, or a raw durable intent.
+the one write of the authority cell. The only internal create is the installed
+source's cell; no caller supplies auxiliary payloads, an alternate policy store,
+or a raw durable intent.
 
 The original canonical signed ingress is retained for receipt-only replay before
 fresh-state admission. A replay never resigns an old request or derives a new
@@ -151,9 +151,9 @@ def successorCreate (deployment : Deployment) (declaration : PolicyInstallContro
     CreateRequest (CellId := Nat) Registry :=
   CanonicalCellRegistry.policySourceCreate deployment.domain declaration.source
 
-def representationCreates (deployment : Deployment) (declaration : PolicyInstallController.Declaration)
-    (placement : CredentialAuthorityDomainReceiver.Placement) : List (CreateRequest (CellId := Nat) Registry) :=
-  successorCreate deployment declaration :: placement.auxiliaryCreates
+def representationCreates (deployment : Deployment) (declaration : PolicyInstallController.Declaration) :
+    List (CreateRequest (CellId := Nat) Registry) :=
+  [successorCreate deployment declaration]
 
 def planWrites (creates : List (CreateRequest (CellId := Nat) Registry))
     (authorityWrites : List DataWrite) : List DataWrite :=
@@ -199,7 +199,7 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
   private mk ::
   deploymentValid : deployment.Valid
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
-  authority : CredentialAuthorityDomainReceiver.Loaded deployment.authorityAnchor durable.snapshot
+  authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   semantic : PolicyInstallController.Prepared profile authority.snapshot (context federation height authority.snapshot ingress)
   declarationExact : semantic.declaration = ingress.declaration
   markerExact : ingress.marker = (PolicyInstallController.requestDigest profile authority.snapshot
@@ -207,14 +207,12 @@ structure Prepared (profile : CanonicalRuntimeProfile.Profile F) (deployment : D
   source : CanonicalCellRegistry.LoadedPolicySource deployment.domain directory.directory
     (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId
       (context federation height authority.snapshot ingress).policyRevision)
-  lowered : CredentialAuthorityDomainReceiver.Lowered directory authority
-    (PolicyInstallController.edits profile authority.snapshot (context federation height authority.snapshot ingress)
-      semantic.declaration) semantic.update [(successorCreate deployment semantic.declaration).cellId]
   allocated : Directory Nat Registry
   allocationExact : ResourceBirth.allocate Registry directory.directory
-    (representationCreates deployment semantic.declaration lowered.placement) = .ok allocated
+    (representationCreates deployment semantic.declaration) = .ok allocated
   physicalShape : PhysicalShape deployment durable
-    (planWrites (representationCreates deployment semantic.declaration lowered.placement) lowered.writes)
+    (planWrites (representationCreates deployment semantic.declaration)
+      (authority.writes semantic.update.validated.apply))
 
 def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment)
     (durable : Durable) (federation : FederationId) (height : Height)
@@ -232,34 +230,38 @@ def prepare (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployme
   let source ← fromOption (CanonicalCellRegistry.loadPolicySource deployment.domain directory.directory
     (authority.snapshot.authState.policyAddress ingress.declaration.source.policyId requestContext.policyRevision))
     .oldSourceUnavailable
-  let lowered ← fromOption (CredentialAuthorityDomainReceiver.lower directory authority semantic.update
-    [(successorCreate deployment semantic.declaration).cellId]) .physicalLowering
-  let creates := representationCreates deployment semantic.declaration lowered.placement
+  let creates := representationCreates deployment semantic.declaration
   match allocationExact : ResourceBirth.allocate Registry directory.directory creates with
   | .error reason => .error (.allocation reason)
   | .ok allocated => do
-      let shape ← require (PhysicalShape deployment durable (planWrites creates lowered.writes)) .physicalShape
+      let shape ← require (PhysicalShape deployment durable
+        (planWrites creates (authority.writes semantic.update.validated.apply))) .physicalShape
       .ok ⟨deploymentValid.down, directory, authority, semantic, declarationExact.down,
-        markerExact.down, source, lowered, allocated, allocationExact, shape.down⟩
+        markerExact.down, source, allocated, allocationExact, shape.down⟩
 
 variable {profile : CanonicalRuntimeProfile.Profile F} {deployment : Deployment} {durable : Durable}
     {federation : FederationId} {height : Height} {ingress : DecodedIngress}
 
 def Prepared.creates (prepared : Prepared profile deployment durable federation height ingress) :=
-  representationCreates deployment prepared.semantic.declaration prepared.lowered.placement
+  representationCreates deployment prepared.semantic.declaration
+
+/-- The authority cell after the installation: the one validated install patch
+applied to the loaded cell. -/
+def Prepared.authorityPost (prepared : Prepared profile deployment durable federation height ingress) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.semantic.update.validated.apply
 
 def Prepared.writes (prepared : Prepared profile deployment durable federation height ingress) :=
-  planWrites prepared.creates prepared.lowered.writes
+  planWrites prepared.creates (prepared.authority.writes prepared.authorityPost)
 
 def Prepared.readGuards (prepared : Prepared profile deployment durable federation height ingress) : List ReadGuard :=
-  CredentialAuthorityDomainReceiver.readonlyGuards
-    (prepared.authority.readGuards ++ [⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩])
-    prepared.writes
+  (prepared.authority.readGuards ++
+      ([⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩] : List ReadGuard)).filter
+    fun guard => guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 theorem Prepared.creates_source_owned
     (prepared : Prepared profile deployment durable federation height ingress) :
-    prepared.creates = successorCreate deployment ingress.declaration ::
-      prepared.lowered.placement.auxiliaryCreates := by
+    prepared.creates = [successorCreate deployment ingress.declaration] := by
   simp only [Prepared.creates, representationCreates, prepared.declarationExact]
 
 theorem Prepared.fresh_pre (prepared : Prepared profile deployment durable federation height ingress)
@@ -274,22 +276,15 @@ theorem Prepared.exact_created (prepared : Prepared profile deployment durable f
   ResourceBirth.allocate_success_created Registry prepared.directory.directory prepared.allocated
     prepared.creates prepared.allocationExact request member
 
-theorem Prepared.source_reserved (prepared : Prepared profile deployment durable federation height ingress)
-    (request : CreateRequest (CellId := Nat) Registry)
-    (member : request ∈ prepared.lowered.placement.auxiliaryCreates) :
-    request.cellId ≠ (successorCreate deployment prepared.semantic.declaration).cellId := by
-  have fresh := prepared.lowered.fresh.2 request member
-  simpa using fresh.2
-
 theorem Prepared.write_roots_bound (prepared : Prepared profile deployment durable federation height ingress)
     (write : DataWrite) (member : write ∈ prepared.writes) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
   rcases List.mem_append.mp member with created | changed
   · obtain ⟨request, _, rfl⟩ := List.mem_map.mp created
     exact ResourceBirthController.birthWrite_root_bound request
-  · exact CredentialAuthorityDomainReceiver.planWrites_roots_bound deployment.authorityAnchor durable.snapshot
-      prepared.authority.snapshot.catalogue prepared.semantic.update.postPages
-      prepared.lowered.placement write changed
+  · simp only [CredentialAuthorityDomainReceiver.Loaded.writes, List.mem_singleton] at changed
+    subst write
+    exact prepared.authority.write_root_bound _
 
 theorem Prepared.readGuards_exact (prepared : Prepared profile deployment durable federation height ingress)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
@@ -305,7 +300,7 @@ theorem Prepared.readGuards_exact (prepared : Prepared profile deployment durabl
 theorem Prepared.readGuards_readonly (prepared : Prepared profile deployment durable federation height ingress)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
     guard.cellId ∉ prepared.writes.map DataWrite.cellId :=
-  of_decide_eq_true (List.mem_filter.mp member).2
+  by simpa using (List.mem_filter.mp member).2
 
 theorem Prepared.authority_reads_covered (prepared : Prepared profile deployment durable federation height ingress)
     (guard : ReadGuard) (member : guard ∈ prepared.authority.readGuards) :
@@ -357,18 +352,14 @@ def AcceptedInstall.installed (accepted : AcceptedInstall profile deployment dur
       (payloadStore deployment accepted.prepared.directory) :=
   ⟨accepted.prepared.semantic, accepted.semantic⟩
 
+/-- The written authority cell is the accepted installer's own post. -/
 theorem AcceptedInstall.actual_authority_post
     (accepted : AcceptedInstall profile deployment durable federation height) :
-    accepted.prepared.lowered.post.logical = accepted.installed.post.logical := by
-  rw [accepted.installed.post_pages_exact]
-  change accepted.prepared.lowered.post.logical =
-    CredentialAuthorityDomain.logicalOfPages accepted.prepared.semantic.update.postPages
-  change CredentialAuthorityDomain.logicalOfPages accepted.prepared.lowered.post.pages = _
-  rw [accepted.prepared.lowered.postPages]
+    accepted.prepared.authorityPost.logical = accepted.installed.post.logical := rfl
 
 theorem AcceptedInstall.actual_post_head
     (accepted : AcceptedInstall profile deployment durable federation height) :
-    CredentialAuthorityDomain.headAt accepted.prepared.lowered.post.logical accepted.ingress.declaration.source.policyId =
+    CredentialAuthorityDomain.headAt accepted.prepared.authorityPost.logical accepted.ingress.declaration.source.policyId =
       some ⟨accepted.ingress.declaration.source.version,
         PolicyRecordCodec.digest accepted.ingress.declaration.source⟩ := by
   rw [accepted.actual_authority_post, ← accepted.prepared.declarationExact]
@@ -376,24 +367,24 @@ theorem AcceptedInstall.actual_post_head
 
 theorem AcceptedInstall.generation_preserved
     (accepted : AcceptedInstall profile deployment durable federation height) :
-    accepted.prepared.lowered.post.logical.fields
-        (.policyEpoch accepted.ingress.declaration.source.policyId) =
-      accepted.prepared.authority.snapshot.logical.fields
-        (.policyEpoch accepted.ingress.declaration.source.policyId) := by
+    accepted.prepared.authorityPost.logical
+        ⟨.policyEpoch, accepted.ingress.declaration.source.policyId⟩ =
+      accepted.prepared.authority.snapshot.logical
+        ⟨.policyEpoch, accepted.ingress.declaration.source.policyId⟩ := by
   rw [accepted.actual_authority_post, ← accepted.prepared.declarationExact]
   exact accepted.installed.generation_preserved
 
 theorem AcceptedInstall.capability_preserved
     (accepted : AcceptedInstall profile deployment durable federation height)
     (kind : ResourceKind) (id : CapabilityId) :
-    accepted.prepared.lowered.post.logical.fields (.capability kind id) =
-      accepted.prepared.authority.snapshot.logical.fields (.capability kind id) := by
+    accepted.prepared.authorityPost.logical ⟨.capability kind, id⟩ =
+      accepted.prepared.authority.snapshot.logical ⟨.capability kind, id⟩ := by
   rw [accepted.actual_authority_post]
   exact accepted.installed.capability_preserved kind id
 
 theorem AcceptedInstall.marker_consumed
     (accepted : AcceptedInstall profile deployment durable federation height) :
-    accepted.prepared.lowered.post.logical.fields (.nullifier accepted.ingress.marker) = some true := by
+    accepted.prepared.authorityPost.logical ⟨.nullifier, accepted.ingress.marker⟩ = some () := by
   rw [accepted.actual_authority_post, accepted.prepared.markerExact]
   exact accepted.installed.nullifier_consumed
 
@@ -409,7 +400,7 @@ def event (domain : Digest) (ingress : DecodedIngress) : StableEvent where
 /-- Admission units count the one semantic installation, its actual physical
 touches and bytes, one native signature, capability admission and compiled
 policy check. There is no invented monetary transfer for internal source or
-shard representation; monetary operations require their conserved Book leg. -/
+authority representation; monetary operations require their conserved Book leg. -/
 def charge (accepted : AcceptedInstall profile deployment durable federation height) : Charge
   | .incidences => 1
   | .turnBytes => accepted.ingress.bytes.length
@@ -471,7 +462,7 @@ theorem installed_source_bytes (accepted : AcceptedInstall profile deployment du
 /-- The actual installed row decodes to the exact source selected by the new
 canonical head. This is a byte statement, not equality of cryptographic roots. -/
 theorem installed_head_and_source (accepted : AcceptedInstall profile deployment durable federation height) :
-    CredentialAuthorityDomain.headAt accepted.prepared.lowered.post.logical
+    CredentialAuthorityDomain.headAt accepted.prepared.authorityPost.logical
         accepted.ingress.declaration.source.policyId =
       some ⟨accepted.ingress.declaration.source.version,
         PolicyRecordCodec.digest accepted.ingress.declaration.source⟩ ∧
@@ -510,83 +501,18 @@ theorem Prepared.fresh_before (prepared : Prepared profile deployment durable fe
   rw [← prepared.directory.bytes_exact, prepared.fresh_pre request member]
   rfl
 
-/-- Source and internal shard allocations cannot overwrite an old live shard
-that the semantic materializer leaves unchanged. Permanent freshness is checked
-against the whole old directory, including tombstones. -/
-theorem unchanged_authority_shard_unwritten
-    (accepted : AcceptedInstall profile deployment durable federation height)
-    (cellId : DurableDataIntent.CellId) (page : CredentialAuthorityPageMaterializer.Page)
-    (physical : durable.snapshot.canonicalBytes cellId =
-      CredentialAuthorityDomainReceiver.shardBytes page)
-    (authorityUnwritten : cellId ∉ accepted.prepared.lowered.writes.map DataWrite.cellId) :
-    cellId ∉ accepted.prepared.writes.map DataWrite.cellId := by
-  intro member
-  obtain ⟨write, member, same⟩ := List.mem_map.mp member
-  rcases List.mem_append.mp member with allocation | authority
-  · obtain ⟨request, inRequests, rfl⟩ := List.mem_map.mp allocation
-    have fresh := accepted.prepared.fresh_before request inRequests
-    change (⟨request.cellId⟩ : DurableDataIntent.CellId) = cellId at same
-    rw [same] at fresh
-    have impossible := fresh.symm.trans physical
-    cases impossible
-  · exact authorityUnwritten (List.mem_map.mpr ⟨write, authority, same⟩)
-
-private theorem installed_authority_page
-    (accepted : AcceptedInstall profile deployment durable federation height)
-    (reference : CredentialAuthorityDomain.Ref) (page : CredentialAuthorityPageMaterializer.Page)
-    (represented : CredentialAuthorityDomainReceiver.PostPageRepresented durable.snapshot
-      accepted.prepared.lowered.writes accepted.prepared.lowered.readGuards
-      accepted.prepared.lowered.placement.auxiliaryCreates reference page) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes reference.cellId =
-      CredentialAuthorityDomainReceiver.shardBytes page := by
-  rcases represented.2 with written | created | unchanged
-  · obtain ⟨write, member, same, bytes⟩ := written
-    have installed := installed_write_bytes accepted write (List.mem_append_right _ member)
-    rw [same, bytes] at installed
-    exact installed
-  · obtain ⟨request, member, same, bytes⟩ := created
-    have inRequests : request ∈ accepted.prepared.creates := List.mem_cons_of_mem _ member
-    have inWrites : ResourceBirthController.birthWrite request ∈ accepted.prepared.writes :=
-      List.mem_append_left _ (List.mem_map.mpr ⟨request, inRequests, rfl⟩)
-    have installed := installed_write_bytes accepted _ inWrites
-    change (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-      ⟨request.cellId⟩ = LifecycleImage.bytes Registry (.live request.cell) at installed
-    rw [same, bytes] at installed
-    exact installed
-  · obtain ⟨bytes, guard, member, same⟩ := unchanged
-    have localFrame := accepted.prepared.lowered.readGuards_readonly guard member
-    rw [same] at localFrame
-    have frame := unchanged_authority_shard_unwritten accepted reference.cellId page bytes localFrame
-    rw [DataSnapshot.install_canonicalBytes]
-    simp only [intent]
-    rw [DurableReceiver.lookupPostBytes_missing _ _ frame]
-    exact bytes
-
-theorem installed_authority_pages (accepted : AcceptedInstall profile deployment durable federation height) :
-    List.Forall₂
-      (fun (reference : CredentialAuthorityDomain.Ref) (page : CredentialAuthorityPageMaterializer.Page) =>
-        (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes reference.cellId =
-          CredentialAuthorityDomainReceiver.shardBytes page)
-      accepted.prepared.lowered.post.catalogue.pages accepted.prepared.lowered.post.pages :=
-  accepted.prepared.lowered.represented.imp
-    (fun reference page represented => installed_authority_page accepted reference page represented)
-
-theorem installed_authority_catalogue (accepted : AcceptedInstall profile deployment durable federation height) :
+/-- The installed image holds exactly the post authority cell at the pinned
+identifier: one write, carrying the accepted installer's post. -/
+theorem installed_authority_cell (accepted : AcceptedInstall profile deployment durable federation height) :
     (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-        deployment.authorityAnchor.catalogueCellId =
-      CredentialAuthorityDomainReceiver.catalogueBytes accepted.prepared.lowered.post.catalogue := by
-  let write := CredentialAuthorityDomainReceiver.catalogueWrite deployment.authorityAnchor durable.snapshot
-    (CredentialAuthorityDomainReceiver.placedCatalogue
-      accepted.prepared.authority.snapshot.catalogue accepted.prepared.lowered.placement)
-  have member : write ∈ accepted.prepared.writes :=
-    List.mem_append_right _ (by
-      simp [write, CredentialAuthorityDomainReceiver.Lowered.writes,
-        CredentialAuthorityDomainReceiver.planWrites])
-  have installed := installed_write_bytes accepted write member
-  change (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-    deployment.authorityAnchor.catalogueCellId = _ at installed
-  rw [accepted.prepared.lowered.postCatalogue]
-  exact installed
+        (CredentialAuthorityDomainReceiver.cellIdOf deployment) =
+      CredentialAuthorityDomainReceiver.cellBytes accepted.prepared.authorityPost := by
+  have member : accepted.prepared.authority.write accepted.prepared.authorityPost ∈
+      accepted.prepared.writes := by
+    unfold Prepared.writes planWrites CredentialAuthorityDomainReceiver.Loaded.writes
+    exact List.mem_append_right _ (List.mem_singleton.mpr rfl)
+  exact installed_write_bytes accepted
+    (accepted.prepared.authority.write accepted.prepared.authorityPost) member
 
 theorem no_partial_commit (accepted : AcceptedInstall profile deployment durable federation height)
     (schedule : Schedule) :

@@ -86,7 +86,7 @@ structure Runtime where
 the tariff-derived request, and authority are all fields; neither a post-book
 nor an executor charge is caller data. -/
 structure OpenedLease
-    (M : Materializer CanonicalResourceKernel.schema Digest)
+    (M : Materializer CanonicalResourceKernel.layout Digest)
     (portal : Portal) (authState : AuthState) (pre : Materialized M) where
   terms : Terms
   runtime : Runtime
@@ -99,7 +99,7 @@ structure OpenedLease
 namespace OpenedLease
 
 variable
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
 
 def prepaid
@@ -315,7 +315,7 @@ abbrev StartObserved (boundary : StartBoundary) (intent : StartIntent) :=
   IrreversibleEffectSettlement.Observed boundary (.forward intent)
 
 def startAction
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) : StartAction where
   leaseId := lease.terms.leaseId
@@ -325,7 +325,7 @@ def startAction
   prepaid := lease.prepaid
 
 def compensation
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) : Compensation where
   leaseId := lease.terms.leaseId
@@ -335,7 +335,7 @@ def compensation
   amount := lease.prepaid
 
 def runningBytes
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) : List UInt8 :=
   ReactiveTerminalCell.frame 181 [ReactiveTerminalCell.encodeNat lease.manifest.version,
@@ -346,7 +346,7 @@ def runningBytes
     ReactiveTerminalCell.encodeNat lease.prepaid]
 
 def startIntent
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre)
     (height attempt : Nat) : StartIntent where
@@ -365,7 +365,7 @@ def startIntent
 read at settlement time, so a provider success racing a logical change is
 quarantined by `IrreversibleEffectSettlement`. -/
 structure StartAttempt
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) (boundary : StartBoundary) where
   height : Nat
@@ -379,7 +379,7 @@ structure StartAttempt
 namespace StartAttempt
 
 variable
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
 
@@ -402,7 +402,7 @@ structure CompletionClaim where
 /-- Completion evidence is indexed by the exact start attempt.  The boundary
 is intentionally abstract: a production provider must refine it below. -/
 structure CompletionBoundary
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {startBoundary : StartBoundary}
     (attempt : StartAttempt lease startBoundary) where
@@ -424,7 +424,7 @@ def statusTag : IrreversibleEffectSettlement.Status → Nat
 It commits the exact external transaction, before/after roots, intended root,
 and status. -/
 def startSettlementDigest
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     (attempt : StartAttempt lease boundary) : Digest :=
@@ -444,7 +444,7 @@ allowed only after a definitely refused start; compensation requires the exact
 compensated status.  Uncertain/stale provider outcomes become `broken`, never
 successful or automatically refundable. -/
 inductive Outcome
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     (attempt : StartAttempt lease boundary)
@@ -468,7 +468,7 @@ inductive Outcome
 namespace Outcome
 
 variable
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -524,7 +524,7 @@ end Outcome
 /-! ## Exact terminal/outbox settlement -/
 
 def promiseId
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) : Digest :=
   ⟨Nat.pair lease.terms.leaseId lease.runtime.providerEndpoint.value⟩
@@ -534,7 +534,7 @@ is zero: the authorized ten-lane debit occurs exactly once in `prepayIntent`.
 A deployment wanting a separately priced terminal operation must authorize a
 second charged request rather than smuggling cost here. -/
 def terminalOpenCell
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) (deadline : Nat) : ReactiveTerminalCell.OpenCell where
   codecVersion := ReactiveTerminalCell.wireVersion
@@ -558,7 +558,7 @@ def terminalOpenCell
   outboxTriggerDistinct := lease.runtime.outboxStartDistinct
 
 @[simp] theorem prepay_and_terminal_transactions_distinct
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     (lease : OpenedLease M portal authState pre) (deadline : Nat) :
     lease.prepayIntent.transactionId ≠
@@ -566,7 +566,7 @@ def terminalOpenCell
   lease.runtime.prepayTerminalDistinct
 
 def terminalPlan
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -580,7 +580,7 @@ def terminalPlan
   triggerRoot := attempt.settlement.logicalRoot
 
 @[simp] theorem terminalPlan_kind
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -591,7 +591,7 @@ def terminalPlan
   cases outcome <;> rfl
 
 theorem terminal_and_outbox_atomic
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -606,7 +606,7 @@ theorem terminal_and_outbox_atomic
   ReactiveTerminalCell.Plan.terminal_and_outbox_atomic (terminalPlan outcome) schedule before
 
 @[simp] theorem terminal_retry_replays
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -621,7 +621,7 @@ theorem terminal_and_outbox_atomic
   ReactiveTerminalCell.Plan.retry_after_install (terminalPlan outcome) schedule before
 
 theorem distinct_provider_terminals_conflict
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -639,7 +639,7 @@ theorem distinct_provider_terminals_conflict
     (by simpa [terminalPlan_kind] using different) schedule before
 
 @[simp] theorem terminal_settlement_has_no_second_charge
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -650,7 +650,7 @@ theorem distinct_provider_terminals_conflict
   rfl
 
 @[simp] theorem terminal_exact_writes_and_nullifier
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -675,7 +675,7 @@ joined to a second canonical accepted resource operation and fresh authority.
 This also means a quarantined/uncertain provider action cannot silently mint
 or transfer value. -/
 structure RefundPlan
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -693,7 +693,7 @@ structure RefundPlan
 namespace RefundPlan
 
 variable
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -759,7 +759,7 @@ end RefundPlan
 No `CompletionBoundary.Evidence` is sound without this separately supplied
 relation and refinement. -/
 structure CompletionRefinement
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -771,7 +771,7 @@ structure CompletionRefinement
 
 /-- Safety and retry theorems do not imply provider progress. -/
 structure LivenessRefinement
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     (Enabled : StartAttempt lease boundary → Prop)
@@ -781,7 +781,7 @@ structure LivenessRefinement
 /-- Physical atomicity is conditional on the existing payload-bearing durable
 simulation.  This wrapper covers the exact provider terminal/outbox intent. -/
 theorem physical_terminal_step_atomic
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}
@@ -812,7 +812,7 @@ theorem physical_terminal_step_atomic
 freshness of its one nullifier.  It never reconstructs bytes from a digest or
 evaluates a cryptographic hash inside a proof of reflexive root equality. -/
 theorem terminalPlan_ready
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {lease : OpenedLease M portal authState pre} {boundary : StartBoundary}
     {attempt : StartAttempt lease boundary}

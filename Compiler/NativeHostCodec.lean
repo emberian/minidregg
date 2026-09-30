@@ -229,8 +229,23 @@ def outcomeStream : StreamCodec Outcome :=
         (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
 
+/-- Version 2: receipts' image boundaries commit to the store-cell image (one
+authority cell, no catalogue or shards). Version-1 outcomes refuse. -/
+def outcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v2".toUTF8.toList
+
 def outcomeCodec : LawfulCodec Outcome :=
-  framed "DREGG/NATIVE-HOST/OUTCOME/v1".toUTF8.toList outcomeStream
+  framed outcomeFrame outcomeStream
+
+def retiredOutcomeFrame : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v1".toUTF8.toList
+
+/-- A version-1 outcome frame refuses to decode. -/
+theorem v1_outcome_refused (payload : List UInt8) :
+    outcomeCodec.decode (retiredOutcomeFrame ++ payload) = none := by
+  have lengthExact : outcomeFrame.length = retiredOutcomeFrame.length := by decide +kernel
+  have different : retiredOutcomeFrame ≠ outcomeFrame := by decide +kernel
+  have raw : (framedRaw outcomeFrame outcomeStream).decode (retiredOutcomeFrame ++ payload) = none := by
+    simp [framedRaw, lengthExact, different]
+  simp [outcomeCodec, framed, ResourceBirthCodec.strictCodec, raw]
 
 @[simp] theorem call_roundtrip (value : SignedCall) :
     callCodec.decode (callCodec.encode value) = some value := callCodec.decode_encode value
@@ -253,5 +268,8 @@ theorem plan_canonical {bytes : List UInt8} {value : SigningPlan}
 theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
     (decoded : outcomeCodec.decode bytes = some value) : outcomeCodec.encode value = bytes :=
   framed_canonical _ _ decoded
+
+/-- info: 'Minidregg.Compiler.NativeHostCodec.v1_outcome_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v1_outcome_refused
 
 end Minidregg.Compiler.NativeHostCodec

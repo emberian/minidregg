@@ -85,7 +85,7 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {kind : ResourceKind} {command : Command kind}
 
 def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
-  prepared.physical.writes ++ prepared.physical.placement.auxiliaryCreates.map ResourceBirthController.birthWrite
+  prepared.authority.writes prepared.authorityPost
 
 def resourceGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
   ⟨⟨command.declaration.target.value⟩,
@@ -95,7 +95,8 @@ def policyGuard (prepared : Prepared deployment profile ambient durable command)
   ⟨⟨prepared.source.readGuard.1⟩, prepared.source.readGuard.2⟩
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  resourceGuard prepared :: policyGuard prepared :: readonlyGuards prepared.authority.readGuards (writes prepared)
+  resourceGuard prepared :: policyGuard prepared ::
+    prepared.authority.readGuards.filter fun guard => guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : Prepared deployment profile ambient durable command) : Prop :=
   ((writes prepared).map DataWrite.cellId).Nodup ∧
@@ -113,11 +114,9 @@ instance physicalShapeDecidable (prepared : Prepared deployment profile ambient 
 theorem writes_roots_bound (prepared : Prepared deployment profile ambient durable command)
     (write : DataWrite) (member : write ∈ writes prepared) :
     rootBytes write.canonicalPostBytes = write.exactPost := by
-  rcases List.mem_append.mp member with authority | allocation
-  · exact planWrites_roots_bound deployment.authorityAnchor durable.snapshot
-      prepared.authority.snapshot.catalogue prepared.update.postPages prepared.physical.placement write authority
-  · obtain ⟨request, _, rfl⟩ := List.mem_map.mp allocation
-    exact ResourceBirthController.birthWrite_root_bound request
+  simp only [writes, Loaded.writes, List.mem_singleton] at member
+  subst write
+  exact prepared.authority.write_root_bound _
 
 theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
@@ -126,7 +125,7 @@ theorem readGuards_readonly (prepared : Prepared deployment profile ambient dura
   · exact shape.2.2.2.1
   · rcases List.mem_cons.mp rest with rfl | authority
     · exact shape.2.2.2.2.1
-    · exact of_decide_eq_true (List.mem_filter.mp authority).2
+    · simpa using (List.mem_filter.mp authority).2
 
 structure AcceptedDelegation [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
@@ -177,15 +176,13 @@ theorem intent_authority_marker
     ingress.command.2.declaration.operationNullifier =
       (transactionId deployment.domain profile.semantics ingress).value := by
   have identity := accepted.prepared.identity
-  rw [accepted.prepared.authority.observed.1] at identity
+  rw [accepted.prepared.authority.domainExact] at identity
   exact identity
 
 theorem accepted_authority_post (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
-    (accepted.accepted.declaration.post accepted.accepted.legs ()).logical = accepted.prepared.physical.post.logical := by
-  rw [accepted.accepted.post_exact]
-  change CredentialAuthorityDomain.logicalOfPages accepted.prepared.update.postPages =
-    CredentialAuthorityDomain.logicalOfPages accepted.prepared.physical.post.pages
-  rw [accepted.prepared.physical.postPages]
+    (accepted.accepted.declaration.post accepted.accepted.legs ()).logical =
+      accepted.prepared.authorityPost.logical :=
+  accepted.accepted.post_exact
 
 /-- Every source-owned write has its exact bytes in the complete installed
 snapshot. The accepted physical shape supplies global, not per-page uniqueness. -/
@@ -196,90 +193,13 @@ theorem installed_write_bytes (accepted : AcceptedDelegation deployment profile 
   DataSnapshot.install_canonicalBytes_of_member durable.snapshot (intent accepted)
     accepted.physical.1 write member
 
-/-- An existing authority shard omitted by the authority writer cannot be
-clobbered by an internal allocation: all allocated identities were unused in
-the actual loaded directory, while this shard has a live canonical envelope. -/
-theorem unchanged_authority_shard_unwritten
-    (accepted : AcceptedDelegation deployment profile ambient durable ingress)
-    (cellId : DurableDataIntent.CellId) (page : CredentialAuthorityPageMaterializer.Page)
-    (physical : durable.snapshot.canonicalBytes cellId = shardBytes page)
-    (authorityUnwritten : cellId ∉ accepted.prepared.physical.writes.map DataWrite.cellId) :
-    cellId ∉ (writes accepted.prepared).map DataWrite.cellId := by
-  intro member
-  obtain ⟨write, member, same⟩ := List.mem_map.mp member
-  rcases List.mem_append.mp member with authority | allocation
-  · exact authorityUnwritten (List.mem_map.mpr ⟨write, authority, same⟩)
-  · obtain ⟨request, inCreates, rfl⟩ := List.mem_map.mp allocation
-    have unused := (accepted.prepared.physical.fresh.2 request inCreates).1
-    have absent : accepted.prepared.directory.directory.slots request.cellId = .absent := by
-      cases slot : accepted.prepared.directory.directory.slots request.cellId with
-      | absent => rfl
-      | present cell =>
-          exact False.elim (unused (accepted.prepared.directory.directory.present_used slot))
-    have view := (LifecycleImage.view_fresh_iff Registry accepted.prepared.directory.directory
-      request.cellId).mpr ⟨absent, unused⟩
-    have freshBytes : durable.snapshot.canonicalBytes ⟨request.cellId⟩ = [] := by
-      rw [← accepted.prepared.directory.bytes_exact, view]
-      rfl
-    change (⟨request.cellId⟩ : DurableDataIntent.CellId) = cellId at same
-    rw [same] at freshBytes
-    have impossible := freshBytes.symm.trans physical
-    cases impossible
-
-private theorem installed_authority_page
-    (accepted : AcceptedDelegation deployment profile ambient durable ingress)
-    (reference : CredentialAuthorityDomain.Ref) (page : CredentialAuthorityPageMaterializer.Page)
-    (represented : PostPageRepresented durable.snapshot accepted.prepared.physical.writes
-      accepted.prepared.physical.readGuards accepted.prepared.physical.placement.auxiliaryCreates reference page) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes reference.cellId = shardBytes page := by
-  rcases represented.2 with written | created | unchanged
-  · obtain ⟨write, member, same, bytes⟩ := written
-    have installed := installed_write_bytes accepted write (List.mem_append_left _ member)
-    rw [same, bytes] at installed
-    exact installed
-  · obtain ⟨request, member, same, bytes⟩ := created
-    have inWrites : ResourceBirthController.birthWrite request ∈ writes accepted.prepared :=
-      List.mem_append_right _ (List.mem_map.mpr ⟨request, member, rfl⟩)
-    have installed := installed_write_bytes accepted _ inWrites
-    change (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-      ⟨request.cellId⟩ = LifecycleImage.bytes Registry (.live request.cell) at installed
-    rw [same, bytes] at installed
-    exact installed
-  · obtain ⟨bytes, guard, member, same⟩ := unchanged
-    have localFrame := accepted.prepared.physical.readGuards_readonly guard member
-    rw [same] at localFrame
-    have frame := unchanged_authority_shard_unwritten accepted reference.cellId page bytes localFrame
-    change (DataSnapshot.lookupPostBytes reference.cellId (writes accepted.prepared)).getD
-      (durable.snapshot.canonicalBytes reference.cellId) = _
-    rw [DurableReceiver.lookupPostBytes_missing _ _ frame]
-    exact bytes
-
-/-- Every page of the whole accepted semantic authority post is represented in
-the actual installation, including retained pages and newly allocated shards. -/
-theorem installed_authority_pages
-    (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
-    List.Forall₂
-      (fun (reference : CredentialAuthorityDomain.Ref)
-          (page : CredentialAuthorityPageMaterializer.Page) =>
-        (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes reference.cellId = shardBytes page)
-      accepted.prepared.physical.post.catalogue.pages accepted.prepared.physical.post.pages :=
-  accepted.prepared.physical.represented.imp
-    (fun reference page represented => installed_authority_page accepted reference page represented)
-
-theorem installed_authority_catalogue
-    (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
-    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-        deployment.authorityAnchor.catalogueCellId =
-      catalogueBytes accepted.prepared.physical.post.catalogue := by
-  let write := catalogueWrite deployment.authorityAnchor durable.snapshot
-    (placedCatalogue accepted.prepared.authority.snapshot.catalogue accepted.prepared.physical.placement)
-  have member : write ∈ writes accepted.prepared :=
-    List.mem_append_left _ (List.mem_append_right _ (by simp [write]))
-  have installed := installed_write_bytes accepted write member
-  change (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes
-    deployment.authorityAnchor.catalogueCellId = _ at installed
-  rw [accepted.prepared.physical.postCatalogue]
-  exact installed
+/-- The installed image holds exactly the post authority cell at the pinned
+identifier. There is one authority write and no shard or catalogue. -/
+theorem installed_authority_cell (accepted : AcceptedDelegation deployment profile ambient durable ingress) :
+    (DataSnapshot.install durable.snapshot (intent accepted)).canonicalBytes (cellIdOf deployment) =
+      cellBytes accepted.prepared.authorityPost :=
+  installed_write_bytes accepted (accepted.prepared.authority.write accepted.prepared.authorityPost)
+    (List.mem_singleton.mpr rfl)
 
 /-- Delegation publishes authority only; the resource whose policy authorized
 it retains its exact complete old payload, not merely an equal root. -/
@@ -387,5 +307,8 @@ def receive (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile
   match ← DurableReceiverIO.load transport rootBytes with
   | .error detail => return .unavailable detail
   | .ok durable => receiveLoaded deployment profile ambient native transport durable bytes
+
+/-- info: 'Minidregg.Kernel.CapabilityDelegationReceiver.installed_authority_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms installed_authority_cell
 
 end Minidregg.Kernel.CapabilityDelegationReceiver

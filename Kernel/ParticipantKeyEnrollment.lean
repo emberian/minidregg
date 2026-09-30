@@ -24,6 +24,7 @@ open Minidregg.Theory.CredentialAuthorityEffects
 open Minidregg.Theory.CredentialSigningKey
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.PolicyInstall
+open Minidregg.Theory.Store (Store Patch Op Address)
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
@@ -32,7 +33,7 @@ abbrev Registry := CanonicalCellRegistry.registry
 abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
-abbrev AuthorityMaterializer := CredentialAuthorityStateCodec.materializer
+abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
 
 structure Command where
   sponsor : SubjectId
@@ -144,32 +145,33 @@ def declarationCodec : LawfulCodec Declaration :=
 def declaration (domain semantics : Digest) (command : Command) : Declaration :=
   ⟨command.key, command.expectedAuthorityRoot, marker domain semantics command⟩
 
-def Declaration.patch (d : Declaration) : Patch CredentialAuthorityState.schema Digest where
-  expectedPreRoot := d.expectedPreRoot
-  fieldFootprint := {
-    .subjectKeyEpoch ⟨d.key.subject⟩,
-    .subjectKey ⟨d.key.subject⟩ d.key.keyEpoch,
-    .nullifier d.operationNullifier }
-  resourceFootprint := ∅
-  fieldWrites :=
-    [⟨.subjectKeyEpoch ⟨d.key.subject⟩, some d.key.keyEpoch⟩,
-     ⟨.subjectKey ⟨d.key.subject⟩ d.key.keyEpoch, some d.key⟩,
-     ⟨.nullifier d.operationNullifier, some true⟩]
-  resourceWrites := []
-
-theorem Declaration.patch_namedFields (d : Declaration) :
-    d.patch.namedFields = d.patch.fieldFootprint := by
-  simp [Declaration.patch, Patch.namedFields]
-
-theorem Declaration.patch_namedResources (d : Declaration) :
-    d.patch.namedResources = d.patch.resourceFootprint := by
-  simp [Declaration.patch, Patch.namedResources]
+/-- Enrollment allocates a fresh subject's key epoch and key record, and the
+operation nullifier: three allocations, each enabled only at an absent address. -/
+def Declaration.patch (d : Declaration) : Patch CredentialAuthorityState.layout :=
+  [.allocate .subjectKeyEpoch ⟨d.key.subject⟩ d.key.keyEpoch,
+   .allocate .subjectKey (⟨d.key.subject⟩, d.key.keyEpoch) d.key,
+   .allocate .nullifier d.operationNullifier ()]
 
 structure Mode {M : Materializer} (pre : Cell M) (d : Declaration) : Type where
   rootExact : d.expectedPreRoot = pre.root
-  subjectAbsent : pre.logical.fields (.subjectKeyEpoch ⟨d.key.subject⟩) = none
-  keyAbsent : pre.logical.fields (.subjectKey ⟨d.key.subject⟩ d.key.keyEpoch) = none
+  subjectAbsent : (show Option Epoch from pre.logical ⟨.subjectKeyEpoch, ⟨d.key.subject⟩⟩) = none
+  keyAbsent : (show Option KeyRecord from
+    pre.logical ⟨.subjectKey, (⟨d.key.subject⟩, d.key.keyEpoch)⟩) = none
   fresh : isNullified pre d.operationNullifier = false
+
+/-- The key record stored at one authority address satisfies `check`; every
+other address passes. -/
+def keyAt (logical : Store CredentialAuthorityState.layout) (check : KeyRecord → Bool) :
+    Address CredentialAuthorityState.layout → Bool
+  | ⟨.subjectKey, key⟩ =>
+      match logical ⟨.subjectKey, key⟩ with
+      | some record => check (show KeyRecord from record)
+      | none => true
+  | _ => true
+
+/-- Every stored key record satisfies `check`: a scan of the one cell's support. -/
+def allKeys (logical : Store CredentialAuthorityState.layout) (check : KeyRecord → Bool) : Bool :=
+  decide (∀ address ∈ logical.support, keyAt logical check address = true)
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
   (Sp800185Cshake256.hash "DREGG.PARTICIPANT.KEY-ENROLL.EFFECT/v1".toUTF8.toList
@@ -210,7 +212,7 @@ def request (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
 
 def family (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command) :
-    SemanticEffectFamily CredentialAuthorityState.schema AuthorityMaterializer Nat where
+    SemanticEffectFamily CredentialAuthorityState.layout AuthorityMaterializer Nat where
   Declaration := Declaration
   declarationCodec := declarationCodec
   pre := snapshot.cell
@@ -229,14 +231,10 @@ def family (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
   ReleaseAuthorization := fun _ _ _ => Unit
   DisclosureAllowed := fun _ _ => sealedOnly
 
-def edits (snapshot : Snapshot) (d : Declaration) : List CredentialAuthorityDomain.Edit :=
-  [CredentialAuthorityDomain.signingKeyEdit snapshot d.key,
-   CredentialAuthorityDomain.nullifierEdit snapshot d.operationNullifier]
-
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable | staleAuthority
   | subjectExists | keyIdExists | publicKeyExists | malformedKey | replayedMarker
-  | authorityPreparation | validation | refinement | physicalPreparation
+  | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   | possession (reason : CredentialSignatureIO.Error) | invalidPossession
@@ -251,32 +249,22 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
     (command : Command) where
   private mk ::
   directory : LoadedDirectory durable
-  authority : Loaded deployment.authorityAnchor durable.snapshot
+  authority : Loaded deployment durable.snapshot
   factory : ResourceTargetAdmission.Observed deployment directory.directory .object
     deployment.factoryId command.expectedFactoryRoot
   candidate : Candidate (family deployment authority.snapshot profile.semantics ambient command)
     authority.snapshot.cell (declaration authority.snapshot.domain profile.semantics command) ()
-  update : CredentialAuthorityDomain.Prepared authority.snapshot
-    (edits authority.snapshot (declaration authority.snapshot.domain profile.semantics command))
-  postExact : update.postLogical = candidate.validated.apply.logical
-  physical : Lowered directory authority
-    (edits authority.snapshot (declaration authority.snapshot.domain profile.semantics command)) update []
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
-  subjectFresh : authority.snapshot.entries.all (fun entry => match entry with
-    | .subjectKey key => key.subject != command.key.subject
-    | _ => true) = true
-  keyIdFresh : authority.snapshot.entries.all (fun entry => match entry with
-    | .subjectKey key => key.keyId != command.key.keyId
-    | _ => true) = true
-  publicKeyFresh : authority.snapshot.entries.all (fun entry => match entry with
-    | .subjectKey key => key.publicKey != command.key.publicKey
-    | _ => true) = true
+  subjectFresh : allKeys authority.snapshot.logical (fun key => key.subject != command.key.subject) = true
+  keyIdFresh : allKeys authority.snapshot.logical (fun key => key.keyId != command.key.keyId) = true
+  publicKeyFresh : allKeys authority.snapshot.logical
+    (fun key => key.publicKey != command.key.publicKey) = true
   keyShape : command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
     command.key.publicKey.length = 32 ∧ command.key.revoked = false ∧
-    command.key.activeFrom ≤ authority.snapshot.catalogue.revision + 1 ∧
-    authority.snapshot.catalogue.revision + 1 ≤ command.key.activeUntil ∧
+    command.key.activeFrom ≤ authority.snapshot.revision + 1 ∧
+    authority.snapshot.revision + 1 ≤ command.key.activeUntil ∧
     command.key.subject ≠ command.sponsor.value
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
@@ -290,32 +278,24 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   let snapshot := authority.snapshot
   let d := declaration snapshot.domain profile.semantics command
   if rootExact : command.expectedAuthorityRoot = snapshot.cell.root then
-    if subjectAbsent : snapshot.logical.fields (.subjectKeyEpoch ⟨command.key.subject⟩) = none then
-      if keyAbsent : snapshot.logical.fields (.subjectKey ⟨command.key.subject⟩ command.key.keyEpoch) = none then
-        if subjectFresh : snapshot.entries.all (fun entry => match entry with
-            | .subjectKey key => key.subject != command.key.subject
-            | _ => true) then
-          if keyIdFresh : snapshot.entries.all (fun entry => match entry with
-              | .subjectKey key => key.keyId != command.key.keyId
-              | _ => true) then
-            if publicKeyFresh : snapshot.entries.all (fun entry => match entry with
-                | .subjectKey key => key.publicKey != command.key.publicKey
-                | _ => true) then
+    if subjectAbsent : (show Option Epoch from
+        snapshot.logical ⟨.subjectKeyEpoch, ⟨command.key.subject⟩⟩) = none then
+      if keyAbsent : (show Option KeyRecord from
+          snapshot.logical ⟨.subjectKey, (⟨command.key.subject⟩, command.key.keyEpoch)⟩) = none then
+        if subjectFresh : allKeys snapshot.logical (fun key => key.subject != command.key.subject) then
+          if keyIdFresh : allKeys snapshot.logical (fun key => key.keyId != command.key.keyId) then
+            if publicKeyFresh : allKeys snapshot.logical
+                (fun key => key.publicKey != command.key.publicKey) then
               if keyShape : command.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
                   command.key.publicKey.length = 32 ∧
                   command.key.revoked = false ∧
-                  command.key.activeFrom ≤ snapshot.catalogue.revision + 1 ∧
-                  snapshot.catalogue.revision + 1 ≤ command.key.activeUntil ∧
+                  command.key.activeFrom ≤ snapshot.revision + 1 ∧
+                  snapshot.revision + 1 ≤ command.key.activeUntil ∧
                   command.key.subject ≠ command.sponsor.value then
                 if fresh : isNullified snapshot.cell d.operationNullifier = false then
-                  let update ← requireSome .authorityPreparation
-                    (CredentialAuthorityDomain.prepare snapshot (edits snapshot d))
-                  match validate AuthorityMaterializer snapshot.cell d.patch with
+                  match validate AuthorityMaterializer snapshot.cell snapshot.cell.root d.patch with
                   | .rejected _ => throw .validation
                   | .accepted validated =>
-                    if same : CredentialAuthorityStateCodec.encode update.postLogical =
-                        CredentialAuthorityStateCodec.encode validated.apply.logical then
-                      let physical ← requireSome .physicalPreparation (lower directory authority update [])
                       let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
                         snapshot.domain directory.directory
                         (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
@@ -326,10 +306,8 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                           modeEvidence := ⟨rootExact, subjectAbsent, keyAbsent, fresh⟩
                           validated := validated
                           postcondition := validated.resultAt }
-                      pure ⟨directory, authority, factory, candidate, update,
-                        CredentialAuthorityStateCodec.encode_injective same, physical, source,
+                      pure ⟨directory, authority, factory, candidate, source,
                         subjectFresh, keyIdFresh, publicKeyFresh, keyShape⟩
-                    else throw .refinement
                 else throw .replayedMarker
               else throw .malformedKey
             else throw .publicKeyExists
@@ -343,8 +321,14 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
   {command : Command}
 
+/-- The authority cell after enrollment: the validated patch applied to the
+loaded cell. It is the one authority write. -/
+def Prepared.authorityPost (prepared : Prepared deployment profile ambient durable command) :
+    CredentialAuthorityDomain.Cell :=
+  prepared.candidate.validated.apply
+
 def project (prepared : Prepared deployment profile ambient durable command)
-    (logical : LogicalState CredentialAuthorityState.schema.{0, 0}) : Minidregg.Pred.State :=
+    (logical : Store CredentialAuthorityState.layout) : Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots
       (request deployment prepared.authority.snapshot profile.semantics ambient command) ++
     [("authority/operation/enroll-key", 1)] ++

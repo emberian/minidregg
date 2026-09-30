@@ -8,7 +8,7 @@ broker must accept only explicitly allocated task resources, never an
 arbitrary caller-authored initial allowance. No field is a policy revision or grant
 revocation generation. A stopped status proves admission fencing, not that
 an external process or provider actually stopped. -/
-import Kernel.DeclaredResourceProjection
+import Kernel.DeclaredFields
 import Kernel.ResourceTransaction
 import Pred.Core
 
@@ -16,7 +16,7 @@ namespace Minidregg.Kernel.AgentGrain
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.EffectDeclaration
 open Minidregg.Theory.DeclaredActionLowering
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Theory.Store (Store Address)
 open Minidregg.Pred
 set_option autoImplicit false
 
@@ -30,43 +30,52 @@ structure State where
 def State.values (s : State) : List Int :=
   [s.generation, s.status, s.remaining, s.reserved]
 
-def key (task : Nat) (field : Nat) : StateKey := .objectField ⟨task⟩ ⟨field⟩
+abbrev key (task : Nat) (field : Nat) : StateKey := DeclaredFields.key task field
 
-def State.page (s : State) (domain : Digest) (task : Nat) : Page :=
-  ⟨domain, task % shardCount,
-    some ⟨key task 0, s.generation⟩, some ⟨key task 1, s.status⟩,
-    some ⟨key task 2, s.remaining⟩, some ⟨key task 3, s.reserved⟩⟩
+/-- The four coordinates in the store's canonical order (fields 1, 2, 3, 0;
+see `DeclaredFields`). -/
+def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
+  [(1,s.status),(2,s.remaining),(3,s.reserved),(0,s.generation)]
 
-def initialPage (domain : Digest) (task budget : Nat) : Page :=
-  (⟨0,0,Int.ofNat budget,0⟩ : State).page domain task
+theorem State.coordinates_four (s : State) :
+    s.coordinates = DeclaredFields.four s.generation s.status s.remaining s.reserved := rfl
 
-def readState (task : Nat) (page : Page) : Option State := do
-  let read := fun n => (page.entries.find? (fun e => e.key == key task n)).map (·.value)
+/-- The task resource as a declared-effect store: exactly its four fields. -/
+def State.store (s : State) (task : Nat) : Store effectLayout :=
+  DeclaredFields.store task s.coordinates
+
+def initialStore (task budget : Nat) : Store effectLayout :=
+  (⟨0, 0, Int.ofNat budget, 0⟩ : State).store task
+
+def readState (task : Nat) (store : Store effectLayout) : Option State := do
+  let read := fun n => DeclaredFields.read task n store
   return ⟨← read 0, ← read 1, ← read 2, ← read 3⟩
+
+theorem readState_store (task : Nat) (s : State) : readState task (s.store task) = some s := by
+  obtain ⟨r0, r1, r2, r3⟩ := DeclaredFields.read_four task s.generation s.status s.remaining s.reserved
+  simp [readState, State.store, State.coordinates_four, r0, r1, r2, r3]
 
 /-- Every operation compares all four old coordinates, including unchanged
 ones. The generic declared receiver checks these writes against the durable
-page and binds the exact actions into authorization and replay identity. -/
+store and binds the exact actions into authorization and replay identity. -/
 def actions (task : Nat) (before after : State) : List Action :=
   (List.range 4).zipWith (fun n pair =>
     .write (key task n) (some pair.1) pair.2) (before.values.zip after.values)
 
 /-- Projection vocabulary required in the generic resource receiver. Both
-sides are decoded from canonical pages, never supplied as decision bits by a
-host. Deltas preserve arithmetic over the exact integer state. -/
-def State.coordinates (s : State) : DeclaredResourceProjection.Values :=
-  [(0,s.generation),(1,s.status),(2,s.remaining),(3,s.reserved)]
-
+sides are read from the task's canonical store, never supplied as decision bits
+by a host. Deltas preserve arithmetic over the exact integer state. -/
 def slots (before after : State) : List (String × Int) :=
   DeclaredResourceProjection.scalarSlots before.coordinates after.coordinates
 
 def project := DeclaredResourceProjection.project
 
-theorem page_projection_exact (domain : Digest) (task : Nat) (before after : State) :
-    DeclaredResourceProjection.project task (before.page domain task) (after.page domain task) =
+/-- The policy view of a task resource is exactly its four coordinates. -/
+theorem store_projection_exact (task : Nat) (before after : State) :
+    DeclaredResourceProjection.project task (before.store task) (after.store task) =
       slots before after := by
-  simp [DeclaredResourceProjection.project, DeclaredResourceProjection.values,
-    Page.entries, State.page, key, slots, State.coordinates]
+  simp only [State.store, slots, State.coordinates_four]
+  exact DeclaredFields.project_four task _ _ _ _ _ _ _ _
 
 private def nonnegative (slot : String) : Pred := .not (.le slot (-1))
 private def unchangedBudget : Pred := .all [

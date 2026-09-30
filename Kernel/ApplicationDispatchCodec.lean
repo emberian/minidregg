@@ -11,7 +11,7 @@ namespace Minidregg.Kernel.ApplicationDispatchCodec
 
 open Minidregg.Compiler
 open Minidregg.Compiler.Tower256ConcreteBackend
-open Minidregg.Compiler.DeclaredEffectPageMaterializer
+open Minidregg.Compiler.IntStream (intStream)
 open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.IndexedProgram

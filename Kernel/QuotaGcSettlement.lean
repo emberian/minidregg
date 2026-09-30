@@ -396,7 +396,7 @@ structure ScopedAuthority {capacity : Nat}
   feeCeiling : resourceFee <= grant.maxCharge .feeDebit
 
 def totalCharge
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation} {capacity : Nat}
     (manifest : AuthorizedResourceCharge.DeploymentManifest)
     (accepted : Accepted pre operation) (page : Page capacity)
@@ -405,7 +405,7 @@ def totalCharge
     pageCharge page protection command
 
 @[simp] theorem totalCharge_feeDebit
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {operation : Operation} {capacity : Nat}
     (manifest : AuthorizedResourceCharge.DeploymentManifest)
     (accepted : Accepted pre operation) (page : Page capacity)
@@ -435,7 +435,7 @@ theorem incidenceOnlyBillable
   omega
 
 structure Admission
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     (manifest : AuthorizedResourceCharge.DeploymentManifest)
     (config : Config) (limits : Limits) (page : Page capacity)
@@ -525,7 +525,7 @@ theorem live_reachable_content_cannot_tombstone
       different, reachable⟩))
 
 theorem no_admission_if_byte_quota_exceeded
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     {manifest : AuthorizedResourceCharge.DeploymentManifest}
     {config : Config} {limits : Limits} {page : Page capacity}
@@ -538,7 +538,7 @@ theorem no_admission_if_byte_quota_exceeded
   exact (Nat.not_le_of_gt exceeded) admitted.byteBound
 
 theorem no_admission_if_capacity_quota_exceeded
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     {manifest : AuthorizedResourceCharge.DeploymentManifest}
     {config : Config} {limits : Limits} {page : Page capacity}
@@ -550,7 +550,7 @@ theorem no_admission_if_capacity_quota_exceeded
   exact (Nat.not_le_of_gt exceeded) admitted.occupiedBound
 
 theorem no_admission_if_work_quota_exceeded
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     {manifest : AuthorizedResourceCharge.DeploymentManifest}
     {config : Config} {limits : Limits} {page : Page capacity}
@@ -563,7 +563,7 @@ theorem no_admission_if_work_quota_exceeded
   exact (Nat.not_le_of_gt exceeded) (admitted.exactFunded .proofWork)
 
 theorem no_admission_if_side_effect_quota_exceeded
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     {manifest : AuthorizedResourceCharge.DeploymentManifest}
     {config : Config} {limits : Limits} {page : Page capacity}
@@ -576,7 +576,7 @@ theorem no_admission_if_side_effect_quota_exceeded
   exact (Nat.not_le_of_gt exceeded) (admitted.exactFunded .sideEffectCount)
 
 theorem no_admission_if_resource_fee_mismatched
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     {manifest : AuthorizedResourceCharge.DeploymentManifest}
     {config : Config} {limits : Limits} {page : Page capacity}
@@ -589,7 +589,7 @@ theorem no_admission_if_resource_fee_mismatched
   exact mismatch admitted.operationFeeExact
 
 theorem stale_epoch_has_no_admission
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     {manifest : AuthorizedResourceCharge.DeploymentManifest}
     {config : Config} {limits : Limits} {page : Page capacity}
@@ -638,7 +638,7 @@ theorem active_lease_cannot_compact
   | compact _ _ expired _ => exact activeLease_not_expired active expired
 
 theorem renewal_installs_exact_successor_lease
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {pre : Materialized M} {capacity : Nat}
     {expectedEpoch height : Nat} {slot : Fin capacity} {before : Object}
     {newLeaseId rate epochs : Nat} {config : Config}
@@ -677,7 +677,7 @@ structure Runtime where
   clockResourceDistinct : clockCell ≠ resourceCell
 
 structure Plan
-    (M : Materializer CanonicalResourceKernel.schema Digest)
+    (M : Materializer CanonicalResourceKernel.layout Digest)
     (portal : Portal) (authState : AuthState) (pre : Materialized M)
     (capacity : Nat) where
   config : Config
@@ -703,7 +703,7 @@ structure Plan
 namespace Plan
 
 variable
-    {M : Materializer CanonicalResourceKernel.schema Digest}
+    {M : Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState} {pre : Materialized M}
     {capacity : Nat}
 

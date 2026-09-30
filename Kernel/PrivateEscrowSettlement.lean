@@ -186,7 +186,7 @@ def Claim.digest (claim : Claim) : Digest :=
 authorized public fill.  In particular, the post-resource root is after all
 three public operations, not merely after escrow release. -/
 structure Claim.BoundTo
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (claim : Claim) (fill : Fill M portal authState) : Prop where
   termsExact : claim.terms = fill.terms
@@ -208,7 +208,7 @@ structure Claim.BoundTo
 
 namespace Claim.BoundTo
 
-variable {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+variable {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     {claim : Claim} {fill : Fill M portal authState}
 
@@ -255,7 +255,7 @@ An assurance layer can therefore expose only constructors backed by a real
 accepted NoteSpend/BFV/MPC effect. -/
 structure SealedAcceptance
     (Source : Claim -> EvidenceBinding -> Type)
-    (M : CellState.Materializer CanonicalResourceKernel.schema Digest) where
+    (M : CellState.Materializer CanonicalResourceKernel.layout Digest) where
   claim : Claim
   evidence : EvidenceBinding
   acceptable : evidence.Acceptable
@@ -270,7 +270,7 @@ structure SealedAcceptance
 namespace SealedAcceptance
 
 variable {Source : Claim -> EvidenceBinding -> Type}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
 
 def receiptBytes (accepted : SealedAcceptance Source M) : List UInt8 :=
   [171] ++ accepted.claim.canonicalBytes ++
@@ -340,7 +340,7 @@ def releaseDomain (claim : Claim) : Digest :=
   ⟨Nat.pair 173 claim.digest.value⟩
 
 def releaseEffectDigest
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (claim : Claim) (fill : Fill M portal authState) : Digest :=
   ⟨Nat.pair claim.digest.value fill.event.eventId.value⟩
@@ -349,7 +349,7 @@ def releaseEffectDigest
 `Fill`.  Its zero cost prevents the disclosure gate from silently duplicating
 the already exact public resource charge. -/
 structure Declassification
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (claim : Claim) (fill : Fill M portal authState) where
   request : Request .object
@@ -365,7 +365,7 @@ structure Declassification
 
 structure ReleaseRuntime
     {Source : Claim -> EvidenceBinding -> Type}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
     (sealed : SealedAcceptance Source M) (fill : Fill M portal authState) where
   transactionId : TransactionId
@@ -389,7 +389,7 @@ structure ReleaseRuntime
 
 structure Settlement
     (Source : Claim -> EvidenceBinding -> Type)
-    (M : CellState.Materializer CanonicalResourceKernel.schema Digest)
+    (M : CellState.Materializer CanonicalResourceKernel.layout Digest)
     (portal : Portal) (authState : AuthState) where
   sealed : SealedAcceptance Source M
   fill : Fill M portal authState
@@ -400,7 +400,7 @@ structure Settlement
 namespace Settlement
 
 variable {Source : Claim -> EvidenceBinding -> Type}
-    {M : CellState.Materializer CanonicalResourceKernel.schema Digest}
+    {M : CellState.Materializer CanonicalResourceKernel.layout Digest}
     {portal : Portal} {authState : AuthState}
 
 def receiptGuard (settlement : Settlement Source M portal authState) : ReadGuard where
