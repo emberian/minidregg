@@ -36,8 +36,9 @@ ssh -T -i ~/.ssh/mini mini@2.28.141.27 < steps.mini    # a script, one verb per 
 
 ```
 mini> keygen mini.key            # your signing key, in your session home; then tell me "done"
-   … i enroll you, give you a factory grant and a small funded account, and set up
-     your workspace. i send you your subject number (a long decimal) …
+   … i enroll you and give you a factory grant and a small funded account.
+     i send you your subject number (a long decimal) …
+mini> init mini.key SUBJECT      # your workspace; before i've provisioned you it says so and makes nothing
 mini> whoami                     # "initialized": true, "subject": "<yours>"
 mini> create notes declared {"type":"all","predicates":[]}
                                  # a resource of your own, under a permit-all law
@@ -75,6 +76,22 @@ mini> law unlock notes {"type":"all","predicates":[]}  # refused: law-denied: �
 ```
 that's the point: nobody can bypass it, not you as owner and not me. **a lock is
 permanent**, so lock throwaway things. `history` lists what you did and how each attempt ended.
+take a grant back with `revoke cut notes SAMS-SUBJECT`, then `submit cut`; sam's next read
+is `refused: revoked`.
+
+documents. a doc is a resource whose lines you append and edit together:
+```
+mini> doc new paper                       # (or `doc new log note`: append-only, edits refused)
+mini> doc append p1 paper 'first paragraph'
+mini> submit p1
+mini> doc show paper                      # numbered lines, who created each
+mini> doc edit p2 paper 1 'first paragraph, better'
+mini> submit p2                           # refused if someone changed line 1 since your `doc show`
+mini> doc link p3 index paper             # a link from index to paper; `doc backlinks paper` finds it
+mini> board new tasks                     # tasks 0 and 1: `board add`, `board take`, `board move … todo doing`
+```
+share a doc the same way as `notes` (delegate, publish, export/import). a page holds 16
+entries (lines and links), so docs are short for now.
 
 ## how things end
 
@@ -102,8 +119,9 @@ the reason after `refused:`:
 
 ## what not to expect yet
 
-- numbered fields, one scalar action per `invoke`, laws as JSON. no rooms, chat, docs or
-  paying yet. no uptime promises. IDs are write-once: pick a new one per request.
+- numbered fields, one scalar action per `invoke`, laws as JSON. no rooms, chat or paying
+  yet; docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
+  pick a new one per request. `help guide` prints this guide.
 
 ## reaching me
 

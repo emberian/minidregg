@@ -36,9 +36,11 @@ says `mode=closed`, every friend gets `mini-closed` and exit 69.
    There is no ship step. `ship.sh` re-renders too, but the roster needs only this.
    Rendering also creates `S/NAME` (mini, 0700).
 3. **Their first login.** Tell them: `ssh -t -i ~/.ssh/mini mini@2.28.141.27`, then
-   `keygen mini.key`. **Do not let them run `init`**: `workspace init` refuses an
-   existing directory, and step 7 needs to make it. Check that the key exists:
+   `keygen mini.key`. Check that the key exists:
    `ssh $BOX test -s $S/NAME/keys/mini.key.pub && echo ok`
+   If they type `init` before step 6 is done, the shell answers one line
+   (`error: init needs your provisioning at …/provision/birth-context.json …`) and
+   makes nothing, so there is nothing to clean up.
 4. **Custody copy (today's contract, `m4-shell.md` §Deviations 1).** `enroll plan` and
    `seal` sign with the sponsor's key and the newcomer's key in one process:
    ```
@@ -64,18 +66,15 @@ says `mode=closed`, every friend gets `mini-closed` and exit 69.
    ```
    This writes `NODE/sponsor/provisions/NAME/{provision.json,birth-context.json}`.
    `--action provision-lookup --dir $NODE/sponsor --name NAME --factory-ref factory` asks again.
-7. **Their workspace, bound to the birth context.** The shell's `init KEYFILE SUBJECT` has
-   no `--birth-context`, and without one a friend cannot `create`:
+   Deliver the birth context into their session home, where their `init` looks for it:
    ```
-   ssh $BOX "install -d -o mini -g mini -m 0700 $S/NAME/namespace && \
-     $ASMINI $C/bin/mini workspace --action init --host $C/bin/minidregg-host \
-       --config $NODE/deployment/pinned-config.json --socket $NODE/public/mini.sock \
-       --key $S/NAME/keys/mini.key --subject SUBJECT \
-       --birth-context $NODE/sponsor/provisions/NAME/birth-context.json \
-       --namespace-root $S/NAME/namespace --dir $S/NAME/workspace"
+   ssh $BOX "install -d -o mini -g mini -m 0700 $S/NAME/provision && \
+     install -o mini -g mini -m 0600 $NODE/sponsor/provisions/NAME/birth-context.json \
+       $S/NAME/provision/birth-context.json"
    ```
-8. **Tell them** their SUBJECT and "you're in: `whoami`, then the first 10 minutes."
-   `whoami` must show `"initialized": true` and their subject.
+7. **Tell them** their SUBJECT and "you're in: `init mini.key SUBJECT`, `whoami`, then the
+   first 10 minutes." Their `init` binds `provision/birth-context.json` and a namespace at
+   `$S/NAME/namespace` itself. `whoami` must show `"initialized": true` and their subject.
 
 ## Re-genesis, as friends experience it
 
@@ -89,11 +88,11 @@ made goes. i'll re-enroll you; then redo your first 10 minutes with new IDs."
    ```
    ssh $BOX 'ts=$(date -u +%Y%m%dT%H%M%SZ); for d in /var/lib/mini/sessions/*/; do n=$(basename $d); \
      install -d -o mini -g mini -m 0700 $d/retired-$ts; \
-     for x in workspace namespace requests inbox refusals enroll; do [ -e $d/$x ] && mv $d/$x $d/retired-$ts/; done; done'
+     for x in workspace namespace provision requests inbox refusals enroll; do [ -e $d/$x ] && mv $d/$x $d/retired-$ts/; done; done'
    ```
    `requests/` must go too: request files are write-once, so an old ID with new content
    is refused. Then restore the permit-all file (step 6).
-3. Redo steps 4–8 per friend (their `keys/mini.key` is still there; they do **not** keygen
+3. Redo steps 4–7 per friend (their `keys/mini.key` is still there; they do **not** keygen
    again). Their subject may change, so tell them the new one.
 
 What friends redo: nothing until you say so, then their own resources, grants and
@@ -111,7 +110,7 @@ references. Hand-offs between friends (`export`/`import`) must be done again.
   anything live: `ssh $BOX /usr/local/lib/mini/mini-restore-check [ARCHIVE]`. For a real
   restore, follow the README §"Restore for real".
 - **Not backed up: friends' session homes** (their secret keys, workspaces, requests). If
-  the box is lost, friends keygen again and you redo steps 2–8.
+  the box is lost, friends keygen again and you redo steps 2–7.
 
 ## Removing a friend
 
@@ -120,7 +119,7 @@ references. Hand-offs between friends (`export`/`import`) must be done again.
 2. Their signing key stays enrolled and their grants stay live in the Store, but the
    secret exists only in `S/NAME/keys` (and in `S/ember/keys/NAME.key` if step 5's `rm` was
    skipped: remove it). No verb prints a secret key.
-3. Revoking a grant has **no verb** yet. The only recipe that has run is the hand-built
-   `revoke-source` intent submitted with `mini submit` (`docs/evidence/2026-09-30-refusal-reasons/refusal-reasons.sh`,
-   the "revoked" block).
+3. Revoke what they were granted, from the session that delegated it (the owner's or
+   yours): `revoke ID REF SUBJECT`, then `submit ID`. It revokes the capability that
+   session delegated on REF to SUBJECT; their next read of REF is `refused: revoked`.
 4. `S/NAME` is their data. Archive it or delete it by hand; the script doesn't decide that.
