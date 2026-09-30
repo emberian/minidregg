@@ -4,13 +4,15 @@
 This module arithmetizes only the closed action vocabulary already owned by
 `Theory.DeclaredActionLowering`: create, guarded write, and exact account move.
 It does not add an action interpreter.  The ordered observations below are a
-projection of `runCheckedWrites`, and the reflection theorem returns to that
-same function and `Declaration.fieldWrites`.
+projection of the declaration's one guarded patch (`Declaration.patch`): one
+observation per `Store.Op`, read at the store its prefix produced.  The
+reflection theorem returns to `Patch.ValidFrom` and `Declaration.run`, whose
+post is `Patch.run`.
 
 The emitted descriptor is statement-specific.  Its public prefix is the exact
 lawful declaration bytes, the request's policy-id/grant-generation/source-revision bytes, and the
 canonical pre-state root bytes.  Its private original variables are the
-expected/observed sparse values at every ordered checked write.  Pin constraints
+expected/observed sparse values at every ordered guarded operation.  Pin constraints
 bind those private values to the generated observation trace; equality
 constraints then enforce every guard.  Option-Int codes must be below the
 BabyBear modulus, making their field embedding injective rather than silently
@@ -36,63 +38,71 @@ open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.DeclaredActionLowering
+open Minidregg.Theory.EffectDeclaration (effectLayout)
+open Minidregg.Theory.Store
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-abbrev EffectFields := FieldStore DeclaredTurn.effectSchema.{0, 0}
+abbrev EffectFields := Store effectLayout
 
-/-! ## Exact projection of the existing ordered executor -/
+/-! ## Exact projection of the one guarded patch -/
 
 structure GuardObservation where
   expected : Option Int
   observed : Option Int
   deriving DecidableEq, Repr
 
-/-- Observe the guard read at each step of the existing ordered write fold.
-The next store is the same `FieldStore.assign` used by `runCheckedWrites`; this
-is a trace projection, not an alternative state transition. -/
-def observeGuards : List CheckedWrite -> EffectFields -> List GuardObservation
-  | [], _ => []
-  | write :: writes, fields =>
-      { expected := write.expected, observed := fields write.key } ::
-        observeGuards writes (fields.assign write.key write.replacement)
+/-- The value an operation's guard requires at its address: a read's observed
+value, a write's or free's prior value, and absence for an allocation. -/
+def opGuard : Op effectLayout -> Option Int
+  | .read _ _ observed => observed
+  | .write _ _ before _ => some before
+  | .allocate _ _ _ => none
+  | .free _ _ before => some before
 
-@[simp] theorem observeGuards_length (writes : List CheckedWrite)
+/-- On the all-RAM effect layout an operation is enabled exactly when its
+address holds its guard value. -/
+theorem enabled_iff_opGuard (fields : EffectFields) (op : Op effectLayout) :
+    op.Enabled fields <-> fields op.address = opGuard op := by
+  cases op <;> simp [Op.Enabled, Op.address, opGuard, Store.Fresh]
+
+/-- Observe the guard read at each step of the patch.  The next store is the
+same `Op.apply` that `Patch.run` uses; this is a trace projection, not an
+alternative state transition. -/
+def observeGuards : Patch effectLayout -> EffectFields -> List GuardObservation
+  | [], _ => []
+  | op :: ops, fields =>
+      { expected := opGuard op, observed := fields op.address } ::
+        observeGuards ops (op.apply fields)
+
+@[simp] theorem observeGuards_length (patch : Patch effectLayout)
     (fields : EffectFields) :
-    (observeGuards writes fields).length = writes.length := by
-  induction writes generalizing fields with
+    (observeGuards patch fields).length = patch.length := by
+  induction patch generalizing fields with
   | nil => rfl
-  | cons write writes induction =>
+  | cons op ops induction =>
       simp [observeGuards, induction]
 
 def GuardsExact (observations : List GuardObservation) : Prop :=
   forall observation, observation ∈ observations ->
     observation.expected = observation.observed
 
-theorem observeGuards_exact_iff_run (writes : List CheckedWrite)
+theorem observeGuards_exact_iff_valid (patch : Patch effectLayout)
     (fields : EffectFields) :
-    GuardsExact (observeGuards writes fields) <->
-      runCheckedWrites writes fields =
-        some (applyFieldWrites (writes.map CheckedWrite.toFieldWrite) fields) := by
-  induction writes generalizing fields with
-  | nil => simp [GuardsExact, observeGuards, runCheckedWrites, applyFieldWrites]
-  | cons write writes induction =>
-      simp only [observeGuards, GuardsExact, List.mem_cons, forall_eq_or_imp]
+    GuardsExact (observeGuards patch fields) <-> Patch.ValidFrom fields patch := by
+  induction patch generalizing fields with
+  | nil => simp [GuardsExact, observeGuards, Patch.ValidFrom]
+  | cons op ops induction =>
+      simp only [observeGuards, GuardsExact, List.mem_cons, forall_eq_or_imp,
+        Patch.ValidFrom, enabled_iff_opGuard]
+      rw [← induction (op.apply fields)]
       constructor
       · rintro ⟨guard, rest⟩
-        simp only [runCheckedWrites, guard]
-        simpa [CheckedWrite.toFieldWrite, applyFieldWrites] using
-          (induction (fields.assign write.key write.replacement)).mp rest
-      · intro run
-        have guard : fields write.key = write.expected := by
-          by_contra mismatch
-          simp [runCheckedWrites, mismatch] at run
-        refine ⟨guard.symm, ?_⟩
-        apply (induction (fields.assign write.key write.replacement)).mpr
-        simpa [runCheckedWrites, guard, CheckedWrite.toFieldWrite,
-          applyFieldWrites] using run
+        exact ⟨guard.symm, rest⟩
+      · rintro ⟨guard, rest⟩
+        exact ⟨guard.symm, rest⟩
 
 /-! ## Exact public bytes -/
 
@@ -124,8 +134,8 @@ theorem optionCode_injective : Function.Injective optionCode := by
   have decoded := congrArg optionIntOfCode equal
   simpa [optionCode] using decoded
 
-/-- The explicit finite-field range premise.  It is automatic for the landed
-small V1 page witnesses but remains visible for arbitrary full-width `Int`s. -/
+/-- The explicit finite-field range premise: visible for arbitrary full-width
+`Int`s. -/
 def CodesBounded (observations : List GuardObservation) : Prop :=
   forall observation, observation ∈ observations ->
     optionCode observation.expected < babyBearP /\
@@ -159,12 +169,12 @@ abbrev WireIx {kind : ResourceKind} {target : ResourceId kind}
     (context : RequestContext) (declaration : Declaration target)
     (fields : EffectFields) :=
   Fin (wireCount (publicBytes context declaration).length
-    (observeGuards declaration.checkedWrites fields).length)
+    (observeGuards declaration.patch fields).length)
 
 def observations {kind : ResourceKind} {target : ResourceId kind}
     (declaration : Declaration target) (fields : EffectFields) :
     List GuardObservation :=
-  observeGuards declaration.checkedWrites fields
+  observeGuards declaration.patch fields
 
 def observationAt {kind : ResourceKind} {target : ResourceId kind}
     (declaration : Declaration target) (fields : EffectFields)
@@ -372,22 +382,29 @@ theorem system_correct {kind : ResourceKind} {target : ResourceId kind}
     systemAccepts asg (system context declaration fields) <->
       asg = assignment context declaration fields /\
         declaration.run fields =
-          some (applyFieldWrites declaration.fieldWrites fields) := by
+          some (Patch.run fields declaration.patch) := by
   by_cases admitted : declaration.admissionCheck = true
   · rw [system, if_pos admitted, systemAccepts_append, pinSystem_correct]
     constructor
     · rintro ⟨rfl, guards⟩
       refine ⟨rfl, ?_⟩
-      have run := (observeGuards_exact_iff_run declaration.checkedWrites fields).mp
+      have valid := (observeGuards_exact_iff_valid declaration.patch fields).mp
         ((guardSystem_correct context declaration fields bounded).mp guards)
-      simpa [Declaration.run, admitted, Declaration.fieldWrites] using run
+      exact (declaration.run_eq_some_iff _ _).mpr ⟨admitted, valid, rfl⟩
     · rintro ⟨rfl, run⟩
       refine ⟨rfl, (guardSystem_correct context declaration fields bounded).mpr ?_⟩
-      apply (observeGuards_exact_iff_run declaration.checkedWrites fields).mpr
-      simpa [Declaration.run, admitted, Declaration.fieldWrites] using run
-  · simp [system, admitted, Declaration.run, systemAccepts, accepts, cst]
-    change (1 : BabyBear) ≠ 0
-    exact one_ne_zero
+      apply (observeGuards_exact_iff_valid declaration.patch fields).mpr
+      exact ((declaration.run_eq_some_iff _ _).mp run).2.1
+  · have notAdmitted : ¬ declaration.Admitted := admitted
+    have refused : declaration.run fields ≠ some (Patch.run fields declaration.patch) :=
+      fun run => notAdmitted ((declaration.run_eq_some_iff _ _).mp run).1
+    simp only [system, admitted, Bool.false_eq_true, if_false, refused, and_false,
+      iff_false]
+    intro accepted
+    have impossible := accepted (cst 1) (by simp)
+    change (1 : BabyBear) = 0 at impossible
+    exact one_ne_zero impossible
+
 
 def descriptor {kind : ResourceKind} {target : ResourceId kind}
     (context : RequestContext) (declaration : Declaration target)
@@ -443,15 +460,15 @@ theorem no_descriptorAccepts_of_inadmissible {kind : ResourceKind}
   exact one_ne_zero impossible
 
 /-- **Load-bearing reflection.**  The emitted descriptor accepts its exact
-action/policy/root public bytes iff the existing declaration guard fold reaches
-the exact post installed by the existing `fieldWrites`. -/
+action/policy/root public bytes iff the declaration's checker accepts at the
+pre-store, with the post `Patch.run` of its one patch. -/
 theorem descriptor_accepts_iff_run {kind : ResourceKind}
     {target : ResourceId kind} (context : RequestContext)
     (declaration : Declaration target) (fields : EffectFields)
     (bounded : CodesBounded (observations declaration fields)) :
     DescriptorAccepts context declaration fields <->
       declaration.run fields =
-        some (applyFieldWrites declaration.fieldWrites fields) := by
+        some (Patch.run fields declaration.patch) := by
   constructor
   · rintro ⟨wireValues, publicExact, holds⟩
     have emitted := (emit_faithful Fin.val
@@ -500,7 +517,7 @@ noncomputable def generateWitness {kind : ResourceKind}
     (declaration : Declaration target) (fields : EffectFields)
     (bounded : CodesBounded (observations declaration fields))
     (run : declaration.run fields =
-      some (applyFieldWrites declaration.fieldWrites fields)) :
+      some (Patch.run fields declaration.patch)) :
     GeneratedWitness context declaration fields := by
   have existsWitness : DescriptorAccepts context declaration fields :=
     (descriptor_accepts_iff_run context declaration fields bounded).mpr run
