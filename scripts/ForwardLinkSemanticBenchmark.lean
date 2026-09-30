@@ -1,24 +1,26 @@
 /-
-# Bounded forward-link semantic benchmark
+# Forward-link semantic benchmark on the deployed content cell
 
-This executable measures the actual computable four-slot content-page path:
-canonical link-entry encoding, `Page.admitInsert`, typed-patch validation and
-Lean cSHAKE materialization, state-codec reopen, canonical link lookup, and
-physical page-route lookup.  The exercised values are variants of the closed
-`Compiler.HyperdocumentContentPageMaterializer` forward-link example.
+This executable measures the actual computable forward-link path on the
+deployed Hyperdocument content cell (`HyperdocumentCell.contentMaterializer`,
+the `StoreCodec` wire): canonical link-entry encoding, guarded-patch validity
+at the pre-store, validation plus Lean cSHAKE materialization, codec reopen,
+and canonical link lookup.  There is no capacity and no cross-page route: the
+link is one guarded allocation in the one document cell.
 
 It does not time the proof-only/noncomputable first-order endpoint, an OS read,
 or the Rust store.  The companion native benchmark measures the opaque
 process/filesystem lifecycle.  The runner builds the endpoint, durable weld,
-local-file join, and this materializer, so one exact-source evidence record
+local-file join, and the content cell, so one exact-source evidence record
 retains the proof join and both timing surfaces without pretending they are a
 cross-language refinement theorem.
 -/
-import Compiler.HyperdocumentContentPageMaterializer
+import Compiler.HyperdocumentCell
 
 namespace Minidregg.Bench.ForwardLinkSemantic
 
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
+open Minidregg.Compiler
+open Minidregg.Compiler.HyperdocumentCodec
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.Hyperdocument
@@ -26,109 +28,113 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-def schemaName : String := "minidregg/forward-link-semantic/v1"
+def schemaName : String := "minidregg/forward-link-semantic/v2"
 def samples : Nat := 31
 def warmups : Nat := 3
 def ordinaryRepetitions : Nat := 16
 def rootRepetitions : Nat := 1
 
+abbrev ContentStore := Store.Store Hyperdocument.layout
+
+def author : PrincipalRef := ⟨⟨7⟩, .object, ⟨11⟩⟩
+def sourceDocument : DocumentId := ⟨⟨100⟩⟩
+def rootElement : ElementId := ⟨⟨101⟩⟩
+
+def documentRecord : DocumentRecord :=
+  ⟨rootElement, ⟨14⟩, author, ⟨⟨1300⟩⟩⟩
+
+def elementRecord : ElementRecord :=
+  ⟨sourceDocument, none, .container [], author, ⟨⟨1300⟩⟩, none⟩
+
 def linkIdAt (nonce : Nat) : LinkId := ⟨⟨102 + nonce⟩⟩
 
-def linkAt (nonce : Nat) : ForwardLink :=
-  { forwardLink with
-    relation := ⟨1400 + nonce⟩
-    operation := ⟨⟨1401 + nonce⟩⟩ }
+def linkAt (nonce : Nat) : LinkRecord where
+  sourceDocument := sourceDocument
+  source := none
+  target := .external [0x68, 0x74, 0x74, 0x70, 0x73] [0x65, 0x78]
+    [0x2f, 0x6c, 0x6f, 0x6f, 0x6d]
+  relation := ⟨1400 + nonce⟩
+  author := author
+  operation := ⟨⟨1401 + nonce⟩⟩
+  tombstonedAt := none
 
-def entryAt (nonce : Nat) : Entry := .link (linkIdAt nonce) (linkAt nonce)
+/-- The document's genesis records; the nonce varies the root element's
+creation operation so repeated work is not shared across nonces. -/
+def preStoreAt (nonce : Nat) : ContentStore :=
+  ((0 : ContentStore).set ⟨.documents, sourceDocument⟩ (some documentRecord)).set
+    ⟨.elements, rootElement⟩ (some { elementRecord with createdAt := ⟨⟨1300 + nonce⟩⟩ })
 
-def prePageAt (nonce : Nat) : Page :=
-  { genesisPage with pageNumber := nonce }
+def patchAt (nonce : Nat) : Store.Patch Hyperdocument.layout :=
+  [.allocate .links (linkIdAt nonce) (linkAt nonce)]
 
-def postPageAt (nonce : Nat) : Page :=
-  { prePageAt nonce with slot2 := some (entryAt nonce) }
+def postStoreAt (nonce : Nat) : ContentStore :=
+  (preStoreAt nonce).set ⟨.links, linkIdAt nonce⟩ (some (linkAt nonce))
 
-def preCellAt (nonce : Nat) : Materialized materializer :=
-  CellState.materialize materializer (stateOfOption (some (prePageAt nonce)))
+def preCellAt (nonce : Nat) : Materialized HyperdocumentCell.contentMaterializer :=
+  CellState.materialize HyperdocumentCell.contentMaterializer (preStoreAt nonce)
 
-def postCellAt (nonce : Nat) : Materialized materializer :=
-  CellState.materialize materializer (stateOfOption (some (postPageAt nonce)))
+def postCellAt (nonce : Nat) : Materialized HyperdocumentCell.contentMaterializer :=
+  CellState.materialize HyperdocumentCell.contentMaterializer (postStoreAt nonce)
 
-def patchAt (nonce : Nat) : CellState.Patch schema Digest where
-  expectedPreRoot := (preCellAt nonce).root
-  fieldFootprint := {()}
-  resourceFootprint := ∅
-  fieldWrites := [{ field := (), value := some (postPageAt nonce) }]
-  resourceWrites := []
+def entryBytes (nonce : Nat) : List UInt8 :=
+  (identifierStream .v1 .link).encode (linkIdAt nonce) ++
+    HyperdocumentCell.linkRecordStream.encode (linkAt nonce)
 
-def entryBytes (nonce : Nat) : List UInt8 := entryStream.encode (entryAt nonce)
-def pageBytes (nonce : Nat) : List UInt8 := (postCellAt nonce).bytes
+def postBytes (nonce : Nat) : List UInt8 := (postCellAt nonce).bytes
 
 def encodedEntryExact (nonce : Nat) : Bool :=
-  decide (entryStream.toLawful.decode (entryBytes nonce) = some (entryAt nonce))
+  decide (HyperdocumentCell.linkRecordStream.toLawful.decode
+    (HyperdocumentCell.linkRecordStream.encode (linkAt nonce)) = some (linkAt nonce))
 
-def admittedExact (nonce : Nat) : Bool :=
-  match (prePageAt nonce).admitInsert (entryAt nonce) with
-  | .error _ => false
-  | .ok post => decide (post.1 = postPageAt nonce)
+def validExact (nonce : Nat) : Bool :=
+  decide (Store.Patch.ValidFrom (preStoreAt nonce) (patchAt nonce))
 
 def installedExact (nonce : Nat) : Bool :=
-  match CellState.validate materializer (preCellAt nonce) (patchAt nonce) with
+  match CellState.validate HyperdocumentCell.contentMaterializer (preCellAt nonce)
+      (preCellAt nonce).root (patchAt nonce) with
   | .rejected _ => false
   | .accepted validated =>
       decide (validated.apply.bytes = (postCellAt nonce).bytes) &&
         decide (validated.apply.root = (postCellAt nonce).root)
 
 def reopenedExact (nonce : Nat) : Bool :=
-  match stateCodec.decode (pageBytes nonce) with
+  match HyperdocumentCell.contentMaterializer.codec.decode (postBytes nonce) with
   | none => false
-  | some reopened => decide (pageAt reopened = some (postPageAt nonce))
+  | some reopened =>
+      decide (Hyperdocument.lookup reopened .links (linkIdAt nonce) = some (linkAt nonce))
 
 def queriedExact (nonce : Nat) : Bool :=
   match (show Option LinkRecord from
-    Hyperdocument.lookup (postPageAt nonce).toCanonicalState .links
-      (linkIdAt nonce)) with
+    Hyperdocument.lookup (postStoreAt nonce) .links (linkIdAt nonce)) with
   | none => false
-  | some found => found == (linkAt nonce).toCanonical
-
-def routedExact (nonce : Nat) : Bool :=
-  (postPageAt nonce).routeForLink (linkIdAt nonce) == some targetPage
+  | some found => found == linkAt nonce
 
 def semanticExact (nonce : Nat) : Bool :=
-  decide ((prePageAt nonce).Valid) && decide ((postPageAt nonce).Valid) &&
-    encodedEntryExact nonce && admittedExact nonce && installedExact nonce &&
-    reopenedExact nonce && queriedExact nonce && routedExact nonce
+  encodedEntryExact nonce && validExact nonce && installedExact nonce &&
+    reopenedExact nonce && queriedExact nonce
 
 @[noinline] def submitEncodeWork (nonce : Nat) : Nat :=
   (entryBytes nonce).foldl (fun checksum byte => checksum + byte.toNat) 0
 
-@[noinline] def validateInsertWork (nonce : Nat) : Nat :=
-  match (prePageAt nonce).admitInsert (entryAt nonce) with
-  | .error _ => 0
-  | .ok post => post.1.entries.length + post.1.pageNumber
+@[noinline] def validatePatchWork (nonce : Nat) : Nat :=
+  if decide (Store.Patch.ValidFrom (preStoreAt nonce) (patchAt nonce)) then nonce + 1 else 0
 
 @[noinline] def logicalInstallRootWork (nonce : Nat) : Nat :=
-  match CellState.validate materializer (preCellAt nonce) (patchAt nonce) with
+  match CellState.validate HyperdocumentCell.contentMaterializer (preCellAt nonce)
+      (preCellAt nonce).root (patchAt nonce) with
   | .rejected _ => 0
   | .accepted validated => validated.apply.root.value % 1000003
 
 @[noinline] def reopenWork (nonce : Nat) : Nat :=
-  match stateCodec.decode (pageBytes nonce) with
+  match HyperdocumentCell.contentMaterializer.codec.decode (postBytes nonce) with
   | none => 0
-  | some reopened =>
-      (pageAt reopened).map
-        (fun page => page.entries.length + page.pageNumber) |>.getD 0
+  | some reopened => reopened.support.card + nonce
 
 @[noinline] def canonicalQueryWork (nonce : Nat) : Nat :=
   match (show Option LinkRecord from
-    Hyperdocument.lookup (postPageAt nonce).toCanonicalState .links
-      (linkIdAt nonce)) with
+    Hyperdocument.lookup (postStoreAt nonce) .links (linkIdAt nonce)) with
   | none => 0
   | some record => record.relation.value + nonce
-
-@[noinline] def routeQueryWork (nonce : Nat) : Nat :=
-  match (postPageAt nonce).routeForLink (linkIdAt nonce) with
-  | none => 0
-  | some page => page.expectedRoot.value + page.pageNumber + nonce
 
 def repeatChecksum (operation : Nat → Nat) : Nat → Nat → Nat
   | 0, accumulator => accumulator
@@ -147,7 +153,7 @@ def sortSamples (values : List Nat) : List Nat :=
 
 def nearestRank (sorted : List Nat) (percentile : Nat) : Nat :=
   let rank := (percentile * sorted.length + 99) / 100
-  (sorted[rank.saturatingSub 1]?).getD 0
+  (sorted[rank - 1]?).getD 0
 
 def runUntimed (repetitions : Nat) (operation : Nat → Nat) : IO Unit := do
   let sink ← IO.mkRef 0
@@ -186,28 +192,26 @@ def runStage (stage : String) (repetitions encodedBytes : Nat)
 
 def main : IO Unit := do
   unless semanticExact 0 do
-    throw <| IO.userError "bounded forward-link semantic regression"
+    throw <| IO.userError "forward-link content-cell semantic regression"
   let entrySize := (entryBytes 0).length
-  let postSize := (pageBytes 0).length
+  let postSize := (postBytes 0).length
   IO.println s!"benchmark={schemaName}"
   IO.println s!"samples={samples}"
   IO.println s!"warmups_per_stage={warmups}"
   IO.println s!"entry_bytes={entrySize}"
-  IO.println s!"post_page_bytes={postSize}"
+  IO.println s!"post_cell_bytes={postSize}"
   IO.println "timing=IO.monoNanosNow in one warmed Lean process"
   IO.println "cache_state=uncontrolled; no cold-cache claim"
   IO.println "memory=not_reported; no reliable per-stage allocator/RSS attribution"
-  IO.println "semantic_scope=computable bounded content page only; not OS, endpoint delivery, or Rust refinement"
+  IO.println "semantic_scope=computable deployed content cell only; not OS, endpoint delivery, or Rust refinement"
   IO.println "record,schema,phase,sample,stage,repetitions,elapsed_ns,per_operation_ns,encoded_bytes,checksum"
   runStage "submit_entry_encode" ordinaryRepetitions entrySize submitEncodeWork
-  runStage "validate_insert" ordinaryRepetitions postSize validateInsertWork
+  runStage "validate_patch" ordinaryRepetitions postSize validatePatchWork
   runStage "logical_install_cshake_root" rootRepetitions postSize
     logicalInstallRootWork
-  runStage "reopen_page_codec" ordinaryRepetitions postSize reopenWork
+  runStage "reopen_store_codec" ordinaryRepetitions postSize reopenWork
   runStage "canonical_link_query" ordinaryRepetitions postSize
     canonicalQueryWork
-  runStage "physical_page_route_query" ordinaryRepetitions postSize
-    routeQueryWork
   IO.println "record,schema,stage,samples,p50_per_operation_ns,p95_per_operation_ns,p99_per_operation_ns,min_per_operation_ns,max_per_operation_ns,repetitions,encoded_bytes"
   IO.println "semantic_status=PASS"
 

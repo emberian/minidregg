@@ -48,12 +48,12 @@ variable
     {contentDeclaration : HyperdocumentOperations.Declaration}
     {content : HyperdocumentOperations.Accepted contentConfig projection
       authorityPre documentPre contentPortal contentDeclaration}
-    {representation : HyperdocumentEventLog.Representation Digest}
+    {MLog : HyperdocumentVersionEffects.LogMaterializer}
     {store : HyperdocumentEventLog.Sparse.Store}
     {eventConfig : HyperdocumentVersionEffects.Config}
     {eventPortal : Portal}
     {eventDeclaration : HyperdocumentVersionEffects.Declaration}
-    {event : HyperdocumentVersionEffects.Accepted content representation store
+    {event : HyperdocumentVersionEffects.Accepted content MLog store
       eventConfig eventPortal eventDeclaration}
     {header : HyperdocumentPublication.Header}
     {contentCellId eventCellId : Digest}
@@ -79,7 +79,7 @@ of the durable replay envelope. -/
 structure PublicationPlan (operation : Published) (authorityCellId : Digest) where
   wire : WireProjection (MultiCellHyperedge.JointNullifier PubAccepted)
   bounded : BoundedMultiCellCommit operation.publication StableEvent wire.event
-  digestAgreement : SharedDigestAgreement MDoc MAuth representation
+  digestAgreement : SharedDigestAgreement MDoc MAuth MLog
   authorityDistinctContent : authorityCellId ≠ contentCellId
   authorityDistinctEvent : authorityCellId ≠ eventCellId
 
@@ -186,8 +186,8 @@ theorem install_preserves_authority
   change guard ∈
     [({ cellId := authorityCellId
         expectedRoot := MDoc.rootBytes authorityPre.bytes } : ReadGuard)]
-  simp [guard, CellState.Materialized.root,
-    plan.digestAgreement.authorityRootFunction]
+  simp [guard, CellState.Materialized.root, CellState.Materializer.rootOf,
+    CellState.Materialized.bytes, plan.digestAgreement.authorityRootFunction]
 
 /-! ## Positive install and replay teeth -/
 

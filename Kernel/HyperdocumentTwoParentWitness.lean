@@ -129,15 +129,11 @@ noncomputable def sourceRecord (alternative : ConflictAlternative) : FieldRecord
 noncomputable def baseCell : Hyperdocument.Cell hyperdocumentMaterializer :=
   hyperdocumentCell
 
-noncomputable def leftLogical : LogicalState cellSchema :=
-  { baseCell.logical with
-    fields := baseCell.logical.fields.write ⟨.fields, field⟩
-      (sourceRecord leftAlternative) }
+noncomputable def leftLogical : Store.Store layout :=
+  baseCell.logical.set ⟨.fields, field⟩ (some (sourceRecord leftAlternative))
 
-noncomputable def rightLogical : LogicalState cellSchema :=
-  { baseCell.logical with
-    fields := baseCell.logical.fields.write ⟨.fields, field⟩
-      (sourceRecord rightAlternative) }
+noncomputable def rightLogical : Store.Store layout :=
+  baseCell.logical.set ⟨.fields, field⟩ (some (sourceRecord rightAlternative))
 
 noncomputable def leftCell : Hyperdocument.Cell hyperdocumentMaterializer :=
   CellState.materialize hyperdocumentMaterializer leftLogical
@@ -146,12 +142,12 @@ noncomputable def rightCell : Hyperdocument.Cell hyperdocumentMaterializer :=
   CellState.materialize hyperdocumentMaterializer rightLogical
 
 @[simp] theorem left_opened :
-    lookup leftCell.logical .fields field = some (sourceRecord leftAlternative) := by
-  exact FieldStore.write_self _ _ _
+    lookup leftCell.logical .fields field = some (sourceRecord leftAlternative) :=
+  Store.Store.set_eq _ _ _
 
 @[simp] theorem right_opened :
-    lookup rightCell.logical .fields field = some (sourceRecord rightAlternative) := by
-  exact FieldStore.write_self _ _ _
+    lookup rightCell.logical .fields field = some (sourceRecord rightAlternative) :=
+  Store.Store.set_eq _ _ _
 
 noncomputable def baseRecord : VersionEventRecord where
   historyDomain := ⟨15⟩
@@ -280,7 +276,7 @@ noncomputable def leftValid : CausalVersionDag.ValidAppend anchor [baseNode] lef
     intro parent present
     simp only [List.mem_singleton] at present
     subst parent
-    exact Nat.le_refl 1
+    exact Nat.le_refl _
   semanticVersionIncreases := by
     intro parent present
     simp only [List.mem_singleton] at present
@@ -483,15 +479,15 @@ noncomputable def mergeSemantic : HyperdocumentMerge.ValidMerge mergeConfig base
     change overlay ∈ [] at present
     simp at present
   writesUnique := by
-    simp [mergeDeclaration, body, plan, HyperdocumentMerge.Declaration.packedWrites,
-      HyperdocumentMerge.FieldPlan.packedWrites,
-      Minidregg.Theory.HyperdocumentOperations.PackedWrite.address]
-  expectedExact := by
-    intro write member
-    simp [mergeDeclaration, body, plan, HyperdocumentMerge.Declaration.packedWrites,
-      HyperdocumentMerge.FieldPlan.packedWrites] at member
-    subst write
-    rfl
+    simp [mergeDeclaration, body, plan, HyperdocumentMerge.Declaration.patch,
+      HyperdocumentMerge.FieldPlan.ops, leftSource, rightSource]
+  guardsValid := by
+    simp only [mergeDeclaration, body, plan, HyperdocumentMerge.Declaration.patch,
+      HyperdocumentMerge.FieldPlan.ops, leftSource, rightSource, List.flatMap_cons,
+      List.flatMap_nil, List.map_nil, List.append_nil,
+      Minidregg.Theory.HyperdocumentOperations.guardedSet, Store.Patch.ValidFrom,
+      Store.Op.Enabled, Store.Store.Fresh]
+    exact ⟨⟨by decide, hyperdocumentCell_absent _⟩, trivial⟩
 
 noncomputable def parentEvidence :
     HyperdocumentMerge.CurrentParentEvidence (MDoc := hyperdocumentMaterializer)
@@ -644,28 +640,13 @@ noncomputable def mergeAuthorization : Authorized TypedAuthorizationWitness.perm
   policyMembershipVerified := rfl
   policyVerified := rfl
 
-theorem mergeValidatedNonempty : Nonempty
-    (ValidatedPatch hyperdocumentMaterializer baseCell
-      (mergeDeclaration.patch mergeConfig)) := by
-  generalize exactOutcome : validate hyperdocumentMaterializer baseCell
-    (mergeDeclaration.patch mergeConfig) = outcome
-  cases outcome with
-  | accepted validated => exact ⟨validated⟩
-  | rejected reason =>
-      have rootExact :
-          (mergeDeclaration.patch mergeConfig).expectedPreRoot = baseCell.root :=
-        mergeSemantic.preRootExact
-      have fieldsExact :
-          (mergeDeclaration.patch mergeConfig).fieldFootprint =
-            (mergeDeclaration.patch mergeConfig).namedFields :=
-        (HyperdocumentMerge.Declaration.patch_namedFields _ _).symm
-      have resourcesExact :
-          (mergeDeclaration.patch mergeConfig).resourceFootprint =
-            (mergeDeclaration.patch mergeConfig).namedResources :=
-        (HyperdocumentMerge.Declaration.patch_namedResources _ _).symm
-      unfold CellState.validate at exactOutcome
-      rw [dif_pos rootExact, dif_pos fieldsExact, dif_pos resourcesExact] at exactOutcome
-      cases exactOutcome
+/-- The merge patch validates at the root its request quotes. -/
+theorem mergeValidated :
+    ValidatedPatch hyperdocumentMaterializer baseCell
+      (mergeDeclaration.toRequest mergeConfig).preStateRoot
+      (mergeDeclaration.patch mergeConfig) :=
+  (validate_accepts _ _ _ _ mergeSemantic.preRootExact mergeSemantic.guardsValid).elim
+    fun validated _ => validated
 
 noncomputable def mergeAccepted : HyperdocumentMerge.Accepted history mergeConfig projection
     authorityPre baseCell TypedAuthorizationWitness.permissivePortal mergeDeclaration :=
@@ -676,23 +657,18 @@ noncomputable def mergeAccepted : HyperdocumentMerge.Accepted history mergeConfi
       simp only [List.mem_singleton] at present
       subst selected
       rfl)
-    mergeCapabilityAdmissible mergeAuthorization
-    (Classical.choice mergeValidatedNonempty)
+    mergeCapabilityAdmissible mergeAuthorization mergeValidated
 
 @[simp] theorem conflict_is_materialized :
     lookup mergeAccepted.accepted.prepared.post.logical .conflicts
       (plan.conflictId mergeConfig
         (mergeDeclaration.operationId mergeConfig)) =
       some (plan.conflictRecord (mergeDeclaration.operationId mergeConfig)) := by
-  exact mergeAccepted.post_contains_write
-    ⟨.conflicts,
-      { key := plan.conflictId mergeConfig
-          (mergeDeclaration.operationId mergeConfig)
-        expected := none
-        replacement := plan.conflictRecord
-          (mergeDeclaration.operationId mergeConfig) }⟩
-    (by simp [mergeDeclaration, body, plan, HyperdocumentMerge.Declaration.packedWrites,
-      HyperdocumentMerge.FieldPlan.packedWrites])
+  apply mergeAccepted.post_contains_guardedSet (space := .conflicts)
+    (key := plan.conflictId mergeConfig (mergeDeclaration.operationId mergeConfig))
+    (expected := none)
+  simp [mergeDeclaration, body, plan, HyperdocumentMerge.Declaration.patch,
+    HyperdocumentMerge.FieldPlan.ops, leftSource, rightSource]
 
 /-! ## Derived event acceptance and atomic two-cell publication -/
 
@@ -708,10 +684,10 @@ noncomputable def eventConfig : HyperdocumentVersionEffects.Config where
   eventDerivation := eventDerivation
   requestDomain := mergeConfig.requestDomain
   semanticRelation := ⟨703⟩
+  historyDomain := mergeIntent.historyDomain
 
-noncomputable def logCell :
-    CellState.Materialized (eventLogCellMaterializer.{0, 0}) :=
-  Minidregg.Kernel.DeployedMaterializerWitness.eventLogCell.{0, 0}
+noncomputable def logCell : CellState.Materialized eventLogCellMaterializer :=
+  Minidregg.Kernel.DeployedMaterializerWitness.eventLogCell
 
 noncomputable def expectedLogRoot : Digest := logCell.root
 
@@ -768,46 +744,24 @@ noncomputable def eventAuthorization : Authorized TypedAuthorizationWitness.perm
   policyMembershipVerified := rfl
   policyVerified := rfl
 
-theorem eventValidatedNonempty : Nonempty
-    (ValidatedPatch eventLogRepresentation.cellMaterializer logCell
+/-- The derived event's append validates on the empty witness log. -/
+theorem eventValidated :
+    ValidatedPatch eventLogCellMaterializer logCell
+      ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted
+        logCell.root).toRequest eventConfig).preStateRoot
       ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted logCell.root).patch
-        eventConfig)) := by
-  generalize exactOutcome : validate eventLogRepresentation.cellMaterializer
-    logCell
-    ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted logCell.root).patch
-      eventConfig) = outcome
-  cases outcome with
-  | accepted validated => exact ⟨validated⟩
-  | rejected reason =>
-      have rootExact :
-          ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted
-            logCell.root).patch eventConfig).expectedPreRoot = logCell.root := rfl
-      have fieldsExact :
-          ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted
-            logCell.root).patch eventConfig).fieldFootprint =
-          ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted
-            logCell.root).patch eventConfig).namedFields :=
-        (HyperdocumentVersionEffects.Declaration.patch_namedFields _ _).symm
-      have resourcesExact :
-          ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted
-            logCell.root).patch eventConfig).resourceFootprint =
-          ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted
-            logCell.root).patch eventConfig).namedResources :=
-        (HyperdocumentVersionEffects.Declaration.patch_namedResources _ _).symm
-      unfold CellState.validate at exactOutcome
-      split at exactOutcome
-      · split at exactOutcome
-        · split at exactOutcome
-          · cases exactOutcome
-          · contradiction
-        · contradiction
-      · contradiction
+        eventConfig) :=
+  (validate_accepts _ _ _ _ rfl (by
+    simp only [HyperdocumentVersionEffects.Declaration.patch,
+      HyperdocumentVersionEffects.Declaration.appendOp, Store.Patch.ValidFrom,
+      Store.Op.Enabled, Store.Store.Fresh]
+    exact ⟨⟨by decide, rfl⟩, trivial⟩)).elim fun validated _ => validated
 
 noncomputable def eventAccepted : HyperdocumentMergePublication.EventAccepted mergeAccepted
-    eventLogRepresentation HyperdocumentEventLog.Sparse.empty eventConfig TypedAuthorizationWitness.permissivePortal
-    logCell.root :=
-  HyperdocumentMergePublication.acceptEvent publicationInputs eventCapabilityAdmissible rfl
-    eventAuthorization (Classical.choice eventValidatedNonempty)
+    eventLogCellMaterializer HyperdocumentEventLog.Sparse.empty eventConfig
+    TypedAuthorizationWitness.permissivePortal logCell.root :=
+  HyperdocumentMergePublication.acceptEvent publicationInputs eventCapabilityAdmissible rfl rfl
+    eventAuthorization eventValidated
 
 noncomputable def header : HyperdocumentMergePublication.Header := ⟨⟨900⟩, ⟨901⟩⟩
 noncomputable def contentCellId : Digest := ⟨902⟩
@@ -833,10 +787,10 @@ noncomputable def commit := HyperdocumentMergePublication.commit mergeAccepted e
     leftSource rightSource [] rfl
 
 @[simp] theorem atomic_event_append :
-    (commit.post .eventLog).logical.fields
-      ⟨HyperdocumentEventLog.Sparse.Namespace.events,
-        (HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted logCell.root).key
-          eventConfig⟩ =
+    (commit.post .eventLog).logical
+      (HyperdocumentEventLog.Sparse.eventAddress
+        ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted logCell.root).key
+          eventConfig)) =
       some (HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted logCell.root).record :=
   HyperdocumentMergePublication.commit_event_post_contains
 

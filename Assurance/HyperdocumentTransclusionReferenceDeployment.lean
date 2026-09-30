@@ -23,7 +23,6 @@ search-index coverage, and response availability remain named premises.
 import Mathlib.Data.List.Lex
 import Mathlib.Data.Prod.Lex
 import Assurance.HyperdocumentLinkEndpointController
-import Compiler.HyperdocumentContentPageMaterializer
 
 namespace Minidregg.Assurance.HyperdocumentTransclusionReferenceDeployment
 
@@ -36,7 +35,6 @@ open Minidregg.Assurance.TransclusionBacklinkHistory
 open Minidregg.Compiler
 open Minidregg.Compiler.DialectClauseDispatch
 open Minidregg.Compiler.HyperdocumentCodec
-open Minidregg.Compiler.HyperdocumentContentPageMaterializer
 open Minidregg.Compiler.SemanticManifest
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Selvage
@@ -216,7 +214,7 @@ noncomputable def encoding (n : Nat) :
   cells reference := [byteCode ((referenceCodec n).encode reference)]
   injective := by
     intro left right equal
-    apply HyperdocumentContentPageMaterializer.lawfulCodec_encode_injective
+    apply Hyperdocument.lawfulCodec_encode_injective
       (referenceCodec n)
     apply byteCode_injective
     simpa using equal
@@ -414,16 +412,13 @@ def semantic : ValidOperation Prior.config Prior.documentPre
       objectCapability := rfl }
   preRootExact := by simp [forwardDeclaration, forwardIntent]
   writesUnique := by
-    simp [forwardDeclaration, forwardAction, forwardPayload,
-      Declaration.packedWrites, Action.packedWrites,
-      HyperdocumentOperations.linkWrites, PackedWrite.address]
-  expectedExact := by
-    intro write member
-    simp [forwardDeclaration, forwardAction, forwardPayload,
-      Declaration.packedWrites, Action.packedWrites,
-      HyperdocumentOperations.linkWrites] at member
-    subst write
-    exact forward_absent
+    simp [forwardDeclaration, forwardAction, Declaration.patch, Action.ops,
+      HyperdocumentOperations.linkWrites]
+  guardsValid := by
+    simp only [Declaration.patch, forwardDeclaration, forwardAction, Action.ops,
+      HyperdocumentOperations.linkWrites, guardedSet, Store.Patch.ValidFrom,
+      Store.Op.Enabled, Store.Store.Fresh]
+    exact ⟨⟨by decide, forward_absent⟩, trivial⟩
   rangesValid := by
     intro range impossible
     cases impossible
@@ -432,9 +427,7 @@ noncomputable def accepted : Accepted Prior.config Prior.projection
     Prior.authorityPre Prior.documentPre Prior.portal forwardDeclaration :=
   HyperdocumentOperations.accept Prior.principal semantic capabilityAdmissible
     authorization
-    (Classical.choice
-      (Minidregg.Assurance.HyperdocumentLinkPublicationWitness.validatedNonempty
-        semantic))
+    (Minidregg.Assurance.HyperdocumentLinkPublicationWitness.validatedOf semantic)
 
 def forwardRecord : LinkRecord :=
   linkRecord (forwardDeclaration.operationId Prior.config) Prior.author

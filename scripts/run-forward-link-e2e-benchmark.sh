@@ -36,14 +36,14 @@ printf 'logical_cpus=%s\n' "$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf un
 printf 'lean=%s\n' "$(lake env lean --version | head -1)"
 printf 'rustc=%s\n' "$(rustc --version)"
 printf 'cargo=%s\n' "$(cargo --version)"
-printf 'prepare=proof joins + computable bounded page + release opaque-store benchmark\n'
+printf 'prepare=proof joins + computable content cell + release opaque-store benchmark\n'
 
 lake build \
   Assurance.HyperdocumentLinkEndpointController \
   Assurance.HyperdocumentLinkPageDurableWeld \
   Assurance.HyperdocumentLinkLocalFileStore \
   Assurance.HyperdocumentLinkClientLocalFileCutover \
-  Compiler.HyperdocumentContentPageMaterializer >/dev/null
+  Compiler.HyperdocumentCell >/dev/null
 
 CARGO_TARGET_DIR="$cargo_target" cargo build --release --quiet \
   --manifest-path native/hyperdocument-link-store/Cargo.toml \

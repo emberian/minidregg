@@ -216,64 +216,54 @@ def genesisSemantic : HyperdocumentOperations.ValidOperation config
       objectCapability := rfl }
   preRootExact := rfl
   writesUnique := by
-    simp [genesisDeclaration, genesisAction,
-      HyperdocumentOperations.Declaration.packedWrites,
-      HyperdocumentOperations.Action.packedWrites,
-      HyperdocumentOperations.createWrites,
-      HyperdocumentOperations.PackedWrite.address]
-  expectedExact := by
-    intro write member
-    simp [genesisDeclaration, genesisAction,
-      HyperdocumentOperations.Declaration.packedWrites,
-      HyperdocumentOperations.Action.packedWrites,
-      HyperdocumentOperations.createWrites] at member
-    rcases member with rfl | rfl <;> rfl
+    simp [genesisDeclaration, genesisAction, HyperdocumentOperations.Declaration.patch,
+      HyperdocumentOperations.Action.ops, HyperdocumentOperations.createWrites]
+  guardsValid := by
+    simp only [HyperdocumentOperations.Declaration.patch, genesisDeclaration, genesisAction,
+      HyperdocumentOperations.Action.ops, HyperdocumentOperations.createWrites,
+      HyperdocumentOperations.guardedSet, Store.Patch.ValidFrom, Store.Op.Enabled,
+      Store.Op.apply, Store.Store.Fresh]
+    refine ⟨⟨by decide, DeployedMaterializerWitness.hyperdocumentCell_absent _⟩,
+      ⟨by decide, ?_⟩, trivial⟩
+    rw [Store.Store.set_ne _ _ _ _ (by intro same; cases same)]
+    exact DeployedMaterializerWitness.hyperdocumentCell_absent _
   rangesValid := trivial
 
-theorem validatedNonempty
+/-- A valid operation's patch validates at the root its intent quotes. -/
+theorem validatedOf
     {pre : Hyperdocument.Cell Genesis.documentMaterializer}
     {declaration : HyperdocumentOperations.Declaration}
     (semantic : HyperdocumentOperations.ValidOperation config pre declaration) :
-    Nonempty (ValidatedPatch Genesis.documentMaterializer pre
-      (declaration.patch config)) := by
-  generalize exactOutcome : validate Genesis.documentMaterializer pre
-    (declaration.patch config) = outcome
-  cases outcome with
-  | accepted validated => exact ⟨validated⟩
-  | rejected reason =>
-      have rootExact : (declaration.patch config).expectedPreRoot = pre.root :=
-        semantic.preRootExact
-      unfold validate at exactOutcome
-      rw [dif_pos rootExact,
-        dif_pos (HyperdocumentOperations.Declaration.patch_namedFields _ _).symm,
-        dif_pos (HyperdocumentOperations.Declaration.patch_namedResources _ _).symm]
-        at exactOutcome
-      cases exactOutcome
+    ValidatedPatch Genesis.documentMaterializer pre
+      (declaration.toRequest config).preStateRoot (declaration.patch config) :=
+  (validate_accepts _ _ _ _ semantic.preRootExact semantic.guardsValid).elim
+    fun validated _ => validated
 
 noncomputable def genesisAccepted : HyperdocumentOperations.Accepted config
     Genesis.projection Genesis.authorityPre Genesis.documentPre
     Genesis.permissivePortal genesisDeclaration :=
   HyperdocumentOperations.accept Genesis.principal genesisSemantic
-    genesisCapabilityAdmissible genesisAuthorization
-    (Classical.choice (validatedNonempty genesisSemantic))
+    genesisCapabilityAdmissible genesisAuthorization (validatedOf genesisSemantic)
 
 abbrev genesisPost := genesisAccepted.accepted.prepared.post
 
+/-- Genesis writes only its document and root element. -/
+theorem genesis_frame (address : Hyperdocument.Address)
+    (notDocument : address ≠ ⟨.documents, Genesis.documentId⟩)
+    (notElement : address ≠ ⟨.elements, Genesis.elementId⟩) :
+    genesisPost.logical address = none := by
+  have framed := genesisAccepted.accepted.frame address (by
+    simp only [HyperdocumentOperations.family, HyperdocumentOperations.Declaration.patch,
+      genesisDeclaration, genesisAction, HyperdocumentOperations.Action.ops,
+      HyperdocumentOperations.createWrites]
+    simp [Store.Patch.writeFootprint, HyperdocumentOperations.guardedSet_writeAddress,
+      notDocument, notElement, eq_comm])
+  rw [framed]
+  exact DeployedMaterializerWitness.hyperdocumentCell_absent _
+
 @[simp] theorem genesis_link_absent (id : LinkId) :
-    lookup genesisPost.logical .links id = none := by
-  have framed := genesisAccepted.accepted.field_frame
-    (⟨.links, id⟩ : Hyperdocument.Address) (by
-      simp [genesisDeclaration, genesisAction,
-        HyperdocumentOperations.family,
-        HyperdocumentOperations.Declaration.patch,
-        HyperdocumentOperations.Declaration.fieldWrites,
-        HyperdocumentOperations.Declaration.packedWrites,
-        HyperdocumentOperations.Action.packedWrites,
-        HyperdocumentOperations.createWrites,
-        HyperdocumentOperations.PackedWrite.toFieldWrite,
-        HyperdocumentOperations.PackedWrite.address]
-      constructor <;> intro equal <;> cases equal)
-  simpa [Hyperdocument.lookup] using framed
+    lookup genesisPost.logical .links id = none :=
+  genesis_frame ⟨.links, id⟩ (by intro same; cases same) (by intro same; cases same)
 
 /-! ## Accepted `.link` child -/
 
@@ -382,19 +372,14 @@ def linkSemantic : HyperdocumentOperations.ValidOperation config genesisPost
       objectCapability := rfl }
   preRootExact := rfl
   writesUnique := by
-    simp [linkDeclaration, linkAction, linkPayload,
-      HyperdocumentOperations.Declaration.packedWrites,
-      HyperdocumentOperations.Action.packedWrites,
-      HyperdocumentOperations.linkWrites,
-      HyperdocumentOperations.PackedWrite.address]
-  expectedExact := by
-    intro write member
-    simp [linkDeclaration, linkAction, linkPayload,
-      HyperdocumentOperations.Declaration.packedWrites,
-      HyperdocumentOperations.Action.packedWrites,
-      HyperdocumentOperations.linkWrites] at member
-    subst write
-    exact genesis_link_absent linkId
+    simp [linkDeclaration, linkAction, HyperdocumentOperations.Declaration.patch,
+      HyperdocumentOperations.Action.ops, HyperdocumentOperations.linkWrites]
+  guardsValid := by
+    simp only [HyperdocumentOperations.Declaration.patch, linkDeclaration, linkAction,
+      HyperdocumentOperations.Action.ops, HyperdocumentOperations.linkWrites,
+      HyperdocumentOperations.guardedSet, Store.Patch.ValidFrom, Store.Op.Enabled,
+      Store.Store.Fresh]
+    exact ⟨⟨by decide, genesis_link_absent linkId⟩, trivial⟩
   rangesValid := by
     intro range impossible
     cases impossible
@@ -403,8 +388,7 @@ noncomputable def linkAccepted : HyperdocumentOperations.Accepted config
     Genesis.projection Genesis.authorityPre genesisPost Genesis.permissivePortal
     linkDeclaration :=
   HyperdocumentOperations.accept Genesis.principal linkSemantic
-    linkCapabilityAdmissible linkAuthorization
-    (Classical.choice (validatedNonempty linkSemantic))
+    linkCapabilityAdmissible linkAuthorization (validatedOf linkSemantic)
 
 @[simp] theorem link_post_contains_forward :
     lookup linkAccepted.accepted.prepared.post.logical .links linkId =
@@ -566,7 +550,11 @@ noncomputable def history : CausalVersionDag.History
 @[simp] theorem history_exact : history.events = [genesisNode, linkNode] :=
   rfl
 
-/-! ## Sparse event-log effect after a retained genesis event -/
+/-! ## Event-log effect after a retained genesis event
+
+The event log uses the witness log materializer, whose root function is the
+same byte-length witness root as the document and authority witness cells, so
+one durable digest serves all three lanes downstream. -/
 
 deriving instance Countable for HyperdocumentVersionEffects.Declaration
 deriving instance Nonempty for VersionEventRecord
@@ -586,27 +574,27 @@ noncomputable def eventConfig : HyperdocumentVersionEffects.Config where
   eventDerivation := eventDerivation
   requestDomain := config.requestDomain
   semanticRelation := ⟨703⟩
+  historyDomain := genesisIntent.historyDomain
 
-noncomputable def eventRepresentation :
-    HyperdocumentEventLog.Representation Digest :=
-  Minidregg.Kernel.DeployedMaterializerWitness.eventLogRepresentation
+abbrev eventMaterializer : HyperdocumentVersionEffects.LogMaterializer :=
+  Minidregg.Kernel.DeployedMaterializerWitness.eventLogCellMaterializer
+
+open HyperdocumentEventLog.Sparse (eventAddress)
 
 def eventStore : HyperdocumentEventLog.Sparse.Store :=
-  HyperdocumentEventLog.Sparse.empty.set .events genesisStored.key
+  HyperdocumentEventLog.Sparse.empty.set (eventAddress genesisStored.key)
     (some genesisAccepted.versionEventRecord)
 
 @[simp] theorem eventStore_contains_genesis :
-    eventStore .events genesisStored.key =
-      some genesisAccepted.versionEventRecord := by
-  exact Minidregg.Kernel.SparseAuthenticatedState.Store.set_eq
-    _ _ _ _
+    eventStore (eventAddress genesisStored.key) =
+      some genesisAccepted.versionEventRecord :=
+  Store.Store.set_eq _ _ _
 
-noncomputable def eventLogPre :
-    CellState.Materialized eventRepresentation.cellMaterializer :=
-  HyperdocumentVersionEffects.cellPre eventRepresentation eventStore
+noncomputable def eventLogPre : CellState.Materialized eventMaterializer :=
+  HyperdocumentVersionEffects.cellPre eventMaterializer eventStore
 
 def eventDeclaration : HyperdocumentVersionEffects.Declaration where
-  expectedLogRoot := eventLogPre.{0, 0}.root
+  expectedLogRoot := eventLogPre.root
   request := linkDeclaration.request
   record := linkAccepted.versionEventRecord
 
@@ -615,11 +603,14 @@ def eventDeclaration : HyperdocumentVersionEffects.Declaration where
   rfl
 
 theorem eventFresh :
-    eventStore .events (eventDeclaration.key eventConfig) = none := by
-  apply Minidregg.Kernel.SparseAuthenticatedState.Store.set_ne
+    eventStore (eventAddress (eventDeclaration.key eventConfig)) = none := by
+  unfold eventStore
+  rw [Store.Store.set_ne]
+  · rfl
   intro equal
   have keyEqual : eventDeclaration.key eventConfig = genesisStored.key := by
-    injection equal
+    simp only [eventAddress, Sigma.mk.injEq, heq_eq_eq, true_and] at equal
+    exact equal
   have digestEqual := congrArg Identifier.digest keyEqual
   change linkNode.entryId = genesisNode.entryId at digestEqual
   simp at digestEqual
@@ -670,44 +661,64 @@ def eventAuthorization : Authorized Genesis.permissivePortal
   policyMembershipVerified := rfl
   policyVerified := rfl
 
-theorem eventValidatedNonempty : Nonempty
-    (ValidatedPatch eventRepresentation.cellMaterializer
-      eventLogPre.{0, 0}
-      (eventDeclaration.patch eventConfig)) := by
-  generalize exactOutcome : validate eventRepresentation.cellMaterializer
-    eventLogPre.{0, 0}
-    (eventDeclaration.patch eventConfig) = outcome
-  cases outcome with
-  | accepted validated => exact ⟨validated⟩
-  | rejected reason =>
-      have rootExact :
-          (eventDeclaration.patch eventConfig).expectedPreRoot =
-            eventLogPre.{0, 0}.root := rfl
-      unfold validate at exactOutcome
-      rw [dif_pos rootExact,
-        dif_pos (HyperdocumentVersionEffects.Declaration.patch_namedFields _ _).symm,
-        dif_pos (HyperdocumentVersionEffects.Declaration.patch_namedResources _ _).symm]
-        at exactOutcome
-      cases exactOutcome
+/-- The append validates at the log root the event request quotes. -/
+theorem eventValidated :
+    ValidatedPatch eventMaterializer eventLogPre
+      (eventDeclaration.toRequest eventConfig).preStateRoot
+      (eventDeclaration.patch eventConfig) :=
+  (validate_accepts _ _ _ _ rfl (by
+    simp only [HyperdocumentVersionEffects.Declaration.patch,
+      HyperdocumentVersionEffects.Declaration.appendOp, Store.Patch.ValidFrom,
+      Store.Op.Enabled, Store.Store.Fresh]
+    exact ⟨⟨by decide, eventFresh⟩, trivial⟩)).elim
+    fun validated _ => validated
+
+/-- The event names this deployment's history domain, so the append's domain
+pin holds. -/
+theorem eventDomainExact :
+    eventDeclaration.record.historyDomain = eventConfig.historyDomain :=
+  rfl
 
 noncomputable def eventAccepted : HyperdocumentVersionEffects.Accepted
-    linkAccepted eventRepresentation eventStore eventConfig
+    linkAccepted eventMaterializer eventStore eventConfig
     Genesis.permissivePortal eventDeclaration :=
   HyperdocumentVersionEffects.accept eventSource Genesis.principal
-    eventCapabilityAdmissible linkWellFormed eventFresh eventAuthorization
-    (Classical.choice eventValidatedNonempty)
+    eventCapabilityAdmissible linkWellFormed eventFresh eventDomainExact eventAuthorization
+    eventValidated
 
 @[simp] theorem event_post_contains_link_event :
-    eventAccepted.accepted.prepared.post.logical.fields
-      ⟨HyperdocumentEventLog.Sparse.Namespace.events,
-        eventDeclaration.key eventConfig⟩ = some eventDeclaration.record :=
+    eventAccepted.accepted.prepared.post.logical
+      (eventAddress (eventDeclaration.key eventConfig)) = some eventDeclaration.record :=
   eventAccepted.post_contains
 
 theorem event_replay_rejected :
     ¬ (HyperdocumentEventLog.Sparse.appendOp
-      (eventDeclaration.stored eventConfig eventAccepted.sourceWellFormed)).Enabled
-      eventAccepted.sparse.post.logical :=
+      (eventDeclaration.stored eventConfig eventAccepted.wellFormed)).Enabled
+      eventAccepted.accepted.prepared.post.logical :=
   eventAccepted.duplicate_rejected
+
+/-! ### The append's domain pin, both poles, at this log -/
+
+/-- Satisfiable pole: the accepted append names the log's history domain. -/
+theorem event_domain_accepted :
+    eventDeclaration.record.historyDomain = eventConfig.historyDomain :=
+  eventAccepted.domain_exact
+
+/-- The same link event re-labelled with another history domain. -/
+def foreignEventDeclaration : HyperdocumentVersionEffects.Declaration :=
+  { eventDeclaration with
+    record := { eventDeclaration.record with historyDomain := ⟨16⟩ } }
+
+/-- Refuting pole: the foreign-domain event has no accepted append at this
+log, with any portal and authority. -/
+theorem foreign_domain_event_refused {portal : Portal} {authState : AuthState}
+    {kind : ResourceKind} {request : Request kind} :
+    IsEmpty (AcceptedCellEffect (portal := portal) (authState := authState)
+      (HyperdocumentVersionEffects.family eventMaterializer eventConfig eventLogPre)
+      request eventLogPre foreignEventDeclaration ()) :=
+  HyperdocumentVersionEffects.no_accepted_of_foreign_domain (by
+    change (⟨16⟩ : Digest) ≠ ⟨15⟩
+    decide)
 
 /-! ## One logical atomic content + event publication -/
 
@@ -735,9 +746,8 @@ noncomputable def commit :=
   exact link_post_contains_forward
 
 @[simp] theorem atomic_event_append :
-    (commit.post .eventLog).logical.fields
-      ⟨HyperdocumentEventLog.Sparse.Namespace.events,
-        eventDeclaration.key eventConfig⟩ = some eventDeclaration.record :=
+    (commit.post .eventLog).logical
+      (eventAddress (eventDeclaration.key eventConfig)) = some eventDeclaration.record :=
   HyperdocumentPublication.commit_event_post_contains
 
 /-! ## Concrete rejection teeth -/
@@ -792,20 +802,9 @@ theorem optional_source_out_of_range_rejected :
   intro semantic
   have stored := semantic.rangesValid badRange rfl
   rcases stored.start with ⟨run, opened, _, _⟩
-  have framed := genesisAccepted.accepted.field_frame
-    (⟨.runs, badPoint.run⟩ : Hyperdocument.Address) (by
-      simp [genesisDeclaration, genesisAction,
-        HyperdocumentOperations.family,
-        HyperdocumentOperations.Declaration.patch,
-        HyperdocumentOperations.Declaration.fieldWrites,
-        HyperdocumentOperations.Declaration.packedWrites,
-        HyperdocumentOperations.Action.packedWrites,
-        HyperdocumentOperations.createWrites,
-        HyperdocumentOperations.PackedWrite.toFieldWrite,
-        HyperdocumentOperations.PackedWrite.address]
-      constructor <;> intro equal <;> cases equal)
-  have absent : lookup genesisPost.logical .runs badPoint.run = none := by
-    simpa [Hyperdocument.lookup] using framed
+  have absent : lookup genesisPost.logical .runs badPoint.run = none :=
+    genesis_frame ⟨.runs, badPoint.run⟩ (by intro same; cases same)
+      (by intro same; cases same)
   change lookup genesisPost.logical .runs badPoint.run = some run at opened
   rw [absent] at opened
   contradiction
@@ -865,6 +864,10 @@ theorem causal_effect_replay_tooth :
 #guard_msgs (whitespace := lax) in #print axioms event_replay_rejected
 /-- info: 'Minidregg.Assurance.HyperdocumentLinkPublicationWitness.optional_source_out_of_range_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms optional_source_out_of_range_rejected
+/-- info: 'Minidregg.Assurance.HyperdocumentLinkPublicationWitness.event_domain_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms event_domain_accepted
+/-- info: 'Minidregg.Assurance.HyperdocumentLinkPublicationWitness.foreign_domain_event_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms foreign_domain_event_refused
 
 end
 

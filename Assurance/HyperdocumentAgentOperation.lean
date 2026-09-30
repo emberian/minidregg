@@ -64,7 +64,7 @@ end HVE
 
 namespace HEP
 
-abbrev Representation := Minidregg.Kernel.HyperdocumentEventLog.Representation
+abbrev LogMaterializer := Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer
 abbrev Store := Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store
 
 end HEP
@@ -194,12 +194,10 @@ def promiseSpec
   nullifier := contentDeclaration.intent.nonce
   cancelKind := cancelKind
   cancelRequest := cancelRequest
-  fieldFootprint := (contentDeclaration.patch contentConfig).fieldFootprint
-  resourceFootprint := (contentDeclaration.patch contentConfig).resourceFootprint
+  footprint := Store.Patch.writeFootprint (contentDeclaration.patch contentConfig)
   requestPreRootExact := requestPreRootExact
   requestEffectExact := rfl
-  fieldFootprintExact := by intro _; rfl
-  resourceFootprintExact := by intro _; rfl
+  footprintExact := by intro _; rfl
   nullifierExact := by intro _; rfl
 
 end Content
@@ -402,13 +400,13 @@ variable
     {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
       projection authorityPre documentPre
       contentPortal contentDeclaration}
-    {representation : HEP.Representation Digest}
+    {MLog : HEP.LogMaterializer}
     {store : HEP.Store}
     {eventConfig : HVE.Config}
     {eventPortal : Portal}
     {eventDeclaration : HVE.Declaration}
     (event : Minidregg.Kernel.HyperdocumentVersionEffects.Accepted content
-      representation store eventConfig eventPortal
+      MLog store eventConfig eventPortal
       eventDeclaration)
     (header : Publication.Header)
     (contentCellId eventCellId : Digest)
@@ -439,13 +437,13 @@ structure PublishedOperation
     {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
       projection authorityPre documentPre
       contentPortal contentDeclaration}
-    {representation : HEP.Representation Digest}
+    {MLog : HEP.LogMaterializer}
     {store : HEP.Store}
     {eventConfig : HVE.Config}
     {eventPortal : Portal}
     {eventDeclaration : HVE.Declaration}
     (event : Minidregg.Kernel.HyperdocumentVersionEffects.Accepted content
-      representation store eventConfig eventPortal
+      MLog store eventConfig eventPortal
       eventDeclaration)
     (header : Publication.Header)
     (contentCellId eventCellId : Digest)
@@ -468,19 +466,19 @@ structure PublishedOperation
   contentPostExact : publication.post .content =
     content.accepted.prepared.post
   eventPostContains :
-    (publication.post .eventLog).logical.fields
-      ⟨Minidregg.Kernel.HyperdocumentEventLog.Sparse.Namespace.events,
-        eventDeclaration.key eventConfig⟩ = some eventDeclaration.record
+    (publication.post .eventLog).logical
+      (Minidregg.Kernel.HyperdocumentEventLog.Sparse.eventAddress
+        (eventDeclaration.key eventConfig)) = some eventDeclaration.record
   eventReplayRejected :
     ¬ (Minidregg.Kernel.HyperdocumentEventLog.Sparse.appendOp
-      (eventDeclaration.stored eventConfig event.sourceWellFormed)).Enabled
-      event.sparse.post.logical
+      (eventDeclaration.stored eventConfig event.wellFormed)).Enabled
+      event.accepted.prepared.post.logical
 
 namespace PublishedOperation
 
 variable
     {event : Minidregg.Kernel.HyperdocumentVersionEffects.Accepted content
-      representation store eventConfig eventPortal eventDeclaration}
+      MLog store eventConfig eventPortal eventDeclaration}
     {header : Publication.Header}
     {contentCellId eventCellId : Digest}
     {boundary : Minidregg.Kernel.MultiCellHyperedge.HandlerBoundary
@@ -534,28 +532,23 @@ variable
 
 theorem selected_address_touched (selection : Selection contentDeclaration) :
     selection.selected.address ∈
-      content.accepted.prepared.delta.fieldFootprint := by
-  rw [AcceptedCellEffect.prepared_fieldFootprint]
+      content.accepted.prepared.delta.footprint := by
+  rw [AcceptedCellEffect.prepared_footprint]
   rcases selection with ⟨selected, actionExact⟩
   cases selected with
   | link payload =>
-      simp [HyperdocumentOperations.family, Declaration.patch,
-        Declaration.fieldWrites, Declaration.packedWrites, Action.packedWrites,
-        linkWrites, PackedWrite.toFieldWrite, PackedWrite.address,
+      simp [HyperdocumentOperations.family, Declaration.patch, Action.ops,
+        linkWrites, Store.Patch.writeFootprint, guardedSet_writeAddress,
         SelectedAction.address, SelectedAction.action, actionExact]
-      exact Finset.mem_singleton_self _
   | annotation payload =>
-      simp [HyperdocumentOperations.family, Declaration.patch,
-        Declaration.fieldWrites, Declaration.packedWrites, Action.packedWrites,
-        annotateWrites, PackedWrite.toFieldWrite, PackedWrite.address,
+      simp [HyperdocumentOperations.family, Declaration.patch, Action.ops,
+        annotateWrites, Store.Patch.writeFootprint, guardedSet_writeAddress,
         SelectedAction.address, SelectedAction.action, actionExact]
-      exact Finset.mem_singleton_self _
 
 /-- The exact selected observer is dirty in the accepted canonical delta. -/
 theorem selected_view_dirty (selection : Selection contentDeclaration) :
     ContentQuery.lens.Dirty selection.selected.query
       content.accepted.prepared.delta := by
-  left
   exact ⟨selection.selected.address,
     Finset.mem_inter.mpr ⟨by
       cases selection.selected <;>

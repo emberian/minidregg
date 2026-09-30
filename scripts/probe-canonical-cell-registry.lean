@@ -13,46 +13,31 @@ namespace CanonicalCellRegistryProbe
 
 def deployment : Deployment := ⟨⟨4242⟩, 10, 11, 12⟩
 
-def declaredPage (cellId : Nat) (key : StateKey) : DeclaredEffectPageMaterializer.Page :=
-  ⟨deployment.domain, cellId % DeclaredEffectPageMaterializer.shardCount,
-    some ⟨key, 17⟩, none, none, none⟩
+/-- A declared cell holding one field of the given key. -/
+def declaredStore (key : StateKey) : Store.Store EffectDeclaration.effectLayout :=
+  StoreCodec.fromEntries [⟨key.address, (17 : Int)⟩]
 
-def objectPage := declaredPage 20 (.objectField ⟨20⟩ ⟨1⟩)
-def accountPage := declaredPage 21 (.objectField ⟨21⟩ ⟨1⟩)
-def programPage := declaredPage 22 (.programCode ⟨22⟩)
+def objectStore := declaredStore (.objectField ⟨20⟩ ⟨1⟩)
+def accountStore := declaredStore (.objectField ⟨21⟩ ⟨1⟩)
+def programStore := declaredStore (.programCode ⟨22⟩)
 
-def objectCell (page : DeclaredEffectPageMaterializer.Page) : PackedCell registry :=
-  ⟨.declaredObject, materialize DeclaredEffectPageMaterializer.materializer
-    (DeclaredEffectPageMaterializer.stateOfOption (some page))⟩
+def objectCell (store : Store.Store EffectDeclaration.effectLayout) : PackedCell registry :=
+  ⟨.declaredObject, materialize DeclaredEffectCell.materializer store⟩
 
-def accountCell (page : DeclaredEffectPageMaterializer.Page) : PackedCell registry :=
-  ⟨.accountMetadata, materialize DeclaredEffectPageMaterializer.materializer
-    (DeclaredEffectPageMaterializer.stateOfOption (some page))⟩
+def accountCell (store : Store.Store EffectDeclaration.effectLayout) : PackedCell registry :=
+  ⟨.accountMetadata, materialize DeclaredEffectCell.materializer store⟩
 
 def programCell : PackedCell registry :=
-  ⟨.declaredProgram, materialize DeclaredEffectPageMaterializer.materializer
-    (DeclaredEffectPageMaterializer.stateOfOption (some programPage))⟩
-
-def contentPage : HyperdocumentContentPageMaterializer.Page :=
-  ⟨deployment.domain, ⟨⟨23⟩⟩, 0, none, none, none, none⟩
-
-def eventPage : HyperdocumentEventPageMaterializer.Page :=
-  ⟨deployment.domain, contentPage.document, 0, none, none, none, none⟩
+  ⟨.declaredProgram, materialize DeclaredEffectCell.materializer programStore⟩
 
 def samples : List (Nat × PackedCell registry) :=
-  [ (20, objectCell objectPage)
-  , (21, accountCell accountPage)
+  [ (20, objectCell objectStore)
+  , (21, accountCell accountStore)
   , (22, programCell)
-  , (23, ⟨.content, materialize HyperdocumentContentPageMaterializer.materializer
-      (HyperdocumentContentPageMaterializer.stateOfOption (some contentPage))⟩)
-  , (24, ⟨.eventHistory, materialize HyperdocumentEventPageMaterializer.materializer
-      (HyperdocumentEventPageMaterializer.stateOfOption (some eventPage))⟩)
-  , (25, ⟨.authorityShard, materialize CredentialAuthorityPageMaterializer.materializer
-      (CredentialAuthorityPageMaterializer.stateOfOption
-        (some (CredentialAuthorityDomain.emptyPage deployment.domain 0)))⟩)
+  , (23, ⟨.content, materialize HyperdocumentCell.contentMaterializer 0⟩)
+  , (24, ⟨.eventHistory, materialize HyperdocumentCell.eventMaterializer 0⟩)
   , (deployment.authorityCellId,
-      ⟨.authorityCatalogue, materialize CredentialAuthorityDomain.catalogueMaterializer
-        (CredentialAuthorityDomain.catalogueState (some ⟨deployment.domain, 0, []⟩))⟩)
+      ⟨.authority, materialize CredentialAuthorityCell.materializer 0⟩)
   , (deployment.resourceBookId,
       ⟨.resourceBook, materialize CanonicalResourcePageMaterializer.materializer
         (CanonicalResourcePageMaterializer.stateOfOption (some CanonicalResourceKernel.Book.empty))⟩) ]
@@ -77,31 +62,30 @@ def checkRows : IO Unit := do
         require "outer lifecycle exact canonical bytes"
           (ResourceBirthCodec.LifecycleImage.bytes registry decoded == lifecycle)
   require "reserved tag refuses" ((kindAtTag 4).isNone)
+  require "retired catalogue tag refuses" ((kindAtTag 7).isNone)
   require "unknown tag refuses" ((kindAtTag 255).isNone)
-  require "object initial accepted" (userInitialCheck deployment 20 (objectCell objectPage))
-  require "account metadata initial accepted" (userInitialCheck deployment 21 (accountCell accountPage))
+  require "object initial accepted" (userInitialCheck deployment 20 (objectCell objectStore))
+  require "account metadata initial accepted" (userInitialCheck deployment 21 (accountCell accountStore))
   require "program metadata initial accepted" (userInitialCheck deployment 22 programCell)
-  let shadow := declaredPage 21 (.accountBalance ⟨21⟩ ⟨21⟩)
-  require "shadow balance is valid low-level page" (decide shadow.Valid)
+  let shadow := declaredStore (.accountBalance ⟨21⟩ ⟨21⟩)
   require "account shadow balance refuses permanent law" (!cellCheck deployment 21 (accountCell shadow))
-  let objectShadow := declaredPage 20 (.accountBalance ⟨20⟩ ⟨20⟩)
+  let objectShadow := declaredStore (.accountBalance ⟨20⟩ ⟨20⟩)
   require "object shadow balance refuses permanent law" (!cellCheck deployment 20 (objectCell objectShadow))
-  let foreign := declaredPage 21 (.objectField ⟨37⟩ ⟨1⟩)
-  require "same-shard foreign id is valid low-level page" (decide foreign.Valid)
-  require "same-shard foreign id refuses" (!cellCheck deployment 21 (accountCell foreign))
+  let foreign := declaredStore (.objectField ⟨37⟩ ⟨1⟩)
+  require "foreign id refuses" (!cellCheck deployment 21 (accountCell foreign))
   require "object request cannot select account metadata"
-    ((selectDeclared deployment 21 .object (accountCell accountPage)).isNone)
+    ((selectDeclared deployment 21 .object (accountCell accountStore)).isNone)
   require "account role selects actual account metadata"
-    ((selectDeclared deployment 21 .account (accountCell accountPage)).isSome)
+    ((selectDeclared deployment 21 .account (accountCell accountStore)).isSome)
   for (identifier, cell) in samples do
     match cell.kind with
     | .resourceBook =>
         require "Book cannot be a user initial payload" (!userInitialCheck deployment identifier cell)
         require "same valid Book at another id refuses" (!cellCheck deployment (identifier + 100) cell)
-    | .authorityShard | .authorityCatalogue | .eventHistory =>
+    | .authority | .eventHistory =>
         require "internal state cannot be a user initial payload" (!userInitialCheck deployment identifier cell)
     | _ => pure ()
-  IO.println "PASS canonical cell registry: 8 actual materializers/pins, dependent codec+outer lifecycle, permanent role/identity law, shadow-money and wrong-role refusal, source-only internal births"
+  IO.println "PASS canonical cell registry: 7 actual store-cell materializers/pins, dependent codec+outer lifecycle, permanent role/identity law, shadow-money and wrong-role refusal, retired catalogue tag refused, source-only internal births"
 
 def checkPhysical (binary : System.FilePath) : IO Unit :=
   IO.FS.withTempDir fun directory => do
@@ -117,7 +101,7 @@ def checkPhysical (binary : System.FilePath) : IO Unit :=
     match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
     | .error message => throw (IO.userError message)
     | .ok loaded =>
-        require "eight original registry samples survive real native reopen" (loaded.cells.length == samples.length)
+        require "every registry sample survives real native reopen" (loaded.cells.length == samples.length)
         for (identifier, bytes) in loaded.cells do
           match (ResourceBirthCodec.LifecycleImage.codec registry).decode bytes with
           | some (.live cell) => do
@@ -125,7 +109,7 @@ def checkPhysical (binary : System.FilePath) : IO Unit :=
                 (cellCheck deployment identifier.value cell)
           | _ => throw (IO.userError "FAIL canonical registry: native cell lost lifecycle kind")
         require "unallocated id retains canonical fresh bytes" (loaded.snapshot.canonicalBytes ⟨9999⟩ == [])
-    IO.println "PASS canonical cell registry native join: fixed lifecycle root + eight original source kinds survive SQLite bootstrap/reopen; policy-source kind has its own probe; this is transport coverage, not birth authorization"
+    IO.println "PASS canonical cell registry native join: fixed lifecycle root + seven store-cell source kinds survive SQLite bootstrap/reopen; policy-source kind has its own probe; this is transport coverage, not birth authorization"
 
 end CanonicalCellRegistryProbe
 

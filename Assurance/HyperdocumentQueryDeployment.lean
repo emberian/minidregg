@@ -1,5 +1,5 @@
 /-
-# Assurance.HyperdocumentQueryDeployment -- authorized bounded-page reads
+# Assurance.HyperdocumentQueryDeployment -- authorized reads of the deployed cells
 
 `Theory.HyperdocumentInterface` deliberately leaves `QueryConfig` abstract and
 does not construct a `QuerySuccess`.  This module closes that carrier with a
@@ -7,24 +7,26 @@ stable v1 query-argument frame, lawful codecs for every query constructor, and
 Lean cSHAKE256 addressing of the exact framed argument bytes.
 
 The positive content pole reads the exact link reopened by
-`HyperdocumentLinkReopenWitness` from a valid sixteen-entry content page.  The
-positive history pole reads one content-addressed, causally well-formed version
-event from a valid four-slot event page.  Both retain one current
+`HyperdocumentLinkReopenWitness` from a deployed content store cell
+(`HyperdocumentCell.contentMaterializer`).  The positive history pole reads the
+accepted link's causally well-formed version event, keyed by the deployed cSHAKE
+event scheme, from a deployed event-log cell.  Both retain one current
 request-indexed authorization and the same semantically admissible capability.
 
-The history page proves local representation validity and causal identity.  It
-does not prove that the page is a member of an authoritative history, that the
-selected event is externally final, that cSHAKE is collision resistant, or
-that an OS can physically reopen either page.  Those ceilings remain explicit
-at the end of the module.
+The history cell proves causal identity of the event it holds.  It does not
+prove that the cell is an authoritative history, that the selected event is
+externally final, that cSHAKE is collision resistant, or that an OS can
+physically reopen either cell.  Those ceilings remain explicit at the end of the
+module.
 -/
 import Assurance.HyperdocumentLinkReopenWitness
-import Compiler.HyperdocumentContentPageMaterializer
-import Compiler.HyperdocumentEventPageMaterializer
+import Compiler.HyperdocumentCell
 import Compiler.Sp800185Cshake256
 
 namespace Minidregg.Assurance.HyperdocumentQueryDeployment
 
+open Minidregg.Compiler
+open Minidregg.Kernel
 open Minidregg.Compiler.HyperdocumentCodec
 open Minidregg.Compiler.Sp800185Cshake256
 open Minidregg.Compiler.Tower256ConcreteBackend
@@ -36,45 +38,10 @@ open Minidregg.Theory.HyperdocumentInterface
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 
-namespace ContentPage
-
-abbrev Page :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page
-abbrev Entry :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.Entry
-abbrev ForwardLink :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.ForwardLink
-abbrev ForwardTarget :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.ForwardTarget
-abbrev schema :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.schema
-abbrev materializer :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.materializer
-abbrev stateOfOption :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.stateOfOption
-abbrev PairBindingPremise :=
-  Minidregg.Compiler.HyperdocumentContentPageMaterializer.PairBindingPremise
-
-end ContentPage
-
-namespace EventPage
-
-abbrev Page :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.Page
-abbrev Entry :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.Entry
-abbrev schema :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.schema
-abbrev materializer :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.materializer
-abbrev stateOfOption :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.stateOfOption
-abbrev eventScheme :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.eventScheme
-abbrev PairBindingPremise :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.PairBindingPremise
-
-end EventPage
+/-- The root-collision premise for one pair of stores under one materializer. -/
+def PairBindingPremise {L : Store.Layout.{0, 0, 0}} (M : CellState.Materializer L Digest)
+    (left right : Store.Store L) : Prop :=
+  M.rootOf left = M.rootOf right → left = right
 
 set_option autoImplicit false
 
@@ -304,65 +271,31 @@ def subject : SubjectId := ⟨91005⟩
 def federation : FederationId := ⟨91006⟩
 def policyId : PolicyId := ⟨91007⟩
 
-/-! ## Exact bounded content-page link read -/
+/-! ## Exact content-cell link read -/
 
 namespace Content
 
-def boundedLink : ContentPage.ForwardLink where
-  sourceDocument := Publication.documentId
-  source := none
-  target := .external [0x68, 0x74, 0x74, 0x70, 0x73] [0x65, 0x78]
-    [0x2f, 0x6c, 0x6f, 0x6f, 0x6d]
-  relation := ⟨24⟩
-  author := Publication.author
-  operation := Publication.linkDeclaration.operationId
-    Publication.operationConfig
-  tombstonedAt := none
+abbrev ContentStore := Store.Store Hyperdocument.layout
 
-@[simp] theorem boundedLink_canonical_exact :
-    boundedLink.toCanonical = Reopen.record :=
-  rfl
+/-- The deployed content cell holding exactly the reopened link. -/
+def store : ContentStore :=
+  (0 : ContentStore).set ⟨.links, Publication.linkId⟩ (some Reopen.record)
 
-def page : ContentPage.Page where
-  contentDomain := ⟨92001⟩
-  document := Publication.documentId
-  pageNumber := 0
-  slot0 := some (.link Publication.linkId boundedLink)
-  slot1 := none
-  slot2 := none
-  slot3 := none
-
-theorem page_valid : page.Valid := by
-  refine ⟨?_, ?_, ?_⟩
-  · simp [page,
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.addresses,
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.entries,
-      _root_.id,
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.Entry.address]
-  · simp [page,
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.entries,
-      _root_.id,
-      Minidregg.Compiler.HyperdocumentContentPageMaterializer.Entry.LocalTo,
-      boundedLink]
-  · decide
-
-def pageCell : Materialized ContentPage.materializer :=
-  CellState.materialize ContentPage.materializer
-    (ContentPage.stateOfOption (some page))
+def cell : Materialized HyperdocumentCell.contentMaterializer :=
+  CellState.materialize HyperdocumentCell.contentMaterializer store
 
 def pre : Hyperdocument.Cell Publication.documentMaterializer :=
-  CellState.materialize Publication.documentMaterializer
-    page.toCanonicalState
+  CellState.materialize Publication.documentMaterializer store
+
+@[simp] theorem store_query_exact :
+    ContentQuery.project Reopen.query store = some Reopen.record := by
+  simp only [Minidregg.Assurance.HyperdocumentLinkReopenWitness.query,
+    ContentQuery.project, Hyperdocument.lookup, store, Store.Store.set_eq]
+  rfl
 
 @[simp] theorem bounded_query_exact :
-    ContentQuery.project Reopen.query pre.logical = some Reopen.record := by
-  simp [pre, Reopen.query, ContentQuery.project, Hyperdocument.lookup,
-    page,
-    Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.toCanonicalState,
-    Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.entries,
-    Minidregg.Compiler.HyperdocumentContentPageMaterializer.Entry.install,
-    boundedLink, _root_.id]
-  rfl
+    ContentQuery.project Reopen.query pre.logical = some Reopen.record :=
+  store_query_exact
 
 def argument : QueryArgument where
   interfaceId := contentReadV1
@@ -467,7 +400,7 @@ inductive Failure where
   deriving DecidableEq, Repr
 
 /-- The proof-carrying content controller decodes exact bytes and then reads
-the deployed bounded page, rather than a host-provided result. -/
+the deployed content cell, rather than a host-provided result. -/
 def execute (bytes : List UInt8)
     (_authorized : QuerySuccess queryConfig portal authState pre declaration
       request capability) : Except Failure (Option LinkRecord) :=
@@ -475,7 +408,7 @@ def execute (bytes : List UInt8)
   | none => .error .malformedArgument
   | some decoded =>
       if decoded = declaration.argument then
-        .ok (ContentQuery.project Reopen.query page.toCanonicalState)
+        .ok (ContentQuery.project Reopen.query cell.logical)
       else
         .error .argumentMismatch
 
@@ -486,58 +419,49 @@ def execute (bytes : List UInt8)
   rw [query_argument_roundtrip]
   change
     (if declaration.argument = declaration.argument then
-      Except.ok (ContentQuery.project Reopen.query page.toCanonicalState)
+      Except.ok (ContentQuery.project Reopen.query cell.logical)
     else Except.error Failure.argumentMismatch) =
       Except.ok (some Reopen.record)
   rw [if_pos rfl]
-  apply congrArg Except.ok
-  simpa [pre] using bounded_query_exact
+  exact congrArg Except.ok store_query_exact
 
 end Content
 
-/-! ## Exact bounded event-page version read -/
+/-! ## Exact event-log cell version read -/
 
 namespace History
 
 namespace Deployed
 
-abbrev page :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.examplePage
-abbrev entry :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.exampleEntry
-abbrev record :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.exampleRecord
-abbrev page_valid :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.examplePage_valid
-abbrev eventPreimageCodec :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.eventPreimageCodec
-abbrev eventDerivation :=
-  Minidregg.Compiler.HyperdocumentEventPageMaterializer.eventDerivation
+/-- The accepted link's version event. -/
+noncomputable abbrev record : VersionEventRecord :=
+  Minidregg.Assurance.HyperdocumentLinkPublicationWitness.linkAccepted.versionEventRecord
+
+theorem record_wellFormed : record.CausallyWellFormed :=
+  Minidregg.Assurance.HyperdocumentLinkPublicationWitness.linkWellFormed
+
+/-- Its deployed cSHAKE key. -/
+noncomputable def key : VersionEventId :=
+  deriveVersionEventId HyperdocumentCell.eventPreimageStream.toLawful
+    HyperdocumentCell.eventDerivation record
+
+/-- The deployed event-log cell holding exactly that event. -/
+noncomputable def store : HyperdocumentEventLog.Sparse.Store :=
+  (0 : HyperdocumentEventLog.Sparse.Store).set
+    (HyperdocumentEventLog.Sparse.eventAddress key) (some record)
+
+noncomputable def cell : Materialized HyperdocumentCell.eventMaterializer :=
+  CellState.materialize HyperdocumentCell.eventMaterializer store
 
 end Deployed
 
-def anchorPage : ContentPage.Page where
-  contentDomain := ⟨93001⟩
-  document := Deployed.record.document
-  pageNumber := 0
-  slot0 := none
-  slot1 := none
-  slot2 := none
-  slot3 := none
-
-theorem anchorPage_valid : anchorPage.Valid := by
-  refine ⟨?_, ?_, ?_⟩ <;> simp [anchorPage,
-    Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.addresses,
-    Minidregg.Compiler.HyperdocumentContentPageMaterializer.Page.entries]
-
 def pre : Hyperdocument.Cell Publication.documentMaterializer :=
-  CellState.materialize Publication.documentMaterializer
-    anchorPage.toCanonicalState
+  CellState.materialize Publication.documentMaterializer 0
 
 def argument : QueryArgument where
   interfaceId := historyReadV1
   document := Deployed.record.document
-  query := .history (.version Deployed.entry.key)
+  query := .history (.version Deployed.key)
 
 def envelope : QueryEnvelope where
   federation := federation
@@ -620,38 +544,20 @@ def success : QuerySuccess queryConfig portal authState pre declaration request
   preRootExact := rfl
   contentOwned := trivial
 
-def lookupVersion (id : VersionEventId) : List EventPage.Entry →
-    Option VersionEventRecord
-  | [] => none
-  | entry :: rest =>
-      if entry.key = id then some entry.record else lookupVersion id rest
-
-def readPage (page : EventPage.Page) (id : VersionEventId) :
+def readCell (store : HyperdocumentEventLog.Sparse.Store) (id : VersionEventId) :
     Option VersionEventRecord :=
-  lookupVersion id page.entries
+  store (HyperdocumentEventLog.Sparse.eventAddress id)
 
 @[simp] theorem deployed_read_exact :
-    readPage Deployed.page Deployed.entry.key = some Deployed.record := by
-  simp [readPage, lookupVersion, Deployed.page, Deployed.entry,
-    Deployed.record,
-    Minidregg.Compiler.HyperdocumentEventPageMaterializer.examplePage,
-    Minidregg.Compiler.HyperdocumentEventPageMaterializer.exampleEntry,
-    Minidregg.Compiler.HyperdocumentEventPageMaterializer.Page.entries,
-    _root_.id]
+    readCell Deployed.cell.logical Deployed.key = some Deployed.record :=
+  Store.Store.set_eq _ _ _
 
-theorem deployed_record_wellFormed : Deployed.record.CausallyWellFormed := by
-  have valid := Deployed.page_valid.entriesValid Deployed.entry (by
-    simp [Deployed.entry,
-      Minidregg.Compiler.HyperdocumentEventPageMaterializer.examplePage,
-      Minidregg.Compiler.HyperdocumentEventPageMaterializer.Page.entries])
-  exact valid.2.2.1
+noncomputable def stored : StoredVersionEvent HyperdocumentCell.eventScheme :=
+  StoredVersionEvent.derive HyperdocumentCell.eventPreimageStream.toLawful
+    HyperdocumentCell.eventDerivation Deployed.record Deployed.record_wellFormed
 
-def stored : StoredVersionEvent EventPage.eventScheme :=
-  StoredVersionEvent.derive Deployed.eventPreimageCodec
-    Deployed.eventDerivation Deployed.record deployed_record_wellFormed
-
-def projection : VersionProjection EventPage.eventScheme
-    Deployed.record.document Deployed.entry.key where
+noncomputable def projection : VersionProjection HyperdocumentCell.eventScheme
+    Deployed.record.document Deployed.key where
   stored := stored
   keyExact := rfl
   documentExact := rfl
@@ -662,8 +568,8 @@ inductive Failure where
   deriving DecidableEq, Repr
 
 /-- The authorized history controller returns the value found in the exact
-bounded event page.  The retained `VersionProjection` proves causal addressing,
-not authoritative-history membership or external finality. -/
+deployed event-log cell.  The retained `VersionProjection` proves causal
+addressing, not authoritative-history membership or external finality. -/
 def execute (bytes : List UInt8)
     (_authorized : QuerySuccess queryConfig portal authState pre declaration
       request capability) : Except Failure (Option VersionEventRecord) :=
@@ -671,7 +577,7 @@ def execute (bytes : List UInt8)
   | none => .error .malformedArgument
   | some decoded =>
       if decoded = declaration.argument then
-        .ok (readPage Deployed.page Deployed.entry.key)
+        .ok (readCell Deployed.cell.logical Deployed.key)
       else
         .error .argumentMismatch
 
@@ -682,7 +588,7 @@ def execute (bytes : List UInt8)
   rw [query_argument_roundtrip]
   change
     (if declaration.argument = declaration.argument then
-      Except.ok (readPage Deployed.page Deployed.entry.key)
+      Except.ok (readCell Deployed.cell.logical Deployed.key)
     else Except.error Failure.argumentMismatch) =
       Except.ok (some Deployed.record)
   rw [if_pos rfl]
@@ -780,45 +686,37 @@ end Teeth
 
 /-! ## Explicit deployment ceilings -/
 
-/-- Additional evidence required before these pure, proof-carrying page reads
+/-- Additional evidence required before these pure, proof-carrying cell reads
 may be described as cryptographically authenticated, authoritative, final, and
 physically available.  No constructor is supplied here.
 
 The pair-scoped binding fields avoid the impossible claim that a finite digest
 is globally injective.  `historyMember` and `externallyFinal` are independent:
-a locally valid, content-addressed event page establishes neither. -/
+a content-addressed event cell establishes neither. -/
 structure DeploymentEvidence
-    (reopenedContent : LogicalState ContentPage.schema)
-    (reopenedHistory : LogicalState EventPage.schema)
+    (reopenedContent : Store.Store Hyperdocument.layout)
+    (reopenedHistory : HyperdocumentEventLog.Sparse.Store)
     (AuthoritativeHistoryMember : VersionEventId → VersionEventRecord → Prop)
     (ExternallyFinal : VersionEventId → Prop)
     (PhysicallyAvailable : Digest → Prop)
     (AuthorizationVerifierSound : Prop) : Prop where
   contentRootObserved :
-    ContentPage.materializer.rootBytes
-        (ContentPage.materializer.codec.encode Content.pageCell.logical) =
-      ContentPage.materializer.rootBytes
-        (ContentPage.materializer.codec.encode reopenedContent)
+    HyperdocumentCell.contentMaterializer.rootOf Content.cell.logical =
+      HyperdocumentCell.contentMaterializer.rootOf reopenedContent
   contentPairBinding :
-    ContentPage.PairBindingPremise Content.pageCell.logical reopenedContent
+    PairBindingPremise HyperdocumentCell.contentMaterializer Content.cell.logical
+      reopenedContent
   historyRootObserved :
-    EventPage.materializer.rootBytes
-        (EventPage.materializer.codec.encode
-          (EventPage.stateOfOption (some History.Deployed.page))) =
-      EventPage.materializer.rootBytes
-        (EventPage.materializer.codec.encode reopenedHistory)
+    HyperdocumentCell.eventMaterializer.rootOf Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.cell.logical =
+      HyperdocumentCell.eventMaterializer.rootOf reopenedHistory
   historyPairBinding :
-    EventPage.PairBindingPremise
-      (EventPage.stateOfOption (some History.Deployed.page)) reopenedHistory
+    PairBindingPremise HyperdocumentCell.eventMaterializer
+      Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.cell.logical reopenedHistory
   historyMember :
-    AuthoritativeHistoryMember History.Deployed.entry.key
-      History.Deployed.record
-  externallyFinal : ExternallyFinal History.Deployed.entry.key
-  contentPhysicallyAvailable : PhysicallyAvailable Content.pageCell.root
-  historyPhysicallyAvailable :
-    PhysicallyAvailable
-      (CellState.materialize EventPage.materializer
-        (EventPage.stateOfOption (some History.Deployed.page))).root
+    AuthoritativeHistoryMember Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.key Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.record
+  externallyFinal : ExternallyFinal Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.key
+  contentPhysicallyAvailable : PhysicallyAvailable Content.cell.root
+  historyPhysicallyAvailable : PhysicallyAvailable Minidregg.Assurance.HyperdocumentQueryDeployment.History.Deployed.cell.root
   authorizationVerifierSound : AuthorizationVerifierSound
 
 /-! ## Axiom pins -/

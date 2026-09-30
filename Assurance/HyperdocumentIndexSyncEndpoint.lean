@@ -3,24 +3,26 @@
 
 This module closes one four-slot Hyperdocument index lifecycle.  A concrete
 stable-range link is inserted by an exact causal delta, both target and range
-queries are complete over all four slots, the canonical page round-trips
-through its framed codec, and an origin-neutral byte controller returns the
+queries are complete over all four slots, the index cell
+(`HyperdocumentCell.indexMaterializer 4`, a `StoreCodec` cell) round-trips and
+denotes exactly its snapshot, and an origin-neutral byte controller returns the
 same bounded result after logical sync/crash/reopen.  Exact retry is recognized
 without applying the delta twice, while checkpoint drift is rejected.
 
 The reader boundary is deliberately `Except Error bytes`.  No theorem below
 says that a native reader performed physical I/O, that a crawler found links
-outside this page, that a network is live, that the causal head is externally
+outside this index, that a network is live, that the causal head is externally
 final, or that cSHAKE collision resistance has been proved.
 -/
 import Assurance.HyperdocumentLinkPublicationWitness
-import Compiler.HyperdocumentIndexPageMaterializer
+import Compiler.HyperdocumentCell
 
 namespace Minidregg.Assurance.HyperdocumentIndexSyncEndpoint
 
 open Minidregg.Assurance.HyperdocumentLinkPublicationWitness
 open Minidregg.Compiler.HyperdocumentCodec
-open Minidregg.Compiler.HyperdocumentIndexPageMaterializer
+open Minidregg.Compiler.HyperdocumentCell (indexLayout indexMaterializer storeOfSnapshot
+  snapshotOfStore snapshotOfStore_storeOfSnapshot checkpointStream indexedRowStream)
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.HyperdocumentIndexSync
 open Minidregg.Theory
@@ -79,7 +81,7 @@ def derivedRow : IndexedRow where
 @[simp] theorem sourceEntry_row : sourceEntry.row? = some derivedRow := by
   rfl
 
-/-! ## Exact causal delta and fresh finite page -/
+/-! ## Exact causal delta and fresh finite snapshot -/
 
 def beforeCheckpoint : CausalCheckpoint where
   historyDomain := linkIntent.historyDomain
@@ -173,7 +175,7 @@ theorem next_fresh : nextSnapshot.Fresh :=
   rfl
 
 /-- These collectors enumerate every inhabitant of `Fin 4`; their exactness is
-bounded-page completeness, not a global backlink assertion. -/
+bounded-index completeness, not a global backlink assertion. -/
 def collectBacklinks (snapshot : Snapshot 4) (target : LinkTarget) :
     List IndexedRow :=
   [backlinkAt snapshot.index target 0,
@@ -204,24 +206,18 @@ def collectStableRanges (snapshot : Snapshot 4) (document : DocumentId)
 
 /-! ## Canonical persistence and logical reopen -/
 
-def nextPage : Page := Page.ofSnapshot nextSnapshot
-def nextState : LogicalState schema := stateOfOption (some nextPage)
-def nextBytes : List UInt8 := stateCodec.encode nextState
+abbrev IndexStore := Store.Store (indexLayout 4)
 
-@[simp] theorem nextPage_source_checkpoint :
-    nextPage.sourceCheckpoint = afterCheckpoint := by
-  rfl
+def nextStore : IndexStore := storeOfSnapshot nextSnapshot
+def nextBytes : List UInt8 := (indexMaterializer 4).codec.encode nextStore
 
-@[simp] theorem page_round_trip :
-    stateCodec.decode nextBytes = some nextState :=
-  stateCodec.decode_encode nextState
+@[simp] theorem cell_round_trip :
+    (indexMaterializer 4).codec.decode nextBytes = some nextStore :=
+  (indexMaterializer 4).codec.decode_encode nextStore
 
-@[simp] theorem pageAt_nextState : pageAt nextState = some nextPage := by
-  rfl
-
-@[simp] theorem page_reopens_exact_snapshot :
-    nextPage.toSnapshot = nextSnapshot :=
-  Page.toSnapshot_ofSnapshot nextSnapshot
+@[simp] theorem cell_reopens_exact_snapshot :
+    snapshotOfStore nextStore = some nextSnapshot :=
+  snapshotOfStore_storeOfSnapshot nextSnapshot
 
 def device : Device 4 := ⟨beforeSnapshot, none⟩
 def syncedDevice : Device 4 := (device.stage nextSnapshot).sync
@@ -291,7 +287,7 @@ noncomputable def responseCodec : LawfulCodec (List IndexedRow) :=
 inductive Failure (NativeError : Type) where
   | native (error : NativeError)
   | malformedRequest
-  | malformedPage
+  | malformedCell
   | staleCheckpoint
   | staleIndex (status : Status)
   deriving Repr
@@ -312,19 +308,18 @@ noncomputable def run {NativeError : Type}
       match reader () with
       | .error error => .error (.native error)
       | .ok bytes =>
-          match stateCodec.decode bytes with
-          | none => .error .malformedPage
-          | some state =>
-              match pageAt state with
-              | none => .error .malformedPage
-              | some page =>
-                  if page.sourceCheckpoint != request.expectedCheckpoint then
+          match (indexMaterializer 4).codec.decode bytes with
+          | none => .error .malformedCell
+          | some store =>
+              match snapshotOfStore store with
+              | none => .error .malformedCell
+              | some snapshot =>
+                  if snapshot.sourceCheckpoint != request.expectedCheckpoint then
                     .error .staleCheckpoint
                   else
-                    match page.status with
+                    match status snapshot with
                     | .current =>
-                        .ok (responseCodec.encode
-                          (evaluate page.toSnapshot request.query))
+                        .ok (responseCodec.encode (evaluate snapshot request.query))
                     | stale => .error (.staleIndex stale)
 
 def targetRequest : Request :=
@@ -333,37 +328,44 @@ def targetRequest : Request :=
 def rangeRequest : Request :=
   ⟨afterCheckpoint, .stableRange Genesis.documentId sourceRange⟩
 
-def pageReader (_ : Unit) : Except Empty (List UInt8) := .ok nextBytes
+def cellReader (_ : Unit) : Except Empty (List UInt8) := .ok nextBytes
 
-theorem nextPage_current : nextPage.status = .current := by
-  apply (status_current_iff nextPage.toSnapshot).2
-  simpa [nextPage] using next_fresh
+theorem next_current : status nextSnapshot = .current :=
+  (status_current_iff nextSnapshot).2 next_fresh
+
+@[simp] theorem next_source_checkpoint :
+    nextSnapshot.sourceCheckpoint = afterCheckpoint :=
+  rfl
+
+/-- A current, checkpoint-matching index cell answers the decoded query. -/
+theorem run_current {NativeError : Type} (request : Request) (bytes : List UInt8)
+    (reader : Unit -> Except NativeError (List UInt8)) (store : IndexStore)
+    (snapshot : Snapshot 4)
+    (read : reader () = .ok bytes)
+    (decoded : (indexMaterializer 4).codec.decode bytes = some store)
+    (denotes : snapshotOfStore store = some snapshot)
+    (checkpoint : snapshot.sourceCheckpoint = request.expectedCheckpoint)
+    (current : status snapshot = .current) :
+    run (requestCodec.encode request) reader =
+      .ok (responseCodec.encode (evaluate snapshot request.query)) := by
+  unfold run
+  rw [requestCodec.decode_encode, read]
+  simp only [decoded, denotes, checkpoint, bne_self_eq_false', Bool.false_eq_true,
+    ↓reduceIte, current]
 
 @[simp] theorem target_run_exact :
-    run (requestCodec.encode targetRequest) pageReader =
+    run (requestCodec.encode targetRequest) cellReader =
       .ok (responseCodec.encode [derivedRow]) := by
-  unfold run
-  rw [requestCodec.decode_encode]
-  simp only [pageReader, page_round_trip, pageAt_nextState, targetRequest,
-    nextPage_source_checkpoint, bne_self_eq_false', Bool.false_eq_true, ↓reduceIte,
-    nextPage_current]
-  rw [page_reopens_exact_snapshot]
-  change Except.ok (responseCodec.encode
-    (collectBacklinks nextSnapshot (.document targetDocument))) = _
-  rw [exact_target_results]
+  rw [run_current targetRequest nextBytes cellReader nextStore nextSnapshot rfl
+    cell_round_trip cell_reopens_exact_snapshot next_source_checkpoint next_current]
+  exact congrArg (fun rows => Except.ok (responseCodec.encode rows)) exact_target_results
 
 @[simp] theorem range_run_exact :
-    run (requestCodec.encode rangeRequest) pageReader =
+    run (requestCodec.encode rangeRequest) cellReader =
       .ok (responseCodec.encode [derivedRow]) := by
-  unfold run
-  rw [requestCodec.decode_encode]
-  simp only [pageReader, page_round_trip, pageAt_nextState, rangeRequest,
-    nextPage_source_checkpoint, bne_self_eq_false', Bool.false_eq_true, ↓reduceIte,
-    nextPage_current]
-  rw [page_reopens_exact_snapshot]
-  change Except.ok (responseCodec.encode
-    (collectStableRanges nextSnapshot Genesis.documentId sourceRange)) = _
-  rw [exact_range_results]
+  rw [run_current rangeRequest nextBytes cellReader nextStore nextSnapshot rfl
+    cell_round_trip cell_reopens_exact_snapshot next_source_checkpoint next_current]
+  exact congrArg (fun rows => Except.ok (responseCodec.encode rows)) exact_range_results
 
 @[simp] theorem target_response_decodes :
     responseCodec.decode (responseCodec.encode [derivedRow]) =
@@ -383,51 +385,72 @@ theorem after_ne_future : afterCheckpoint ≠ futureCheckpoint := by
 def staleSnapshot : Snapshot 4 :=
   { nextSnapshot with sourceCheckpoint := futureCheckpoint }
 
-def stalePage : Page := Page.ofSnapshot staleSnapshot
-def staleState : LogicalState schema := stateOfOption (some stalePage)
-def staleBytes : List UInt8 := stateCodec.encode staleState
+def staleStore : IndexStore := storeOfSnapshot staleSnapshot
+def staleBytes : List UInt8 := (indexMaterializer 4).codec.encode staleStore
 
 @[simp] theorem stale_round_trip :
-    stateCodec.decode staleBytes = some staleState :=
-  stateCodec.decode_encode staleState
+    (indexMaterializer 4).codec.decode staleBytes = some staleStore :=
+  (indexMaterializer 4).codec.decode_encode staleStore
 
-@[simp] theorem pageAt_staleState : pageAt staleState = some stalePage := by
+@[simp] theorem stale_cell_reopens :
+    snapshotOfStore staleStore = some staleSnapshot :=
+  snapshotOfStore_storeOfSnapshot staleSnapshot
+
+@[simp] theorem stale_source_checkpoint :
+    staleSnapshot.sourceCheckpoint = futureCheckpoint :=
   rfl
 
-@[simp] theorem stalePage_source_checkpoint :
-    stalePage.sourceCheckpoint = futureCheckpoint := by
-  rfl
-
-@[simp] theorem stalePage_index_checkpoint :
-    stalePage.indexCheckpoint = afterCheckpoint := by
-  rfl
-
-@[simp] theorem stale_page_status : stalePage.status = .staleCheckpoint := by
+@[simp] theorem stale_status : status staleSnapshot = .staleCheckpoint := by
   apply stale_checkpoint_detected
-  simpa using after_ne_future
+  change afterCheckpoint ≠ futureCheckpoint
+  exact after_ne_future
 
 def futureRequest : Request :=
   ⟨futureCheckpoint, .backlinks (.document targetDocument)⟩
 
 def staleReader (_ : Unit) : Except Empty (List UInt8) := .ok staleBytes
 
+/-- A checkpoint-matching but stale index cell is refused with its status. -/
+theorem run_stale {NativeError : Type} (request : Request) (bytes : List UInt8)
+    (reader : Unit -> Except NativeError (List UInt8)) (store : IndexStore)
+    (snapshot : Snapshot 4) (stale : Status)
+    (read : reader () = .ok bytes)
+    (decoded : (indexMaterializer 4).codec.decode bytes = some store)
+    (denotes : snapshotOfStore store = some snapshot)
+    (checkpoint : snapshot.sourceCheckpoint = request.expectedCheckpoint)
+    (staleStatus : status snapshot = stale) (notCurrent : stale ≠ .current) :
+    run (requestCodec.encode request) reader = .error (.staleIndex stale) := by
+  unfold run
+  rw [requestCodec.decode_encode, read]
+  simp only [decoded, denotes, checkpoint, bne_self_eq_false', Bool.false_eq_true,
+    ↓reduceIte]
+  rw [staleStatus]
+  cases stale
+  · exact absurd rfl notCurrent
+  all_goals rfl
+
 @[simp] theorem stale_index_rejected :
     run (requestCodec.encode futureRequest) staleReader =
-      .error (.staleIndex .staleCheckpoint) := by
-  unfold run
-  rw [requestCodec.decode_encode]
-  simp only [staleReader, stale_round_trip, pageAt_staleState, futureRequest,
-    stalePage_source_checkpoint, bne_self_eq_false', Bool.false_eq_true, ↓reduceIte,
-    stale_page_status]
+      .error (.staleIndex .staleCheckpoint) :=
+  run_stale futureRequest staleBytes staleReader staleStore staleSnapshot .staleCheckpoint rfl
+    stale_round_trip stale_cell_reopens stale_source_checkpoint stale_status (by decide)
 
 def malformedReader (_ : Unit) : Except Empty (List UInt8) := .ok []
 
-@[simp] theorem malformed_page_rejected :
+@[simp] theorem malformed_cell_rejected :
     run (requestCodec.encode targetRequest) malformedReader =
-      .error .malformedPage := by
+      .error .malformedCell := by
   unfold run
   rw [requestCodec.decode_encode]
-  rfl
+  have refused : (indexMaterializer 4).codec.decode [] = none := by
+    change Minidregg.Compiler.StoreCodec.decode (Minidregg.Compiler.HyperdocumentCell.indexWire 4) [] = none
+    unfold Minidregg.Compiler.StoreCodec.decode
+    rw [if_neg]
+    intro framed
+    have lengths := congrArg List.length framed
+    rw [Minidregg.Compiler.StoreCodec.frame_length] at lengths
+    simp at lengths
+  simp [malformedReader, refused]
 
 def failedReader (_ : Unit) : Except Nat (List UInt8) := .error 503
 
