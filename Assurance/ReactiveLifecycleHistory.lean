@@ -42,7 +42,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y z q r h c
+universe u v w y z q r h c
   uSemantics uClauseInput uClauseQuery uClauseReply uClauseOutcome
   uClauseEvidence uBoundary
 
@@ -54,17 +54,16 @@ noncomputable section
 The entire semantic shape fixed when a promise is opened.
 
 `interpretAdvice` is Lean-authored meaning for the one eagerly selected
-first-order code.  Its universal laws make the patch footprint and nullifier
+first-order code.  Its universal laws make the patch's address footprint and nullifier
 independent of the late value.  The request index itself fixes authority:
 finalization must retain `Authorized portal authState spec.request` inside the
 accepted effect and cannot replace any request field.
 -/
 structure PromiseSpec
     (U : FirstOrderUniverse.{q, r})
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier)
     (Height Condition Continuation : Type h) where
   promiseId : Digest
   kind : ResourceKind
@@ -79,16 +78,12 @@ structure PromiseSpec
   nullifier : Nullifier
   cancelKind : ResourceKind
   cancelRequest : Request cancelKind
-  fieldFootprint : Finset S.Field
-  resourceFootprint : Finset S.Resource
+  footprint : Finset (Store.Address L)
   requestPreRootExact : request.preStateRoot = pre.root
   requestEffectExact : request.effectsDigest = family.effectDigest declaration
-  fieldFootprintExact : forall advice,
-    (family.patch declaration (interpretAdvice advice)).fieldFootprint =
-      fieldFootprint
-  resourceFootprintExact : forall advice,
-    (family.patch declaration (interpretAdvice advice)).resourceFootprint =
-      resourceFootprint
+  footprintExact : forall advice,
+    Store.Patch.writeFootprint (family.patch declaration (interpretAdvice advice)) =
+      footprint
   nullifierExact : forall advice,
     family.nullifier declaration (interpretAdvice advice) = some nullifier
 
@@ -96,10 +91,9 @@ namespace PromiseSpec
 
 variable
     {U : FirstOrderUniverse.{q, r}}
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {Height Condition Continuation : Type h}
 
 /-- The late carrier was selected eagerly by `adviceCode`. -/
@@ -151,10 +145,9 @@ section Lifecycle
 
 variable
     {U : FirstOrderUniverse.{q, r}}
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {Height Condition Continuation BreakReason : Type h}
     [LinearOrder Height]
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
@@ -331,22 +324,9 @@ def finalizedAuthorization
     Authorized portal authState spec.request :=
   finalized.accepted.authorization
 
-/-- The final effect has the eager field footprint for every possible advice. -/
-@[simp] theorem finalizedFieldFootprintExact
-    {portal : Portal} {authState : AuthState}
-    {rules : HistoryRules n F Height Condition BreakReason}
-    {spec : PromiseSpec U family Height Condition Continuation}
-    (finalized : Finalized (manifest := manifest) (registry := registry)
-      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
-      (headerCells := headerCells) (C := C)
-      (portal := portal) (authState := authState) rules spec) :
-    finalized.accepted.prepared.delta.fieldFootprint = spec.fieldFootprint := by
-  simpa only [AcceptedCellEffect.prepared_fieldFootprint] using
-    spec.fieldFootprintExact finalized.reaction.advice
-
-/-- The final effect has the eager resource footprint for every possible
+/-- The final effect has the eager address footprint for every possible
 advice. -/
-@[simp] theorem finalizedResourceFootprintExact
+@[simp] theorem finalizedFootprintExact
     {portal : Portal} {authState : AuthState}
     {rules : HistoryRules n F Height Condition BreakReason}
     {spec : PromiseSpec U family Height Condition Continuation}
@@ -354,10 +334,25 @@ advice. -/
       (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
       (headerCells := headerCells) (C := C)
       (portal := portal) (authState := authState) rules spec) :
-    finalized.accepted.prepared.delta.resourceFootprint =
-      spec.resourceFootprint := by
-  simpa only [AcceptedCellEffect.prepared_resourceFootprint] using
-    spec.resourceFootprintExact finalized.reaction.advice
+    finalized.accepted.prepared.delta.footprint = spec.footprint := by
+  simpa only [AcceptedCellEffect.prepared_footprint] using
+    spec.footprintExact finalized.reaction.advice
+
+/-- Refuting side of the eager footprint: whatever late advice arrives, the
+finalized effect leaves every address outside the promise's footprint exactly
+as the promise's pre-cell held it. -/
+theorem finalizedFrame
+    {portal : Portal} {authState : AuthState}
+    {rules : HistoryRules n F Height Condition BreakReason}
+    {spec : PromiseSpec U family Height Condition Continuation}
+    (finalized : Finalized (manifest := manifest) (registry := registry)
+      (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
+      (headerCells := headerCells) (C := C)
+      (portal := portal) (authState := authState) rules spec)
+    (address : Store.Address L) (outside : address ∉ spec.footprint) :
+    finalized.accepted.prepared.post.logical address = spec.pre.logical address :=
+  finalized.accepted.frame address
+    (by rwa [spec.footprintExact finalized.reaction.advice])
 
 /-- The final effect retains the eager replay nullifier. -/
 @[simp] theorem finalizedNullifierExact
@@ -397,7 +392,7 @@ def finalizedToLeg
       (clauseEvidence := clauseEvidence) (entryFamily := entryFamily)
       (headerCells := headerCells) (C := C)
       (portal := portal) (authState := authState) rules spec) :
-    Leg.{u, v, w, x, y, z} portal authState spec.pre where
+    Leg.{u, v, w, y, z} portal authState spec.pre where
   Nullifier := Nullifier
   family := family
   kind := spec.kind
@@ -616,16 +611,16 @@ def Finalized.releaseAfterPhysicalCommit
 
 end Lifecycle
 
-/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.PromiseSpec.decode_encode_advice' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.PromiseSpec.decode_encode_advice' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms PromiseSpec.decode_encode_advice
 /-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.notificationObservedStateExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms notificationObservedStateExact
 /-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.notificationNotAfterDeadline' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms notificationNotAfterDeadline
-/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedFieldFootprintExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms finalizedFieldFootprintExact
-/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedResourceFootprintExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms finalizedResourceFootprintExact
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedFootprintExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalizedFootprintExact
+/-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedFrame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms finalizedFrame
 /-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedNullifierExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms finalizedNullifierExact
 /-- info: 'Minidregg.Assurance.ReactiveLifecycleHistory.finalizedObservedPreRootExact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
