@@ -170,9 +170,9 @@ def intendedEffect (request : CoreRequest) : SpendEffect where
 /-- Extra note-spend exactness retained around the generic computation token.
 These are state/effect bindings, never a second authorization witness. -/
 structure Accepted
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    (adapter : ComputationCellEffect.Adapter (S := S) declaration)
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    (adapter : ComputationCellEffect.Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     (commonRequest : Request kind) (pre : CellState.Materialized M)
     (request : CoreRequest) (result : CoreResult) where
@@ -184,9 +184,9 @@ structure Accepted
 /-- Direct positive join.  `authorization` is the sole transition-authority
 argument.  The validated value is indexed by the one exact adapter patch. -/
 def accept
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    (adapter : ComputationCellEffect.Adapter (S := S) declaration)
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    (adapter : ComputationCellEffect.Adapter (L := L) declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -197,15 +197,15 @@ def accept
       commonRequest.argsDigest = adapter.completeRequestDigest request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.completeEffectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : declaration.Completion request result)
     (resourceEffectsExact : request.resourceEffects = [intendedEffect request])
     (eagerNullifierExact : request.nullifier = some request.inputValue.nullifier)
-    (validated : CellState.ValidatedPatch M pre (adapter.patch request result)) :
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request result)) :
     Accepted (portal := portal) (authState := authState)
       adapter commonRequest pre request result where
   computation := ComputationCellEffect.accept declaration adapter authorization requestBound
-    argsDigestBound effectsDigestBound preRootBound completion validated
+    argsDigestBound effectsDigestBound completion validated
   resourceEffectsExact := resourceEffectsExact
   eagerNullifierExact := eagerNullifierExact
 
@@ -213,23 +213,24 @@ def accept
 
 /-- The exact validated canonical patch retained by an accepted note spend. -/
 def Accepted.validatedPatch
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
     (accepted : Accepted (portal := portal) (authState := authState)
       adapter commonRequest pre request result) :
-    CellState.ValidatedPatch M pre (adapter.patch request result) :=
+    CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request result) :=
   accepted.computation.cellEffect.validated
 
 /-- The note-spend completion retains the exact constraint acceptance proof and
 all public bindings.  This theorem is deliberately arithmetic only. -/
 theorem accepted_relation
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -262,9 +263,9 @@ theorem accepted_relation
 /-- Constraint acceptance entails exactly `Compiler.NoteSpend.ValidSpend` for
 the accepted assignment's note.  It does not entail hiding or knowledge. -/
 theorem accepted_validSpend
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -287,9 +288,9 @@ theorem accepted_validSpend
 /-- Common request, effect, pre-state, eager-nullifier, and sealing facts remain
 simultaneously available from the accepted token. -/
 theorem accepted_kernel_bindings
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -304,7 +305,7 @@ theorem accepted_kernel_bindings
     accepted.computation.cellEffect.disclosure = .sealed := by
   exact ⟨accepted.computation.argsDigestBound,
     accepted.computation.cellEffect.effectsDigestBound,
-    accepted.computation.cellEffect.preRootBound,
+    AcceptedCellEffect.preRootBound accepted.computation.cellEffect,
     accepted.resourceEffectsExact,
     by simpa only [ComputationCellEffect.accepted_nullifier]
       using accepted.eagerNullifierExact,

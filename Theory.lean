@@ -35,7 +35,6 @@ import Theory.DeclaredActionLowering  -- a closed create/write/move action langu
 import Theory.Conservation  -- conservation as a homomorphism: delta of an abstract value view, the per-asset sum, postings generate its kernel, per-move bounds
 import Theory.ConservationBridge  -- the store value view (`valueView`) and the Book / declared-action conservation results derived from the kernel theorem
 import Theory.DeclaredTurn  -- data-only authorization/effect execution with exact-post semantic certification and definitional rejection atomicity
-import Theory.TurnTransition  -- ordinary and resumed reactive turns share canonical roots, exact footprints/deltas, frame laws, and atomic refusal
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
 import Theory.AcceptedCellEffectRequestBinding  -- family-selected lawful argument projections close the common request's args digest without duplicating authorization or overbinding envelopes
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell

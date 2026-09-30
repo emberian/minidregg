@@ -37,7 +37,7 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 universe uSemantics uClauseInput uClauseQuery uClauseReply uClauseOutcome
-  uClauseEvidence uOp uAtom u v w x y z
+  uClauseEvidence uOp uAtom u v w y z
 
 noncomputable section
 
@@ -430,12 +430,11 @@ end Observation
 section Effect
 
 variable
-    {CellSchema : CellState.Schema.{u, v, w, x}}
-    [DecidableEq CellSchema.Field] [DecidableEq CellSchema.Resource]
-    {M : CellState.Materializer CellSchema Digest}
+    {CellLayout : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer CellLayout Digest}
     {Nullifier : Type y}
-    {effectFamily : SemanticEffectFamily.{u, v, w, x, y, z}
-      CellSchema M Nullifier}
+    {effectFamily : SemanticEffectFamily.{u, v, w, y, z}
+      CellLayout M Nullifier}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} {pre : CellState.Materialized M}
     {declaration : effectFamily.Declaration}
@@ -469,7 +468,7 @@ def applyEffect
     AppliedEffect (manifest := manifest) (registry := registry)
       (clauseEvidence := clauseEvidence) (family := family)
       (headerCells := headerCells) (C := C) (SCommit := SCommit)
-      (CellSchema := CellSchema) (M := M) (Nullifier := Nullifier)
+      (CellLayout := CellLayout) (M := M) (Nullifier := Nullifier)
       (effectFamily := effectFamily) (portal := portal)
       (authState := authState) (kind := kind) (request := request)
       (pre := pre) (declaration := declaration) (outcome := outcome)

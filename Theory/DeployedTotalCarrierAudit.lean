@@ -6,12 +6,12 @@ for declared effects, and `Kernel.EventLogMaterializerLimit` proves the same
 for the event log.  The authority and Hyperdocument cases were described but
 not separately pinned.  This module closes those two regression teeth.
 
-Both proofs embed every Boolean stream into one infinite typed address plane:
+Both proofs embed every Boolean stream into one infinite typed namespace:
 authority revocation membership and Hyperdocument mark records respectively.
 Any lawful total-state codec would therefore inject `Nat -> Bool` into byte
 strings, which is impossible.  These negative theorems concern only the
-deleted total carrier.  The canonical finite `DFinsupp` state remains inhabited
-and is exercised by the deployed witnesses.
+deleted total carrier, `MaterializerCardinality.TotalStore`.  The canonical
+`Store L` remains inhabited (`DeployedMaterializerWitness`).
 -/
 import Theory.DeployedMaterializerWitness
 import Theory.MaterializerCardinality
@@ -25,6 +25,7 @@ open Minidregg.Theory.Hyperdocument
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.MaterializerCardinality
 open Minidregg.Theory.TypedAuthorization
+open Minidregg.Theory.Store
 
 set_option autoImplicit false
 
@@ -48,36 +49,34 @@ def emptyCapability (kind : ResourceKind) : Capability kind where
 /-- The old total authority state can retain an arbitrary Boolean stream in
 the capability-revocation plane.  All unrelated typed fields receive an
 arbitrary inhabitant solely to reconstruct the deleted carrier. -/
-noncomputable def totalAuthorityStateOf (marked : Nat -> Bool) :
-    TotalLogicalState CredentialAuthorityState.schema.{0, 0} where
-  fields
-    | .capability kind _ => ⟨emptyCapability kind, []⟩
-    | .issuerEpoch _ => show Epoch from 0
-    | .policyEpoch _ => show Epoch from 0
-    | .policyRevision _ => show PolicyRevision from 0
-    | .policyAddress _ _ => show Digest from ⟨0⟩
-    | .subjectKeyEpoch _ => show Epoch from 0
-    | .subjectKey subject epoch =>
+def totalAuthorityStateOf (marked : Nat -> Bool) :
+    TotalStore CredentialAuthorityState.layout
+  | ⟨.capability kind, _⟩ => show StoredCapability kind from ⟨emptyCapability kind, []⟩
+  | ⟨.issuerEpoch, _⟩ => show Epoch from 0
+  | ⟨.policyEpoch, _⟩ => show Epoch from 0
+  | ⟨.policyRevision, _⟩ => show PolicyRevision from 0
+  | ⟨.policyAddress, _⟩ => show Digest from ⟨0⟩
+  | ⟨.subjectKeyEpoch, _⟩ => show Epoch from 0
+  | ⟨.subjectKey, (subject, epoch)⟩ =>
+      show CredentialSigningKey.KeyRecord from
         { keyId := 0, keyEpoch := epoch, algorithm := 0, subject := subject.value,
           publicKey := [], activeFrom := 0, activeUntil := 0, revoked := false }
-    | .revoked (.capability ⟨identifier⟩) => marked identifier
-    | .revoked (.channel _) => false
-    | .nullifier _ => false
-  resources := fun resource => nomatch resource
+  | ⟨.revoked, .capability ⟨identifier⟩⟩ => show Bool from marked identifier
+  | ⟨.revoked, .channel _⟩ => show Bool from false
+  | ⟨.nullifier, _⟩ => show Bool from false
 
 theorem totalAuthorityStateOf_injective :
     Function.Injective totalAuthorityStateOf := by
   intro left right same
   funext index
-  have fields := congrArg TotalLogicalState.fields same
-  have point := congrFun fields (.revoked (.capability ⟨index⟩))
-  exact point
+  exact congrFun same
+    (⟨.revoked, RevocationKey.capability ⟨index⟩⟩ : Address CredentialAuthorityState.layout)
 
 /-- Restoring a total field at the authority boundary reintroduces the exact
 cardinality obstruction fixed by the sparse migration. -/
 theorem totalAuthorityMaterializer_isEmpty :
     IsEmpty
-      (TotalMaterializer CredentialAuthorityState.schema.{0, 0} Digest) :=
+      (TotalMaterializer CredentialAuthorityState.layout Digest) :=
   totalMaterializer_isEmpty_of_natBool_embedding totalAuthorityStateOf
     totalAuthorityStateOf_injective
 
@@ -137,45 +136,41 @@ theorem markValue_injective : Function.Injective markValue := by
 /-- The old total Hyperdocument state can retain a Boolean stream in the
 infinite mark-id plane. -/
 def totalHyperdocumentStateOf (marked : Nat -> Bool) :
-    TotalLogicalState Hyperdocument.cellSchema.{0, 0} where
-  fields
-    | ⟨.documents, _⟩ => baseDocumentRecord
-    | ⟨.atoms, _⟩ => baseAtomRecord
-    | ⟨.runs, _⟩ => baseRunRecord
-    | ⟨.elements, _⟩ => baseElementRecord
-    | ⟨.fields, _⟩ => baseFieldRecord
-    | ⟨.conflicts, _⟩ => baseConflictRecord
-    | ⟨.links, _⟩ => baseLinkRecord
-    | ⟨.transclusions, _⟩ => baseTransclusionRecord
-    | ⟨.marks, ⟨⟨identifier⟩⟩⟩ => markValue (marked identifier)
-    | ⟨.annotations, _⟩ => baseAnnotationRecord
-  resources := fun resource => nomatch resource
+    TotalStore Hyperdocument.layout
+  | ⟨.documents, _⟩ => show DocumentRecord from baseDocumentRecord
+  | ⟨.atoms, _⟩ => show AtomRecord from baseAtomRecord
+  | ⟨.runs, _⟩ => show RunRecord from baseRunRecord
+  | ⟨.elements, _⟩ => show ElementRecord from baseElementRecord
+  | ⟨.fields, _⟩ => show FieldRecord from baseFieldRecord
+  | ⟨.conflicts, _⟩ => show ConflictRecord from baseConflictRecord
+  | ⟨.links, _⟩ => show LinkRecord from baseLinkRecord
+  | ⟨.transclusions, _⟩ => show TransclusionRecord from baseTransclusionRecord
+  | ⟨.marks, ⟨⟨identifier⟩⟩⟩ => show MarkRecord from markValue (marked identifier)
+  | ⟨.annotations, _⟩ => show AnnotationRecord from baseAnnotationRecord
 
 theorem totalHyperdocumentStateOf_injective :
     Function.Injective totalHyperdocumentStateOf := by
   intro left right same
   funext index
-  have fields := congrArg TotalLogicalState.fields same
-  have point := congrFun fields
-    (⟨.marks, ⟨⟨index⟩⟩⟩ : Hyperdocument.Address)
-  exact markValue_injective point
+  exact markValue_injective (congrFun same
+    (⟨.marks, ⟨⟨index⟩⟩⟩ : Hyperdocument.Address))
 
 /-- Restoring a total field at the Hyperdocument boundary is impossible for
 the same cardinality reason; finite sparse storage is load-bearing. -/
 theorem totalHyperdocumentMaterializer_isEmpty :
-    IsEmpty (TotalMaterializer Hyperdocument.cellSchema.{0, 0} Digest) :=
+    IsEmpty (TotalMaterializer Hyperdocument.layout Digest) :=
   totalMaterializer_isEmpty_of_natBool_embedding totalHyperdocumentStateOf
     totalHyperdocumentStateOf_injective
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Theory.DeployedTotalCarrierAudit.totalAuthorityStateOf_injective' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.DeployedTotalCarrierAudit.totalAuthorityStateOf_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms totalAuthorityStateOf_injective
 /-- info: 'Minidregg.Theory.DeployedTotalCarrierAudit.totalAuthorityMaterializer_isEmpty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms totalAuthorityMaterializer_isEmpty
-/-- info: 'Minidregg.Theory.DeployedTotalCarrierAudit.totalHyperdocumentStateOf_injective' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.DeployedTotalCarrierAudit.totalHyperdocumentStateOf_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms totalHyperdocumentStateOf_injective
 /-- info: 'Minidregg.Theory.DeployedTotalCarrierAudit.totalHyperdocumentMaterializer_isEmpty' depends on axioms: [propext, Classical.choice, Quot.sound] -/

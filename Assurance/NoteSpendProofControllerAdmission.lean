@@ -41,9 +41,9 @@ namespace CoreJoin
 field is projected from the exact common request or its release-free
 note-spend request. -/
 def statementOf
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -59,9 +59,9 @@ def statementOf
 /-- The canonical statement inherits every load-bearing kernel/relation
 binding and the still-unassigned suite pin from the accepted computation. -/
 theorem statementOf_exact
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -101,9 +101,9 @@ theorem statementOf_exact
 /-- The accepted note-spend request is deliberately undeployed: its exact
 statement cannot bind a suite whose identity is assigned. -/
 theorem statementOf_no_boundReflectedSuite
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -150,9 +150,9 @@ def runReflected {Error : Type} (statement : NoteSpendProofController.Statement)
 
 /-- The core-specific weak runner always sends the exact accepted statement. -/
 def runAcceptedReflected
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -361,9 +361,9 @@ the exact nonzero suite binding, the five soundness reductions, and one coin
 outside their union.  Hiding is intentionally absent. -/
 structure AdmittedReceipt
     {Omega : Type} [Fintype Omega]
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -379,9 +379,9 @@ structure AdmittedReceipt
 namespace AdmittedReceipt
 
 variable {Omega : Type} [Fintype Omega]
-variable {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-variable {M : CellState.Materializer S Digest}
-variable {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+variable {L : Theory.Store.Layout}
+variable {M : CellState.Materializer L Digest}
+variable {adapter : ComputationCellEffect.Adapter (L := L) declaration}
 variable {portal : Portal} {authState : AuthState} {kind : ResourceKind}
 variable {commonRequest : Request kind} {pre : CellState.Materialized M}
 variable {request : CoreRequest} {result : CoreResult}
@@ -431,9 +431,9 @@ end AdmittedReceipt
 same-coin soundness laws, and a proof that the selected coin is good. -/
 def run
     {Omega : Type} [Fintype Omega]
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -452,9 +452,9 @@ def run
 
 theorem run_success_integrity
     {Omega : Type} [Fintype Omega]
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
+    {adapter : ComputationCellEffect.Adapter (L := L) declaration}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : CoreRequest} {result : CoreResult}
@@ -599,9 +599,9 @@ end CommonGameFamily
 namespace NoteSpendCommonGame
 
 variable {Omega : Type} [Fintype Omega] {Error : Type}
-variable {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-variable {M : CellState.Materializer S Digest}
-variable {adapter : ComputationCellEffect.Adapter (S := S) declaration}
+variable {L : Theory.Store.Layout}
+variable {M : CellState.Materializer L Digest}
+variable {adapter : ComputationCellEffect.Adapter (L := L) declaration}
 variable {portal : Portal} {authState : AuthState} {kind : ResourceKind}
 variable {commonRequest : Request kind} {pre : CellState.Materialized M}
 variable {request : CoreRequest} {result : CoreResult}

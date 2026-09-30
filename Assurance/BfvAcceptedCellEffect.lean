@@ -31,7 +31,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y
+universe u v w y
 
 noncomputable section
 
@@ -115,10 +115,9 @@ noncomputable def acceptBatchSealed
     {claim : PublicStatement} {template : BatchTemplate claim}
     (admission : BatchAdmission manifest claim template)
     (commitmentId : Digest)
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -130,21 +129,20 @@ noncomputable def acceptBatchSealed
         (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (legs : CompletionLegs authority request outcome)
     (statementExact :
       authority.declaration.computationStatementOf request outcome =
         admission.statement commitmentId)
-    (validated : CellState.ValidatedPatch M pre
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       (adapter.patch request outcome)) :
     AcceptedCellEffect (portal := portal) (authState := authState)
       (PrivateCellEffect.sealedFamily (M := M)
         (privateDeclaration := authority.declaration) adapter pre :
-          SemanticEffectFamily S M Nullifier)
+          SemanticEffectFamily L M Nullifier)
       commonRequest pre request outcome :=
   PrivateCellEffect.acceptComputationSealed
     (privateDeclaration := authority.declaration) adapter
-    commonAuthorization requestBound effectsDigestBound preRootBound
+    commonAuthorization requestBound effectsDigestBound
     (completionOfBatchAdmission authority admission commitmentId legs statementExact)
     validated
 
@@ -153,10 +151,9 @@ noncomputable def acceptBatchSealed
     {claim : PublicStatement} {template : BatchTemplate claim}
     (admission : BatchAdmission manifest claim template)
     (commitmentId : Digest)
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -168,25 +165,23 @@ noncomputable def acceptBatchSealed
         (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (legs : CompletionLegs authority request outcome)
     (statementExact :
       authority.declaration.computationStatementOf request outcome =
         admission.statement commitmentId)
-    (validated : CellState.ValidatedPatch M pre
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       (adapter.patch request outcome)) :
     (acceptBatchSealed authority admission commitmentId adapter
-      commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact
+      commonAuthorization requestBound effectsDigestBound legs statementExact
       validated).disclosure = .sealed :=
   rfl
 
 /-- Any accepted BFV cell effect exposes the exact equation family carried by
 its mode evidence.  Sealing has no effect on this semantic fact. -/
 theorem accepted_every_exact_integer_equation
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -195,7 +190,7 @@ theorem accepted_every_exact_integer_equation
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       (PrivateCellEffect.sealedFamily (M := M)
         (privateDeclaration := authority.declaration) adapter pre :
-          SemanticEffectFamily S M Nullifier)
+          SemanticEffectFamily L M Nullifier)
       commonRequest pre request outcome)
     (rowIndex : Fin equationsPerOwner) :
     (accepted.modeEvidence.computation.witness.outputRepresentation.equations.equation rowIndex).numerator
@@ -215,10 +210,9 @@ noncomputable def historyClaimOfBatchSealed
     {claim : PublicStatement} {template : BatchTemplate claim}
     (admission : BatchAdmission manifest claim template)
     (commitmentId : Digest)
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (adapter : PrivateCellEffect.ComputationAdapter (S := S)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (adapter : PrivateCellEffect.ComputationAdapter (L := L)
       (privateDeclaration := authority.declaration) Nullifier)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
@@ -230,24 +224,23 @@ noncomputable def historyClaimOfBatchSealed
         (privateDeclaration := authority.declaration) adapter pre).request request)
     (effectsDigestBound :
       commonRequest.effectsDigest = adapter.effectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (legs : CompletionLegs authority request outcome)
     (statementExact :
       authority.declaration.computationStatementOf request outcome =
         admission.statement commitmentId)
-    (validated : CellState.ValidatedPatch M pre
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
       (adapter.patch request outcome))
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (projection : HistoryProjection
       (PrivateCellEffect.sealedFamily (M := M)
         (privateDeclaration := authority.declaration) adapter pre :
-          SemanticEffectFamily S M Nullifier) n F)
+          SemanticEffectFamily L M Nullifier) n F)
     (headerCells : HistoryAdmissionContext -> BindingIx -> F)
     (context : HistoryAdmissionContext) :
     BoundSemanticReceiptClaim n F :=
   projection.historyClaim headerCells context
     (acceptBatchSealed authority admission commitmentId adapter
-      commonAuthorization requestBound effectsDigestBound preRootBound legs statementExact validated)
+      commonAuthorization requestBound effectsDigestBound legs statementExact validated)
 
 /-- info: 'Minidregg.Assurance.BfvAcceptedCellEffect.completionOfBatchAdmission' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms completionOfBatchAdmission

@@ -9,8 +9,8 @@ is first-order data, its arguments have a lawful codec, and successful
 negotiation retains the existing `TypedAuthorization.Authorized` token at the
 complete request index.
 
-Direct content reads are pure projections of an exact finite canonical
-`Hyperdocument.cellSchema` footprint.  Backlink and version queries are only
+Direct content reads are pure projections of an exact finite footprint of the
+canonical `Store Hyperdocument.layout`.  Backlink and version queries are only
 history declarations: resolving them requires the authenticated history layer.
 In particular this module makes no claim that a host search index is complete,
 that a version is final, or that any logical result was durably persisted.
@@ -82,7 +82,7 @@ def View : ContentQuery → Type
 
 /-- Pure projection from the sole canonical logical state. -/
 def project (query : ContentQuery)
-    (state : CellState.LogicalState cellSchema) : query.View :=
+    (state : Store.Store layout) : query.View :=
   match query with
   | .link id => Hyperdocument.lookup state .links id
   | .annotation id => Hyperdocument.lookup state .annotations id
@@ -90,7 +90,7 @@ def project (query : ContentQuery)
 /-- A direct query may not use authority for one document to read a record
 owned by another.  Absence is allowed and discloses no record. -/
 def OwnedBy (query : ContentQuery) (document : DocumentId)
-    (state : CellState.LogicalState cellSchema) : Prop :=
+    (state : Store.Store layout) : Prop :=
   match query with
   | .link id => ∀ record,
       Hyperdocument.lookup state .links id = some record →
@@ -99,14 +99,13 @@ def OwnedBy (query : ContentQuery) (document : DocumentId)
       Hyperdocument.lookup state .annotations id = some record →
         record.document = document
 
-/-- The canonical reactive lens for direct Hyperdocument reads.  Its resource
-footprint is empty because `cellSchema` has no resource lane. -/
-def lens : ObserverLens cellSchema ContentQuery View where
-  fieldDependencies := footprint
-  resourceDependencies := fun _ => ∅
+/-- The canonical reactive lens for direct Hyperdocument reads: it depends on
+exactly the query's footprint. -/
+def lens : ObserverLens layout ContentQuery View where
+  dependencies := footprint
   project := project
   locality := by
-    intro query left right fieldsExact _resourcesExact
+    intro query left right fieldsExact
     cases query with
     | link id =>
         simpa [project, Hyperdocument.lookup] using
@@ -117,12 +116,8 @@ def lens : ObserverLens cellSchema ContentQuery View where
           fieldsExact (⟨.annotations, id⟩ : Address)
             (Finset.mem_singleton.mpr rfl)
 
-@[simp] theorem lens_fieldDependencies (query : ContentQuery) :
-    lens.fieldDependencies query = query.footprint :=
-  rfl
-
-@[simp] theorem lens_resourceDependencies (query : ContentQuery) :
-    lens.resourceDependencies query = ∅ :=
+@[simp] theorem lens_dependencies (query : ContentQuery) :
+    lens.dependencies query = query.footprint :=
   rfl
 
 end ContentQuery
@@ -599,25 +594,25 @@ structure VersionProjection
     projection.stored.key = id :=
   projection.keyExact
 
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.ContentQuery.lens' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.ContentQuery.lens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms ContentQuery.lens
 /-- info: 'Minidregg.Theory.HyperdocumentInterface.QueryConfig.decode_encode_argument' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms QueryConfig.decode_encode_argument
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_wrong_interface' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_wrong_interface' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_query_success_wrong_interface
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_reserved_version' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_reserved_version' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_query_success_reserved_version
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_outside_scope' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_outside_scope' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_query_success_outside_scope
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_wrong_target' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_query_success_wrong_target' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_query_success_wrong_target
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_wrong_version' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_wrong_version' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_action_success_wrong_version
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_outside_scope' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_outside_scope' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_action_success_outside_scope
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_wrong_target' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.no_action_success_wrong_target' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_action_success_wrong_target
-/-- info: 'Minidregg.Theory.HyperdocumentInterface.rejected_ne_accepted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.HyperdocumentInterface.rejected_ne_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms rejected_ne_accepted
 
 end Minidregg.Theory.HyperdocumentInterface

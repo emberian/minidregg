@@ -15,11 +15,11 @@ root-marker coordinate.  Exact Digest roots remain public typed data beside
 the word; this module does not claim that a finite list of local openings
 reconstructs, binds, or cryptographically commits the whole cell.
 
-The coordinate carrier is structurally finite even when the schema is
-infinite.  It is transported to `Fin width` for the existing receipt relation,
+The coordinate carrier is structurally finite even when the layout's address
+type is infinite.  It is transported to `Fin width` for the existing receipt relation,
 with `0 < width` proved from the root-marker coordinate.  Hyperdocument effects
 use their exact declaration footprint and therefore never enumerate the
-infinite address schema.
+infinite address type.
 -/
 import Assurance.SemanticReceiptRelation
 import Theory.AcceptedCellEffect
@@ -36,61 +36,51 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y z
+universe u v w y z
 
 noncomputable section
 
 /-! ## A finite scope chosen by one canonical patch -/
 
-/-- A finite observation scope for one patch.  It may retain extra fields for
-reactive/history consumers, but it must contain the patch's exact validated
-footprints.  No `Fintype S.Field` or schema enumeration is required. -/
+/-- A finite observation scope for one patch.  It may retain extra addresses
+for reactive/history consumers, but it must contain the patch's exact write
+footprint.  No `Fintype (Address L)` or layout enumeration is required. -/
 structure DeclaredScope
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource] {Root : Type y}
-    (patch : CellState.Patch S Root) where
-  fields : Finset S.Field
-  resources : Finset S.Resource
-  fields_cover : patch.fieldFootprint ⊆ fields
-  resources_cover : patch.resourceFootprint ⊆ resources
+    {L : Theory.Store.Layout.{u, v, w}}
+    (patch : Theory.Store.Patch L) where
+  addresses : Finset (Theory.Store.Address L)
+  cover : Theory.Store.Patch.writeFootprint patch ⊆ addresses
 
 namespace DeclaredScope
 
 variable
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource] {Root : Type y}
-    {patch : CellState.Patch S Root}
+    {L : Theory.Store.Layout.{u, v, w}}
+    {patch : Theory.Store.Patch L}
 
 /-- The smallest scope is the declaration footprint itself. -/
-def exact (patch : CellState.Patch S Root) : DeclaredScope patch where
-  fields := patch.fieldFootprint
-  resources := patch.resourceFootprint
-  fields_cover := Finset.Subset.rfl
-  resources_cover := Finset.Subset.rfl
+def exact (patch : Theory.Store.Patch L) : DeclaredScope patch where
+  addresses := Theory.Store.Patch.writeFootprint patch
+  cover := Finset.Subset.rfl
 
 /-- One coordinate is reserved for the typed root header.  The other
-coordinates are precisely the finitely scoped fields and resources. -/
+coordinates are precisely the finitely scoped addresses. -/
 abbrev Coordinate (scope : DeclaredScope patch) :=
-  Fin 1 ⊕ (scope.fields ⊕ scope.resources)
+  Fin 1 ⊕ scope.addresses
 
 def rootCoordinate (scope : DeclaredScope patch) : scope.Coordinate :=
   Sum.inl 0
 
-def fieldCoordinate (scope : DeclaredScope patch)
-    (field : S.Field) (member : field ∈ scope.fields) : scope.Coordinate :=
-  Sum.inr (Sum.inl ⟨field, member⟩)
-
-def resourceCoordinate (scope : DeclaredScope patch)
-    (resource : S.Resource) (member : resource ∈ scope.resources) :
+def addressCoordinate (scope : DeclaredScope patch)
+    (address : Theory.Store.Address L) (member : address ∈ scope.addresses) :
     scope.Coordinate :=
-  Sum.inr (Sum.inr ⟨resource, member⟩)
+  Sum.inr ⟨address, member⟩
 
 instance coordinateNonempty (scope : DeclaredScope patch) :
     Nonempty scope.Coordinate :=
   ⟨scope.rootCoordinate⟩
 
 /-- The width is finite by construction and depends on the chosen patch
-scope, not on the cardinality of the schema. -/
+scope, not on the cardinality of the layout. -/
 def width (scope : DeclaredScope patch) : Nat :=
   Fintype.card scope.Coordinate
 
@@ -106,46 +96,36 @@ the accumulator field.  Injectivity, canonical wire bytes, and cryptographic
 binding are intentionally not postulated here; a concrete deployment may add
 the laws its proof system actually checks. -/
 structure Scalarizer
-    (S : CellState.Schema.{u, v, w, x}) (F : Type z) where
+    (L : Theory.Store.Layout.{u, v, w}) (F : Type z) where
   root : Digest -> F
-  field : (field : S.Field) -> Option (S.FieldType field) -> F
-  resource : (resource : S.Resource) -> CellState.ResourceCell S resource -> F
+  value : (address : Theory.Store.Address L) -> Option (L.Value address.1) -> F
 
 namespace DeclaredScope
 
 variable
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {patch : CellState.Patch S Digest}
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
+    {patch : Theory.Store.Patch L}
     (scope : DeclaredScope patch)
-    {F : Type z} (scalarizer : Scalarizer S F)
+    {F : Type z} (scalarizer : Scalarizer L F)
+    {expectedPreRoot : Digest}
 
 /-- Project only the finite declared observation scope.  The root coordinate
 is a scalar opening of the exact typed root; the root itself remains available
 separately as `cell.root`. -/
 def project (cell : CellState.Materialized M) : Store scope.Coordinate F
   | Sum.inl _ => scalarizer.root cell.root
-  | Sum.inr (Sum.inl field) =>
-      scalarizer.field field.1 (cell.logical.fields field.1)
-  | Sum.inr (Sum.inr resource) =>
-      scalarizer.resource resource.1 (cell.logical.resources resource.1)
+  | Sum.inr address => scalarizer.value address.1 (cell.logical address.1)
 
 @[simp] theorem project_root (cell : CellState.Materialized M) :
     scope.project scalarizer cell scope.rootCoordinate =
       scalarizer.root cell.root :=
   rfl
 
-@[simp] theorem project_field (cell : CellState.Materialized M)
-    (field : S.Field) (member : field ∈ scope.fields) :
-    scope.project scalarizer cell (scope.fieldCoordinate field member) =
-      scalarizer.field field (cell.logical.fields field) :=
-  rfl
-
-@[simp] theorem project_resource (cell : CellState.Materialized M)
-    (resource : S.Resource) (member : resource ∈ scope.resources) :
-    scope.project scalarizer cell (scope.resourceCoordinate resource member) =
-      scalarizer.resource resource (cell.logical.resources resource) :=
+@[simp] theorem project_address (cell : CellState.Materialized M)
+    (address : Theory.Store.Address L) (member : address ∈ scope.addresses) :
+    scope.project scalarizer cell (scope.addressCoordinate address member) =
+      scalarizer.value address (cell.logical address) :=
   rfl
 
 /-- The exact Digest root accompanying a scoped word.  It is not recovered
@@ -175,21 +155,17 @@ def snapshot (cell : CellState.Materialized M) :
 /-! ## Exact scoped transition -/
 
 /-- Root is always touched because the public post-root is part of every
-committed transition.  Scoped field/resource coordinates are touched exactly
-when the canonical patch names them. -/
+committed transition.  Scoped address coordinates are touched exactly when
+the canonical patch writes them. -/
 def IsTouched : scope.Coordinate -> Prop
   | Sum.inl _ => True
-  | Sum.inr (Sum.inl field) => field.1 ∈ patch.fieldFootprint
-  | Sum.inr (Sum.inr resource) => resource.1 ∈ patch.resourceFootprint
+  | Sum.inr address => address.1 ∈ Theory.Store.Patch.writeFootprint patch
 
 instance isTouchedDecidable (coordinate : scope.Coordinate) :
     Decidable (scope.IsTouched coordinate) := by
   cases coordinate with
   | inl root => simp only [IsTouched]; infer_instance
-  | inr rest =>
-      cases rest with
-      | inl field => simp only [IsTouched]; infer_instance
-      | inr resource => simp only [IsTouched]; infer_instance
+  | inr address => simp only [IsTouched]; infer_instance
 
 def touched : Finset scope.Coordinate :=
   Finset.univ.filter scope.IsTouched
@@ -197,24 +173,18 @@ def touched : Finset scope.Coordinate :=
 @[simp] theorem root_mem_touched : scope.rootCoordinate ∈ scope.touched := by
   simp [touched, IsTouched, rootCoordinate]
 
-@[simp] theorem field_mem_touched (field : S.Field)
-    (member : field ∈ scope.fields) :
-    scope.fieldCoordinate field member ∈ scope.touched <->
-      field ∈ patch.fieldFootprint := by
-  simp [touched, IsTouched, fieldCoordinate]
-
-@[simp] theorem resource_mem_touched (resource : S.Resource)
-    (member : resource ∈ scope.resources) :
-    scope.resourceCoordinate resource member ∈ scope.touched <->
-      resource ∈ patch.resourceFootprint := by
-  simp [touched, IsTouched, resourceCoordinate]
+@[simp] theorem address_mem_touched (address : Theory.Store.Address L)
+    (member : address ∈ scope.addresses) :
+    scope.addressCoordinate address member ∈ scope.touched <->
+      address ∈ Theory.Store.Patch.writeFootprint patch := by
+  simp [touched, IsTouched, addressCoordinate]
 
 /-- The local anti-ghost law is inherited from the exact validated typed
 patch.  The root coordinate cannot enter the frame premise because it is
 always touched. -/
 theorem project_frame
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch)
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch)
     (coordinate : scope.Coordinate)
     (outside : coordinate ∉ scope.touched) :
     scope.project scalarizer validated.apply coordinate =
@@ -222,22 +192,14 @@ theorem project_frame
   cases coordinate with
   | inl root =>
       exact False.elim (outside (by simp [touched, IsTouched]))
-  | inr rest =>
-      cases rest with
-      | inl field =>
-          apply congrArg (scalarizer.field field.1)
-          apply validated.field_frame field.1
-          intro named
-          exact outside (by simp [touched, IsTouched, named])
-      | inr resource =>
-          apply congrArg (scalarizer.resource resource.1)
-          apply validated.resource_frame resource.1
-          intro named
-          exact outside (by simp [touched, IsTouched, named])
+  | inr address =>
+      apply congrArg (scalarizer.value address.1)
+      exact Theory.Store.Patch.run_frame pre.logical patch address.1 (fun named =>
+        outside (by simp [touched, IsTouched, named]))
 
 def delta
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     ReceiptDelta (scope.project scalarizer pre)
       (scope.project scalarizer validated.apply) where
   touched := scope.touched
@@ -246,28 +208,28 @@ def delta
 def core
     [Field F] [DecidableEq F]
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     ReceiptWitness scope.Coordinate F :=
   ReceiptWitness.ofDelta (scope.delta scalarizer validated)
 
 theorem core_valid
     [Field F] [DecidableEq F]
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     (scope.core scalarizer validated).Satisfies :=
   ReceiptWitness.ofDelta_satisfies (scope.delta scalarizer validated)
 
 @[simp] theorem core_pre
     [Field F] [DecidableEq F]
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     (scope.core scalarizer validated).pre = scope.project scalarizer pre :=
   rfl
 
 @[simp] theorem core_post
     [Field F] [DecidableEq F]
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     (scope.core scalarizer validated).post =
       scope.project scalarizer validated.apply :=
   rfl
@@ -286,7 +248,7 @@ def finTouched : Finset (Fin scope.width) :=
 
 theorem finProject_frame
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch)
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch)
     (index : Fin scope.width) (outside : index ∉ scope.finTouched) :
     scope.finProject scalarizer validated.apply index =
       scope.finProject scalarizer pre index := by
@@ -298,7 +260,7 @@ theorem finProject_frame
 
 def finDelta
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     ReceiptDelta (scope.finProject scalarizer pre)
       (scope.finProject scalarizer validated.apply) where
   touched := scope.finTouched
@@ -307,14 +269,14 @@ def finDelta
 def finCore
     [Field F] [DecidableEq F]
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     ReceiptWitness (Fin scope.width) F :=
   ReceiptWitness.ofDelta (scope.finDelta scalarizer validated)
 
 theorem finCore_valid
     [Field F] [DecidableEq F]
     {pre : CellState.Materialized M}
-    (validated : CellState.ValidatedPatch M pre patch) :
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot patch) :
     (scope.finCore scalarizer validated).Satisfies :=
   ReceiptWitness.ofDelta_satisfies (scope.finDelta scalarizer validated)
 
@@ -324,18 +286,11 @@ theorem finCore_valid
       scalarizer.root cell.root := by
   simp [finProject]
 
-@[simp] theorem finProject_at_field (cell : CellState.Materialized M)
-    (field : S.Field) (member : field ∈ scope.fields) :
+@[simp] theorem finProject_at_address (cell : CellState.Materialized M)
+    (address : Theory.Store.Address L) (member : address ∈ scope.addresses) :
     scope.finProject scalarizer cell
-        (scope.coordinateEquivFin (scope.fieldCoordinate field member)) =
-      scalarizer.field field (cell.logical.fields field) := by
-  simp [finProject]
-
-@[simp] theorem finProject_at_resource (cell : CellState.Materialized M)
-    (resource : S.Resource) (member : resource ∈ scope.resources) :
-    scope.finProject scalarizer cell
-        (scope.coordinateEquivFin (scope.resourceCoordinate resource member)) =
-      scalarizer.resource resource (cell.logical.resources resource) := by
+        (scope.coordinateEquivFin (scope.addressCoordinate address member)) =
+      scalarizer.value address (cell.logical address) := by
   simp [finProject]
 
 end DeclaredScope
@@ -345,10 +300,9 @@ end DeclaredScope
 namespace AcceptedAdapter
 
 variable
-    {S : CellState.Schema.{u, v, w, x}} [DecidableEq S.Field]
-    [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {request : Request kind} {pre : CellState.Materialized M}
     {declaration : family.Declaration} {outcome : family.Outcome declaration}
@@ -377,7 +331,7 @@ it is not reconstructed from the finite scoped word. -/
 def finCore {F : Type*} [Field F] [DecidableEq F]
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome)
-    (scalarizer : Scalarizer S F) :
+    (scalarizer : Scalarizer L F) :
     ReceiptWitness
       (Fin (exactScope (family := family) (declaration := declaration)
         (outcome := outcome)).width) F :=
@@ -389,7 +343,7 @@ def finCore {F : Type*} [Field F] [DecidableEq F]
 theorem finCore_valid {F : Type*} [Field F] [DecidableEq F]
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome)
-    (scalarizer : Scalarizer S F) :
+    (scalarizer : Scalarizer L F) :
     (AcceptedAdapter.finCore accepted scalarizer).Satisfies :=
   DeclaredScope.finCore_valid
     (patch := family.patch declaration outcome)
@@ -414,20 +368,15 @@ variable
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : HyperdocumentOperations.Declaration}
 
-/-- Exact Hyperdocument scope: the finite list of addresses named by this
-action, plus no resources.  The infinite `Hyperdocument.Address` type is never
-enumerated. -/
+/-- Exact Hyperdocument scope: the finite set of addresses this action writes.
+The infinite `Hyperdocument.Address` type is never enumerated. -/
 def scope (config : HyperdocumentOperations.Config)
     (declaration : HyperdocumentOperations.Declaration) :
     DeclaredScope (declaration.patch config) :=
   DeclaredScope.exact (declaration.patch config)
 
-@[simp] theorem scope_fields : (scope config declaration).fields =
-    (declaration.patch config).fieldFootprint :=
-  rfl
-
-@[simp] theorem scope_resources : (scope config declaration).resources =
-    (declaration.patch config).resourceFootprint :=
+@[simp] theorem scope_addresses : (scope config declaration).addresses =
+    Theory.Store.Patch.writeFootprint (declaration.patch config) :=
   rfl
 
 theorem width_positive : 0 < (scope config declaration).width :=
@@ -436,7 +385,7 @@ theorem width_positive : 0 < (scope config declaration).width :=
 def finCore {F : Type*} [Field F] [DecidableEq F]
     (accepted : HyperdocumentOperations.Accepted config projection
       authorityPre documentPre portal declaration)
-    (scalarizer : Scalarizer Hyperdocument.cellSchema F) :
+    (scalarizer : Scalarizer Hyperdocument.layout F) :
     ReceiptWitness (Fin (scope config declaration).width) F :=
   DeclaredScope.finCore (patch := declaration.patch config)
     (scope config declaration) scalarizer accepted.accepted.validated
@@ -444,7 +393,7 @@ def finCore {F : Type*} [Field F] [DecidableEq F]
 theorem finCore_valid {F : Type*} [Field F] [DecidableEq F]
     (accepted : HyperdocumentOperations.Accepted config projection
       authorityPre documentPre portal declaration)
-    (scalarizer : Scalarizer Hyperdocument.cellSchema F) :
+    (scalarizer : Scalarizer Hyperdocument.layout F) :
     (HyperdocumentAdapter.finCore accepted scalarizer).Satisfies :=
   DeclaredScope.finCore_valid (patch := declaration.patch config)
     (scope config declaration) scalarizer accepted.accepted.validated
@@ -466,16 +415,16 @@ theorem finCore_valid {F : Type*} [Field F] [DecidableEq F]
 
 /-- A declared Hyperdocument address opens from the exact canonical pre-cell. -/
 theorem pre_lookup_exact {F : Type*}
-    (scalarizer : Scalarizer Hyperdocument.cellSchema F)
+    (scalarizer : Scalarizer Hyperdocument.layout F)
     (address : Hyperdocument.Address)
-    (named : address ∈ (declaration.patch config).fieldFootprint) :
+    (named : address ∈ Theory.Store.Patch.writeFootprint (declaration.patch config)) :
     DeclaredScope.finProject (patch := declaration.patch config)
         (scope config declaration) scalarizer documentPre
         (DeclaredScope.coordinateEquivFin (patch := declaration.patch config)
           (scope config declaration)
-          ((scope config declaration).fieldCoordinate address named)) =
-      scalarizer.field address (documentPre.logical.fields address) := by
-  exact DeclaredScope.finProject_at_field (patch := declaration.patch config)
+          ((scope config declaration).addressCoordinate address named)) =
+      scalarizer.value address (documentPre.logical address) := by
+  exact DeclaredScope.finProject_at_address (patch := declaration.patch config)
     (scope config declaration) scalarizer documentPre address named
 
 /-- The matching post opening is read from the sole verifier-minted post-cell,
@@ -483,17 +432,17 @@ not from a receipt-supplied parallel state. -/
 theorem post_lookup_exact {F : Type*}
     (accepted : HyperdocumentOperations.Accepted config projection
       authorityPre documentPre portal declaration)
-    (scalarizer : Scalarizer Hyperdocument.cellSchema F)
+    (scalarizer : Scalarizer Hyperdocument.layout F)
     (address : Hyperdocument.Address)
-    (named : address ∈ (declaration.patch config).fieldFootprint) :
+    (named : address ∈ Theory.Store.Patch.writeFootprint (declaration.patch config)) :
     DeclaredScope.finProject (patch := declaration.patch config)
         (scope config declaration) scalarizer accepted.accepted.prepared.post
         (DeclaredScope.coordinateEquivFin (patch := declaration.patch config)
           (scope config declaration)
-          ((scope config declaration).fieldCoordinate address named)) =
-      scalarizer.field address
-        (accepted.accepted.prepared.post.logical.fields address) := by
-  exact DeclaredScope.finProject_at_field (patch := declaration.patch config)
+          ((scope config declaration).addressCoordinate address named)) =
+      scalarizer.value address
+        (accepted.accepted.prepared.post.logical address) := by
+  exact DeclaredScope.finProject_at_address (patch := declaration.patch config)
     (scope config declaration) scalarizer
     accepted.accepted.prepared.post address named
 

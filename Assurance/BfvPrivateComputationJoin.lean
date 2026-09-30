@@ -277,13 +277,13 @@ sole transition authority; exact argument/effect digests, pre-root, validated
 patch, input identity, and the BFV mode token are all required in this one
 construction. -/
 noncomputable def acceptCore
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}
@@ -292,25 +292,25 @@ noncomputable def acceptCore
       (ComputationCellEffect.family dialect.declaration adapter pre).request request)
     (argsDigestBound : commonRequest.argsDigest = adapter.completeRequestDigest request)
     (effectsDigestBound : commonRequest.effectsDigest = adapter.completeEffectDigest request)
-    (preRootBound : commonRequest.preStateRoot = pre.root)
     (completion : dialect.declaration.Completion request result)
-    (validated : CellState.ValidatedPatch M pre (adapter.patch request result)) :
+    (validated : CellState.ValidatedPatch M pre commonRequest.preStateRoot
+      (adapter.patch request result)) :
     ComputationCellEffect.Accepted (portal := portal) (authState := authState)
       dialect.declaration adapter commonRequest pre request result :=
   ComputationCellEffect.accept dialect.declaration adapter authorization requestBound argsDigestBound
-    effectsDigestBound preRootBound completion validated
+    effectsDigestBound completion validated
 
 /-- An accepted pure BFV effect retains all request bindings, is necessarily
 sealed, and exposes the exact equation for every one of the 384 owner rows.
 This is an arithmetic/representation theorem only. -/
 theorem acceptedCore_bfv_semantics
-    {S : CellState.Schema} [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
+    {L : Theory.Store.Layout}
+    {M : CellState.Materializer L Digest}
     {CanonicalInput InputSourceWitness InputTargetWitness ResourceEffect Footprint
       Nullifier : Type}
     (dialect : CoreDialect CanonicalInput InputSourceWitness InputTargetWitness
       ResourceEffect Footprint Nullifier)
-    (adapter : ComputationCellEffect.Adapter (S := S) dialect.declaration)
+    (adapter : ComputationCellEffect.Adapter (L := L) dialect.declaration)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
     {commonRequest : Request kind} {pre : CellState.Materialized M}
     {request : dialect.declaration.Request} {result : dialect.declaration.Result}

@@ -33,7 +33,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y z uClauseInput uClauseQuery uClauseReply uClauseOutcome
+universe u v w y z uClauseInput uClauseQuery uClauseReply uClauseOutcome
   uClauseEvidence
 
 noncomputable section
@@ -50,20 +50,19 @@ exact representation of the canonical materializer root.  Neither law says
 that a native implementation computes either representation.
 -/
 structure HistoryProjection
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    (family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier)
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    (family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier)
     (n : Nat) (F : Type*) [Field F] [DecidableEq F] where
   project : CellState.Materialized M -> Store (Fin n) F
   stateCommitment : StateCommitment (Fin n) F
-  projectFootprint : CellState.Patch S Digest -> Finset (Fin n)
+  projectFootprint : Theory.Store.Patch L -> Finset (Fin n)
   root_exact : forall cell,
     stateCommitment.root (project cell) = cell.root
   frame : forall (declaration : family.Declaration)
     (outcome : family.Outcome declaration)
-    (pre : CellState.Materialized M)
-    (validated : CellState.ValidatedPatch M pre
+    (pre : CellState.Materialized M) (expectedPreRoot : Digest)
+    (validated : CellState.ValidatedPatch M pre expectedPreRoot
       (family.patch declaration outcome))
     (index : Fin n),
     index ∉ projectFootprint (family.patch declaration outcome) ->
@@ -72,10 +71,9 @@ structure HistoryProjection
 namespace HistoryProjection
 
 variable
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest} {Nullifier : Type y}
-    {family : SemanticEffectFamily.{u, v, w, x, y, z} S M Nullifier}
+    {L : Theory.Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest} {Nullifier : Type y}
+    {family : SemanticEffectFamily.{u, v, w, y, z} L M Nullifier}
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (projection : HistoryProjection family n F)
     {portal : Portal} {authState : AuthState} {kind : ResourceKind}
@@ -89,7 +87,8 @@ def delta
     ReceiptDelta (projection.project pre)
       (projection.project accepted.prepared.post) where
   touched := projection.projectFootprint (family.patch declaration outcome)
-  frame := projection.frame declaration outcome pre accepted.validated
+  frame := projection.frame declaration outcome pre request.preStateRoot
+    accepted.validated
 
 /-- The canonical receipt core.  Its post and touched set are projections of
 the same validated patch carried by `accepted`. -/
@@ -132,7 +131,7 @@ theorem request_preRoot_projected
       family request pre declaration outcome) :
     request.preStateRoot =
       projection.stateCommitment.root (projection.project pre) :=
-  accepted.preRootBound.trans (projection.root_exact pre).symm
+  (AcceptedCellEffect.preRootBound accepted).trans (projection.root_exact pre).symm
 
 /-- The projected post-word commits to the canonical prepared post root. -/
 theorem prepared_postRoot_projected
