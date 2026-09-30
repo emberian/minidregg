@@ -1,30 +1,34 @@
 /-
 # Theory.MaterializerCardinality -- why canonical cells must be sparse
 
-The former `CellState.LogicalState.fields` was a total dependent function.  At
-an infinite field index it could contain an injective copy of `Nat → Bool`, but
-every `LawfulCodec` injects into the countable type `List UInt8`.  Consequently
-the deployed authority, Hyperdocument, event-log, and declared-effect schemas
-had no materializer at all.
+The former cell carrier (`CellState.LogicalState.fields`, and the declared
+effects' `EffectDeclaration.Store := StateKey → Int`) was a total dependent
+function.  At an infinite key index it could contain an injective copy of
+`Nat → Bool`, but every `LawfulCodec` injects into the countable type
+`List UInt8`.  Consequently the deployed authority, Hyperdocument, event-log,
+and declared-effect schemas had no materializer at all.
 
-`CellState.LogicalState.fields` is now a canonical dependent finite map.  This
+The one carrier is now `Store.Store L`, a canonical dependent finite map.  This
 module keeps the counting argument against the *deleted total carrier* as a
-regression tooth, and characterizes the repaired materializer honestly: it is
-inhabited exactly when the complete sparse logical-state type is countable.
+regression tooth, and characterizes the materializer honestly: it is inhabited
+exactly when the store type is countable, which it is whenever namespaces, keys
+and values are.
 -/
+import Mathlib.Data.DFinsupp.Encodable
 import Theory.CellState
-import Theory.DeclaredTurn
+import Theory.EffectDeclaration
 
 namespace Minidregg.Theory.MaterializerCardinality
 
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.IndexedProgram
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
-universe u v w x y
+universe u v w y
 
 instance : Countable UInt8 :=
   Function.Injective.countable (f := UInt8.toNat)
@@ -52,64 +56,59 @@ theorem lawfulCodec_injective {alpha : Type u} (codec : LawfulCodec alpha) :
 
 /-! ## Regression model: the deleted total-function carrier -/
 
-/-- The old field shape, retained only so the vacuity cannot silently return. -/
-structure TotalLogicalState (S : Schema.{u, v, w, x}) where
-  fields : (field : S.Field) → S.FieldType field
-  resources : (resource : S.Resource) → ResourceCell S resource
+/-- The old carrier shape: one value at every address, retained only so the
+vacuity cannot silently return. -/
+def TotalStore (L : Layout.{u, v, w}) : Type (max u v w) :=
+  (address : Address L) → L.Value address.1
 
 /-- The materializer interface over that old carrier. -/
-structure TotalMaterializer (S : Schema.{u, v, w, x}) (Root : Type y) where
-  codec : LawfulCodec (TotalLogicalState S)
+structure TotalMaterializer (L : Layout.{u, v, w}) (Root : Type y) where
+  codec : LawfulCodec (TotalStore L)
   rootBytes : List UInt8 → Root
 
 /-- Any total carrier containing `Nat → Bool` has no lawful materializer. -/
 theorem totalMaterializer_isEmpty_of_natBool_embedding
-    {S : Schema.{0, 0, 0, 0}} {Root : Type}
-    (embed : (Nat → Bool) → TotalLogicalState S)
+    {L : Layout.{0, 0, 0}} {Root : Type}
+    (embed : (Nat → Bool) → TotalStore L)
     (embed_injective : Function.Injective embed) :
-    IsEmpty (TotalMaterializer S Root) :=
+    IsEmpty (TotalMaterializer L Root) :=
   ⟨fun materializer =>
     not_injective_natBool (fun value => materializer.codec.encode (embed value))
       ((lawfulCodec_injective materializer.codec).comp embed_injective)⟩
 
-open Minidregg.Theory.DeclaredTurn in
+open Minidregg.Theory.EffectDeclaration in
 /-- The former declared-effect carrier really did contain every Boolean stream. -/
-def totalEffectStateOf (marked : Nat → Bool) :
-    TotalLogicalState effectSchema where
-  fields := fun key =>
-    match key with
+def totalEffectStateOf (marked : Nat → Bool) : TotalStore effectLayout :=
+  fun address =>
+    match address.2 with
     | .programCode program =>
         show Int from if marked program.value then 1 else 0
     | _ => show Int from 0
-  resources := fun resource => nomatch resource
 
-open Minidregg.Theory.DeclaredTurn in
+open Minidregg.Theory.EffectDeclaration in
 theorem totalEffectStateOf_injective : Function.Injective totalEffectStateOf := by
   intro left right same
   funext index
-  have fields := congrArg TotalLogicalState.fields same
-  have point := congrFun fields (.programCode ⟨index⟩)
-  simp only [totalEffectStateOf] at point
+  have point := congrFun same (StateKey.programCode ⟨index⟩).address
+  simp only [totalEffectStateOf, StateKey.address] at point
   by_cases hleft : left index = true
   · by_cases hright : right index = true
     · rw [hleft, hright]
     · simp [hleft, hright] at point
-      exact absurd point (show (1 : Int) ≠ 0 by decide)
   · by_cases hright : right index = true
     · simp [hleft, hright] at point
-      exact absurd point (show (0 : Int) ≠ 1 by decide)
     · simp only [Bool.not_eq_true] at hleft hright
       rw [hleft, hright]
 
-open Minidregg.Theory.DeclaredTurn in
+open Minidregg.Theory.EffectDeclaration in
 /-- Load-bearing negative tooth: restoring the old total effect carrier makes
 the kernel materializer empty again. -/
 theorem totalEffectMaterializer_isEmpty :
-    IsEmpty (TotalMaterializer effectSchema.{0, 0} Digest) :=
+    IsEmpty (TotalMaterializer effectLayout Digest) :=
   totalMaterializer_isEmpty_of_natBool_embedding totalEffectStateOf
     totalEffectStateOf_injective
 
-/-! ## The repaired sparse carrier -/
+/-! ## The sparse carrier -/
 
 /-- Any nonempty countable type has a lawful codec.  The unary wire format is
 an existence witness, not a deployment recommendation. -/
@@ -122,32 +121,48 @@ theorem nonempty_lawfulCodec_of_countable {alpha : Type} [Countable alpha]
   intro value
   simp [encodable.encodek]
 
-/-- A repaired materializer exists exactly when its complete sparse logical
-state is countable (assuming the root carrier and state are inhabited). -/
-theorem materializer_nonempty_iff_countable {S : Schema.{0, 0, 0, 0}}
-    {Root : Type} [Nonempty (LogicalState S)] [Nonempty Root] :
-    Nonempty (Materializer S Root) ↔ Countable (LogicalState S) := by
+/-- A materializer exists exactly when its store type is countable (assuming
+the root carrier is inhabited). -/
+theorem materializer_nonempty_iff_countable {L : Layout.{0, 0, 0}}
+    {Root : Type} [Nonempty Root] :
+    Nonempty (Materializer L Root) ↔ Countable (Store L) := by
   constructor
   · intro ⟨materializer⟩
     exact (lawfulCodec_injective materializer.codec).countable
   · intro countable
-    obtain ⟨codec⟩ := nonempty_lawfulCodec_of_countable (alpha := LogicalState S)
+    obtain ⟨codec⟩ := nonempty_lawfulCodec_of_countable (alpha := Store L)
     exact ⟨{ codec := codec, rootBytes := fun _ => Classical.arbitrary Root }⟩
 
-/-- With countable typed fields and no resource lane, the repaired complete
-logical state is countable even when the field index is infinite. -/
-theorem sparse_schema_state_countable {S : Schema.{0, 0, 0, 0}}
-    [Countable S.Field] [∀ field, Countable (S.FieldType field)]
-    (resourceEmpty : IsEmpty S.Resource) : Countable (LogicalState S) := by
-  apply Function.Injective.countable (f := fun state => state.fields)
-  intro left right same
-  cases left with
-  | mk leftFields leftResources =>
-      cases right with
-      | mk rightFields rightResources =>
-          congr 1
-          funext resource
-          exact resourceEmpty.elim resource
+/-- With countable namespaces, keys and values, the store is countable even
+when the key index is infinite. -/
+theorem sparse_store_countable {L : Layout.{0, 0, 0}}
+    [Countable L.Namespace] [∀ space, Countable (L.Key space)]
+    [∀ space, Countable (L.Value space)] : Countable (Store L) :=
+  inferInstance
+
+open Minidregg.Theory.EffectDeclaration in
+/-- A first-order code for the three state-key constructors: `StateKey` is
+countable, and Lean does not derive that. -/
+def stateKeyCode : StateKey → Nat × Nat × Nat
+  | .objectField object field => (0, object.value, field.value)
+  | .accountBalance account resource => (1, account.value, resource.value)
+  | .programCode program => (2, program.value, 0)
+
+open Minidregg.Theory.EffectDeclaration in
+theorem stateKeyCode_injective : Function.Injective stateKeyCode := by
+  rintro (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩) (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩) same <;>
+    simp_all [stateKeyCode]
+
+open Minidregg.Theory.EffectDeclaration in
+instance stateKey_countable : Countable StateKey :=
+  Function.Injective.countable stateKeyCode_injective
+
+open Minidregg.Theory.EffectDeclaration in
+/-- The positive pole: the declared-effect layout, whose total carrier had no
+materializer, has one over the sparse store. -/
+theorem effectMaterializer_nonempty : Nonempty (Materializer effectLayout Digest) := by
+  haveI : Nonempty Digest := ⟨⟨0⟩⟩
+  exact materializer_nonempty_iff_countable.mpr sparse_store_countable
 
 /-! ## Axiom pins -/
 
@@ -161,7 +176,9 @@ theorem sparse_schema_state_countable {S : Schema.{0, 0, 0, 0}}
 #guard_msgs (whitespace := lax) in #print axioms nonempty_lawfulCodec_of_countable
 /-- info: 'Minidregg.Theory.MaterializerCardinality.materializer_nonempty_iff_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms materializer_nonempty_iff_countable
-/-- info: 'Minidregg.Theory.MaterializerCardinality.sparse_schema_state_countable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms sparse_schema_state_countable
+/-- info: 'Minidregg.Theory.MaterializerCardinality.effectMaterializer_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms effectMaterializer_nonempty
+/-- info: 'Minidregg.Theory.MaterializerCardinality.stateKeyCode_injective' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms stateKeyCode_injective
 
 end Minidregg.Theory.MaterializerCardinality
