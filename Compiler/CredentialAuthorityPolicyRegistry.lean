@@ -4,15 +4,15 @@
 The receiving registry consumes the complete canonical authority domain. Its
 policy source is the executable canonical v2 record, addressed by cSHAKE. The
 current source revision, selected address, membership, and all authority epochs come
-from that same snapshot. The physical receiver supplies complete catalogue
-and shard provenance; semantic source bytes alone cannot reconstruct it.
+from that same snapshot: the deployment's one authority cell. The physical
+receiver supplies that cell's provenance; semantic source bytes alone cannot
+reconstruct it.
 
-The explicit Example namespace retains the earlier bounded-page model only
-as an instance of the generic selection and stale-guard theorems. It is not a
-receiving configuration or decoder fallback. Signature verification remains
-the deployment portal's responsibility.
+The explicit Example namespace instantiates the generic selection and
+stale-guard theorems at one concrete authority cell. It is not a receiving
+configuration or decoder fallback. Signature verification remains the
+deployment portal's responsibility.
 -/
-import Compiler.CredentialAuthorityPageMaterializer
 import Compiler.CredentialAuthorityDomain
 import Compiler.PolicyRecordCodec
 import Compiler.CredentialSignatureAdmission
@@ -23,7 +23,6 @@ namespace Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
-open Minidregg.Compiler.CredentialAuthorityPageMaterializer
 open Minidregg.Compiler.Sp800185Cshake256
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel.CanonicalPolicyRegistry
@@ -73,11 +72,11 @@ structure PolicyRecordPairBinding (left right : PolicyRecord) : Prop where
 
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 
-/-- Every authority coordinate is read from the full canonical schema. The
-revocation universe is derived from every checked shard, never requester
+/-- Every authority coordinate is read from the one authority cell. The
+revocation universe is the cell's own revoked-plane support, never requester
 selected. A physical receiver must provide this snapshot's provenance. -/
 def projection (snapshot : Snapshot) :
-    CredentialAuthorityState.StateProjection CredentialAuthorityState.schema.{0, 0} :=
+    CredentialAuthorityState.StateProjection CredentialAuthorityState.layout :=
   snapshot.revocationUniverse.stateProjection
 
 @[simp] theorem projection_authState (snapshot : Snapshot) :
@@ -237,17 +236,60 @@ instance membershipBoundDecidable (snapshot : Snapshot) (root address : Digest)
 def domainMember (snapshot : Snapshot) (root address : Digest) : Prop :=
   ∃ claim, MembershipBound snapshot root address claim
 
+/-- One stored capability, read at its own address, that was issued by
+`issuer` at `epoch` and commits to `commitment`. -/
+def issuedAt (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+    (commitment : Digest) : Store.Address CredentialAuthorityState.layout → Bool
+  | ⟨.capability kind, identifier⟩ =>
+      match readCapability snapshot.cell kind identifier with
+      | some stored => decide (stored.head.issuer = issuer ∧
+          stored.head.issuerEpoch = epoch ∧
+          storedCapabilityDigest snapshot stored = commitment)
+      | none => false
+  | _ => false
+
 /-- Issuer evidence is checked against an ACTUAL stored capability and the
-current complete-snapshot issuer epoch. It cannot be supplied by a base cache. -/
+current complete-snapshot issuer epoch. It cannot be supplied by a base cache.
+The search ranges over the cell's finite support. -/
 def issuerCheck (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
     (commitment : Digest) : Bool :=
   decide (issuerEpochAt snapshot.cell issuer = epoch) &&
-    snapshot.entries.any fun entry =>
-      match entry with
-      | .capability _ stored => decide (stored.head.issuer = issuer ∧
-          stored.head.issuerEpoch = epoch ∧
-          storedCapabilityDigest snapshot stored = commitment)
-      | _ => false
+    decide (∃ address ∈ snapshot.logical.support,
+      issuedAt snapshot issuer epoch commitment address = true)
+
+/-- Issuer acceptance names a stored capability of that issuer and epoch. -/
+theorem issuerCheck_sound (snapshot : Snapshot) (issuer : IssuerId) (epoch : Epoch)
+    (commitment : Digest) (accepted : issuerCheck snapshot issuer epoch commitment = true) :
+    issuerEpochAt snapshot.cell issuer = epoch ∧
+      ∃ kind identifier stored, readCapability snapshot.cell kind identifier = some stored ∧
+        stored.head.issuer = issuer ∧ stored.head.issuerEpoch = epoch ∧
+        storedCapabilityDigest snapshot stored = commitment := by
+  simp only [issuerCheck, Bool.and_eq_true, decide_eq_true_eq] at accepted
+  obtain ⟨current, ⟨plane, identifier⟩, _, issued⟩ := accepted
+  refine ⟨current, ?_⟩
+  cases plane with
+  | capability kind =>
+      simp only [issuedAt] at issued
+      cases read : readCapability snapshot.cell kind identifier with
+      | none => simp [read] at issued
+      | some stored =>
+          simp only [read, decide_eq_true_eq] at issued
+          exact ⟨kind, identifier, stored, read, issued⟩
+  | _ => simp [issuedAt] at issued
+
+/-- A stored capability of the current issuer epoch is found. -/
+theorem issuerCheck_complete (snapshot : Snapshot) {kind : ResourceKind}
+    (stored : StoredCapability kind)
+    (present : readCapability snapshot.cell kind stored.head.id = some stored)
+    (current : issuerEpochAt snapshot.cell stored.head.issuer = stored.head.issuerEpoch) :
+    issuerCheck snapshot stored.head.issuer stored.head.issuerEpoch
+      (storedCapabilityDigest snapshot stored) = true := by
+  simp only [issuerCheck, Bool.and_eq_true, decide_eq_true_eq]
+  refine ⟨current, ⟨.capability kind, stored.head.id⟩, ?_, ?_⟩
+  · rw [DFinsupp.mem_support_iff]
+    change readCapability snapshot.cell kind stored.head.id ≠ none
+    rw [present]; simp
+  · simp [issuedAt, present]
 
 def nonRevocationCheck (snapshot : Snapshot) (root : Digest) (key : RevocationKey) : Bool :=
   decide (root = snapshot.cell.root ∧ key ∈ snapshot.revocationUniverse.revocationKeys ∧
@@ -681,83 +723,86 @@ their model binding or fixed registry.
 -/
 namespace Example
 
-/-- The bounded-page projection belongs only to this explicit model. -/
-def projection := CredentialAuthorityPageMaterializer.projection
+open Minidregg.Theory.Store (Address)
 
+abbrev layout := CredentialAuthorityState.layout
 
 def committedPolicy : CommittedPolicy where
   address := policyRecordDigest demoRecord
   record := demoRecord
 
-def policyEntry : Entry :=
-  .policy demoRequest.policyId demoRequest.policyEpoch demoRequest.policyRevision committedPolicy.address
+def policyAt : Address layout := ⟨.policyAddress, (demoRequest.policyId, demoRequest.policyRevision)⟩
 
-def policyPage : Page where
-  authorityDomain := ⟨91000⟩
-  pageNumber := 0
-  slot0 := some policyEntry
-  slot1 := none
-  slot2 := none
-  slot3 := none
+/-- One authority store holding exactly the demo policy group: generation,
+current revision, and that revision's content address. -/
+def policyStore : Store.Store layout :=
+  (((0 : Store.Store layout).set ⟨.policyEpoch, demoRequest.policyId⟩
+      (some demoRequest.policyEpoch)).set ⟨.policyRevision, demoRequest.policyId⟩
+      (some demoRequest.policyRevision)).set policyAt (some committedPolicy.address)
 
-def policyPageCell : Materialized materializer :=
-  CellState.materialize materializer (stateOfOption (some policyPage))
+/-- The registry consumes the actual authority-cell materializer; there is
+no focused encoding or second synthetic cell for its projection. -/
+def authorityMaterializer := CredentialAuthorityCell.materializer
 
-theorem policyPage_valid : policyPage.Valid := by
-  simp [Page.Valid, Page.fields, Page.entries, policyPage, policyEntry, Entry.fields]
+def authorityCell : RegistryCell authorityMaterializer :=
+  CellState.materialize authorityMaterializer policyStore
 
-@[simp] theorem policyPage_contains : policyPage.Contains policyEntry := by
-  simp [Page.Contains, Page.entries, policyPage]
+/-- The canonical projection of this cell (its revoked-plane support). -/
+def projection : CredentialAuthorityState.StateProjection layout :=
+  (Minidregg.Theory.CanonicalAuthorityProjection.projection authorityCell).stateProjection
 
-@[simp] theorem policyPage_revision_exact :
-    policyPage.policyRevisionAt demoRequest.policyId = demoRequest.policyRevision := by
-  simp [Page.policyRevisionAt, Page.toCanonicalState, Page.entries, policyPage,
-    policyEntry, Entry.install]
-  rfl
+theorem policyStore_epoch :
+    policyStore ⟨.policyEpoch, demoRequest.policyId⟩ = some demoRequest.policyEpoch := by
+  unfold policyStore
+  rw [Store.Store.set_ne _ _ _ _ (by simp [policyAt]),
+    Store.Store.set_ne _ _ _ _ (by simp), Store.Store.set_eq]; rfl
 
-@[simp] theorem policyPage_address_exact :
-    policyPage.policyAddressAt demoRequest.policyId demoRequest.policyRevision =
-      committedPolicy.address := by
-  simp [Page.policyAddressAt, Page.toCanonicalState, Page.entries, policyPage,
-    policyEntry, Entry.install]
-  rfl
+theorem policyStore_revision :
+    policyStore ⟨.policyRevision, demoRequest.policyId⟩ = some demoRequest.policyRevision := by
+  unfold policyStore
+  rw [Store.Store.set_ne _ _ _ _ (by simp [policyAt]), Store.Store.set_eq]; rfl
 
-@[simp] theorem policyPageCell_bytes :
-    policyPageCell.bytes = wireFrame ++ 1 :: pageStream.encode policyPage :=
-  rfl
+theorem policyStore_address : policyStore policyAt = some committedPolicy.address := by
+  unfold policyStore
+  rw [Store.Store.set_eq]; rfl
 
-/-! ## The physical page is the canonical authority cell -/
-
-/-- The registry consumes the actual materializer; there is no focused
-encoding, countable fallback, or second synthetic cell for its projection. -/
-def authorityMaterializer := CredentialAuthorityPageMaterializer.materializer
-
-def authorityCell : RegistryCell authorityMaterializer := policyPageCell
-
-@[simp] theorem authorityCell_bytes_exact :
-    authorityCell.bytes = policyPageCell.bytes := rfl
-
-@[simp] theorem authorityCell_root_exact :
-    authorityCell.root = policyPageCell.root := rfl
+/-- The cell holds the committed policy as its current head. -/
+theorem policyStore_head :
+    CredentialAuthorityDomain.headAt policyStore demoRequest.policyId =
+      some ⟨demoRequest.policyRevision, committedPolicy.address⟩ :=
+  CredentialAuthorityDomain.headAt_of_fields _ _ (by rw [policyStore_epoch]; rfl) _ _
+    policyStore_revision policyStore_address
 
 @[simp] theorem authorityCell_revision_exact :
     (projection.authState authorityCell).policyRevision
         demoRequest.policyId = demoRequest.policyRevision := by
-  change (some demoRequest.policyRevision).getD 0 = demoRequest.policyRevision
+  change (show Option PolicyRevision from policyStore ⟨.policyRevision, demoRequest.policyId⟩).getD 0 =
+    demoRequest.policyRevision
+  rw [policyStore_revision]
   rfl
 
 @[simp] theorem authorityCell_address_exact :
     addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision =
       committedPolicy.address := by
-  change (some committedPolicy.address).getD ⟨0⟩ = committedPolicy.address
+  change (show Option Digest from policyStore policyAt).getD ⟨0⟩ = committedPolicy.address
+  rw [policyStore_address]
   rfl
 
-/-! ## Page membership, registry, and compiler admission -/
+/-! ## Cell membership, registry, and compiler admission -/
 
-/-- The inherited portal owns every non-membership verifier.  Page membership
-is replaced by an exact decidable reading of this page and root.  Therefore no
+/-- The cell holds this policy as its current head. -/
+def Contains : Prop :=
+  CredentialAuthorityDomain.headAt authorityCell.logical demoRequest.policyId =
+    some ⟨demoRequest.policyRevision, committedPolicy.address⟩
+
+instance : Decidable Contains := by unfold Contains; infer_instance
+
+theorem contains : Contains := policyStore_head
+
+/-- The inherited portal owns every non-membership verifier.  Membership is
+replaced by an exact decidable reading of this cell and root.  Therefore no
 signature acceptance or signature-soundness theorem is synthesized here. -/
-def pagePortal (base : Portal) : Portal where
+def cellPortal (base : Portal) : Portal where
   SignatureWitness := base.SignatureWitness
   ProofWitness := base.ProofWitness
   CapabilityCommitmentWitness := base.CapabilityCommitmentWitness
@@ -772,8 +817,7 @@ def pagePortal (base : Portal) : Portal where
   verifyCapabilityUse := base.verifyCapabilityUse
   verifyCapabilityCommitment := base.verifyCapabilityCommitment
   verifyMembership := fun root address _ =>
-    decide (root = policyPageCell.root /\
-      address = committedPolicy.address /\ policyPage.Contains policyEntry)
+    decide (root = authorityCell.root /\ address = committedPolicy.address /\ Contains)
   verifyIssuer := base.verifyIssuer
   verifyNonRevocation := base.verifyNonRevocation
   verifyCommittedPolicy := base.verifyCommittedPolicy
@@ -785,7 +829,7 @@ def policyRegistry : PolicyRegistry where
     else none
 
 def config (base : Portal) : CanonicalPolicyConfig (ZMod 13) where
-  base := pagePortal base
+  base := cellPortal base
   registry := policyRegistry
   recordDigest := policyRecordDigest
   stepBinding := .model demoStateDigest demoStepDigest
@@ -794,8 +838,7 @@ def config (base : Portal) : CanonicalPolicyConfig (ZMod 13) where
 @[simp] theorem config_verifyMembership (base : Portal)
     (root address : Digest) :
     (config base).portal.verifyMembership root address () =
-      decide (root = policyPageCell.root /\
-        address = committedPolicy.address /\ policyPage.Contains policyEntry) :=
+      decide (root = authorityCell.root /\ address = committedPolicy.address /\ Contains) :=
   rfl
 
 @[simp] theorem registry_resolves (base : Portal) :
@@ -831,21 +874,16 @@ noncomputable def payloadAvailability (base : Portal) :
       simp [payloadStore, contentAddressing]
     · simp [config, policyRegistry, key] at resolved
 
-def pageMember (root address : Digest) : Prop :=
-  root = policyPageCell.root /\ address = committedPolicy.address /\
-    policyPage.Contains policyEntry
-
-noncomputable instance pageMemberDecidable (root address : Digest) :
-    Decidable (pageMember root address) :=
-  Classical.propDecidable _
+def cellMember (root address : Digest) : Prop :=
+  root = authorityCell.root /\ address = committedPolicy.address /\ Contains
 
 noncomputable def membershipSemantics (base : Portal) :
     MembershipSemantics (config base).portal where
-  Member := pageMember
+  Member := cellMember
   verifier_sound := by
     intro root address witness accepted
-    have claim : root = policyPageCell.root /\
-        address = committedPolicy.address /\ policyPage.Contains policyEntry := by
+    have claim : root = authorityCell.root /\
+        address = committedPolicy.address /\ Contains := by
       apply of_decide_eq_true
       simpa only [config_verifyMembership] using accepted
     exact claim
@@ -872,16 +910,16 @@ theorem policy_verifies (base : Portal) :
     (castExact := by decide)).mpr
   decide
 
-theorem page_membership_verified (base : Portal) :
+theorem cell_membership_verified (base : Portal) :
     (config base).portal.verifyMembership authorityCell.root
       committedPolicy.address () = true := by
   rw [config_verifyMembership]
   apply decide_eq_true
-  exact ⟨authorityCell_root_exact, rfl, policyPage_contains⟩
+  exact ⟨rfl, rfl, contains⟩
 
 /-- Positive committed authorization.  The non-policy proof witness and its
 acceptance are explicit inputs from `base`; this construction proves only the
-policy/page join and makes no signature claim. -/
+policy/cell join and makes no signature claim. -/
 noncomputable def positiveAuthorized
     (base : Portal) (proofWitness : base.ProofWitness)
     (proofAccepted : base.verifyProof demoRequest proofWitness = true) :
@@ -889,11 +927,13 @@ noncomputable def positiveAuthorized
       (projection.authState authorityCell)
       demoRequest where
   evidence := .proof proofWitness (by
-    simpa [config, CanonicalPolicyConfig.portal, pagePortal] using proofAccepted)
+    simpa [config, CanonicalPolicyConfig.portal, cellPortal] using proofAccepted)
   policyWitness := policyWitness
   policyMembershipWitness := ()
   policyEpochExact := by
-    change demoRequest.policyEpoch = (some demoRequest.policyEpoch).getD 0
+    change demoRequest.policyEpoch =
+      (show Option Epoch from policyStore ⟨.policyEpoch, demoRequest.policyId⟩).getD 0
+    rw [policyStore_epoch]
     rfl
   policyRevisionExact := by
     exact authorityCell_revision_exact.symm
@@ -906,7 +946,7 @@ noncomputable def positiveAuthorized
       (addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision)
       () = true
     rw [authorityCell_address_exact]
-    exact page_membership_verified base
+    exact cell_membership_verified base
   policyVerified := by
     rw [portal_verifyCommittedPolicy]
     rw [Bool.and_eq_true]
@@ -916,8 +956,8 @@ noncomputable def positiveAuthorized
       committedPolicy.address
     exact authorityCell_address_exact
 
-/-- The concrete page produces the kernel's full proof-relevant selection:
-canonical bytes, cSHAKE address, fetched source, exact page membership, and the
+/-- The concrete cell produces the kernel's full proof-relevant selection:
+canonical bytes, cSHAKE address, fetched source, exact cell membership, and the
 accepted source predicate all refer to the same `committedPolicy`. -/
 noncomputable def selectedPayload
     (base : Portal) (proofWitness : base.ProofWitness)
@@ -929,7 +969,7 @@ noncomputable def selectedPayload
     (positiveAuthorized base proofWitness proofAccepted)
     committedPolicy (registry_resolves base)
 
-/-! ## The concrete page root is the durable read guard -/
+/-! ## The concrete cell root is the durable read guard -/
 
 def registryCellId : CellId := ⟨91010⟩
 def dataCellId : CellId := ⟨91011⟩
@@ -939,8 +979,8 @@ def dataPostBytes : List UInt8 := [1, 2, 3, 4]
 
 def dataWrite : DataWrite where
   cellId := dataCellId
-  expectedPre := CredentialAuthorityPageMaterializer.rootBytes dataPreBytes
-  exactPost := CredentialAuthorityPageMaterializer.rootBytes dataPostBytes
+  expectedPre := StoreCodec.rootBytes dataPreBytes
+  exactPost := StoreCodec.rootBytes dataPostBytes
   canonicalPostBytes := dataPostBytes
 
 def event : StableEvent where
@@ -949,7 +989,7 @@ def event : StableEvent where
   eventId := ⟨91021⟩
   canonicalBytes := [80, 79, 76, 73, 67, 89]
 
-def baseIntent : DataIntent CredentialAuthorityPageMaterializer.rootBytes where
+def baseIntent : DataIntent StoreCodec.rootBytes where
   transactionId := ⟨91030⟩
   writes := [dataWrite]
   readGuards := []
@@ -967,26 +1007,21 @@ theorem registryCell_readOnly :
     registryCellId ∉ baseIntent.writes.map DataWrite.cellId := by
   decide
 
-def sharedDigest :
-    SharedDigest authorityMaterializer
-      CredentialAuthorityPageMaterializer.rootBytes :=
+def sharedDigest : SharedDigest authorityMaterializer StoreCodec.rootBytes :=
   ⟨rfl⟩
 
-noncomputable def guardedIntent :
-    DataIntent CredentialAuthorityPageMaterializer.rootBytes :=
+noncomputable def guardedIntent : DataIntent StoreCodec.rootBytes :=
   guardPolicyRegistry authorityCell registryCellId sharedDigest baseIntent
     registryCell_readOnly
 
 noncomputable def snapshotBytes (cellId : CellId) : List UInt8 :=
   if cellId = dataCellId then dataPreBytes
-  else if cellId = registryCellId then policyPageCell.bytes
+  else if cellId = registryCellId then authorityCell.bytes
   else []
 
-noncomputable def readySnapshot :
-    DataSnapshot CredentialAuthorityPageMaterializer.rootBytes where
+noncomputable def readySnapshot : DataSnapshot StoreCodec.rootBytes where
   model :=
-    { roots := fun cellId =>
-        CredentialAuthorityPageMaterializer.rootBytes (snapshotBytes cellId)
+    { roots := fun cellId => StoreCodec.rootBytes (snapshotBytes cellId)
       consumed := fun _ => false
       available := 0
       history := []
@@ -996,12 +1031,11 @@ noncomputable def readySnapshot :
 
 @[simp] theorem readySnapshot_registry_root :
     readySnapshot.model.roots registryCellId = authorityCell.root := by
-  change CredentialAuthorityPageMaterializer.rootBytes
-      (snapshotBytes registryCellId) = authorityCell.root
-  have bytesExact : snapshotBytes registryCellId = policyPageCell.bytes := by
+  change StoreCodec.rootBytes (snapshotBytes registryCellId) = authorityCell.root
+  have bytesExact : snapshotBytes registryCellId = authorityCell.bytes := by
     simp [snapshotBytes, registryCellId, dataCellId]
   rw [bytesExact]
-  exact authorityCell_root_exact.symm
+  rfl
 
 theorem baseIntent_ready : baseIntent.preflight readySnapshot = .ok () := by
   have rootsReady :
@@ -1012,9 +1046,7 @@ theorem baseIntent_ready : baseIntent.preflight readySnapshot = .ok () := by
     simp only [baseIntent, DataIntent.erase, List.map_singleton,
       List.mem_singleton] at member
     subst write
-    change CredentialAuthorityPageMaterializer.rootBytes
-        (snapshotBytes dataCellId) =
-      CredentialAuthorityPageMaterializer.rootBytes dataPreBytes
+    change StoreCodec.rootBytes (snapshotBytes dataCellId) = StoreCodec.rootBytes dataPreBytes
     have bytesExact : snapshotBytes dataCellId = dataPreBytes := by
       simp [snapshotBytes, dataCellId]
     rw [bytesExact]
@@ -1053,44 +1085,44 @@ theorem guardedIntent_ready : guardedIntent.preflight readySnapshot = .ok () :=
     baseIntent registryCell_readOnly readySnapshot readySnapshot_registry_root
     baseIntent_ready
 
-/-! ## Pair-bound page rotation rejects the old authorization intent -/
+/-! ## Pair-bound policy rotation rejects the old authorization intent -/
 
-noncomputable def rotatedPolicyEntry : Entry :=
-  .policy demoRequest.policyId demoRequest.policyEpoch (demoRequest.policyRevision + 1) ⟨91040⟩
+/-- The same cell after the policy's revision advances to a new address. -/
+def rotatedStore : Store.Store layout :=
+  (((0 : Store.Store layout).set ⟨.policyEpoch, demoRequest.policyId⟩
+      (some demoRequest.policyEpoch)).set ⟨.policyRevision, demoRequest.policyId⟩
+      (some (demoRequest.policyRevision + 1))).set
+    ⟨.policyAddress, (demoRequest.policyId, demoRequest.policyRevision + 1)⟩ (some ⟨91040⟩)
 
-noncomputable def rotatedPage : Page :=
-  { policyPage with slot0 := some rotatedPolicyEntry }
+def rotatedCell : RegistryCell authorityMaterializer :=
+  CellState.materialize authorityMaterializer rotatedStore
 
-noncomputable def rotatedPageCell : Materialized materializer :=
-  CellState.materialize materializer (stateOfOption (some rotatedPage))
+/-- The root-collision premise for this one pair of authority stores. -/
+def RootPairBinding (left right : Store.Store layout) : Prop :=
+  authorityMaterializer.rootOf left = authorityMaterializer.rootOf right → left = right
 
-theorem selected_rotated_states_ne :
-    stateOfOption (some policyPage) ≠ stateOfOption (some rotatedPage) := by
+theorem selected_rotated_states_ne : policyStore ≠ rotatedStore := by
   intro equal
-  have pages := congrArg pageAt equal
-  simp only [pageAt, stateOfOption] at pages
-  have pageExact : policyPage = rotatedPage := Option.some.inj pages
-  have slots := congrArg Page.slot0 pageExact
-  simp [policyPage, rotatedPage, policyEntry, rotatedPolicyEntry] at slots
+  have revisions := congrArg (fun store : Store.Store layout =>
+    store ⟨.policyRevision, demoRequest.policyId⟩) equal
+  simp only at revisions
+  rw [policyStore_revision] at revisions
+  unfold rotatedStore at revisions
+  rw [Store.Store.set_ne _ _ _ _ (by simp), Store.Store.set_eq] at revisions
+  exact Nat.succ_ne_self demoRequest.policyRevision (Option.some.inj revisions).symm
 
-theorem rotated_root_ne
-    (binding : PairBindingPremise
-      (stateOfOption (some policyPage)) (stateOfOption (some rotatedPage))) :
-    rotatedPageCell.root ≠ policyPageCell.root := by
+theorem rotated_root_ne (binding : RootPairBinding policyStore rotatedStore) :
+    rotatedCell.root ≠ authorityCell.root := by
   intro rootsEqual
-  apply selected_rotated_states_ne
-  apply state_eq_of_root_eq binding
-  simpa [rotatedPageCell, policyPageCell, materializer] using rootsEqual.symm
+  exact selected_rotated_states_ne (binding rootsEqual.symm)
 
 noncomputable def rotatedSnapshotBytes (cellId : CellId) : List UInt8 :=
-  if cellId = registryCellId then rotatedPageCell.bytes
+  if cellId = registryCellId then rotatedCell.bytes
   else snapshotBytes cellId
 
-noncomputable def rotatedSnapshot :
-    DataSnapshot CredentialAuthorityPageMaterializer.rootBytes where
+noncomputable def rotatedSnapshot : DataSnapshot StoreCodec.rootBytes where
   model :=
-    { roots := fun cellId =>
-        CredentialAuthorityPageMaterializer.rootBytes (rotatedSnapshotBytes cellId)
+    { roots := fun cellId => StoreCodec.rootBytes (rotatedSnapshotBytes cellId)
       consumed := fun _ => false
       available := 0
       history := []
@@ -1098,18 +1130,18 @@ noncomputable def rotatedSnapshot :
   canonicalBytes := rotatedSnapshotBytes
   coherent := by intro cellId; rfl
 
-theorem rotatedSnapshot_moved
-    (binding : PairBindingPremise
-      (stateOfOption (some policyPage)) (stateOfOption (some rotatedPage))) :
+theorem rotatedSnapshot_moved (binding : RootPairBinding policyStore rotatedStore) :
     rotatedSnapshot.model.roots registryCellId ≠ authorityCell.root := by
-  simpa [rotatedSnapshot, rotatedSnapshotBytes] using rotated_root_ne binding
+  have bytesExact : rotatedSnapshotBytes registryCellId = rotatedCell.bytes := by
+    simp [rotatedSnapshotBytes]
+  change StoreCodec.rootBytes (rotatedSnapshotBytes registryCellId) ≠ authorityCell.root
+  rw [bytesExact]
+  exact rotated_root_ne binding
 
-/-- Stale page-update tooth.  A policy revision/address rotation changes the
-pair-bound page root, so the old content+authorization intent is rejected at
-the read guard before its data write can be installed. -/
-theorem rotated_page_rejects_old_intent
-    (binding : PairBindingPremise
-      (stateOfOption (some policyPage)) (stateOfOption (some rotatedPage))) :
+/-- Stale policy-update tooth.  A policy revision/address rotation changes the
+pair-bound authority-cell root, so the old content+authorization intent is
+rejected at the read guard before its data write can be installed. -/
+theorem rotated_policy_rejects_old_intent (binding : RootPairBinding policyStore rotatedStore) :
     guardedIntent.preflight rotatedSnapshot = .error .staleReadGuard :=
   policy_registry_rotation_rejects_old_intent authorityCell registryCellId
     sharedDigest baseIntent registryCell_readOnly rotatedSnapshot
@@ -1121,12 +1153,9 @@ theorem rotated_page_rejects_old_intent
 it must provide exactly this simulation premise. -/
 abbrev PhysicalAtomicityPremise
     (PhysicalState : Type) (PhysicalStep : PhysicalState ->
-      DataIntent CredentialAuthorityPageMaterializer.rootBytes ->
-      PhysicalState -> Type)
-    (Represents : PhysicalState ->
-      DataSnapshot CredentialAuthorityPageMaterializer.rootBytes -> Prop) :=
-  ImplementationRefinement CredentialAuthorityPageMaterializer.rootBytes
-    PhysicalState PhysicalStep Represents
+      DataIntent StoreCodec.rootBytes -> PhysicalState -> Type)
+    (Represents : PhysicalState -> DataSnapshot StoreCodec.rootBytes -> Prop) :=
+  ImplementationRefinement StoreCodec.rootBytes PhysicalState PhysicalStep Represents
 
 end Example
 end Minidregg.Compiler.CredentialAuthorityPolicyRegistry
@@ -1142,6 +1171,6 @@ end Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 /-- info: 'Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.guardedIntent_ready' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.guardedIntent_ready
-/-- info: 'Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.rotated_page_rejects_old_intent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.rotated_policy_rejects_old_intent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
-  #print axioms Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.rotated_page_rejects_old_intent
+  #print axioms Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.rotated_policy_rejects_old_intent
