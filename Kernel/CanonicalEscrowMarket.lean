@@ -925,7 +925,9 @@ theorem fill_after_close_preflight_rejects
   simp only [Bool.not_true, Bool.false_eq_true, if_false]
   cases checked : fill.intent.erase.preflight
       (Snapshot.install before.model close.intent.erase) with
-  | error reason => simp [checked]
+  | error reason =>
+    simp [checked]
+    split <;> simp
   | ok unit => exact (modelReject checked).elim
 
 /-- A private proof is outside this public settlement kernel.  The only sound
