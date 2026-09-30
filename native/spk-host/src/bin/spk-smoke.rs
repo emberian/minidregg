@@ -78,7 +78,12 @@ async fn probe(input: Args, manifest: SpkManifest) -> Result<(), Box<dyn Error>>
         persistent_var_max_bytes: input.max_var_bytes,
         argv: command.argv.clone(),
         environ: command.environ.clone(),
+        // The app never writes to this harness's stdout/stderr.
+        app_output: std::env::temp_dir()
+            .join(format!("spk-app-output-{}.log", std::process::id())),
     })?;
+    println!("app_output={}", std::env::temp_dir()
+        .join(format!("spk-app-output-{}.log", std::process::id())).display());
     println!("app_spawned mode={} pid={}", input.mode, child.process.id());
     let mut process = child.process;
     let rpc: UnixStream = child.rpc;

@@ -297,28 +297,11 @@ impl SourceTool for OfflineSourceHost {
     }
 }
 
+/// The one launch-command profile (`sandbox::validate_command`), applied at
+/// qualification so a package the sandbox or spawn gate would refuse never
+/// reaches a BEGIN.
 fn valid_command(command: &SpkCommand) -> io::Result<()> {
-    let Some(executable) = command.argv.first() else {
-        return Err(invalid("signed SPK launch command has no executable"));
-    };
-    if executable.is_empty()
-        || command.argv.len() > 64
-        || command.environ.len() > 128
-        || command
-            .argv
-            .iter()
-            .any(|arg| arg.len() > 4096 || arg.as_bytes().contains(&0))
-        || command.environ.iter().any(|(key, value)| {
-            key.is_empty()
-                || key.len() > 256
-                || value.len() > 4096
-                || key.as_bytes().contains(&0)
-                || value.as_bytes().contains(&0)
-        })
-    {
-        return Err(invalid("signed SPK launch command exceeds v2 bound"));
-    }
-    Ok(())
+    crate::sandbox::validate_command(&command.argv, &command.environ)
 }
 
 fn command_source(command: &SpkCommand) -> io::Result<Value> {
@@ -625,8 +608,14 @@ mod tests {
             environ: vec![],
         };
         assert!(valid_command(&command).is_err());
+        command.argv[0] = "app".into();
+        assert!(valid_command(&command).is_err());
         command.argv[0] = "/app".into();
         command.environ.push(("A".into(), "\0".into()));
         assert!(valid_command(&command).is_err());
+        command.environ[0] = ("A=B".into(), "v".into());
+        assert!(valid_command(&command).is_err());
+        command.environ[0] = ("A".into(), "v".into());
+        assert!(valid_command(&command).is_ok());
     }
 }
