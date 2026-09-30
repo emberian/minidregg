@@ -2,7 +2,7 @@
 # Compiler.CredentialSignatureAdmission — native signatures from one authority snapshot
 
 The complete authority snapshot selects the current committed key. Lean
-derives the singleton key projection, authority root, catalogue revision,
+derives the singleton key projection, authority root, authority clock,
 canonical seventeen-field request and shared operation nullifier. The existing
 SignedEnvelope controller checks canonical framing, key identity/epoch,
 revocation, activation and replay before the native verifier sees bytes.
@@ -120,12 +120,14 @@ def select (snapshot : Snapshot) (request : SomeRequest) : Except Reject (Select
         else .error .subjectKeyEpoch
   else .error .wrongDomain
 
-/-- The activation epoch is the complete authority catalogue revision. Every
-lowered authority update can advance it; it is not height or subject epoch. -/
+/-- The activation epoch is the authority clock of the one authority cell: the
+number of spent operation nullifiers (`Snapshot.revision`). It never runs
+backwards and every authority operation advances it; it is not height or
+subject epoch. -/
 def keyRegistry (snapshot : Snapshot) (key : KeyRecord) : CredentialSignedEnvelopeController.KeyRegistryProjection where
   codecVersion := CredentialSignedEnvelopeController.registryCodecVersion
   authorityRoot := snapshot.cell.root
-  registryEpoch := snapshot.catalogue.revision
+  registryEpoch := snapshot.revision
   keys := [key]
 
 def controllerState (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat) :
@@ -134,11 +136,9 @@ def controllerState (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat) :
   authorityRoot := snapshot.cell.root
   registryCommitment := CredentialSignedEnvelopeController.registryDigest
     (CredentialSignedEnvelopeController.registryCodec.encode (keyRegistry snapshot key))
-  registryEpoch := snapshot.catalogue.revision
+  registryEpoch := snapshot.revision
   consumedNullifiers :=
-    if (show Option Bool from snapshot.logical.fields (.nullifier nullifier)).getD false then
-      [nullifier]
-    else []
+    if CredentialAuthorityState.isNullified snapshot.cell nullifier then [nullifier] else []
 
 def header (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat)
     (request : SomeRequest) : CredentialSignedEnvelopeController.SignedHeader where

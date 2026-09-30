@@ -101,6 +101,10 @@ Its genesis offset belongs to the source-owned receiver parameters below. -/
 def nativeClockVersion : List UInt8 :=
   "DREGG.RUNTIME.CLOCK.GENESIS-PLUS-ACCEPTED-COUNT.EXACT-IMAGE/v1".toUTF8.toList
 
+/-- The authority domain is one cell; its clock is the spent-nullifier count. -/
+def authorityDomainVersion : List UInt8 :=
+  "DREGG.RUNTIME.AUTHORITY-DOMAIN.ONE-CELL.SPENT-NULLIFIER-CLOCK/v1".toUTF8.toList
+
 def nativeHostWireVersion : List UInt8 :=
   "DREGG.NATIVE.HOST.JOINT-TYPED-OPERATIONS-REVOCATION-SIGNED-READS/v3".toUTF8.toList
 
@@ -160,8 +164,7 @@ def sourceComponents : List (List UInt8) :=
    CredentialAuthorityReplay.birthIdentityFrame,
    CredentialAuthorityReplay.birthIdentityCustomization,
    StoreCodec.frame CredentialAuthorityCell.wire,
-   CredentialAuthorityDomain.catalogueFrame,
-   CredentialAuthorityDomain.catalogueRootCustomization,
+   authorityDomainVersion,
    PolicyRecordCodec.wireFrame,
    PolicyRecordCodec.customization,
    PolicySourceCell.wireFrame,
