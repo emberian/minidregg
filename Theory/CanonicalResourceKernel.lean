@@ -23,10 +23,12 @@ credit-only operation is deliberately excluded and proved to break the law.
 Physical payment finality, wall-clock expiry, eviction, and durable CAS remain
 handler obligations; a logical lease record does not pretend those occurred.
 
-The account book is one typed field in this bounded nucleus.  A production
+The account book is one typed store address in this bounded nucleus, written
+by one guarded operation.  A production
 layout may shard balances and leases into sparse fields while preserving the
 same operation normalization and conservation law.
 -/
+import Mathlib.Data.DFinsupp.Encodable
 import Theory.CellState
 import Theory.TypedAuthorization
 
@@ -34,6 +36,7 @@ namespace Minidregg.Theory.CanonicalResourceKernel
 
 open Minidregg.Theory
 open Minidregg.Theory.CellState
+open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
@@ -65,6 +68,7 @@ structure Book where
   accounts : Finset AccountId
   balances : Π₀ _ : AccountId × AssetId, Int
   leaseRecords : Π₀ _ : LeaseId, Option LeaseRecord
+  deriving DecidableEq
 
 deriving instance Countable for Book
 
@@ -216,110 +220,105 @@ structure Admission (book : Book) (operation : Operation) : Prop where
 
 /-! ## Canonical typed-cell embedding -/
 
-/-- This bounded nucleus uses one typed book field.  There is no untyped map and
-no resource package whose authority could be forged independently. -/
+/-- This bounded nucleus uses one typed book address.  There is no untyped map
+and no resource package whose authority could be forged independently. -/
 inductive Field
   | book
   deriving DecidableEq, Repr
 
 deriving instance Countable for Field
 
-def schema : CellState.Schema.{0, 0, 0, 0} where
-  Field := Field
-  FieldType := fun _ => Book
-  Resource := Empty
-  ResourceType := fun resource => nomatch resource
-  Authority := fun resource => nomatch resource
-  Evidence := fun resource => nomatch resource
+/-- One RAM namespace holding the book at the unit key. -/
+abbrev layout : Layout.{0, 0, 0} where
+  Namespace := Field
+  Key := fun _ => Unit
+  Value := fun _ => Book
+  discipline := fun _ => .ram
 
-local instance schemaFieldDecidableEq : DecidableEq schema.Field := by
-  change DecidableEq Field
-  infer_instance
+/-- The one address of the book. -/
+def bookAddress : Address layout := ⟨.book, ()⟩
 
-local instance schemaResourceDecidableEq : DecidableEq schema.Resource := by
-  change DecidableEq Empty
-  infer_instance
+/-- Absence of the book address denotes the empty book at the semantic layer. -/
+def logicalBook (logical : Store layout) : Book :=
+  (logical bookAddress).getD Book.empty
 
-/-- Absence of the book field denotes the empty book at the semantic layer. -/
-def logicalBook (logical : CellState.LogicalState schema) : Book :=
-  (logical.fields.read .book).getD Book.empty
+/-- The guarded patch installing `post` as the book: an overwrite guarded by the
+exact present book, or an allocation when the book is absent.  The guard is
+read from `store`, so the patch is valid there by construction. -/
+def bookPatch (store : Store layout) (post : Book) : Patch layout :=
+  match store bookAddress with
+  | some before => [.write .book () before post]
+  | none => [.allocate .book () post]
+
+theorem bookPatch_valid (store : Store layout) (post : Book) :
+    Patch.ValidFrom store (bookPatch store post) := by
+  unfold bookPatch
+  split
+  · rename_i before present
+    exact ⟨⟨rfl, present⟩, trivial⟩
+  · rename_i absent
+    exact ⟨⟨by decide, absent⟩, trivial⟩
+
+@[simp] theorem logicalBook_run_bookPatch (store : Store layout) (post : Book) :
+    logicalBook (Patch.run store (bookPatch store post)) = post := by
+  unfold bookPatch logicalBook
+  split <;> simp [Patch.run, Op.apply, bookAddress]
+
+/-- The book patch writes only the book address. -/
+theorem bookPatch_writeFootprint (store : Store layout) (post : Book) :
+    Patch.writeFootprint (bookPatch store post) = {bookAddress} := by
+  unfold bookPatch
+  split <;> rfl
 
 /-- The exact patch is derived from the exact materialized pre-cell.  Callers do
 not supply balances, a post-book, a footprint, or a post-root. -/
 def Operation.patch
-    {M : CellState.Materializer schema Digest}
-    (operation : Operation) (pre : CellState.Materialized M) :
-    CellState.Patch schema Digest where
-  expectedPreRoot := pre.root
-  fieldFootprint := {.book}
-  resourceFootprint := ∅
-  fieldWrites :=
-    [{ field := .book, value := some (operation.apply (logicalBook pre.logical)) }]
-  resourceWrites := []
+    {M : CellState.Materializer layout Digest}
+    (operation : Operation) (pre : CellState.Materialized M) : Patch layout :=
+  bookPatch pre.logical (operation.apply (logicalBook pre.logical))
 
-/-- The derived patch always passes the structural cell validator. -/
-theorem Operation.validated_nonempty
-    {M : CellState.Materializer schema Digest}
+/-- The derived patch, quoted against the pre-cell's own root, is validated. -/
+theorem Operation.validated
+    {M : CellState.Materializer layout Digest}
     (operation : Operation) (pre : CellState.Materialized M) :
-    Nonempty (CellState.ValidatedPatch M pre (operation.patch pre)) := by
-  have accepted :
-      ∃ validated : CellState.ValidatedPatch M pre (operation.patch pre),
-        CellState.validate M pre (operation.patch pre) =
-          .accepted validated := by
-    unfold CellState.validate
-    rw [dif_pos (show (operation.patch pre).expectedPreRoot = pre.root from rfl)]
-    rw [dif_pos (show (operation.patch pre).fieldFootprint =
-      (operation.patch pre).namedFields by
-        simp [Operation.patch, CellState.Patch.namedFields])]
-    rw [dif_pos (show (operation.patch pre).resourceFootprint =
-      (operation.patch pre).namedResources by
-        simp [Operation.patch, CellState.Patch.namedResources])]
-    exact ⟨_, rfl⟩
-  exact ⟨accepted.choose⟩
-
-/-- Canonical selection of the verifier-minted proof produced above. -/
-noncomputable def Operation.validated
-    {M : CellState.Materializer schema Digest}
-    (operation : Operation) (pre : CellState.Materialized M) :
-    CellState.ValidatedPatch M pre (operation.patch pre) :=
-  Classical.choice (operation.validated_nonempty pre)
+    CellState.ValidatedPatch M pre pre.root (operation.patch pre) := by
+  obtain ⟨validated, _⟩ := CellState.validate_accepts M pre pre.root
+    (operation.patch pre) rfl (bookPatch_valid _ _)
+  exact validated
 
 /-- The accepted resource token joins policy to the one derived typed patch.
 It does not claim a database transaction or an external lease clock advanced. -/
 structure Accepted
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     (pre : CellState.Materialized M) (operation : Operation) : Prop where
   admission : Admission (logicalBook pre.logical) operation
-  validated : CellState.ValidatedPatch M pre (operation.patch pre)
+  validated : CellState.ValidatedPatch M pre pre.root (operation.patch pre)
 
 /-- Once policy admission is proved, no host-supplied post data remains. -/
-noncomputable def Accepted.ofAdmission
-    {M : CellState.Materializer schema Digest}
+theorem Accepted.ofAdmission
+    {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {operation : Operation}
     (admission : Admission (logicalBook pre.logical) operation) :
     Accepted pre operation :=
   ⟨admission, operation.validated pre⟩
 
 def Accepted.post
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {operation : Operation}
     (accepted : Accepted pre operation) : CellState.Materialized M :=
   accepted.validated.apply
 
 /-- Applying the accepted typed patch installs exactly `Operation.apply`. -/
 @[simp] theorem Accepted.post_logicalBook
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {operation : Operation}
-  (accepted : Accepted pre operation) :
-    logicalBook accepted.post.logical = operation.apply (logicalBook pre.logical) := by
-  simp [Accepted.post, logicalBook, CellState.ValidatedPatch.apply,
-    CellState.materialize, Operation.patch, CellState.applyFieldWrites,
-    CellState.applyResourceWrites, CellState.FieldStore.read,
-    CellState.FieldStore.assign]
+    (accepted : Accepted pre operation) :
+    logicalBook accepted.post.logical = operation.apply (logicalBook pre.logical) :=
+  logicalBook_run_bookPatch _ _
 
 /-- The accepted canonical post conserves every asset. -/
 theorem Accepted.conserves
-    {M : CellState.Materializer schema Digest}
+    {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {operation : Operation}
     (accepted : Accepted pre operation) (asset : AssetId) :
     (logicalBook accepted.post.logical).totalAsset asset =
@@ -505,50 +504,37 @@ theorem Batch.run_accepts_iff (batch : Batch) (book post : Book) :
   unfold Batch.run
   split_ifs with admitted <;> simp [admitted, eq_comm]
 
-def Batch.patch {M : CellState.Materializer schema Digest}
-    (batch : Batch) (pre : CellState.Materialized M) : CellState.Patch schema Digest where
-  expectedPreRoot := pre.root
-  fieldFootprint := {.book}
-  resourceFootprint := ∅
-  fieldWrites := [{ field := .book, value := some (batch.apply (logicalBook pre.logical)) }]
-  resourceWrites := []
+def Batch.patch {M : CellState.Materializer layout Digest}
+    (batch : Batch) (pre : CellState.Materialized M) : Patch layout :=
+  bookPatch pre.logical (batch.apply (logicalBook pre.logical))
 
-theorem Batch.validated_nonempty {M : CellState.Materializer schema Digest}
+theorem Batch.validated {M : CellState.Materializer layout Digest}
     (batch : Batch) (pre : CellState.Materialized M) :
-    Nonempty (CellState.ValidatedPatch M pre (batch.patch pre)) := by
-  have accepted : ∃ validated : CellState.ValidatedPatch M pre (batch.patch pre),
-      CellState.validate M pre (batch.patch pre) = .accepted validated := by
-    unfold CellState.validate
-    rw [dif_pos (show (batch.patch pre).expectedPreRoot = pre.root from rfl)]
-    rw [dif_pos (show (batch.patch pre).fieldFootprint = (batch.patch pre).namedFields by
-      simp [Batch.patch, CellState.Patch.namedFields])]
-    rw [dif_pos (show (batch.patch pre).resourceFootprint = (batch.patch pre).namedResources by
-      simp [Batch.patch, CellState.Patch.namedResources])]
-    exact ⟨_, rfl⟩
-  exact ⟨accepted.choose⟩
+    CellState.ValidatedPatch M pre pre.root (batch.patch pre) := by
+  obtain ⟨validated, _⟩ := CellState.validate_accepts M pre pre.root
+    (batch.patch pre) rfl (bookPatch_valid _ _)
+  exact validated
 
-structure AcceptedBatch {M : CellState.Materializer schema Digest}
+structure AcceptedBatch {M : CellState.Materializer layout Digest}
     (pre : CellState.Materialized M) (batch : Batch) : Prop where
   admission : batch.Admission (logicalBook pre.logical)
-  validated : CellState.ValidatedPatch M pre (batch.patch pre)
+  validated : CellState.ValidatedPatch M pre pre.root (batch.patch pre)
 
-def AcceptedBatch.ofAdmission {M : CellState.Materializer schema Digest}
+theorem AcceptedBatch.ofAdmission {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {batch : Batch}
     (admission : batch.Admission (logicalBook pre.logical)) : AcceptedBatch pre batch :=
-  ⟨admission, Classical.choice (batch.validated_nonempty pre)⟩
+  ⟨admission, batch.validated pre⟩
 
-def AcceptedBatch.post {M : CellState.Materializer schema Digest}
+def AcceptedBatch.post {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {batch : Batch}
     (accepted : AcceptedBatch pre batch) : CellState.Materialized M := accepted.validated.apply
 
-@[simp] theorem AcceptedBatch.post_logicalBook {M : CellState.Materializer schema Digest}
+@[simp] theorem AcceptedBatch.post_logicalBook {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {batch : Batch} (accepted : AcceptedBatch pre batch) :
-    logicalBook accepted.post.logical = batch.apply (logicalBook pre.logical) := by
-  simp [AcceptedBatch.post, logicalBook, CellState.ValidatedPatch.apply,
-    CellState.materialize, Batch.patch, CellState.applyFieldWrites,
-    CellState.applyResourceWrites, CellState.FieldStore.read, CellState.FieldStore.assign]
+    logicalBook accepted.post.logical = batch.apply (logicalBook pre.logical) :=
+  logicalBook_run_bookPatch _ _
 
-theorem AcceptedBatch.conserves {M : CellState.Materializer schema Digest}
+theorem AcceptedBatch.conserves {M : CellState.Materializer layout Digest}
     {pre : CellState.Materialized M} {batch : Batch}
     (accepted : AcceptedBatch pre batch) (asset : AssetId) :
     (logicalBook accepted.post.logical).totalAsset asset =
@@ -651,9 +637,20 @@ def witnessBook : Book where
       DFinsupp.single (2, 0) 3
   leaseRecords := 0
 
-def witnessLogical : CellState.LogicalState schema where
-  fields := (0 : CellState.FieldStore schema).write .book witnessBook
-  resources := fun resource => nomatch resource
+def witnessLogical : Store layout :=
+  (0 : Store layout).set bookAddress (some witnessBook)
+
+/-- The guard of the book patch has teeth: a patch read at the empty store
+allocates, and is refused at a store that already holds a book. -/
+theorem stale_bookPatch_refused :
+    ¬ Patch.ValidFrom witnessLogical (bookPatch 0 witnessBook) := by
+  decide
+
+/-- The same post, read at the store it runs against, is enabled there. -/
+theorem fresh_bookPatch_valid :
+    witnessLogical bookAddress = some witnessBook ∧
+      Patch.ValidFrom witnessLogical (bookPatch witnessLogical witnessBook) := by
+  decide
 
 def witnessMintAdmission :
     Admission witnessBook (.mint 0 1 2) where
@@ -736,8 +733,8 @@ example :
 
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.Operation.apply_conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Operation.apply_conserves
-/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Operation.validated_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Operation.validated_nonempty
+/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Operation.validated' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Operation.validated
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.Accepted.conserves' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Accepted.conserves
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.Book.creditOnly_breaks_conservation' depends on axioms: [propext, Classical.choice, Quot.sound] -/
