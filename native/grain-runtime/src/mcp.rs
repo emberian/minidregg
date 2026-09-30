@@ -302,6 +302,15 @@ fn tools_for_catalog(catalog: &ToolCatalog) -> Value {
             json!({"name":"mini_workspace_recover",
                 "description":"Read-only exact lookup of a retained workspace submission by controller operation ID. This never resubmits an effect.",
                 "inputSchema":{"type":"object","properties":{"operationId":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"required":["operationId"],"additionalProperties":false}}),
+            json!({"name":"mini_workspace_attempts",
+                "description":"List this grain's workspace submissions and how each ended: performed, refused or uncertain, with the evidence basis. A pending entry is still being recovered. Read-only; current state needs a signed read.",
+                "inputSchema":{"type":"object","properties":{"operationId":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"additionalProperties":false}}),
+            json!({"name":"mini_workspace_import_reference",
+                "description":"Store a recipient reference that another participant published for this grain under a local name. The reference is a hint: the client checks it names this grain and carries a confirmed receipt, and every later read or write still faces current Mini admission.",
+                "inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},"reference":{"type":"object","description":"minidregg-delegated-reference-v1 document"}},"required":["name","reference"],"additionalProperties":false}}),
+            json!({"name":"mini_workspace_export_reference",
+                "description":"Return the recipient reference for a delegation this grain proposed and whose submission resolved performed, so it can be handed to the recipient. Read-only exact historical lookup; grants nothing by itself.",
+                "inputSchema":{"type":"object","properties":{"proposalId":{"type":"string","pattern":"^[0-9]+$","maxLength":20}},"required":["proposalId"],"additionalProperties":false}}),
         ]);
     }
     if catalog.resource_workspace_create {
@@ -573,6 +582,9 @@ mod tests {
             "mini_workspace_propose",
             "mini_workspace_submit",
             "mini_workspace_recover",
+            "mini_workspace_attempts",
+            "mini_workspace_import_reference",
+            "mini_workspace_export_reference",
         ] {
             assert!(present["tools"]
                 .as_array()
