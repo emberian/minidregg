@@ -1,0 +1,1 @@
+any [ subject == {GM}, not (verb == 2) ]

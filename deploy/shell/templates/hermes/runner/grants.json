@@ -1,0 +1,18 @@
+{
+  "type": "mini-hermes-role-grants-v1",
+  "role": "runner",
+  "placeholders": {
+    "{ROOM}": "the room name given to summon",
+    "{H}": "Hermes's subject, decimal, from enroll-or-reuse",
+    "{OUT}": "each output cell named in the program's Outputs line",
+    "{IN}": "each input cell named in the program's Inputs line"
+  },
+  "delegate": [],
+  "delegateEach": [
+    {"over": "outputs",
+     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{OUT}","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}},
+    {"over": "inputs",
+     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{IN}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}}
+  ],
+  "own": ["{ROOM}-stream-{H}"]
+}
