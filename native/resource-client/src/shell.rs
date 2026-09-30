@@ -590,11 +590,7 @@ fn outcome_line(outcome: &Value) -> (i32, String) {
     match outcome.get("type").and_then(Value::as_str) {
         Some("refused") => (
             EXIT_REFUSED,
-            format!(
-                "refused: phase {} detail {}",
-                hex_text(outcome.get("phase")),
-                hex_text(outcome.get("detail"))
-            ),
+            super::refusal_line(outcome).unwrap_or_else(|| "refused: unnamed".into()),
         ),
         Some(kind @ ("uncertain" | "unavailable")) => (
             EXIT_UNDECIDED,
@@ -630,7 +626,7 @@ pub(crate) fn render(ending: &Ending) -> (i32, String) {
                     text.push_str(&format!("  outcome: {outcome}\n"));
                     code
                 }
-                HostDecision::RefusedFrame { command, byte, encoded } => {
+                HostDecision::RefusedFrame { command, byte, encoded, .. } => {
                     match decoded {
                         Some(Ok(outcome)) => {
                             let (_, line) = outcome_line(outcome);
@@ -1342,18 +1338,19 @@ mod tests {
 
     #[test]
     fn host_refusal_renders_decoded_verbatim_and_exits_three() {
-        let decoded = json!({"type":"refused","phase":super::super::hex(b"observation"),
-            "detail":super::super::hex(b"observation refused")});
+        let decoded = json!({"type":"refused","reason":"no-grant",
+            "phase":super::super::hex(b"observation"),
+            "detail":super::super::hex(b"this key holds no grant covering this target and operation")});
         let ending = Ending::Host {
             client: "host refused query; encoded refusal: 4452".into(),
-            decision: HostDecision::RefusedFrame { command: "query".into(), byte: 255, encoded: vec![0x44, 0x52] },
+            decision: HostDecision::RefusedFrame { command: "query".into(), byte: 255, encoded: vec![0x44, 0x52], decoded: None },
             decoded: Some(Ok(decoded)),
             evidence: Some(PathBuf::from("/h/refusals/r.bin")),
         };
         let (code, text) = render(&ending);
         assert_eq!(code, EXIT_REFUSED);
         assert!(text.starts_with(
-            "refused: phase \"observation\" detail \"observation refused\" (Host refused query, reply byte 255)\n"
+            "refused: no-grant: this key holds no grant covering this target and operation (phase observation) (Host refused query, reply byte 255)\n"
         ), "{text}");
         assert!(text.contains("  encoded: 4452\n"));
         assert!(text.contains("  evidence: /h/refusals/r.bin\n"));
@@ -1364,7 +1361,7 @@ mod tests {
     fn undecodable_refusal_is_still_a_refusal_with_its_bytes() {
         let ending = Ending::Host {
             client: "enrollment Host refused op87; exact frame retained".into(),
-            decision: HostDecision::RefusedFrame { command: "enrollment op87".into(), byte: 254, encoded: vec![1] },
+            decision: HostDecision::RefusedFrame { command: "enrollment op87".into(), byte: 254, encoded: vec![1], decoded: None },
             decoded: Some(Err("bad frame".into())),
             evidence: None,
         };
@@ -1378,13 +1375,13 @@ mod tests {
     fn receiver_outcomes_are_classified_by_type_not_prose() {
         let refused = Ending::Host {
             client: "host returned refused; exact outcome evidence was retained".into(),
-            decision: HostDecision::Outcome(json!({"type":"refused","phase":"6162","detail":"ff00"})),
+            decision: HostDecision::Outcome(json!({"type":"refused","reason":"law-denied","phase":"6162","detail":"ff00"})),
             decoded: None,
             evidence: None,
         };
         let (code, text) = render(&refused);
         assert_eq!(code, EXIT_REFUSED);
-        assert!(text.starts_with("refused: phase \"ab\" detail hex ff00\n"), "{text}");
+        assert!(text.starts_with("refused: law-denied: hex ff00 (phase ab)\n"), "{text}");
         let uncertain = Ending::Host {
             client: "host returned uncertain; exact outcome evidence was retained".into(),
             decision: HostDecision::Outcome(json!({"type":"uncertain","detail":"78"})),

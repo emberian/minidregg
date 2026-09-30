@@ -328,7 +328,8 @@ def installed (label : String) : Outcome → IO Receipt
   | .confirmed .installed receipt => do
       IO.println s!"PASS installed event {receipt.acceptedCount}: {label}"
       pure receipt
-  | .refused phase detail => throw (IO.userError s!"FAIL {label}: {phase} {detail}")
+  | .refused reason phase detail =>
+      throw (IO.userError s!"FAIL {label}: {reason.name} {phase} {detail}")
   | _ => throw (IO.userError s!"FAIL {label}: not installed")
 
 def replayed (label : String) (original : Receipt) : Outcome → IO Unit
@@ -360,8 +361,8 @@ def committedWithoutReply (client : Client) (call : System.FilePath) : IO Receip
   pure receipt
 
 def rejected (label : String) : Outcome → IO Unit
-  | .refused phase detail =>
-      IO.println s!"PASS refusal: {label}; canonical outcome {repr (outcomeCodec.encode (.refused phase detail))}"
+  | .refused reason phase detail =>
+      IO.println s!"PASS refusal: {label} ({reason.name}); canonical outcome {repr (outcomeCodec.encode (.refused reason phase detail))}"
   | _ => throw (IO.userError s!"FAIL {label}: did not refuse")
 
 def invocation (client : Client) (custody : Custody) (capability : CapabilityId)

@@ -240,12 +240,15 @@ Messages (`Compiler/NativeHostCodec.lean`, `Compiler/NativeObservationCodec.lean
 * `DREGG/NATIVE-HOST/SIGNING-PLAN/v3` — domain digest, semantics digest, image
   boundary digest, height nat, finalized draft, list of slots (role nat, index
   nat, canonical header bytes). The client signs each header with Ed25519.
-* `DREGG/NATIVE-HOST/OUTCOME/v1` — sum of: confirmed(confirmation, receipt) |
-  refused(phase bytes, detail bytes) | contention | absent | unavailable(detail) |
+* `DREGG/NATIVE-HOST/OUTCOME/v2` — sum of: confirmed(confirmation, receipt) |
+  refused(reason byte, phase bytes, detail bytes) | contention | absent | unavailable(detail) |
   uncertain(detail). Confirmation is installed / recoveredAfterUncertainResponse /
   replayed. Receipt is transaction id, event id, accepted count, image boundary
   (all digests/nats). The accepted count counts entries through that
-  transaction, not the current tip.
+  transaction, not the current tip. The reason is one byte of the closed
+  `RefusalReason` (`Compiler/RefusalReason.lean`); a v1 frame is refused, never
+  reinterpreted. On a Host refusal `mini` prints `refused: <reason>: <text>` and
+  exits 3.
 * `DREGG/NATIVE-HOST/OBSERVE-INTENT/v3` — subject, nonce, purpose (query(kind,
   target, view: resource | policy | capability) or prepare(draft)), list of
   grants (kind, target, capability).

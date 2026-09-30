@@ -10,6 +10,7 @@ import Kernel.PolicyInstallReceiver
 import Kernel.ResourceBirthReceiver
 import Kernel.CapabilityDelegationReceiver
 import Kernel.CapabilityRevocationReceiver
+import Compiler.RefusalReason
 
 namespace Minidregg.Compiler.NativeHostCodec
 
@@ -193,22 +194,23 @@ def confirmationStream : StreamCodec DurableReceiverIO.Confirmation :=
       | .inr _ => .replayed)
     (by intro value; cases value <;> rfl)
 
-/-- Refusal payload is a stable source-selected phase plus a diagnostic. It
-does not contain internal snapshots, journals, capability records or intents. -/
+/-- Refusal payload is a named reason from the closed `RefusalReason` set, a
+stable source-selected phase and a diagnostic. It does not contain internal
+snapshots, journals, capability records or intents. -/
 inductive Outcome where
   | confirmed (kind : DurableReceiverIO.Confirmation) (receipt : Receipt)
-  | refused (phase : List UInt8) (detail : List UInt8)
+  | refused (reason : RefusalReason) (phase : List UInt8) (detail : List UInt8)
   | contention
   | unavailable (detail : List UInt8)
   | uncertain (detail : List UInt8)
   | absent
 
 abbrev OutcomeWire := Sum (DurableReceiverIO.Confirmation × Receipt)
-  (Sum (List UInt8 × List UInt8) (Sum Bool (Sum (List UInt8) (List UInt8))))
+  (Sum (RefusalReason × List UInt8 × List UInt8) (Sum Bool (Sum (List UInt8) (List UInt8))))
 
 def Outcome.toWire : Outcome → OutcomeWire
   | .confirmed kind receipt => .inl (kind, receipt)
-  | .refused phase detail => .inr (.inl (phase, detail))
+  | .refused reason phase detail => .inr (.inl (reason, phase, detail))
   | .contention => .inr (.inr (.inl false))
   | .absent => .inr (.inr (.inl true))
   | .unavailable detail => .inr (.inr (.inr (.inl detail)))
@@ -216,7 +218,7 @@ def Outcome.toWire : Outcome → OutcomeWire
 
 def Outcome.ofWire : OutcomeWire → Outcome
   | .inl (kind, receipt) => .confirmed kind receipt
-  | .inr (.inl (phase, detail)) => .refused phase detail
+  | .inr (.inl (reason, phase, detail)) => .refused reason phase detail
   | .inr (.inr (.inl false)) => .contention
   | .inr (.inr (.inl true)) => .absent
   | .inr (.inr (.inr (.inl detail))) => .unavailable detail
@@ -225,12 +227,15 @@ def Outcome.ofWire : OutcomeWire → Outcome
 def outcomeStream : StreamCodec Outcome :=
   StreamCodec.xmap
     (StreamCodec.sum (StreamCodec.product confirmationStream receiptStream)
-      (StreamCodec.sum (StreamCodec.product bytesStream bytesStream)
+      (StreamCodec.sum (StreamCodec.product RefusalReason.stream
+          (StreamCodec.product bytesStream bytesStream))
         (StreamCodec.sum StreamCodec.bool (StreamCodec.sum bytesStream bytesStream))))
     Outcome.toWire Outcome.ofWire (by intro value; cases value <;> rfl)
 
+/-- v2 adds the refusal reason. A v1 frame is refused, never reinterpreted
+(`outcome_v1_refused`). -/
 def outcomeCodec : LawfulCodec Outcome :=
-  framed "DREGG/NATIVE-HOST/OUTCOME/v1".toUTF8.toList outcomeStream
+  framed "DREGG/NATIVE-HOST/OUTCOME/v2".toUTF8.toList outcomeStream
 
 @[simp] theorem call_roundtrip (value : SignedCall) :
     callCodec.decode (callCodec.encode value) = some value := callCodec.decode_encode value
@@ -250,8 +255,39 @@ theorem plan_canonical {bytes : List UInt8} {value : SigningPlan}
     (decoded : signingPlanCodec.decode bytes = some value) : signingPlanCodec.encode value = bytes :=
   framed_canonical _ _ decoded
 
+/-- A framed codec refuses bytes that do not begin with its own frame. -/
+theorem framed_other_frame_refused {α : Type} (frame : List UInt8) (stream : StreamCodec α)
+    (bytes : List UInt8) (other : bytes.take frame.length ≠ frame) :
+    (framed frame stream).decode bytes = none := by
+  simp [framed, ResourceBirthCodec.strictCodec, framedRaw, other]
+
+def outcomeFrameV1 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v1".toUTF8.toList
+def outcomeFrameV2 : List UInt8 := "DREGG/NATIVE-HOST/OUTCOME/v2".toUTF8.toList
+
+theorem outcome_frame_lengths_equal_compiled : outcomeFrameV2.length = outcomeFrameV1.length := by
+  native_decide
+
+theorem outcome_frames_distinct_compiled : outcomeFrameV1 ≠ outcomeFrameV2 := by
+  native_decide
+
+/-- Every v1 outcome frame, whatever its payload, is refused by the v2 codec;
+it is never reinterpreted. -/
+theorem outcome_v1_refused (payload : List UInt8) :
+    outcomeCodec.decode (outcomeFrameV1 ++ payload) = none := by
+  apply framed_other_frame_refused
+  change (outcomeFrameV1 ++ payload).take outcomeFrameV2.length ≠ outcomeFrameV2
+  rw [outcome_frame_lengths_equal_compiled, List.take_left]
+  exact outcome_frames_distinct_compiled
+
+/-- A refusal frame names its reason: distinct reasons give distinct frames. -/
+theorem outcome_refusal_reason_decoded (reason : RefusalReason) (phase detail : List UInt8) :
+    outcomeCodec.decode (outcomeCodec.encode (.refused reason phase detail)) =
+      some (.refused reason phase detail) := outcomeCodec.decode_encode _
+
 theorem outcome_canonical {bytes : List UInt8} {value : Outcome}
     (decoded : outcomeCodec.decode bytes = some value) : outcomeCodec.encode value = bytes :=
   framed_canonical _ _ decoded
 
 end Minidregg.Compiler.NativeHostCodec
+
+#print axioms Minidregg.Compiler.NativeHostCodec.outcome_v1_refused

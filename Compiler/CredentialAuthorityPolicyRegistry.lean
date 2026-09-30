@@ -18,6 +18,7 @@ import Compiler.PolicyRecordCodec
 import Compiler.CredentialSignatureAdmission
 import Theory.CredentialLineageAdmission
 import Kernel.CanonicalPolicyRegistry
+import Compiler.RefusalReason
 
 namespace Minidregg.Compiler.CredentialAuthorityPolicyRegistry
 
@@ -450,10 +451,23 @@ def config {F : Type} [Field F] [DecidableEq F]
   stepBinding := .canonical step
   compilerProfile := profile
 
+/-- The evidence names exactly the stored capability at the caller's identifier.
+Named so that the checked constructor's result type does not mention its own
+lookup syntactically. -/
+def NamesStored {portal : Portal} {state : AuthState} {kind : ResourceKind} {request : Request kind}
+    (snapshot : Snapshot) (identifier : CapabilityId) (evidence : Evidence portal state request) : Prop :=
+  ∃ stored, readCapability snapshot.cell kind identifier = some stored ∧
+    evidence.capabilityValue = some (stored.head, storedCapabilityDigest snapshot stored)
+
 /-- Execute the existing semantic capability decider and every mandatory
 portal check against the exact old snapshot. The returned evidence is already
 for the canonical policy portal, so an upper controller cannot replace it by
-an unrelated signature-mode token while claiming capability invocation. -/
+an unrelated signature-mode token while claiming capability invocation.
+
+Each refusing branch names its reason. Absence, a failed native use and every
+holder/scope failure are `noGrant`, and they are decided before any other
+component, so only the capability's own holder can learn that it is revoked,
+outside its window or stale (`RefusalReason.capabilityRefusal`). -/
 private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
     (profile : PolicyCompilerProfile F)
     (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
@@ -461,17 +475,22 @@ private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
     (commitmentWitness : base.CapabilityCommitmentWitness)
     (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
     (revocationWitness : RevocationKey → base.NonRevocationWitness) :
-    Option { evidence : Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request //
-      ∃ stored, readCapability snapshot.cell kind identifier = some stored ∧
-        evidence.capabilityValue = some (stored.head, storedCapabilityDigest snapshot stored) } :=
-  match readCapability snapshot.cell kind identifier with
-  | none => none
+    Except RefusalReason
+      { evidence : Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request //
+        NamesStored snapshot identifier evidence } :=
+  match found : readCapability snapshot.cell kind identifier with
+  | none => .error .noGrant
   | some stored =>
     let capability := stored.head
     let commitment := storedCapabilityDigest snapshot stored
     let portal := (config (F := F) profile snapshot store base step).portal
-    if semantic : AuthorizationDeclaration.capabilityAdmissibleCheck capability snapshot.authState request = true then
-      if used : portal.verifyCapabilityUse request capability commitment useWitness = true then
+    if used : portal.verifyCapabilityUse request capability commitment useWitness = true then
+      match refusal : RefusalReason.capabilityRefusal capability snapshot.authState request with
+      | some reason => .error reason
+      | none =>
+        have semantic : AuthorizationDeclaration.capabilityAdmissibleCheck capability
+            snapshot.authState request = true :=
+          (RefusalReason.capabilityRefusal_eq_none_iff capability snapshot.authState request).mp refusal
         if committed : portal.verifyCapabilityCommitment capability commitment commitmentWitness = true then
           if member : portal.verifyMembership snapshot.authState.capabilityRoot commitment
               (.capability kind capability.id) = true then
@@ -484,7 +503,7 @@ private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
                   if channels : ∀ channel ∈ capability.channels,
                       portal.verifyNonRevocation snapshot.authState.revocationRoot (.channel channel)
                         (revocationWitness (.channel channel)) = true then
-                    some ⟨(.capability capability commitment commitmentWitness
+                    .ok ⟨(.capability capability commitment commitmentWitness
                       (.capability kind capability.id) issuerWitness
                       (revocationWitness (.capability capability.id)) useWitness
                       ((AuthorizationDeclaration.capabilityAdmissibleCheck_eq_true_iff
@@ -492,15 +511,14 @@ private def capabilityEvidenceChecked {F : Type} [Field F] [DecidableEq F]
                       used committed member issuer self
                       (fun identifier member => ⟨revocationWitness (.capability identifier), ancestors identifier member⟩)
                       (fun channel member => ⟨revocationWitness (.channel channel), channels channel member⟩)),
-                      ⟨stored, rfl, rfl⟩⟩
-                  else none
-                else none
-              else none
-            else none
-          else none
-        else none
-      else none
-    else none
+                      Exists.intro stored (And.intro found rfl)⟩
+                  else .error .revoked
+                else .error .revoked
+              else .error .revoked
+            else .error .staleGrant
+          else .error .noGrant
+        else .error .noGrant
+    else .error .noGrant
 
 /-- The single receiving constructor projects evidence from the checked source
 result. Its erased proof records the exact parent lookup at the construction
@@ -515,7 +533,122 @@ def capabilityEvidence {F : Type} [Field F] [DecidableEq F]
     (revocationWitness : RevocationKey → base.NonRevocationWitness) :
     Option (Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request) :=
   (capabilityEvidenceChecked profile snapshot store base step request identifier
+    commitmentWitness useWitness issuerWitness revocationWitness).toOption.map Subtype.val
+
+/-- The same decision with the refusing branch named. `capabilityEvidence` is
+its projection (`capabilityEvidenceRefusal_toOption`), not a second decider. -/
+def capabilityEvidenceRefusal {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness) :
+    Except RefusalReason
+      (Evidence (config (F := F) profile snapshot store base step).portal snapshot.authState request) :=
+  (capabilityEvidenceChecked profile snapshot store base step request identifier
     commitmentWitness useWitness issuerWitness revocationWitness).map Subtype.val
+
+theorem capabilityEvidenceRefusal_toOption {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness) :
+    (capabilityEvidenceRefusal profile snapshot store base step request identifier
+      commitmentWitness useWitness issuerWitness revocationWitness).toOption =
+    capabilityEvidence profile snapshot store base step request identifier
+      commitmentWitness useWitness issuerWitness revocationWitness := by
+  unfold capabilityEvidenceRefusal capabilityEvidence
+  cases capabilityEvidenceChecked profile snapshot store base step request identifier
+    commitmentWitness useWitness issuerWitness revocationWitness <;> rfl
+
+private theorem capabilityEvidenceChecked_absent {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness)
+    (absent : readCapability snapshot.cell kind identifier = none) :
+    capabilityEvidenceChecked profile snapshot store base step request identifier
+      commitmentWitness useWitness issuerWitness revocationWitness = .error .noGrant := by
+  unfold capabilityEvidenceChecked
+  split
+  · rfl
+  · rename_i stored found
+    rw [absent] at found
+    cases found
+
+private theorem capabilityEvidenceChecked_semantic {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness)
+    (stored : StoredCapability kind) (reason : RefusalReason)
+    (present : readCapability snapshot.cell kind identifier = some stored)
+    (used : (config (F := F) profile snapshot store base step).portal.verifyCapabilityUse request
+      stored.head (storedCapabilityDigest snapshot stored) useWitness = true)
+    (refused : RefusalReason.capabilityRefusal stored.head snapshot.authState request = some reason) :
+    capabilityEvidenceChecked profile snapshot store base step request identifier
+      commitmentWitness useWitness issuerWitness revocationWitness = .error reason := by
+  unfold capabilityEvidenceChecked
+  split
+  · rename_i found
+    rw [present] at found
+    cases found
+  · rename_i stored' found
+    rw [present] at found
+    cases found
+    dsimp only
+    rw [dif_pos used]
+    split
+    · rename_i named decided
+      rw [refused] at decided
+      cases decided
+      rfl
+    · rename_i decided
+      rw [refused] at decided
+      cases decided
+
+/-- An absent capability is refused as `noGrant`. -/
+theorem capabilityEvidenceRefusal_absent {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness)
+    (absent : readCapability snapshot.cell kind identifier = none) :
+    capabilityEvidenceRefusal profile snapshot store base step request identifier
+      commitmentWitness useWitness issuerWitness revocationWitness = .error .noGrant := by
+  rw [capabilityEvidenceRefusal, capabilityEvidenceChecked_absent profile snapshot store base step
+    request identifier commitmentWitness useWitness issuerWitness revocationWitness absent]
+  rfl
+
+/-- A present capability whose semantic component fails is refused under that
+component's reason, after native use and before any portal opening. -/
+theorem capabilityEvidenceRefusal_semantic {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (base : Portal) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (commitmentWitness : base.CapabilityCommitmentWitness)
+    (useWitness : base.CapabilityUseWitness) (issuerWitness : base.IssuerWitness)
+    (revocationWitness : RevocationKey → base.NonRevocationWitness)
+    (stored : StoredCapability kind) (reason : RefusalReason)
+    (present : readCapability snapshot.cell kind identifier = some stored)
+    (used : (config (F := F) profile snapshot store base step).portal.verifyCapabilityUse request
+      stored.head (storedCapabilityDigest snapshot stored) useWitness = true)
+    (refused : RefusalReason.capabilityRefusal stored.head snapshot.authState request = some reason) :
+    capabilityEvidenceRefusal profile snapshot store base step request identifier
+      commitmentWitness useWitness issuerWitness revocationWitness = .error reason := by
+  rw [capabilityEvidenceRefusal, capabilityEvidenceChecked_semantic profile snapshot store base step
+    request identifier commitmentWitness useWitness issuerWitness revocationWitness stored reason
+    present used refused]
+  rfl
 
 /-- Success preserves the exact storage lookup at the caller's identifier and
 returns that stored head with its complete source-owned lineage commitment.
@@ -561,6 +694,28 @@ def sourceCapabilityOnlyEvidence {F : Type} [Field F] [DecidableEq F]
       (sourceCapabilityPortal snapshot expectedNullifier) step).portal snapshot.authState request) :=
   capabilityEvidence profile snapshot store (sourceCapabilityPortal snapshot expectedNullifier) step
     request identifier () receipt () (fun _ => ())
+
+/-- `sourceCapabilityOnlyEvidence` with the refusing branch named. -/
+def sourceCapabilityOnlyEvidenceChecked {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
+    Except RefusalReason (Evidence (config (F := F) profile snapshot store
+      (sourceCapabilityPortal snapshot expectedNullifier) step).portal snapshot.authState request) :=
+  capabilityEvidenceRefusal profile snapshot store (sourceCapabilityPortal snapshot expectedNullifier) step
+    request identifier () receipt () (fun _ => ())
+
+theorem sourceCapabilityOnlyEvidenceChecked_toOption {F : Type} [Field F] [DecidableEq F]
+    (profile : PolicyCompilerProfile F)
+    (snapshot : Snapshot) (store : PayloadStore) (expectedNullifier : Nat) (step : PolicyStepContext)
+    {kind : ResourceKind} (request : Request kind) (identifier : CapabilityId)
+    (receipt : CredentialSignatureAdmission.CheckedSignature snapshot) :
+    (sourceCapabilityOnlyEvidenceChecked profile snapshot store expectedNullifier step
+      request identifier receipt).toOption =
+    sourceCapabilityOnlyEvidence profile snapshot store expectedNullifier step request identifier receipt :=
+  capabilityEvidenceRefusal_toOption profile snapshot store
+    (sourceCapabilityPortal snapshot expectedNullifier) step request identifier () receipt () (fun _ => ())
 
 /-- The native capability-only helper names exactly the requested parent
 record. Invocation authentication remains the current holder's checked receipt. -/

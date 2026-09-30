@@ -1,0 +1,3 @@
+--- cleanup
+--- processes naming the run directory after cleanup:
+3277793 bash src/docs/evidence/2026-09-30-refusal-reasons/refusal-reasons.sh /home/ember/build/mini-product-20260930/mr-refusals/bin/minidregg-host-mr-r1 /home/ember/build/mini-product-20260930/mr-refusals/bin/mini-mr-r1 /home/ember/build/mini-product-20260930/mr-refusals/bin/mini-mr-r1 /home/ember/build/bakeoff-20260929/helpers-durable-copy/minidregg-link-sqlite-store /home/ember/build/bakeoff-20260929/helpers-durable-copy/minidregg-credential-signature-verifier /home/ember/build/mini-product-20260930/mr-refusals/run/refusals-3 22437

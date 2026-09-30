@@ -100,6 +100,7 @@ pub(crate) fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
                 command: format!("enrollment op{operation}"),
                 byte: *byte,
                 encoded: encoded.to_vec(),
+                decoded: None,
             });
             Err(format!(
                 "enrollment Host refused op{operation}; exact frame retained"

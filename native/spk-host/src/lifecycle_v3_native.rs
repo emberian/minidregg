@@ -484,7 +484,7 @@ pub(crate) fn submit_once(
     )?;
     let reply = operator.invoke(22, &ingress)?;
     write_new(attempt_dir, "op22-frame.bin", &reply)?;
-    let outcome = framed_payload(&reply, 22, b"DREGG/NATIVE-HOST/OUTCOME/v1")?;
+    let outcome = framed_payload(&reply, 22, b"DREGG/NATIVE-HOST/OUTCOME/v2")?;
     let outcome_path = write_new(attempt_dir, "op22-outcome.bin", outcome)?;
     let inspection = operator.tool(
         "inspect",

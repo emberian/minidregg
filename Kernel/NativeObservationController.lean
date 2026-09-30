@@ -51,19 +51,43 @@ theorem loadedImageBoundary_exact (deployment : Deployment) (semantics : Digest)
       NativeHostCodec.imageBoundary deployment.domain semantics durable.image := by
   simp only [loadedImageBoundary, NativeHostCodec.imageBoundary, durable.canonical]
 
-private def refused : String := "observation refused"
+/-- What an unauthenticated requester may be told. Before its signature has
+verified, a refusal names only facts the challenge endpoint already publishes:
+whether the named subject has an enrolled key (the challenge's public
+enrollment coordinate) and whether the signed challenge's image is current
+(the image boundary is a public challenge field). Every other pre-signature
+failure -- an absent or unobservable target, a footprint that does not match
+the state-dependent required set -- is the uniform `undisclosed`. -/
+def preAuthentication (refusal : Refusal) : Refusal :=
+  match refusal.reason with
+  | .unknownKey => refusal
+  | .staleRoot => refusal
+  | _ => .of .undisclosed
+
+theorem preAuthentication_reasons (refusal : Refusal) :
+    (preAuthentication refusal).reason = .unknownKey ∨
+      (preAuthentication refusal).reason = .staleRoot ∨
+      preAuthentication refusal = .of .undisclosed := by
+  unfold preAuthentication
+  split <;> simp_all
+
+theorem preAuthentication_noGrant :
+    preAuthentication (.of .noGrant) = .of .undisclosed := rfl
+
+theorem preAuthentication_unknownKey :
+    preAuthentication (.of .unknownKey) = .of .unknownKey := rfl
 
 /-- Source contract named by the deployed profile: exact role selection,
 schema-native unchanged views, explicit observation grants for the entire
 joint target list, and the one loaded image throughout authorization. -/
 abbrev observationProjectionVersion := CanonicalRuntimeProfile.observationProjectionVersion
 
-private def need {α : Type} : Option α → Except String α
-  | none => .error refused
+private def need {α : Type} (reason : RefusalReason) : Option α → Except Refusal α
+  | none => .error (.of reason)
   | some value => .ok value
 
-private def require (condition : Bool) : Except String Unit :=
-  if condition then .ok () else .error refused
+private def require (reason : RefusalReason) (condition : Bool) : Except Refusal Unit :=
+  if condition then .ok () else .error (.of reason)
 
 abbrev observeVerb := ResourceObservationAdmission.observeVerb
 abbrev book (context : Context deployment durable) := ResourceObservationAdmission.book context
@@ -97,35 +121,35 @@ An existing account cannot be hidden merely by listing it as a proposed birth.
 All debit sources are included, even when the eventual operation would fail
 its factory fee/funding checks. Recipient credits confer no read obligation. -/
 def requiredTargets (context : Context deployment durable) (intent : Intent) :
-    Except String (List Target) := do
+    Except Refusal (List Target) := do
   match intent.purpose with
   | .query query => pure [(query.kind, query.target)]
   | .prepare (.invoke bytes) =>
-      let command ← need (DeclaredResourceController.commandCodec.decode bytes)
-      require (command.subject == intent.subject)
-      require command.targetsWellFormed
+      let command ← need .malformed (DeclaredResourceController.commandCodec.decode bytes)
+      require .malformed (command.subject == intent.subject)
+      require .malformed command.targetsWellFormed
       pure (command.targets.map fun target => (target.kind, target.target))
   | .prepare (.delegate bytes) =>
-      let command ← need (CapabilityDelegationController.commandCodec.decode bytes)
-      require (command.2.subject == intent.subject)
+      let command ← need .malformed (CapabilityDelegationController.commandCodec.decode bytes)
+      require .malformed (command.2.subject == intent.subject)
       -- Observing another grant must not expose this named parent's lineage.
-      require (intent.grants.all fun grant => grant.capability == command.2.declaration.parentId)
+      require .malformed (intent.grants.all fun grant => grant.capability == command.2.declaration.parentId)
       pure [(command.1, command.2.declaration.target.value)]
   | .prepare (.revoke bytes) =>
-      let command ← need (CapabilityRevocationController.commandCodec.decode bytes)
-      require (command.2.subject == intent.subject)
+      let command ← need .malformed (CapabilityRevocationController.commandCodec.decode bytes)
+      require .malformed (command.2.subject == intent.subject)
       -- Observing the resource is separate from exercising its management
       -- grant. The signing plan exposes no stored victim/lineage payload.
       pure [(command.1, command.2.target.value)]
   | .prepare (.install subject _ bytes) =>
-      require (subject == intent.subject)
-      let declaration ← need (PolicyInstallController.decodeDeclaration bytes)
-      let kind ← need (declaredKind context declaration.source.policyId.value)
+      require .malformed (subject == intent.subject)
+      let declaration ← need .malformed (PolicyInstallController.decodeDeclaration bytes)
+      let kind ← need .noGrant (declaredKind context declaration.source.policyId.value)
       pure [(kind, declaration.source.policyId.value)]
   | .prepare (.birth bytes _) =>
       if let some source := GrainResourceBirthHostCodec.sourceCodec.decode bytes then
-        require (source.birth.creator == intent.subject)
-        let current ← need (book context)
+        require .malformed (source.birth.creator == intent.subject)
+        let current ← need .noGrant (book context)
         let sources : List Target := source.birth.resourceBatch.operations.filterMap fun operation =>
           if operation.posting.source ∈ current.accounts then
             some (.account, operation.posting.source) else none
@@ -133,27 +157,27 @@ def requiredTargets (context : Context deployment durable) (intent : Intent) :
           [(ResourceKind.object, source.toolTask),
             (ResourceKind.object, source.parentTask)]).eraseDups
       else
-        let descriptor ← need (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
-        require (descriptor.creator == intent.subject)
-        let current ← need (book context)
+        let descriptor ← need .malformed (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
+        require .malformed (descriptor.creator == intent.subject)
+        let current ← need .noGrant (book context)
         let sources := descriptor.resourceBatch.operations.filterMap fun operation =>
           if operation.posting.source ∈ current.accounts then
             some (.account, operation.posting.source) else none
         pure ((.object, descriptor.factory.value) :: sources).eraseDups
 
-def footprintExact (context : Context deployment durable) (intent : Intent) : Except String Unit :=
+def footprintExact (context : Context deployment durable) (intent : Intent) : Except Refusal Unit :=
   match requiredTargets context intent with
   | .error reason => .error reason
   | .ok required =>
       if intent.grants.map (fun grant => (grant.kind, grant.target)) = required then .ok ()
-      else .error refused
+      else .error (.of .malformed)
 
 /-- Missing, additional, reordered or wrong-kind read selections are all
 refused before any selected values can be returned. -/
 theorem footprint_mismatch_refused (context : Context deployment durable) (intent : Intent)
     (required : List Target) (derived : requiredTargets context intent = .ok required)
     (different : intent.grants.map (fun grant => (grant.kind, grant.target)) ≠ required) :
-    footprintExact context intent = .error refused := by
+    footprintExact context intent = .error (.of .malformed) := by
   simp [footprintExact, derived, different]
 
 theorem footprint_success_exact (context : Context deployment durable) (intent : Intent)
@@ -338,17 +362,17 @@ structure CheckedGrant (context : Context deployment durable) (profile : Canonic
 private def headerAt (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (boundary : Digest)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
-    Except String CredentialSignedEnvelopeController.SignedHeader := do
-  let selected ← need (select context grant)
+    Except Refusal CredentialSignedEnvelopeController.SignedHeader := do
+  let selected ← need .noGrant (select context grant)
   (CredentialSignatureAdmission.signingHeader context.authority.snapshot
     (markerAt deployment boundary profile.semantics intent grant)
     ⟨grant.kind, requestAt context boundary profile.semantics federation genesisHeight
       intent grant selected.packed.payload.root⟩).mapError
-      (fun _ => refused)
+      (fun reason => .of (RefusalReason.ofSignature reason))
 
 def header (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent) (grant : GrantRef) :
-    Except String CredentialSignedEnvelopeController.SignedHeader :=
+    Except Refusal CredentialSignedEnvelopeController.SignedHeader :=
   headerAt context profile
     (loadedImageBoundary deployment profile.semantics durable)
     federation genesisHeight intent grant
@@ -366,7 +390,7 @@ theorem headerAt_exact (context : Context deployment durable)
 The selected public KeyRecord is reversibly encoded in the existing registry
 binding in each header; this binding is not claimed to hide enrollment data. -/
 def challenge (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
-    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except String Challenge := do
+    (federation : FederationId) (genesisHeight : Nat) (intent : Intent) : Except Refusal Challenge := do
   let boundary := loadedImageBoundary deployment profile.semantics durable
   footprintExact context intent
   let headers ← intent.grants.mapM fun grant => do
@@ -380,20 +404,24 @@ def checkGrant (native : CredentialSignatureIO.NativeConfig)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grant : GrantRef) (signature : List UInt8) :
-    IO (Except String (CheckedGrant context profile federation genesisHeight intent grant)) := do
-  let some selected := select context grant | return .error refused
+    IO (Except Refusal (CheckedGrant context profile federation genesisHeight intent grant)) := do
+  let some selected := select context grant | return .error (preAuthentication (.of .noGrant))
   let boundary := loadedImageBoundary deployment profile.semantics durable
   let wanted := requestAt context boundary profile.semantics federation genesisHeight
     intent grant selected.packed.payload.root
-  let .ok prepared := ResourceObservationAdmission.prepare context profile wanted
+  match ResourceObservationAdmission.prepare context profile wanted
       (markerAt deployment boundary profile.semantics intent grant) grant.capability
-      (intentCodec.encode intent)
-    | return .error refused
-  let .ok actualHeader := headerAt context profile boundary federation genesisHeight intent grant
-    | return .error refused
+      (intentCodec.encode intent) with
+  | .error reason => return .error (preAuthentication reason)
+  | .ok prepared =>
+  match headerAt context profile boundary federation genesisHeight intent grant with
+  | .error reason => return .error (preAuthentication reason)
+  | .ok actualHeader =>
   let envelope := CredentialSignatureAdmission.canonicalEnvelopeCodec.encode ⟨actualHeader, signature⟩
+  -- From here the refusal is the signed requester's own: its signature is
+  -- checked first, then its capability and the resource's current law.
   match ← ResourceObservationAdmission.check native prepared envelope with
-  | .error _ => return .error refused
+  | .error reason => return .error reason
   | .ok checked =>
       have selectedExact : prepared.observed.before = selected.packed := by
         have same := prepared.observed.present.symm.trans selected.present
@@ -427,37 +455,57 @@ private def checkGrants (native : CredentialSignatureIO.NativeConfig)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (intent : Intent)
     (grants : List GrantRef) (signatures : List (List UInt8)) :
-    IO (Except String ((index : Fin grants.length) →
+    IO (Except Refusal ((index : Fin grants.length) →
       CheckedGrant context profile federation genesisHeight intent (grants.get index))) := do
   match grants, signatures with
   | [], [] => return .ok (fun index => Fin.elim0 index)
   | grant :: rest, signature :: remaining =>
       match ← checkGrant native context profile federation genesisHeight intent grant signature with
-      | .error _ => return .error refused
+      | .error reason => return .error reason
       | .ok first =>
           match ← checkGrants native context profile federation genesisHeight intent rest remaining with
-          | .error _ => return .error refused
+          | .error reason => return .error reason
           | .ok tail => return .ok (Fin.cases first tail)
-  | _, _ => return .error refused
+  | _, _ => return .error (preAuthentication (.of .malformed))
+
+/-- A supplied challenge that differs from the current one is stale exactly
+when it names another image or height; any other difference is a request that
+was never issued by this Host, and is not described. -/
+def challengeMismatch (expected supplied : Challenge) : Refusal :=
+  if expected.imageBoundary ≠ supplied.imageBoundary ∨ expected.height ≠ supplied.height then
+    .of .staleRoot
+  else .of .undisclosed
+
+theorem challengeMismatch_stale (expected supplied : Challenge)
+    (moved : expected.imageBoundary ≠ supplied.imageBoundary) :
+    challengeMismatch expected supplied = .of .staleRoot := by
+  simp [challengeMismatch, moved]
+
+theorem challengeMismatch_same_image (expected supplied : Challenge)
+    (boundary : expected.imageBoundary = supplied.imageBoundary)
+    (height : expected.height = supplied.height) :
+    challengeMismatch expected supplied = .of .undisclosed := by
+  simp [challengeMismatch, boundary, height]
 
 /-- Stale challenges are refused against the current exact loaded image.
-No grant means no successful footprint. No callback can mint a read token. -/
+No grant means no successful footprint. No callback can mint a read token.
+Before the signature verifies only `preAuthentication` reasons are named. -/
 def authorize (native : CredentialSignatureIO.NativeConfig)
     (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (federation : FederationId) (genesisHeight : Nat) (signed : Signed) :
-    IO (Except String (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
+    IO (Except Refusal (AuthorizedIntent context profile federation genesisHeight signed.challenge.intent)) := do
   let intent := signed.challenge.intent
   match derived : challenge context profile federation genesisHeight intent with
-  | .error _ => return .error refused
+  | .error reason => return .error (preAuthentication reason)
   | .ok expected =>
       if same : expected = signed.challenge then
         if footprint : footprintExact context intent = .ok () then
           match ← checkGrants native context profile federation genesisHeight intent intent.grants signed.signatures with
-          | .error _ => return .error refused
+          | .error reason => return .error reason
           | .ok grants => return .ok ⟨signed.challenge,
                 derived.trans (congrArg Except.ok same), footprint, grants⟩
-        else return .error refused
-      else return .error refused
+        else return .error (preAuthentication (.of .malformed))
+      else return .error (challengeMismatch expected signed.challenge)
 
 /-- This codec is a read view, not a writable Book/registry payload. -/
 def resourceViewStream : StreamCodec (List UInt8 × List (Nat × Int)) :=

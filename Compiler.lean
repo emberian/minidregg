@@ -38,6 +38,7 @@ import Compiler.BoundedPageSchemaUpgrade  -- V2 page codecs/controllers preserve
 import Compiler.HyperdocumentIndexPageMaterializer  -- bounded backlink/range index rows have a versioned framed codec, cSHAKE root, and exact causal projection
 import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
 import Compiler.FiniteSparseMaterializerAudit  -- exact seven-schema census: all accepted/non-vacuous, with four inhabitation-only codecs distinguished from three production-pinned page codecs
+import Compiler.RefusalReason  -- the closed set of named Host refusals and the capability-component classifier
 import Compiler.CredentialAuthorityPolicyRegistry  -- the bounded authority page drives exact compiled-policy selection and a root-guarded durable intent
 import Compiler.SemanticTurnReceiptDescriptor -- Lean-authoritative semantic receipt declaration -> AIR -> emitted first-order artifact; downstream native code only reads the generated descriptor
 import Compiler.SemanticManifest -- content-addressed first-order semantic ABI, carrier profiles, named bridges, closed dialect-clause registry, and history/admission bindings

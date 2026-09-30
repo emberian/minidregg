@@ -133,14 +133,16 @@ structure Prepared (context : Context deployment durable) (profile : CanonicalRu
   accountBalances : List (Nat × Int)
   balancesExact : balances context kind wanted.target.value = some accountBalances
 
-private def refused : String := "observation refused"
-
+/-- Each refusing branch names its reason. The request is host-built from the
+same image, so a component mismatch means the caller asked for something other
+than an observation of this image (`malformed`) or named generations that have
+moved (`staleRoot`); an unobservable target is `noGrant`. -/
 def prepare (context : Context deployment durable) (profile : CanonicalRuntimeProfile.Profile F)
     (wanted : Request kind) (marker : Nat) (capability : CapabilityId) (contextBytes : List UInt8) :
-    Except String (Prepared context profile wanted marker capability contextBytes) :=
+    Except Refusal (Prepared context profile wanted marker capability contextBytes) :=
   match ResourceTargetAdmission.observe deployment context.directory.directory kind
       wanted.target.value wanted.preStateRoot with
-  | none => .error refused
+  | none => .error (.of .noGrant)
   | some observed =>
       if observeExact : wanted.verb = observeVerb kind then
         if domainExact : wanted.domain = deployment.domain then
@@ -149,15 +151,15 @@ def prepare (context : Context deployment durable) (profile : CanonicalRuntimePr
               if epochExact : wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId then
                 if revisionExact : wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId then
                   match balancesExact : balances context kind wanted.target.value with
-                  | none => .error refused
+                  | none => .error (.of .noGrant)
                   | some values => .ok ⟨observed, observeExact, domainExact, semanticsExact,
                       policyExact, epochExact, revisionExact, values, balancesExact⟩
-                else .error refused
-              else .error refused
-            else .error refused
-          else .error refused
-        else .error refused
-      else .error refused
+                else .error (.of .staleRoot)
+              else .error (.of .staleRoot)
+            else .error (.of .malformed)
+          else .error (.of .malformed)
+        else .error (.of .malformed)
+      else .error (.of .malformed)
 
 variable {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
   {wanted : Request kind} {marker : Nat} {capability : CapabilityId} {contextBytes : List UInt8}
@@ -184,17 +186,84 @@ def policyConfig (prepared : Prepared context profile wanted marker capability c
 def portal (prepared : Prepared context profile wanted marker capability contextBytes) : Portal :=
   (policyConfig prepared).portal
 
+/-- Read admission after the requester's signature has verified. Capability
+failures carry the reason of the component that decided them
+(`sourceCapabilityOnlyEvidenceChecked`); a missing or failing committed law is
+`lawDenied`. -/
+def authorizeChecked (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
+    Except RefusalReason (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
+  let config := policyConfig prepared
+  match sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature with
+  | .error reason => .error reason
+  | .ok evidence =>
+      match config.registry.resolve wanted.policyId wanted.policyRevision with
+      | none => .error .lawDenied
+      | some committed =>
+          let witness := canonicalWitness profile.compilerProfile.compiler committed
+            (step prepared).oldState (step prepared).newState
+          match CanonicalPolicyAdmission.admit config context.authority.snapshot.authState wanted
+              evidence witness (.policy wanted.policyId wanted.policyRevision)
+              prepared.epochExact prepared.revisionExact with
+          | none => .error .lawDenied
+          | some authorized => .ok authorized
+
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
-    Option (Authorized (portal prepared) context.authority.snapshot.authState wanted) := do
-  let config := policyConfig prepared
-  let evidence ← sourceCapabilityOnlyEvidence profile.compilerProfile context.authority.snapshot
-    (sourceStore context) marker (step prepared) wanted capability signature
-  let committed ← config.registry.resolve wanted.policyId wanted.policyRevision
-  let witness := canonicalWitness profile.compilerProfile.compiler committed
-    (step prepared).oldState (step prepared).newState
-  CanonicalPolicyAdmission.admit config context.authority.snapshot.authState wanted
-    evidence witness (.policy wanted.policyId wanted.policyRevision) prepared.epochExact prepared.revisionExact
+    Option (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
+  (authorizeChecked prepared signature).toOption
+
+/-- The signed requester is told the reason of the capability branch that
+decided its refusal, unchanged. -/
+theorem authorizeChecked_capability_reason
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (reason : RefusalReason)
+    (refused : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature = .error reason) :
+    authorizeChecked prepared signature = .error reason := by
+  simp only [authorizeChecked, refused]
+
+/-- With admissible capability evidence and a resolved committed law, a law
+that does not accept is reported as `lawDenied`. -/
+theorem authorizeChecked_lawDenied
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (committed : CommittedPolicy)
+    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
+    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+      some committed)
+    (denied : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
+      wanted evidence
+      (canonicalWitness profile.compilerProfile.compiler committed
+        (step prepared).oldState (step prepared).newState)
+      (.policy wanted.policyId wanted.policyRevision)
+      prepared.epochExact prepared.revisionExact = none) :
+    authorizeChecked prepared signature = .error .lawDenied := by
+  simp only [authorizeChecked, supplied, resolved, denied]
+
+/-- The admitted pole: the law's acceptance is returned unchanged. -/
+theorem authorizeChecked_admitted
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (committed : CommittedPolicy)
+    (authorized : Authorized (portal prepared) context.authority.snapshot.authState wanted)
+    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
+    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+      some committed)
+    (accepted : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
+      wanted evidence
+      (canonicalWitness profile.compilerProfile.compiler committed
+        (step prepared).oldState (step prepared).newState)
+      (.policy wanted.policyId wanted.policyRevision)
+      prepared.epochExact prepared.revisionExact = some authorized) :
+    authorizeChecked prepared signature = .ok authorized := by
+  simp only [authorizeChecked, supplied, resolved, accepted]
 
 attribute [irreducible] portal
 
@@ -206,17 +275,20 @@ structure Checked (prepared : Prepared context profile wanted marker capability 
   authorization : Authorized (portal prepared) context.authority.snapshot.authState wanted
   authorized : authorize prepared signature = some authorization
 
+/-- Signature first: until it verifies, the requester is not authenticated
+and only `badSignature` (a fact about its own envelope) is named. -/
 def check (native : CredentialSignatureIO.NativeConfig)
     (prepared : Prepared context profile wanted marker capability contextBytes) (envelope : List UInt8) :
-    IO (Except String (Checked prepared envelope)) := do
+    IO (Except Refusal (Checked prepared envelope)) := do
   match ← CredentialSignatureAdmission.verifyNative native context.authority.snapshot marker wanted envelope with
-  | .error _ => return .error refused
+  | .error reason => return .error (.of (RefusalReason.ofSignature reason))
   | .ok signature =>
       if exact : signature.envelopeBytes = envelope then
-        match authorized : authorize prepared signature with
-        | none => return .error refused
-        | some authorization => return .ok ⟨signature, exact, authorization, authorized⟩
-      else return .error refused
+        match decided : authorizeChecked prepared signature with
+        | .error reason => return .error (.of reason)
+        | .ok authorization =>
+            return .ok ⟨signature, exact, authorization, by simp [authorize, decided, Except.toOption]⟩
+      else return .error (.of .badSignature)
 
 omit [DecidableEq F] in
 theorem read_preserves_resource (prepared : Prepared context profile wanted marker capability contextBytes) :

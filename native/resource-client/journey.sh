@@ -142,19 +142,24 @@ call() {
 cwall() { cat "$SD/$1.wall"; }
 fail() { DETAIL="$*"; return 1; }
 
-# A refusal counts only when the Host said so: the client exits nonzero AND
-# prints `host refused <stage>` AND the encoded refusal carries the native
-# outcome tag. A client crash or a parse error is not a refusal.
-REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d45   # DREGG/NATIVE-HOST/OUTCOME
+# A refusal counts only when the Host said so: the client exits 3 (a Host
+# refusal) AND names the Host's decoded RefusalReason for `host refused
+# <stage>` AND the encoded refusal carries the native outcome v2 tag. A client
+# crash, a parse error or an undecoded frame is not a refusal.
+REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d452f7632   # DREGG/NATIVE-HOST/OUTCOME/v2
 refused() {
   local name=$1
-  [ "$(cat "$SD/$name.rc")" != 0 ] || return 1
-  grep -q "mini: host refused [a-z]*; encoded refusal: $REFUSAL_TAG" "$SD/$name.err"
+  [ "$(cat "$SD/$name.rc")" = 3 ] || return 1
+  grep -Eq "^  client: host refused [a-z-]+: refused: [a-z-]+: .*; encoded refusal: $REFUSAL_TAG" "$SD/$name.err"
+}
+# reason NAME: `<stage> <reason>` of a Host refusal, from the client's line.
+reason() {
+  grep -Eo "host refused [a-z-]+: refused: [a-z-]+" "$SD/$1.err" | tail -1 | sed -E 's/host refused ([a-z-]+): refused: /\1 /'
 }
 # decode NAME: the Host's encoded refusal as text, one line.
 decode() {
   grep -o 'encoded refusal: [0-9a-f]*' "$SD/$1.err" | tail -1 | cut -d' ' -f3 | xxd -r -p 2>/dev/null \
-    | tr -c '[:print:]' ' ' | tr -s ' ' | sed 's/^ *DREGG\/NATIVE-HOST\/OUTCOME\/v1 *//'
+    | tr -c '[:print:]' ' ' | tr -s ' ' | sed 's/^ *DREGG\/NATIVE-HOST\/OUTCOME\/v2 *//'
 }
 installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1" >/dev/null 2>&1; }
 replayed() { jq -e '.type == "confirmed" and .confirmation == "replayed"' "$1" >/dev/null 2>&1; }
@@ -451,7 +456,7 @@ step_J5() {
   local c
   for c in read-child read-owner propose-write submit-crafted uread usubmit; do
     if refused "$c"; then
-      printf '%s\trefused\t%s\t%s\n' "$c" "$(grep -o 'host refused [a-z]*' "$SD/$c.err")" "$(decode "$c")" >>"$ARTIFACT"
+      printf '%s\trefused\t%s\t%s\n' "$c" "$(reason "$c")" "$(decode "$c")" >>"$ARTIFACT"
     else
       printf '%s\tNOT-REFUSED\trc=%s\n' "$c" "$(cat "$SD/$c.rc")" >>"$ARTIFACT"; n=$((n + 1))
     fi
@@ -619,7 +624,7 @@ step_J8() {
   call srepair "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/repair.json" --proposal-id repair
   for c in nread npropose ncrafted sread srepair; do
     if refused "$c"; then
-      printf '%s\trefused\t%s\t%s\n' "$c" "$(grep -o 'host refused [a-z]*' "$SD/$c.err")" "$(decode "$c")" >>"$ARTIFACT"
+      printf '%s\trefused\t%s\t%s\n' "$c" "$(reason "$c")" "$(decode "$c")" >>"$ARTIFACT"
     else
       printf '%s\tNOT-REFUSED\trc=%s\n' "$c" "$(cat "$SD/$c.rc")" >>"$ARTIFACT"; n=$((n + 1))
     fi
