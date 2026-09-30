@@ -72,6 +72,6 @@ def main : IO Unit := do
     throw (IO.userError "Rust ViewInfo fixture differs from Lean-authored schema")
   IO.println "application permission schema authoring: ok"
 
-end Minidregg.Host.ApplicationPermissionSchemaAuthoringCheck
+#eval main
 
-def main : IO Unit := Minidregg.Host.ApplicationPermissionSchemaAuthoringCheck.main
+end Minidregg.Host.ApplicationPermissionSchemaAuthoringCheck

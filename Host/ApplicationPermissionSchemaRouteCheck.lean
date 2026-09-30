@@ -62,6 +62,6 @@ def main : IO Unit := do
   | .ok _ => throw (IO.userError "duplicate-key JSON was accepted")
   IO.println "application permission schema route: ok"
 
-end Minidregg.Host.ApplicationPermissionSchemaRouteCheck
+#eval main
 
-def main : IO Unit := Minidregg.Host.ApplicationPermissionSchemaRouteCheck.main
+end Minidregg.Host.ApplicationPermissionSchemaRouteCheck

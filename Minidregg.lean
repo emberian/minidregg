@@ -15,6 +15,7 @@ import Compiler.BoundedQuantifiedPolicyAdmission  -- bounded quantified policies
 import Compiler.DeclaredActionAir  -- canonical action bytes and sparse guard execution are equivalent to one emitted descriptor
 import Compiler.DeclaredEffectPageRegistry  -- bounded declared-effect pages enter the dependent cell registry
 import Selvage        -- the proof system
+import Host      -- the native receiving process (the minidregg-host exe root) and its executable regressions
 import Assurance   -- generated ledger machinery: pins, keystone audit, Bound/Forced
 import Assurance.CredentialFoundationMigrationAudit  -- exact pins for revision/generation separation and explicit delegation
 import Assurance.CredentialDelegationLineageAudit

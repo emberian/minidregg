@@ -75,3 +75,15 @@ import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
 import Kernel.ResourceTransactionAudit
+import Kernel.ApplicationDispatchUpper
+import Kernel.ApplicationGrainLaws
+import Kernel.ApplicationLifecycleBeginCheck
+import Kernel.ApplicationLifecycleClaimPolicyCheck
+import Kernel.ApplicationLifecycleClaimReceiver
+import Kernel.ApplicationLifecycleClaimVerified
+import Kernel.ApplicationShareIssueHistorical
+import Kernel.ApplicationSpkProfileProofs
+import Kernel.FnSelectedHistoricalStep
+import Kernel.FnSelectiveReleaseProofs
+import Kernel.NativeHostBookInvariant
+import Kernel.TypedCellHyperedgeCompositionWitness
