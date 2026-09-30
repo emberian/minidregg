@@ -26,8 +26,8 @@ teeth below check the two binding equations are real by exhibiting requests
 that fail them.
 
 Scope, exactly: this shows the common effect authority is satisfiable at built
-parameters, with a permissive portal and a minimal schema.  It is not a claim
-about any deployed portal, schema, or effect family, and it proves nothing
+parameters, with a permissive portal and a minimal layout.  It is not a claim
+about any deployed portal, layout, or effect family, and it proves nothing
 about privacy, cost, or physical settlement.
 -/
 import Theory.AcceptedCellEffect
@@ -42,6 +42,7 @@ open Minidregg.Theory.CellStateWitness
 open Minidregg.Theory.IndexedProgram
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.TypedAuthorizationWitness
+open Minidregg.Theory.Store
 
 set_option autoImplicit false
 
@@ -57,7 +58,7 @@ def unitCodec : LawfulCodec Unit where
 `CellStateWitness` proved validates.  The family is forced sealed: `Release`
 and both authority carriers are empty, so no disclosure decision other than
 `sealed` can be written. -/
-def family : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Unit where
+def family : SemanticEffectFamily.{0, 0, 0, 0, 0} layout materializer Unit where
   Declaration := Unit
   declarationCodec := unitCodec
   pre := cell
@@ -90,22 +91,22 @@ theorem disclosure_forced_sealed
 /-! ## The accepted effect -/
 
 /-- The `ValidatedPatch` obtained by running the validator in
-`CellStateWitness`. -/
-noncomputable def validatedPatch :
-    ValidatedPatch materializer cell (family.patch () ()) :=
-  honestPatch_accepted.choose
+`CellStateWitness`, quoted at the request's pre-state root. -/
+theorem validatedPatch :
+    ValidatedPatch materializer cell request.preStateRoot (family.patch () ()) := by
+  obtain ⟨validated, _⟩ := honestPatch_accepted
+  exact validated
 
 /-- **`AcceptedCellEffect` is inhabited.**  Every field is built: the
 authority token comes from `TypedAuthorizationWitness`, the validated patch
 from `CellStateWitness`, and the two binding equations hold by computation. -/
-noncomputable def accepted :
+def accepted :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       family request cell () () where
   authorization := authorized
   preStateBound := rfl
   requestBound := rfl
   effectsDigestBound := rfl
-  preRootBound := rfl
   modeEvidence := ()
   validated := validatedPatch
   postcondition := validatedPatch.resultAt
@@ -126,7 +127,7 @@ legs are genuinely distinct accepted effects rather than one value used twice.
 
 /-- The second family: same shape, different effect digest, and the patch that
 writes the field back. -/
-def familyTrue : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Unit where
+def familyTrue : SemanticEffectFamily.{0, 0, 0, 0, 0} layout materializer Unit where
   Declaration := Unit
   declarationCodec := unitCodec
   pre := cellTrue
@@ -143,19 +144,20 @@ def familyTrue : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schema materializer Uni
   ReleaseAuthorization := fun _ _ release => release.elim
   DisclosureAllowed := fun _ _ decision => decision = .sealed
 
-noncomputable def validatedPatchTrue :
-    ValidatedPatch materializer cellTrue (familyTrue.patch () ()) :=
-  honestPatchTrue_accepted.choose
+theorem validatedPatchTrue :
+    ValidatedPatch materializer cellTrue requestTrue.preStateRoot
+      (familyTrue.patch () ()) := by
+  obtain ⟨validated, _⟩ := honestPatchTrue_accepted
+  exact validated
 
 /-- **The second accepted effect.** -/
-noncomputable def acceptedTrue :
+def acceptedTrue :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       familyTrue requestTrue cellTrue () () where
   authorization := authorizedTrue
   preStateBound := rfl
   requestBound := rfl
   effectsDigestBound := rfl
-  preRootBound := by decide
   modeEvidence := ()
   validated := validatedPatchTrue
   postcondition := validatedPatchTrue.resultAt
@@ -172,14 +174,14 @@ turn below is one accepted effect wearing two hats. -/
 theorem legs_distinct : family.effectDigest () ≠ familyTrue.effectDigest () := by
   decide
 
-/-! ## A third accepted effect, over the OTHER schema
+/-! ## A third accepted effect, over the OTHER layout
 
-Cross-schema heterogeneity needs an accepted effect whose schema and
-materializer differ, not just whose values do.  This one lives on `schemaB`:
-two field keys carrying `Unit`, against the first schema's one key carrying
+Cross-layout heterogeneity needs an accepted effect whose layout and
+materializer differ, not just whose values do.  This one lives on `layoutB`:
+two keys carrying `Unit`, against the first layout's one key carrying
 `Bool`. -/
 
-noncomputable def familyB : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schemaB materializerB Unit where
+def familyB : SemanticEffectFamily.{0, 0, 0, 0, 0} layoutB materializerB Unit where
   Declaration := Unit
   declarationCodec := unitCodec
   pre := cellB
@@ -196,19 +198,19 @@ noncomputable def familyB : SemanticEffectFamily.{0, 0, 0, 0, 0, 0} schemaB mate
   ReleaseAuthorization := fun _ _ release => release.elim
   DisclosureAllowed := fun _ _ decision => decision = .sealed
 
-noncomputable def validatedPatchB :
-    ValidatedPatch materializerB cellB (familyB.patch () ()) :=
-  honestPatchB_accepted.choose
+theorem validatedPatchB :
+    ValidatedPatch materializerB cellB requestB.preStateRoot (familyB.patch () ()) := by
+  obtain ⟨validated, _⟩ := honestPatchB_accepted
+  exact validated
 
-/-- **The accepted effect over the second schema.** -/
-noncomputable def acceptedB :
+/-- **The accepted effect over the second layout.** -/
+def acceptedB :
     AcceptedCellEffect (portal := permissivePortal) (authState := authState)
       familyB requestB cellB () () where
   authorization := authorizedB
   preStateBound := rfl
   requestBound := rfl
   effectsDigestBound := rfl
-  preRootBound := rfl
   modeEvidence := ()
   validated := validatedPatchB
   postcondition := validatedPatchB.resultAt
@@ -313,35 +315,74 @@ theorem no_accepted_of_wrongNonce :
   change (99 : Nat) = 8 at nonce
   omega
 
-/-- The deliberately constant-root second schema makes collision resistance
-unavailable, while its canonical logical state still distinguishes presence. -/
-noncomputable def collidingCellB : Materialized materializerB :=
-  materialize materializerB
-    { logicalB with fields := logicalB.fields.write false () }
+/-- A deliberately constant-root materializer over the second layout makes
+collision resistance unavailable, while its canonical logical store still
+distinguishes presence.  (`materializerB`'s root is the state byte, so the
+collision has to be built on its own materializer.) -/
+def constantMaterializerB : Materializer layoutB Digest where
+  codec := stateCodecB
+  rootBytes := fun _ => ⟨0⟩
 
-theorem collidingCellB_same_root : collidingCellB.root = cellB.root := rfl
+def constantCellB : Materialized constantMaterializerB :=
+  materialize constantMaterializerB logicalB
 
-theorem collidingCellB_ne : collidingCellB ≠ cellB := by
+def collidingCellB : Materialized constantMaterializerB :=
+  materialize constantMaterializerB (logicalB.set (addressB false) (some ()))
+
+theorem collidingCellB_same_root : collidingCellB.root = constantCellB.root := rfl
+
+theorem collidingCellB_ne : collidingCellB ≠ constantCellB := by
   intro same
-  have field := congrArg (fun c : Materialized materializerB => c.logical.fields false) same
-  simp [collidingCellB, cellB, logicalB, materialize] at field
+  have field := congrArg
+    (fun c : Materialized constantMaterializerB => c.logical (addressB false)) same
+  simp [collidingCellB, constantCellB, logicalB, materialize] at field
 
-/-- Even the old patch validator accepts at the colliding root.  The new
-canonical-pre equality, rather than a hidden validator failure, closes it. -/
+/-- `familyB`'s shape over the constant-root materializer. -/
+def familyConstB : SemanticEffectFamily.{0, 0, 0, 0, 0} layoutB constantMaterializerB Unit where
+  Declaration := Unit
+  declarationCodec := unitCodec
+  pre := constantCellB
+  request := fun _ => ⟨.object, requestB⟩
+  Outcome := fun _ => Unit
+  outcomeCodec := fun _ => unitCodec
+  ModeEvidence := fun _ _ => Unit
+  Postcondition := fun _ _ post => honestPatchB.ResultAt constantCellB.logical post
+  effectDigest := fun _ => ⟨27⟩
+  patch := fun _ _ => honestPatchB
+  nullifier := fun _ _ => none
+  Release := fun _ _ => PEmpty
+  DeclassificationAuthority := fun _ _ => PEmpty
+  ReleaseAuthorization := fun _ _ release => release.elim
+  DisclosureAllowed := fun _ _ decision => decision = .sealed
+
+/-- Satisfiable pole: the family is inhabited at its own pre-cell. -/
+theorem acceptedConstB_nonempty :
+    Nonempty (AcceptedCellEffect (portal := permissivePortal)
+      (authState := authState) familyConstB requestB constantCellB () ()) := by
+  obtain ⟨validated, _⟩ := validate_accepts constantMaterializerB constantCellB
+    requestB.preStateRoot honestPatchB rfl (by decide)
+  exact ⟨{ authorization := authorizedB
+           preStateBound := rfl
+           requestBound := rfl
+           effectsDigestBound := rfl
+           modeEvidence := ()
+           validated := validated
+           postcondition := validated.resultAt
+           disclosure := .sealed
+           disclosureAllowed := rfl }⟩
+
+/-- Even the patch validator accepts at the colliding root.  The canonical-pre
+equality, rather than a hidden validator failure, closes it. -/
 theorem collidingCellB_patch_validates :
-    Nonempty (ValidatedPatch materializerB collidingCellB honestPatchB) := by
-  have accepted : ∃ validated : ValidatedPatch materializerB collidingCellB honestPatchB,
-      validate materializerB collidingCellB honestPatchB = .accepted validated := by
-    unfold validate
-    rw [dif_pos (show honestPatchB.expectedPreRoot = collidingCellB.root from rfl)]
-    rw [dif_pos (show honestPatchB.fieldFootprint = honestPatchB.namedFields by decide)]
-    rw [dif_pos (show honestPatchB.resourceFootprint = honestPatchB.namedResources by decide)]
-    exact ⟨_, rfl⟩
-  exact ⟨accepted.choose⟩
+    ValidatedPatch constantMaterializerB collidingCellB requestB.preStateRoot
+      honestPatchB := by
+  obtain ⟨validated, _⟩ := validate_accepts constantMaterializerB collidingCellB
+    requestB.preStateRoot honestPatchB rfl (by decide)
+  exact validated
 
 theorem no_accepted_of_collidingPre :
     IsEmpty (AcceptedCellEffect (portal := permissivePortal)
-      (authState := authState) familyB requestB collidingCellB () ()) :=
+      (authState := authState) familyConstB requestB collidingCellB () ()) :=
   AcceptedCellEffect.no_accepted_of_pre_mismatch collidingCellB_ne
 
 /-- The sealed effect carries no release, and that is a refutation too: the
@@ -381,6 +422,8 @@ theorem no_accepted_of_staleEpoch :
 #guard_msgs (whitespace := lax) in #print axioms no_accepted_of_wrongNonce
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.no_accepted_of_collidingPre' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_accepted_of_collidingPre
+/-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.acceptedConstB_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms acceptedConstB_nonempty
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.disclosure_forced_sealed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms disclosure_forced_sealed
 /-- info: 'Minidregg.Theory.AcceptedCellEffectWitness.acceptedCellEffect_nonempty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
