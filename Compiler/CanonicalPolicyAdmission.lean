@@ -245,7 +245,8 @@ structure CompilerSemanticDescriptor where
   orderWidth : Option Nat
   deriving DecidableEq, Repr
 
-def compilerSemanticVersion : Nat := 1
+/-- Version 2 lowers the slot-to-slot atoms `eqSlots`/`leSlots`; version-1 descriptors do not verify. -/
+def compilerSemanticVersion : Nat := 2
 
 open Minidregg.Compiler.Tower256ConcreteBackend in
 def compilerDescriptorStream :
