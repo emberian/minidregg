@@ -84,8 +84,11 @@ case "$lean_version" in
   *"${lean_pin##*:v}"*) ;;
   *) candidate_die "lean on PATH ($lean_version) is not the pinned $lean_pin; put elan's lake/lean first on PATH" ;;
 esac
-rustc_version=$(cd "$src/native/resource-client" && rustc -vV | tr '\n' ';')
-cargo_version=$(cd "$src/native/resource-client" && cargo -V)
+# rustup chooses a toolchain from the working directory, not from
+# --manifest-path, so every Rust command names the pinned channel explicitly.
+rustc_version=$(rustc "+$rust_pin" -vV | tr '\n' ';')
+rustc_line=$(rustc "+$rust_pin" -V)
+cargo_version=$(cargo "+$rust_pin" -V)
 cc_version=$(cc --version | sed -n 1p)
 stamp "lean=$lean_version rust=$rust_pin"
 
@@ -118,11 +121,14 @@ export RUSTFLAGS="--remap-path-prefix=$src=/minidregg --remap-path-prefix=$cargo
 export CARGO_INCREMENTAL=0
 build_rust() {
   crate=$1 bin=$2
-  cargo build --release --locked -j "$cargo_jobs" \
+  (cd "$src" && cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
     --manifest-path "$src/native/$crate/Cargo.toml" \
     --target-dir "$out/work/target/$crate" --bin "$bin" \
-    >"$out/logs/cargo-$crate.log" 2>&1 \
+    >"$out/logs/cargo-$crate.log" 2>&1) \
     || { tail -40 "$out/logs/cargo-$crate.log" >&2; candidate_die "cargo build failed: $crate"; }
+  # The binary must name the pinned compiler (ELF .comment "rustc version ...").
+  grep -aqF "rustc version ${rustc_line#rustc }" "$out/work/target/$crate/release/$bin" \
+    || candidate_die "$bin was not built by $rustc_line"
   install -m 0555 "$out/work/target/$crate/release/$bin" "$out/bin/$bin"
 }
 build_rust resource-client mini
