@@ -1,0 +1,28 @@
+{
+  "type": "any",
+  "predicates": [
+    {
+      "type": "eq",
+      "slot": "joint/target/{BOOK}/balance/{A_G}/{GOLD}/delta",
+      "value": "0"
+    },
+    {
+      "type": "all",
+      "predicates": [
+        {
+          "type": "eqSlots",
+          "left": "request/subject",
+          "right": "resource/field/4/after"
+        },
+        {
+          "type": "not",
+          "predicate": {
+            "type": "le",
+            "slot": "joint/target/{BOOK}/balance/{A_G}/{GOLD}/delta",
+            "value": "{MAXPAY_LT}"
+          }
+        }
+      ]
+    }
+  ]
+}

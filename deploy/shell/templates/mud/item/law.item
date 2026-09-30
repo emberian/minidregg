@@ -1,0 +1,23 @@
+-- kind: item
+-- MUD §2.2 unique item: one cell, one owner. Installed as `law.management ; law.item`
+-- (+ `; law.item-reward` for an item area.json places as a quest reward).
+-- A give is the holder's `write owner NEW expected OLD`; the expected value is the stale-read guard that
+-- refuses the second of two concurrent gives (guardFailed, DATAMODEL 4.3) -- a CAS, not a clause.
+-- Joint indices: drop/take: 0 = this item, 1 = the dropper's / taker's sheet. NEEDS K-JOINT-INDEX there.
+-- 1 holder [J-MUD-2 row 4]: only the current owner writes, or the referee (clause 4 bounds it).
+any [ not (verb == 2), eqSlots subject field owner before, subject == {REF} ];
+-- 2 pinned: an item cannot change what it is.
+any [ not (verb == 2), all [ field id == {ID}, field kind == {KIND} ] ];
+-- 3 charges [J-MUD-2 row 6]: charges only fall (a lantern burns; nothing refills it in v1).
+any [ not (verb == 2), field charges delta <= 0 ];
+-- 4 ref-spends-only [J-MUD-2 row 7]: a referee that is not the holder may spend charges, never move the item.
+any [ not (verb == 2), not (subject == {REF}), eqSlots subject field owner before,
+      all [ field owner delta == 0, field where delta == 0, field worn delta == 0 ] ];
+-- 5 carried: an item a player holds lies nowhere (where = 0); only the referee's (the floor's) items lie in a room.
+any [ not (verb == 2), field owner == {REF}, field where == 0 ];
+-- 6 drop-here [J-MUD-2 row 8]: an item put on the floor lies where its dropper stands. NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), not (field owner == {REF}), field owner delta == 0,
+      all [ eqSlots joint 1 sheet id subject, eqSlots field where joint 1 sheet at ] ];
+-- 7 take-here [J-MUD-2 row 9]: a floor item goes only to someone standing where it lies. NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), not (field owner before == {REF}), field owner delta == 0, field where before == 0,
+      all [ eqSlots joint 1 sheet id field owner, eqSlots joint 1 sheet at field where before ] ]

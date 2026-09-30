@@ -1,0 +1,25 @@
+{
+  "type": "any",
+  "predicates": [
+    {
+      "type": "not",
+      "predicate": {
+        "type": "eq",
+        "slot": "request/verb",
+        "value": "2"
+      }
+    },
+    {
+      "type": "not",
+      "predicate": {
+        "type": "eq",
+        "slot": "request/subject",
+        "value": "{REF}"
+      }
+    },
+    {
+      "type": "witnessed",
+      "identifier": "{VK_RESOLVER}"
+    }
+  ]
+}

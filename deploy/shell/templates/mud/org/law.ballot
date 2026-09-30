@@ -1,0 +1,29 @@
+-- kind: ballot
+-- MUD §2.7 ballot cell {REALM}-org-{G}-ballot-{N}. Installed as `law.management ; law.ballot`.
+-- Eight seats, vote-0..vote-7 born 0 (= no vote) when the ballot opens; candidates are 1..ncand (<= 3).
+-- Seats map to members at `ballot open` ({SEAT_k} = the member's subject; an empty seat is bound to {NOBODY}).
+-- Each seat is scoped by LAW here (clause 4), so one-vote-each does not wait for K-FIELDS; K-FIELDS would add
+-- the same fact on the capability side (MUD A6).
+-- 1 pinned
+any [ not (verb == 2), all [ field id == {N}, field org == {G}, field office == {OFFICE}, field ncand == {NCAND} ] ];
+-- 2 range
+any [ not (verb == 2), all [ field open in {0,1}, field vote-0 in {0,1,2,3}, field vote-1 in {0,1,2,3}, field vote-2 in {0,1,2,3}, field vote-3 in {0,1,2,3}, field vote-4 in {0,1,2,3}, field vote-5 in {0,1,2,3}, field vote-6 in {0,1,2,3}, field vote-7 in {0,1,2,3} ] ];
+-- 3 close-once [J-MUD-5 row 8]: open only falls, and only the returning officer closes it.
+any [ not (verb == 2), all [ field open delta <= 0, any [ field open delta == 0, subject == {OFFICER} ] ] ];
+-- 4 own-seat [J-MUD-5 row 7 (C writes A's vote refused)]: a seat's vote is written only by its member, while open.
+any [ not (verb == 2),
+  all [ any [ field vote-0 delta == 0, all [ subject == {SEAT_0}, field open before == 1 ] ],
+      any [ field vote-1 delta == 0, all [ subject == {SEAT_1}, field open before == 1 ] ],
+      any [ field vote-2 delta == 0, all [ subject == {SEAT_2}, field open before == 1 ] ],
+      any [ field vote-3 delta == 0, all [ subject == {SEAT_3}, field open before == 1 ] ],
+      any [ field vote-4 delta == 0, all [ subject == {SEAT_4}, field open before == 1 ] ],
+      any [ field vote-5 delta == 0, all [ subject == {SEAT_5}, field open before == 1 ] ],
+      any [ field vote-6 delta == 0, all [ subject == {SEAT_6}, field open before == 1 ] ],
+      any [ field vote-7 delta == 0, all [ subject == {SEAT_7}, field open before == 1 ] ] ] ];
+-- 5 vote-once [J-MUD-5 row 6 (a second, different vote refused)]: writeOnce per seat
+--   (a same-value rewrite passes writeOnce, Pred/Core.lean:202-204; it changes nothing).
+any [ not (verb == 2), all [ field vote-0 writeOnce, field vote-1 writeOnce, field vote-2 writeOnce, field vote-3 writeOnce, field vote-4 writeOnce, field vote-5 writeOnce, field vote-6 writeOnce, field vote-7 writeOnce ] ];
+-- 6 result [J-MUD-5 row 9]: only the tally runner writes the result, only after close.
+any [ not (verb == 2), field result delta == 0, all [ subject == {TALLY}, field open before == 0 ] ];
+-- 7 result-once
+any [ not (verb == 2), field result writeOnce ]

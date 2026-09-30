@@ -1,0 +1,12 @@
+-- kind: sheet
+-- NEEDS K-BOOK-SLOTS (PLACE §4.8): the Book leg of the same command, projected as
+-- joint/target/{BOOK}/balance/{ACCOUNT}/{ASSET}/delta (PLACE's slot name; ASSUMED until K-BOOK-SLOTS lands).
+-- Appended to law.sheet when it lands: an affliction falls only in a turn that burns its cure from S's account.
+-- Today (October) the referee lowers afflictions after it burned the herb in a separate K-WELL turn, and
+-- nothing in the sheet law binds the two (accountable, MUD §2.3).
+-- 34 cure-burns [J-MUD-3b]
+any [ not (verb == 2),
+      all [ field aff-asthma delta == 0, field aff-paralysis delta == 0, field aff-clumsiness delta == 0 ],
+      all [ any [ field aff-asthma delta == 0, slot joint/target/{BOOK}/balance/{A_S}/{KELP}/delta == -1 ],
+            any [ field aff-paralysis delta == 0, slot joint/target/{BOOK}/balance/{A_S}/{FAELEAF}/delta == -1 ],
+            any [ field aff-clumsiness delta == 0, slot joint/target/{BOOK}/balance/{A_S}/{FAELEAF}/delta == -1 ] ] ]

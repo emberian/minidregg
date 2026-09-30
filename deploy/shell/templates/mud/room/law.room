@@ -1,0 +1,10 @@
+-- kind: room
+-- MUD §2.1 room cell. Installed as `law.management ; law.room`. Exits are data only the area's builder writes;
+-- the room cannot lie about its id. For the manse area {BUILDER} is the realm concierge, which mirrors the
+-- lease's expiresAt into `until` (MUD §2.9 "Decided").
+-- 1 builder [J-MUD-1 row 10]: only the builder writes a room.
+any [ not (verb == 2), subject == {BUILDER} ];
+-- 2 pinned [J-MUD-1 row 11]: id, area and whether the room is leased never change.
+any [ not (verb == 2), all [ field id == {ID}, field area == {AREA}, field leased == {LEASED} ] ];
+-- 3 range
+any [ not (verb == 2), all [ field dark in {0,1}, field leased in {0,1} ] ]

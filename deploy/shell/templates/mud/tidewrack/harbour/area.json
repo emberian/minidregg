@@ -1,0 +1,140 @@
+{
+  "type": "mud-area-v1",
+  "realm": "tidewrack",
+  "area": "harbour",
+  "areaId": "1",
+  "builder": "{W_FOUNDER}",
+  "rooms": [
+    {
+      "id": "101",
+      "slug": "quay",
+      "title": "The Quay",
+      "scene": "rooms/quay.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "n": "102",
+        "d": "201"
+      }
+    },
+    {
+      "id": "102",
+      "slug": "square",
+      "title": "Market Square",
+      "scene": "rooms/square.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "101",
+        "w": "103",
+        "n": "104",
+        "nw": "105",
+        "ne": "106"
+      }
+    },
+    {
+      "id": "103",
+      "slug": "tavern",
+      "title": "The Brine Cask",
+      "scene": "rooms/tavern.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "e": "102",
+        "u": "107"
+      }
+    },
+    {
+      "id": "104",
+      "slug": "hall",
+      "title": "Harbourwatch Hall",
+      "scene": "rooms/hall.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "102",
+        "n": "108"
+      }
+    },
+    {
+      "id": "105",
+      "slug": "shrine",
+      "title": "Shrine of the Drowned Lamp",
+      "scene": "rooms/shrine.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "se": "102"
+      }
+    },
+    {
+      "id": "106",
+      "slug": "chandlery",
+      "title": "Chandlery Lane",
+      "scene": "rooms/chandlery.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "sw": "102",
+        "e": "109",
+        "n": "110"
+      }
+    },
+    {
+      "id": "107",
+      "slug": "loft",
+      "title": "The Brine Cask Loft",
+      "scene": "rooms/loft.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "d": "103"
+      }
+    },
+    {
+      "id": "108",
+      "slug": "tower",
+      "title": "The Watchtower",
+      "scene": "rooms/tower.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "d": "104"
+      }
+    },
+    {
+      "id": "109",
+      "slug": "fishmarket",
+      "title": "The Fishmarket",
+      "scene": "rooms/fishmarket.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "w": "106"
+      }
+    },
+    {
+      "id": "110",
+      "slug": "lanes-gate",
+      "title": "Gate of the Lanes",
+      "scene": "rooms/lanes-gate.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "106",
+        "n": "301"
+      }
+    }
+  ],
+  "items": [],
+  "spawns": [],
+  "shop": {
+    "room": "102",
+    "market": "harbour",
+    "sells": [
+      "kelp",
+      "faeleaf",
+      "lantern"
+    ]
+  }
+}

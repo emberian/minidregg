@@ -1,0 +1,6 @@
+-- kind: any
+-- Clause 0 of every installed MUD law (p-templates finding 4: one law judges every verb). Reads and mutates
+-- pass here (the grants and the game clauses decide); delegate / installPolicy / revoke only for the realm
+-- founder. Verb tags: observe 1, mutate 2, delegate 3, installPolicy 4, revoke 5
+-- (Compiler/CredentialAuthorityEntryCodec.lean:71-82).
+any [ verb == 1, verb == 2, all [ verb in {3,4,5}, subject == {W_FOUNDER} ] ]

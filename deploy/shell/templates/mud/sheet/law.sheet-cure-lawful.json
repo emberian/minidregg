@@ -1,0 +1,83 @@
+{
+  "type": "any",
+  "predicates": [
+    {
+      "type": "not",
+      "predicate": {
+        "type": "eq",
+        "slot": "request/verb",
+        "value": "2"
+      }
+    },
+    {
+      "type": "all",
+      "predicates": [
+        {
+          "type": "eq",
+          "slot": "resource/field/10/delta",
+          "value": "0"
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/11/delta",
+          "value": "0"
+        },
+        {
+          "type": "eq",
+          "slot": "resource/field/12/delta",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "type": "all",
+      "predicates": [
+        {
+          "type": "any",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/10/delta",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "joint/target/{BOOK}/balance/{A_S}/{KELP}/delta",
+              "value": "-1"
+            }
+          ]
+        },
+        {
+          "type": "any",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/11/delta",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "joint/target/{BOOK}/balance/{A_S}/{FAELEAF}/delta",
+              "value": "-1"
+            }
+          ]
+        },
+        {
+          "type": "any",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/12/delta",
+              "value": "0"
+            },
+            {
+              "type": "eq",
+              "slot": "joint/target/{BOOK}/balance/{A_S}/{FAELEAF}/delta",
+              "value": "-1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

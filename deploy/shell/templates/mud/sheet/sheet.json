@@ -1,0 +1,46 @@
+{
+  "type": "mud-sheet-template-v1",
+  "fields": "fields.json",
+  "cells": {
+    "player": "{REALM}-sheet-{S}",
+    "mob": "{REALM}-mob-{M} (a mob has its own enrolled subject {S}=M whose key the referee process holds; its moves and strikes are ordinary owner turns under this same law)"
+  },
+  "init": "init.sheet.json",
+  "laws": {
+    "live (October)": [
+      "law.management",
+      "law.sheet"
+    ],
+    "after K-BOOK-SLOTS": [
+      "law.management",
+      "law.sheet",
+      "law.sheet-cure-lawful"
+    ],
+    "after K-RAN (NOCK.md)": [
+      "law.management",
+      "law.sheet",
+      "law.sheet-witnessed"
+    ]
+  },
+  "placeholders": {
+    "{REALM}": "realm name",
+    "{S}": "the sheet's subject (decimal); a mob's own subject",
+    "{W_FOUNDER}": "realm founder",
+    "{REF}": "the referee runner's subject",
+    "{HOME}": "the room id a revive places the sheet in: realm.json shrine for players, the spawn room for a mob",
+    "{HPMAX}": "realm.json constants (players) or the mob's hp",
+    "{RESPAWN_M1}": "RESPAWN - 1: players realm.json constants.RESPAWN_M1, a mob its spawn's respawn - 1",
+    "{MAXHIT_LT}": "-(MAXHIT+1)",
+    "{COST_M1}": "min bal cost of strike/defend/flee - 1",
+    "{ECOST_M1}": "cast eq cost - 1",
+    "{LANTERN}": "item kind number of a lantern (item/fields.json itemKinds)"
+  },
+  "birth": [
+    "create the sheet cell declared under law.management (W_FOUNDER bound)",
+    "propose init.sheet.json (every field is created: a clause reading a missing field fails closed)",
+    "delegate observe,mutate on the sheet to S (M4's player invite shape)",
+    "install law.management ; law.sheet with the placeholders above",
+    "mint the starter kit from the wells (realm.json starterKit; K-WELL)"
+  ],
+  "fieldCountNeeds": "15 fields per sheet. MEASURED: the old store refuses the 4th created field of one resource (RejectReason.overflow, product/mj-journey.md K4); c-c2's DeclaredResourceProjection says 'there is no page capacity' -- the sheet needs the C2 growth exit in the deployed candidate before its birth can succeed."
+}

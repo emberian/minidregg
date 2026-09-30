@@ -1,0 +1,32 @@
+{
+  "type": "mud-item-template-v1",
+  "fields": "fields.json",
+  "init": "init.item.json",
+  "laws": {
+    "ordinary": [
+      "law.management",
+      "law.item"
+    ],
+    "quest reward": [
+      "law.management",
+      "law.item",
+      "law.item-reward"
+    ]
+  },
+  "placeholders": {
+    "{ID}": "item number (realm-unique)",
+    "{KIND}": "fields.json itemKinds",
+    "{OWNER}": "holder subject; {REF} for an item on the floor or held in reserve",
+    "{WHERE}": "room id when on the floor, else 0",
+    "{CHARGES}": "0 unless the kind burns",
+    "{REF}": "referee",
+    "{QUEST}": "for a reward item: the quest's number"
+  },
+  "verbs": {
+    "give S ITEM": "write owner := S, expected = my subject",
+    "drop ITEM": "write owner := REF, where := my at; targets [item, my sheet]",
+    "take ITEM": "an intent; the referee writes owner := me; targets [item, my sheet]",
+    "wear ITEM": "write worn := 1",
+    "examine ITEM": "read the item, print its design doc"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "type": "mud-tariff-v1",
+  "decidedBy": "ember (MUD \u00a76.4). These are MUD \u00a72.10's defaults, unchanged; change the numbers here, nothing else reads a copy.",
+  "unit": "credit (asset 0; 1 credit = 1e-6 DREGG, PAY \u00a77.1)",
+  "base": "3",
+  "baseSource": "MEASURED tariff.base = 3 in M8's run (product/m8-fleet-surface.md:86-87, via p-templates README item 12)",
+  "perTopic": {
+    "say": "3",
+    "go": "3",
+    "strike": "3",
+    "cast": "3",
+    "vote": "3",
+    "note": "MUD \u00a72.10: a per-topic base is one more field; all equal to base for v1"
+  },
+  "create": "500",
+  "createCovers": [
+    "a room (build room / area load, per cell)",
+    "an item cell",
+    "a design document",
+    "a mob birth (GM spawn)"
+  ],
+  "comp": {
+    "daily": "1000",
+    "to": "every enrolled sheet with alive = 1, on the first K-CLOCK tick of each chain day (clock/day)",
+    "by": "the realm concierge, PAY \u00a72.8 mechanism 2 (comp payer amount memo), nullifier paycomp:{nonce}",
+    "turnsPerDay": "333 (= floor(1000 / 3))",
+    "spendableOn": [
+      "turn fees"
+    ],
+    "notSpendableOn": [
+      "Hermes narration (purse-only; the purse refill needs a payer holding at least the minimum refill)"
+    ],
+    "creation": "MUD \u00a72.10 says the comp is sized below the creation tariff so a free key creates nothing. With these defaults it is not: daily 1000 > create 500, so a comp-only key can pay for two cells a day. Either create must exceed daily, or creation must be refused on comp-funded credit. This is flagged for ember and not decided here."
+  },
+  "observe": "0 (ASSUMED, PLACE A2 / MUD A4: reads carry no fee)",
+  "manseLease": {
+    "rate": "{MANSE_RATE}",
+    "per": "chain hour",
+    "note": "PAY \u00a72.6 Operation.lease; left as a placeholder: MUD names no number"
+  },
+  "neverBuys": [
+    "a verb",
+    "a wider scope",
+    "a law change",
+    "a seat",
+    "a skill level",
+    "xp",
+    "an item"
+  ]
+}

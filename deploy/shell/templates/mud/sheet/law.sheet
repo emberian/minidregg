@@ -1,0 +1,138 @@
+-- kind: sheet
+-- MUD sheet law (MUD.md §2.1, §2.2, §2.3). Installed as `law.management ; law.sheet`, so clause 0 is
+-- management and the clause numbers in the comments count from 1 in this file = 1.. in the installed law.
+-- Joint indices are the command's 0-based target order (K-JOINT-INDEX):
+-- The owner's intent is three fields written in one turn: intent (action), target (a sheet id), skill.
+--   owner's go/flee:        0 = this sheet, 1 = current room, 2 = destination room, 3 = key or light item, 4 = light item
+--   referee's resolution:   0 = attacker sheet, 1 = defender sheet
+-- Atoms beyond today's Pred: eqSlots/leSlots (k-sloteq, landed on the data-model line), leSlotsOff (K-PRED-OFFSET),
+-- clock now (K-CLOCK), joint I ... (K-JOINT-INDEX). Each clause's NEEDS is in its comment.
+
+-- 1 writer [J-MUD-3 row 11]: only the sheet's subject and the referee write a sheet.
+any [ not (verb == 2), subject == {S}, subject == {REF} ];
+-- 2 pinned [J-MUD-1 row 2]: the sheet is S's (id = S).
+any [ not (verb == 2), field id == {S} ];
+-- 3 range: flags are 0|1, intent is a known code.
+any [ not (verb == 2), all [ field alive in {0,1}, field intent in {0,1,2,3,4,9}, field aff-asthma in {0,1},
+                  field aff-paralysis in {0,1}, field aff-clumsiness in {0,1}, field def-ward in {0,1},
+                  field skill in {0,1,2,3,4,5} ] ];
+-- 4 deaths-monotone [J-MUD-3 row 12]: deaths never falls (theorem death_is_reachable, second half).
+any [ not (verb == 2), field deaths monotone ];
+-- 5 deaths-count [J-MUD-3 row 8b]: deaths moves by exactly 1, and only on the 1 -> 0 edge of alive.
+any [ not (verb == 2), field deaths delta == 0, all [ field alive before == 1, field alive after == 0, field deaths delta == 1 ] ];
+-- 6 dead-at-zero [J-MUD-3 row 8a]: hp <= 0 forces alive = 0. Death is ADMITTED, never refused: no hp floor.
+any [ not (verb == 2), not (field hp <= 0), field alive == 0 ];
+-- 7 owner-alive [J-MUD-3 row 9]: a dead owner may write only intent := pray.
+any [ not (verb == 2), not (subject == {S}), field alive before == 1,
+      all [ field intent == 9, field at delta == 0, field target delta == 0 ] ];
+-- 8 owner-fields [J-MUD-3 rows 5, 10b]: the owner never writes combat fields (October: cures go through the
+--   referee after a kelp burn; one-turn owner cures wait for K-BOOK-SLOTS, see law.sheet-cure-lawful).
+any [ not (verb == 2), not (subject == {S}),
+      all [ field hp delta == 0, field bal delta == 0, field eq delta == 0, field alive delta == 0,
+            field deaths delta == 0, field respawn delta == 0, field aff-asthma delta == 0,
+            field aff-paralysis delta == 0, field aff-clumsiness delta == 0, field def-ward delta == 0 ] ];
+-- 9 pray-dead [J-MUD-3 row 10a]: pray only while dead.
+any [ not (verb == 2), not (subject == {S}), not (field intent == 9), field alive before == 0 ];
+-- 10 bal [J-MUD-3 row 3]: a physical intent (strike/defend/flee) needs balance: bal <= now. NEEDS K-CLOCK.
+any [ not (verb == 2), not (subject == {S}), not (field intent in {1,3,4}), leSlots field bal before clock now ];
+-- 11 eq [J-MUD-3 row 3c]: a mental intent (cast) needs equilibrium: eq <= now. NEEDS K-CLOCK.
+any [ not (verb == 2), not (subject == {S}), not (field intent == 2), leSlots field eq before clock now ];
+-- 12 paralysis [J-MUD-3 row 14]: the paralysed neither act physically nor walk (affliction-table.json).
+any [ not (verb == 2), not (subject == {S}), field aff-paralysis before == 0,
+      all [ not (field intent in {1,3,4}), field at delta == 0 ] ];
+-- 13 asthma [J-MUD-3 row 3d]: the asthmatic cannot cast (affliction-table.json).
+any [ not (verb == 2), not (subject == {S}), not (field intent == 2), field aff-asthma before == 0 ];
+-- 14 move-from [J-MUD-1 row 6]: joint 1 is the room I am in. NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), not (subject == {S}), field at delta == 0, eqSlots field at before joint 1 room id ];
+-- 15 move-to [J-MUD-1 row 6]: joint 2 is the room I arrive in. NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), not (subject == {S}), field at delta == 0, eqSlots field at after joint 2 room id ];
+-- 16 exits [J-MUD-1 row 4]: some exit of room 1 is room 2. NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), not (subject == {S}), field at delta == 0,
+      any [ eqSlots joint 1 room exit-n joint 2 room id,
+        eqSlots joint 1 room exit-s joint 2 room id,
+        eqSlots joint 1 room exit-e joint 2 room id,
+        eqSlots joint 1 room exit-w joint 2 room id,
+        eqSlots joint 1 room exit-ne joint 2 room id,
+        eqSlots joint 1 room exit-nw joint 2 room id,
+        eqSlots joint 1 room exit-se joint 2 room id,
+        eqSlots joint 1 room exit-sw joint 2 room id,
+        eqSlots joint 1 room exit-u joint 2 room id,
+        eqSlots joint 1 room exit-d joint 2 room id,
+        eqSlots joint 1 room exit-in joint 2 room id,
+        eqSlots joint 1 room exit-out joint 2 room id ] ];
+-- 17 door [J-MUD-1 rows 7, 8, 9]: every locked exit taken needs its key (joint 3) held by the mover. NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), not (subject == {S}), field at delta == 0,
+      all [ any [ not (eqSlots joint 1 room exit-n joint 2 room id), joint 1 room locked-n == 0,
+              all [ eqSlots joint 1 room key-n joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-s joint 2 room id), joint 1 room locked-s == 0,
+              all [ eqSlots joint 1 room key-s joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-e joint 2 room id), joint 1 room locked-e == 0,
+              all [ eqSlots joint 1 room key-e joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-w joint 2 room id), joint 1 room locked-w == 0,
+              all [ eqSlots joint 1 room key-w joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-ne joint 2 room id), joint 1 room locked-ne == 0,
+              all [ eqSlots joint 1 room key-ne joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-nw joint 2 room id), joint 1 room locked-nw == 0,
+              all [ eqSlots joint 1 room key-nw joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-se joint 2 room id), joint 1 room locked-se == 0,
+              all [ eqSlots joint 1 room key-se joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-sw joint 2 room id), joint 1 room locked-sw == 0,
+              all [ eqSlots joint 1 room key-sw joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-u joint 2 room id), joint 1 room locked-u == 0,
+              all [ eqSlots joint 1 room key-u joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-d joint 2 room id), joint 1 room locked-d == 0,
+              all [ eqSlots joint 1 room key-d joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-in joint 2 room id), joint 1 room locked-in == 0,
+              all [ eqSlots joint 1 room key-in joint 3 item id, eqSlots joint 3 item owner subject ] ],
+        any [ not (eqSlots joint 1 room exit-out joint 2 room id), joint 1 room locked-out == 0,
+              all [ eqSlots joint 1 room key-out joint 3 item id, eqSlots joint 3 item owner subject ] ] ] ];
+-- 18 dark [J-MUD-1 rows 5, 5b]: a dark room needs a lit lantern (joint 3 or 4) held by the mover. NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), not (subject == {S}), field at delta == 0, joint 2 room dark == 0,
+      all [ joint 3 item kind == {LANTERN}, eqSlots joint 3 item owner subject, not (joint 3 item charges <= 0) ],
+      all [ joint 4 item kind == {LANTERN}, eqSlots joint 4 item owner subject, not (joint 4 item charges <= 0) ] ];
+-- 19 lease [J-MUD-6]: a leased room (a manse) admits only while now <= until. NEEDS K-CLOCK + K-JOINT-INDEX.
+any [ not (verb == 2), not (subject == {S}), field at delta == 0, joint 2 room leased == 0, leSlots clock now joint 2 room until ];
+-- 20 ref-at: the referee moves a sheet only when reviving it (to HOME, clause 23).
+any [ not (verb == 2), not (subject == {REF}), field at delta == 0, all [ field alive before == 0, field alive after == 1 ] ];
+-- 21 no-heal [J-MUD-3 row 6b]: the referee never raises hp except on revive.
+any [ not (verb == 2), not (subject == {REF}), field hp delta <= 0, all [ field alive before == 0, field alive after == 1 ] ];
+-- 22 maxhit [J-MUD-3 row 6]: hp/delta >= -MAXHIT per turn ({MAXHIT_LT} = -(MAXHIT+1); `>= k` is `not (<= k-1)`).
+any [ not (verb == 2), not (subject == {REF}), not (field hp delta <= {MAXHIT_LT}) ];
+-- 23 revive [J-MUD-3 rows 10b, 10c, 13]: alive 0 -> 1 only by the referee (the shrine), after a prayer and the
+--   respawn time, to full hp at HOME. NEEDS K-CLOCK.
+any [ not (verb == 2), not (all [ field alive before == 0, field alive after == 1 ]),
+      all [ subject == {REF}, field intent before == 9, leSlots field respawn before clock now,
+            field hp == {HPMAX}, field at == {HOME}, field intent == 0 ] ];
+-- 24 respawn-at-death: respawn moves only on the 1 -> 0 edge of alive.
+any [ not (verb == 2), field respawn delta == 0, all [ field alive before == 1, field alive after == 0 ] ];
+-- 25 death-timer [J-MUD-4 rat respawn]: dying sets respawn >= now + RESPAWN ({RESPAWN_M1} = RESPAWN - 1).
+--   NEEDS K-PRED-OFFSET + K-CLOCK.
+any [ not (verb == 2), not (all [ field alive before == 1, field alive after == 0 ]),
+      not (leSlotsOff field respawn clock now {RESPAWN_M1}) ];
+-- 26 attacker [J-MUD-3 rows 2, 4]: hurting this sheet (hp down or an affliction up) needs a live attacker at
+--   joint 0, in this room, whose pending intent was strike/cast naming this sheet, and this sheet alive.
+--   NEEDS K-JOINT-INDEX.
+any [ not (verb == 2), all [ not (field hp delta <= -1), field aff-asthma delta <= 0, field aff-paralysis delta <= 0, field aff-clumsiness delta <= 0 ],
+      all [ field alive before == 1, joint 0 sheet intent before in {1,2}, eqSlots joint 0 sheet target before field id,
+            joint 0 sheet alive before == 1, eqSlots joint 0 sheet at field at ] ];
+-- 27 attacker-paid [J-MUD-3 row 4b]: the attacker had balance (equilibrium for cast) and paid it:
+--   bal/after >= now + COST. NEEDS K-JOINT-INDEX + K-CLOCK + K-PRED-OFFSET.
+any [ not (verb == 2), all [ not (field hp delta <= -1), field aff-asthma delta <= 0, field aff-paralysis delta <= 0, field aff-clumsiness delta <= 0 ],
+      all [ joint 0 sheet intent before == 1, leSlots joint 0 sheet bal before clock now,
+            not (leSlotsOff joint 0 sheet bal clock now {COST_M1}) ],
+      all [ joint 0 sheet intent before == 2, leSlots joint 0 sheet eq before clock now,
+            not (leSlotsOff joint 0 sheet eq clock now {ECOST_M1}) ] ];
+-- 28 bal-paid [J-MUD-3 row 2]: the referee raises my bal only for a physical intent of mine, never lowers it,
+--   and to >= now + COST. NEEDS K-PRED-OFFSET + K-CLOCK.
+any [ not (verb == 2), not (subject == {REF}), field bal delta == 0,
+      all [ field intent before in {1,3,4}, not (field bal delta <= -1), not (leSlotsOff field bal clock now {COST_M1}) ] ];
+-- 29 eq-paid: the same for equilibrium and cast. NEEDS K-PRED-OFFSET + K-CLOCK.
+any [ not (verb == 2), not (subject == {REF}), field eq delta == 0,
+      all [ field intent before == 2, not (field eq delta <= -1), not (leSlotsOff field eq clock now {ECOST_M1}) ] ];
+-- 30 intent-clear [J-MUD-3 row 2]: the referee only clears intent, target and skill.
+any [ not (verb == 2), not (subject == {REF}), all [ field intent delta == 0, field target delta == 0, field skill delta == 0 ],
+      all [ field intent == 0, field target == 0, field skill == 0 ] ];
+-- 31 ward [J-MUD-3 row 15]: a raised ward blocks paralysis (the defence-blocks-affliction fact, MUD §2.3).
+any [ not (verb == 2), field def-ward before == 0, field aff-paralysis delta <= 0 ];
+-- 32 defend [J-MUD-3 row 15b]: a ward is raised only on my own defend intent.
+any [ not (verb == 2), field def-ward delta <= 0, field intent before == 3 ]

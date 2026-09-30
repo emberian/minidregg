@@ -1,0 +1,90 @@
+{
+  "type": "all",
+  "predicates": [
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "eq",
+          "slot": "request/subject",
+          "value": "{BUILDER}"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "eq",
+              "slot": "resource/field/0/after",
+              "value": "{ID}"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/1/after",
+              "value": "{AREA}"
+            },
+            {
+              "type": "eq",
+              "slot": "resource/field/3/after",
+              "value": "{LEASED}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "all",
+          "predicates": [
+            {
+              "type": "memberOf",
+              "slot": "resource/field/2/after",
+              "values": [
+                "0",
+                "1"
+              ]
+            },
+            {
+              "type": "memberOf",
+              "slot": "resource/field/3/after",
+              "values": [
+                "0",
+                "1"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

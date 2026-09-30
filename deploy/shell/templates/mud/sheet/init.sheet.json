@@ -1,0 +1,134 @@
+{
+  "type": "minidregg-workspace-proposal-v1",
+  "action": "invoke",
+  "targets": [
+    {
+      "name": "{REALM}-sheet-{S}",
+      "payload": {
+        "type": "scalar",
+        "actions": [
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "0"
+            },
+            "value": "{S}"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "1"
+            },
+            "value": "{HOME}"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "2"
+            },
+            "value": "{HPMAX}"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "3"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "4"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "5"
+            },
+            "value": "1"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "6"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "7"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "8"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "9"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "10"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "11"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "12"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "13"
+            },
+            "value": "0"
+          },
+          {
+            "type": "create",
+            "key": {
+              "type": "object",
+              "field": "14"
+            },
+            "value": "0"
+          }
+        ]
+      }
+    }
+  ]
+}

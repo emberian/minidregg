@@ -1,0 +1,9 @@
+-- kind: item
+-- Appended for an item placed as a quest reward (area.json `placed.quest`). While the referee holds it in
+-- reserve (owner REF, where 0), it leaves the referee only in the turn that marks the quest rewarded, to the
+-- quest's owner, and it checks the quest's state itself rather than trusting the quest cell's law to have. Joint 0 = the quest cell (the reward command's targets are [quest, item]). NEEDS K-JOINT-INDEX.
+-- 8 reward-only [J-MUD-4 row 5 (early reward refused), row 6]
+any [ not (verb == 2), not (field owner before == {REF}), not (field where before == 0), field owner delta == 0,
+      all [ joint 0 quest id == {QUEST}, joint 0 quest state == 2,
+            joint 0 quest rewarded before == 0, joint 0 quest rewarded == 1,
+            eqSlots joint 0 quest owner field owner ] ]

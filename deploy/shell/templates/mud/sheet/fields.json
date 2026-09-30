@@ -1,0 +1,52 @@
+{
+  "type": "mud-fields-v1",
+  "cells": {
+    "sheet": "{REALM}-sheet-{S}",
+    "mob": "{REALM}-mob-{M}"
+  },
+  "kinds": {
+    "sheet": {
+      "id": "0",
+      "at": "1",
+      "hp": "2",
+      "bal": "3",
+      "eq": "4",
+      "alive": "5",
+      "deaths": "6",
+      "intent": "7",
+      "target": "8",
+      "respawn": "9",
+      "aff-asthma": "10",
+      "aff-paralysis": "11",
+      "aff-clumsiness": "12",
+      "def-ward": "13",
+      "skill": "14"
+    }
+  },
+  "intentCodes": {
+    "idle": "0",
+    "strike": "1",
+    "cast": "2",
+    "defend": "3",
+    "flee": "4",
+    "pray": "9"
+  },
+  "bookAssets": {
+    "xp": "an AssetId of the realm's xp well (K-WELL); NOT a sheet field",
+    "essence": "an AssetId of the realm's essence well (K-WELL); NOT a sheet field",
+    "gold": "an AssetId (K-WELL)",
+    "kelp": "an AssetId (K-WELL)",
+    "faeleaf": "an AssetId (K-WELL)"
+  },
+  "notFields": {
+    "maxhit": "a law constant {MAXHIT_LT} from realm.json constants, not a field: the damage bound is on hp/delta and Pred cannot negate a slot, so a per-sheet maxhit field could not be used by any clause"
+  },
+  "skillCodes": {
+    "none": "0",
+    "bite": "1",
+    "envenom": "2",
+    "gnaw": "3",
+    "gust": "4",
+    "ward": "5"
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "type": "mud-org-offices-v1",
+  "shapeRead": "native/resource-client/src/shell.rs:480-487 (the delegate request); workspace.rs:728-734 requires EXACTLY type, action, name, recipient, verbs, maxCost -- a request carrying maxDelta or fields is refused by the client today",
+  "placeholders": {
+    "{REALM}": "realm name",
+    "{G}": "org number",
+    "{H}": "the office holder's subject",
+    "{UNTIL}": "term end, a block height (valid_until is a block height, 09-29 decision)"
+  },
+  "offices": {
+    "treasurer": {
+      "orgField": "treasurer",
+      "today": [
+        {
+          "type": "minidregg-workspace-proposal-v1",
+          "action": "delegate",
+          "name": "{REALM}-org-{G}",
+          "recipient": "{H}",
+          "verbs": [
+            "observe"
+          ],
+          "maxCost": "50000"
+        }
+      ],
+      "needs": {
+        "K-FIELDS": {
+          "maxDelta": "{MAXPAY}",
+          "why": "MUD \u00a72.7: the treasurer moves at most MAXPAY per turn (DATAMODEL \u00a73.5 Scope.maxDelta)"
+        },
+        "transfer-delegation": {
+          "target": "A_G (the org's Book account)",
+          "verbs": [
+            "transfer"
+          ],
+          "why": "a Book account is not a workspace reference; no delegate shape names an account today (workspace.rs:728-760 resolves `name` through the workspace's references). Until one exists the org automation that holds A_G's transfer grant pays, and law.treasury (K-BOOK-SLOTS) is the only bound"
+        },
+        "notAfter": "{UNTIL}"
+      },
+      "revoke": "office revoke: revoke this delegation; `ancestors` takes a deposed leader's appointees down with it (ancestor_revocation_rejected)"
+    },
+    "recruiter": {
+      "orgField": "recruiter",
+      "today": [
+        {
+          "type": "minidregg-workspace-proposal-v1",
+          "action": "delegate",
+          "name": "{REALM}-org-{G}",
+          "recipient": "{H}",
+          "verbs": [
+            "observe",
+            "mutate",
+            "delegate"
+          ],
+          "maxCost": "50000"
+        }
+      ],
+      "needs": {
+        "K-FIELDS": {
+          "fields": [
+            "roster/*"
+          ],
+          "why": "a recruiter writes the roster, not the org's leader or tax"
+        },
+        "notAfter": "{UNTIL}"
+      }
+    },
+    "lawgiver": {
+      "orgField": null,
+      "today": [],
+      "needs": {
+        "installPolicy-delegation": {
+          "verbs": [
+            "installPolicy"
+          ],
+          "why": "law.management admits installPolicy for {W_FOUNDER} only; a lawgiver office means a management clause naming the office holder, re-installed at each appointment"
+        }
+      }
+    },
+    "member-vote": {
+      "orgField": null,
+      "today": [
+        {
+          "type": "minidregg-workspace-proposal-v1",
+          "action": "delegate",
+          "name": "{REALM}-org-{G}-ballot-{N}",
+          "recipient": "{H}",
+          "verbs": [
+            "observe",
+            "mutate"
+          ],
+          "maxCost": "50000"
+        }
+      ],
+      "needs": {
+        "K-FIELDS": {
+          "fields": [
+            "vote-{SEAT}"
+          ],
+          "why": "law.ballot clause 4 already scopes each seat; K-FIELDS adds the capability half (MUD A6)"
+        }
+      }
+    },
+    "tithe": {
+      "orgField": null,
+      "today": [],
+      "needs": {
+        "transfer-delegation": {
+          "from": "A_S",
+          "to": "the org automation",
+          "verbs": [
+            "transfer"
+          ],
+          "maxCost": "{RATE}",
+          "why": "MUD \u00a72.7 taxes are consent in the capability: the member delegates transfer on their own account"
+        }
+      }
+    }
+  }
+}

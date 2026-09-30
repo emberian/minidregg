@@ -1,0 +1,34 @@
+{
+  "type": "any",
+  "predicates": [
+    {
+      "type": "eq",
+      "slot": "request/verb",
+      "value": "1"
+    },
+    {
+      "type": "eq",
+      "slot": "request/verb",
+      "value": "2"
+    },
+    {
+      "type": "all",
+      "predicates": [
+        {
+          "type": "memberOf",
+          "slot": "request/verb",
+          "values": [
+            "3",
+            "4",
+            "5"
+          ]
+        },
+        {
+          "type": "eq",
+          "slot": "request/subject",
+          "value": "{W_FOUNDER}"
+        }
+      ]
+    }
+  ]
+}

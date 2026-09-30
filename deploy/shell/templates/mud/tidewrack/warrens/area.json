@@ -1,0 +1,193 @@
+{
+  "type": "mud-area-v1",
+  "realm": "tidewrack",
+  "area": "warrens",
+  "areaId": "2",
+  "builder": "{W_FOUNDER}",
+  "rooms": [
+    {
+      "id": "201",
+      "slug": "cellar",
+      "title": "The Wet Cellar",
+      "scene": "rooms/cellar.md",
+      "dark": "1",
+      "leased": "0",
+      "exits": {
+        "u": "101",
+        "n": "202",
+        "e": "203"
+      },
+      "locks": {
+        "n": "cellar-key"
+      }
+    },
+    {
+      "id": "202",
+      "slug": "arch",
+      "title": "The Bricked Arch",
+      "scene": "rooms/arch.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "201",
+        "n": "204"
+      }
+    },
+    {
+      "id": "203",
+      "slug": "junction",
+      "title": "Drain Junction",
+      "scene": "rooms/junction.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "w": "201",
+        "e": "205",
+        "s": "206"
+      }
+    },
+    {
+      "id": "204",
+      "slug": "cistern",
+      "title": "The Old Cistern",
+      "scene": "rooms/cistern.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "202",
+        "n": "207"
+      }
+    },
+    {
+      "id": "205",
+      "slug": "crawlway",
+      "title": "The Crawlway",
+      "scene": "rooms/crawlway.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "w": "203",
+        "e": "208"
+      }
+    },
+    {
+      "id": "206",
+      "slug": "sluice",
+      "title": "The Sluice Gate",
+      "scene": "rooms/sluice.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "n": "203",
+        "s": "209"
+      }
+    },
+    {
+      "id": "207",
+      "slug": "court",
+      "title": "The Ratking's Court",
+      "scene": "rooms/court.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "204",
+        "e": "210"
+      }
+    },
+    {
+      "id": "208",
+      "slug": "niche",
+      "title": "The Smugglers' Niche",
+      "scene": "rooms/niche.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "w": "205"
+      }
+    },
+    {
+      "id": "209",
+      "slug": "collapse",
+      "title": "The Collapsed Tunnel",
+      "scene": "rooms/collapse.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "n": "206",
+        "e": "211"
+      }
+    },
+    {
+      "id": "210",
+      "slug": "midden",
+      "title": "The Bone Midden",
+      "scene": "rooms/midden.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "w": "207"
+      }
+    },
+    {
+      "id": "211",
+      "slug": "grotto",
+      "title": "The Seep Grotto",
+      "scene": "rooms/grotto.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "w": "209",
+        "n": "212"
+      }
+    },
+    {
+      "id": "212",
+      "slug": "undercroft",
+      "title": "The Undercroft Stair",
+      "scene": "rooms/undercroft.md",
+      "dark": "0",
+      "leased": "0",
+      "exits": {
+        "s": "211"
+      }
+    }
+  ],
+  "items": [
+    {
+      "slug": "cellar-key",
+      "id": "5001",
+      "kind": "key",
+      "title": "a bargeman's iron key",
+      "placed": {
+        "quest": "rat-catcher"
+      }
+    }
+  ],
+  "spawns": [
+    {
+      "mob": "rat",
+      "room": "201",
+      "program": "../../programs/rat.hoon",
+      "hp": "8",
+      "respawn": "20",
+      "skill": "gnaw",
+      "wander": [
+        "201",
+        "203",
+        "205",
+        "203"
+      ]
+    },
+    {
+      "mob": "ratking",
+      "room": "207",
+      "program": "../../programs/rat.hoon",
+      "hp": "20",
+      "respawn": "200",
+      "skill": "gnaw",
+      "wander": [
+        "207"
+      ]
+    }
+  ]
+}
