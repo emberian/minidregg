@@ -211,4 +211,51 @@ theorem validateLoaded_durable {config : Config} {durable : Durable} {opened : O
       subst validated
       rfl
 
+/-! ## The served root and C1's specification root -/
+
+/-- The served entries (read off a resumed snapshot) are C1's `worldEntries` of
+the image when the snapshot is the genesis replay and the chain is the
+deployment's log root. -/
+theorem entriesOf_worldEntries (config : Config) (image : DurableReceiver.Image)
+    (snapshot : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) (chain : Digest)
+    (restored : image.restore ResourceBirthCodec.rootBytes = some snapshot)
+    (rooted : chain = NativeHostCodec.logRoot config.deployment.domain config.profile.semantics image) :
+    DurableReceiverIO.entriesOf image snapshot chain =
+      (NativeHostCodec.worldEntries config.deployment.domain config.profile.semantics image).map
+        fun e => (e.1, NativeHostCodec.leafRoot e.2) := by
+  unfold DurableReceiverIO.entriesOf NativeHostCodec.worldEntries
+  rw [List.map_cons, List.map_map]
+  refine congrArg₂ List.cons ?_ ?_
+  · rw [rooted]
+    rfl
+  · apply List.map_congr_left
+    intro cellId _
+    show (_, snapshot.model.roots cellId) = (_, ResourceBirthCodec.rootBytes (image.currentBytes cellId))
+    rw [← snapshot.coherent cellId,
+      DurableReceiver.Image.currentBytes_restore ResourceBirthCodec.rootBytes image snapshot restored cellId]
+
+/-- **The root a Loaded serves after open or rebase** (a cache built from the
+served state) is C1's specification root of the image, when the resumed
+snapshot is the genesis replay (`DurableCheckpoint.resume_sound`: an honest
+checkpoint) and the chain is rooted at this deployment's genesis log root
+(`validateLoaded` refuses otherwise; `Loaded.chainExact`). -/
+theorem servedRoot_eq_worldRoot (config : Config) (image : DurableReceiver.Image)
+    (snapshot : DurableDataIntent.DataSnapshot ResourceBirthCodec.rootBytes) (chain : Digest)
+    (restored : image.restore ResourceBirthCodec.rootBytes = some snapshot)
+    (rooted : chain = NativeHostCodec.logRoot config.deployment.domain config.profile.semantics image) :
+    (DurableReceiverIO.RootCache.ofEntries (DurableReceiverIO.entriesOf image snapshot chain)).root =
+      worldRoot config image := by
+  rw [DurableReceiverIO.RootCache.root_eq, entriesOf_worldEntries config image snapshot chain restored rooted]
+  simp only [worldRoot, NativeHostCodec.worldRoot, DurableReceiverIO.RootCache.ofEntries]
+
+/-- The chain of a loaded image validated for this deployment is its log root. -/
+theorem chain_logRoot (config : Config) (durable : Durable)
+    (rooted : durable.logStart = config.logStart durable.image.seed) :
+    durable.chain = NativeHostCodec.logRoot config.deployment.domain config.profile.semantics durable.image := by
+  rw [durable.chainExact, rooted]
+  rfl
+
+/-- info: 'Minidregg.Kernel.NativeHost.servedRoot_eq_worldRoot' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms servedRoot_eq_worldRoot
+
 end Minidregg.Kernel.NativeHost
