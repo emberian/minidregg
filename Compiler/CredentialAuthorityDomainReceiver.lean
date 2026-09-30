@@ -265,11 +265,33 @@ theorem LoadedDirectory.bytes_exact
 
 /-! ## Concrete preparation of the root-issuance batch -/
 
+/-- The revocation keys an issuance batch brings into scope: each grant's own
+key and the channels it names.  `GrantReady` requires every named channel to be
+registered and live in the cell, and every self key to be live, so none of these
+keys is revoked and extending the universe changes no authorization field
+(`issueUniverse_authState_exact`). -/
 def issuanceKeys (grants : List AuthorityGrant) : Finset RevocationKey :=
-  (grants.map fun grant => RevocationKey.capability grant.capability.head.id).toFinset
+  (grants.map fun grant => RevocationKey.capability grant.capability.head.id).toFinset ∪
+    grants.foldr (fun grant keys => grant.capability.head.channels.image RevocationKey.channel ∪ keys) ∅
+
+theorem self_mem_issuanceKeys {grants : List AuthorityGrant} {grant : AuthorityGrant}
+    (member : grant ∈ grants) :
+    RevocationKey.capability grant.capability.head.id ∈ issuanceKeys grants :=
+  Finset.mem_union_left _ (List.mem_toFinset.mpr (List.mem_map.mpr ⟨grant, member, rfl⟩))
+
+theorem channel_mem_issuanceKeys {grants : List AuthorityGrant} {grant : AuthorityGrant}
+    (member : grant ∈ grants) {channel : ChannelId} (named : channel ∈ grant.capability.head.channels) :
+    RevocationKey.channel channel ∈ issuanceKeys grants := by
+  apply Finset.mem_union_right
+  induction grants with
+  | nil => cases member
+  | cons head rest induction =>
+      rcases List.mem_cons.mp member with rfl | inRest
+      · exact Finset.mem_union_left _ (Finset.mem_image_of_mem _ named)
+      · exact Finset.mem_union_right _ (induction inRest)
 
 def issueUniverse (snapshot : CredentialAuthorityDomain.Snapshot) (grants : List AuthorityGrant) :
-    ProjectionUniverse := snapshot.extendedUniverse (issuanceKeys grants)
+    ProjectionUniverse := ⟨snapshot.revocationUniverse.revocationKeys ∪ issuanceKeys grants⟩
 
 theorem issueUniverse_authState_exact (snapshot : CredentialAuthorityDomain.Snapshot)
     (grants : List AuthorityGrant) :
@@ -286,7 +308,7 @@ def GrantReady (snapshot : CredentialAuthorityDomain.Snapshot) (grant : Authorit
     grant.capability.head.policyEpoch = policyEpochAt snapshot.cell grant.capability.head.policyId ∧
     isRevoked snapshot.cell (.capability grant.capability.head.id) = false ∧
     (∀ channel ∈ grant.capability.head.channels,
-      RevocationKey.channel channel ∈ snapshot.revocationUniverse.revocationKeys ∧
+      isRegistered snapshot.cell (.channel channel) = true ∧
       isRevoked snapshot.cell (.channel channel) = false)
 
 instance grantReadyDecidable (snapshot : CredentialAuthorityDomain.Snapshot) (grant : AuthorityGrant) :
@@ -295,9 +317,9 @@ instance grantReadyDecidable (snapshot : CredentialAuthorityDomain.Snapshot) (gr
   infer_instance
 
 def policyFresh (snapshot : CredentialAuthorityDomain.Snapshot) (policy : InitialPolicy) : Prop :=
-  generationAt? snapshot.logical policy.policyId = none ∧
-    revisionAt? snapshot.logical policy.policyId = none ∧
-    addressAt? snapshot.logical policy.policyId 0 = none
+  (show Option Epoch from snapshot.logical ⟨.policyEpoch, policy.policyId⟩) = none ∧
+    (show Option PolicyRevision from snapshot.logical ⟨.policyRevision, policy.policyId⟩) = none ∧
+    (show Option Digest from snapshot.logical ⟨.policyAddress, (policy.policyId, 0)⟩) = none
 
 instance policyFreshDecidable (snapshot : CredentialAuthorityDomain.Snapshot) (policy : InitialPolicy) :
     Decidable (policyFresh snapshot policy) := by
@@ -338,10 +360,9 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
         rootAncestors := ancestors
         issuerCurrent := issuer
         policyCurrent := policy
-        selfRegistered := Finset.mem_union_right _
-          (List.mem_toFinset.mpr (List.mem_map.mpr ⟨grant, member, rfl⟩))
+        selfRegistered := Finset.mem_union_right _ (self_mem_issuanceKeys member)
         channelsRegistered := fun channel channelMember =>
-          Finset.mem_union_left _ (channels channel channelMember).1
+          Finset.mem_union_right _ (channel_mem_issuanceKeys member channelMember)
         selfLive := self
         channelsLive := fun channel channelMember => (channels channel channelMember).2 }
 
