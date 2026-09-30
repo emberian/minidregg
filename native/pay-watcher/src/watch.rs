@@ -1,5 +1,12 @@
-//! One stateless run: tip, then per book index per endpoint a view of the index's recent
-//! finalized transfers, then N-endpoint agreement (PAY.md §3.3) over those views.
+//! One run: tip, then per book index per endpoint a view of the index's recent finalized
+//! transfers, then N-endpoint agreement (PAY.md §3.3) over those views.
+//!
+//! Every index is stateless except the ENROLLMENT index (PAY.md §11.9), which pages back to a
+//! persistent [`Cursor`] instead of a `maxPages` window. A per-payer address sees a handful of
+//! transfers; the enrollment address is public, a shared queue anyone can fill with memo-bearing
+//! dust, and a newest-N window there is §2.2's dust hole: enough dust pushes a real enrollment
+//! out of the window for good. So index 0 is read to the end of what is not yet SETTLED, and the
+//! cursor records how far that is.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -8,15 +15,64 @@ use serde_json::{json, Value};
 
 use crate::config::{BookEntry, Config};
 use crate::decode::{signatures_of, token_accounts, transaction_credit, SigEntry, TxOutcome};
+use crate::memo;
 use crate::model::{
-    base58, unbase58, unhex, Clock, Event, Observation, Reason, Refusal, Sig,
+    base58, hex, unbase58, unhex, Clock, Event, Key, Observation, Reason, Refusal, Sig,
 };
+
+/// The enrollment index's paging state: per token account, the newest signature at and below
+/// which every listing is SETTLED, and is therefore never listed or fetched again (it is
+/// passed as `until`). Settled = retained by a receipt, or an agreed permanent skip (failed,
+/// zero delta, net debit, below the journal floor). An emitted-but-unreceipted credit, a
+/// refusal or a disagreement is NOT settled and holds the cursor below it, so it is read again
+/// next run: the cursor can lose nothing that the stateless rule would have retried.
+pub type Cursor = BTreeMap<Key, Sig>;
+
+/// `{"cursors": {"<token account hex>": "<signature hex>"}}`. An absent file is an empty cursor.
+pub fn load_cursor(path: &Path) -> Result<Cursor, String> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Cursor::new()),
+        Err(e) => return Err(format!("cursor {}: {e}", path.display())),
+    };
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("cursor {}: not JSON: {e}", path.display()))?;
+    let object = value.as_object().ok_or("cursor is not an object")?;
+    if object.keys().any(|k| k != "cursors") {
+        return Err(format!("cursor {}: unknown field", path.display()));
+    }
+    let map = value
+        .get("cursors")
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("cursor {}: missing `cursors` object", path.display()))?;
+    let mut cursor = Cursor::new();
+    for (account, sig) in map {
+        let account = unhex::<32>(account)
+            .ok_or_else(|| format!("cursor {}: account {account} is not 64 hex", path.display()))?;
+        let sig = sig
+            .as_str()
+            .and_then(unhex::<64>)
+            .ok_or_else(|| format!("cursor {}: signature is not 128 hex", path.display()))?;
+        cursor.insert(account, sig);
+    }
+    Ok(cursor)
+}
+
+pub fn cursor_json(cursor: &Cursor) -> Vec<u8> {
+    let map: serde_json::Map<String, Value> = cursor
+        .iter()
+        .map(|(a, s)| (hex(a), Value::String(hex(s))))
+        .collect();
+    pretty(&json!({ "cursors": map }))
+}
 use crate::transport::Transport;
 
 pub struct Report {
     pub tip: Clock,
     pub observations: Vec<Observation>,
     pub events: Vec<Event>,
+    /// The enrollment cursor after this run (the input cursor where nothing advanced).
+    pub cursor: Cursor,
 }
 
 impl Report {
@@ -122,7 +178,9 @@ pub fn common_tip(transports: &[&dyn Transport]) -> Result<Clock, Refusal> {
 /// One endpoint's verdict on one transfer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Outcome {
-    Credit { slot: u64, block_time: u64, amount: u64 },
+    /// `memos`: every memo instruction's bytes, read for the enrollment index only (`None`
+    /// elsewhere). Endpoints must agree on the BYTES: the watcher never picks one endpoint's.
+    Credit { slot: u64, block_time: u64, amount: u64, memos: Option<Vec<Vec<u8>>> },
     Skip(Reason, String),
     Refused(Reason, String),
 }
@@ -134,15 +192,41 @@ impl Outcome {
                 slot,
                 block_time,
                 amount,
-            } => format!("credit slot={slot} blockTime={block_time} amount={amount}"),
+                memos,
+            } => {
+                let base = format!("credit slot={slot} blockTime={block_time} amount={amount}");
+                match memos {
+                    Some(m) => format!(
+                        "{base} memos=[{}]",
+                        m.iter().map(|b| memo::describe(b)).collect::<Vec<_>>().join(", ")
+                    ),
+                    None => base,
+                }
+            }
             Outcome::Skip(r, d) | Outcome::Refused(r, d) => format!("{} ({d})", r.name()),
         }
+    }
+
+    /// A permanent decision: the cursor may pass it.
+    fn settled(&self) -> bool {
+        matches!(
+            self,
+            Outcome::Skip(
+                Reason::FailedTransaction
+                    | Reason::ZeroDelta
+                    | Reason::NetDebit
+                    | Reason::BelowJournalFloor,
+                _
+            )
+        )
     }
 }
 
 struct IndexView {
     outcomes: BTreeMap<Sig, Outcome>,
     notes: Vec<(Reason, Option<Sig>, String)>,
+    /// Enrollment index only: per token account, the listing at or below the tip, newest first.
+    listed: Vec<(Key, Vec<Sig>)>,
 }
 
 /// One endpoint's view of one book index. An `Err` refuses the whole index for this run, as
@@ -154,10 +238,13 @@ fn view_index(
     entry: &BookEntry,
     receipts: &BTreeSet<Sig>,
     tip: Clock,
+    cursor: &Cursor,
 ) -> Result<IndexView, Refusal> {
+    let enrol = cfg.enrol.as_ref().filter(|e| e.index == entry.index);
     let mut view = IndexView {
         outcomes: BTreeMap::new(),
         notes: Vec::new(),
+        listed: Vec::new(),
     };
     let accounts = token_accounts(
         &t.call(
@@ -182,15 +269,25 @@ fn view_index(
     let mut seen: BTreeMap<Sig, SigEntry> = BTreeMap::new();
     for account in &accounts {
         let mut before: Option<Sig> = None;
-        for page in 0..cfg.max_pages {
+        let until = enrol.and_then(|_| cursor.get(account));
+        let mut listed: Vec<Sig> = Vec::new();
+        let mut listed_set: BTreeSet<Sig> = BTreeSet::new();
+        let mut page = 0usize;
+        loop {
             let mut opts = json!({ "commitment": "finalized", "limit": cfg.page_size });
             if let Some(b) = before {
                 opts["before"] = Value::String(base58(&b));
+            }
+            if let Some(u) = until {
+                opts["until"] = Value::String(base58(u));
             }
             let entries = signatures_of(
                 &t.call("getSignaturesForAddress", json!([base58(account), opts]))?,
             )?;
             for e in &entries {
+                if enrol.is_some() && e.slot <= tip.slot && listed_set.insert(e.signature) {
+                    listed.push(e.signature);
+                }
                 // A receipt saves this signature's getTransaction, and nothing else: paging
                 // continues, because an OLDER transfer that was not emitted on an earlier run
                 // (endpoints disagreed, or it was pruned) has no receipt and must be read
@@ -232,8 +329,17 @@ fn view_index(
             if entries.len() < cfg.page_size {
                 break;
             }
-            before = entries.last().map(|e| e.signature);
-            if page + 1 == cfg.max_pages {
+            let next = entries.last().map(|e| e.signature);
+            if next == before {
+                return Err(Refusal::malformed(format!(
+                    "account {}: paging did not advance",
+                    base58(account)
+                )));
+            }
+            before = next;
+            page += 1;
+            // The enrollment index pages to the cursor or the end of history (module doc).
+            if enrol.is_none() && page == cfg.max_pages {
                 view.notes.push((
                     Reason::PageBound,
                     None,
@@ -244,7 +350,11 @@ fn view_index(
                         cfg.page_size
                     ),
                 ));
+                break;
             }
+        }
+        if enrol.is_some() {
+            view.listed.push((*account, listed));
         }
     }
 
@@ -280,10 +390,26 @@ fn view_index(
                         let amount = u64::try_from(delta).map_err(|_| {
                             Refusal::malformed(format!("credited amount {delta} exceeds u64"))
                         })?;
-                        Outcome::Credit {
-                            slot,
-                            block_time,
-                            amount,
+                        match enrol {
+                            // Dust is recorded here and never submitted (PAY.md §11.7).
+                            Some(e) if amount < e.journal_floor => Outcome::Skip(
+                                Reason::BelowJournalFloor,
+                                format!("amount {amount} < journalFloor {}", e.journal_floor),
+                            ),
+                            // Only the memos of the transaction that made the credit: a memo
+                            // in any other transaction is never joined to it.
+                            Some(_) => Outcome::Credit {
+                                slot,
+                                block_time,
+                                amount,
+                                memos: Some(memo::memos(&result)?),
+                            },
+                            None => Outcome::Credit {
+                                slot,
+                                block_time,
+                                amount,
+                                memos: None,
+                            },
                         }
                     } else if delta == 0 {
                         Outcome::Skip(Reason::ZeroDelta, "added nothing to the watched accounts".into())
@@ -304,6 +430,7 @@ pub fn run(
     cfg: &Config,
     transports: &[&dyn Transport],
     receipts: &BTreeSet<Sig>,
+    cursor: &Cursor,
 ) -> Result<Report, Refusal> {
     if transports.len() < cfg.min_endpoints {
         return Err(Refusal::new(
@@ -318,12 +445,13 @@ pub fn run(
     let tip = common_tip(transports)?;
     let mut observations = Vec::new();
     let mut events = Vec::new();
+    let mut next_cursor = cursor.clone();
 
     for entry in &cfg.book {
         let idx = Some(entry.index);
         let views: Vec<(&str, Result<IndexView, Refusal>)> = transports
             .iter()
-            .map(|t| (t.label(), view_index(*t, cfg, entry, receipts, tip)))
+            .map(|t| (t.label(), view_index(*t, cfg, entry, receipts, tip, cursor)))
             .collect();
 
         let refusals: Vec<Event> = views
@@ -349,26 +477,53 @@ pub fn run(
             .iter()
             .flat_map(|(_, v)| v.outcomes.keys().copied())
             .collect();
+        // Signatures whose agreed outcome is a permanent decision (see `Cursor`).
+        let mut settled: BTreeSet<Sig> = receipts.clone();
         for sig in sigs {
             let answers: Vec<Option<&Outcome>> =
                 views.iter().map(|(_, v)| v.outcomes.get(&sig)).collect();
             let first = answers[0];
             if first.is_some() && answers.iter().all(|a| *a == first) {
+                if first.expect("checked").settled() {
+                    settled.insert(sig);
+                }
                 match first.expect("checked") {
                     Outcome::Credit {
                         slot,
                         block_time,
                         amount,
-                    } => observations.push(Observation {
-                        index: entry.index,
-                        address: entry.address,
-                        signature: sig,
-                        slot: *slot,
-                        block_time: *block_time,
-                        amount: *amount,
-                        mint: cfg.asset.mint,
-                        token_program: cfg.asset.token_program,
-                    }),
+                        memos,
+                    } => {
+                        let (memo, memo_error) = match memos {
+                            Some(m) => memo::bind(m),
+                            None => (None, None),
+                        };
+                        if let (Some(e), Some(m)) = (memo_error, memos) {
+                            events.push(Event::of(
+                                e.reason(),
+                                idx,
+                                Some(sig),
+                                None,
+                                format!(
+                                    "{} memo instruction(s); memo emitted as null: [{}]",
+                                    m.len(),
+                                    m.iter().map(|b| memo::describe(b)).collect::<Vec<_>>().join(", ")
+                                ),
+                            ));
+                        }
+                        observations.push(Observation {
+                            index: entry.index,
+                            address: entry.address,
+                            signature: sig,
+                            slot: *slot,
+                            block_time: *block_time,
+                            amount: *amount,
+                            mint: cfg.asset.mint,
+                            token_program: cfg.asset.token_program,
+                            memo,
+                            memo_error,
+                        })
+                    }
                     Outcome::Skip(r, d) | Outcome::Refused(r, d) => {
                         events.push(Event::of(*r, idx, Some(sig), None, d.clone()))
                     }
@@ -385,6 +540,7 @@ pub fn run(
                 events.push(Event::of(Reason::EndpointsDisagree, idx, Some(sig), None, detail));
             }
         }
+        advance_cursor(&views, &settled, idx, &mut next_cursor, &mut events);
     }
     observations.sort_by(|a, b| {
         (a.index, a.slot, a.signature).cmp(&(b.index, b.slot, b.signature))
@@ -393,5 +549,43 @@ pub fn run(
         tip,
         observations,
         events,
+        cursor: next_cursor,
     })
+}
+
+/// Per enrollment token account: walk the agreed listing from the oldest entry and move the
+/// cursor over every settled signature, stopping at the first that is not. The listing order is
+/// the RPC's (a slot can hold several of the account's transactions, and `until` cuts at a
+/// position, not a slot), so the endpoints must list the account identically or it holds.
+fn advance_cursor(
+    views: &[(&str, IndexView)],
+    settled: &BTreeSet<Sig>,
+    idx: Option<u64>,
+    cursor: &mut Cursor,
+    events: &mut Vec<Event>,
+) {
+    let Some((_, first)) = views.first() else { return };
+    for (account, listed) in &first.listed {
+        let agreed = views.iter().all(|(_, v)| {
+            v.listed.iter().any(|(a, l)| a == account && l == listed)
+        });
+        if !agreed {
+            events.push(Event::of(
+                Reason::CursorHeld,
+                idx,
+                None,
+                None,
+                format!("account {}: endpoints list it differently", base58(account)),
+            ));
+            continue;
+        }
+        if let Some(newest_settled) = listed
+            .iter()
+            .rev()
+            .take_while(|s| settled.contains(*s))
+            .last()
+        {
+            cursor.insert(*account, *newest_settled);
+        }
+    }
 }

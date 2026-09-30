@@ -1,0 +1,11 @@
+{
+  "description": "alice's memo in a transaction that moves nothing, then the transfer in a DIFFERENT transaction with no memo: the memo is not joined to it (memo null)",
+  "exit": 0,
+  "memos": [
+    "none"
+  ],
+  "observations": 1,
+  "reasons": [
+    "zeroDelta"
+  ]
+}

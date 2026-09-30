@@ -1,6 +1,7 @@
 {
   "description": "a token balance entry's accountIndex is past the account-key list",
   "exit": 3,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "accountIndexOutOfRange"

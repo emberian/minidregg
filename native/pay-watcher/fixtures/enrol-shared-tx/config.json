@@ -1,0 +1,28 @@
+{
+  "asset": {
+    "mint": "9xkU49fBixt9jfgvsHquwoA6HBLriYgVsaqa6RaPKuQU",
+    "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
+  },
+  "book": [
+    {
+      "address": "CoNW8ZskNXN2s3usTsmHR7MoAPFLeTX7mbULQK25E8y1",
+      "index": 0
+    },
+    {
+      "address": "2X9EKs5gzkTynxiESNKy3BM2YRrDmLW8r67wHBuCeZTS",
+      "index": 1
+    },
+    {
+      "address": "fJp5rXQaFNsCVHyVjnpvyd25oVTGEDXF1j7Xez9ToNY",
+      "index": 5
+    }
+  ],
+  "enrol": {
+    "index": 0,
+    "journalFloor": 1000000
+  },
+  "maxPages": 4,
+  "minEndpoints": 2,
+  "pageSize": 25,
+  "receiptsDir": "receipts"
+}
