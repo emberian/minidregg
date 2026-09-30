@@ -99,6 +99,12 @@ def inputsInRange (profile : CompilerProfile) : Pred → State → State → Boo
       | .scalar width =>
           decide (PredOrder.InputsInRange width
             ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b))
+  | .leSlotsOff a b c, _, new =>
+      match profile.order with
+      | .disabled => false
+      | .scalar width =>
+          decide (PredOrder.InputsInRange width
+            ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b + c))
   | .not p, old, new => inputsInRange profile p old new
   | .allL ps, old, new => inputsInRangeL profile ps old new
   | .anyL ps, old, new => inputsInRangeL profile ps old new
@@ -478,6 +484,20 @@ theorem eval_leSlots_source (old new : State) (a b : Slot) :
   cases ha : new.get a <;> cases hb : new.get b <;>
     simp [Minidregg.Pred.eval, Minidregg.Pred.evalWith, intOf, ha, hb]
 
+theorem eval_leSlotsOff_source (old new : State) (a b : Slot) (c : Int) :
+    Minidregg.Pred.eval (.leSlotsOff a b c) old new =
+      (((new.get a).isSome && (new.get b).isSome) && decide (intOf new a ≤ intOf new b + c)) := by
+  cases ha : new.get a <;> cases hb : new.get b <;>
+    simp [Minidregg.Pred.eval, Minidregg.Pred.evalWith, intOf, ha, hb]
+
+/-- `leSlotsOff` right operand: `val(new, b) + c`, the constant folded in as `le` folds its bound. -/
+def offR (b : Slot) (c : Int) : Term (AirSig F Wire) :=
+  add' (vr (.val true b)) (cst (c : F))
+
+@[simp] theorem eval_offR (old new : State) (A : List ℕ → ℕ → F) (b : Slot) (c : Int) :
+    eval (stepAsg old new A) (offR b c) = ((intOf new b + c : Int) : F) := by
+  simp only [offR, eval_add', eval_vr, eval_cst, stepAsg, cond_true, valOf_intOf, Int.cast_add]
+
 theorem eval_le_source (old new : State) (s : Slot) (v : Int) :
     Minidregg.Pred.eval (.le s v) old new =
       ((new.get s).isSome && decide (intOf new s ≤ v)) := by
@@ -536,6 +556,14 @@ def lowerA (profile : CompilerProfile) : Pred → Term (AirSig F Wire) × Constr
           (PredOrder.indicator width present (orderBits width),
            PredOrder.gadget width present (vr (.val true a)) (vr (.val true b))
              (.aux [] 0) (orderBits width))
+  | .leSlotsOff a b c =>
+      match profile.order with
+      | .disabled => (cst 0, [cst 1])
+      | .scalar width =>
+          let present := mul' (vr (.pres true a)) (vr (.pres true b))
+          (PredOrder.indicator width present (orderBits width),
+           PredOrder.gadget width present (vr (.val true a)) (offR b c)
+             (.aux [] 0) (orderBits width))
   | .witnessed _ =>
       (cst 0, [])        -- first-party fail-closed: the indicator is constant 0
   | .not p =>
@@ -574,6 +602,7 @@ def supported (profile : CompilerProfile) : Pred → Bool
   | .monotone _   => match profile.order with | .disabled => false | .scalar _ => true
   | .eqSlots _ _  => true
   | .leSlots _ _  => match profile.order with | .disabled => false | .scalar _ => true
+  | .leSlotsOff _ _ _ => match profile.order with | .disabled => false | .scalar _ => true
   | .witnessed _  => true
   | .not p        => supported profile p
   | .allL ps      => supportedL profile ps
@@ -594,6 +623,7 @@ def lits : Pred → List ℤ
   | .monotone _   => []
   | .eqSlots _ _  => []
   | .leSlots _ _  => []
+  | .leSlotsOff _ _ c => [c]
   | .witnessed _  => []
   | .not p        => lits p
   | .allL ps      => litsL ps
@@ -639,6 +669,11 @@ def wit (profile : CompilerProfile) : Pred → State → State → List ℕ → 
       | .disabled => 0
       | .scalar width => orderAux width
           ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b) k
+  | .leSlotsOff a b c => fun _ new _ k =>
+      match profile.order with
+      | .disabled => 0
+      | .scalar width => orderAux width
+          ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b + c) k
   | .witnessed _  => fun _ _ _ _ => 0
   | .not p        => wit profile p
   | .allL ps      => witL profile ps 0
@@ -816,6 +851,61 @@ theorem lowerA_complete_leSlots (profile : CompilerProfile) (a b : Slot) (old ne
     · intro i
       simp only [orderBits, stepAsg, wit, hmode, orderAux_bit]
 
+omit [DecidableEq F] in
+/-- **`leSlotsOff` forcing case**: `leSlots` with right operand `val(new,b) + c`. Under an
+admissible scalar profile and the actual difference `new[b] + c − new[a]` in range, every accepted
+assignment forces the indicator to `[new[a] ≤ new[b] + c]` (both present). -/
+theorem lowerA_forced_leSlotsOff (profile : CompilerProfile) (hprofile : profile.Admissible F)
+    (a b : Slot) (c : Int) (old new : State) (A : List ℕ → ℕ → F)
+    (hsup : supported profile (.leSlotsOff a b c) = true)
+    (hrange : inputsInRange profile (.leSlotsOff a b c) old new = true)
+    (h : systemAccepts (stepAsg old new A) (lowerA profile (.leSlotsOff a b c)).2) :
+    eval (stepAsg old new A) (lowerA profile (.leSlotsOff a b c)).1
+      = if Minidregg.Pred.eval (.leSlotsOff a b c) old new = true then 1 else 0 := by
+  cases hmode : profile.order with
+  | disabled => simp [supported, hmode] at hsup
+  | scalar width =>
+    simp only [lowerA, hmode] at h ⊢
+    have hr : PredOrder.InputsInRange width
+        ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b + c) := by
+      simpa only [inputsInRange, hmode, decide_eq_true_eq] using hrange
+    have hnw : PredOrder.NoWrap F width := by
+      simpa only [CompilerProfile.Admissible, hmode] using hprofile
+    have hf := PredOrder.forced width (mul' (vr (.pres true a)) (vr (.pres true b)))
+      (vr (.val true a)) (offR b c) (.aux [] 0) (orderBits width)
+      (stepAsg old new A) ((new.get a).isSome && (new.get b).isSome)
+      (intOf new a) (intOf new b + c) hnw hr
+      (by simpa only [eval_mul', eval_vr, stepAsg, cond_true] using presOf_pair (F := F) new a b)
+      (by simpa only [eval_vr, stepAsg, cond_true] using valOf_intOf (F := F) new a)
+      (eval_offR old new A b c) h
+    simpa only [eval_leSlotsOff_source] using hf
+
+/-- **`leSlotsOff` completeness case**: under a scalar profile with the actual difference
+`new[b] + c − new[a]` in range, the emitted witness satisfies the order gadget. -/
+theorem lowerA_complete_leSlotsOff (profile : CompilerProfile) (a b : Slot) (c : Int)
+    (old new : State)
+    (hsup : supported profile (.leSlotsOff a b c) = true)
+    (hrange : inputsInRange profile (.leSlotsOff a b c) old new = true) :
+    systemAccepts (stepAsg old new (wit profile (F := F) (.leSlotsOff a b c) old new))
+      (lowerA profile (.leSlotsOff a b c)).2 := by
+  cases hmode : profile.order with
+  | disabled => simp [supported, hmode] at hsup
+  | scalar width =>
+    simp only [lowerA, hmode]
+    have hr : PredOrder.InputsInRange width
+        ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b + c) := by
+      simpa only [inputsInRange, hmode, decide_eq_true_eq] using hrange
+    refine PredOrder.complete (F := F) width (mul' (vr (.pres true a)) (vr (.pres true b)))
+      (vr (.val true a)) (offR b c) (.aux [] 0) (orderBits width)
+      (stepAsg old new (wit profile (.leSlotsOff a b c) old new))
+      ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b + c) hr
+      ?_ ?_ (eval_offR _ _ _ b c) ?_ ?_
+    · simpa only [eval_mul', eval_vr, stepAsg, cond_true] using presOf_pair (F := F) new a b
+    · simpa only [eval_vr, stepAsg, cond_true] using valOf_intOf (F := F) new a
+    · simp only [stepAsg, wit, hmode, orderAux_zero]
+    · intro i
+      simp only [orderBits, stepAsg, wit, hmode, orderAux_bit]
+
 end DecEqF
 
 /-! ## §10. FORCING — the general soundness induction: on EVERY accepted assignment the
@@ -957,6 +1047,8 @@ theorem lowerA_forced (profile : CompilerProfile)
     lowerA_forced_eqSlots profile a b old new A hinj h
   | .leSlots a b, old, new, A, _, hsup, hrange, h =>
     lowerA_forced_leSlots profile hprofile a b old new A hsup hrange h
+  | .leSlotsOff a b c, old, new, A, _, hsup, hrange, h =>
+    lowerA_forced_leSlotsOff profile hprofile a b c old new A hsup hrange h
   | .witnessed vk, old, new, A, _, _, _, _ => by
     simp [lowerA, eval_cst, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
       Minidregg.Pred.failClosed]
@@ -1104,6 +1196,8 @@ theorem lowerA_complete (profile : CompilerProfile) :
         simp only [orderBits, stepAsg, wit, hmode, orderAux_bit]
   | .eqSlots a b, old, new, _, _ => lowerA_complete_eqSlots profile a b old new
   | .leSlots a b, old, new, hsup, hrange => lowerA_complete_leSlots profile a b old new hsup hrange
+  | .leSlotsOff a b c, old, new, hsup, hrange =>
+    lowerA_complete_leSlotsOff profile a b c old new hsup hrange
   | .witnessed vk, old, new, _, _ => by
     simp only [lowerA]
     exact systemAccepts_nil _
@@ -1261,6 +1355,54 @@ theorem lower_leSlots_correct {width : Nat}
       lowerA_forced_leSlots _ hprofile a b old new _ hsup hr hsys, if_pos he]
     ring
 
+/-- **`leSlotsOff` refinement, in source terms**: under an admissible `scalar width` profile, and
+with the actual difference `new[b] + c − new[a]` in `[-2^width, 2^width)` whenever both are
+present, the compiled system accepts for some auxiliary assignment iff both slots are present in
+`new` and `new[a] ≤ new[b] + c`. The range premise is on the compared quantity itself, the
+offset included — the premise `le` carries for `v − new[s]` — so `|c|` needs no bound of its own
+and the gadget's range check is the one `leSlots` emits. -/
+theorem lower_leSlotsOff_correct {width : Nat}
+    (hprofile : (CompilerProfile.scalar width).Admissible F) {a b : Slot} {c : Int}
+    {old new : State}
+    (hrange : ∀ x y, new.get a = some x → new.get b = some y →
+      -(2 : Int) ^ width ≤ y + c - x ∧ y + c - x < (2 : Int) ^ width) :
+    (∃ A : List ℕ → ℕ → F,
+        systemAccepts (stepAsg old new A) (lower (.scalar width) (.leSlotsOff a b c)))
+      ↔ ∃ x y, new.get a = some x ∧ new.get b = some y ∧ x ≤ y + c := by
+  have hsup : supported (.scalar width) (.leSlotsOff a b c) = true := rfl
+  have hr : inputsInRange (.scalar width) (.leSlotsOff a b c) old new = true := by
+    simp only [inputsInRange, CompilerProfile.scalar, decide_eq_true_eq, PredOrder.InputsInRange]
+    cases ha : new.get a with
+    | none => simp
+    | some x =>
+      cases hb : new.get b with
+      | none => simp
+      | some y => simpa [intOf, ha, hb] using hrange x y ha hb
+  have hsem : Minidregg.Pred.eval (.leSlotsOff a b c) old new = true ↔
+      ∃ x y, new.get a = some x ∧ new.get b = some y ∧ x ≤ y + c := by
+    cases ha : new.get a <;> cases hb : new.get b <;>
+      simp [Minidregg.Pred.eval, Minidregg.Pred.evalWith, ha, hb]
+  rw [← hsem]
+  constructor
+  · rintro ⟨A, h⟩
+    rw [lower, systemAccepts_append, systemAccepts_cons] at h
+    obtain ⟨hsys, htop, -⟩ := h
+    unfold accepts at htop
+    rw [eval_add', eval_cst,
+      lowerA_forced_leSlotsOff _ hprofile a b c old new A hsup hr hsys] at htop
+    by_contra he
+    rw [if_neg he] at htop
+    exact zero_ne_one (by linear_combination htop : (0 : F) = 1)
+  · intro he
+    refine ⟨wit (.scalar width) (.leSlotsOff a b c) old new, ?_⟩
+    have hsys := lowerA_complete_leSlotsOff (F := F) (.scalar width) a b c old new hsup hr
+    rw [lower, systemAccepts_append, systemAccepts_cons]
+    refine ⟨hsys, ?_, systemAccepts_nil _⟩
+    unfold accepts
+    rw [eval_add', eval_cst,
+      lowerA_forced_leSlotsOff _ hprofile a b c old new _ hsup hr hsys, if_pos he]
+    ring
+
 end DecEqF
 
 /-! ## §13. The explicit disabled profile refuses order on every assignment and field. -/
@@ -1275,6 +1417,10 @@ theorem lower_monotone_disabled_refuses (s : Slot) (asg : Wire → F) :
 
 theorem lower_leSlots_disabled_refuses (a b : Slot) (asg : Wire → F) :
     ¬ systemAccepts asg (lower CompilerProfile.disabled (.leSlots a b)) := fun h =>
+  one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
+
+theorem lower_leSlotsOff_disabled_refuses (a b : Slot) (c : Int) (asg : Wire → F) :
+    ¬ systemAccepts asg (lower CompilerProfile.disabled (.leSlotsOff a b c)) := fun h =>
   one_ne_zero (h (cst 1) (List.mem_append_left _ (List.mem_cons_self)))
 
 /-! ## §14. SUBSUMPTION — the general compiler reproduces the hand gadget (n = 1 → n = ∀).
@@ -1440,6 +1586,12 @@ example : ∃ A : List ℕ → ℕ → ZMod 7,
 #guard_msgs (whitespace := lax) in #print axioms lower_eqSlots_correct
 /-- info: 'Minidregg.Compiler.lower_leSlots_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lower_leSlots_correct
+/-- info: 'Minidregg.Compiler.lowerA_forced_leSlotsOff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lowerA_forced_leSlotsOff
+/-- info: 'Minidregg.Compiler.lowerA_complete_leSlotsOff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lowerA_complete_leSlotsOff
+/-- info: 'Minidregg.Compiler.lower_leSlotsOff_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lower_leSlotsOff_correct
 
 /-! ### Closing audit note
 

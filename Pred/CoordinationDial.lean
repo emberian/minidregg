@@ -157,6 +157,7 @@ theorem eval_congr_slot : ∀ (p : Pred) {k : Slot}, singleSlot p = some k →
   | .monotone _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .eqSlots _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .leSlots _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
+  | .leSlotsOff _ _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .witnessed _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .allL _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .anyL _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
@@ -172,6 +173,7 @@ def NewOnly : Pred → Bool
   | .monotone _ => false
   | .eqSlots _ _ => true
   | .leSlots _ _ => true
+  | .leSlotsOff _ _ _ => true
   | .witnessed _ => false
   | .not q => NewOnly q
   | .allL ps => NewOnlyList ps
@@ -199,6 +201,8 @@ theorem eval_congr_toFun : ∀ (p : Pred), NewOnly p = true →
   | .eqSlots a b, _, _, _, _, _, h => by
       simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
   | .leSlots a b, _, _, _, _, _, h => by
+      simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
+  | .leSlotsOff a b _, _, _, _, _, _, h => by
       simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
   | .witnessed _, hp, _, _, _, _, _ => by simp [NewOnly] at hp
   | .not q, hp, old, old', _, _, h => by
@@ -303,6 +307,7 @@ def dial : Pred → Verdict
   | .monotone _ => .stepShaped
   | .eqSlots _ _ => .free
   | .leSlots _ _ => .free
+  | .leSlotsOff _ _ _ => .free
   | .witnessed _ => .thirdParty
   | .not q => if (singleSlot q).isSome then .free else Verdict.combine .ordering (dial q)
   | .allL ps => dialList ps
@@ -341,6 +346,17 @@ theorem dial_free_closed : ∀ (p : Pred), dial p = .free → MergeClosed p
         simp only [joinRead, decide_eq_true_eq, Bool.false_eq_true, IsEmpty.forall_iff,
           imp_self, implies_true]
       all_goals exact sup_le_sup
+  | .leSlotsOff a b c, _ => fun old s t hs ht => by
+      -- `max` commutes with a constant shift, for either sign of `c`:
+      -- `x₁ ≤ y₁ + c, x₂ ≤ y₂ + c ⇒ x₁ ⊔ x₂ ≤ (y₁ ⊔ y₂) + c`.
+      simp only [eval, evalWith, get_mergeState] at hs ht ⊢
+      revert hs ht
+      cases s.get a <;> cases s.get b <;> cases t.get a <;> cases t.get b <;>
+        simp (config := { failIfUnchanged := false }) only [joinRead, decide_eq_true_eq,
+          Bool.false_eq_true, IsEmpty.forall_iff, imp_self, implies_true]
+      intro h₁ h₂
+      exact max_le (Int.le_trans h₁ (Int.add_le_add_right (Int.le_max_left _ _) c))
+        (Int.le_trans h₂ (Int.add_le_add_right (Int.le_max_right _ _) c))
   | .witnessed _, h => by simp [dial] at h
   | .not q, h => fun old s t hs ht => by
       have hk : (singleSlot q).isSome = true := by
@@ -474,6 +490,11 @@ example : dialTier demoAny = .bft := by decide
 
 end Witness
 
+/-- The offset order atom is coordination-free for every offset, negative ones included: slot-wise
+max commutes with the shift by `c`, so two admitted concurrent writes merge to an admitted one. -/
+theorem leSlotsOff_merge_closed (a b : Slot) (c : Int) : MergeClosed (.leSlotsOff a b c) :=
+  dial_free_closed _ rfl
+
 /-! ## §8 — Axiom pins. -/
 
 /-- info: 'Minidregg.Pred.CoordinationDial.toFun_mergeState' depends on axioms: [propext, Quot.sound] -/
@@ -502,5 +523,8 @@ end Witness
 
 /-- info: 'Minidregg.Pred.CoordinationDial.Witness.monotone_refused' depends on axioms: [propext] -/
 #guard_msgs in #print axioms Witness.monotone_refused
+
+/-- info: 'Minidregg.Pred.CoordinationDial.leSlotsOff_merge_closed' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms leSlotsOff_merge_closed
 
 end Minidregg.Pred.CoordinationDial
