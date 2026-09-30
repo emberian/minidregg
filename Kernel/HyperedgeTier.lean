@@ -33,7 +33,8 @@ Residuals (prose, not `Prop := True`):
                   parameter of every statement here. Making it a cell attribute (and
                   the frame rule for it — a turn leaves the tiers of cells outside its
                   footprint untouched) is future vocabulary.
-  [TIER-gate]     the admission gate (`Kernel/Gate.lean` `admit`) does not yet
+  [TIER-gate]     the admission gate (`DeclaredHyperedge.Declaration.authorizationCheck`,
+                  consulted by `DeclaredHyperedge.execute`) does not yet
                   consult tiers: the join-tier hold ("effects wait for the join-tier
                   rule's commit") is stated on the rule, not enforced by the gate.
 -/

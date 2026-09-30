@@ -1,14 +1,12 @@
 /-
-# Kernel — the 3 verbs over the product camera (ATLAS §7).
+# Kernel — the turn carriers and their settlement models (ATLAS §7).
 
-The conservation ALGEBRA of all three verbs is landed: move (State) ·
+The conservation ALGEBRA of the three verbs over a `ℤ` ledger: move (State) ·
 create/gwrite (Verbs) — plain state functions + conservation/frame theorems.
-The executor tier (Gate) is the kernel MODEL of the 4-leg admission gate:
-Verb = admission × footprint, fail-closed admit, gate soundness
-(fail-closed/conserves/frame), the first Kernel @[export]. Its footprint-Fpu
-refinement and the AIR arithmetization (Compiler lane) are named residuals.
+The admission gate a committed turn passes is
+`DeclaredHyperedge.Declaration.authorizationCheck`, consulted by
+`DeclaredHyperedge.execute`.
 -/
-import Kernel.Camera  -- the four-substance product resource algebra (the camera tier)
 import Kernel.State   -- the minimal kernel state: accounts + bal + caps + one UKey map; Σ-conservation
 import Kernel.Turn    -- the turn as a wide pullback (hyperedge): cone + balance, legs_agree, the binding tooth
 import Kernel.TurnLimit  -- N2a: the hyperedge cone data IS a wide-pullback limit (Types.isLimit), keystones
@@ -54,7 +52,6 @@ import Kernel.DeclaredActionExecution  -- accepted create/write/move batches bec
 import Kernel.Receipt    -- the receipt word Q: uproj faithfulness + the frame as a receipt fact (OB-3's kernel side)
 import Kernel.Verbs   -- create + gwrite: the remaining conservation-algebra verbs, conservation (honest side-conditions) + frames + the receipt bridge
 import Kernel.PrivateTurn  -- the private-witness turn: the hyperedge at carrier Pub × Priv; publicView blind to the witness ([PRIVATE-TURN-kernel])
-import Kernel.Gate    -- the gated executor MODEL: Verb = admission × footprint, the 4-leg fail-closed gateOK, admit + soundness (fail-closed/conserves/frame/no-TOCTOU), @[export minidregg_gate_ok]
 import Kernel.FinalityGate  -- ATLAS §3 item 11, the finality gate as a DECIDER over ReplicatedSettlementFinality: `check` is a bare && of positive checks, check_eq_true_iff the unfolding lemma, a true verdict CONSTRUCTS the Finalized certificate (certificate / check_sound / check_complete / check_eq_true_iff_exists_finalized) so checked_logs_comparable and checked_no_conflict are inherited, never re-proved; fail-closed teeth attributable per leg; closed Fin 3 instance decided; @[export minidregg_finality_check]. Residuals [FINALITY-GATE-authenticated] [FINALITY-GATE-liveness] [FINALITY-GATE-rust] [FINALITY-GATE-receipt-seam]
 import Kernel.HyperedgeTier  -- Law 2 on the ONE turn model: commitTier tierOf := Finset.univ.sup over the incidences, leg_le_commitTier, commitTier_eq_causal_iff (coordination-free iff EVERY written cell is tier 1), hyperedge_commit_at_join (+ leg canonicity from the one apex); Law 1 ⟂ Law 2 on the shared conservation aggregate (conservedAtTier := Σ halfEdge = 0, conservation_tier_independent := rfl, the Σ = 1 cone refused at every tier). On Kernel.Turn only — no KernelState. Residuals [TIER-of-cell] [TIER-gate]
 import Kernel.HyperedgeKnowledge  -- the epistemic reading of legs_agree: in the observation frame the apex H.tid is DISTRIBUTED KNOWLEDGE among the honest legs for ANY hyperedge and ANY faulty set (agreement_is_distributed_knowledge; distKnows_apex_iff_honest_agree the iff), and a fork — two honest legs reading different ids — is the absence of any distributed apex (fork_has_no_distributed_apex; splitTuple_no_hyperedge). Residual [HYPEREDGE-operational]

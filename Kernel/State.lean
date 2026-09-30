@@ -23,21 +23,20 @@ kernel state is four fields:
     circuit's `(present, value)` encoding. New side tables are new CONSTRUCTORS,
     never new record fields — the compression is structural.
 
-The keystone here is the ATLAS §3 item-8 conservation spine, the *concrete* `ℤ`
-ledger shadow of `Camera.conservation_is_fpu` (the abstract `Auth M` law): a
+The keystone here is the ATLAS §3 item-8 conservation spine over a concrete `ℤ`
+ledger: a
 `move` (debit / credit on the `bal` column) preserves each per-asset total
 `totalAsset k a = Σ_{c ∈ accounts} bal c a` EXACTLY, and — the tooth — a `mint`
 without a matching issuer-well debit strictly BREAKS it. Both poles are BUILT on
 a concrete state (ATLAS §6 law 2: a keystone that cannot exhibit both poles does
 not compile), the sum genuinely computed.
 
-Deliberately NOT here: the executor, the 4-leg gate, the hyperedge turn shape
+Deliberately NOT here: the executor, the admission gate, the hyperedge turn shape
 (the `Kernel/Turn` lane). The other two verbs' conservation ALGEBRA —
 `create`/`gwrite` as plain functions with their own conservation + frame
 theorems — is the sibling `Kernel/Verbs.lean`. `move`/`mint` here are plain
 functions on the `bal` column — the conservation ALGEBRA, not the gated verb.
 -/
-import Kernel.Camera  -- the four-substance product camera this state's Σ-law shadows
 import Mathlib.Algebra.BigOperators.Group.Finset.Piecewise
 import Mathlib.Data.Finset.Insert
 
@@ -167,7 +166,7 @@ def mint (k : KernelState) (dst : CellId) (a : AssetId) (δ : ℤ) : KernelState
 
 /-! ## §6. The conservation keystone (BUILT, with both poles).
 
-The concrete `ℤ`-ledger shadow of `Camera.conservation_is_fpu`. -/
+Per-asset `Σ` over the concrete `ℤ` ledger. -/
 
 /-- **THE CONSERVATION KEYSTONE.** A `move` between two EXISTING cells preserves
 the per-asset total exactly — `totalAsset` is unchanged, `Σ_{c} bal c a` invariant.
