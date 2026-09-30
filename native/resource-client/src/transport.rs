@@ -148,6 +148,21 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 !plan.is_empty() && sponsor.len() == 64 && possession.len() == 64
             }),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // Fleet turns: plan and topic poll carry one signed account observation
+        // and one canonical body; assembly carries one plan and one raw
+        // signature; submit/lookup carry one signed ingress; head carries one
+        // signed observation; receipt carries one canonical decimal id.
+        [92 | 96, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [93, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
+        [94 | 95 | 97, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [98, digits @ ..] => {
+            !digits.is_empty()
+                && digits.len() <= 80
+                && digits.iter().all(u8::is_ascii_digit)
+                && (digits.len() == 1 || digits[0] != b'0')
+        }
         _ => false,
     }
 }

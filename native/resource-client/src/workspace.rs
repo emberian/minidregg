@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 const MAX_RECORD: u64 = 256 * 1024;
 
-fn decimal(value: &str, field: &str) -> Result<()> {
+pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 39
         || (value.len() > 1 && value.starts_with('0'))
@@ -65,7 +65,7 @@ fn readable_delegation_verbs(selected: &[Value], parent: &[Value]) -> Result<()>
     Ok(())
 }
 
-fn validate_name(value: &str) -> Result<()> {
+pub(crate) fn validate_name(value: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 64
         || !value
@@ -95,7 +95,7 @@ fn private_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn make_private_dir(path: &Path) -> Result<()> {
+pub(crate) fn make_private_dir(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     builder.mode(0o700);
     builder
@@ -104,7 +104,7 @@ fn make_private_dir(path: &Path) -> Result<()> {
     private_dir(path)
 }
 
-fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -122,7 +122,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn bounded_json(path: &Path) -> Result<Value> {
+pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD {
@@ -141,14 +141,14 @@ fn bounded_json(path: &Path) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
 }
 
-fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
+pub(crate) fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     value
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("workspace record lacks {key}"))
 }
 
-fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
+pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     let path = PathBuf::from(member(value, key)?);
     if !path.is_absolute() {
         return Err(format!("workspace {key} is not absolute"));
@@ -162,7 +162,7 @@ fn os_string(value: OsString, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} must be UTF-8"))
 }
 
-fn random_nonce() -> Result<String> {
+pub(crate) fn random_nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
@@ -170,7 +170,7 @@ fn random_nonce() -> Result<String> {
     Ok(u128::from_be_bytes(bytes).to_string())
 }
 
-fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
+pub(crate) fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     for _ in 0..8 {
         let nonce = random_nonce()?;
         let attempt = root.join("attempts").join(format!("a-{nonce}"));
@@ -181,7 +181,7 @@ fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     Err("could not allocate a distinct workspace attempt name".into())
 }
 
-fn load(root: &Path) -> Result<Value> {
+pub(crate) fn load(root: &Path) -> Result<Value> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -214,13 +214,13 @@ fn load(root: &Path) -> Result<Value> {
     Ok(value)
 }
 
-struct InitIdentity<'a> {
-    key: Option<&'a Path>,
-    subject: Option<&'a str>,
-    enrollment: Option<&'a Path>,
+pub(crate) struct InitIdentity<'a> {
+    pub(crate) key: Option<&'a Path>,
+    pub(crate) subject: Option<&'a str>,
+    pub(crate) enrollment: Option<&'a Path>,
 }
 
-fn init(
+pub(crate) fn init(
     root: &Path,
     host: &Path,
     config: &Path,
@@ -325,7 +325,7 @@ fn init(
     Ok(())
 }
 
-fn reference(root: &Path, name: &str) -> Result<Value> {
+pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
     validate_name(name)?;
     let value = bounded_json(&root.join("refs").join(format!("{name}.json")))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
@@ -351,17 +351,17 @@ fn reference(root: &Path, name: &str) -> Result<Value> {
     Ok(value)
 }
 
-struct ImportInput<'a> {
-    name: &'a str,
-    kind: &'a str,
-    target: &'a str,
-    observe: &'a str,
-    operation: Option<&'a str>,
-    control: Option<&'a str>,
-    provenance: Option<&'a Path>,
+pub(crate) struct ImportInput<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) kind: &'a str,
+    pub(crate) target: &'a str,
+    pub(crate) observe: &'a str,
+    pub(crate) operation: Option<&'a str>,
+    pub(crate) control: Option<&'a str>,
+    pub(crate) provenance: Option<&'a Path>,
 }
 
-fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
+pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
     let ImportInput {
         name: name_value,
         kind,
@@ -477,7 +477,7 @@ fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Resu
     )
 }
 
-fn signed_view(
+pub(crate) fn signed_view(
     root: &Path,
     workspace: &Value,
     reference: &Value,
@@ -1018,7 +1018,7 @@ fn recover(root: &Path, attempt: &Path) -> Result<()> {
     retry(&candidate, "lookup", false)
 }
 
-fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
+pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
     let mut names = Vec::new();
     for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -1106,13 +1106,25 @@ fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<
     Ok(())
 }
 
+/// What one workspace birth creates. `Own` is an object owned by this
+/// workspace's subject and funded from the context; it becomes a local
+/// reference. `FundedAccount` is an account the sponsor creates for another
+/// admitted subject, funded by one Book posting from the context fee payer.
+/// Its owner holds both grants, so this workspace keeps only a handoff record
+/// for that owner and never a reference it cannot use.
+pub(crate) enum BirthShape<'a> {
+    Own,
+    FundedAccount { owner: &'a str, amount: &'a str },
+}
+
 fn complete_birth(
     root: &Path,
     name_value: &str,
     source: &Value,
     receipt: &Value,
     reservation: &participant_namespace::Reservation,
-) -> Result<()> {
+    shape: &BirthShape<'_>,
+) -> Result<Value> {
     let birth = source.get("birth").ok_or("retained birth source absent")?;
     let parts = birth
         .get("resources")
@@ -1128,11 +1140,32 @@ fn complete_birth(
     {
         return Err("birth source no longer matches durable namespace reservation".into());
     }
+    if let BirthShape::FundedAccount { owner: subject, amount } = shape {
+        let value = json!({"type":"minidregg-fleet-account-handoff-v1","name":name_value,
+            "owner":subject,"kind":"account","target":target,"observeCapability":owner,
+            "operationCapability":owner,"controlCapability":control,"funding":amount,
+            "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,
+                "reservationRecord":reservation.record_path},"authority":"hint-only"});
+        let handoff = root
+            .join("sources")
+            .join(format!("create-{name_value}.handoff.json"));
+        if handoff.exists() {
+            if bounded_json(&handoff)? != value {
+                return Err("prior account handoff differs from exact birth receipt".into());
+            }
+        } else {
+            private_file(
+                &handoff,
+                &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
+            )?;
+        }
+        return Ok(value);
+    }
     let reference_path = root.join("refs").join(format!("{name_value}.json"));
     if reference_path.exists() {
         let prior = reference(root, name_value)?;
         if member(&prior, "target")? == target && member(&prior, "observeCapability")? == owner {
-            return Ok(());
+            return Ok(prior);
         }
         return Err("confirmed birth conflicts with existing workspace reference".into());
     }
@@ -1149,19 +1182,27 @@ fn complete_birth(
         "{}",
         serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?
     );
-    Ok(())
+    Ok(value)
 }
 
-fn create(
+pub(crate) fn create(
     root: &Path,
     workspace: &Value,
     name_value: &str,
     storage: &str,
-    predicate_path: &Path,
-) -> Result<()> {
+    predicate: &Value,
+    shape: &BirthShape<'_>,
+) -> Result<Value> {
     validate_name(name_value)?;
     if !matches!(storage, "content" | "declared") {
         return Err("supported resource storage is content or declared".into());
+    }
+    if let BirthShape::FundedAccount { owner, amount } = shape {
+        if storage != "declared" {
+            return Err("an account birth uses declared storage".into());
+        }
+        decimal(owner, "account owner subject")?;
+        decimal(amount, "account funding amount")?;
     }
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = member_path(workspace, "namespaceRoot")?;
@@ -1169,13 +1210,15 @@ fn create(
     if member(&context, "type")? != "minidregg-participant-birth-context-v1" {
         return Err("unknown birth context version".into());
     }
-    let predicate = bounded_json(predicate_path)?;
     let request_path = root
         .join("sources")
         .join(format!("create-{name_value}.request.json"));
-    let requested_core = json!({"type":"minidregg-workspace-create-request-v1",
+    let mut requested_core = json!({"type":"minidregg-workspace-create-request-v1",
         "name":name_value,"storage":storage,"predicate":predicate,"context":context,
         "subject":member(workspace,"subject")?});
+    if let BirthShape::FundedAccount { owner, amount } = shape {
+        requested_core["shape"] = json!({"kind":"account","owner":owner,"amount":amount});
+    }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
         let nonce = member(&saved, "nonce")?;
@@ -1220,16 +1263,40 @@ fn create(
         .join("sources")
         .join(format!("create-{name_value}.json"));
     let nonce = member(&request, "nonce")?;
+    // Debit legs are ordered funding first, then the fee; each names the
+    // capability that spends its source. The funding leg debits the context's
+    // fee payer, so it presents that payer's spend grant again.
+    let (kind, resource_owner, funding, capabilities) = match shape {
+        BirthShape::Own => (
+            "object",
+            member(workspace, "subject")?,
+            context["funding"].clone(),
+            context["sourceCapabilities"].clone(),
+        ),
+        BirthShape::FundedAccount { owner, amount } => {
+            let fee_capabilities = context["sourceCapabilities"]
+                .as_array()
+                .filter(|values| values.len() == 1)
+                .ok_or("a funded account birth needs one fee-payer source capability")?;
+            (
+                "account",
+                *owner,
+                json!([{"source":member(&context,"feePayer")?,"destination":reservation.ids["target"],
+                    "asset":member(&context["genesis"],"asset")?,"amount":amount}]),
+                json!([fee_capabilities[0], fee_capabilities[0]]),
+            )
+        }
+    };
     let expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
-                "resources":[{"kind":"object","storage":storage,
-                    "target":reservation.ids["target"],"owner":member(workspace,"subject")?,
+                "resources":[{"kind":kind,"storage":storage,
+                    "target":reservation.ids["target"],"owner":resource_owner,
                     "ownerCapability":reservation.ids["ownerCapability"],
                     "controlCapability":reservation.ids["controlCapability"],
                     "predicate":predicate}],
-                "sourceCapabilities":context["sourceCapabilities"],
-                "funding":context["funding"],"feePayer":context["feePayer"]},
+                "sourceCapabilities":capabilities,
+                "funding":funding,"feePayer":context["feePayer"]},
             "grants":context["grants"]});
     let source = if source_path.exists() {
         let saved = bounded_json(&source_path)?;
@@ -1323,12 +1390,12 @@ fn create(
             ));
         }
         if let Some(receipt) = accepted_outcome(&attempt)? {
-            return complete_birth(root, name_value, &source, &receipt, &reservation);
+            return complete_birth(root, name_value, &source, &receipt, &reservation, shape);
         }
         retry(&attempt, "lookup", false)?;
         let receipt = accepted_outcome(&attempt)?
             .ok_or("historical create lookup did not confirm installed birth")?;
-        return complete_birth(root, name_value, &source, &receipt, &reservation);
+        return complete_birth(root, name_value, &source, &receipt, &reservation, shape);
     }
     eprintln!("workspace birth attempt: {}", attempt.display());
     submit(
@@ -1341,7 +1408,7 @@ fn create(
         false,
     )?;
     let receipt = accepted_outcome(&attempt)?.ok_or("birth returned without installed receipt")?;
-    complete_birth(root, name_value, &source, &receipt, &reservation)
+    complete_birth(root, name_value, &source, &receipt, &reservation, shape)
 }
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
@@ -1458,9 +1525,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "create" => {
             let name = os_string(args.required("name")?, "resource name")?;
             let storage = os_string(args.required("storage")?, "storage")?;
-            let predicate = path(args.required("predicate")?);
+            let predicate = bounded_json(&path(args.required("predicate")?))?;
             args.finish()?;
-            create(&root, &workspace, &name, &storage, &predicate)
+            create(
+                &root,
+                &workspace,
+                &name,
+                &storage,
+                &predicate,
+                &BirthShape::Own,
+            )
+            .map(|_| ())
         }
         "recover" => {
             let attempt = path(args.required("attempt")?);
