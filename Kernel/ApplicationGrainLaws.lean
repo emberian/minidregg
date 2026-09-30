@@ -162,11 +162,11 @@ theorem completed_stop_does_not_retire (before : State) :
   simp [Operation.after]
 
 theorem lifecycle_command_retains_content (operation : Operation) (subject : SubjectId)
-    (authorityRoot : Digest) (nonce app : Nat) (capability : CapabilityId)
+    (nonce app : Nat) (capability : CapabilityId)
     (expectedRoot : Digest) (before : State)
     (contentTargets : List DeclaredResourceController.Target)
     (observeCapability : Option CapabilityId) :
-    (operation.command subject authorityRoot nonce app capability expectedRoot before
+    (operation.command subject nonce app capability expectedRoot before
       contentTargets observeCapability).targets.tail = contentTargets := rfl
 
 end Minidregg.Kernel.ApplicationGrain

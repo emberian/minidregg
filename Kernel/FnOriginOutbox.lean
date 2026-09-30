@@ -87,7 +87,6 @@ structure Report where
   subject : SubjectId
   target : Nat
   capability : CapabilityId
-  expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
   nativeCarrierVerified : Bool
   originReadmitted : Bool
@@ -148,7 +147,7 @@ def marker (domain semantics : Digest) (subject : SubjectId) (value : Prepared) 
 
 def outboxCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
-  ⟨report.subject, report.expectedAuthorityRoot,
+  ⟨report.subject,
     outboxNonce domain semantics report.prepared,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (outboxAtom domain semantics report.prepared)
@@ -183,7 +182,7 @@ def originalPrepared (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
       FnConsumerOperation.exactSignedCommand signed.commandBytes
         (outboxCommand domain semantics
           ⟨prepared, [], command.subject, target.target, target.capability,
-            command.expectedAuthorityRoot, target.expectedTargetRoot, true, true⟩) then
+            target.expectedTargetRoot, true, true⟩) then
     some prepared
   else none
 

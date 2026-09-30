@@ -2144,7 +2144,6 @@ structure ConsumerReportSource where
   subject : Nat
   target : Nat
   capability : Nat
-  expectedAuthorityRoot : Nat
   expectedTargetRoot : Nat
   deriving FromJson
 
@@ -2816,14 +2815,14 @@ def ConsumerReportSource.report (source : ConsumerReportSource) (package : List 
     ⟨source.history.toUTF8.toList, source.incarnation.toUTF8.toList,
       source.sourceIdentity.toUTF8.toList, source.fnVerdictRef.toUTF8.toList⟩,
     package, ⟨source.subject⟩, source.target, ⟨source.capability⟩,
-    ⟨source.expectedAuthorityRoot⟩, ⟨source.expectedTargetRoot⟩, none, none⟩
+    ⟨source.expectedTargetRoot⟩, none, none⟩
 
 /-- Portable authorship has no fn Store history, incarnation or T10 verdict.
 The reserved literal fields make that absence explicit in the v1 P1 binding
 codec. The operation selects the pinned Mini origin and re-admitted origin
 transaction, never the fn source identity. -/
 def portableConsumerReport (policy : FnConsumerOperation.Policy)
-    (authorityRoot targetRoot : Minidregg.Theory.TypedAuthorization.Digest)
+    (targetRoot : Minidregg.Theory.TypedAuthorization.Digest)
     (verified : FnPortableVerified)
     (carrier package : List UInt8) (origin : FnEvidenceCodec.Package) :
     FnConsumerOperation.Report :=
@@ -2833,7 +2832,7 @@ def portableConsumerReport (policy : FnConsumerOperation.Policy)
       verified.sourceIdentity,
       "fn-portable-authorship-v1".toUTF8.toList⟩,
     package, policy.subject, policy.target, policy.capability,
-    authorityRoot, targetRoot,
+    targetRoot,
     some ⟨carrier, verified.sourceIdentity, verified.principal,
       verified.edPublicKey, verified.mlPublicKey⟩, none⟩
 
@@ -2841,12 +2840,12 @@ def portableConsumerReport (policy : FnConsumerOperation.Policy)
 portable verifier. Caller-supplied scope or verdict flags never become fields
 of the signed Mini command. -/
 def pollConsumerReport (policy : FnConsumerOperation.Policy)
-    (authorityRoot targetRoot : Minidregg.Theory.TypedAuthorization.Digest)
+    (targetRoot : Minidregg.Theory.TypedAuthorization.Digest)
     (verified : FnPortableVerified) (carrier package : List UInt8)
     (origin : FnEvidenceCodec.Package) (cursor event : List UInt8)
     (projection : FnPollProjection) (controlBinding : Option (String × String)) :
     FnConsumerOperation.Report :=
-  let base := portableConsumerReport policy authorityRoot targetRoot
+  let base := portableConsumerReport policy targetRoot
     verified carrier package origin
   let storeInbox : FnConsumerOperation.StorePollInbox :=
     ⟨cursor, event, controlBinding.isSome, projection.sourceIdentity,
@@ -2930,7 +2929,7 @@ def exportConsumerInbox (config : NativeHost.Config) (transactionId : Nat) :
             { application := conflict.application, operation := conflict.operation,
               provenance := conflict.provenance, package := conflict.package,
               subject := ⟨0⟩, target := 0, capability := ⟨0⟩,
-              expectedAuthorityRoot := ⟨0⟩, expectedTargetRoot := ⟨0⟩,
+              expectedTargetRoot := ⟨0⟩,
               portableInbox := some inbox, storePoll := store }
           return .ok (inbox, "conflict",
             (FnConsumerOperation.conflictInboxAtom config.deployment.domain
@@ -2963,7 +2962,7 @@ def exportConsumerPoll (config : NativeHost.Config) (transactionId : Nat) :
             { application := conflict.application, operation := conflict.operation,
               provenance := conflict.provenance, package := conflict.package,
               subject := ⟨0⟩, target := 0, capability := ⟨0⟩,
-              expectedAuthorityRoot := ⟨0⟩, expectedTargetRoot := ⟨0⟩,
+              expectedTargetRoot := ⟨0⟩,
               portableInbox := some portable, storePoll := some store }
           return .ok (store, "conflict",
             (FnConsumerOperation.storeConflictAtom config.deployment.domain
@@ -3154,7 +3153,7 @@ def selectedFnNewPaths (paths : List String) : IO Unit := do
 /-- One native fn poll and projection. The owner signature and current
 recipient law are checked later by Mini op20; this route never ACKs. -/
 def selectedReleaseFnPoll (fnBinary scopePath controlPath capabilitySource
-    authoritySource targetSource cursorPath reportPath sourcePath packetPath
+    targetSource cursorPath reportPath sourcePath packetPath
     ingressPath resultPath : String) : IO Unit := do
   unless [fnBinary, scopePath, controlPath].all (·.startsWith "/") do
     throw (IO.userError "selected-release fn operator paths must be absolute")
@@ -3162,8 +3161,6 @@ def selectedReleaseFnPoll (fnBinary scopePath controlPath capabilitySource
     ingressPath, resultPath]
   let capability : Minidregg.Theory.TypedAuthorization.CapabilityId :=
     ⟨← IO.ofExcept (exactDecimal "recipient capability" capabilitySource)⟩
-  let authorityRoot : Minidregg.Theory.TypedAuthorization.Digest :=
-    ⟨← IO.ofExcept (exactDecimal "recipient authority root" authoritySource)⟩
   let targetRoot : Minidregg.Theory.TypedAuthorization.Digest :=
     ⟨← IO.ofExcept (exactDecimal "recipient target root" targetSource)⟩
   let scope ← selectedFnScope scopePath
@@ -3190,7 +3187,7 @@ def selectedReleaseFnPoll (fnBinary scopePath controlPath capabilitySource
     unless afterPosition == fromPosition && after.committedAck == before.committedAck do
       throw (IO.userError "selected-release fn poll position changed before candidate")
     let candidate ← IO.ofExcept <| FnSelectiveReleaseFnReceiving.derive
-      projection.source projection.messageId capability authorityRoot targetRoot
+      projection.source projection.messageId capability targetRoot
     writeBytes sourcePath projection.source
     writeBytes packetPath candidate.packetBytes
     writeBytes ingressPath candidate.ingressBytes
@@ -3213,7 +3210,7 @@ bind its exact owner-authored suffix and Message-ID, and leave Mini admission
 to the independently signed release packet and current recipient law. This
 route never emits an fn-e verdict, event17 coverage, or cursor ACK. -/
 def selectedReleaseFnLegacyPoll (fnBinary scopePath controlPath expectedArticlePath
-    capabilitySource authoritySource targetSource cursorPath reportPath storedPath
+    capabilitySource targetSource cursorPath reportPath storedPath
     packetPath ingressPath resultPath : String) : IO Unit := do
   unless [fnBinary, scopePath, controlPath, expectedArticlePath].all (·.startsWith "/") do
     throw (IO.userError "selected-release legacy fn inputs must be absolute")
@@ -3221,8 +3218,6 @@ def selectedReleaseFnLegacyPoll (fnBinary scopePath controlPath expectedArticleP
     ingressPath, resultPath]
   let capability : Minidregg.Theory.TypedAuthorization.CapabilityId :=
     ⟨← IO.ofExcept (exactDecimal "recipient capability" capabilitySource)⟩
-  let authorityRoot : Minidregg.Theory.TypedAuthorization.Digest :=
-    ⟨← IO.ofExcept (exactDecimal "recipient authority root" authoritySource)⟩
   let targetRoot : Minidregg.Theory.TypedAuthorization.Digest :=
     ⟨← IO.ofExcept (exactDecimal "recipient target root" targetSource)⟩
   let expected ← readBoundedBytes expectedArticlePath FnEvidenceCodec.maxSourceBytes
@@ -3275,7 +3270,7 @@ def selectedReleaseFnLegacyPoll (fnBinary scopePath controlPath expectedArticleP
         stored.drop (stored.length - expected.length) == expected do
       throw (IO.userError "fn stored article lacks exact selected owner source suffix")
     let candidate ← IO.ofExcept <| FnSelectiveReleaseFnReceiving.derive
-      expected messageId.toUTF8.toList capability authorityRoot targetRoot
+      expected messageId.toUTF8.toList capability targetRoot
     let (afterPosition, after) ← queryFnConsumerPosition executable scope controlPath
     unless afterPosition == fromPosition &&
         after.committedAck == before.committedAck &&
@@ -3554,7 +3549,7 @@ def runPollConsumerDecisionLoaded (config : NativeHost.Config)
       config.deployment probeTarget cell
       | throw "poll consumer target is not a valid content resource"
     pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
-  let report := pollConsumerReport policy opened.authority.snapshot.cell.root
+  let report := pollConsumerReport policy
     targetRoot verified carrier extracted.package originPackage
     cursor event projection controlBinding
   let decision ← IO.ofExcept (FnConsumerOperation.evaluateVerified config
@@ -3677,7 +3672,7 @@ def runReplyConsumerPollDecisionLoaded (config : NativeHost.Config)
       ⟨carrier, verified.sourceIdentity, verified.principal,
         verified.edPublicKey, verified.mlPublicKey⟩, storePoll,
       policy.subject, policy.target, policy.capability,
-      opened.authority.snapshot.cell.root, targetRoot⟩
+      targetRoot⟩
   let decision ← IO.ofExcept (FnReplyConsumption.evaluateVerified config opened
     gateway ⟨policy.application, policy.subject,
       policy.target, policy.capability⟩ report)
@@ -3823,7 +3818,7 @@ def runCatalogOwnRDecisionLoaded (config : NativeHost.Config)
       outbox.transactionId, portable, poll⟩
   let report : FnCatalogOwnRProgress.Report :=
     ⟨evidence, policy.subject, policy.target, policy.capability,
-      opened.authority.snapshot.cell.root, targetRoot⟩
+      targetRoot⟩
   let decision ← IO.ofExcept (FnCatalogOwnRProgress.evaluateVerified config
     gateway policy selectedScope report opened)
   let (decisionName, intent) ← match decision with
@@ -3926,7 +3921,7 @@ def runReplyConsumerCatalogDecisionLoaded (config : NativeHost.Config)
       ⟨qCarrier, qVerified.sourceIdentity, qVerified.principal,
         qVerified.edPublicKey, qVerified.mlPublicKey⟩, storePoll,
       policy.subject, policy.target, policy.capability,
-      opened.authority.snapshot.cell.root, targetRoot⟩
+      targetRoot⟩
   let decision ← IO.ofExcept (FnReplyConsumption.evaluateVerified config opened
     gateway ⟨policy.application, policy.subject,
       policy.target, policy.capability⟩ report)
@@ -3982,7 +3977,7 @@ def runFnEmptyPageDecisionLoaded (config : NativeHost.Config)
       FnConsumerOperation.pollControlBinding fnBinary controlPath, true⟩
   let report : FnConsumerProgress.Report :=
     ⟨evidence, policy.subject, policy.target, policy.capability,
-      opened.authority.snapshot.cell.root, targetRoot⟩
+      targetRoot⟩
   let decision ← IO.ofExcept (FnConsumerProgress.evaluateVerified config
     gateway policy selectedScope report opened)
   let (decisionName, intent) ← match decision with
@@ -4304,7 +4299,7 @@ def runFnOriginOutboxSession (config : NativeHost.Config)
         verified.principal, verified.edPublicKey, verified.mlPublicKey⟩
     let report : FnOriginOutbox.Report :=
       ⟨prepared, extracted.package, policy.subject, policy.target,
-        policy.capability, opened.authority.snapshot.cell.root, targetRoot,
+        policy.capability, targetRoot,
         true, true⟩
     let decision ← IO.ofExcept (FnOriginOutbox.evaluateVerified config opened
       gateway policy report)
@@ -4763,7 +4758,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
 def usage : String :=
 "enroll-key-plan OBSERVED.bin COMMAND.bin PLAN.bin|enroll-key-assemble PLAN.bin SPONSOR-SIG.bin POSSESSION-SIG.bin INGRESS.bin|enroll-key-submit INGRESS.bin OUTCOME.bin|enroll-key-lookup INGRESS.bin OUTCOME.bin\n" ++
 "inspect-agent-lifetime-paid-ingress PAID-PLAN.bin INGRESS.bin RESULT.json\ninspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
-"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -5720,30 +5715,29 @@ def run (arguments : List String) : IO UInt32 := do
           writeBytes packetPath packet
           writeBytes articlePath article
           pure 0
-      | "selected-release-ingress", [packetPath, capabilityText, authorityText,
+      | "selected-release-ingress", [packetPath, capabilityText,
           targetText, output] =>
           let packet ← readBoundedBytes packetPath maxFrame
           let capability ← IO.ofExcept (exactDecimal "capability" capabilityText)
-          let authority ← IO.ofExcept (exactDecimal "authority root" authorityText)
           let target ← IO.ofExcept (exactDecimal "target root" targetText)
           let ingress ← IO.ofExcept
-            (FnSelectiveReleaseAuthoring.assembleIngress packet ⟨capability⟩ ⟨authority⟩ ⟨target⟩)
+            (FnSelectiveReleaseAuthoring.assembleIngress packet ⟨capability⟩ ⟨target⟩)
           writeBytes output ingress
           pure 0
       | "selected-release-fn-poll",
-          [fnBinary, scopePath, controlPath, capabilityText, authorityText,
+          [fnBinary, scopePath, controlPath, capabilityText,
            targetText, cursorPath, reportPath, sourcePath, packetPath,
            ingressPath, resultPath] =>
           selectedReleaseFnPoll fnBinary scopePath controlPath capabilityText
-            authorityText targetText cursorPath reportPath sourcePath packetPath
+            targetText cursorPath reportPath sourcePath packetPath
             ingressPath resultPath
           pure 0
       | "selected-release-fn-legacy-poll",
           [fnBinary, scopePath, controlPath, expectedArticlePath,
-           capabilityText, authorityText, targetText, cursorPath, reportPath,
+           capabilityText, targetText, cursorPath, reportPath,
            storedPath, packetPath, ingressPath, resultPath] =>
           selectedReleaseFnLegacyPoll fnBinary scopePath controlPath
-            expectedArticlePath capabilityText authorityText targetText
+            expectedArticlePath capabilityText targetText
             cursorPath reportPath storedPath packetPath ingressPath resultPath
           pure 0
       | "selected-release-fn-ack",
@@ -5990,7 +5984,6 @@ def run (arguments : List String) : IO UInt32 := do
               | throw "portable consumer target is not a valid content resource"
             pure pre.root : Except String Minidregg.Theory.TypedAuthorization.Digest)
           let report := portableConsumerReport policy
-            opened.authority.snapshot.cell.root
             targetRoot verified carrier
             extracted.package originPackage
           let gateway ← requireGateway config

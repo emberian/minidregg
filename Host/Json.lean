@@ -584,11 +584,9 @@ private def commandTarget (path : String) (json : Lean.Json) :
     payload := ← targetPayload (path ++ ".payload") (← field path "payload" obj) }
 
 private def command (path : String) (json : Lean.Json) : Result DeclaredResourceController.Command := do
-  let obj ← exactObject path ["subject", "expectedAuthorityRoot", "nonce", "targets"] json
+  let obj ← exactObject path ["subject", "nonce", "targets"] json
   pure {
     subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
-    expectedAuthorityRoot := ⟨← nat (path ++ ".expectedAuthorityRoot")
-      (← field path "expectedAuthorityRoot" obj)⟩
     nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
     targets := ← list (path ++ ".targets") commandTarget (← field path "targets" obj) }
 
@@ -1587,7 +1585,7 @@ private def grainSource (path : String) (json : Lean.Json) :
     Result (DeclaredResourceController.Command × AgentGrain.State) := do
   let obj ← object path json
   for key in obj.foldl (init := []) (fun names key _ => key :: names) do
-    unless ["task", "subject", "capability", "expectedAuthorityRoot",
+    unless ["task", "subject", "capability",
       "schemaVersion", "expectedTargetRoot", "context", "before", "operation",
       "publications", "observeCapability", "parentWitness"].contains key do
       throw s!"{path}: unknown field {key}"
@@ -1625,8 +1623,6 @@ private def grainSource (path : String) (json : Lean.Json) :
     (operationId, payload)
   let subject := SubjectId.mk (← nat (path ++ ".subject") (← field path "subject" obj))
   let capability := CapabilityId.mk (← nat (path ++ ".capability") (← field path "capability" obj))
-  let authorityRoot := Digest.mk
-    (← nat (path ++ ".expectedAuthorityRoot") (← field path "expectedAuthorityRoot" obj))
   let targetRoot := Digest.mk
     (← nat (path ++ ".expectedTargetRoot") (← field path "expectedTargetRoot" obj))
   let schemaVersion ← nat (path ++ ".schemaVersion") (← field path "schemaVersion" obj)
@@ -1670,7 +1666,7 @@ private def grainSource (path : String) (json : Lean.Json) :
               (← field parentBeforePath "reserved" parentBeforeObj)⟩
         pure <| (AgentGrain.Operation.input).target parentTask parentCapability
           parentRoot parentBefore (some parentObserve) :: publications
-  let command := operation.command subject authorityRoot (AgentGrain.contextNonce contextBytes)
+  let command := operation.command subject (AgentGrain.contextNonce contextBytes)
     task capability targetRoot state publications observeCapability
   pure (command, operation.after state)
 
@@ -2277,14 +2273,25 @@ private def draftJson : Draft → Lean.Json
   | .delegate bytes => .mkObj [("type", "delegate"), ("command", hexJson bytes)]
   | .revoke bytes => .mkObj [("type", "revoke"), ("command", hexJson bytes)]
 
+/-- The plan's authority footprint as (address, value) pairs, both as canonical
+hex (value `null` = absent): the values the signature binds. -/
+def footprintJson (bytes : List UInt8) : Lean.Json :=
+  match PlanFootprintCodec.decode CredentialAuthorityCell.wire bytes with
+  | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
+  | some reads => .arr <| reads.toArray.map fun read => .mkObj
+      [("address", hexJson (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire read.address)),
+       ("value", match read.observed with
+         | none => .null
+         | some value => hexJson ((CredentialAuthorityCell.wire.valueStream read.address.1).encode value))]
+
 private def signedHeaderJson (bytes : List UInt8) : Lean.Json :=
   match CredentialSignedEnvelopeController.headerCodec.decode bytes with
   | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
   | some header => .mkObj
       [("canonical", hexJson bytes), ("decoded", true),
        ("codecVersion", decimal header.codecVersion),
-       ("authorityRoot", decimal header.authorityRoot.value),
-       ("registryCommitment", decimal header.registryCommitment.value),
+       ("footprint", footprintJson header.footprint),
+       ("validUntil", decimal header.validUntil),
        ("keyId", decimal header.keyId), ("keyEpoch", decimal header.keyEpoch),
        ("algorithm", decimal header.algorithm), ("domain", hexJson header.domain),
        ("message", hexJson header.message), ("nullifier", decimal header.nullifier)]
@@ -2629,7 +2636,8 @@ private def intentJson (value : Intent) : Lean.Json := .mkObj
 private def challengeJson (value : Challenge) : Lean.Json := .mkObj
   [("intent", intentJson value.intent), ("domain", decimal value.domain.value),
    ("semantics", decimal value.semantics.value), ("federation", decimal value.federation.value),
-   ("imageBoundary", decimal value.imageBoundary.value), ("height", decimal value.height),
+   ("imageBoundary", decimal value.imageBoundary.value),
+   ("authorityRoot", decimal value.authorityRoot.value), ("height", decimal value.height),
    ("headers", .arr <| value.headers.toArray.map hexJson),
    ("signing", .arr <| value.headers.toArray.map signedHeaderJson)]
 

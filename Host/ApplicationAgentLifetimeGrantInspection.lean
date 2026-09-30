@@ -35,8 +35,8 @@ private def slotJson (slot : SigningSlot) : Json :=
          ("algorithm", decimal header.algorithm),
          ("keyId", decimal header.keyId),
          ("keyEpoch", decimal header.keyEpoch),
-         ("authorityRoot", decimal header.authorityRoot.value),
-         ("registryCommitment", decimal header.registryCommitment.value),
+         ("validUntil", decimal header.validUntil),
+         ("footprintHex", hex header.footprint),
          ("domainHex", hex header.domain),
          ("messageHex", hex header.message),
          ("nullifier", decimal header.nullifier)]

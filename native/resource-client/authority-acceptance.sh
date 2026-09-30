@@ -167,7 +167,7 @@ test "$(decimal "$POLICY_VIEW" domain)" = 8501
 test "$(decimal "$POLICY_VIEW" semantics)" = "$SEMANTICS"
 jq -e '.previous == null and .predicate == {"type":"all","predicates":[]}' \
   "$POLICY_VIEW" >/dev/null
-POLICY_ROOT=$(jq -er '.signing[0].authorityRoot |
+POLICY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/policy-before/challenge.json")
 
@@ -229,7 +229,7 @@ test "$ROUNDTRIP" = "$CANONICAL"
 query_resource alice-before-delegate 7 61 "$EVIDENCE/alice.key" 30005
 TARGET_ROOT=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-delegate/view.json")
-AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
+AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-delegate/challenge.json")
 BEFORE_DENIAL=$(challenge_decimal "$EVIDENCE/alice-before-delegate/challenge.json" imageBoundary)
@@ -237,7 +237,7 @@ BEFORE_DENIAL=$(challenge_decimal "$EVIDENCE/alice-before-delegate/challenge.jso
 # A valid Alice signer and owner grant cannot mutate under the installed law.
 cat >"$EVIDENCE/alice-denied-intent.json" <<EOF
 {"subject":"7","nonce":"30006","purpose":{"type":"prepare","draft":{
- "type":"invoke","command":{"subject":"7","expectedAuthorityRoot":"$AUTHORITY_ROOT",
+ "type":"invoke","command":{"subject":"7",
  "nonce":"30007","targets":[{"kind":"object","target":"600",
  "capability":"61","observeCapability":null,"schemaVersion":"1",
  "expectedTargetRoot":"$TARGET_ROOT","payload":{"type":"scalar","actions":[
@@ -289,13 +289,13 @@ query_resource bob-before-write 8 63 "$EVIDENCE/bob.key" 30011
 BOB_ROOT=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/bob-before-write/view.json")
 test "$BOB_ROOT" = "$TARGET_ROOT"
-BOB_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
+BOB_AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/bob-before-write/challenge.json")
 
 cat >"$EVIDENCE/bob-write-intent.json" <<EOF
 {"subject":"8","nonce":"30012","purpose":{"type":"prepare","draft":{
- "type":"invoke","command":{"subject":"8","expectedAuthorityRoot":"$BOB_AUTHORITY_ROOT",
+ "type":"invoke","command":{"subject":"8",
  "nonce":"30013","targets":[{"kind":"object","target":"600",
  "capability":"63","observeCapability":null,"schemaVersion":"1",
  "expectedTargetRoot":"$BOB_ROOT","payload":{"type":"scalar","actions":[
@@ -315,7 +315,7 @@ jq -e '[.page.entries[] | select(.key.type == "object" and .key.resource == "600
   "$EVIDENCE/alice-after-bob/view.json" >/dev/null
 POST_BOB_ROOT=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-after-bob/view.json")
-POST_BOB_AUTHORITY=$(jq -er '.signing[0].authorityRoot |
+POST_BOB_AUTHORITY=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-after-bob/challenge.json")
 test "$POST_BOB_ROOT" != "$BOB_ROOT"
@@ -324,7 +324,7 @@ test "$(challenge_decimal "$EVIDENCE/alice-after-bob/challenge.json" height)" = 
 # The child has observe+mutate, never program policy management. The host
 # accepts its signatures but refuses the fully signed management call.
 query_policy bob-policy 8 63 "$EVIDENCE/bob.key" 30015
-BOB_POLICY_ROOT=$(jq -er '.signing[0].authorityRoot |
+BOB_POLICY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/bob-policy/challenge.json")
 BOB_POLICY_ADDRESS=$(decimal "$EVIDENCE/bob-policy/view.json" address)
@@ -399,12 +399,12 @@ jq -e '(.page.entries | length) == 2 and
   ([.page.entries[] | select(.key.type == "object" and .key.resource == "600" and
     .key.field == "1" and .value == "0")] | length) == 1' \
   "$EVIDENCE/alice-before-retry/view.json" >/dev/null
-FINAL_AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot |
+FINAL_AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/alice-before-retry/challenge.json")
 cat >"$EVIDENCE/bob-after-revoke-invoke.json" <<EOF
 {"subject":"8","nonce":"30023","purpose":{"type":"prepare","draft":{
- "type":"invoke","command":{"subject":"8","expectedAuthorityRoot":"$FINAL_AUTHORITY_ROOT",
+ "type":"invoke","command":{"subject":"8",
  "nonce":"30024","targets":[{"kind":"object","target":"600",
  "capability":"63","observeCapability":null,"schemaVersion":"1",
  "expectedTargetRoot":"$FINAL_TARGET_ROOT","payload":{"type":"scalar","actions":[

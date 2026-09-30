@@ -52,6 +52,10 @@ structure Challenge where
   semantics : Digest
   federation : FederationId
   imageBoundary : Digest
+  /-- The authority cell's root at this observation.  Public read data: signing
+  headers no longer carry it (they carry the plan's footprint), and a flow whose
+  command still names an authority root reads it here. -/
+  authorityRoot : Digest
   height : Nat
   headers : List (List UInt8)
   deriving DecidableEq, Repr
@@ -121,15 +125,17 @@ def challengeStream : StreamCodec Challenge :=
   StreamCodec.xmap
     (StreamCodec.product intentStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream (StreamCodec.product federationStream
-        (StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
-          (StreamCodec.list bytesStream)))))))
+        (StreamCodec.product digestStream (StreamCodec.product digestStream
+          (StreamCodec.product StreamCodec.nat (StreamCodec.list bytesStream))))))))
     (fun value => (value.intent, value.domain, value.semantics, value.federation,
-      value.imageBoundary, value.height, value.headers))
+      value.imageBoundary, value.authorityRoot, value.height, value.headers))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
-      wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
+      wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
-def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v3".toUTF8.toList
+/-- Version 4: the challenge names the authority root; its headers carry the
+plan footprint (envelope version 2).  Version-3 challenges refuse. -/
+def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v4".toUTF8.toList
 
 def challengeCodec : LawfulCodec Challenge := NativeHostCodec.framed challengeFrame challengeStream
 
@@ -138,7 +144,7 @@ def signedStream : StreamCodec Signed :=
     (fun value => (value.challenge, value.signatures))
     (fun wire => ⟨wire.1, wire.2⟩) (by intro value; cases value; rfl)
 
-def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v3".toUTF8.toList
+def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v4".toUTF8.toList
 
 def signedCodec : LawfulCodec Signed := NativeHostCodec.framed signedFrame signedStream
 

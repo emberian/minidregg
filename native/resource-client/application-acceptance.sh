@@ -240,7 +240,7 @@ for member in first second; do
     "$((13000 + subject))" resource
   root=$(jq -er '.page.root | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
     "$EVIDENCE/app-before-delegate-$member/view.json")
-  authority=$(jq -er '.signing[0].authorityRoot |
+  authority=$(jq -er '.authorityRoot |
     select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
     "$EVIDENCE/app-before-delegate-$member/challenge.json")
   cat >"$EVIDENCE/delegate-$member-intent.json" <<EOF

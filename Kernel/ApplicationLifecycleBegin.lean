@@ -199,7 +199,7 @@ def nonce (domain semantics : Digest) (source : Source) : Nat :=
 def command (domain semantics : Digest) (source : Source) :
     DeclaredResourceController.Command :=
   ApplicationGrain.Operation.command source.kind.operation source.subject
-    source.authorityRoot (nonce domain semantics source) source.app source.capability
+    (nonce domain semantics source) source.app source.capability
     source.appRoot source.before
 
 def stableNullifier (domain semantics : Digest) (source : Source) : StableNullifier where

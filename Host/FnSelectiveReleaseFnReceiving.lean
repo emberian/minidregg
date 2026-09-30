@@ -22,14 +22,14 @@ structure Candidate where
 
 def derive (projectedSource projectedMessageId : List UInt8)
     (capability : Minidregg.Theory.TypedAuthorization.CapabilityId)
-    (authorityRoot targetRoot : Minidregg.Theory.TypedAuthorization.Digest) :
+    (targetRoot : Minidregg.Theory.TypedAuthorization.Digest) :
     Except String Candidate := do
   let article ← extract projectedSource
   unless article.packet.release.destination.messageId == projectedMessageId do
     throw "fn projected Message-ID differs from selected release"
   let packetBytes := packetCodec.encode article.packet
   let ingressBytes ← FnSelectiveReleaseAuthoring.assembleIngress packetBytes
-    capability authorityRoot targetRoot
+    capability targetRoot
   pure ⟨packetBytes, ingressBytes, projectedMessageId⟩
 
 end Minidregg.Host.FnSelectiveReleaseFnReceiving

@@ -133,7 +133,7 @@ pub(crate) fn sign_pinned_slots(slots: &[Value], pins: &[SignerPin]) -> io::Resu
             || text(signing, "keyId")? != pin.key_id
             || text(signing, "keyEpoch")? != pin.key_epoch
             || text(signing, "algorithm")? != "1"
-            || !decimal(text(signing, "authorityRoot")?)
+            || !decimal(text(signing, "validUntil")?)
             || !decimal(text(signing, "nullifier")?)
             || !lowercase_hex(text(signing, "domainHex")?)
             || !lowercase_hex(text(signing, "messageHex")?)

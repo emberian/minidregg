@@ -203,24 +203,61 @@ theorem requestStreamFor_wrong_kind {actual expected : ResourceKind}
 
 abbrev requestCodecVersion := Minidregg.Theory.AuthorizationDeclaration.requestCodecVersion
 
+/-- The signed frame is the PLAN frame: a signature over the old whole-request
+frame (`DREGG/AUTH/REQUEST`) does not verify against it. -/
 def requestFrame : List UInt8 :=
-  "DREGG/AUTH/REQUEST".toUTF8.toList ++ [UInt8.ofNat requestCodecVersion]
+  "DREGG/AUTH/PLAN".toUTF8.toList ++ [UInt8.ofNat requestCodecVersion]
+
+/-- The request as a plan signs it.  `height` is the admission clock and
+`preStateRoot` is the kernel's own pre-root of the leg's cell
+(`MultiCellHyperedge.PreparedTuple.requestRoots` derives it from the validated
+patch); neither is the signer's to bind.  Signing them bound every plan to the
+exact journal length and to the whole root of every cell it touched, so any
+commit anywhere invalidated every pending plan.  A plan bounds the clock with
+the signed header's `validUntil` and states what it read at address level: a
+command's per-cell `expectedTargetRoot` for a cell it reads whole, and the
+header's authority footprint (`Theory.PlanBinding`).  The two words are encoded
+as zero. -/
+def planOf (request : SomeRequest) : SomeRequest :=
+  ⟨request.1, { request.2 with height := 0, preStateRoot := ⟨0⟩ }⟩
 
 def signedRequestBytes (request : SomeRequest) : List UInt8 :=
-  requestFrame ++ someRequestStream.encode request
+  requestFrame ++ someRequestStream.encode (planOf request)
 
 theorem signedRequestBytes_exact (request : SomeRequest) :
     signedRequestBytes request =
-      ("DREGG/AUTH/REQUEST".toUTF8.toList ++ [2]) ++
+      ("DREGG/AUTH/PLAN".toUTF8.toList ++ [2]) ++
         (StreamCodec.list StreamCodec.nat).encode
-          (requestWords (encodeRequest request)) := rfl
+          (requestWords (encodeRequest (planOf request))) := rfl
 
-theorem signedRequestBytes_injective : Function.Injective signedRequestBytes := by
-  intro left right same
-  have samePayload : someRequestCodec.encode left = someRequestCodec.encode right :=
-    List.append_cancel_left same
-  have decoded := congrArg someRequestCodec.decode samePayload
-  simpa only [someRequestCodec.decode_encode, Option.some.injEq] using decoded
+/-- The signed bytes determine exactly the plan: every request field except the
+admission clock and the kernel-derived pre-root. -/
+theorem signedRequestBytes_eq_iff (left right : SomeRequest) :
+    signedRequestBytes left = signedRequestBytes right ↔ planOf left = planOf right := by
+  constructor
+  · intro same
+    have samePayload : someRequestCodec.encode (planOf left) =
+        someRequestCodec.encode (planOf right) :=
+      List.append_cancel_left same
+    have decoded := congrArg someRequestCodec.decode samePayload
+    simpa only [someRequestCodec.decode_encode, Option.some.injEq] using decoded
+  · intro same
+    unfold signedRequestBytes
+    rw [same]
+
+/-- Satisfied pole: a plan signed at one height and pre-root is the same signed
+plan at any other. -/
+theorem signedRequestBytes_clock_free {kind : ResourceKind} (request : Request kind)
+    (height : Height) (root : Digest) :
+    signedRequestBytes ⟨kind, { request with height := height, preStateRoot := root }⟩ =
+      signedRequestBytes ⟨kind, request⟩ := rfl
+
+/-- Refuted pole: every plan field is still bound; two requests whose plans
+differ sign different bytes. -/
+theorem signedRequestBytes_separates_plan {left right : SomeRequest}
+    (different : planOf left ≠ planOf right) :
+    signedRequestBytes left ≠ signedRequestBytes right :=
+  fun same => different ((signedRequestBytes_eq_iff left right).1 same)
 
 #print axioms requestWireOfWords_exact
 #print axioms requestWords_injective
@@ -229,7 +266,8 @@ theorem signedRequestBytes_injective : Function.Injective signedRequestBytes := 
 #print axioms requestCodecFor_canonical
 #print axioms requestStreamFor_wrong_kind
 #print axioms signedRequestBytes_exact
-#print axioms signedRequestBytes_injective
+#print axioms signedRequestBytes_eq_iff
+#print axioms signedRequestBytes_clock_free
 
 
 private theorem resourceKindTag_of_decoded {tag : Nat} {kind : ResourceKind}

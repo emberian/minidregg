@@ -175,7 +175,7 @@ jq -n --slurpfile view "$EVIDENCE/source/before/view.json" \
   --slurpfile challenge "$EVIDENCE/source/before/challenge.json" \
   --arg payload "$NOTE_HEX" --arg changed "$CHANGED_HEX" \
   '{subject:"7",nonce:"30003",purpose:{type:"prepare",draft:{type:"invoke",
-    command:{subject:"7",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+    command:{subject:"7",
       nonce:"30004",targets:[{kind:"object",target:"8001",capability:"61",
         observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].page.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
@@ -199,7 +199,7 @@ jq -e --arg payload "$NOTE_HEX" --arg changed "$CHANGED_HEX" \
 cat >"$EVIDENCE/recipient/install-intent.json" <<EOF
 {"subject":"7","nonce":"30006","purpose":{"type":"prepare","draft":{
  "type":"install-source","subject":"7","control":"62","declaration":{
- "expectedPreRoot":"$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/recipient/before-policy/challenge.json")",
+ "expectedPreRoot":"$(jq -er '.authorityRoot' "$EVIDENCE/recipient/before-policy/challenge.json")",
  "expected":{"version":"0","address":"$(jq -er '.address' "$EVIDENCE/recipient/before-policy/view.json")"},
  "nonce":"30007","source":{"policyId":"600","version":"1",
  "domain":"8612","semantics":"$(decimal "$EVIDENCE/recipient/profile.json" semantics)",
@@ -255,11 +255,9 @@ build_candidate() {
 build_ingress() {
   label=$1 query_label=$2
   root="$EVIDENCE/candidate-$label"
-  authority=$(jq -er '.signing[0].authorityRoot' \
-    "$EVIDENCE/recipient/$query_label/challenge.json")
   target=$(jq -er '.page.root' "$EVIDENCE/recipient/$query_label/view.json")
   "$HOST" "$RECIPIENT_CONFIG" selected-release-ingress \
-    "$root/packet.bin" 61 "$authority" "$target" "$root/ingress.bin"
+    "$root/packet.bin" 61 "$target" "$root/ingress.bin"
 }
 
 RECIPIENT_SOCKET="$EVIDENCE/recipient/session/host.sock"
@@ -436,7 +434,7 @@ jq -n --slurpfile prior "$EVIDENCE/recipient/pre-law/view.json" \
   --arg semantics "$RECIPIENT_SEMANTICS" \
   '{subject:"7",nonce:"30016",purpose:{type:"prepare",draft:{
     type:"install-source",subject:"7",control:"62",declaration:{
-      expectedPreRoot:$challenge[0].signing[0].authorityRoot,
+      expectedPreRoot:$challenge[0].authorityRoot,
       expected:{version:$prior[0].version,address:$prior[0].address},
       nonce:"30017",source:{policyId:"600",version:"2",domain:"8612",
         semantics:$semantics,previous:$prior[0].address,

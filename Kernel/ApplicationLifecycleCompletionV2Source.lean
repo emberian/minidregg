@@ -133,7 +133,6 @@ def Source.command (domain semantics : Digest) (source : Source) :
       [appTarget, source.packageTarget domain]
     else [appTarget]
   { subject := begin.managementSubject
-    expectedAuthorityRoot := source.currentAuthorityRoot
     nonce := (Sp800185Cshake256.hash
       "DREGG/APPLICATION/LIFECYCLE-COMPLETION-COMMAND/v2".toUTF8.toList
       ((StreamCodec.product digestStream

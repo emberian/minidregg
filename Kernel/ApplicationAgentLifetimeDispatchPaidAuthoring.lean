@@ -208,7 +208,6 @@ def prepareReserveVerified (config : Config) {target : Durable}
         grant.ingress.spec.grant⟩
   let command : DeclaredResourceController.Command :=
     { subject := base.payerSubject
-      expectedAuthorityRoot := verified.opened.authority.snapshot.cell.root
       nonce := ApplicationAgentLifetimeDispatchReserveContext.reserveNonce context
       targets := [AgentGrain.Operation.target (.reserve base.reserveAmount)
         base.purseTask base.purseCapability purseCell.payload.root purseState
@@ -370,7 +369,6 @@ def preparePaidVerified (config : Config) {target : Durable}
     throw "current lifetime paid hold differs from admitted reserve"
   let command : DeclaredResourceController.Command :=
     { subject := base.payerSubject
-      expectedAuthorityRoot := verified.opened.authority.snapshot.cell.root
       nonce := ApplicationAgentLifetimeDispatchReserveContext.payerNonce request.context
       targets := [AgentGrain.Operation.target .input base.purseTask
         fixed.fixed.purseCapability purseCell.payload.root purseState

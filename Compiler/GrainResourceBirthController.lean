@@ -95,7 +95,7 @@ the birth identity. -/
 def Source.grainCommand (tariff : Tariff) (source : Source) :
     DeclaredResourceController.Command :=
   AgentGrain.Operation.command (.settle (Int.ofNat (tariff.charge source.birth)))
-    source.birth.creator source.authorityRoot source.grainNonce
+    source.birth.creator source.grainNonce
     source.toolTask source.toolCapability source.toolRoot source.toolBefore
     [source.parentTarget] (some source.toolObserveCapability)
 

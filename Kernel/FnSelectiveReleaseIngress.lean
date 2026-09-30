@@ -26,7 +26,6 @@ set_option autoImplicit false
 structure Ingress where
   packet : Packet
   capability : CapabilityId
-  expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
   deriving DecidableEq, Repr
 
@@ -34,22 +33,21 @@ def ingressStream : StreamCodec Ingress :=
   StreamCodec.xmap
     (StreamCodec.product packetStream
       (StreamCodec.product CredentialAuthorityEntryCodec.capabilityIdStream
-        (StreamCodec.product digestStream digestStream)))
-    (fun ingress => (ingress.packet, ingress.capability,
-      ingress.expectedAuthorityRoot, ingress.expectedTargetRoot))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
+        digestStream))
+    (fun ingress => (ingress.packet, ingress.capability, ingress.expectedTargetRoot))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
   ResourceBirthCodec.strictCodec
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v2".toUTF8.toList ingressStream)
+    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream)
 
 theorem ingressCodec_accepted_bytes {bytes : List UInt8} {ingress : Ingress}
     (accepted : ingressCodec.decode bytes = some ingress) :
     ingressCodec.encode ingress = bytes := by
   unfold ingressCodec at accepted ⊢
   exact ResourceBirthCodec.strictCodec_canonical
-    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v2".toUTF8.toList ingressStream)
+    (NativeHostCodec.framed "DREGG/FN/SELECTIVE-INGRESS/v3".toUTF8.toList ingressStream)
     accepted
 
 /-- The release key excludes gateway witness choice and owner subject. It is
@@ -79,7 +77,6 @@ unsigned outer fields are only current witness selectors. -/
 def command (ingress : Ingress) : DeclaredResourceController.Command :=
   let release := ingress.packet.release
   { subject := ⟨release.owner.subject⟩
-    expectedAuthorityRoot := ingress.expectedAuthorityRoot
     nonce := (keyDigest release).value
     targets :=
       [{ kind := .object

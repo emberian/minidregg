@@ -46,11 +46,11 @@ theorem composite_header_differs_from_bare {F : Type} [Field F]
     (birth : GrainResourceBirthController.PreparedSourceBirth profile.compilerProfile
       deployment pins durable profile.semantics tariff source)
     (key : Minidregg.Theory.CredentialSigningKey.KeyRecord)
-    (request : SomeRequest) :
+    (request : SomeRequest) (validUntil validUntil' : Nat) :
     CredentialSignatureAdmission.header birth.prepared.pre.authority.snapshot key
-      (useMarker profile deployment tariff source) request ≠
+      (useMarker profile deployment tariff source) request validUntil ≠
     CredentialSignatureAdmission.header birth.prepared.pre.authority.snapshot key
-      source.birth.authorityNullifier request := by
+      source.birth.authorityNullifier request validUntil' := by
   intro same
   have markerEqual := congrArg CredentialSignedEnvelopeController.SignedHeader.nullifier same
   rcases birth.shape with ⟨_, _, _, _, _, _, _, _, _, distinct⟩

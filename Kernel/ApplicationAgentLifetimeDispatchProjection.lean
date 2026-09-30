@@ -110,13 +110,14 @@ def ofLifetimeDispatchAt {config : Config} {opened : Opened config}
     { dispatch := dispatch
       effectiveBits := current.bits
       sessionFingerprint := ApplicationDispatchAdmission.sessionFingerprintOfKey
-        (ApplicationDispatchAdmission.sessionFingerprintKeyFor current.selection
+        (ApplicationDispatchAdmission.sessionFingerprintKeyFor
+          current.prepared.authority.snapshot.cell.root current.selection
           ingress.dispatch current.bits admitted.issue.evidence.spec.ticket.resource)
       ticketResource := admitted.issue.evidence.spec.ticket.resource
       ticketRoot := ingress.dispatch.ticketRoot
       enrollmentResource := ingress.dispatch.dispatch.enrollmentResource
       enrollmentRoot := ingress.dispatch.dispatch.enrollmentRoot
-      authorityRoot := current.selection.authorityRoot
+      authorityRoot := current.prepared.authority.snapshot.cell.root
       appRoot := ingress.dispatch.dispatch.appRoot
       sessionRoot := current.selection.sessionRoot
       issueTransaction := admitted.issue.evidence.transactionId

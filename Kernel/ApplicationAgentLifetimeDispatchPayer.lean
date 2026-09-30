@@ -35,7 +35,6 @@ structure Checked (config : Config) (opened : Opened config)
   accepted : DeclaredResourceController.AcceptedInvocation prepared signed
   commandExact : command =
     { subject := context.base.payerSubject
-      expectedAuthorityRoot := command.expectedAuthorityRoot
       nonce := payerNonce context
       targets := [AgentGrain.Operation.target .input context.base.purseTask
         payerCapability cell.payload.root state (some payerObserve)] }
@@ -69,7 +68,6 @@ def checkCurrent (config : Config) (opened : Opened config)
             context.base.maximumCharge ≤ context.base.reserveAmount then
           if commandExact : command =
               { subject := context.base.payerSubject
-                expectedAuthorityRoot := command.expectedAuthorityRoot
                 nonce := payerNonce context
                 targets := [AgentGrain.Operation.target .input context.base.purseTask
                   payerCapability cell.payload.root state (some payerObserve)] } then

@@ -23,6 +23,7 @@ import Compiler.CredentialSignatureIO
 import Compiler.CredentialAuthorityDomain
 import Compiler.TypedAuthorizationRequestCodec
 import Compiler.ResourceBirthCodec
+import Compiler.PlanFootprintCodec
 
 namespace Minidregg.Compiler.CredentialSignatureAdmission
 
@@ -64,21 +65,21 @@ abbrev requestBytes := TypedAuthorizationRequestCodec.signedRequestBytes
 theorem requestWords_injective : Function.Injective TypedAuthorizationRequestCodec.requestWords :=
   TypedAuthorizationRequestCodec.requestWords_injective
 
-theorem requestBytes_injective : Function.Injective requestBytes :=
-  TypedAuthorizationRequestCodec.signedRequestBytes_injective
-
-/-- The native adapter signs precisely the sole source-owned request projection,
-for every kind and every request; source revision is never defaulted. -/
+/-- The native adapter signs precisely the sole source-owned plan projection
+of the request, for every kind and every request; source revision is never
+defaulted. -/
 theorem requestBytes_exact_projection (request : SomeRequest) :
     requestBytes request = requestFrame ++
       (StreamCodec.list StreamCodec.nat).encode
-        (TypedAuthorizationRequestCodec.requestWords (encodeRequest request)) := rfl
+        (TypedAuthorizationRequestCodec.requestWords
+          (encodeRequest (TypedAuthorizationRequestCodec.planOf request))) := rfl
 
 theorem requestBytes_separates_policyRevision {kind : ResourceKind}
     (request : Request kind) (revision : Nat) (different : request.policyRevision ≠ revision) :
     requestBytes ⟨kind, request⟩ ≠ requestBytes ⟨kind, { request with policyRevision := revision }⟩ := by
   intro same
-  have sameWire := congrArg encodeRequest (requestBytes_injective same)
+  have samePlan := (TypedAuthorizationRequestCodec.signedRequestBytes_eq_iff _ _).1 same
+  have sameWire := congrArg encodeRequest samePlan
   exact different (congrArg RequestWire.policyRevision sameWire)
 
 inductive Reject where
@@ -89,6 +90,13 @@ inductive Reject where
   | publicKeyLength
   | envelope (reason : CredentialSignedEnvelopeController.Failure CredentialSignatureIO.Error)
   | sourceBinding
+  /-- The signed footprint does not decode as authority reads. -/
+  | malformedFootprint
+  /-- A value this plan read in the authority cell has changed since it was
+  signed; `address` is the canonical bytes of the first such address. -/
+  | footprintStale (address : List UInt8)
+  /-- The admission height is past the plan's signed `validUntil`. -/
+  | expired (height validUntil : Nat)
   deriving DecidableEq, Repr
 
 /-- Selection is a read of the canonical authority schema, never a host key
@@ -120,31 +128,66 @@ def select (snapshot : Snapshot) (request : SomeRequest) : Except Reject (Select
         else .error .subjectKeyEpoch
   else .error .wrongDomain
 
+/-! ## The plan's authority footprint
+
+A signature binds the values its admission reads in the authority cell, not the
+cell's root (`Theory.PlanBinding`).  Signature admission reads exactly the
+subject's current key epoch and the key record at that epoch (`select`); those
+two addresses, at the values they held when the plan was signed, are the
+footprint.  Another agent's admission allocates its own nullifier, and enrolls
+or rotates only its own key, so it moves neither address and leaves this plan
+admissible.  Policy epoch and revision are request fields, and the capability
+check runs at admission against the current cell (check equals use). -/
+
+open Minidregg.Theory.PlanBinding in
+def footprintAddresses (subject : SubjectId) (epoch : Epoch) :
+    List (Store.Address CredentialAuthorityState.layout) :=
+  [⟨.subjectKeyEpoch, subject⟩, ⟨.subjectKey, (subject, epoch)⟩]
+
+open Minidregg.Theory.PlanBinding in
+def footprint (snapshot : Snapshot) (request : SomeRequest) :
+    Footprint CredentialAuthorityState.layout :=
+  Footprint.observe snapshot.logical
+    (footprintAddresses request.2.subject request.2.subjectKeyEpoch)
+
+def footprintBytes (snapshot : Snapshot) (request : SomeRequest) : List UInt8 :=
+  PlanFootprintCodec.encode CredentialAuthorityCell.wire (footprint snapshot request)
+
+/-- How long a signed plan stays admissible, in admitted turns after the height
+it was authored at.  A deployment pin; replay is the nullifier's job, not this. -/
+def planValidityWindow : Nat := 256
+
 /-- The activation epoch is the authority clock of the one authority cell: the
 number of spent operation nullifiers (`Snapshot.revision`). It never runs
 backwards and every authority operation advances it; it is not height or
-subject epoch. -/
+subject epoch.  It is checked at admission against the current cell and is not
+signed. -/
 def keyRegistry (snapshot : Snapshot) (key : KeyRecord) : CredentialSignedEnvelopeController.KeyRegistryProjection where
   codecVersion := CredentialSignedEnvelopeController.registryCodecVersion
   authorityRoot := snapshot.cell.root
   registryEpoch := snapshot.revision
   keys := [key]
 
-def controllerState (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat) :
-    CredentialSignedEnvelopeController.ControllerState where
+def controllerState (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat)
+    (request : SomeRequest) : CredentialSignedEnvelopeController.ControllerState where
   codecVersion := CredentialSignedEnvelopeController.stateCodecVersion
   authorityRoot := snapshot.cell.root
   registryCommitment := CredentialSignedEnvelopeController.registryDigest
     (CredentialSignedEnvelopeController.registryCodec.encode (keyRegistry snapshot key))
   registryEpoch := snapshot.revision
+  footprint := footprintBytes snapshot request
+  height := request.2.height
   consumedNullifiers :=
     if CredentialAuthorityState.isNullified snapshot.cell nullifier then [nullifier] else []
 
+/-- The signed header.  It names the plan's authority footprint and the height
+it is valid until; it names no authority root, registry commitment or
+authority clock, so an unrelated admission does not invalidate it. -/
 def header (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat)
-    (request : SomeRequest) : CredentialSignedEnvelopeController.SignedHeader where
+    (request : SomeRequest) (validUntil : Nat) : CredentialSignedEnvelopeController.SignedHeader where
   codecVersion := CredentialSignedEnvelopeController.envelopeCodecVersion
-  authorityRoot := snapshot.cell.root
-  registryCommitment := (controllerState snapshot key nullifier).registryCommitment
+  footprint := footprintBytes snapshot request
+  validUntil := validUntil
   keyId := key.keyId
   keyEpoch := key.keyEpoch
   algorithm := ed25519Algorithm
@@ -153,17 +196,35 @@ def header (snapshot : Snapshot) (key : KeyRecord) (nullifier : Nat)
   nullifier := nullifier
 
 /-- Client preparation exposes only the exact source-derived bytes to sign;
-it does not construct a checked signature or choose an independent key. -/
+it does not construct a checked signature or choose an independent key.  The
+plan is valid for `planValidityWindow` turns after the authoring height. -/
 def signingHeader (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest) :
     Except Reject CredentialSignedEnvelopeController.SignedHeader := do
   let selected ← select snapshot request
-  .ok (header snapshot selected.key nullifier request)
+  .ok (header snapshot selected.key nullifier request (request.2.height + planValidityWindow))
+
+open Minidregg.Theory.PlanBinding in
+/-- Name the staleness before the controller's byte comparison: decode the
+signed footprint and check it against the current authority cell.  A plan whose
+reads all still hold passes; one whose read moved is refused naming it. -/
+def checkFootprint (snapshot : Snapshot) (envelopeBytes : List UInt8) : Except Reject Unit :=
+  match CredentialSignedEnvelopeController.envelopeCodec.decode envelopeBytes with
+  | none => .ok ()
+  | some envelope =>
+      match PlanFootprintCodec.decode CredentialAuthorityCell.wire envelope.header.footprint with
+      | none => .error .malformedFootprint
+      | some signed =>
+          match Footprint.admit snapshot.logical signed with
+          | .ok () => .ok ()
+          | .error (.footprintStale address) =>
+              .error (.footprintStale (PlanFootprintCodec.addressBytes CredentialAuthorityCell.wire address))
 
 structure Prepared (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest) where
   source : Selected snapshot request
   controller : CredentialSignedEnvelopeController.Prepared
   keyExact : controller.key = source.key
-  headerExact : controller.envelope.header = header snapshot source.key nullifier request
+  headerExact : controller.envelope.header =
+    header snapshot source.key nullifier request controller.envelope.header.validUntil
 
 /-- The parser and all envelope admission decisions remain in the existing
 controller. The additional equality pins its result to this source snapshot
@@ -171,14 +232,20 @@ and the enclosing operation's exact shared nullifier. -/
 def prepare (snapshot : Snapshot) (nullifier : Nat) (request : SomeRequest)
     (envelopeBytes : List UInt8) : Except Reject (Prepared snapshot nullifier request) := do
   let source ← select snapshot request
+  checkFootprint snapshot envelopeBytes
   match CredentialSignedEnvelopeController.prepare (NativeError := CredentialSignatureIO.Error) request.2.subject.value
       signatureDomain (requestBytes request)
-      (CredentialSignedEnvelopeController.stateCodec.encode (controllerState snapshot source.key nullifier))
+      (CredentialSignedEnvelopeController.stateCodec.encode (controllerState snapshot source.key nullifier request))
       (CredentialSignedEnvelopeController.registryCodec.encode (keyRegistry snapshot source.key)) envelopeBytes with
+  | .error .expired => .error (.expired request.2.height (match
+      CredentialSignedEnvelopeController.envelopeCodec.decode envelopeBytes with
+      | some envelope => envelope.header.validUntil
+      | none => 0))
   | .error reason => .error (.envelope reason)
   | .ok controller =>
       if keyExact : controller.key = source.key then
-        if headerExact : controller.envelope.header = header snapshot source.key nullifier request then
+        if headerExact : controller.envelope.header =
+            header snapshot source.key nullifier request controller.envelope.header.validUntil then
           .ok ⟨source, controller, keyExact, headerExact⟩
         else .error .sourceBinding
       else .error .sourceBinding
@@ -242,10 +309,10 @@ theorem checked_key_from_same_snapshot (snapshot : Snapshot) (receipt : CheckedS
 
 theorem checked_frame_exact (snapshot : Snapshot) (receipt : CheckedSignature snapshot) :
     receipt.prepared.controller.frame = CredentialSignedEnvelopeController.headerCodec.encode
-      (header snapshot receipt.prepared.source.key receipt.nullifier receipt.request) := by
+      (header snapshot receipt.prepared.source.key receipt.nullifier receipt.request
+        receipt.prepared.controller.envelope.header.validUntil) := by
   rw [receipt.prepared.controller.frameExact]
-  change CredentialSignedEnvelopeController.headerCodec.encode receipt.prepared.controller.envelope.header = _
-  rw [receipt.prepared.headerExact]
+  exact congrArg CredentialSignedEnvelopeController.headerCodec.encode receipt.prepared.headerExact
 
 /-- Explicit IO-to-verifier refinement obligation for ACTUAL execution,
 including the pinned executable and exact process/filesystem byte transport.

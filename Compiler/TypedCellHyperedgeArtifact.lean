@@ -45,7 +45,7 @@ theorem signedRequestBytes_exact_artifact (request : SomeRequest) :
     TypedAuthorizationRequestCodec.signedRequestBytes request =
       TypedAuthorizationRequestCodec.requestFrame ++
         (Tower256ConcreteBackend.StreamCodec.list Tower256ConcreteBackend.StreamCodec.nat).encode
-          (requestWords (encodeRequest request)) := rfl
+          (requestWords (encodeRequest (TypedAuthorizationRequestCodec.planOf request))) := rfl
 
 /-- One incidence's complete public semantic description. -/
 structure LegArtifact where

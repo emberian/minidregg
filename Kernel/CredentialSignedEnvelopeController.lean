@@ -4,8 +4,11 @@
 This is the first byte-level controller for the signature carrier of
 `CredentialAuthorityFamily`.  Lean owns every framing and selection decision:
 
-* a signed header names its codec version, authority root, exact committed key
-  registry, key id/epoch/algorithm, domain, message bytes, and nullifier;
+* a signed header names its codec version, the plan's authority footprint (the
+  exact authority values it read, `Theory.PlanBinding`), the height it is valid
+  until, key id/epoch/algorithm, domain, message bytes, and nullifier.  It names
+  no authority root: a signature over the root was invalidated by every
+  admission anywhere in the authority cell;
 * the key registry is a versioned projection committed by the controller state;
 * only the uniquely selected current, live, non-revoked key reaches native
   verification; and
@@ -31,9 +34,12 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-def stateCodecVersion : Nat := 1
+def stateCodecVersion : Nat := 2
 def registryCodecVersion : Nat := 1
-def envelopeCodecVersion : Nat := 1
+/-- Version 2: the header binds the authority footprint and `validUntil` in
+place of the authority root and registry commitment.  Version-1 envelopes
+refuse (`wrongEnvelopeVersion`, and their tuple no longer decodes). -/
+def envelopeCodecVersion : Nat := 2
 
 /-! ## Versioned committed key projection -/
 
@@ -93,8 +99,10 @@ def registryDigest (bytes : List UInt8) : Digest :=
 
 structure SignedHeader where
   codecVersion : Nat
-  authorityRoot : Digest
-  registryCommitment : Digest
+  /-- Canonical bytes of the plan's authority reads: (address, value) pairs. -/
+  footprint : List UInt8
+  /-- The last admission height at which this plan may be admitted. -/
+  validUntil : Nat
   keyId : Nat
   keyEpoch : Nat
   algorithm : Nat
@@ -104,12 +112,12 @@ structure SignedHeader where
   deriving DecidableEq, Repr
 
 abbrev HeaderTuple :=
-  Nat × Digest × Digest × Nat × Nat × Nat × List UInt8 × List UInt8 × Nat
+  Nat × List UInt8 × Nat × Nat × Nat × Nat × List UInt8 × List UInt8 × Nat
 
 def headerTupleStream : StreamCodec HeaderTuple :=
   StreamCodec.product StreamCodec.nat
-    (StreamCodec.product digestStream
-      (StreamCodec.product digestStream
+    (StreamCodec.product bytesStream
+      (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat
           (StreamCodec.product StreamCodec.nat
             (StreamCodec.product StreamCodec.nat
@@ -117,15 +125,15 @@ def headerTupleStream : StreamCodec HeaderTuple :=
                 (StreamCodec.product bytesStream StreamCodec.nat)))))))
 
 def SignedHeader.toTuple (header : SignedHeader) : HeaderTuple :=
-  (header.codecVersion, header.authorityRoot, header.registryCommitment,
+  (header.codecVersion, header.footprint, header.validUntil,
     header.keyId, header.keyEpoch, header.algorithm, header.domain,
     header.message, header.nullifier)
 
 def SignedHeader.ofTuple : HeaderTuple -> SignedHeader
-  | (version, root, commitment, keyId, keyEpoch, algorithm, domain,
+  | (version, footprint, validUntil, keyId, keyEpoch, algorithm, domain,
       message, nullifier) =>
-    { codecVersion := version, authorityRoot := root,
-      registryCommitment := commitment, keyId := keyId, keyEpoch := keyEpoch,
+    { codecVersion := version, footprint := footprint,
+      validUntil := validUntil, keyId := keyId, keyEpoch := keyEpoch,
       algorithm := algorithm, domain := domain, message := message,
       nullifier := nullifier }
 
@@ -160,31 +168,40 @@ def SignedEnvelope.frame (envelope : SignedEnvelope) : List UInt8 :=
 
 /-! ## Persistent replay state and Lean-owned planning -/
 
+/-- The controller's view of the current authority state.  `footprint` is the
+canonical encoding of the current values at the addresses the signed footprint
+names, and `height` is the admission height; both are derived at admission,
+never supplied by the signer. -/
 structure ControllerState where
   codecVersion : Nat
   authorityRoot : Digest
   registryCommitment : Digest
   registryEpoch : Nat
+  footprint : List UInt8
+  height : Nat
   consumedNullifiers : List Nat
   deriving DecidableEq, Repr
 
-abbrev StateTuple := Nat × Digest × Digest × Nat × List Nat
+abbrev StateTuple := Nat × Digest × Digest × Nat × List UInt8 × Nat × List Nat
 
 def stateTupleStream : StreamCodec StateTuple :=
   StreamCodec.product StreamCodec.nat
     (StreamCodec.product digestStream
       (StreamCodec.product digestStream
         (StreamCodec.product StreamCodec.nat
-          (StreamCodec.list StreamCodec.nat))))
+          (StreamCodec.product bytesStream
+            (StreamCodec.product StreamCodec.nat
+              (StreamCodec.list StreamCodec.nat))))))
 
 def ControllerState.toTuple (state : ControllerState) : StateTuple :=
   (state.codecVersion, state.authorityRoot, state.registryCommitment,
-    state.registryEpoch, state.consumedNullifiers)
+    state.registryEpoch, state.footprint, state.height, state.consumedNullifiers)
 
 def ControllerState.ofTuple : StateTuple -> ControllerState
-  | (version, root, commitment, epoch, nullifiers) =>
+  | (version, root, commitment, epoch, footprint, height, nullifiers) =>
     { codecVersion := version, authorityRoot := root,
       registryCommitment := commitment, registryEpoch := epoch,
+      footprint := footprint, height := height,
       consumedNullifiers := nullifiers }
 
 @[simp] theorem ControllerState.ofTuple_toTuple (state : ControllerState) :
@@ -208,7 +225,11 @@ inductive Failure (NativeError : Type) where
   | staleAuthority
   | uncommittedRegistry
   | staleRegistry
-  | wrongRegistryCommitment
+  /-- A value the plan read in the authority cell has changed since it was
+  signed.  The only authority-state staleness a signature can carry. -/
+  | footprintStale
+  /-- The admission height is past the plan's signed `validUntil`. -/
+  | expired
   | wrongDomain
   | wrongMessage
   | replayedNullifier
@@ -267,15 +288,14 @@ def prepare {NativeError : Type}
                 .error .wrongEnvelopeVersion
               else if registry.authorityRoot != state.authorityRoot then
                 .error .staleAuthority
-              else if envelope.header.authorityRoot != state.authorityRoot then
-                .error .staleAuthority
               else if registryDigest registryBytes != state.registryCommitment then
                 .error .uncommittedRegistry
               else if registry.registryEpoch != state.registryEpoch then
                 .error .staleRegistry
-              else if envelope.header.registryCommitment !=
-                  state.registryCommitment then
-                .error .wrongRegistryCommitment
+              else if envelope.header.footprint != state.footprint then
+                .error .footprintStale
+              else if envelope.header.validUntil < state.height then
+                .error .expired
               else if envelope.header.domain != expectedDomain then
                 .error .wrongDomain
               else if envelope.header.message != expectedMessage then

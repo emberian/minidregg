@@ -341,7 +341,7 @@ done
 # tool identity. The source-authored parent rule permits that subject only the
 # pinned-generation witness no-op; the tool owns its own spendable task.
 PARENT_ROOT=$(jq -er '.page.root' "$EVIDENCE/controller-born/view.json")
-PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$EVIDENCE/controller-born/challenge.json")
+PARENT_AUTHORITY=$(jq -er '.authorityRoot' "$EVIDENCE/controller-born/challenge.json")
 cat >"$EVIDENCE/parent-witness-delegation.json" <<EOF
 {"subject":"7","nonce":"31000","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
@@ -363,7 +363,7 @@ query_task delegated-parent 8 "$CONTROLLER_TASK" 73 "$EVIDENCE/tool.key" 31002
 test "$(jq -er '.page.root' "$EVIDENCE/delegated-parent/view.json")" = "$PARENT_ROOT"
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
   query_task parent-for-provider 7 "$CONTROLLER_TASK" 71 "$EVIDENCE/controller.key" 31003
-  PROVIDER_PARENT_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
+  PROVIDER_PARENT_AUTHORITY=$(jq -er '.authorityRoot' \
     "$EVIDENCE/parent-for-provider/challenge.json")
   cat >"$EVIDENCE/provider-parent-delegation.json" <<EOF
 {"subject":"7","nonce":"31004","purpose":{"type":"prepare","draft":{
@@ -390,10 +390,10 @@ fi
 PUBLICATION_ROOT=$(jq -er '.page.root' "$EVIDENCE/publication-born/view.json")
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
   query_task publication-for-delegation 7 "$PUBLICATION_TARGET" 91 "$EVIDENCE/controller.key" 31007
-  PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
+  PUBLICATION_AUTHORITY=$(jq -er '.authorityRoot' \
     "$EVIDENCE/publication-for-delegation/challenge.json")
 else
-  PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
+  PUBLICATION_AUTHORITY=$(jq -er '.authorityRoot' \
     "$EVIDENCE/delegated-parent/challenge.json")
 fi
 cat >"$EVIDENCE/publication-delegation.json" <<EOF
@@ -418,7 +418,7 @@ test "$(jq -er '.page.root' "$EVIDENCE/delegated-publication/view.json")" = "$PU
 
 # Reads use a separate observe-only sibling grant. The MCP reader cannot use
 # the publication mutation authority or select an arbitrary target.
-PUBLICATION_AUTHORITY=$(jq -er '.signing[0].authorityRoot' \
+PUBLICATION_AUTHORITY=$(jq -er '.authorityRoot' \
   "$EVIDENCE/delegated-publication/challenge.json")
 cat >"$EVIDENCE/publication-read-delegation.json" <<EOF
 {"subject":"7","nonce":"31020","purpose":{"type":"prepare","draft":{
@@ -634,7 +634,7 @@ tool_witness_source() {
     --slurpfile toolChallenge "$EVIDENCE/$name-tool/challenge.json" \
     --slurpfile parent "$EVIDENCE/$name-parent/view.json" \
     '{grain:{task:"7002",subject:"8",capability:"81",observeCapability:"81",
-      schemaVersion:"1",expectedAuthorityRoot:$toolChallenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",
       expectedTargetRoot:$tool[0].page.root,
       context:{operationId:$nonce,payload:"separate tool task with parent witness"},
       before:{generation:$tool[0].page.grain.generation,status:$tool[0].page.grain.status,

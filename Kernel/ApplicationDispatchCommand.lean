@@ -23,7 +23,6 @@ set_option autoImplicit false
 app, installed manifest and enrollment are separately observed under source-
 derived native requests and durable read guards. -/
 structure Selection where
-  authorityRoot : Digest
   sessionRoot : Digest
   sessionObserve : CapabilityId
 
@@ -71,7 +70,6 @@ cgroup fence merely because an agent happens to relay its HTTP bytes. -/
 def command (ingress : Ingress) (selection : Selection) (parent : Option Parent) :
     DeclaredResourceController.Command :=
   { subject := ingress.dispatch.session.subject
-    expectedAuthorityRoot := selection.authorityRoot
     nonce := (requestDigest ingress).value
     targets := targets ingress selection parent }
 

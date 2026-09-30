@@ -23,7 +23,7 @@ if [ "$command" = query ]; then
   status=$(cat "$state/status")
   reserved=$(cat "$state/reserved")
   printf '{"page":{"root":"100","grain":{"task":"7102","generation":"1","status":"%s","remaining":"10","reserved":"%s"}}}\n' "$status" "$reserved" > "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300","height":"10"}' > "$dir/challenge.json"
+  printf '%s\n' '{"authorityRoot":"200","signing":[{}],"imageBoundary":"300","height":"10"}' > "$dir/challenge.json"
   exit 0
 fi
 [ "$command" = submit ] || exit 40

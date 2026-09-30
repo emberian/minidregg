@@ -375,7 +375,7 @@ def challenge (context : Context deployment durable) (profile : CanonicalRuntime
     let value ← headerAt context profile boundary federation genesisHeight intent grant
     pure (CredentialSignedEnvelopeController.headerCodec.encode value)
   pure ⟨intent, deployment.domain, profile.semantics, federation,
-    boundary,
+    boundary, context.authority.snapshot.cell.root,
     genesisHeight + durable.image.accepted.length, headers⟩
 
 def checkGrant (native : CredentialSignatureIO.NativeConfig)

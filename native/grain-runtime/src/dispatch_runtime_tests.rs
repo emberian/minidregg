@@ -153,7 +153,7 @@ case "$1" in
     done
     mkdir -p "$dir"
     printf '%s\n' '{"page":{"root":"200","grain":{"task":"7103","generation":"2","status":"3","remaining":"5","reserved":"5"}}}' > "$dir/view.json"
-    printf '%s\n' '{"signing":[{"authorityRoot":"300"}],"imageBoundary":"400"}' > "$dir/challenge.json"
+    printf '%s\n' '{"authorityRoot":"300","signing":[{}],"imageBoundary":"400"}' > "$dir/challenge.json"
     ;;
   *) exit 40 ;;
 esac
@@ -354,7 +354,7 @@ if [ "$command" = query ]; then
     remaining=7
   fi
   printf '{"page":{"root":"100","grain":{"task":"%s","generation":"%s","status":"%s","remaining":"%s","reserved":"%s"}}}\n' "$task" "$generation" "$status" "$remaining" "$reserved" > "$dir/view.json"
-  printf '%s\n' '{"signing":[{"authorityRoot":"200"}],"imageBoundary":"300"}' > "$dir/challenge.json"
+  printf '%s\n' '{"authorityRoot":"200","signing":[{}],"imageBoundary":"300"}' > "$dir/challenge.json"
   exit 0
 fi
 [ "$command" = submit ] || exit 40

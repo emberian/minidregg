@@ -136,7 +136,7 @@ def sourceDigest (domain semantics : Digest) (source : Source) : Digest :=
 def command (domain semantics : Digest) (source : Source) :
     DeclaredResourceController.Command :=
   ApplicationGrain.Operation.command (Kind.claimOperation source.begin.source.kind)
-    source.begin.source.subject source.currentAuthorityRoot
+    source.begin.source.subject
     (sourceDigest domain semantics source).value source.begin.source.app
     source.begin.source.capability source.currentAppRoot source.before
 

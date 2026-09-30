@@ -38,7 +38,6 @@ structure Report where
   subject : SubjectId
   target : Nat
   capability : CapabilityId
-  expectedAuthorityRoot : Digest
   expectedTargetRoot : Digest
   deriving Repr
 
@@ -103,11 +102,11 @@ def progressAtom (domain semantics : Digest) (evidence : Evidence) : AtomId :=
 def marker (domain semantics : Digest) (subject : SubjectId)
     (evidence : Evidence) : Digest :=
   DeclaredResourceController.transactionId domain semantics
-    ⟨subject, ⟨0⟩, progressNonce domain semantics evidence, []⟩
+    ⟨subject, progressNonce domain semantics evidence, []⟩
 
 def progressCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
-  ⟨report.subject, report.expectedAuthorityRoot,
+  ⟨report.subject,
     progressNonce domain semantics report.evidence,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
@@ -141,7 +140,7 @@ def matchesSignedShape (domain semantics : Digest)
   exactSignedCommand signedBytes
     (progressCommand domain semantics
     ⟨evidence, command.subject, target.target, target.capability,
-      command.expectedAuthorityRoot, target.expectedTargetRoot⟩)
+      target.expectedTargetRoot⟩)
 
 theorem matchesSignedShape_sound (domain semantics : Digest)
     (signedBytes : List UInt8) (command : DeclaredResourceController.Command)
@@ -150,7 +149,7 @@ theorem matchesSignedShape_sound (domain semantics : Digest)
     (matched : matchesSignedShape domain semantics signedBytes command target evidence = true) :
     command = progressCommand domain semantics
       ⟨evidence, command.subject, target.target, target.capability,
-        command.expectedAuthorityRoot, target.expectedTargetRoot⟩ := by
+        target.expectedTargetRoot⟩ := by
   exact exactSignedCommand_sound signedBytes command _
     decoded matched
 

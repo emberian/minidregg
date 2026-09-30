@@ -65,7 +65,7 @@ def ofDispatchAt {config : Config} {opened : Opened config}
     ticketRoot := ingress.ticketRoot
     enrollmentResource := ingress.dispatch.enrollmentResource
     enrollmentRoot := ingress.dispatch.enrollmentRoot
-    authorityRoot := checked.selection.authorityRoot
+    authorityRoot := checked.prepared.authority.snapshot.cell.root
     appRoot := ingress.dispatch.appRoot
     sessionRoot := checked.selection.sessionRoot
     issueTransaction := admitted.prior.evidence.transactionId
@@ -91,7 +91,7 @@ def ofAgentDispatchAt {config : Config} {opened : Opened config}
     ticketRoot := ingress.dispatch.ticketRoot
     enrollmentResource := ingress.dispatch.dispatch.enrollmentResource
     enrollmentRoot := ingress.dispatch.dispatch.enrollmentRoot
-    authorityRoot := checked.selection.authorityRoot
+    authorityRoot := checked.prepared.authority.snapshot.cell.root
     appRoot := ingress.dispatch.dispatch.appRoot
     sessionRoot := checked.selection.sessionRoot
     issueTransaction := admitted.issue.evidence.transactionId

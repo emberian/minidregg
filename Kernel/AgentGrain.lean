@@ -233,12 +233,12 @@ def Operation.target (operation : Operation) (task : Nat) (capability : Capabili
 The caller supplies each other incidence; the kernel requires distinct target
 identities and admits all against one old authority snapshot, or commits none.
 There is no agent-specific transaction mode or storage path. -/
-def Operation.command (operation : Operation) (subject : SubjectId) (authorityRoot : Digest)
+def Operation.command (operation : Operation) (subject : SubjectId)
     (nonce task : Nat) (capability : CapabilityId) (expectedRoot : Digest) (before : State)
     (publications : List DeclaredResourceController.Target := [])
     (observeCapability : Option CapabilityId := none) :
     DeclaredResourceController.Command :=
-  { subject := subject, expectedAuthorityRoot := authorityRoot, nonce := nonce,
+  { subject := subject, nonce := nonce,
     targets := operation.target task capability expectedRoot before observeCapability :: publications }
 
 theorem operation_target_actions_exact (operation : Operation) (task : Nat)
@@ -248,10 +248,10 @@ theorem operation_target_actions_exact (operation : Operation) (task : Nat)
       .scalar (AgentGrain.actions task before (operation.after before)) := rfl
 
 theorem operation_command_retains_publications (operation : Operation) (subject : SubjectId)
-    (authorityRoot : Digest) (nonce task : Nat) (capability : CapabilityId)
+    (nonce task : Nat) (capability : CapabilityId)
     (expectedRoot : Digest) (before : State) (publications : List DeclaredResourceController.Target)
     (observeCapability : Option CapabilityId) :
-    (operation.command subject authorityRoot nonce task capability expectedRoot before publications
+    (operation.command subject nonce task capability expectedRoot before publications
       observeCapability).targets.tail =
       publications := rfl
 
