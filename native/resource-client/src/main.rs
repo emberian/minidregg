@@ -128,6 +128,10 @@ pub(crate) fn refusal_line(outcome: &Value) -> Option<String> {
         .get("reason")
         .and_then(Value::as_str)
         .unwrap_or("unnamed");
+    // A law refusal carries the Host's own rendering of the failing clause.
+    if let Some(explain) = outcome.get("explain").and_then(Value::as_str) {
+        return Some(format!("refused: {reason}: {explain}"));
+    }
     Some(format!(
         "refused: {reason}: {} (phase {})",
         outcome_text(outcome.get("detail")),

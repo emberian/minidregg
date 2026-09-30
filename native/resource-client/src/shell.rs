@@ -29,6 +29,8 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod law;
+
 pub(crate) const EXIT_OK: i32 = 0;
 pub(crate) const EXIT_CLIENT: i32 = 1;
 pub(crate) const EXIT_USAGE: i32 = 2;
@@ -56,7 +58,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
-    Verb { name: "law", usage: "law ID REF PREDICATE-JSON|@FILE", operation: "mini workspace --action propose (action install-policy)" },
+    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE", operation: "mini workspace --action propose (action install-policy)" },
     Verb { name: "submit", usage: "submit ID", operation: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID" },
     Verb { name: "lookup", usage: "lookup ID", operation: "mini workspace --action recover --attempt attempts/ID" },
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
@@ -241,6 +243,31 @@ fn json_argument(session: &Session, word: &str, label: &str) -> std::result::Res
         word.to_owned()
     };
     serde_json::from_str(&text).map_err(|e| format!("{label} is not JSON: {e}"))
+}
+
+/// A law: grammar text (`law::parse`), one JSON predicate as before, or
+/// `@FILE` from HOME/requests holding either. Several words are one law text,
+/// joined by single spaces.
+fn law_argument(session: &Session, words: &[String]) -> std::result::Result<Value, String> {
+    if let [word] = words {
+        if word.starts_with('{') {
+            return json_argument(session, word, "predicate");
+        }
+        if let Some(file) = word.strip_prefix('@') {
+            session_file(file, "law")?;
+            let path = session.home.join("requests").join(file);
+            let mut bytes = Vec::new();
+            fs::File::open(&path)
+                .and_then(|f| f.take(1 << 20).read_to_end(&mut bytes))
+                .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let text = String::from_utf8(bytes).map_err(|_| "law file is not UTF-8".to_string())?;
+            if text.trim_start().starts_with('{') {
+                return serde_json::from_str(&text).map_err(|e| format!("law file is not JSON: {e}"));
+            }
+            return law::parse(&text).map_err(|e| format!("law: {e}"));
+        }
+    }
+    law::parse(&words.join(" ")).map_err(|e| format!("law: {e}"))
 }
 
 fn request_file(path: PathBuf, value: &Value) -> (PathBuf, Vec<u8>) {
@@ -487,10 +514,12 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             proposal(session, &w[1], &request)
         }
         "law" => {
-            arity(&w, 3, 3, u)?;
+            if w.len() < 4 {
+                arity(&w, 3, 3, u)?;
+            }
             workspace_name(&w[1], "proposal ID")?;
             workspace_name(&w[2], "reference name")?;
-            let predicate = json_argument(session, &w[3], "predicate")?;
+            let predicate = law_argument(session, &w[3..])?;
             let request = json!({"type":"minidregg-workspace-proposal-v1",
                 "action":"install-policy","name":w[2],"predicate":predicate});
             proposal(session, &w[1], &request)
@@ -1296,6 +1325,25 @@ mod tests {
             json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"shared",
                 "recipient":"182","verbs":["observe","mutate"],"maxCost":"50000"})
         );
+        let (_, _, writes) = client(
+            plan(&s, r#"law board-law shared "any [ field 2 monotone, not (verb == write) ]; any [ field 2 in {0,1,2}, not (verb == write) ]""#)
+                .unwrap(),
+        );
+        let request: Value = serde_json::from_str(&writes[0].1).unwrap();
+        let guard = json!({"type":"not","predicate":{"type":"eq","slot":"request/verb","value":"2"}});
+        assert_eq!(
+            request["predicate"],
+            json!({"type":"all","predicates":[
+                {"type":"any","predicates":[{"type":"monotone","slot":"resource/field/2/after"}, guard]},
+                {"type":"any","predicates":[{"type":"memberOf","slot":"resource/field/2/after","values":["0","1","2"]}, guard]}]})
+        );
+        let (_, _, unquoted) = client(plan(&s, "law seal shared sealed").unwrap());
+        let request: Value = serde_json::from_str(&unquoted[0].1).unwrap();
+        assert_eq!(request["predicate"], json!({"type":"any","predicates":[]}));
+        let (_, _, words) = client(plan(&s, "law l2 shared any [ field 2 monotone, not (verb == write) ]").unwrap());
+        let request: Value = serde_json::from_str(&words[0].1).unwrap();
+        assert_eq!(request["predicate"]["predicates"][1]["predicate"]["value"], json!("2"));
+        assert!(plan(&s, "law bad shared field 2 before monotone").unwrap_err().contains("never refuse"));
         let (_, _, writes) = client(plan(&s, r#"law lock shared {"type":"any","predicates":[]}"#).unwrap());
         let request: Value = serde_json::from_str(&writes[0].1).unwrap();
         assert_eq!(
@@ -1355,6 +1403,35 @@ mod tests {
         assert!(text.contains("  encoded: 4452\n"));
         assert!(text.contains("  evidence: /h/refusals/r.bin\n"));
         assert!(text.ends_with("  client: host refused query; encoded refusal: 4452\n"));
+    }
+
+    #[test]
+    fn law_refusal_prints_the_hosts_rendering_of_the_failing_clause() {
+        let decoded = json!({"type":"refused","reason":"law-denied",
+            "phase":super::super::hex(b"observation"),
+            "detail":super::super::hex(b"the resource's current law denies this operation"),
+            "leaf":{"path":["0"],"text":"any [ field 2 monotone, not (verb == write) ]","before":"2","after":"1"},
+            "explain":"field 2 monotone (before 2, after 1)"});
+        let ending = Ending::Host {
+            client: "host refused prepare".into(),
+            decision: HostDecision::RefusedFrame { command: "prepare".into(), byte: 255, encoded: vec![0x44], decoded: None },
+            decoded: Some(Ok(decoded)),
+            evidence: None,
+        };
+        let (code, text) = render(&ending);
+        assert_eq!(code, EXIT_REFUSED);
+        assert!(
+            text.starts_with("refused: law-denied: field 2 monotone (before 2, after 1) (Host refused prepare, reply byte 255)\n"),
+            "{text}"
+        );
+        // Without the Host's `explain`, the reason's fixed text is printed.
+        let plain = Ending::Host {
+            client: "c".into(),
+            decision: HostDecision::Outcome(json!({"type":"refused","reason":"law-denied","phase":"6162","detail":"78"})),
+            decoded: None,
+            evidence: None,
+        };
+        assert!(render(&plain).1.starts_with("refused: law-denied: x (phase ab)\n"));
     }
 
     #[test]
