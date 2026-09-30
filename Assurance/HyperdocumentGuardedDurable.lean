@@ -41,12 +41,11 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : HyperdocumentOperations.Declaration}
-    {content : HyperdocumentOperations.Accepted contentConfig projection
+    {content : HyperdocumentOperations.Accepted contentConfig
       authorityPre documentPre contentPortal contentDeclaration}
     {MLog : HyperdocumentVersionEffects.LogMaterializer}
     {store : HyperdocumentEventLog.Sparse.Store}

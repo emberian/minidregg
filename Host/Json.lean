@@ -680,15 +680,14 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
 
 private def keyRecord (path : String) (json : Lean.Json) : Result KeyRecord := do
   let obj ← exactObject path ["keyId", "keyEpoch", "algorithm", "subject", "publicKey",
-    "activeFrom", "activeUntil", "revoked"] json
+    "activeFrom", "activeUntil"] json
   pure ⟨← nat (path ++ ".keyId") (← field path "keyId" obj),
     ← nat (path ++ ".keyEpoch") (← field path "keyEpoch" obj),
     ← nat (path ++ ".algorithm") (← field path "algorithm" obj),
     ← nat (path ++ ".subject") (← field path "subject" obj),
     ← decodeHex (path ++ ".publicKey") (← field path "publicKey" obj),
     ← nat (path ++ ".activeFrom") (← field path "activeFrom" obj),
-    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj),
-    ← bool (path ++ ".revoked") (← field path "revoked" obj)⟩
+    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj)⟩
 
 private def enrollment (path : String) (json : Lean.Json) : Result NativeHostGenesis.Enrollment := do
   let obj ← exactObject path ["key", "accountId", "spendCapabilityId", "controlCapabilityId",
@@ -2294,7 +2293,7 @@ private def participantKeyRecordJson (key : KeyRecord) : Lean.Json := .mkObj
    ("algorithm", decimal key.algorithm), ("subject", decimal key.subject),
    ("publicKey", hexJson key.publicKey),
    ("activeFrom", decimal key.activeFrom),
-   ("activeUntil", decimal key.activeUntil), ("revoked", .bool key.revoked)]
+   ("activeUntil", decimal key.activeUntil)]
 
 private def participantKeyCommandJson
     (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj
@@ -2689,7 +2688,7 @@ private def optionalOperationJson (value : Option Hyperdocument.OperationId) : L
 
 /-- One entry of a content cell. Documents, elements, links, atoms and runs are
 spelled out; every entry carries its canonical `StoreCodec` entry bytes. -/
-private def contentEntryJson (entry : StoreCodec.Entry Hyperdocument.layout) : Lean.Json :=
+private def contentEntryJson (entry : Minidregg.Theory.Store.Entry Hyperdocument.layout) : Lean.Json :=
   let canonical := hexJson ((StoreCodec.entryStream HyperdocumentCell.contentWire).encode entry)
   match entry with
   | ⟨⟨.documents, identifier⟩, _⟩ =>

@@ -21,7 +21,7 @@ authority-cell root read-only.
 Two deployment ceilings remain deliberately visible.  The portal below is an
 inhabitation verifier, not a signature or membership security claim.  Root
 movement of the authority cell is conditional on the pair-scoped cSHAKE256
-no-collision premise (`CredentialAuthorityCell.PairBindingPremise`), never on a
+no-collision premise (`CellState.PairBindingPremise`), never on a
 global injection into 256 bits.  Durable execution is a model until a physical
 handler inhabits the existing `ImplementationRefinement` simulation boundary.
 -/
@@ -66,24 +66,17 @@ def examplePolicy : PolicyId := ⟨17⟩
 /-- The authority domain this lifecycle's requests and durable records name. -/
 def lifecycleDomain : Digest := ⟨8100⟩
 
-/-- The revocation keys the lifecycle registers: the root and child capability
-and the shared channel. -/
-def authorityDomain : ProjectionUniverse where
-  revocationKeys :=
-    { .capability ⟨100⟩, .capability ⟨101⟩, .channel ⟨9⟩ }
-
 /-- Policy generation two at current revision two, a staged revision-three
-address, and every lifecycle revocation key registered (present in the
-append-only `registered` plane) and live (absent from `revoked`).  A staged
+address, and the shared channel registered (present in the append-only
+`registered` plane) and live (absent from `revoked`).  The root and child
+capabilities are NOT registered here: issuance and attenuation register them.  A staged
 revision does not become current until an explicit policy installation changes
 the revision plane; grant-generation rotation does not select it. -/
-def initialEntries : List (StoreCodec.Entry layout) :=
+def initialEntries : List (Minidregg.Theory.Store.Entry layout) :=
   [⟨⟨.policyEpoch, examplePolicy⟩, (2 : Epoch)⟩,
    ⟨⟨.policyRevision, examplePolicy⟩, (2 : PolicyRevision)⟩,
    ⟨⟨.policyAddress, (examplePolicy, 2)⟩, (⟨2200⟩ : Digest)⟩,
    ⟨⟨.policyAddress, (examplePolicy, 3)⟩, (⟨3300⟩ : Digest)⟩,
-   ⟨⟨.registered, .capability ⟨100⟩⟩, ()⟩,
-   ⟨⟨.registered, .capability ⟨101⟩⟩, ()⟩,
    ⟨⟨.registered, .channel ⟨9⟩⟩, ()⟩]
 
 def initialLogical : Store layout := StoreCodec.fromEntries initialEntries
@@ -111,11 +104,16 @@ theorem initial_roundtrip :
 @[simp] theorem staged_policy_address :
     policyAddressAt initialCell examplePolicy 3 = ⟨3300⟩ := by decide
 
-/-- Every key of the lifecycle's revocation universe is registered and live in
-the pre-cell. -/
-theorem initial_keys_registered_live :
-    ∀ key ∈ authorityDomain.revocationKeys,
-      isRegistered initialCell key = true ∧ isRevoked initialCell key = false := by
+/-- The shared channel is registered and live in the pre-cell. -/
+theorem initial_channel_registered_live :
+    isRegistered initialCell (.channel ⟨9⟩) = true ∧
+      isRevoked initialCell (.channel ⟨9⟩) = false := by
+  decide
+
+/-- Neither lifecycle capability is registered before it is created. -/
+theorem initial_capabilities_unregistered :
+    isRegistered initialCell (.capability ⟨100⟩) = false ∧
+      isRegistered initialCell (.capability ⟨101⟩) = false := by
   decide
 
 /-! ## A verifier boundary suitable only for inhabitation -/
@@ -198,7 +196,7 @@ membership, epoch, and policy gates.  Proof mode avoids pretending the
 signature face above is sound. -/
 noncomputable def adminAuthorization (pre : Cell AuthorityMaterializer) (effects : Digest)
     (nonce : Nat) (args : Digest := ⟨9002⟩) :
-    Authorized lifecyclePortal (authState authorityDomain pre)
+    Authorized lifecyclePortal (authState pre)
       (adminRequest pre effects nonce args) where
   evidence := .proof () rfl
   policyWitness := policyAddressAt pre examplePolicy
@@ -304,7 +302,7 @@ noncomputable def issueCodec : LawfulCodec (IssueDeclaration .object) := by
   letI : Nonempty (IssueDeclaration .object) := ⟨issueDeclaration⟩
   exact codecOfCountable _
 
-def issueEvidence : IssueEvidence authorityDomain initialCell issueDeclaration where
+def issueEvidence : IssueEvidence initialCell issueDeclaration where
   preRootExact := rfl
   slotFresh := by intro kind; cases kind <;> decide
   rootParent := rfl
@@ -312,13 +310,13 @@ def issueEvidence : IssueEvidence authorityDomain initialCell issueDeclaration w
   rootAncestors := rfl
   issuerCurrent := by decide
   policyCurrent := by decide
-  selfRegistered := by decide
+  selfUnregistered := by decide
   channelsRegistered := by decide
   selfLive := by decide
   channelsLive := by decide
 
 noncomputable def issued :=
-  acceptIssue authorityDomain initialCell (adminContext initialCell) issueCodec issueDigest issueDeclaration
+  acceptIssue initialCell (adminContext initialCell) issueCodec issueDigest issueDeclaration
     (adminAuthorization initialCell (issueDigest issueDeclaration) 1001
       (adminArgsDigest (issueCodec.encode issueDeclaration)))
     rfl rfl rfl issueEvidence
@@ -330,6 +328,11 @@ noncomputable abbrev issuedCell : Cell AuthorityMaterializer :=
     readCapability issuedCell .object rootCapability.id =
       some ⟨rootCapability, []⟩ :=
   issue_post_capability_exact issued
+
+/-- Issuance registered the root capability's own key. -/
+@[simp] theorem issued_root_registered :
+    isRegistered issuedCell (.capability rootCapability.id) = true :=
+  issue_post_registered issued
 
 def parentStored : StoredCapability .object := ⟨rootCapability, []⟩
 
@@ -352,7 +355,7 @@ noncomputable def storedCapabilityCodec :
   exact codecOfCountable _
 
 def attenuateEvidence :
-    AttenuateEvidence authorityDomain issuedCell attenuateDeclaration parentStored where
+    AttenuateEvidence issuedCell attenuateDeclaration parentStored where
   preRootExact := rfl
   parentExact := by simpa [parentStored] using issued_root_exact
   parentIdExact := rfl
@@ -362,7 +365,7 @@ def attenuateEvidence :
   childSlotFresh := by intro kind; cases kind <;> decide
   issuerCurrent := by decide
   policyCurrent := by decide
-  selfRegistered := by decide
+  selfUnregistered := by decide
   ancestorsRegistered := by decide
   channelsRegistered := by decide
   selfLive := by decide
@@ -370,7 +373,7 @@ def attenuateEvidence :
   channelsLive := by decide
 
 noncomputable def attenuated :=
-  acceptAttenuation authorityDomain issuedCell (adminContext issuedCell) attenuateCodec
+  acceptAttenuation issuedCell (adminContext issuedCell) attenuateCodec
     storedCapabilityCodec attenuateDigest attenuateDeclaration parentStored
     (adminAuthorization issuedCell (attenuateDigest attenuateDeclaration) 1002
       (adminArgsDigest (attenuateCodec.encode attenuateDeclaration)))
@@ -383,6 +386,11 @@ noncomputable abbrev attenuatedCell : Cell AuthorityMaterializer :=
     readCapability attenuatedCell .object childCapability.id =
       some (descendedCapability childCapability parentStored) :=
   attenuation_post_capability_exact attenuated
+
+/-- Attenuation registered the child capability's own key. -/
+@[simp] theorem attenuated_child_registered :
+    isRegistered attenuatedCell (.capability childCapability.id) = true :=
+  attenuation_post_registered attenuated
 
 theorem attenuated_child_lineage :
     LineageValid (descendedCapability childCapability parentStored) :=
@@ -430,7 +438,7 @@ noncomputable def useRequest : Request .object :=
   adminRequest attenuatedCell ⟨9200⟩ 2001
 
 theorem child_admissible_for_use :
-    childCapability.Admissible (authState authorityDomain attenuatedCell)
+    childCapability.Admissible (authState attenuatedCell)
       useRequest := by
   refine
     { holder := by simp [childCapability, useRequest, adminRequest, Holder.Covers]
@@ -456,23 +464,20 @@ theorem child_admissible_for_use :
       ancestorNotRevoked := ?_
       channelNotRevoked := ?_ }
   · intro member
-    rcases (mem_authState_revoked_iff authorityDomain attenuatedCell
-      (.capability childCapability.id)).mp member with ⟨_, revoked⟩
+    have revoked := (mem_authState_revoked_iff attenuatedCell (.capability childCapability.id)).mp member
     rw [attenuated_live] at revoked
     contradiction
   · intro ancestor ancestorMember revokedMember
-    rcases (mem_authState_revoked_iff authorityDomain attenuatedCell
-      (.capability ancestor)).mp revokedMember with ⟨_, revoked⟩
+    have revoked := (mem_authState_revoked_iff attenuatedCell (.capability ancestor)).mp revokedMember
     rw [attenuated_live] at revoked
     contradiction
   · intro channel channelMember revokedMember
-    rcases (mem_authState_revoked_iff authorityDomain attenuatedCell
-      (.channel channel)).mp revokedMember with ⟨_, revoked⟩
+    have revoked := (mem_authState_revoked_iff attenuatedCell (.channel channel)).mp revokedMember
     rw [attenuated_live] at revoked
     contradiction
 
 def tokenEvidence :
-    Evidence lifecyclePortal (authState authorityDomain attenuatedCell)
+    Evidence lifecyclePortal (authState attenuatedCell)
       useRequest :=
   .capability childCapability ⟨9500⟩ () () () () () child_admissible_for_use
     rfl rfl rfl rfl rfl
@@ -480,7 +485,7 @@ def tokenEvidence :
     (by intro channel member; exact ⟨(), rfl⟩)
 
 def tokenAuthorization :
-    Authorized lifecyclePortal (authState authorityDomain attenuatedCell)
+    Authorized lifecyclePortal (authState attenuatedCell)
       useRequest where
   evidence := tokenEvidence
   policyWitness := ⟨2200⟩
@@ -506,7 +511,7 @@ def childLineage : childCapability.Lineage :=
 policy epoch/address/membership gate remains in `tokenAuthorization`. -/
 noncomputable def acceptedToken :
     AcceptedCredential requestDigestScheme lifecyclePortal
-      (authState authorityDomain attenuatedCell) useRequest where
+      (authState attenuatedCell) useRequest where
   authorization := tokenAuthorization
   carrier := .token
   carrierSupported := by
@@ -535,13 +540,13 @@ noncomputable def revokeCodec : LawfulCodec RevokeDeclaration := by
   exact codecOfCountable _
 
 def revokeEvidence :
-    RevokeEvidence authorityDomain attenuatedCell revokeDeclaration where
+    RevokeEvidence attenuatedCell revokeDeclaration where
   preRootExact := rfl
   registered := by decide
   live := attenuated_live _
 
 noncomputable def revoked :=
-  acceptRevocation authorityDomain attenuatedCell (adminContext attenuatedCell) revokeCodec revokeDigest
+  acceptRevocation attenuatedCell (adminContext attenuatedCell) revokeCodec revokeDigest
     revokeDeclaration
     (adminAuthorization attenuatedCell (revokeDigest revokeDeclaration) 1003
       (adminArgsDigest (revokeCodec.encode revokeDeclaration)))
@@ -555,7 +560,7 @@ noncomputable abbrev revokedCell : Cell AuthorityMaterializer :=
   revocation_post_exact revoked
 
 theorem revoked_channel_authorizer_member :
-    .channel ⟨9⟩ ∈ (authState authorityDomain revokedCell).revoked :=
+    .channel ⟨9⟩ ∈ (authState revokedCell).revoked :=
   revocation_post_is_authorizer_member revoked
 
 noncomputable def rotateDeclaration : RotateEpochDeclaration where
@@ -580,7 +585,7 @@ def rotateEvidence : RotateEpochEvidence revokedCell rotateDeclaration where
   successorExact := by decide
 
 noncomputable def rotated :=
-  acceptEpochRotation authorityDomain revokedCell (adminContext revokedCell) rotateCodec rotateDigest
+  acceptEpochRotation revokedCell (adminContext revokedCell) rotateCodec rotateDigest
     rotateDeclaration
     (adminAuthorization revokedCell (rotateDigest rotateDeclaration) 1004
       (adminArgsDigest (rotateCodec.encode rotateDeclaration)))
@@ -614,40 +619,39 @@ theorem final_channel_registered_and_revoked :
   decide
 
 theorem final_channel_authorizer_member :
-    .channel ⟨9⟩ ∈ (authState authorityDomain finalCell).revoked := by
-  apply (mem_authState_revoked_iff authorityDomain finalCell _).2
-  exact ⟨by decide, final_channel_revoked⟩
+    .channel ⟨9⟩ ∈ (authState finalCell).revoked := by
+  exact (mem_authState_revoked_iff finalCell _).2 final_channel_revoked
 
 /-- The exact child token used above cannot be authorized after the same
 canonical cell records the channel revocation. -/
 theorem subsequent_child_authorization_rejected :
-    ¬ childCapability.Admissible (authState authorityDomain finalCell)
+    ¬ childCapability.Admissible (authState finalCell)
       useRequest := by
   exact channel_revocation_rejected childCapability
-    (authState authorityDomain finalCell) useRequest ⟨9⟩
+    (authState finalCell) useRequest ⟨9⟩
     (by simp [childCapability, rootCapability]) final_channel_authorizer_member
 
 /-- Epoch rotation supplies an independent rejection tooth: the old token's
 policy epoch is no longer current. -/
 theorem subsequent_child_policy_stale :
     childCapability.policyEpoch ≠
-      (authState authorityDomain finalCell).policyEpoch childCapability.policyId := by
+      (authState finalCell).policyEpoch childCapability.policyId := by
   intro current
   have impossible : (2 : Nat) = 3 := by
     exact current.trans final_policy_epoch_three
   contradiction
 
 theorem wrong_scope_rejected :
-    ¬ childCapability.Admissible (authState authorityDomain attenuatedCell)
+    ¬ childCapability.Admissible (authState attenuatedCell)
       (useRequest.retarget ⟨701⟩) := by
   apply target_substitution_rejected childCapability
-    (authState authorityDomain attenuatedCell) useRequest ⟨701⟩
+    (authState attenuatedCell) useRequest ⟨701⟩
   simp [childCapability, childScope]
 
 /-! ## Replay and stale-root teeth at the semantic effect boundary -/
 
 theorem issue_replay_rejected :
-    IssueEvidence authorityDomain issuedCell issueDeclaration -> False := fun replay =>
+    IssueEvidence issuedCell issueDeclaration -> False := fun replay =>
   replay.reject_existing_id .object ⟨rootCapability, []⟩ issued_root_exact
 
 noncomputable def staleIssueDeclaration : IssueDeclaration .object :=
@@ -656,7 +660,7 @@ noncomputable def staleIssueDeclaration : IssueDeclaration .object :=
     operationNullifier := 1999 }
 
 theorem stale_root_rejected :
-    IssueEvidence authorityDomain initialCell staleIssueDeclaration -> False := by
+    IssueEvidence initialCell staleIssueDeclaration -> False := by
   intro stale
   have equal := stale.preRootExact
   have values := congrArg Digest.value equal
@@ -846,11 +850,10 @@ theorem authority_update_changes_store :
 /-- Under the pair-scoped no-collision premise for exactly these two stores,
 the authority update moves the root a durable read guard observes. -/
 theorem authority_update_moves_root
-    (binding : CredentialAuthorityCell.PairBindingPremise
+    (binding : CellState.PairBindingPremise AuthorityMaterializer
       finalCell.logical attenuatedCell.logical) :
     finalCell.root ≠ attenuatedCell.root :=
-  CredentialAuthorityCell.root_ne_of_logical_ne (left := finalCell) (right := attenuatedCell)
-    binding authority_update_changes_store
+  binding.root_ne authority_update_changes_store
 
 noncomputable def afterAuthorityUpdateBytes
     (cellId : Minidregg.Kernel.DurableDataIntent.CellId) : List UInt8 :=
@@ -872,7 +875,7 @@ noncomputable def afterAuthorityUpdate : DataSnapshot fullRoot where
 moved.  This is conditional exactly on the pair-scoped no-collision premise
 for the two authority stores. -/
 theorem authority_update_rejects_old_use
-    (binding : CredentialAuthorityCell.PairBindingPremise
+    (binding : CellState.PairBindingPremise AuthorityMaterializer
       finalCell.logical attenuatedCell.logical) :
     guardedUseIntent.preflight afterAuthorityUpdate =
       .error .staleReadGuard := by
@@ -892,8 +895,12 @@ abbrev PhysicalDurabilityCeiling
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.initial_keys_registered_live' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms initial_keys_registered_live
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.initial_channel_registered_live' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms initial_channel_registered_live
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.issued_root_registered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms issued_root_registered
+/-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.attenuated_child_registered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms attenuated_child_registered
 /-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.final_channel_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms final_channel_registered_and_revoked
 /-- info: 'Minidregg.Assurance.DeployedCredentialLifecycle.final_deregistration_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/

@@ -203,7 +203,6 @@ def Config.Valid {F : Type} [Field F]
   (∀ enrollment ∈ config.enrollments,
     enrollment.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
     enrollment.key.publicKey.length = 32 ∧
-    enrollment.key.revoked = false ∧
     enrollment.key.activeFrom ≤ initialAuthorityRevision ∧
     initialAuthorityRevision ≤ enrollment.key.activeUntil)
 
@@ -320,31 +319,42 @@ def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
   factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config)
 
-def policyEntries (record : PolicyRecord) : List CredentialAuthorityEffects.Entry :=
+def policyEntries (record : PolicyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
    ⟨⟨.policyRevision, record.policyId⟩, (record.version : PolicyRevision)⟩,
    ⟨⟨.policyAddress, (record.policyId, record.version)⟩, PolicyRecordCodec.digest record⟩]
 
-def keyEntries (key : KeyRecord) : List CredentialAuthorityEffects.Entry :=
+/-- A genesis signing key: its current epoch, its record, and the registration
+of its key version, exactly as enrollment writes them. -/
+def keyEntries (key : KeyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.subjectKeyEpoch, ⟨key.subject⟩⟩, key.keyEpoch⟩,
-   ⟨⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩, key⟩]
+   ⟨⟨.subjectKey, (⟨key.subject⟩, key.keyEpoch)⟩, key⟩,
+   CredentialAuthorityEffects.registrationEntry (CredentialAuthorityState.signingKeyRevocation key)]
 
 def capabilityEntry {kind : ResourceKind} (capability : Capability kind) :
-    CredentialAuthorityEffects.Entry :=
+    Minidregg.Theory.Store.Entry CredentialAuthorityState.layout :=
   ⟨⟨.capability kind, capability.id⟩, (⟨capability, []⟩ : CredentialAuthorityState.StoredCapability kind)⟩
+
+/-- A genesis capability is installed together with the registration of its
+own revocation key, exactly as issuance does: "registered" is presence in the
+`registered` plane, and genesis holds no capability it could not revoke. -/
+def capabilityEntries {kind : ResourceKind} (capability : Capability kind) :
+    List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
+  [capabilityEntry capability,
+   CredentialAuthorityEffects.registrationEntry (.capability capability.id)]
 
 /-- Every genesis authority record, as entries of the one authority cell. -/
 def entries {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
-    List CredentialAuthorityEffects.Entry :=
-  [⟨⟨.issuerEpoch, profile.template.issuer⟩, config.issuerEpoch⟩,
-   capabilityEntry (controlCapability profile config)] ++
+    List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
+  ⟨⟨.issuerEpoch, profile.template.issuer⟩, config.issuerEpoch⟩ ::
+  capabilityEntries (controlCapability profile config) ++
   (policies profile config).flatMap policyEntries ++
   config.enrollments.flatMap (fun enrollment =>
     keyEntries enrollment.key ++
-    [capabilityEntry (accountCapability profile config enrollment),
-     capabilityEntry (accountControlCapability profile config enrollment),
-     capabilityEntry (factoryObserveCapability profile config enrollment)])
+    capabilityEntries (accountCapability profile config enrollment) ++
+    capabilityEntries (accountControlCapability profile config enrollment) ++
+    capabilityEntries (factoryObserveCapability profile config enrollment))
 
 /-- The genesis authority store. -/
 def authorityStore {F : Type} [Field F]

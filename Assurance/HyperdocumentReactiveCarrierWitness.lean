@@ -49,8 +49,6 @@ noncomputable abbrev declaration :=
   Minidregg.Theory.HyperdocumentCausalFamily.Witness.declaration
 noncomputable abbrev accepted :=
   Minidregg.Theory.HyperdocumentCausalFamily.Witness.accepted
-noncomputable abbrev projection :=
-  Minidregg.Theory.HyperdocumentCausalFamily.Witness.projection
 noncomputable abbrev authorityPre :=
   Minidregg.Theory.HyperdocumentCausalFamily.Witness.authorityPre
 noncomputable abbrev portal :=
@@ -489,7 +487,7 @@ def finalized : Finalized
     (clauseEvidence := clauseEvidence) (entryFamily := family)
     (headerCells := headerCells) (C := code)
     (portal := HW.portal)
-    (authState := CredentialAuthorityState.authState HW.projection HW.authorityPre)
+    (authState := CredentialAuthorityState.authState HW.authorityPre)
     historyRules promiseSpec :=
   finalize historyRules reaction HW.accepted.accepted
 

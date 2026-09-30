@@ -327,39 +327,10 @@ theorem LoadedDirectory.bytes_exact
 
 /-! ## Concrete preparation of the root-issuance batch -/
 
-/-- The revocation keys an issuance batch brings into scope: each grant's own
-key and the channels it names.  `GrantReady` requires every named channel to be
-registered and live in the cell, and every self key to be live, so none of these
-keys is revoked and extending the universe changes no authorization field
-(`issueUniverse_authState_exact`). -/
-def issuanceKeys (grants : List AuthorityGrant) : Finset RevocationKey :=
-  (grants.map fun grant => RevocationKey.capability grant.capability.head.id).toFinset ∪
-    grants.foldr (fun grant keys => grant.capability.head.channels.image RevocationKey.channel ∪ keys) ∅
-
-theorem self_mem_issuanceKeys {grants : List AuthorityGrant} {grant : AuthorityGrant}
-    (member : grant ∈ grants) :
-    RevocationKey.capability grant.capability.head.id ∈ issuanceKeys grants :=
-  Finset.mem_union_left _ (List.mem_toFinset.mpr (List.mem_map.mpr ⟨grant, member, rfl⟩))
-
-theorem channel_mem_issuanceKeys {grants : List AuthorityGrant} {grant : AuthorityGrant}
-    (member : grant ∈ grants) {channel : ChannelId} (named : channel ∈ grant.capability.head.channels) :
-    RevocationKey.channel channel ∈ issuanceKeys grants := by
-  apply Finset.mem_union_right
-  induction grants with
-  | nil => cases member
-  | cons head rest induction =>
-      rcases List.mem_cons.mp member with rfl | inRest
-      · exact Finset.mem_union_left _ (Finset.mem_image_of_mem _ named)
-      · exact Finset.mem_union_right _ (induction inRest)
-
-def issueUniverse (snapshot : CredentialAuthorityDomain.Snapshot) (grants : List AuthorityGrant) :
-    ProjectionUniverse := ⟨snapshot.revocationUniverse.revocationKeys ∪ issuanceKeys grants⟩
-
-theorem issueUniverse_authState_exact (snapshot : CredentialAuthorityDomain.Snapshot)
-    (grants : List AuthorityGrant) :
-    CredentialAuthorityState.authState (issueUniverse snapshot grants) snapshot.cell =
-      snapshot.authState := snapshot.authState_extension_exact (issuanceKeys grants)
-
+/-- A grant is ready at the loaded cell when it is a fresh root whose own key
+is not yet registered (the birth registers it) and not revoked, and every
+channel it names is already registered and live; each read is a presence-plane
+read of the one cell. -/
 def GrantReady (snapshot : CredentialAuthorityDomain.Snapshot) (grant : AuthorityGrant) : Prop :=
   grant.capability.ancestry = [] ∧
     CapabilityIdFresh snapshot.cell grant.capability.head.id ∧
@@ -368,6 +339,7 @@ def GrantReady (snapshot : CredentialAuthorityDomain.Snapshot) (grant : Authorit
     grant.capability.head.ancestors = ∅ ∧
     grant.capability.head.issuerEpoch = issuerEpochAt snapshot.cell grant.capability.head.issuer ∧
     grant.capability.head.policyEpoch = policyEpochAt snapshot.cell grant.capability.head.policyId ∧
+    isRegistered snapshot.cell (.capability grant.capability.head.id) = false ∧
     isRevoked snapshot.cell (.capability grant.capability.head.id) = false ∧
     (∀ channel ∈ grant.capability.head.channels,
       isRegistered snapshot.cell (.channel channel) = true ∧
@@ -403,14 +375,14 @@ instance batchReadyDecidable (snapshot : CredentialAuthorityDomain.Snapshot)
 
 def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor registry) (ready : BatchReady snapshot descriptor) :
-    ResourceBirthAuthority.BatchEvidence (issueUniverse snapshot descriptor.grants)
+    ResourceBirthAuthority.BatchEvidence
       snapshot.cell descriptor where
   slotsDistinct := ready.1
   grantIdsDistinct := ready.2.1
   policiesFresh := ready.2.2.1
   ancestryEmpty := fun grant member => (ready.2.2.2.2 grant member).1
   issue := fun grant member => by
-    obtain ⟨_, slot, parent, root, ancestors, issuer, policy, self, channels⟩ :=
+    obtain ⟨_, slot, parent, root, ancestors, issuer, policy, unregistered, self, channels⟩ :=
       ready.2.2.2.2 grant member
     exact
       { preRootExact := rfl
@@ -420,9 +392,8 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
         rootAncestors := ancestors
         issuerCurrent := issuer
         policyCurrent := policy
-        selfRegistered := Finset.mem_union_right _ (self_mem_issuanceKeys member)
-        channelsRegistered := fun channel channelMember =>
-          Finset.mem_union_right _ (channel_mem_issuanceKeys member channelMember)
+        selfUnregistered := unregistered
+        channelsRegistered := fun channel channelMember => (channels channel channelMember).1
         selfLive := self
         channelsLive := fun channel channelMember => (channels channel channelMember).2 }
 
@@ -437,7 +408,7 @@ structure PreparedGrantBatch {F : Type} [Field F]
     (descriptor : Descriptor registry) where
   private mk ::
   initialSources : PolicySourceCell.CheckedInitials deployment.domain profile descriptor.initialPolicies
-  mode : ResourceBirthAuthority.BatchEvidence (issueUniverse loaded.snapshot descriptor.grants)
+  mode : ResourceBirthAuthority.BatchEvidence
     loaded.snapshot.cell descriptor
 
 def prepareGrantBatch {F : Type} [Field F]
@@ -459,9 +430,9 @@ variable {F : Type} [Field F]
     {deployment : CanonicalCellRegistry.Deployment} {loaded : Loaded deployment durable.snapshot}
     {descriptor : Descriptor registry}
 
-def PreparedGrantBatch.post (_prepared : PreparedGrantBatch profile deployment loaded descriptor) :
+def PreparedGrantBatch.post (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
     CredentialAuthorityDomain.Cell :=
-  ResourceBirthAuthority.post loaded.snapshot.cell descriptor
+  ResourceBirthAuthority.post loaded.snapshot.cell descriptor prepared.mode
 
 def PreparedGrantBatch.writes (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
     List DataWrite :=
@@ -475,7 +446,7 @@ def PreparedGrantBatch.auxiliaryCreates
 theorem PreparedGrantBatch.post_logical
     (prepared : PreparedGrantBatch profile deployment loaded descriptor) :
     prepared.post.logical = setAll loaded.snapshot.logical (ResourceBirthAuthority.entries descriptor) :=
-  ResourceBirthAuthority.post_logical _ _
+  ResourceBirthAuthority.post_logical _ _ _
 
 end GrantBatch
 

@@ -38,7 +38,6 @@ import Theory.DeclaredTurn  -- data-only authorization/effect execution with exa
 import Theory.AcceptedCellEffect  -- request-indexed semantic effect families admit ZK/MPC/FHE results as canonical cell transitions; sealed is the default and release is explicit
 import Theory.AcceptedCellEffectRequestBinding  -- family-selected lawful argument projections close the common request's args digest without duplicating authorization or overbinding envelopes
 import Theory.CredentialAuthorityState  -- capability lineage, current epochs/policies, revocations, and operation nullifiers occupy one canonical typed sparse CellState; AuthState roots/reads project from that exact cell
-import Theory.CanonicalAuthorityProjection  -- the finite revocation universe is derived from the authority cell's own sparse support, so omitted caller keys cannot erase a live revocation
 import Theory.MaterializerCardinality  -- REGRESSION TOOTH: the deleted total-function carrier was uncountable; the landed sparse carrier is characterized by ordinary countability
 import Theory.DeployedTotalCarrierAudit  -- closes the deleted total-carrier impossibility teeth for authority and Hyperdocument, completing all four migrated deployed schemas
 import Theory.DeployedMaterializerWitness  -- effect, authority, and Hyperdocument schemas now have concrete materializers and cells; existence codecs are not deployment wire claims

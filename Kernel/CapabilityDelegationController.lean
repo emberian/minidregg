@@ -148,13 +148,6 @@ def child {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command kind) (parent : StoredCapability kind) : StoredCapability kind :=
   delegatedCapability command.declaration.child parent (request snapshot semantics ambient command)
 
-def projectionUniverse {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind) : ProjectionUniverse :=
-  ⟨snapshot.revocationUniverse.revocationKeys ∪ {RevocationKey.capability command.declaration.child.id}⟩
-
-theorem universe_authState_exact {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind) :
-    authState (projectionUniverse snapshot command) snapshot.cell = snapshot.authState :=
-  snapshot.authState_extension_exact _
-
 inductive Reject where
   | malformedCommand | directoryUnavailable | authorityUnavailable | targetUnavailable
   | staleTarget | staleAuthority | identity | parentUnavailable | lineage | descent
@@ -176,11 +169,11 @@ def DescentReady {kind : ResourceKind} (snapshot : Snapshot) (command : Command 
     snapshot.spent command.declaration.operationNullifier = false ∧
     command.declaration.child.issuerEpoch = issuerEpochAt snapshot.cell command.declaration.child.issuer ∧
     command.declaration.child.policyEpoch = policyEpochAt snapshot.cell command.declaration.child.policyId ∧
-    RevocationKey.capability command.declaration.child.id ∈ (projectionUniverse snapshot command).revocationKeys ∧
+    isRegistered snapshot.cell (.capability command.declaration.child.id) = false ∧
     (∀ ancestor ∈ command.declaration.child.ancestors,
-      RevocationKey.capability ancestor ∈ (projectionUniverse snapshot command).revocationKeys) ∧
+      isRegistered snapshot.cell (.capability ancestor) = true) ∧
     (∀ channel ∈ command.declaration.child.channels,
-      RevocationKey.channel channel ∈ (projectionUniverse snapshot command).revocationKeys) ∧
+      isRegistered snapshot.cell (.channel channel) = true) ∧
     isRevoked snapshot.cell (.capability command.declaration.child.id) = false ∧
     (∀ ancestor ∈ command.declaration.child.ancestors,
       isRevoked snapshot.cell (.capability ancestor) = false) ∧
@@ -195,12 +188,12 @@ instance descentReadyDecidable {kind : ResourceKind} (snapshot : Snapshot)
 def descentEvidence {kind : ResourceKind} (snapshot : Snapshot) (command : Command kind)
     (parent : StoredCapability kind) (ready : DescentReady snapshot command parent)
     (valid : LineageValid parent) (anchored : LineageAnchored snapshot.cell parent) :
-    DescentEvidence (projectionUniverse snapshot command) snapshot.cell command.declaration.expectedPreRoot
+    DescentEvidence snapshot.cell command.declaration.expectedPreRoot
       command.declaration.parentId command.declaration.child parent := by
   rcases ready with ⟨root, lookup, parentId, fresh, _unspent, issuer, generation,
-    selfRegistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
+    selfUnregistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
   exact ⟨root, lookup, parentId, valid, anchored, fresh, issuer, generation,
-    selfRegistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
+    selfUnregistered, ancestorsRegistered, channelsRegistered, selfLive, ancestorsLive, channelsLive⟩
 
 abbrev ObservedTarget (deployment : Deployment) (directory : Directory Nat Registry)
     {kind : ResourceKind} (command : Command kind) :=
@@ -218,7 +211,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   authority : Loaded deployment durable.snapshot
   target : ObservedTarget deployment directory.directory command
   parent : StoredCapability kind
-  descent : DescentEvidence (projectionUniverse authority.snapshot command) authority.snapshot.cell
+  descent : DescentEvidence authority.snapshot.cell
     command.declaration.expectedPreRoot command.declaration.parentId command.declaration.child parent
   shape : CredentialAuthorityFamily.DelegationShape
     (request authority.snapshot profile.semantics ambient command) command.declaration.child parent.head
@@ -279,7 +272,7 @@ def Prepared.authorityPost (prepared : Prepared deployment profile ambient durab
 def layout (prepared : Prepared deployment profile ambient durable command) : CellLayout Unit where
   storeLayout _ := CredentialAuthorityState.layout
   materializer _ := AuthorityMaterializer
-  projectAuthority := fun _ _ => authState (projectionUniverse prepared.authority.snapshot command) prepared.authority.snapshot.cell
+  projectAuthority := fun _ _ => authState prepared.authority.snapshot.cell
   cellId _ := cellIdOf deployment
 
 def rawLeg (prepared : Prepared deployment profile ambient durable command) :
@@ -302,7 +295,7 @@ def plan (prepared : Prepared deployment profile ambient durable command) : Prep
   legEffectsDigest _ _ := effectsDigest prepared.authority.snapshot.domain profile.semantics command command.declaration
   bindFamily _ portals _ :=
     { Nullifier := Nat
-      family := delegateFamily (projectionUniverse prepared.authority.snapshot command) prepared.authority.snapshot.cell
+      family := delegateFamily prepared.authority.snapshot.cell
         (portals ()) (context prepared.authority.snapshot profile.semantics ambient command)
         (declarationCodec kind) (storedCapabilityStream kind).toLawful
         (effectsDigest prepared.authority.snapshot.domain profile.semantics command)
@@ -368,6 +361,9 @@ def policyConfig [DecidableEq F] (prepared : Prepared deployment profile ambient
 def portal [DecidableEq F] (prepared : Prepared deployment profile ambient durable command) : Portal :=
   (policyConfig prepared).portal
 
+/-- The snapshot carries its authorization projection memoised
+(`Snapshot.authStateExact`); the family is indexed by the cell's own
+projection.  They are equal, so an authorization moves across unchanged. -/
 def reindexAuthorization {source target : AuthState} {portal : Portal}
     {kind : ResourceKind} {request : Request kind} (same : source = target)
     (authorization : Authorized portal target request) : Authorized portal source request :=
@@ -376,7 +372,8 @@ def reindexAuthorization {source target : AuthState} {portal : Portal}
 theorem reindexAuthorization_capabilityValue {source target : AuthState} {portal : Portal}
     {kind : ResourceKind} {request : Request kind} (same : source = target)
     (authorization : Authorized portal target request) :
-    (reindexAuthorization same authorization).evidence.capabilityValue = authorization.evidence.capabilityValue := by
+    (reindexAuthorization same authorization).evidence.capabilityValue =
+      authorization.evidence.capabilityValue := by
   cases same
   rfl
 
@@ -385,15 +382,15 @@ def mode [DecidableEq F] (prepared : Prepared deployment profile ambient durable
       (request prepared.authority.snapshot profile.semantics ambient command))
     (named : authorization.evidence.capabilityValue =
       some (prepared.parent.head, storedCapabilityDigest prepared.authority.snapshot prepared.parent)) :
-    DelegationEvidence (projectionUniverse prepared.authority.snapshot command) prepared.authority.snapshot.cell
+    DelegationEvidence prepared.authority.snapshot.cell
       (portal prepared) (context prepared.authority.snapshot profile.semantics ambient command)
       (declarationCodec kind) (effectsDigest prepared.authority.snapshot.domain profile.semantics command)
       command.declaration prepared.parent where
   toDescentEvidence := prepared.descent
   parentCommitment := storedCapabilityDigest prepared.authority.snapshot prepared.parent
-  parentAuthorization := reindexAuthorization (universe_authState_exact prepared.authority.snapshot command) authorization
+  parentAuthorization := reindexAuthorization prepared.authority.snapshot.authStateExact.symm authorization
   parentNamed := (reindexAuthorization_capabilityValue
-    (universe_authState_exact prepared.authority.snapshot command) authorization).trans named
+    prepared.authority.snapshot.authStateExact.symm authorization).trans named
   shape := prepared.shape
 
 attribute [irreducible] portal
@@ -469,8 +466,8 @@ def Accepted.evidence [DecidableEq F]
     (accepted : Accepted prepared envelope) :
     (tuple prepared).AdmissionEvidence (fun _ => portal prepared) where
   modes _ := mode prepared accepted.authorization accepted.parentNamed
-  authorizations _ := reindexAuthorization
-    (universe_authState_exact prepared.authority.snapshot command) accepted.authorization
+  authorizations _ := reindexAuthorization prepared.authority.snapshot.authStateExact.symm
+    accepted.authorization
   disclosure _ := .sealed
   disclosureAllowed _ := trivial
 

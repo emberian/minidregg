@@ -47,7 +47,7 @@ abbrev Incidence := Unit
 
 def projection : AuthorizationProjection S where
   project := fun _ =>
-    CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre
+    CredentialAuthorityState.authState Genesis.authorityPre
 
 /-- No authorization, declaration, outcome, patch, or disclosure is rebuilt:
 the leg retains the already accepted concrete `.link` operation. -/
@@ -220,7 +220,7 @@ is current for the exact credential-authority cell; the proof-portal path above
 does not erase it. -/
 def currentCapability :
     Genesis.capability.Admissible
-      (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+      (CredentialAuthorityState.authState Genesis.authorityPre)
       (linkDeclaration.toRequest config) :=
   linkCapabilityAdmissible
 

@@ -114,11 +114,10 @@ def recordOfContent
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration) : VersionEventRecord :=
   content.versionEventRecord
 
@@ -129,11 +128,10 @@ structure SourceExact
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration)
     (declaration : Declaration) : Prop where
   recordExact : declaration.record = recordOfContent content
@@ -143,11 +141,10 @@ theorem SourceExact.pre_root_exact
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration}
     {declaration : Declaration}
     (source : SourceExact content declaration) :
@@ -159,11 +156,10 @@ theorem SourceExact.post_root_exact
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration}
     {declaration : Declaration}
     (source : SourceExact content declaration) :
@@ -176,11 +172,10 @@ theorem SourceExact.request_id_exact
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration}
     {declaration : Declaration}
     (source : SourceExact content declaration) :
@@ -193,11 +188,10 @@ theorem SourceExact.effect_id_exact
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration}
     {declaration : Declaration}
     (source : SourceExact content declaration) :
@@ -210,13 +204,12 @@ theorem SourceExact.object_capability
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
     {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
-      projection authorityPre documentPre contentPortal contentDeclaration}
+      authorityPre documentPre contentPortal contentDeclaration}
     {declaration : Declaration}
     (source : SourceExact content declaration) :
     declaration.record.author.capabilityKind = .object := by
@@ -310,26 +303,25 @@ structure Accepted
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    (content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration)
     (M : LogMaterializer)
     (store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store) (config : Config)
     (portal : Portal) (declaration : Declaration) : Type where
   source : SourceExact content declaration
-  principal : AuthenticatedPrincipal projection authorityPre
+  principal : AuthenticatedPrincipal authorityPre
     declaration.request.height declaration.record.author
   namedCapabilityAdmissible :
     (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
       principal source.object_capability).Admissible
-    (CredentialAuthorityState.authState projection authorityPre)
+    (CredentialAuthorityState.authState authorityPre)
     (declaration.toRequest config)
   accepted : AcceptedCellEffect
     (portal := portal)
-    (authState := CredentialAuthorityState.authState projection authorityPre)
+    (authState := CredentialAuthorityState.authState authorityPre)
     (family M config (cellPre M store)) (declaration.toRequest config)
     (cellPre M store) declaration ()
 
@@ -337,28 +329,27 @@ def accept
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration}
     {M : LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store} {config : Config}
     {portal : Portal} {declaration : Declaration}
     (source : SourceExact content declaration)
-    (principal : AuthenticatedPrincipal projection authorityPre
+    (principal : AuthenticatedPrincipal authorityPre
       declaration.request.height declaration.record.author)
     (namedCapabilityAdmissible :
       (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
         principal source.object_capability).Admissible
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (declaration.toRequest config))
     (wellFormed : declaration.record.CausallyWellFormed)
     (fresh : store (eventAddress (declaration.key config)) = none)
     (domainExact : declaration.record.historyDomain = config.historyDomain)
     (authorization : Authorized portal
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (declaration.toRequest config))
     (validated : CellState.ValidatedPatch M (cellPre M store)
       (declaration.toRequest config).preStateRoot (declaration.patch config)) :
@@ -383,11 +374,10 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal} {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection authorityPre
+    {content : Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig authorityPre
       documentPre contentPortal contentDeclaration}
     {M : LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store} {config : Config}

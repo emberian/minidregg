@@ -50,7 +50,7 @@ cat >"$ROOT/genesis.json" <<EOF
  "factoryPredicate":{"type":"all","predicates":[]},
  "enrollments":[{"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1",
    "subject":"7","publicKey":"$SPONSOR_PUBLIC","activeFrom":"0",
-   "activeUntil":"1000000","revoked":false},
+   "activeUntil":"1000000"},
    "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
    "factoryObserveCapabilityId":"54","initialBalance":"100000",
    "accountPredicate":{"type":"all","predicates":[]}}],

@@ -419,9 +419,6 @@ theorem arbitrary_issuer_refused (template : CanonicalRuntimeProfile.FactoryTemp
   intro bound
   exact wrong (template_issuer_exact template authority height descriptor bound grant member)
 
-def issueUniverse (prepared : PreparedBirth profile.compilerProfile deployment pins durable descriptor) :=
-  CredentialAuthorityDomainReceiver.issueUniverse prepared.authority.snapshot descriptor.grants
-
 /-- Request metadata is entirely source-derived except the receiver's trusted
 height. That height is a service input, not asserted to be a committed clock.
 Each account's policy selector is its actual source account id. -/
@@ -483,7 +480,7 @@ def rawLeg (prepared : PreparedBirth profile.compilerProfile deployment pins dur
       { pre := prepared.authority.snapshot.cell
         patch := ResourceBirthAuthority.patch prepared.authority.snapshot.cell source.val
         request := ⟨.object, ResourceBirthAuthority.request pins
-          CanonicalCellRegistry.sourceEncoding (issueUniverse prepared)
+          CanonicalCellRegistry.sourceEncoding
           prepared.authority.snapshot.cell height source.val⟩
         Postcondition := ResourceBirthAuthority.Postcondition source.val }
   | .allocation index =>
@@ -515,7 +512,7 @@ def bindFamily (prepared : PreparedBirth profile.compilerProfile deployment pins
   | .authority =>
       { Nullifier := Nat
         family := ResourceBirthAuthority.family pins CanonicalCellRegistry.sourceEncoding
-          (issueUniverse prepared) prepared.authority.snapshot.cell height
+          prepared.authority.snapshot.cell height
         declaration := source.val, outcome := ()
         preExact := rfl, requestExact := rfl, effectsExact := rfl, patchExact := rfl
         postconditionExact := fun _ => Iff.rfl }
@@ -549,6 +546,7 @@ theorem validated (prepared : PreparedBirth profile.compilerProfile deployment p
   | .factory => factoryValidated prepared.factory.payload
   | .book => prepared.resources.validated
   | .authority => ResourceBirthAuthority.validated prepared.authority.snapshot.cell descriptor
+      prepared.grants.mode
   | .allocation index => ResourceBirthController.allocationValidated
       prepared.directory.directory (creation descriptor index) (allocationFresh prepared index)
 
@@ -852,7 +850,8 @@ def policyPostState
     (incidence : Legs descriptor) → Store ((layout prepared).storeLayout incidence)
   | .factory => prepared.factory.payload.logical
   | .book => prepared.resources.post.logical
-  | .authority => (ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor).logical
+  | .authority => (ResourceBirthAuthority.post prepared.authority.snapshot.cell descriptor
+      prepared.grants.mode).logical
   | .allocation index => LifecycleSlot.state Registry (.live (creation descriptor index).cell)
 
 theorem Pending.policyPreCell_exact

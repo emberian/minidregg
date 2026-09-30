@@ -12,8 +12,10 @@ credential lifecycle's exact authority root and request.  It exhibits:
   EUF-CMA/key-custody premises.
 
 Negative witnesses cover wrong key, rotated epoch, algorithm, domain, message,
-revoked/stale key, replay, malformed input, false verification, and native
-error.  The demo verifier is only an executable control witness.  No theorem
+stale key, replay, malformed input, false verification, and native error.
+A revoked or unregistered key version is refused before this controller, by
+`CredentialSignatureAdmission.select` reading the authority cell's presence
+planes (`select_revoked_refused`, `select_unregistered_refused`).  The demo verifier is only an executable control witness.  No theorem
 claims it implements public-key cryptography or that the registry digest is
 collision resistant.
 -/
@@ -51,7 +53,6 @@ def canonicalKey : KeyRecord where
   publicKey := [11, 22, 33, 44, 55, 66, 77, 88]
   activeFrom := 4
   activeUntil := 8
-  revoked := false
 
 def canonicalRegistry : KeyRegistryProjection where
   codecVersion := registryCodecVersion
@@ -163,7 +164,7 @@ theorem canonical_projection_is_committed :
 policy registry and common authorization state. -/
 theorem canonical_projection_root_join :
     canonicalRegistry.authorityRoot =
-        (authState authorityDomain attenuatedCell).policyRoot /\
+        (authState attenuatedCell).policyRoot /\
       canonicalState.authorityRoot = attenuatedCell.root := by
   exact ⟨rfl, rfl⟩
 
@@ -268,7 +269,7 @@ theorem attenuated_subject_key_epoch_zero :
 
 def signedAuthorization :
     Authorized (signaturePortal demoVerifier)
-      (authState authorityDomain attenuatedCell) useRequest where
+      (authState attenuatedCell) useRequest where
   evidence := .signature canonicalWitness
     (by
       change useRequest.subjectKeyEpoch =
@@ -295,7 +296,7 @@ def signedAuthorization :
 
 noncomputable def acceptedSignature :
     AcceptedCredential requestDigestScheme (signaturePortal demoVerifier)
-      (authState authorityDomain attenuatedCell) useRequest where
+      (authState attenuatedCell) useRequest where
   authorization := signedAuthorization
   carrier := .signature
   carrierSupported := rfl
@@ -325,7 +326,7 @@ structure SemanticPath
   credential :
     Nonempty (AcceptedCredential requestDigestScheme
       (signaturePortal demoVerifier)
-      (authState authorityDomain attenuatedCell) useRequest)
+      (authState attenuatedCell) useRequest)
   signerIssued :
     SignerIssued canonicalKey.keyId canonicalKey.keyEpoch
       canonicalEnvelope.frame canonicalEnvelope.signature
@@ -493,8 +494,7 @@ def rotatedKey : KeyRecord :=
     subject := canonicalKey.subject
     publicKey := canonicalKey.publicKey
     activeFrom := 6
-    activeUntil := 10
-    revoked := false }
+    activeUntil := 10 }
 
 def rotatedRegistry : KeyRegistryProjection :=
   { canonicalRegistry with registryEpoch := 6, keys := [rotatedKey] }
@@ -523,31 +523,6 @@ def oldEpochAfterRotation : SignedEnvelope :=
     canonicalKey, canonicalRegistryCommitment, stateCodecVersion,
     registryCodecVersion, envelopeCodecVersion, credentialDomain,
     KeyRegistryProjection.findKey]
-
-def revokedKey : KeyRecord := { canonicalKey with revoked := true }
-def revokedRegistry : KeyRegistryProjection :=
-  { canonicalRegistry with keys := [revokedKey] }
-def revokedState : ControllerState := (withCommitment revokedRegistry).1
-def revokedCommitment : Digest := (withCommitment revokedRegistry).2
-def revokedEnvelope : SignedEnvelope := envelopeForCommitment revokedCommitment
-
-@[simp] theorem revoked_key_selected :
-    revokedRegistry.findKey canonicalKey.keyId = some revokedKey := by
-  rfl
-
-@[simp] theorem revoked_key_rejected :
-    prepare (NativeError := Unit) useRequest.subject.value credentialDomain
-      canonicalMessage (stateCodec.encode revokedState)
-      (registryCodec.encode revokedRegistry)
-      (envelopeCodec.encode revokedEnvelope) = .error .revokedKey := by
-  unfold prepare
-  rw [stateCodec.decode_encode, registryCodec.decode_encode,
-    envelopeCodec.decode_encode]
-  simp [revokedState, revokedCommitment, withCommitment, revokedRegistry,
-    revokedKey, revokedEnvelope, envelopeForCommitment, canonicalState,
-    canonicalRegistry, canonicalEnvelope, canonicalHeader, canonicalKey,
-    canonicalRegistryCommitment, stateCodecVersion, registryCodecVersion,
-    envelopeCodecVersion, credentialDomain, KeyRegistryProjection.findKey]
 
 def staleKey : KeyRecord := { canonicalKey with activeUntil := 4 }
 def staleRegistry : KeyRegistryProjection :=

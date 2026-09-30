@@ -7,8 +7,10 @@ This is the first byte-level controller for the signature carrier of
 * a signed header names its codec version, authority root, exact committed key
   registry, key id/epoch/algorithm, domain, message bytes, and nullifier;
 * the key registry is a versioned projection committed by the controller state;
-* only the uniquely selected current, live, non-revoked key reaches native
-  verification; and
+* only the uniquely selected current key within its activation window reaches
+  native verification (revocation is not a record field: the key version's
+  standing is read from the authority cell's presence planes by
+  `CredentialSignatureAdmission.select` before this controller runs); and
 * success consumes the signed nullifier in the next persistent state.
 
 Native code receives only public-key, canonical-frame, and signature bytes and
@@ -216,7 +218,6 @@ inductive Failure (NativeError : Type) where
   | wrongSubject
   | wrongKeyEpoch
   | wrongAlgorithm
-  | revokedKey
   | staleKey
   | invalidSignature
   | nativeVerify (error : NativeError)
@@ -292,7 +293,6 @@ def prepare {NativeError : Type}
                       .error .wrongKeyEpoch
                     else if key.algorithm != envelope.header.algorithm then
                       .error .wrongAlgorithm
-                    else if key.revoked then .error .revokedKey
                     else if registry.registryEpoch < key.activeFrom ||
                         key.activeUntil < registry.registryEpoch then
                       .error .staleKey

@@ -38,12 +38,11 @@ abbrev Accepted
     (history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor)
     (config : Minidregg.Kernel.HyperdocumentMerge.Config)
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentPre : Hyperdocument.Cell MDoc)
     (portal : Portal)
     (declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration) :=
-  Minidregg.Kernel.HyperdocumentMerge.Accepted history config projection
+  Minidregg.Kernel.HyperdocumentMerge.Accepted history config
     authorityPre documentPre portal declaration
 
 /-! ## Exact selected/absent base projections -/
@@ -54,12 +53,11 @@ theorem Accepted.selected_plan_base_exact
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (certificate : Minidregg.Kernel.HyperdocumentMerge.SelectedBase
       accepted.parents)
@@ -80,12 +78,11 @@ theorem Accepted.ambiguous_plan_base_absent
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (certificate : Minidregg.Kernel.HyperdocumentMerge.AmbiguousCommonBases
       accepted.parents)
@@ -104,12 +101,11 @@ theorem Accepted.unavailable_plan_base_absent
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (noCommon : Minidregg.Kernel.HyperdocumentMerge.CommonBase
       accepted.parents → False)
@@ -128,12 +124,11 @@ def Accepted.selectedReachesParent
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (certificate : Minidregg.Kernel.HyperdocumentMerge.SelectedBase
       accepted.parents)
@@ -149,12 +144,11 @@ theorem Accepted.selected_realization_root_exact
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (certificate : Minidregg.Kernel.HyperdocumentMerge.SelectedBase
       accepted.parents) :
@@ -168,12 +162,11 @@ theorem Accepted.parent_realization_root_exact
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (parent : Minidregg.Kernel.HyperdocumentMerge.Parent)
     (present : parent ∈ declaration.body.parents) :
@@ -191,12 +184,11 @@ def publicationInputs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config)
     (expectedLogRoot : Digest)
@@ -218,12 +210,11 @@ def publicationInputs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal}
     {declaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre
+    (accepted : Accepted history config authorityPre documentPre
       portal declaration)
     (expectedLogRoot : Digest) :
     (Minidregg.Kernel.HyperdocumentMergePublication.derivedEventDeclaration
@@ -239,12 +230,11 @@ theorem selected_base_conflict_is_published
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {mergeConfig : Minidregg.Kernel.HyperdocumentMerge.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {mergePortal : Portal}
     {mergeDeclaration : Minidregg.Kernel.HyperdocumentMerge.Declaration}
-    {merge : Accepted history mergeConfig projection authorityPre documentPre
+    {merge : Accepted history mergeConfig authorityPre documentPre
       mergePortal mergeDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}

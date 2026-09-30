@@ -94,6 +94,52 @@ theorem Materialized.root_encoding_coherent {L : Layout.{u, v, w}} {Root : Type 
   cases h
   rfl
 
+/-! ## Pair-scoped root binding
+
+A root is a digest of the canonical bytes; no global injectivity of the root
+function is claimed.  A root equality between two specific stores is turned
+into store equality only under the premise that this pair is not a collision.
+This is the one definition: every cell family (authority, Book, content, event
+log) states its root binding with it. -/
+
+/-- A root collision between two specific stores under one materializer. -/
+structure Collision {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
+    (left right : Store L) : Prop where
+  statesDifferent : left ≠ right
+  rootsEqual : M.rootOf left = M.rootOf right
+
+/-- A collision's canonical bytes differ: the codec is lawful, so only the root
+function can identify two different stores. -/
+theorem Collision.bytes_ne {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} {left right : Store L} (collision : Collision M left right) :
+    M.codec.encode left ≠ M.codec.encode right := by
+  intro same
+  apply collision.statesDifferent
+  have decoded := congrArg M.codec.decode same
+  rw [M.codec.decode_encode, M.codec.decode_encode] at decoded
+  exact Option.some.inj decoded
+
+/-- The pair-scoped collision-resistance premise. -/
+def PairBindingPremise {L : Layout.{u, v, w}} {Root : Type y} (M : Materializer L Root)
+    (left right : Store L) : Prop :=
+  ¬ Collision M left right
+
+/-- Under the pair premise, equal roots mean equal stores. -/
+theorem PairBindingPremise.logical_eq {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} {left right : Store L}
+    (binding : PairBindingPremise M left right)
+    (same : M.rootOf left = M.rootOf right) : left = right := by
+  by_contra different
+  exact binding ⟨different, same⟩
+
+/-- Under the pair premise, different stores have different roots: a change a
+durable read guard observes. -/
+theorem PairBindingPremise.root_ne {L : Layout.{u, v, w}} {Root : Type y}
+    {M : Materializer L Root} {left right : Store L}
+    (binding : PairBindingPremise M left right)
+    (different : left ≠ right) : M.rootOf left ≠ M.rootOf right :=
+  fun same => different (binding.logical_eq same)
+
 /-! ## Validated patches -/
 
 /-- Verifier-minted validation of one patch against one exact pre-cell and the
@@ -269,4 +315,8 @@ structure IntentBinding
 /-- info: 'Minidregg.Theory.CellState.validate_accepted_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms validate_accepted_iff
 
+/-- info: 'Minidregg.Theory.CellState.PairBindingPremise.root_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PairBindingPremise.root_ne
+/-- info: 'Minidregg.Theory.CellState.Collision.bytes_ne' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Collision.bytes_ne
 end Minidregg.Theory.CellState

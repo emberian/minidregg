@@ -72,18 +72,6 @@ structure PolicyRecordPairBinding (left right : PolicyRecord) : Prop where
 
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 
-/-- Every authority coordinate is read from the one authority cell. The
-revocation universe is the cell's own revoked-plane support, never requester
-selected. A physical receiver must provide this snapshot's provenance. -/
-def projection (snapshot : Snapshot) :
-    CredentialAuthorityState.StateProjection CredentialAuthorityState.layout :=
-  snapshot.revocationUniverse.stateProjection
-
-@[simp] theorem projection_authState (snapshot : Snapshot) :
-    (projection snapshot).authState snapshot.cell = snapshot.authState := by
-  rw [snapshot.authStateExact, projection, CredentialAuthorityState.authState_identity_projection]
-  rfl
-
 /-- Data returned by the actual resolver retains every checked source fact. -/
 structure LoadedPolicy (snapshot : Snapshot) (store : PayloadStore)
     (policyId : PolicyId) (revision : PolicyRevision) where
@@ -292,8 +280,10 @@ theorem issuerCheck_complete (snapshot : Snapshot) {kind : ResourceKind}
     rw [present]; simp
   · simp [issuedAt, present]
 
+/-- Non-revocation at the exact root: the key is registered and not revoked, both
+read from the cell's presence planes.  There is no key list beside them. -/
 def nonRevocationCheck (snapshot : Snapshot) (root : Digest) (key : RevocationKey) : Bool :=
-  decide (root = snapshot.cell.root ∧ key ∈ snapshot.revocationUniverse.revocationKeys ∧
+  decide (root = snapshot.cell.root ∧ isRegistered snapshot.cell key = true ∧
     isRevoked snapshot.cell key = false)
 
 /-- Preserve the supplied cryptographic verifier checks AND require exact
@@ -748,9 +738,6 @@ def authorityMaterializer := CredentialAuthorityCell.materializer
 def authorityCell : RegistryCell authorityMaterializer :=
   CellState.materialize authorityMaterializer policyStore
 
-/-- The canonical projection of this cell (its revoked-plane support). -/
-def projection : CredentialAuthorityState.StateProjection layout :=
-  (Minidregg.Theory.CanonicalAuthorityProjection.projection authorityCell).stateProjection
 
 theorem policyStore_epoch :
     policyStore ⟨.policyEpoch, demoRequest.policyId⟩ = some demoRequest.policyEpoch := by
@@ -775,7 +762,7 @@ theorem policyStore_head :
     policyStore_revision policyStore_address
 
 @[simp] theorem authorityCell_revision_exact :
-    (projection.authState authorityCell).policyRevision
+    (CredentialAuthorityState.authState authorityCell).policyRevision
         demoRequest.policyId = demoRequest.policyRevision := by
   change (show Option PolicyRevision from policyStore ⟨.policyRevision, demoRequest.policyId⟩).getD 0 =
     demoRequest.policyRevision
@@ -783,7 +770,7 @@ theorem policyStore_head :
   rfl
 
 @[simp] theorem authorityCell_address_exact :
-    addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision =
+    addressAt authorityCell demoRequest.policyId demoRequest.policyRevision =
       committedPolicy.address := by
   change (show Option Digest from policyStore policyAt).getD ⟨0⟩ = committedPolicy.address
   rw [policyStore_address]
@@ -925,7 +912,7 @@ noncomputable def positiveAuthorized
     (base : Portal) (proofWitness : base.ProofWitness)
     (proofAccepted : base.verifyProof demoRequest proofWitness = true) :
     CanonicalAuthorized (config base)
-      (projection.authState authorityCell)
+      (CredentialAuthorityState.authState authorityCell)
       demoRequest where
   evidence := .proof proofWitness (by
     simpa [config, CanonicalPolicyConfig.portal, cellPortal] using proofAccepted)
@@ -940,11 +927,11 @@ noncomputable def positiveAuthorized
     exact authorityCell_revision_exact.symm
   policyAddressExact := by
     change committedPolicy.address =
-      addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision
+      addressAt authorityCell demoRequest.policyId demoRequest.policyRevision
     exact authorityCell_address_exact.symm
   policyMembershipVerified := by
     change (config base).portal.verifyMembership authorityCell.root
-      (addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision)
+      (addressAt authorityCell demoRequest.policyId demoRequest.policyRevision)
       () = true
     rw [authorityCell_address_exact]
     exact cell_membership_verified base
@@ -953,7 +940,7 @@ noncomputable def positiveAuthorized
     rw [Bool.and_eq_true]
     refine ⟨?_, policy_verifies base⟩
     apply decide_eq_true
-    change addressAt projection authorityCell demoRequest.policyId demoRequest.policyRevision =
+    change addressAt authorityCell demoRequest.policyId demoRequest.policyRevision =
       committedPolicy.address
     exact authorityCell_address_exact
 
@@ -964,7 +951,7 @@ noncomputable def selectedPayload
     (base : Portal) (proofWitness : base.ProofWitness)
     (proofAccepted : base.verifyProof demoRequest proofWitness = true) :
     SelectionPayload (config base) (contentAddressing base) payloadStore
-      (membershipSemantics base) projection authorityCell demoRequest
+      (membershipSemantics base) authorityCell demoRequest
       (positiveAuthorized base proofWitness proofAccepted) :=
   SelectionPayload.ofAuthorized (availability := payloadAvailability base)
     (positiveAuthorized base proofWitness proofAccepted)

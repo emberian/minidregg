@@ -363,7 +363,6 @@ variable
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : HyperdocumentOperations.Declaration}
@@ -383,7 +382,7 @@ theorem width_positive : 0 < (scope config declaration).width :=
   (scope config declaration).width_positive
 
 def finCore {F : Type*} [Field F] [DecidableEq F]
-    (accepted : HyperdocumentOperations.Accepted config projection
+    (accepted : HyperdocumentOperations.Accepted config
       authorityPre documentPre portal declaration)
     (scalarizer : Scalarizer Hyperdocument.layout F) :
     ReceiptWitness (Fin (scope config declaration).width) F :=
@@ -391,7 +390,7 @@ def finCore {F : Type*} [Field F] [DecidableEq F]
     (scope config declaration) scalarizer accepted.accepted.validated
 
 theorem finCore_valid {F : Type*} [Field F] [DecidableEq F]
-    (accepted : HyperdocumentOperations.Accepted config projection
+    (accepted : HyperdocumentOperations.Accepted config
       authorityPre documentPre portal declaration)
     (scalarizer : Scalarizer Hyperdocument.layout F) :
     (HyperdocumentAdapter.finCore accepted scalarizer).Satisfies :=
@@ -400,14 +399,14 @@ theorem finCore_valid {F : Type*} [Field F] [DecidableEq F]
 
 /-- Root headers remain exact typed Digests beside the finite opening word. -/
 @[simp] theorem pre_root_exact
-    (accepted : HyperdocumentOperations.Accepted config projection
+    (accepted : HyperdocumentOperations.Accepted config
       authorityPre documentPre portal declaration) :
     documentPre.root = declaration.intent.expectedContentRoot := by
   exact (HyperdocumentOperations.ValidOperation.preRootExact
     (HyperdocumentOperations.Accepted.semantic accepted)).symm
 
 @[simp] theorem post_root_exact
-    (accepted : HyperdocumentOperations.Accepted config projection
+    (accepted : HyperdocumentOperations.Accepted config
       authorityPre documentPre portal declaration) :
     accepted.accepted.prepared.post.root =
       accepted.accepted.prepared.postRoot :=
@@ -430,7 +429,7 @@ theorem pre_lookup_exact {F : Type*}
 /-- The matching post opening is read from the sole verifier-minted post-cell,
 not from a receipt-supplied parallel state. -/
 theorem post_lookup_exact {F : Type*}
-    (accepted : HyperdocumentOperations.Accepted config projection
+    (accepted : HyperdocumentOperations.Accepted config
       authorityPre documentPre portal declaration)
     (scalarizer : Scalarizer Hyperdocument.layout F)
     (address : Hyperdocument.Address)

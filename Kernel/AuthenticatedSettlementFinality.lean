@@ -8,8 +8,11 @@ that book explicit.  A signed vote binds all of the following data:
 * the canonical credential-authority root consulted for admission;
 * a versioned public-key identity selected for one replica;
 * the current subject-key and governance-policy epochs;
-* a revocation key for that key identity that is registered and live in the
-  exact cell (present in `registered`, absent from `revoked`);
+* the key version's own revocation key (`RevocationKey.signingKey subject
+  keyEpoch`), whose standing in the exact cell is `live`
+  (`CredentialAuthorityState.keyStanding`: present in `registered`, absent
+  from `revoked`) -- the same function the host's signature admission
+  (`CredentialSignatureAdmission.select`) calls;
 * the protocol domain, consensus epoch, derived log slot, and injectively
   encoded candidate bytes.
 
@@ -23,9 +26,10 @@ reduction, not a concrete signature theorem.
 
 **Trust ceiling.**  `KeyDirectory.Member`, signature verification origin,
 EUF security, key custody, and issuance discipline are deployment premises.
-The module proves no concrete scheme secure and no network live.  Dedicated
-credential revocation channels are used as key-version revocation identifiers;
-a deployment must refine that assignment to its physical key registry.
+The module proves no concrete scheme secure and no network live.  A key
+version's revocation identity is not a free field: it is
+`RevocationKey.signingKey subject keyEpoch`, the key the host registers at
+enrollment and genesis.
 -/
 import Kernel.ReplicatedSettlementFinality
 import Theory.CredentialAuthorityState
@@ -48,10 +52,8 @@ variable {TxId : Type u} {CellId : Type v} {Nullifier : Type w}
 /-! ## Versioned public-key identities and the canonical authority view -/
 
 /-- One public key together with every stable name needed to select and revoke
-it.  `revocationKey` should be a dedicated credential-authority channel for
-this key version (or a deployment-refined equivalent), never a host-local flag.
-The governance policy address pins the exact versioned policy content under
-which this signer is admitted. -/
+it.  The governance policy address pins the exact versioned policy content
+under which this signer is admitted. -/
 structure VersionedPublicKeyIdentity (PublicKey : Type k) where
   subject : SubjectId
   keyEpoch : Epoch
@@ -60,7 +62,12 @@ structure VersionedPublicKeyIdentity (PublicKey : Type k) where
   governancePolicy : PolicyId
   governanceEpoch : Epoch
   governanceAddress : Digest
-  revocationKey : RevocationKey
+
+/-- The revocation identity of a key version is determined by the version: the
+same `RevocationKey.signingKey` the host registers when it installs the key. -/
+def VersionedPublicKeyIdentity.revocationKey {PublicKey : Type k}
+    (identity : VersionedPublicKeyIdentity PublicKey) : RevocationKey :=
+  .signingKey identity.subject identity.keyEpoch
 
 /-- The public-key lookup is an explicit authenticated-directory boundary.
 `Member root identity` is the semantic membership relation a physical Merkle
@@ -74,7 +81,6 @@ Changing `cell` changes the authority root included in every expected vote. -/
 structure SignerAuthority
     (M : CredentialAuthorityState.Materializer)
     (Node : Type n) (PublicKey : Type k) where
-  projection : ProjectionUniverse
   cell : CredentialAuthorityState.Cell M
   directory : KeyDirectory PublicKey
   protocolDomain : Digest
@@ -86,7 +92,7 @@ variable {M : CredentialAuthorityState.Materializer}
   (authority : SignerAuthority M Node PublicKey)
 
 def authState : TypedAuthorization.AuthState :=
-  CredentialAuthorityState.authState authority.projection authority.cell
+  CredentialAuthorityState.authState authority.cell
 
 /-- Exact currentness of one signer at the canonical authority snapshot.  The
 directory entry, key epoch, policy epoch/address, and revocation membership all
@@ -112,15 +118,12 @@ structure CurrentSigner (node : Node) : Prop where
         (authority.signer node).governancePolicy
         (authority.signer node).governanceEpoch =
       (authority.signer node).governanceAddress
-  /-- The key-version revocation key is registered in the exact cell: present
-  in the append-only `registered` plane, so it can never be erased. -/
-  registered :
-    CredentialAuthorityState.isRegistered authority.cell
-      (authority.signer node).revocationKey = true
-  /-- ...and live: absent from the append-only `revoked` plane of the same cell. -/
-  notRevoked :
-    CredentialAuthorityState.isRevoked authority.cell
-      (authority.signer node).revocationKey = false
+  /-- The signer check: the key version's standing in the exact cell is
+  `live` (registered and not revoked).  This is `keyStanding`, the function
+  the host's signature admission calls; there is no second check. -/
+  standing :
+    CredentialAuthorityState.keyStanding authority.cell
+      (authority.signer node).revocationKey = .live
 
 end SignerAuthority
 
@@ -254,8 +257,9 @@ theorem revoked_signer_rejected
       vote.identity.revocationKey = true) :
     ¬ AcceptedVote authority candidateCodec payloadCodec portal node candidate vote := by
   intro accepted
-  have live := accepted.currentSigner.notRevoked
-  rw [← accepted.identityExact, revoked] at live
+  have live := accepted.currentSigner.standing
+  rw [← accepted.identityExact,
+    CredentialAuthorityState.keyStanding_revoked _ _ revoked] at live
   cases live
 
 /-- A vote whose key-version revocation key the exact cell has not registered
@@ -271,9 +275,9 @@ theorem unregistered_signer_rejected
       vote.identity.revocationKey = false) :
     ¬ AcceptedVote authority candidateCodec payloadCodec portal node candidate vote := by
   intro accepted
-  have registered := accepted.currentSigner.registered
-  rw [← accepted.identityExact, absent] at registered
-  cases registered
+  have live := accepted.currentSigner.standing
+  rw [← accepted.identityExact] at live
+  exact CredentialAuthorityState.keyStanding_unregistered _ _ absent live
 
 theorem wrong_authority_root_rejected
     {authority : SignerAuthority M Node PublicKey}

@@ -440,10 +440,9 @@ theorem ValidOperation.ranges_post
 
 def authenticatedObjectHead
     {M : CredentialAuthorityState.Materializer}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell M}
     {height : Height} {principalRef : PrincipalRef}
-    (principal : AuthenticatedPrincipal projection authorityPre height principalRef)
+    (principal : AuthenticatedPrincipal authorityPre height principalRef)
     (objectKind : principalRef.capabilityKind = .object) : Capability .object :=
   objectKind ▸ principal.stored.head
 
@@ -488,47 +487,45 @@ structure Accepted
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     (config : Config)
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentPre : Hyperdocument.Cell MDoc)
     (portal : Portal)
     (declaration : Declaration) : Type where
-  principal : AuthenticatedPrincipal projection authorityPre
+  principal : AuthenticatedPrincipal authorityPre
     declaration.request.height declaration.intent.author
   semantic : ValidOperation config documentPre declaration
   namedCapabilityAdmissible :
     (authenticatedObjectHead principal
       semantic.canonical.objectCapability).Admissible
-    (CredentialAuthorityState.authState projection authorityPre)
+    (CredentialAuthorityState.authState authorityPre)
     (declaration.toRequest config)
   accepted : AcceptedCellEffect
     (portal := portal)
-    (authState := CredentialAuthorityState.authState projection authorityPre)
+    (authState := CredentialAuthorityState.authState authorityPre)
     (family config documentPre) (declaration.toRequest config) documentPre declaration ()
 
 def accept
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (principal : AuthenticatedPrincipal projection authorityPre
+    (principal : AuthenticatedPrincipal authorityPre
       declaration.request.height declaration.intent.author)
     (semantic : ValidOperation config documentPre declaration)
     (namedCapabilityAdmissible :
       (authenticatedObjectHead principal
         semantic.canonical.objectCapability).Admissible
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (declaration.toRequest config))
     (authorization : Authorized portal
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (declaration.toRequest config))
     (validated : CellState.ValidatedPatch
       MDoc documentPre (declaration.toRequest config).preStateRoot
       (declaration.patch config)) :
-    Accepted config projection authorityPre documentPre portal declaration where
+    Accepted config authorityPre documentPre portal declaration where
   principal := principal
   semantic := semantic
   namedCapabilityAdmissible := namedCapabilityAdmissible
@@ -555,11 +552,10 @@ def Accepted.versionEventRecord
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted config authorityPre documentPre portal declaration) :
     VersionEventRecord :=
   { historyDomain := declaration.intent.historyDomain
     document := declaration.intent.document
@@ -578,11 +574,10 @@ def Accepted.causalPreimage
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted config authorityPre documentPre portal declaration) :
     CausalVersionDag.EventPreimage :=
   accepted.versionEventRecord.toCausalPreimage
 
@@ -590,11 +585,10 @@ def Accepted.causalPreimage
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted config authorityPre documentPre portal declaration) :
     accepted.causalPreimage.preStateRoot = documentPre.root :=
   rfl
 
@@ -602,11 +596,10 @@ def Accepted.causalPreimage
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted config authorityPre documentPre portal declaration) :
     accepted.causalPreimage.postStateRoot =
       accepted.accepted.prepared.post.root :=
   rfl
@@ -642,11 +635,10 @@ theorem Accepted.post_contains_guardedSet
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted config authorityPre documentPre portal declaration)
     {space : Namespace} {key : Key space}
     {expected : Option (Value space)} {replacement : Value space}
     (member : guardedSet space key expected replacement ∈ declaration.patch config) :
@@ -658,11 +650,10 @@ theorem Accepted.post_contains_link
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted config authorityPre documentPre portal declaration)
     (payload : LinkPayload) (actionExact : declaration.action = .link payload) :
     lookup accepted.accepted.prepared.post.logical .links payload.id =
       some (linkRecord (declaration.operationId config)
@@ -674,11 +665,10 @@ theorem Accepted.post_contains_transclusion
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted config authorityPre documentPre portal declaration)
     (payload : TranscludePayload)
     (actionExact : declaration.action = .transclude payload) :
     lookup accepted.accepted.prepared.post.logical .transclusions payload.id =
@@ -691,11 +681,10 @@ theorem Accepted.post_contains_transclusion_forward_link
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted config authorityPre documentPre portal declaration)
     (payload : TranscludePayload)
     (actionExact : declaration.action = .transclude payload) :
     lookup accepted.accepted.prepared.post.logical .links payload.forwardLinkId =
@@ -710,11 +699,10 @@ def Accepted.receiptEvent
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted config authorityPre documentPre portal declaration) :
     ReceiptEvent (family (M := MDoc) config documentPre) :=
   accepted.accepted.toReceiptEvent
 
@@ -722,11 +710,10 @@ def Accepted.receiptEvent
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted config authorityPre documentPre portal declaration) :
     accepted.accepted.toReceiptEvent.request = declaration.toRequest config :=
   rfl
 

@@ -309,8 +309,6 @@ abbrev documentPre :=
   Minidregg.Assurance.HyperdocumentLinkPublicationWitness.genesisPost
 abbrev principal :=
   Minidregg.Assurance.HyperdocumentLinkPublicationWitness.Genesis.principal
-abbrev projection :=
-  Minidregg.Assurance.HyperdocumentLinkPublicationWitness.Genesis.projection
 abbrev authorityPre :=
   Minidregg.Assurance.HyperdocumentLinkPublicationWitness.Genesis.authorityPre
 abbrev portal :=
@@ -358,7 +356,7 @@ def forwardDeclaration : Declaration where
 
 def capabilityAdmissible :
     Prior.capability.Admissible
-      (CredentialAuthorityState.authState Prior.projection Prior.authorityPre)
+      (CredentialAuthorityState.authState Prior.authorityPre)
       (forwardDeclaration.toRequest Prior.config) where
   holder := rfl
   scope :=
@@ -385,7 +383,7 @@ def capabilityAdmissible :
   channelNotRevoked := Prior.principal.channelsNotRevoked
 
 def authorization : Authorized Prior.portal
-    (CredentialAuthorityState.authState Prior.projection Prior.authorityPre)
+    (CredentialAuthorityState.authState Prior.authorityPre)
     (forwardDeclaration.toRequest Prior.config) where
   evidence := .proof () rfl
   policyWitness := ()
@@ -423,7 +421,7 @@ def semantic : ValidOperation Prior.config Prior.documentPre
     intro range impossible
     cases impossible
 
-noncomputable def accepted : Accepted Prior.config Prior.projection
+noncomputable def accepted : Accepted Prior.config
     Prior.authorityPre Prior.documentPre Prior.portal forwardDeclaration :=
   HyperdocumentOperations.accept Prior.principal semantic capabilityAdmissible
     authorization

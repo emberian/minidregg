@@ -362,27 +362,6 @@ theorem preserves_hidden_balance_coordinate :
       some (stateOfOption (some witnessHiddenBook)) :=
   stateCodec.decode_encode _
 
-structure Collision (left right : Store CanonicalResourceKernel.layout) : Prop where
-  statesDifferent : left ≠ right
-  bytesDifferent : stateCodec.encode left ≠ stateCodec.encode right
-  rootsEqual : rootBytes (stateCodec.encode left) = rootBytes (stateCodec.encode right)
-
-theorem collision_of_root_eq_of_ne {left right : Store CanonicalResourceKernel.layout}
-    (different : left ≠ right)
-    (same : rootBytes (stateCodec.encode left) = rootBytes (stateCodec.encode right)) :
-    Collision left right :=
-  ⟨different, fun bytes => different (codec_encode_injective stateCodec bytes), same⟩
-
-def PairBindingPremise (left right : Store CanonicalResourceKernel.layout) : Prop :=
-  ¬ Collision left right
-
-theorem state_eq_of_root_eq {left right : Store CanonicalResourceKernel.layout}
-    (binding : PairBindingPremise left right)
-    (same : rootBytes (stateCodec.encode left) = rootBytes (stateCodec.encode right)) :
-    left = right := by
-  by_contra different
-  exact binding (collision_of_root_eq_of_ne different same)
-
 end Minidregg.Compiler.CanonicalResourcePageMaterializer
 
 /- Existing consumers retain their API name, now definitionally the concrete

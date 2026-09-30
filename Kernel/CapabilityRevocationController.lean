@@ -117,14 +117,11 @@ def declaration {kind : ResourceKind} (domain semantics : Digest) (command : Com
 
 def declarationStream : StreamCodec RevokeDeclaration :=
   StreamCodec.xmap
-    (StreamCodec.product (StreamCodec.sum capabilityIdStream channelIdStream)
+    (StreamCodec.product CredentialAuthorityCell.revocationKeyStream
       (StreamCodec.product digestStream StreamCodec.nat))
-    (fun declaration => ((match declaration.key with
-      | .capability key => .inl key | .channel key => .inr key),
-      declaration.expectedPreRoot, declaration.operationNullifier))
-    (fun (key, root, marker) => ⟨(match key with
-      | .inl key => .capability key | .inr key => .channel key), root, marker⟩)
-    (by intro declaration; cases declaration with | mk key root marker => cases key <;> rfl)
+    (fun declaration => (declaration.key, declaration.expectedPreRoot, declaration.operationNullifier))
+    (fun (key, root, marker) => ⟨key, root, marker⟩)
+    (by intro declaration; cases declaration; rfl)
 
 def declarationCodec : LawfulCodec RevokeDeclaration :=
   ResourceBirthCodec.strictCodec declarationStream.toLawful
@@ -175,7 +172,7 @@ def request {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
 
 inductive Reject where
   | malformedCommand | directoryUnavailable | authorityUnavailable | targetUnavailable
-  | staleAuthority | victimUnavailable | victimPolicy | alreadyRevoked | replayedMarker
+  | staleAuthority | victimUnavailable | unregisteredVictim | victimPolicy | alreadyRevoked | replayedMarker
   | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
@@ -195,7 +192,7 @@ def observeTarget (deployment : Deployment) (directory : Directory Nat Registry)
 
 def family {kind : ResourceKind} (snapshot : Snapshot) (semantics : Digest)
     (ambient : Ambient) (command : Command kind) :=
-  revokeFamily snapshot.revocationUniverse snapshot.cell declarationCodec
+  revokeFamily snapshot.cell declarationCodec
     (effectsDigest snapshot.domain semantics command) (context snapshot semantics ambient command)
 
 structure Prepared {F : Type} [Field F] (deployment : Deployment)
@@ -228,7 +225,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     if victimIdentity : victim.head.id = command.capability then
      if victimPolicy : victim.head.policyId = ⟨command.target.value⟩ then
       if rootExact : command.expectedAuthorityRoot = authority.snapshot.cell.root then
-        if registered : RevocationKey.capability command.capability ∈ authority.snapshot.revocationUniverse.revocationKeys then
+        if registered : isRegistered authority.snapshot.cell (.capability command.capability) = true then
           if live : isRevoked authority.snapshot.cell (.capability command.capability) = false then
             if authority.snapshot.spent (operationMarker authority.snapshot.domain profile.semantics command) = false then
               match validate AuthorityMaterializer authority.snapshot.cell authority.snapshot.cell.root
@@ -248,7 +245,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                     source⟩
             else .error .replayedMarker
           else .error .alreadyRevoked
-        else .error .victimUnavailable
+        else .error .unregisteredVictim
       else .error .staleAuthority
      else .error .victimPolicy
     else .error .victimUnavailable
@@ -355,7 +352,7 @@ theorem Accepted.revoked [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) :
     RevocationKey.capability command.capability ∈
-      (authState prepared.authority.snapshot.revocationUniverse accepted.semantic.prepared.post).revoked :=
+      (authState accepted.semantic.prepared.post).revoked :=
   by simpa using (revocation_post_is_authorizer_member
     (accepted.semantic.recast prepared.authority.snapshot.authStateExact))
 
@@ -363,7 +360,7 @@ theorem Accepted.rejects_victim [DecidableEq F]
     {prepared : Prepared deployment profile ambient durable command} {envelope : List UInt8}
     (accepted : Accepted prepared envelope) (wanted : Request command.victimKind) :
     ¬ prepared.victim.head.Admissible
-      (authState prepared.authority.snapshot.revocationUniverse accepted.semantic.prepared.post) wanted := by
+      (authState accepted.semantic.prepared.post) wanted := by
   intro admitted
   apply admitted.selfNotRevoked
   rw [prepared.victimIdentity]
@@ -374,7 +371,7 @@ theorem Accepted.rejects_descendant [DecidableEq F]
     (accepted : Accepted prepared envelope) {other : ResourceKind} (descendant : Capability other)
     (wanted : Request other) (ancestor : command.capability ∈ descendant.ancestors) :
     ¬ descendant.Admissible
-      (authState prepared.authority.snapshot.revocationUniverse accepted.semantic.prepared.post) wanted :=
+      (authState accepted.semantic.prepared.post) wanted :=
   ancestor_revocation_rejected descendant _ wanted command.capability ancestor accepted.revoked
 
 /-- Neither a subject signature nor a proof-only portal can replace the

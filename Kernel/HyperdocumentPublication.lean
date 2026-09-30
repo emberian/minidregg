@@ -38,24 +38,22 @@ abbrev ContentAccepted
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     (contentConfig : Minidregg.Theory.HyperdocumentOperations.Config)
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentPre : Hyperdocument.Cell MDoc)
     (contentPortal : Portal)
     (contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration) :=
-  Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig projection
+  Minidregg.Theory.HyperdocumentOperations.Accepted contentConfig
     authorityPre documentPre contentPortal contentDeclaration
 
 abbrev EventAccepted
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : ContentAccepted contentConfig projection authorityPre documentPre
+    (content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration)
     (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
     (store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store)
@@ -67,7 +65,6 @@ abbrev EventAccepted
 
 def cells
     {MAuth : CredentialAuthorityState.Materializer}
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
     (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
@@ -84,7 +81,7 @@ def cells
     | .content => contentPortal
     | .eventLog => eventPortal
   projectAuthority := fun _ _ =>
-    CredentialAuthorityState.authState projection authorityPre
+    CredentialAuthorityState.authState authorityPre
   cellId
     | .content => contentCellId
     | .eventLog => eventCellId
@@ -93,12 +90,11 @@ def declaration
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : ContentAccepted contentConfig projection authorityPre documentPre
+    (content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -109,7 +105,7 @@ def declaration
       eventDeclaration)
     (header : Header) (contentCellId eventCellId : Digest) :
     Minidregg.Kernel.MultiCellHyperedge.Declaration
-      (cells projection authorityPre MDoc MLog contentPortal
+      (cells authorityPre MDoc MLog contentPortal
         eventPortal contentCellId eventCellId) where
   header :=
     { domain := contentConfig.requestDomain
@@ -142,12 +138,11 @@ def acceptedLegs
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : ContentAccepted contentConfig projection authorityPre documentPre
+    (content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -165,12 +160,11 @@ def zeroResourceLaw
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : ContentAccepted contentConfig projection authorityPre documentPre
+    (content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -186,7 +180,6 @@ def zeroResourceLaw
 
 theorem cellIds_injective
     {MAuth : CredentialAuthorityState.Materializer}
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentMaterializer : Hyperdocument.Materializer Digest)
     (MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer)
@@ -194,7 +187,7 @@ theorem cellIds_injective
     {contentCellId eventCellId : Digest}
     (distinct : contentCellId ≠ eventCellId) :
     Function.Injective
-      (cells projection authorityPre documentMaterializer MLog
+      (cells authorityPre documentMaterializer MLog
         contentPortal eventPortal contentCellId eventCellId).cellId := by
   intro left right equal
   cases left <;> cases right
@@ -207,12 +200,11 @@ theorem aggregate_zero
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : ContentAccepted contentConfig projection authorityPre documentPre
+    (content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -234,12 +226,11 @@ def commit
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    (content : ContentAccepted contentConfig projection authorityPre documentPre
+    (content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration)
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -260,7 +251,7 @@ def commit
     Minidregg.Kernel.MultiCellHyperedge.Commit
       (zeroResourceLaw content event header contentCellId eventCellId)
       (acceptedLegs content event header contentCellId eventCellId) boundary where
-  cellIdsDistinct := cellIds_injective projection authorityPre MDoc MLog
+  cellIdsDistinct := cellIds_injective authorityPre MDoc MLog
     contentPortal eventPortal cellIdsDistinct
   sharedDomain := by
     intro incidence
@@ -276,12 +267,11 @@ def commit
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : ContentAccepted contentConfig projection authorityPre documentPre
+    {content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}
@@ -308,12 +298,11 @@ def commit
     {MDoc : Hyperdocument.Materializer Digest}
     {MAuth : CredentialAuthorityState.Materializer}
     {contentConfig : Minidregg.Theory.HyperdocumentOperations.Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {contentPortal : Portal}
     {contentDeclaration : Minidregg.Theory.HyperdocumentOperations.Declaration}
-    {content : ContentAccepted contentConfig projection authorityPre documentPre
+    {content : ContentAccepted contentConfig authorityPre documentPre
       contentPortal contentDeclaration}
     {MLog : Minidregg.Kernel.HyperdocumentVersionEffects.LogMaterializer}
     {store : Minidregg.Kernel.HyperdocumentEventLog.Sparse.Store}

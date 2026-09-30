@@ -21,7 +21,7 @@ open Minidregg.Theory.Store
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.CredentialAuthorityState (layout)
 open Minidregg.Theory.CredentialAuthorityEffects
-  (Entry assignAll setAll run_assignAll)
+  (assignAll setAll run_assignAll)
 open Minidregg.Compiler
 
 set_option autoImplicit false

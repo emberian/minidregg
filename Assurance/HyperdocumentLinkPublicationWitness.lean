@@ -42,8 +42,6 @@ abbrev documentPre :=
   Minidregg.Theory.DeployedMaterializerWitness.hyperdocumentCell
 abbrev authorityPre :=
   Minidregg.Theory.HyperdocumentCausalFamily.Witness.authorityPre
-abbrev projection :=
-  Minidregg.Theory.HyperdocumentCausalFamily.Witness.projection
 abbrev principal :=
   Minidregg.Theory.HyperdocumentCausalFamily.Witness.principal
 abbrev capability :=
@@ -170,7 +168,7 @@ def genesisDeclaration : HyperdocumentOperations.Declaration where
 
 def genesisCapabilityAdmissible :
     Genesis.capability.Admissible
-      (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+      (CredentialAuthorityState.authState Genesis.authorityPre)
       (genesisDeclaration.toRequest config) where
   holder := rfl
   scope :=
@@ -197,7 +195,7 @@ def genesisCapabilityAdmissible :
   channelNotRevoked := Genesis.principal.channelsNotRevoked
 
 def genesisAuthorization : Authorized Genesis.permissivePortal
-    (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+    (CredentialAuthorityState.authState Genesis.authorityPre)
     (genesisDeclaration.toRequest config) where
   evidence := .proof () rfl
   policyWitness := ()
@@ -240,7 +238,7 @@ theorem validatedOf
     fun validated _ => validated
 
 noncomputable def genesisAccepted : HyperdocumentOperations.Accepted config
-    Genesis.projection Genesis.authorityPre Genesis.documentPre
+    Genesis.authorityPre Genesis.documentPre
     Genesis.permissivePortal genesisDeclaration :=
   HyperdocumentOperations.accept Genesis.principal genesisSemantic
     genesisCapabilityAdmissible genesisAuthorization (validatedOf genesisSemantic)
@@ -283,12 +281,12 @@ def linkAction : HyperdocumentOperations.Action := .link linkPayload
 
 def semanticFamily : CausalVersionDag.SemanticFamily
     (Hyperdocument.Cell Genesis.documentMaterializer) :=
-  HyperdocumentCausalFamily.family config Genesis.projection
+  HyperdocumentCausalFamily.family config
     Genesis.authorityPre Genesis.permissivePortal
 
 noncomputable def genesisEvidence :
     HyperdocumentCausalFamily.EventEvidence Genesis.documentMaterializer config
-      Genesis.projection Genesis.authorityPre Genesis.permissivePortal
+      Genesis.authorityPre Genesis.permissivePortal
       genesisAccepted.causalPreimage where
   documentPre := Genesis.documentPre
   declaration := genesisDeclaration
@@ -326,7 +324,7 @@ def linkDeclaration : HyperdocumentOperations.Declaration where
 
 def linkCapabilityAdmissible :
     Genesis.capability.Admissible
-      (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+      (CredentialAuthorityState.authState Genesis.authorityPre)
       (linkDeclaration.toRequest config) where
   holder := rfl
   scope :=
@@ -353,7 +351,7 @@ def linkCapabilityAdmissible :
   channelNotRevoked := Genesis.principal.channelsNotRevoked
 
 def linkAuthorization : Authorized Genesis.permissivePortal
-    (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+    (CredentialAuthorityState.authState Genesis.authorityPre)
     (linkDeclaration.toRequest config) where
   evidence := .proof () rfl
   policyWitness := ()
@@ -385,7 +383,7 @@ def linkSemantic : HyperdocumentOperations.ValidOperation config genesisPost
     cases impossible
 
 noncomputable def linkAccepted : HyperdocumentOperations.Accepted config
-    Genesis.projection Genesis.authorityPre genesisPost Genesis.permissivePortal
+    Genesis.authorityPre genesisPost Genesis.permissivePortal
     linkDeclaration :=
   HyperdocumentOperations.accept Genesis.principal linkSemantic
     linkCapabilityAdmissible linkAuthorization (validatedOf linkSemantic)
@@ -400,7 +398,7 @@ noncomputable def linkAccepted : HyperdocumentOperations.Accepted config
 
 noncomputable def linkEvidence :
     HyperdocumentCausalFamily.EventEvidence Genesis.documentMaterializer config
-      Genesis.projection Genesis.authorityPre Genesis.permissivePortal
+      Genesis.authorityPre Genesis.permissivePortal
       linkAccepted.causalPreimage where
   documentPre := genesisPost
   declaration := linkDeclaration
@@ -622,7 +620,7 @@ def eventSource : HyperdocumentVersionEffects.SourceExact linkAccepted
 
 def eventCapabilityAdmissible :
     Genesis.capability.Admissible
-      (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+      (CredentialAuthorityState.authState Genesis.authorityPre)
       (eventDeclaration.toRequest eventConfig) where
   holder := rfl
   scope :=
@@ -650,7 +648,7 @@ def eventCapabilityAdmissible :
   channelNotRevoked := Genesis.principal.channelsNotRevoked
 
 def eventAuthorization : Authorized Genesis.permissivePortal
-    (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+    (CredentialAuthorityState.authState Genesis.authorityPre)
     (eventDeclaration.toRequest eventConfig) where
   evidence := .proof () rfl
   policyWitness := ()
@@ -813,10 +811,10 @@ def outsideTarget : ResourceId .object := ⟨999⟩
 
 theorem outside_scope_rejected :
     ¬ Genesis.capability.Admissible
-      (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+      (CredentialAuthorityState.authState Genesis.authorityPre)
       ((linkDeclaration.toRequest config).retarget outsideTarget) :=
   target_substitution_rejected Genesis.capability
-    (CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre)
+    (CredentialAuthorityState.authState Genesis.authorityPre)
     (linkDeclaration.toRequest config) outsideTarget (by
       simp only [Genesis.capability,
         Minidregg.Theory.HyperdocumentCausalFamily.Witness.capability,
@@ -831,7 +829,7 @@ theorem outside_scope_rejected :
         HyperdocumentOperations.Declaration.toRequest] at valueEqual)
 
 def revokedState : AuthState :=
-  { CredentialAuthorityState.authState Genesis.projection Genesis.authorityPre with
+  { CredentialAuthorityState.authState Genesis.authorityPre with
     revoked := {RevocationKey.capability Genesis.capability.id} }
 
 theorem revoked_capability_rejected :

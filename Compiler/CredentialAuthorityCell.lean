@@ -47,6 +47,8 @@ def revocationKeyStream : StreamCodec RevocationKey where
   encode
     | .capability capability => 0 :: capabilityIdStream.encode capability
     | .channel channel => 1 :: channelIdStream.encode channel
+    | .signingKey subject epoch =>
+        2 :: (StreamCodec.product subjectIdStream StreamCodec.nat).encode (subject, epoch)
   decodePrefix
     | 0 :: bytes => do
         let (capability, suffix) <- capabilityIdStream.decodePrefix bytes
@@ -54,12 +56,18 @@ def revocationKeyStream : StreamCodec RevocationKey where
     | 1 :: bytes => do
         let (channel, suffix) <- channelIdStream.decodePrefix bytes
         some (.channel channel, suffix)
+    | 2 :: bytes => do
+        let ((subject, epoch), suffix) <-
+          (StreamCodec.product subjectIdStream StreamCodec.nat).decodePrefix bytes
+        some (.signingKey subject epoch, suffix)
     | _ => none
   decodePrefix_encode := by
     intro key suffix
     cases key with
     | capability capability => simp [capabilityIdStream.decodePrefix_encode]
     | channel channel => simp [channelIdStream.decodePrefix_encode]
+    | signingKey subject epoch =>
+        simp [(StreamCodec.product subjectIdStream StreamCodec.nat).decodePrefix_encode]
 
 /-- One tag byte per plane. -/
 def planeTag : AuthorityPlane → UInt8
@@ -89,7 +97,10 @@ def planeOfTag : UInt8 → Option AuthorityPlane
   | 12 => some .registered
   | _ => none
 
-/-- The retired operation-nullifier plane (tag 9, wire v1) refuses to decode:
+/-- Wire v3 (the wave-c merge of lane D2's v2 and lane REG's v2): no
+operation-nullifier plane, tagged-v2 revocation keys (tag 2 = `signingKey`),
+`signing-key-record/v2` without the revoked flag.
+The retired operation-nullifier plane (tag 9, wire v1) refuses to decode:
 operation nullifiers live in the durable consumed set, so an authority cell
 written with them must be re-genesised, never reinterpreted. -/
 theorem retired_nullifier_plane_refused : planeOfTag 9 = none := rfl
@@ -138,8 +149,8 @@ def keyCodecId : AuthorityPlane → String
   | .policyAddress => "policy-id/nat x nat"
   | .subjectKeyEpoch => "subject-id/nat"
   | .subjectKey => "subject-id/nat x nat"
-  | .revoked => "revocation-key/tagged-v1"
-  | .registered => "revocation-key/tagged-v1"
+  | .revoked => "revocation-key/tagged-v2"
+  | .registered => "revocation-key/tagged-v2"
 
 def valueCodecId : AuthorityPlane → String
   | .capability _ => "stored-capability/v1"
@@ -148,7 +159,7 @@ def valueCodecId : AuthorityPlane → String
   | .policyRevision => "nat/base255"
   | .policyAddress => "digest/nat"
   | .subjectKeyEpoch => "nat/base255"
-  | .subjectKey => "signing-key-record/v1"
+  | .subjectKey => "signing-key-record/v2"
   | .revoked => "unit/presence"
   | .registered => "unit/presence"
 
@@ -159,7 +170,7 @@ def planes : List AuthorityPlane :=
 
 /-- The authority layout on the wire. -/
 def wire : Wire layout where
-  name := "minidregg/credential-authority/v2"
+  name := "minidregg/credential-authority/v3"
   namespaces := planes
   namespaces_complete := by
     intro plane
@@ -216,43 +227,6 @@ theorem register_accepted_at_cell (pre : Cell) (key : RevocationKey)
         validated.apply.logical ⟨.registered, key⟩ = some () :=
   register_accepted materializer pre key fresh
 
-/-! ## Pair-scoped root binding
-
-The cell root is the cSHAKE256 digest of the canonical bytes.  No global
-injectivity into 256 bits is claimed: a root equality between two specific
-stores is turned into store equality only under the premise that this pair is
-not a collision. -/
-
-/-- A collision between two authority stores: different stores, hence different
-canonical bytes (`encode_injective`), with the same root. -/
-structure Collision (left right : Store layout) : Prop where
-  statesDifferent : left ≠ right
-  bytesDifferent : materializer.codec.encode left ≠ materializer.codec.encode right
-  rootsEqual : materializer.rootOf left = materializer.rootOf right
-
-theorem collision_of_root_eq_of_ne {left right : Store layout} (different : left ≠ right)
-    (same : materializer.rootOf left = materializer.rootOf right) : Collision left right :=
-  ⟨different, fun bytes => different (encode_injective wire bytes), same⟩
-
-/-- The pair-scoped collision-resistance premise. -/
-def PairBindingPremise (left right : Store layout) : Prop :=
-  ¬ Collision left right
-
-/-- Under the pair premise, equal roots mean equal stores. -/
-theorem logical_eq_of_root_eq {left right : Cell}
-    (binding : PairBindingPremise left.logical right.logical)
-    (same : left.root = right.root) : left.logical = right.logical := by
-  by_contra different
-  exact binding (collision_of_root_eq_of_ne different same)
-
-/-- Under the pair premise, two cells with different stores have different
-roots: every accepted authority change moves the root a durable read guard
-observes. -/
-theorem root_ne_of_logical_ne {left right : Cell}
-    (binding : PairBindingPremise left.logical right.logical)
-    (different : left.logical ≠ right.logical) : left.root ≠ right.root :=
-  fun same => different (logical_eq_of_root_eq binding same)
-
 /-! ## A worked authority cell -/
 
 namespace Witness
@@ -307,9 +281,6 @@ def ownerEntries : List (Entry layout) :=
 
 def ownerCell : Cell := materialize materializer (fromEntries ownerEntries)
 
-/-- The declared revocation universe contains the owner's own key. -/
-def domain : ProjectionUniverse := ⟨{.capability demoCapability.id}⟩
-
 theorem owner_capability_exact :
     readCapability ownerCell .object demoCapability.id = some ⟨demoCapability, []⟩ := by
   decide
@@ -327,12 +298,12 @@ theorem owner_registered_not_revoked :
       isRevoked ownerCell (.capability demoCapability.id) = false := by
   decide
 
-theorem owner_revoked_empty : (authState domain ownerCell).revoked = ∅ := by
+theorem owner_revoked_empty : (authState ownerCell).revoked = ∅ := by
   decide
 
 /-- Satisfiable pole: the committed owner capability is admissible. -/
 theorem owner_admissible :
-    demoCapability.Admissible (authState domain ownerCell) demoRequest := by
+    demoCapability.Admissible (authState ownerCell) demoRequest := by
   refine
     { holder := demoCapability_admissible.holder
       scope := demoCapability_admissible.scope
@@ -351,14 +322,14 @@ theorem owner_admissible :
 
 /-- Refuting pole: a different subject is refused by the same cell. -/
 theorem other_subject_refused :
-    ¬ demoCapability.Admissible (authState domain ownerCell)
+    ¬ demoCapability.Admissible (authState ownerCell)
       { demoRequest with subject := ⟨99⟩ } := by
   intro admitted
   have holder := admitted.holder
   simp [demoCapability, Holder.Covers] at holder
 
 theorem other_target_refused :
-    ¬ demoCapability.Admissible (authState domain ownerCell)
+    ¬ demoCapability.Admissible (authState ownerCell)
       (demoRequest.retarget demoOtherTarget) :=
   target_substitution_rejected demoCapability _ _ _ (by decide)
 
@@ -368,7 +339,7 @@ def rotatedCell : Cell :=
     (fromEntries (⟨⟨.issuerEpoch, demoCapability.issuer⟩, (4 : Nat)⟩ :: ownerEntries))
 
 theorem rotated_issuer_refused :
-    ¬ demoCapability.Admissible (authState domain rotatedCell) demoRequest := by
+    ¬ demoCapability.Admissible (authState rotatedCell) demoRequest := by
   intro admitted
   have current : demoCapability.issuerEpoch = issuerEpochAt rotatedCell demoCapability.issuer :=
     admitted.issuerCurrent
@@ -383,7 +354,7 @@ def revokedCell : Cell :=
     (fromEntries (⟨⟨.revoked, .capability demoCapability.id⟩, ()⟩ :: ownerEntries))
 
 theorem revocation_refuses_owner :
-    ¬ demoCapability.Admissible (authState domain revokedCell) demoRequest := by
+    ¬ demoCapability.Admissible (authState revokedCell) demoRequest := by
   intro admitted
   exact admitted.selfNotRevoked (by decide)
 
@@ -455,8 +426,6 @@ theorem retired_page_frame_refused (payload : List UInt8) :
 #guard_msgs (whitespace := lax) in #print axioms deregister_rejected_at_cell
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.register_accepted_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms register_accepted_at_cell
-/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.root_ne_of_logical_ne' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms root_ne_of_logical_ne
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.revoked_owner_registered_and_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Witness.revoked_owner_registered_and_revoked
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.Witness.cell_deregister_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/

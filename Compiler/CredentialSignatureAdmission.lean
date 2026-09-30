@@ -85,6 +85,10 @@ inductive Reject where
   | wrongDomain
   | missingCurrentKey
   | subjectKeyEpoch
+  /-- The selected key version is not in the cell's `registered` plane. -/
+  | unregisteredKey
+  /-- The selected key version is in the cell's `revoked` plane. -/
+  | revokedKey
   | unsupportedAlgorithm
   | publicKeyLength
   | envelope (reason : CredentialSignedEnvelopeController.Failure CredentialSignatureIO.Error)
@@ -99,6 +103,11 @@ structure Selected (snapshot : Snapshot) (request : SomeRequest) where
     request.2.subject = some key
   epochCurrent : request.2.subjectKeyEpoch = snapshot.authState.subjectKeyEpoch request.2.subject
   epochExact : key.keyEpoch = request.2.subjectKeyEpoch
+  /-- The signer check: the selected key version is registered and not
+  revoked, read by `CredentialAuthorityState.keyStanding` -- the same function
+  the settlement model's `CurrentSigner.standing` states. -/
+  standing : CredentialAuthorityState.keyStanding snapshot.cell
+    (CredentialAuthorityState.signingKeyRevocation key) = .live
   domainExact : request.2.domain = snapshot.domain
   algorithmExact : key.algorithm = ed25519Algorithm
   keyLength : key.publicKey.length = 32
@@ -111,11 +120,17 @@ def select (snapshot : Snapshot) (request : SomeRequest) : Except Reject (Select
         if epochCurrent : request.2.subjectKeyEpoch =
             snapshot.authState.subjectKeyEpoch request.2.subject then
           if epochExact : key.keyEpoch = request.2.subjectKeyEpoch then
-            if algorithmExact : key.algorithm = ed25519Algorithm then
-              if keyLength : key.publicKey.length = 32 then
-                .ok ⟨key, selected, epochCurrent, epochExact, domainExact, algorithmExact, keyLength⟩
-              else .error .publicKeyLength
-            else .error .unsupportedAlgorithm
+            match standing : CredentialAuthorityState.keyStanding snapshot.cell
+                (CredentialAuthorityState.signingKeyRevocation key) with
+            | .unregistered => .error .unregisteredKey
+            | .revoked => .error .revokedKey
+            | .live =>
+              if algorithmExact : key.algorithm = ed25519Algorithm then
+                if keyLength : key.publicKey.length = 32 then
+                  .ok ⟨key, selected, epochCurrent, epochExact, standing, domainExact,
+                    algorithmExact, keyLength⟩
+                else .error .publicKeyLength
+              else .error .unsupportedAlgorithm
           else .error .subjectKeyEpoch
         else .error .subjectKeyEpoch
   else .error .wrongDomain
@@ -281,6 +296,65 @@ theorem issued_of_checked
   completion.issued_of_verified receipt.prepared.controller
     (ioRefinement.exactResult _ _ _ _ observed)
 
+/-- **Signer check, refuting pole.**  Whatever the envelope, a request whose
+current key version the cell has not registered is refused by selection, before
+any envelope decode or native verification. -/
+theorem select_unregistered_refused (snapshot : Snapshot) (request : SomeRequest)
+    (key : KeyRecord)
+    (domainExact : request.2.domain = snapshot.domain)
+    (current : CredentialAuthorityState.currentSigningKey snapshot.logical request.2.subject = some key)
+    (epochCurrent : request.2.subjectKeyEpoch = snapshot.authState.subjectKeyEpoch request.2.subject)
+    (epochExact : key.keyEpoch = request.2.subjectKeyEpoch)
+    (unregistered : CredentialAuthorityState.keyStanding snapshot.cell
+      (CredentialAuthorityState.signingKeyRevocation key) = .unregistered) :
+    select snapshot request = .error .unregisteredKey := by
+  unfold select
+  rw [dif_pos domainExact]
+  split
+  · rename_i none; rw [current] at none; cases none
+  · rename_i selectedKey selected
+    rw [current] at selected
+    cases selected
+    rw [dif_pos epochCurrent, dif_pos epochExact]
+    split <;> simp_all
+
+/-- **Signer check, refuting pole.**  A revoked current key version is refused. -/
+theorem select_revoked_refused (snapshot : Snapshot) (request : SomeRequest)
+    (key : KeyRecord)
+    (domainExact : request.2.domain = snapshot.domain)
+    (current : CredentialAuthorityState.currentSigningKey snapshot.logical request.2.subject = some key)
+    (epochCurrent : request.2.subjectKeyEpoch = snapshot.authState.subjectKeyEpoch request.2.subject)
+    (epochExact : key.keyEpoch = request.2.subjectKeyEpoch)
+    (revoked : CredentialAuthorityState.isRevoked snapshot.cell
+      (CredentialAuthorityState.signingKeyRevocation key) = true) :
+    select snapshot request = .error .revokedKey := by
+  have standing := CredentialAuthorityState.keyStanding_revoked snapshot.cell _ revoked
+  unfold select
+  rw [dif_pos domainExact]
+  split
+  · rename_i none; rw [current] at none; cases none
+  · rename_i selectedKey selected
+    rw [current] at selected
+    cases selected
+    rw [dif_pos epochCurrent, dif_pos epochExact]
+    split <;> simp_all
+
+/-- **Signer check, sound pole.**  Every checked signature's key version is
+registered and live in the exact snapshot cell. -/
+theorem checked_signer_live (snapshot : Snapshot) (receipt : CheckedSignature snapshot) :
+    CredentialAuthorityState.isRegistered snapshot.cell
+        (CredentialAuthorityState.signingKeyRevocation receipt.prepared.controller.key) = true ∧
+      CredentialAuthorityState.isRevoked snapshot.cell
+        (CredentialAuthorityState.signingKeyRevocation receipt.prepared.controller.key) = false := by
+  rw [receipt.prepared.keyExact]
+  exact (CredentialAuthorityState.keyStanding_live_iff _ _).mp receipt.prepared.source.standing
+
+/-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.select_unregistered_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms select_unregistered_refused
+/-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.select_revoked_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms select_revoked_refused
+/-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.checked_signer_live' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms checked_signer_live
 /-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.requestBytes_exact_projection' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms requestBytes_exact_projection
 /-- info: 'Minidregg.Compiler.CredentialSignatureAdmission.requestBytes_separates_policyRevision' depends on axioms: [propext, Classical.choice, Quot.sound] -/

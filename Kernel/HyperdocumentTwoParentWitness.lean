@@ -606,7 +606,7 @@ noncomputable def parentContent : HyperdocumentMerge.ParentContentEvidence paren
 
 noncomputable def mergeCapabilityAdmissible :
     capability.Admissible
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (mergeDeclaration.toRequest mergeConfig) where
   holder := rfl
   scope :=
@@ -629,7 +629,7 @@ noncomputable def mergeCapabilityAdmissible :
   channelNotRevoked := principal.channelsNotRevoked
 
 noncomputable def mergeAuthorization : Authorized TypedAuthorizationWitness.permissivePortal
-    (CredentialAuthorityState.authState projection authorityPre)
+    (CredentialAuthorityState.authState authorityPre)
     (mergeDeclaration.toRequest mergeConfig) where
   evidence := .proof () rfl
   policyWitness := ()
@@ -648,7 +648,7 @@ theorem mergeValidated :
   (validate_accepts _ _ _ _ mergeSemantic.preRootExact mergeSemantic.guardsValid).elim
     fun validated _ => validated
 
-noncomputable def mergeAccepted : HyperdocumentMerge.Accepted history mergeConfig projection
+noncomputable def mergeAccepted : HyperdocumentMerge.Accepted history mergeConfig
     authorityPre baseCell TypedAuthorizationWitness.permissivePortal mergeDeclaration :=
   HyperdocumentMerge.accept principal mergeSemantic parentEvidence parentContent
     (.selected selectedBase) (by
@@ -704,7 +704,7 @@ noncomputable def publicationInputs : HyperdocumentMerge.PublicationInputs merge
 
 noncomputable def eventCapabilityAdmissible :
     capability.Admissible
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted logCell.root).toRequest
         eventConfig) where
   holder := rfl
@@ -732,7 +732,7 @@ noncomputable def eventCapabilityAdmissible :
   channelNotRevoked := principal.channelsNotRevoked
 
 noncomputable def eventAuthorization : Authorized TypedAuthorizationWitness.permissivePortal
-    (CredentialAuthorityState.authState projection authorityPre)
+    (CredentialAuthorityState.authState authorityPre)
     ((HyperdocumentMergePublication.derivedEventDeclaration mergeAccepted logCell.root).toRequest
       eventConfig) where
   evidence := .proof () rfl

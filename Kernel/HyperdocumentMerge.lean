@@ -524,11 +524,10 @@ structure Accepted
     (history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor)
     (config : Config)
-    (projection : CredentialAuthorityState.ProjectionUniverse)
     (authorityPre : CredentialAuthorityState.Cell MAuth)
     (documentPre : Hyperdocument.Cell MDoc)
     (portal : Portal) (declaration : Declaration) : Type _ where
-  principal : AuthenticatedPrincipal projection authorityPre
+  principal : AuthenticatedPrincipal authorityPre
     declaration.request.height declaration.intent.author
   semantic : ValidMerge config documentPre declaration
   parents : CurrentParentEvidence (MDoc := MDoc) history declaration.body.parents
@@ -538,11 +537,11 @@ structure Accepted
   namedCapabilityAdmissible :
     (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
       principal semantic.objectCapability).Admissible
-    (CredentialAuthorityState.authState projection authorityPre)
+    (CredentialAuthorityState.authState authorityPre)
     (declaration.toRequest config)
   accepted : AcceptedCellEffect
     (portal := portal)
-    (authState := CredentialAuthorityState.authState projection authorityPre)
+    (authState := CredentialAuthorityState.authState authorityPre)
     (family config documentPre) (declaration.toRequest config) documentPre declaration ()
 
 def accept
@@ -551,11 +550,10 @@ def accept
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (principal : AuthenticatedPrincipal projection authorityPre
+    (principal : AuthenticatedPrincipal authorityPre
       declaration.request.height declaration.intent.author)
     (semantic : ValidMerge config documentPre declaration)
     (parents : CurrentParentEvidence (MDoc := MDoc) history declaration.body.parents)
@@ -565,14 +563,14 @@ def accept
     (namedCapabilityAdmissible :
       (Minidregg.Theory.HyperdocumentOperations.authenticatedObjectHead
         principal semantic.objectCapability).Admissible
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (declaration.toRequest config))
     (authorization : Authorized portal
-      (CredentialAuthorityState.authState projection authorityPre)
+      (CredentialAuthorityState.authState authorityPre)
       (declaration.toRequest config))
     (validated : CellState.ValidatedPatch MDoc documentPre
       (declaration.toRequest config).preStateRoot (declaration.patch config)) :
-    Accepted history config projection authorityPre documentPre portal declaration where
+    Accepted history config authorityPre documentPre portal declaration where
   principal := principal
   semantic := semantic
   parents := parents
@@ -599,11 +597,10 @@ theorem Accepted.post_contains_guardedSet
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     {space : Namespace} {key : Key space}
     {expected : Option (Value space)} {replacement : Value space}
     (member : guardedSet space key expected replacement ∈ declaration.patch config) :
@@ -617,11 +614,10 @@ theorem Accepted.frame
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     (address : Address)
     (outside : address ∉ Patch.writeFootprint (declaration.patch config)) :
     accepted.accepted.prepared.post.logical address = documentPre.logical address :=
@@ -633,11 +629,10 @@ theorem Accepted.changed_only_declared
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     (address : Address)
     (changed : accepted.accepted.prepared.post.logical address ≠
       documentPre.logical address) :
@@ -650,11 +645,10 @@ theorem Accepted.post_contains_mark
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     (parent : VersionEventId) (id : MarkId) (expected : Option MarkRecord)
     (replacement : MarkRecord)
     (member : StableOverlay.mark parent id expected replacement ∈
@@ -672,11 +666,10 @@ theorem Accepted.post_contains_annotation
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     (parent : VersionEventId) (id : AnnotationId)
     (expected : Option AnnotationRecord) (replacement : AnnotationRecord)
     (member : StableOverlay.annotation parent id expected replacement ∈
@@ -748,11 +741,10 @@ def recordOfAccepted
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted history config authorityPre documentPre portal declaration) :
     VersionEventRecord :=
   { historyDomain := declaration.intent.historyDomain
     document := declaration.intent.document
@@ -772,11 +764,10 @@ def eventDeclaration
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     (expectedLogRoot : Digest) :
     Minidregg.Kernel.HyperdocumentVersionEffects.Declaration where
   expectedLogRoot := expectedLogRoot
@@ -792,11 +783,10 @@ structure PublicationInputs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     (eventConfig : Minidregg.Kernel.HyperdocumentVersionEffects.Config)
     (expectedLogRoot : Digest) : Type _ where
   addressingExact : scheme = eventConfig.scheme
@@ -811,11 +801,10 @@ structure PublicationInputs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted history config authorityPre documentPre portal declaration) :
     (recordOfAccepted accepted).parents = declaration.body.parents.map Parent.key := by
   exact accepted.semantic.parentFrontierExact
 
@@ -825,11 +814,10 @@ structure PublicationInputs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted history config authorityPre documentPre portal declaration) :
     (recordOfAccepted accepted).preStateRoot = documentPre.root :=
   rfl
 
@@ -839,11 +827,10 @@ structure PublicationInputs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration) :
+    (accepted : Accepted history config authorityPre documentPre portal declaration) :
     (recordOfAccepted accepted).postStateRoot =
       accepted.accepted.prepared.post.root :=
   rfl
@@ -854,11 +841,10 @@ structure PublicationInputs
     {history : CausalVersionDag.History (scheme := scheme)
       (family := causalFamily) anchor}
     {config : Config}
-    {projection : CredentialAuthorityState.ProjectionUniverse}
     {authorityPre : CredentialAuthorityState.Cell MAuth}
     {documentPre : Hyperdocument.Cell MDoc}
     {portal : Portal} {declaration : Declaration}
-    (accepted : Accepted history config projection authorityPre documentPre portal declaration)
+    (accepted : Accepted history config authorityPre documentPre portal declaration)
     (expectedLogRoot : Digest) :
     (eventDeclaration accepted expectedLogRoot).record = recordOfAccepted accepted :=
   rfl
