@@ -117,7 +117,7 @@ rustc_version=$(rustc "+$rust_pin" -vV | tr '\n' ';')
 rustc_line=$(rustc "+$rust_pin" -V)
 cargo_version=$(cargo "+$rust_pin" -V)
 cc_version=$(cc --version | sed -n 1p)
-stamp "lean=$lean_version rust=$rust_pin"
+if [ "$client_only" = 1 ]; then stamp "rust=$rust_pin (client only)"; else stamp "lean=$lean_version rust=$rust_pin"; fi
 
 t_lean=$(date +%s) t_cache=$t_lean t_host=$t_lean
 if [ "$client_only" = 0 ]; then
@@ -197,7 +197,13 @@ WRAP
   chmod 0555 "$cc_wrap"
   mkdir -p "$out/work/sdk/MacOSX.sdk"
   target_env=$(printf '%s' "$target" | tr 'a-z-' 'A-Z_')
-  (cd "$src" && env "CC_$(printf '%s' "$target" | tr '-' '_')=$cc_wrap" \
+  target_cc=$(printf '%s' "$target" | tr '-' '_')
+  # The Mach-O UUID hashes the linked objects, and ring's C objects carry the
+  # build directory in their debug info; map it away so the bytes do not
+  # depend on --out (as the Linux build's RUSTFLAGS already do for Rust).
+  (cd "$src" && env "CC_$target_cc=$cc_wrap" \
+      "CFLAGS_$target_cc=-ffile-prefix-map=$out=/out -ffile-prefix-map=$cargo_home=/cargo" \
+      RUSTFLAGS="--remap-path-prefix=$out=/out $RUSTFLAGS" \
       "CARGO_TARGET_${target_env}_LINKER=$cc_wrap" SDKROOT="$out/work/sdk/MacOSX.sdk" \
       ZIG_GLOBAL_CACHE_DIR="$out/work/zig-cache" ZIG_LOCAL_CACHE_DIR="$out/work/zig-cache" \
     cargo "+$rust_pin" build --release --locked -j "$cargo_jobs" \
