@@ -10,15 +10,15 @@ canonical branch, and one proposal branch for every incidence.
 
 Settlement is not a second mutation kernel.  It is an accepted
 `TypedCellHyperedge.Commit`: every incidence is an existing request-indexed
-`AcceptedCellEffect`, the joint patch is validated once, resource writes are
-disjoint, field overlap is either disjoint or resolved by the declared canonical
-order, and the typed resource law balances.  The minted receipt retains that
+`AcceptedCellEffect`, the joint patch is validated once (every guard at its
+prefix), address overlap is either refused by disjoint composition or admitted
+in canonical order only where every accepted outcome survives, and the typed
+resource law balances.  The minted receipt retains that
 actual hyperedge and derives its quadratic history core from the unique canonical
 pre/post cells.  Deployment hashing and header-cell injection remain explicit
 parameters over this exact semantic object.
 -/
 import Assurance.SemanticReceiptRuntimeCodec
-import Kernel.SparseAuthenticatedState
 import Kernel.TypedCellHyperedge
 import Theory.CredentialAuthorityFamily
 
@@ -33,7 +33,7 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-universe u v w x y z b p
+universe u v w y z b p
 
 noncomputable section
 
@@ -116,44 +116,37 @@ end BranchHistory
 
 /-! ## Focus/cut and selected sparse roots -/
 
-/-- A focus is a typed selection from the canonical cell plus a finite set of
+/-- A focus is a selection of canonical-cell addresses plus a finite set of
 sparse planes.  A selected sparse root is never supplied independently: it is
 projected from the exact materialized sparse state for that plane. -/
 structure StateFocus
-    (S : CellState.Schema.{u, v, w, x})
-    (L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w})
-    (sparseMaterializer :
-      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest)
+    (L : Store.Layout.{u, v, w})
+    (SL : Store.Layout.{u, v, w})
+    (sparseMaterializer : CellState.Materializer SL Digest)
     (Plane : Type p) [DecidableEq Plane]
-    (sparseState : Plane ->
-      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer) where
-  fields : Finset S.Field
-  resources : Finset S.Resource
+    (sparseState : Plane -> CellState.Materialized sparseMaterializer) where
+  addresses : Finset (Store.Address L)
   sparsePlanes : Finset Plane
 
 namespace StateFocus
 
 def sparseRootAt
-    {S : CellState.Schema.{u, v, w, x}}
-    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
-    {sparseMaterializer :
-      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
+    {L : Store.Layout.{u, v, w}}
+    {SL : Store.Layout.{u, v, w}}
+    {sparseMaterializer : CellState.Materializer SL Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane ->
-      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
-    (_focus : StateFocus S L sparseMaterializer Plane sparseState)
+    {sparseState : Plane -> CellState.Materialized sparseMaterializer}
+    (_focus : StateFocus L SL sparseMaterializer Plane sparseState)
     (plane : Plane) : Digest :=
   (sparseState plane).root
 
 @[simp] theorem sparseRootAt_exact
-    {S : CellState.Schema.{u, v, w, x}}
-    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
-    {sparseMaterializer :
-      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
+    {L : Store.Layout.{u, v, w}}
+    {SL : Store.Layout.{u, v, w}}
+    {sparseMaterializer : CellState.Materializer SL Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane ->
-      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
-    (focus : StateFocus S L sparseMaterializer Plane sparseState)
+    {sparseState : Plane -> CellState.Materialized sparseMaterializer}
+    (focus : StateFocus L SL sparseMaterializer Plane sparseState)
     (plane : Plane) :
     focus.sparseRootAt plane = (sparseState plane).root :=
   rfl
@@ -189,43 +182,39 @@ end LiveAuthorityPath
 section Cut
 
 variable
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {portal : Portal} {projection : AuthorizationProjection S}
-    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
-    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
-    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
-    {sparseMaterializer :
-      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
+    {portal : Portal} {projection : AuthorizationProjection L}
+    {Incidence : Type z}
+    {declaration : Declaration.{u, v, w, y, z} L M portal projection Incidence}
+    {SL : Store.Layout.{u, v, w}}
+    {sparseMaterializer : CellState.Materializer SL Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane ->
-      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
+    {sparseState : Plane -> CellState.Materialized sparseMaterializer}
 
 /-- The exact focus/cut presented for settlement.
 
 The canonical branch says which public history head is currently being updated.
 Every incidence has a branch whose latest semantic-object root is exactly that
-leg's effect digest.  The focused cell keys are exactly the joint patch
-footprints; sparse roots are retained as additional read context and derived by
+leg's effect digest.  The focused cell addresses are exactly the joint patch's
+write footprint; sparse roots are retained as additional read context and derived by
 `StateFocus.sparseRootAt`. -/
 structure FocusCut (base : CanonicalHead)
-    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence) where
+    (declaration : Declaration.{u, v, w, y, z} L M portal projection Incidence) where
   canonical : BranchHistory base
   branches : Incidence -> BranchHistory base
-  focus : StateFocus S L sparseMaterializer Plane sparseState
+  focus : StateFocus L SL sparseMaterializer Plane sparseState
   canonicalPreStateExact : canonical.head.stateRoot = declaration.pre.root
   branchProposalExact : forall incidence,
     (branches incidence).latestSemanticObjectRoot =
       some (declaration.legs incidence).request.effectsDigest
-  fieldsExact : focus.fields = declaration.jointPatch.fieldFootprint
-  resourcesExact : focus.resources = declaration.jointPatch.resourceFootprint
+  addressesExact : focus.addresses = Store.Patch.writeFootprint declaration.jointPatch
 
 namespace FocusCut
 
 theorem exactBaseDomain
     {base : CanonicalHead}
-    (cut : FocusCut (L := L) (sparseMaterializer := sparseMaterializer)
+    (cut : FocusCut (SL := SL) (sparseMaterializer := sparseMaterializer)
       (Plane := Plane) (sparseState := sparseState) base declaration)
     (incidence : Incidence) :
     (cut.branches incidence).head.historyDomain = base.historyDomain :=
@@ -233,7 +222,7 @@ theorem exactBaseDomain
 
 theorem no_stale_canonical_pre
     {base : CanonicalHead}
-    (cut : FocusCut (L := L) (sparseMaterializer := sparseMaterializer)
+    (cut : FocusCut (SL := SL) (sparseMaterializer := sparseMaterializer)
       (Plane := Plane) (sparseState := sparseState) base declaration)
     (stale : cut.canonical.head.stateRoot ≠ declaration.pre.root) : False :=
   stale cut.canonicalPreStateExact
@@ -247,31 +236,26 @@ end Cut
 section Conflicts
 
 variable
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {portal : Portal} {projection : AuthorizationProjection S}
-    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
+    {portal : Portal} {projection : AuthorizationProjection L}
+    {Incidence : Type z} [Fintype Incidence]
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance}
-    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
+    {law : ResourceLaw.{u, v, w, y, b} L M portal Coordinate Balance}
+    {declaration : Declaration.{u, v, w, y, z} L M portal projection Incidence}
 
-/-- An unresolved conflict is exactly a colliding resource replacement, or a
-field collision while the plan declares disjoint field composition.  Field
-overlap in canonical mode is resolved by the complete declared later-wins order
-and is therefore not called an unresolved conflict. -/
+/-- An unresolved conflict is an address written by two incidences while the
+plan declares disjoint composition.  Overlap in canonical mode is ordered, and
+its outcomes must survive (`Commit.outcomesPreserved`), so it is not called an
+unresolved conflict. -/
 inductive MergeConflict
-    (declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence)
+    (declaration : Declaration.{u, v, w, y, z} L M portal projection Incidence)
     (left right : Incidence) : Prop
-  | field
-      (mode : declaration.composition.fieldMode = .disjoint)
-      (key : S.Field)
-      (leftWrites : key ∈ (declaration.legPatch left).fieldFootprint)
-      (rightWrites : key ∈ (declaration.legPatch right).fieldFootprint)
-  | resource
-      (key : S.Resource)
-      (leftWrites : key ∈ (declaration.legPatch left).resourceFootprint)
-      (rightWrites : key ∈ (declaration.legPatch right).resourceFootprint)
+  | address
+      (mode : declaration.composition.mode = .disjoint)
+      (key : Store.Address L)
+      (leftWrites : key ∈ Store.Patch.writeFootprint (declaration.legPatch left))
+      (rightWrites : key ∈ Store.Patch.writeFootprint (declaration.legPatch right))
 
 /-- A typed commit contains the real conflict-freedom proof. -/
 theorem Commit.noMergeConflict
@@ -280,14 +264,11 @@ theorem Commit.noMergeConflict
     Not (MergeConflict declaration left right) := by
   intro conflict
   cases conflict with
-  | field mode key leftWrites rightWrites =>
-      have disjoint : declaration.FieldFootprintsDisjoint := by
-        simpa [mode] using commit.shape.fieldsValid
+  | address mode key leftWrites rightWrites =>
+      have disjoint : declaration.FootprintsDisjoint := by
+        simpa [mode] using commit.shape.modeValid
       exact (Finset.disjoint_left.mp
         (disjoint left right different) leftWrites) rightWrites
-  | resource key leftWrites rightWrites =>
-      exact (Finset.disjoint_left.mp
-        (commit.shape.resourcesDisjoint left right different) leftWrites) rightWrites
 
 end Conflicts
 
@@ -296,28 +277,25 @@ end Conflicts
 section Settlement
 
 variable
-    {S : CellState.Schema.{u, v, w, x}}
-    [DecidableEq S.Field] [DecidableEq S.Resource]
-    {M : CellState.Materializer S Digest}
-    {portal : Portal} {projection : AuthorizationProjection S}
-    {Incidence : Type z} [Fintype Incidence] [DecidableEq Incidence]
+    {L : Store.Layout.{u, v, w}}
+    {M : CellState.Materializer L Digest}
+    {portal : Portal} {projection : AuthorizationProjection L}
+    {Incidence : Type z} [Fintype Incidence]
     {Coordinate : Type y} {Balance : Type b} [AddCommMonoid Balance]
-    {law : ResourceLaw.{u, v, w, x, y, z, b} S M portal Coordinate Balance}
-    {declaration : Declaration.{u, v, w, x, y, z} S M portal projection Incidence}
-    {L : Minidregg.Kernel.SparseAuthenticatedState.Layout.{u, v, w}}
-    {sparseMaterializer :
-      Minidregg.Kernel.SparseAuthenticatedState.Materializer L Digest}
+    {law : ResourceLaw.{u, v, w, y, b} L M portal Coordinate Balance}
+    {declaration : Declaration.{u, v, w, y, z} L M portal projection Incidence}
+    {SL : Store.Layout.{u, v, w}}
+    {sparseMaterializer : CellState.Materializer SL Digest}
     {Plane : Type p} [DecidableEq Plane]
-    {sparseState : Plane ->
-      Minidregg.Kernel.SparseAuthenticatedState.Materialized sparseMaterializer}
+    {sparseState : Plane -> CellState.Materialized sparseMaterializer}
     {base : CanonicalHead}
-    {cut : FocusCut (L := L) (sparseMaterializer := sparseMaterializer)
+    {cut : FocusCut (SL := SL) (sparseMaterializer := sparseMaterializer)
       (Plane := Plane) (sparseState := sparseState) base declaration}
 
 /-- Successful settlement is the existing schema-polymorphic typed hyperedge
 commit plus a current proof-relevant authority path for every exact leg. -/
 structure AcceptedSettlement
-    (cut : FocusCut (L := L) (sparseMaterializer := sparseMaterializer)
+    (cut : FocusCut (SL := SL) (sparseMaterializer := sparseMaterializer)
       (Plane := Plane) (sparseState := sparseState) base declaration) where
   commit : Commit law declaration
   authorityPath : forall incidence,
@@ -330,8 +308,7 @@ def post (settlement : AcceptedSettlement (law := law) cut) :
   settlement.commit.prepared.post
 
 def hyperedge (settlement : AcceptedSettlement (law := law) cut) :
-    Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge
-      settlement.commit :=
+    Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge law declaration :=
   settlement.commit.toHyperedge
 
 @[simp] theorem postRoot (settlement : AcceptedSettlement (law := law) cut) :
@@ -343,57 +320,47 @@ theorem noMergeConflict (settlement : AcceptedSettlement (law := law) cut)
     Not (MergeConflict declaration left right) :=
   GrainForkSettlement.Commit.noMergeConflict settlement.commit different
 
-theorem includes_leg_field
+theorem includes_leg_writes
     (settlement : AcceptedSettlement (law := law) cut)
     (incidence : Incidence) :
-    (declaration.legPatch incidence).fieldFootprint ⊆ cut.focus.fields := by
-  rw [cut.fieldsExact]
-  exact settlement.commit.leg_fieldFootprint_subset incidence
-
-theorem includes_leg_resource
-    (settlement : AcceptedSettlement (law := law) cut)
-    (incidence : Incidence) :
-    (declaration.legPatch incidence).resourceFootprint ⊆ cut.focus.resources := by
-  rw [cut.resourcesExact]
-  exact settlement.commit.leg_resourceFootprint_subset incidence
+    Store.Patch.writeFootprint (declaration.legPatch incidence) ⊆ cut.focus.addresses := by
+  rw [cut.addressesExact]
+  exact settlement.commit.leg_footprint_subset incidence
 
 end AcceptedSettlement
 
 /-! ### Canonical history core from the unique typed post -/
 
-/-- A finite, surjective field enumeration and typed sparse encoding into the
-history field.  Absence is encoded explicitly rather than replaced by a hidden
-default.  Resource packages remain bound by the canonical full-cell pre/post
-roots; this projection does not pretend heterogeneous resource evidence is a
-field. -/
+/-- A finite, surjective address enumeration and typed sparse encoding into
+the history field.  Absence is encoded explicitly rather than replaced by a
+hidden default. -/
 structure FieldProjection (n : Nat) (F : Type*) [Field F] where
-  keyAt : Fin n -> S.Field
+  keyAt : Fin n -> Store.Address L
   keyAt_surjective : Function.Surjective keyAt
-  encode : (field : S.Field) -> Option (S.FieldType field) -> F
+  encode : (address : Store.Address L) -> Option (L.Value address.1) -> F
 
 def FieldProjection.project
     {n : Nat} {F : Type*} [Field F]
-    (fieldProjection : FieldProjection (S := S) n F)
+    (fieldProjection : FieldProjection (L := L) n F)
     (cell : CellState.Materialized M) : Fin n -> F :=
   fun index => fieldProjection.encode (fieldProjection.keyAt index)
-    (cell.logical.fields (fieldProjection.keyAt index))
+    (cell.logical (fieldProjection.keyAt index))
 
 def AcceptedSettlement.receiptDelta
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (settlement : AcceptedSettlement (law := law) cut)
-    (fieldProjection : FieldProjection (S := S) n F) :
+    (fieldProjection : FieldProjection (L := L) n F) :
     Minidregg.Theory.ReactiveReceipt.ReceiptDelta
       (fieldProjection.project declaration.pre)
       (fieldProjection.project settlement.post) where
   touched := Finset.univ.filter fun index =>
-    fieldProjection.keyAt index ∈ declaration.jointPatch.fieldFootprint
+    fieldProjection.keyAt index ∈ Store.Patch.writeFootprint declaration.jointPatch
   frame := by
     intro index outside
-    have fieldOutside :
-        fieldProjection.keyAt index ∉ declaration.jointPatch.fieldFootprint := by
+    have addressOutside :
+        fieldProjection.keyAt index ∉ Store.Patch.writeFootprint declaration.jointPatch := by
       simpa using outside
-    have framed := settlement.commit.field_frame
-      (fieldProjection.keyAt index) fieldOutside
+    have framed := settlement.commit.frame (fieldProjection.keyAt index) addressOutside
     exact congrArg (fieldProjection.encode (fieldProjection.keyAt index)) framed
 
 /-- Public values projected directly from the exact accepted settlement.  A
@@ -426,7 +393,7 @@ def AcceptedSettlement.header
 def AcceptedSettlement.receiptClaim
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (settlement : AcceptedSettlement (law := law) cut)
-    (fieldProjection : FieldProjection (S := S) n F)
+    (fieldProjection : FieldProjection (L := L) n F)
     (headerCells : AcceptedSettlement (law := law) cut -> BindingIx -> F) :
     BoundSemanticReceiptClaim n F where
   witness :=
@@ -439,12 +406,11 @@ exact accumulated claim derived above. -/
 structure CanonicalReceipt
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (settlement : AcceptedSettlement (law := law) cut)
-    (fieldProjection : FieldProjection (S := S) n F)
+    (fieldProjection : FieldProjection (L := L) n F)
     (headerCells : AcceptedSettlement (law := law) cut -> BindingIx -> F) where
   private mk ::
   semanticHyperedge :
-    Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge
-      settlement.commit
+    Minidregg.Kernel.TypedCellHyperedge.Commit.SemanticHyperedge law declaration
   semanticHyperedgeExact : semanticHyperedge = settlement.hyperedge
   claim : BoundSemanticReceiptClaim n F
   claimExact : claim = settlement.receiptClaim fieldProjection headerCells
@@ -452,7 +418,7 @@ structure CanonicalReceipt
 def AcceptedSettlement.mintReceipt
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     (settlement : AcceptedSettlement (law := law) cut)
-    (fieldProjection : FieldProjection (S := S) n F)
+    (fieldProjection : FieldProjection (L := L) n F)
     (headerCells : AcceptedSettlement (law := law) cut -> BindingIx -> F) :
     CanonicalReceipt settlement fieldProjection headerCells where
   semanticHyperedge := settlement.hyperedge
@@ -463,7 +429,7 @@ def AcceptedSettlement.mintReceipt
 @[simp] theorem CanonicalReceipt.claim_core_exact
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     {settlement : AcceptedSettlement (law := law) cut}
-    {fieldProjection : FieldProjection (S := S) n F}
+    {fieldProjection : FieldProjection (L := L) n F}
     {headerCells : AcceptedSettlement (law := law) cut -> BindingIx -> F}
     (receipt : CanonicalReceipt settlement fieldProjection headerCells) :
     receipt.claim.witness.core =
@@ -474,7 +440,7 @@ def AcceptedSettlement.mintReceipt
 theorem CanonicalReceipt.post_root_exact
     {n : Nat} {F : Type*} [Field F] [DecidableEq F]
     {settlement : AcceptedSettlement (law := law) cut}
-    {fieldProjection : FieldProjection (S := S) n F}
+    {fieldProjection : FieldProjection (L := L) n F}
     {headerCells : AcceptedSettlement (law := law) cut -> BindingIx -> F}
     (_receipt : CanonicalReceipt settlement fieldProjection headerCells) :
     settlement.header.postStateRoot = declaration.apex := by
