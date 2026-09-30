@@ -579,7 +579,7 @@ def provisionSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do
   match ← ParticipantFactoryProvisioningReceiver.receiveLoaded config.deployment config.profile
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-      config.storage.transport opened.durable bytes with
+      config.transport opened.durable bytes with
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "provision-factory-observe" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
@@ -665,7 +665,7 @@ def fleetSubmitLoaded (config : Config) (opened : Opened config)
     IO Outcome := do
   match ← FleetTurnReceiver.receiveLoaded config.deployment config.profile config.tariff
       ⟨config.federation, logicalHeight config opened.durable⟩ config.signature
-      config.storage.transport opened.durable bytes with
+      config.transport opened.durable bytes with
   | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
   -- The signed header names an authority root older than the loaded one: the
   -- plan was made against an earlier image and nothing moved. That is the
