@@ -863,6 +863,23 @@ theorem fold_wf {g W : World R TxId D} {log : List (Turn R TxId Ev)}
       | none => rw [hl] at h; cases h
       | some w => rw [hl] at h; exact step_wf H (ih hl) h
 
+/-- `genesis` is a genesis world: height zero at the initial log root and an
+empty journal, so `journal_exact` and `fold_head` apply from it. -/
+theorem genesis_is_Genesis (cells : Cells R) : Genesis H (genesis H cells : World R TxId D) := by
+  refine ⟨Store.set_eq _ _ _, fun x => ?_⟩
+  show (genesisSystem H : Store (sysLayout TxId D)) ⟨SysSpace.journal, x⟩ = none
+  unfold genesisSystem
+  rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e))]
+  rfl
+
+/-- A genesis world has no retired ids, so it satisfies the invariant. -/
+theorem genesis_wf (cells : Cells R) : (genesis H cells : World R TxId D).WF := by
+  intro c _
+  show (genesisSystem H : Store (sysLayout TxId D)) ⟨SysSpace.retired, c⟩ = none
+  unfold genesisSystem
+  rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e))]
+  rfl
+
 end StepLaws
 
 /-! ## Height, log chain, and journal exactness (§4.9, §4.13) -/
@@ -1429,6 +1446,10 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms step_wf
 /-- info: 'Minidregg.Kernel.World.fold_wf' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fold_wf
+/-- info: 'Minidregg.Kernel.World.genesis_is_Genesis' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms genesis_is_Genesis
+/-- info: 'Minidregg.Kernel.World.genesis_wf' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms genesis_wf
 /-- info: 'Minidregg.Kernel.World.step_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms step_head
 /-- info: 'Minidregg.Kernel.World.fold_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
