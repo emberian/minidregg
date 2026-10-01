@@ -135,7 +135,8 @@ grant() { # NAME VERBS-JSON EXTRA-JSON
   jq -r .capability "$SPONSOR_WS/proposals/m-$1/recipient-reference.json"
 }
 R_OBSERVE=$(grant grant-r-read '["observe"]' '{}')
-R_ANNOTATE=$(grant grant-r-annotate '["mutate"]' '{"fields":["annotations"]}')
+R_ANNOTATE=$(grant grant-r-annotate '["observe","mutate"]' '{"fields":["annotations"]}')
+[ -n "$R_OBSERVE" ] && [ -n "$R_ANNOTATE" ] || { echo "setup: a reviewer grant failed (see $D/grant-r-*.err)" >&2; exit 1; }
 run grant-r-import "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name mpaper --kind object \
   --target "$(jq -r .target "$SPONSOR_WS/refs/mpaper.json")" --observe-capability "$R_OBSERVE" \
   --operation-capability "$R_ANNOTATE"; ok grant-r-import
