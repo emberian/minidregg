@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The one gate. Every step must pass; there is no fallback and no skip flag.
 #   1. proof hygiene: no bare `#print axioms`, no project `axiom`.
+#      Theory/SheetLaw.lean's embedded law is the embed of the MUD sheet JSON.
 #   2. `lake build Minidregg`: the umbrella imports every library root
 #      (Theory Kernel Pred Effects Compiler Selvage Assurance Host), so every
 #      library module elaborates, every pinned axiom footprint is compared, and
@@ -21,6 +22,7 @@ lake=${LAKE:-lake}
 
 echo "== gate 1/5: proof hygiene"
 bash scripts/check-proof-hygiene.sh
+python3 scripts/gen-sheetlaw.py --check
 
 tree_before=$(git diff --binary | git hash-object --stdin)
 

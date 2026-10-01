@@ -1,10 +1,12 @@
 /-
 # Theory.SheetLaw — the MUD sheet law, as written, judged by the kernel
 
-`deploy/shell/templates/mud/sheet/law.sheet.json` (branch `mud-templates`, commit `1ee44ed`), composed
-as the templates' README says: `all [law.management, clause 1, …, clause 32]`. §2 is that JSON written
+`deploy/shell/templates/mud/sheet/law.sheet.json` (branch `mud-law-fix`, commit `8280b8d7`), composed
+as the templates' README says: `all [law.management, clause 1, …, clause 33]`. §2 is that JSON written
 out as a `Pred` term, one `def` per clause, placeholder `{X}` ↦ `p.X`; nothing is re-sorted, dropped or
-simplified. Slot spellings are the renderer's: `field NAME view` ↦ `resource/field/{n}/{view}` by
+simplified. §2 is generated, not hand-edited: the mechanical embed (one recursive render of the JSON
+predicate tree) reproduces `1ee44ed`'s §2 byte for byte from `1ee44ed`'s JSON, and this §2 from
+`8280b8d7`'s. Slot spellings are the renderer's: `field NAME view` ↦ `resource/field/{n}/{view}` by
 `sheet/fields.json`, `joint I KIND NAME view` ↦ `joint/index/{I}/resource/field/{n}/{view}`,
 `clock now` ↦ `clock/now`.
 
@@ -18,9 +20,9 @@ so on this branch:
   needed. Consequences proved below: the referee cannot lower hp at all (`combat_death_refused_without_joint`),
   the owner cannot declare a strike (`owner_strike_refused_without_clock`), and **no one can revive a
   dead sheet** (`revive_needs_clock`, `dead_stays_dead_without_clock`);
-* clauses 25, 28 and 29 put `leSlotsOff … clock/now …` under `not`: a fail-closed atom under `not`
-  passes, so while the clock is absent the death timer admits any `respawn` and the referee's
-  balance/equilibrium payments admit any non-decreasing value.
+* clauses 25, 27, 28 and 29 state their timers positively (`leSlotsOff clock/now … NEG_…`), so a
+  missing clock refuses them too: no death without the clock (`death_needs_clock`). On `1ee44ed`
+  they wrapped the atom in `not`, which passed while the clock was absent.
 
 The slot-to-slot atoms (`eqSlots`, `leSlots`, `leSlotsOff`) are k-sloteq's and k-offset's, merged into
 this branch for these laws; wave-c alone cannot express either law.
@@ -28,11 +30,10 @@ this branch for these laws; wave-c alone cannot express either law.
 §6 models the kernel's view with the clock and `joint/index` slots as optional extras, so the poles
 that need K-CLOCK / K-JOINT-INDEX are stated with them present, and the wave-c poles without.
 
-Counterexample found (`referee_kills_healthy_sheet`): no clause ties a death to hp. The referee may
-write `alive 1 → 0, deaths +1` on a sheet at full hp with no attacker, and the law admits it, with
-or without the clock and joint slots. `deathNeedsHp` is the missing clause
-(`alive 1 → 0 ⇒ hp ≤ 0`); `sheetLawFixed` appends it, refuses the smite and still admits the
-combat death.
+Counterexample found on `1ee44ed`'s law (`referee_kills_healthy_sheet`): no clause tied a death to hp,
+so the referee could write `alive 1 → 0, deaths +1` on a sheet at full hp with no attacker. Clause 33
+(`alive 1 → 0 ⇒ hp ≤ 0`, `death_needs_hp`) closes it: `smite_refused`, while
+`death_reachable_by_strike` still admits the combat death.
 
 The kernel theorems (§5) are over `DeclaredResourceController.CheckedLeg`, the per-leg record every
 `AcceptedInvocation` carries: its `Authorized` value forces the committed predicate to hold on
@@ -58,12 +59,12 @@ structure Params where
   MAXHIT_LT : Int
   HPMAX : Int
   HOME : Int
-  RESPAWN_M1 : Int
-  COST_M1 : Int
-  ECOST_M1 : Int
+  NEG_RESPAWN : Int
+  NEG_COST : Int
+  NEG_ECOST : Int
   LANTERN : Int
 
-/-! ## §2. The law, literally (`law.management.json`, then `sheet/law.sheet.json` clauses 1–32) -/
+/-! ## §2. The law, literally (`law.management.json`, then `sheet/law.sheet.json` clauses 1–33) -/
 
 section Law
 set_option linter.unusedVariables false
@@ -394,7 +395,7 @@ def sheetClause25 (p : Params) : Pred :=
     .not (Pred.all [
         .eq "resource/field/5/before" 1,
         .eq "resource/field/5/after" 0]),
-    .not (.leSlotsOff "resource/field/9/after" "clock/now" p.RESPAWN_M1)]
+    .leSlotsOff "clock/now" "resource/field/9/after" p.NEG_RESPAWN]
 
 /-- clause 26 -/
 def sheetClause26 (p : Params) : Pred :=
@@ -424,11 +425,11 @@ def sheetClause27 (p : Params) : Pred :=
     Pred.all [
       .eq "joint/index/0/resource/field/7/before" 1,
       .leSlots "joint/index/0/resource/field/3/before" "clock/now",
-      .not (.leSlotsOff "joint/index/0/resource/field/3/after" "clock/now" p.COST_M1)],
+      .leSlotsOff "clock/now" "joint/index/0/resource/field/3/after" p.NEG_COST],
     Pred.all [
       .eq "joint/index/0/resource/field/7/before" 2,
       .leSlots "joint/index/0/resource/field/4/before" "clock/now",
-      .not (.leSlotsOff "joint/index/0/resource/field/4/after" "clock/now" p.ECOST_M1)]]
+      .leSlotsOff "clock/now" "joint/index/0/resource/field/4/after" p.NEG_ECOST]]
 
 /-- clause 28 -/
 def sheetClause28 (p : Params) : Pred :=
@@ -439,7 +440,7 @@ def sheetClause28 (p : Params) : Pred :=
     Pred.all [
       .memberOf "resource/field/7/before" [1, 3, 4],
       .not (.le "resource/field/3/delta" (-1)),
-      .not (.leSlotsOff "resource/field/3/after" "clock/now" p.COST_M1)]]
+      .leSlotsOff "clock/now" "resource/field/3/after" p.NEG_COST]]
 
 /-- clause 29 -/
 def sheetClause29 (p : Params) : Pred :=
@@ -450,7 +451,7 @@ def sheetClause29 (p : Params) : Pred :=
     Pred.all [
       .eq "resource/field/7/before" 2,
       .not (.le "resource/field/4/delta" (-1)),
-      .not (.leSlotsOff "resource/field/4/after" "clock/now" p.ECOST_M1)]]
+      .leSlotsOff "clock/now" "resource/field/4/after" p.NEG_ECOST]]
 
 /-- clause 30 -/
 def sheetClause30 (p : Params) : Pred :=
@@ -480,16 +481,26 @@ def sheetClause32 (p : Params) : Pred :=
     .le "resource/field/13/delta" 0,
     .eq "resource/field/7/before" 3]
 
+/-- clause 33 -/
+def sheetClause33 (p : Params) : Pred :=
+  Pred.any [
+    .not (.eq "request/verb" 2),
+    .not (Pred.all [
+        .eq "resource/field/5/before" 1,
+        .eq "resource/field/5/after" 0]),
+    .le "resource/field/2/after" 0]
+
 
 end Law
 
-/-- The installed sheet law: management is clause 0, then clauses 1–32 in file order. -/
+/-- The installed sheet law: management is clause 0, then clauses 1–33 in file order. -/
 def sheetClauses (p : Params) : List Pred :=
   [management p,
    sheetClause1 p, sheetClause2 p, sheetClause3 p, sheetClause4 p, sheetClause5 p, sheetClause6 p, sheetClause7 p, sheetClause8 p,
    sheetClause9 p, sheetClause10 p, sheetClause11 p, sheetClause12 p, sheetClause13 p, sheetClause14 p, sheetClause15 p, sheetClause16 p,
    sheetClause17 p, sheetClause18 p, sheetClause19 p, sheetClause20 p, sheetClause21 p, sheetClause22 p, sheetClause23 p, sheetClause24 p,
-   sheetClause25 p, sheetClause26 p, sheetClause27 p, sheetClause28 p, sheetClause29 p, sheetClause30 p, sheetClause31 p, sheetClause32 p]
+   sheetClause25 p, sheetClause26 p, sheetClause27 p, sheetClause28 p, sheetClause29 p, sheetClause30 p, sheetClause31 p, sheetClause32 p,
+   sheetClause33 p]
 
 def sheetLaw (p : Params) : Pred := Pred.all (sheetClauses p)
 
@@ -1092,6 +1103,36 @@ theorem owner_alive_monotone_over_history (p : Params) (v : Values) (ts : List T
 
 end History
 
+/-- **`death_needs_hp`** (clause 33, the converse of clause 6): an admitted mutate that takes `alive`
+1 → 0 leaves `hp ≤ 0`. With clause 6, `alive` falls exactly when hp crosses 0. -/
+theorem death_needs_hp (p : Params) (o n : State) (admitted : eval (sheetLaw p) o n = true)
+    (verb : n.get "request/verb" = some 2)
+    (wasAlive : n.get "resource/field/5/before" = some 1)
+    (nowDead : n.get "resource/field/5/after" = some 0) :
+    ∃ h, n.get "resource/field/2/after" = some h ∧ h ≤ 0 := by
+  have c := sheet_clause admitted (q := sheetClause33 p) (by simp [sheetClauses])
+  simp only [sheetClause33, ev_any, ev_all, ev_not, ev_eq, ev_le, List.mem_cons, List.not_mem_nil,
+    or_false, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp, forall_eq, verb, wasAlive,
+    nowDead, not_true_eq_false, false_or, and_self] at c
+  exact c
+
+/-- **`death_needs_clock`** (clause 25 in its positive `leSlotsOff` form): with no `clock/now` slot no
+admitted mutate takes `alive` 1 → 0. With `revive_needs_clock`, `alive` is constant on a clockless
+step. -/
+theorem death_needs_clock (p : Params) (o n : State) (verb : n.get "request/verb" = some 2)
+    (noClock : n.get "clock/now" = none)
+    (wasAlive : n.get "resource/field/5/before" = some 1)
+    (nowDead : n.get "resource/field/5/after" = some 0) :
+    eval (sheetLaw p) o n = false := by
+  apply Bool.eq_false_iff.mpr
+  intro admitted
+  have c := sheet_clause admitted (q := sheetClause25 p) (by simp [sheetClauses])
+  simp only [sheetClause25, ev_any, ev_all, ev_not, ev_eq, ev_leSlotsOff, List.mem_cons,
+    List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left, forall_eq_or_imp, forall_eq, verb,
+    wasAlive, nowDead, noClock, not_true_eq_false, false_or, and_self] at c
+  obtain ⟨x, y, hx, -⟩ := c
+  cases hx
+
 /-! ## §5. The kernel: every admitted leg satisfies its installed law
 
 `CheckedLeg` is what `DeclaredResourceController.verifyAndAuthorizeLeg` returns and what every
@@ -1200,8 +1241,8 @@ end Kernel
 
 /-! ## §8. Poles on concrete sheets, by `decide`
 
-Tidewrack's constants (`tidewrack/realm.json`: MAXHIT_LT −7, HPMAX 10, RESPAWN_M1 −1, COST_M1 2,
-ECOST_M1 3, LANTERN 2; HOME = the shrine, 105). The subject numbers are this file's: the sheet's
+Tidewrack's constants (`tidewrack/realm.json`: MAXHIT_LT −7, HPMAX 10, NEG_RESPAWN 0, NEG_COST −3,
+NEG_ECOST −4, LANTERN 2; HOME = the shrine, 105). The subject numbers are this file's: the sheet's
 owner is 7, the referee 3, the founder 1, a stranger 9. Field numbers are `sheet/fields.json`:
 id 0, at 1, hp 2, bal 3, eq 4, alive 5, deaths 6, intent 7, target 8, respawn 9, aff-asthma 10,
 aff-paralysis 11, aff-clumsiness 12, def-ward 13, skill 14. -/
@@ -1210,7 +1251,7 @@ section Poles
 
 def tidewrack : Params :=
   { S := 7, REF := 3, W_FOUNDER := 1, MAXHIT_LT := -7, HPMAX := 10, HOME := 105,
-    RESPAWN_M1 := -1, COST_M1 := 2, ECOST_M1 := 3, LANTERN := 2 }
+    NEG_RESPAWN := 0, NEG_COST := -3, NEG_ECOST := -4, LANTERN := 2 }
 
 /-- A sheet from its fifteen fields, in `fields.json` order. -/
 def sheet (at' hp bal eq alive deaths intent target respawn asthma paralysis clumsiness ward skill : Int) :
@@ -1265,31 +1306,17 @@ theorem death_reachable_by_strike :
       Minidregg.Kernel.DeclaredResourceProjection.get slain 5 = some 0 := by
   decide
 
-/-- **On this branch the combat death is refused**: without the joint and clock slots the referee
-cannot lower hp at all (clauses 26 and 27 fail closed). -/
+/-- **Without the joint and clock slots the combat death is refused**: clause 25 fails closed on the
+missing clock, and the referee cannot lower hp at all (clauses 26 and 27 fail closed). -/
 theorem combat_death_refused_without_joint :
     admits (sheetLaw tidewrack) live strikeTurnWaveC = false := by
   decide
 
-/-- **Counterexample: the referee may kill a healthy sheet.** `alive 1 → 0, deaths +1` at hp 3, no
-attacker, no clock: every clause admits it. No clause makes a death need hp ≤ 0. -/
-theorem referee_kills_healthy_sheet :
-    admits (sheetLaw tidewrack) live smiteTurn = true := by
-  decide
-
-/-- The missing clause: a death (`alive 1 → 0`) needs `hp ≤ 0`. -/
-def deathNeedsHp : Pred :=
-  Pred.any [.not (.eq "request/verb" 2),
-    .not (Pred.all [.eq "resource/field/5/before" 1, .eq "resource/field/5/after" 0]),
-    .le "resource/field/2/after" 0]
-
-def sheetLawFixed (p : Params) : Pred := Pred.all (sheetClauses p ++ [deathNeedsHp])
-
-set_option maxRecDepth 20000 in
-/-- The fixed law refuses the smite and still admits the combat death. -/
-theorem fixed_law_refuses_smite_admits_strike :
-    admits (sheetLawFixed tidewrack) live smiteTurn = false ∧
-      admits (sheetLawFixed tidewrack) live strikeTurn = true := by
+/-- **The referee cannot kill a healthy sheet** (clause 33). `alive 1 → 0, deaths +1` at hp 3, no
+attacker, no clock: refused. On `1ee44ed`'s law this turn was admitted (the counterexample
+`referee_kills_healthy_sheet`); `death_reachable_by_strike` is the paired satisfiable pole. -/
+theorem smite_refused :
+    admits (sheetLaw tidewrack) live smiteTurn = false := by
   decide
 
 /-- **Refutable pole: the owner's `alive := 1` is refused**, even with the clock present. -/
@@ -1371,6 +1398,10 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms revive_needs_clock
 /-- info: 'Minidregg.Theory.SheetLaw.owner_cannot_raise_alive' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms owner_cannot_raise_alive
+/-- info: 'Minidregg.Theory.SheetLaw.death_needs_hp' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms death_needs_hp
+/-- info: 'Minidregg.Theory.SheetLaw.death_needs_clock' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms death_needs_clock
 /-- info: 'Minidregg.Theory.SheetLaw.fieldName_inj' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms fieldName_inj
 /-- info: 'Minidregg.Theory.SheetLaw.pairName_ne_fieldName' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -1413,10 +1444,8 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms death_is_reachable
 /-- info: 'Minidregg.Theory.SheetLaw.combat_death_refused_without_joint' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms combat_death_refused_without_joint
-/-- info: 'Minidregg.Theory.SheetLaw.referee_kills_healthy_sheet' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms referee_kills_healthy_sheet
-/-- info: 'Minidregg.Theory.SheetLaw.fixed_law_refuses_smite_admits_strike' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms fixed_law_refuses_smite_admits_strike
+/-- info: 'Minidregg.Theory.SheetLaw.smite_refused' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms smite_refused
 /-- info: 'Minidregg.Theory.SheetLaw.owner_revive_refused' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms owner_revive_refused
 /-- info: 'Minidregg.Theory.SheetLaw.shrine_revive_admitted' depends on axioms: [propext] -/
