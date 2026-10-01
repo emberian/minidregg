@@ -145,9 +145,19 @@ private def item (kind : ResourceKind) (index : Nat) (json : Json) : Result (Ite
       else throw s!"{path}: the delegation is over a {kindName commandKind} resource"
   | other => throw s!"{path}: unknown item type {other}"
 
+/-- A scope's targets: the named cells, or `under R` (the room and every cell
+born under it, K-ROOM). -/
+private def targetsJson {kind : ResourceKind} : TargetSet kind → Json
+  | .explicit ts => .arr <| ((ts.image (·.value)).sort (· ≤ ·)).toArray.map decimal
+  | .under room => .mkObj [("under", decimal room)]
+
+private def targetsText {kind : ResourceKind} : TargetSet kind → String
+  | .explicit ts => braces ((ts.image (·.value)).sort (· ≤ ·) |>.map toString)
+  | .under room => s!"under {room}"
+
 private def capJson {kind : ResourceKind} (cap : Capability kind) : List (String × Json) :=
   [("holder", holderText cap.holder),
-   ("targets", .arr <| ((cap.scope.targets.image (·.value)).sort (· ≤ ·)).toArray.map decimal),
+   ("targets", targetsJson cap.scope.targets),
    ("verbs", .arr <| (verbNames cap.scope.verbs).toArray.map Json.str),
    ("maxCost", decimal cap.scope.maxCost), ("notBefore", decimal cap.notBefore),
    ("notAfter", decimal cap.notAfter), ("root", decimal cap.root.value),
@@ -174,7 +184,7 @@ private def nodeLine {kind : ResourceKind} (node : Node kind) : String :=
         | reasons => ", ".intercalate (reasons.map RefusalReason.name)
       s!"{node.id}  [not readable] ({why}){flags}"
   | some cap =>
-      s!"{node.id}  {holderText cap.holder}  targets {braces ((cap.scope.targets.image (·.value)).sort (· ≤ ·) |>.map toString)}  verbs {braces (verbNames cap.scope.verbs)}  maxCost {cap.scope.maxCost}  heights {cap.notBefore}..{cap.notAfter}  [{", ".intercalate (node.sources.map sourceText)}]{flags}"
+      s!"{node.id}  {holderText cap.holder}  targets {targetsText cap.scope.targets}  verbs {braces (verbNames cap.scope.verbs)}  maxCost {cap.scope.maxCost}  heights {cap.notBefore}..{cap.notAfter}  [{", ".intercalate (node.sources.map sourceText)}]{flags}"
 
 private partial def treeLines {kind : ResourceKind} (tree : CapTree kind) (fuel : Nat)
     (indent : String) (node : Node kind) : List String :=
@@ -218,7 +228,7 @@ def capTreeView (bytes : List UInt8) : Result Json := do
 /-- The scalar fields of a reader's own resource view, `(field, value)`. -/
 def fieldValues (bytes : List UInt8) : Option (List (Nat × Int)) := do
   let value ← NativeObservationController.resourceViewCodec.decode bytes
-  let packed ← CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.1
+  let packed ← CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.2.1
   match packed with
   | ⟨.declaredObject, payload⟩ =>
       some <| (StoreCodec.entries DeclaredEffectCell.wire payload.logical).filterMap fun entry =>
@@ -365,6 +375,7 @@ def addressText : AuthAddress → String
   | ⟨.subjectKey, (subject, epoch)⟩ => s!"key of subject {subject.value} epoch {epoch}"
   | ⟨.revoked, key⟩ => s!"revocation of {revocationText key}"
   | ⟨.registered, key⟩ => s!"registration of {revocationText key}"
+  | ⟨.parent, cell⟩ => "room parent of cell " ++ Nat.repr cell
 
 private def actionText : DeclaredActionLowering.Action → String
   | .create (.objectField _ f) v => s!"create field {f.value} = {v}"
@@ -382,6 +393,7 @@ private def draftLines : Draft → List String
             match target.payload with
             | .scalar actions => actions.map (fun a => "    " ++ actionText a)
             | .content command => [s!"    content command ({(ContentResource.commandCodec.encode command).length} bytes)"]
+            | .append _ => ["    stream append: one entry (the cell keeps its digest; the text rides in this signed command)"]
   | .delegate bytes => match CapabilityDelegationController.commandCodec.decode bytes with
     | none => ["  delegate: noncanonical command"]
     | some ⟨kind, command⟩ =>
@@ -392,6 +404,7 @@ private def draftLines : Draft → List String
       [s!"  install a law by subject {subject.value} under control capability {control.value} ({bytes.length}-byte declaration)",
        "  writes the authority cell: the resource's policy revision"]
   | .revoke bytes => [s!"  revoke ({bytes.length}-byte command); writes the authority cell's revocation plane"]
+  | .renounce bytes => [s!"  renounce ({bytes.length}-byte command): the holder gives up its own capability; writes the authority cell's revocation plane"]
   | .birth bytes capabilities => [s!"  birth ({bytes.length}-byte descriptor, {capabilities.length} source capabilities)"]
 
 private def slotLines (entry : SigningSlot × Option SlotLegs) : List String :=
