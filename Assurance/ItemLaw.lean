@@ -25,10 +25,8 @@ namespace Minidregg.Assurance.ItemLaw
 
 open Minidregg.Pred (Pred State eval)
 open Minidregg.Kernel.DeclaredResourceProjection (Values fieldName get)
-open Minidregg.Assurance.SheetLaw (ev_eq ev_le ev_memberOf ev_eqSlots ev_not ev_all ev_any Turn view
-  admits Accepted stepsOf final get_before get_after get_verb get_subject find_none state_get
-  scalarSlots_split mem_deltas mem_pairs mem_joint request_ne_field clock_ne_field joint_ne_field
-  ne_of_lastc lastc_before lastc_after lastc_delta pairName_ne_fieldName fieldName_inj get_delta)
+open Minidregg.Assurance.SheetLaw (Accepted stepsOf final)
+open Minidregg.Kernel.LawView (ev_eq ev_le ev_memberOf ev_eqSlots ev_not ev_all ev_any Turn view admits get_before get_after get_verb get_subject find_none state_get scalarSlots_split mem_deltas mem_pairs mem_joint request_ne_field clock_ne_field joint_ne_field ne_of_lastc lastc_before lastc_after lastc_delta pairName_ne_fieldName fieldName_inj get_delta)
 set_option autoImplicit false
 
 /-! ## §1. Constants -/
@@ -165,9 +163,9 @@ theorem former_holder_refused (p : Params) (o n : State) (a b : Int)
 /-- The `delta` slot is absent when the pre-state lacks the field. -/
 theorem get_delta_absent (t : Turn) (pre post : Values) (N : Nat) (hpre : get pre N = none) :
     (view t pre post).get (fieldName N "delta") = none := by
-  have hw : SheetLaw.lastc "delta" = some 'r' ∨ SheetLaw.lastc "delta" = some 'e' ∨
-      SheetLaw.lastc "delta" = some 'a' := .inr (.inr (by decide))
-  have hreq := find_none (l := SheetLaw.request t.verb t.subject) (k := fieldName N "delta")
+  have hw : Minidregg.Kernel.LawView.lastc "delta" = some 'r' ∨ Minidregg.Kernel.LawView.lastc "delta" = some 'e' ∨
+      Minidregg.Kernel.LawView.lastc "delta" = some 'a' := .inr (.inr (by decide))
+  have hreq := find_none (l := Minidregg.Kernel.LawView.request t.verb t.subject) (k := fieldName N "delta")
     (fun q hq => request_ne_field hq N _ hw (by decide))
   have hbef := find_none (l := pre.map (fun p => (fieldName p.1 "before", p.2))) (k := fieldName N "delta")
     (fun q hq => by
@@ -196,9 +194,9 @@ theorem get_delta_absent (t : Turn) (pre post : Values) (N : Nat) (hpre : get pr
     (fun q hq => by
       obtain ⟨a, b, e⟩ := mem_pairs hq
       rw [e]; exact pairName_ne_fieldName a b N _)
-  have hclock := find_none (k := fieldName N "delta") (l := SheetLaw.clockSlots t.now)
+  have hclock := find_none (k := fieldName N "delta") (l := Minidregg.Kernel.LawView.clockSlots t.now)
     (fun q hq => clock_ne_field hq N _ hw (by decide))
-  have hjoint := find_none (k := fieldName N "delta") (l := SheetLaw.jointSlots t.joint)
+  have hjoint := find_none (k := fieldName N "delta") (l := Minidregg.Kernel.LawView.jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
   simp only [view, state_get, scalarSlots_split, List.find?_append, hreq, hbef, haft, hdel, hpair,
     hclock, hjoint, Option.or_none]

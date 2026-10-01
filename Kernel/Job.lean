@@ -17,10 +17,10 @@ law spells it `eq {RAN_SLOT} 1` and the slot is a parameter: on a tree with K-RA
 replace the atom with `.ran p.PROGRAM`, which lowers to the same circuit. Nothing here assumes who
 projects the slot: `caller_cannot_forge_truth` is stated over the slot.
 
-**What the kernel supplies.** As in `Theory.SheetLaw` §6: the policy reads `old = project(pre, pre)` and
+**What the kernel supplies.** As in `Kernel.LawView` §2: the policy reads `old = project(pre, pre)` and
 `new = project(pre, post)` (`DeclaredResourceProjection.scalarSlots`), behind the request slots and
 `clock/now` (K-CLOCK, on resource invocations only — reads see no clock, so every clause but
-management is guarded to writes). §5 reuses `SheetLaw.view` and adds the run slot after it.
+management is guarded to writes). §5 reuses `LawView.view` and adds the run slot after it.
 
 **Deviations from COMPUTE.md §2.2's field list.** `window` is not a field: `finalAt = clock/now + window`
 is a three-slot relation that no atom states with a field-valued window, so the window is the law
@@ -36,13 +36,13 @@ over the sixteen declared fields only; closing it is a kernel item (a declared k
 -/
 import Pred.Core
 import Pred.Leaf
-import Theory.SheetLaw
+import Kernel.LawView
 
 namespace Minidregg.Kernel.Job
 
 open Minidregg.Pred (Pred State eval firstFailingLeaf)
 open Minidregg.Kernel.DeclaredResourceProjection (Values fieldName scalarSlots get)
-open Minidregg.Theory.SheetLaw (ev_eq ev_le ev_memberOf ev_eqSlots ev_leSlots ev_leSlotsOff ev_not ev_all
+open Minidregg.Kernel.LawView (ev_eq ev_le ev_memberOf ev_eqSlots ev_leSlots ev_leSlotsOff ev_not ev_all
   ev_any)
 set_option autoImplicit false
 
@@ -736,7 +736,7 @@ end LawLevel
 /-! ## §5. The kernel's view, and histories -/
 
 section View
-open Minidregg.Theory.SheetLaw (Turn view request clockSlots)
+open Minidregg.Kernel.LawView (Turn view request clockSlots)
 
 /-- One write (or read) on a job cell: who, which verb, the clock, the run verdict the controller
 projects (K-RAN; `none` when the command carries no run claim) and the post-state. -/
@@ -747,14 +747,14 @@ structure JobTurn where
   ran : Option Int
   post : Values
 
-/-- The SheetLaw turn with no joint participants. -/
+/-- The LawView turn with no joint participants. -/
 def JobTurn.base (t : JobTurn) : Turn := ⟨t.verb, t.subject, t.now, [], t.post⟩
 
 def ranSlots (p : Params) : Option Int → List (String × Int)
   | none => []
   | some v => [(p.RAN_SLOT, v)]
 
-/-- The policy's view: `SheetLaw.view` (request, fields, clock) and then the run slot. -/
+/-- The policy's view: `LawView.view` (request, fields, clock) and then the run slot. -/
 def jview (p : Params) (t : JobTurn) (pre post : Values) : State :=
   ⟨(view t.base pre post).slots ++ ranSlots p t.ran⟩
 
@@ -792,41 +792,41 @@ theorem jget_field (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Values)
 theorem jget_after (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Values) (N : Nat)
     (hN : N ∈ F.all) : (jview p t pre post).get (fieldName N "after") = get post N := by
   rw [jget_field p fr t pre post N hN _ (by simp)]
-  exact Minidregg.Theory.SheetLaw.get_after _ _ _ _
+  exact Minidregg.Kernel.LawView.get_after _ _ _ _
 
 theorem jget_before (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Values) (N : Nat)
     (hN : N ∈ F.all) : (jview p t pre post).get (fieldName N "before") = get pre N := by
   rw [jget_field p fr t pre post N hN _ (by simp)]
-  exact Minidregg.Theory.SheetLaw.get_before _ _ _ _
+  exact Minidregg.Kernel.LawView.get_before _ _ _ _
 
 theorem jget_delta (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Values) (N : Nat)
     (hN : N ∈ F.all) (o : Int) (hpre : get pre N = some o) :
     (jview p t pre post).get (fieldName N "delta") = (get post N).map (· - o) := by
   rw [jget_field p fr t pre post N hN _ (by simp)]
-  exact Minidregg.Theory.SheetLaw.get_delta _ _ _ _ _ hpre
+  exact Minidregg.Kernel.LawView.get_delta _ _ _ _ _ hpre
 
 /-- The `delta` slot is absent when the pre-state lacks the field. -/
 theorem view_delta_none (t : Turn) (pre post : Values) (N : Nat) (hpre : get pre N = none) :
     (view t pre post).get (fieldName N "delta") = none := by
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have hw : lastc "delta" = some 'r' ∨ lastc "delta" = some 'e' ∨ lastc "delta" = some 'a' :=
     .inr (.inr (by decide))
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have hreq := find_none (l := request t.verb t.subject) (k := fieldName N "delta")
     (fun q hq => request_ne_field hq N _ hw (by decide))
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have hbef := find_none (l := pre.map (fun p => (fieldName p.1 "before", p.2))) (k := fieldName N "delta")
     (fun q hq => by
       simp only [List.mem_map] at hq
       obtain ⟨p, -, rfl⟩ := hq
       exact ne_of_lastc (by rw [lastc_before, lastc_delta]; decide))
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have haft := find_none (l := post.map (fun p => (fieldName p.1 "after", p.2))) (k := fieldName N "delta")
     (fun q hq => by
       simp only [List.mem_map] at hq
       obtain ⟨p, -, rfl⟩ := hq
       exact ne_of_lastc (by rw [lastc_delta, lastc_after]; decide))
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have hdel := find_none (k := fieldName N "delta")
     (l := post.filterMap (fun p => (get pre p.1).map fun old => (fieldName p.1 "delta", p.2 - old)))
     (fun q hq => by
@@ -836,7 +836,7 @@ theorem view_delta_none (t : Turn) (pre post : Values) (N : Nat) (hpre : get pre
       have : a.1 = N := fieldName_inj.mp e
       rw [this, hpre] at hold
       cases hold)
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have hpair := find_none (k := fieldName N "delta")
     (l := post.flatMap (fun a => post.filterMap fun b => do
         let oldA ← get pre a.1
@@ -845,13 +845,13 @@ theorem view_delta_none (t : Turn) (pre post : Values) (N : Nat) (hpre : get pre
     (fun q hq => by
       obtain ⟨a, b, e⟩ := mem_pairs hq
       rw [e]; exact pairName_ne_fieldName a b N _)
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have hclock := find_none (k := fieldName N "delta") (l := clockSlots t.now)
     (fun q hq => clock_ne_field hq N _ hw (by decide))
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   have hjoint := find_none (k := fieldName N "delta") (l := jointSlots t.joint)
     (fun q hq => joint_ne_field hq N _)
-  open Minidregg.Theory.SheetLaw in
+  open Minidregg.Kernel.LawView in
   simp only [view, state_get, scalarSlots_split, List.find?_append, hreq, hbef, haft, hdel, hpair,
     hclock, hjoint, Option.or_none, Option.map_none]
 
@@ -863,11 +863,11 @@ theorem jget_delta_none (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Va
 
 theorem jget_verb (p : Params) (t : JobTurn) (pre post : Values) :
     (jview p t pre post).get "request/verb" = some t.verb := by
-  rw [jget, Minidregg.Theory.SheetLaw.get_verb]; rfl
+  rw [jget, Minidregg.Kernel.LawView.get_verb]; rfl
 
 theorem jget_clock (p : Params) (fr : p.RAN_SLOT ≠ "clock/now") (t : JobTurn) (pre post : Values) :
     (jview p t pre post).get "clock/now" = t.now := by
-  rw [jget, Minidregg.Theory.SheetLaw.get_clock, ran_get_ne p _ _ fr, Option.or_none]; rfl
+  rw [jget, Minidregg.Kernel.LawView.get_clock, ran_get_ne p _ _ fr, Option.or_none]; rfl
 
 /-- A field the slot-pair frame leaves alone is unchanged in the store. -/
 theorem frame_eq (p : Params) (fr : p.Fresh) (t : JobTurn) (pre : Values) (N : Nat) (hN : N ∈ F.all)
