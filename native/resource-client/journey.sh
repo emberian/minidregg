@@ -4,7 +4,8 @@
 #   journey.sh MANIFEST.json NEW_RUN_ROOT
 #
 # One run stands up a fresh private Store, walks every step in order, prints one
-# table row per step (PASS / FAIL / UNBUILT, wall seconds, deciding artifact),
+# table row per step (PASS / FAIL / UNBUILT / UNMEASURED / UNCONFIGURED, wall
+# seconds, deciding artifact),
 # writes NEW_RUN_ROOT/journey-result.json, and names the FRONTIER: the first
 # step that did not pass. Exit status is 0 only when the frontier is the end.
 # Status is whatever a run prints; nothing else is status.
@@ -48,6 +49,11 @@
 # Note: by the time M3-M7 run, the resource `shared` is deliberately locked
 # (J8). A hook that needs an open resource creates its own through SPONSOR_WS.
 #
+# Statuses: PASS; FAIL; UNBUILT (no journey.d hook yet); UNMEASURED (G without
+# level 1000 in JOURNEY_GROWTH_LEVELS); UNCONFIGURED (an input from outside the
+# tree is not supplied: a manifest key, or NOCK_TEMPLATES/NOCK_RUN for JN2/JN3,
+# NOCK_DOOR_JAM/NOCK_DOOR_FUEL for JN5). None of them is PASS; only FAIL says
+# something ran and was wrong. scripts/local-gates.sh gate 5 reads them apart.
 # Tunables: JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
@@ -273,6 +279,8 @@ run_step() {
   case $rc in
     0) STATUS[$id]=PASS ;;
     3) STATUS[$id]=UNBUILT ;;
+    4) STATUS[$id]=UNMEASURED ;;
+    5) STATUS[$id]=UNCONFIGURED ;;
     *) STATUS[$id]=FAIL ;;
   esac
   WALL[$id]=$(elapsed "$t0" "$t1"); ART[$id]=$ARTIFACT; DET[$id]=$DETAIL
@@ -620,7 +628,7 @@ step_G() {
     fi
     prev_wm=$wm
   done
-  case " $levels " in *" 1000 "*) ;; *) fail "$verdict; level 1000 not in JOURNEY_GROWTH_LEVELS, so the exit is unmeasured"; return;; esac
+  case " $levels " in *" 1000 "*) ;; *) DETAIL="UNMEASURED: $verdict; level 1000 not in JOURNEY_GROWTH_LEVELS (\"$levels\"), so the exit is not measured"; return 4;; esac
   if gt "$wm" 5 || gt "$REOPEN_S" 60; then fail "$verdict — over thresholds"; return; fi
   DETAIL="$verdict — within thresholds"
 }
@@ -717,6 +725,14 @@ step_K4() {
 
 # ---------------------------------------------------------------- M3-M7 hooks
 
+# needs_env VAR... : a hook whose inputs come from outside the tree (Nock jams,
+# the nock-run runner) is UNCONFIGURED, not FAIL, when they are not supplied.
+needs_env() {
+  local v missing=""
+  for v in "$@"; do [ -n "${!v:-}" ] || missing="$missing $v"; done
+  [ -z "$missing" ] && return 0
+  DETAIL="UNCONFIGURED: not supplied:$missing"; return 5
+}
 # hook ID EXIT-TEXT [MANIFEST-KEY]
 hook() {
   local id=$1 exit_text=$2 need=${3:-} file rc
@@ -725,7 +741,7 @@ hook() {
     DETAIL="UNBUILT: no journey.d/$id.sh. Green when: $exit_text"; return 3
   fi
   if [ -n "$need" ] && [ -z "$(mf "$need")" ]; then
-    fail "journey.d/$id.sh exists but the manifest has no .$need"; return
+    DETAIL="UNCONFIGURED: journey.d/$id.sh exists but the manifest has no .$need"; return 5
   fi
   export JOURNEY_RUN=$RUN JOURNEY_WORLD=$W JOURNEY_STEP_DIR=$SD MINI HOST STORE VERIFIER CONFIG SOCKET \
     SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT NEWCOMER_SUBJECT SHELL_BIN HERMES_BIN SPK_HOST_BIN CANDIDATE
@@ -752,9 +768,9 @@ step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write,
 step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
 step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHAKE256 digest, the right opening installs, a wrong opening or a reveal before the deadline is refused, the plaintext is on the Store only after the reveal (lane k-hasheq)"; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
-step_JN2() { hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
-step_JN3() { hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
-step_JN5() { hook jnock5 "J-NOCK-5: the hoonc counter kernel is born as a door, pokes are refereed by re-execution, a stale state and a non-write effect refused (lane n11; needs NOCK_DOOR_JAM, NOCK_DOOR_FUEL)"; }
+step_JN2() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
+step_JN3() { needs_env NOCK_TEMPLATES NOCK_RUN || return; hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
+step_JN5() { needs_env NOCK_DOOR_JAM NOCK_DOOR_FUEL || return; hook jnock5 "J-NOCK-5: the hoonc counter kernel is born as a door, pokes are refereed by re-execution, a stale state and a non-write effect refused (lane n11; needs NOCK_DOOR_JAM, NOCK_DOOR_FUEL)"; }
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }

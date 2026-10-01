@@ -1,0 +1,2 @@
+# step<TAB>why it is UNBUILT (no journey.d hook). A pinned step that turns PASS is red until its row goes.
+M6	no journey.d/m6.sh: scripts/spk-platform/grain-journey.sh needs root on a grain host (/opt pins, signed SPK, loop volumes, app UIDs)
