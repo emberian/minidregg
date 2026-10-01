@@ -244,8 +244,10 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       let obj ← exactObject path ["type", "identifier"] json
       pure (.witnessed ⟨← string (path ++ ".identifier") (← field path "identifier" obj)⟩)
   | "hashEq" =>
-      let obj ← exactObject path ["type", "value", "blinder", "commit"] json
-      pure (.hashEq (← string (path ++ ".value") (← field path "value" obj))
+      let obj ← exactObject path ["type", "values", "blinder", "commit"] json
+      let values ← list (path ++ ".values") string (← field path "values" obj)
+      if values.isEmpty then failAt (path ++ ".values") "a hashEq opens at least one value slot"
+      pure (.hashEq values
         (← string (path ++ ".blinder") (← field path "blinder" obj))
         (← string (path ++ ".commit") (← field path "commit" obj)))
   | "ran" =>
@@ -277,8 +279,9 @@ private partial def predicateJson : Pred → Lean.Json
       ("right", .str right), ("offset", signedDecimal offset)]
   | .witnessed identifier => .mkObj [("type", "witnessed"),
       ("identifier", .str identifier.id)]
-  | .hashEq value blinder commit => .mkObj [("type", "hashEq"), ("value", .str value),
-      ("blinder", .str blinder), ("commit", .str commit)]
+  | .hashEq values blinder commit => .mkObj [("type", "hashEq"),
+      ("values", .arr (values.toArray.map .str)), ("blinder", .str blinder),
+      ("commit", .str commit)]
   | .ran program => .mkObj [("type", "ran"), ("program", .str (toString program))]
   | .not child => .mkObj [("type", "not"), ("predicate", predicateJson child)]
   | .allL children => .mkObj [("type", "all"),
@@ -4028,7 +4031,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ("address", decimal (PolicyRecordCodec.digest value).value),
         ("domain", decimal value.domain.value), ("semantics", decimal value.semantics.value),
         ("previous", value.previous.map (fun d => decimal d.value) |>.getD .null),
-        ("predicate", predicateJson value.predicate)]
+        ("predicate", predicateJson value.predicate),
+        ("text", .str (LawLeaf.renderClause value.predicate))]
   | "view-who" => do
       let value ← decoded "view-who" NativeObservationController.whoViewCodec bytes
       pure <| .mkObj [("type", "who"), ("members", .arr <| value.toArray.map fun (subject, seen) =>
