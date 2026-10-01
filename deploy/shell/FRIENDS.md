@@ -118,6 +118,23 @@ mini> board new tasks                     # tasks 0 and 1: `board add`, `board t
 share a doc the same way as `notes` (delegate, publish, export/import). a doc lives in one
 content cell with no fixed size; its lines are ordered by their atom ids.
 
+sealed markets. you sell SUPPLY units to sealed bids; nobody, me included, can read a bid before
+the close, because the Store holds only a commitment to it:
+```
+mini> market open fish 120 140 8          # bids sealed until height 119, reveals 120..139, settle from 140
+mini> delegate g1 fish SAMS-SUBJECT observe,mutate 50000     # then submit/publish/export as for notes
+sam>  bid fish 30 5                        # commits to (price 30, qty 5); the opening stays in sam's workspace
+sam>  submit bid-fish
+mini> bids fish                            # sam's slot shows `sealed sealed` until sam reveals
+sam>  reveal fish r1                       # from height 120: writes the opening; the law checks it
+sam>  submit r1                            # a wrong price or a reveal before 120 is `refused: law-denied: …`
+mini> market settle fish                   # from height 140: fills by price, then by who bid first
+mini> submit settle-fish
+mini> law show fish                        # the market's law, in the one-line grammar
+```
+a bid you never reveal fills nothing. there is no deposit yet, so not revealing costs nothing:
+markets here are for friends, not for strangers who might bid and walk away.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
