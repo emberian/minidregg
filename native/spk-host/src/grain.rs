@@ -36,7 +36,15 @@ use std::time::{Duration, Instant};
 const MAX_JSON: u64 = 64 * 1024;
 const MAX_SPK: u64 = 256 * 1024 * 1024;
 const PACKAGE_STORE: &str = "/var/lib/minidregg/spk/packages";
-const START_WAIT: Duration = Duration::from_secs(900);
+/// How long `grain start` waits for the resident's START completion before
+/// reporting UNRESOLVED (the resident keeps going either way). Measured on
+/// final (SPK-APPS 2026-10-01): a START is BEGIN, claim, launch, report,
+/// sign, op70 and op38, several of which replay the Store's history in the
+/// Host; 245-626 s at load 20-45, and op38 alone 6.5 min at load 45. At
+/// 900 s the operator gave up on STARTs that then completed, and a harness
+/// that stopped the Store services on that verdict wedged them. 30 minutes
+/// until the Host's replay is fixed (task HOST-KECCAK).
+const START_WAIT: Duration = Duration::from_secs(1800);
 
 /// Mini plan signing-slot order per lifecycle kind (role, index). Mini's plan
 /// inspection remains decisive: a differing slot list refuses before signing.

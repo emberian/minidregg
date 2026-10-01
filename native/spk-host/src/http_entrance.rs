@@ -996,7 +996,13 @@ fn handle_stream_with(
     }
     let kind = policy.authenticate(&mut request)?;
     let method = request.method;
-    let response = dispatch(request, kind, policy).unwrap_or_else(|_| unavailable_response(method));
+    // The client sees one uniform 503; the operator's journal gets the
+    // reason (an admitted request that failed in delivery, an fd3 refusal,
+    // an unrepresentable app response), or a survey cannot say what broke.
+    let response = dispatch(request, kind, policy).unwrap_or_else(|error| {
+        eprintln!("spk-host: dispatch unavailable ({method:?}): {error}");
+        unavailable_response(method)
+    });
     stream.write_all(&response)
 }
 
