@@ -71,7 +71,7 @@ is the validated post and its materialized root is
 `DurableCommitProtocol.Intent.ofAcceptedEffect_rootWrites` equated with the
 `RootWrite.exactPost` its intent carried, now read off the world. -/
 theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
-    (H : History R TxId Ev D) {w w' : World R TxId D} {t : Turn R TxId Ev}
+    (H : History R TxId Ev D) {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') (c : CellId)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome)
@@ -90,28 +90,54 @@ theorem step_ofAccepted_root {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq 
   rw [hpost]
   simp
 
+/-- The turn carrying one accepted leg at cell `c`, charged its storage bytes. -/
+def singleTurn {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+    (H : History R TxId Ev D) (c : CellId) (x : TxId) (ev : Ev)
+    (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
+      family request pre declaration outcome) : Turn R TxId Ev D :=
+  { txId := x, creates := [], legs := [Leg.ofAccepted c accepted], retires := [], event := ev,
+    charge := fun lane => if lane = .storageBytes then H.legBytes (Leg.ofAccepted c accepted) else 0 }
+
 /-- Satisfiable pole at the seam: a one-leg turn carrying an accepted effect,
-at a fresh id and a present head, is accepted by `step`, and installs the
-validated post. -/
+charged its storage bytes, at a fresh id, a present head and a meter that
+funds the charge, is accepted by `step`, and installs the validated post. -/
 theorem step_single_accepted {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
     (H : History R TxId Ev D) (w : World R TxId D) (c : CellId) (x : TxId) (ev : Ev)
     (accepted : AcceptedCellEffect (portal := portal) (authState := authState)
       family request pre declaration outcome)
     (holds : w.cells c = some ⟨k, pre.logical⟩)
     {height : Nat} {logRoot : D} (hh : w.head = some (height, logRoot))
-    (fresh : w.journal x = none) :
-    ∃ w', World.step H w ⟨x, [], [Leg.ofAccepted c accepted], [], ev⟩ = some w' ∧
+    (fresh : w.journal x = none)
+    (funded : H.legBytes (Leg.ofAccepted c accepted) ≤ w.meter .storageBytes) :
+    ∃ w', World.step H w (singleTurn H c x ev accepted) = some w' ∧
       w'.cells c = some ⟨k, accepted.validated.apply.logical⟩ := by
-  let t : Turn R TxId Ev := ⟨x, [], [Leg.ofAccepted c accepted], [], ev⟩
+  let t : Turn R TxId Ev D := singleTurn H c x ev accepted
   have hcells : applyCells w.cells t =
       .ok (w.cells.update c (some ⟨k, accepted.validated.apply.logical⟩)) := by
     unfold applyCells
-    simp only [t, applyCreates, applyLegs, applyLeg_ofAccepted w.cells c accepted holds,
+    simp only [t, singleTurn, applyCreates, applyLegs, applyLeg_ofAccepted w.cells c accepted holds,
       applyRetires]
   have shaped : Shaped t := by
-    refine ⟨?_, ?_, ?_, ?_⟩ <;> simp [t]
-  have hv := sysPatch_valid_plain H (t := t) rfl rfl fresh hh
-  refine ⟨_, (step_eq_some H).2 (admit_of H shaped hh fresh hv hcells), ?_⟩
+    refine ⟨?_, ?_, ?_, ?_⟩ <;> simp [t, singleTurn]
+  have covered : t.charge ≤ w.meter := by
+    intro lane
+    by_cases e : lane = .storageBytes
+    · subst e; simpa [t, singleTurn] using funded
+    · simp [t, singleTurn, e]
+  have hk : turnCheck H w t height = none := by
+    rw [turnCheck_eq_none_iff]
+    refine ⟨by simp [t, singleTurn], ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩,
+      by simp [t, singleTurn], by simp [t, singleTurn, patchBytes], covered⟩
+  have hv : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) := by
+    refine sysPatch_valid_plain H rfl rfl fresh hh ⟨by simp [t, singleTurn], by simp [t, singleTurn]⟩ ?_
+    intro lane hl
+    have pos : 0 < w.meter lane := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (covered lane)
+    rw [meter_system] at pos ⊢
+    revert pos
+    cases w.system ⟨SysSpace.allowance, lane⟩ with
+    | none => intro pos; exact absurd pos (lt_irrefl 0)
+    | some a => intro _; rfl
+  refine ⟨_, (step_eq_some H).2 (admit_of H shaped hh fresh hk hv hcells), ?_⟩
   exact cells_update_self _ _ _
 
 end Accepted
@@ -129,19 +155,19 @@ actual states and steps: each physical step represents either the old world
 the world `step` produced (a completed install, possibly with a lost
 reply).  `PhysicalStep` is proof-relevant evidence, not a Boolean. -/
 structure ImplementationRefinement (PhysicalState : Type)
-    (PhysicalStep : PhysicalState → Turn R TxId Ev → PhysicalState → Type q)
+    (PhysicalStep : PhysicalState → Turn R TxId Ev D → PhysicalState → Type q)
     (Represents : PhysicalState → World R TxId D → Prop) : Prop where
-  simulates : ∀ {pb pa : PhysicalState} {wb : World R TxId D} {t : Turn R TxId Ev},
+  simulates : ∀ {pb pa : PhysicalState} {wb : World R TxId D} {t : Turn R TxId Ev D},
     Represents pb wb → PhysicalStep pb t pa →
       Represents pa wb ∨ ∃ wa, World.step H wb t = some wa ∧ Represents pa wa
 
 /-- **No partial commit.**  A refining physical step represents the complete
 old world or the complete stepped world; there is no third state. -/
 theorem physical_step_exact {PhysicalState : Type}
-    {PhysicalStep : PhysicalState → Turn R TxId Ev → PhysicalState → Type q}
+    {PhysicalStep : PhysicalState → Turn R TxId Ev D → PhysicalState → Type q}
     {Represents : PhysicalState → World R TxId D → Prop}
     (refinement : ImplementationRefinement H PhysicalState PhysicalStep Represents)
-    {pb pa : PhysicalState} {wb : World R TxId D} {t : Turn R TxId Ev}
+    {pb pa : PhysicalState} {wb : World R TxId D} {t : Turn R TxId Ev D}
     (represented : Represents pb wb) (stepped : PhysicalStep pb t pa) :
     ∃ wa, Represents pa wa ∧ (wa = wb ∨ World.step H wb t = some wa) := by
   rcases refinement.simulates represented stepped with keep | ⟨wa, hs, hr⟩
@@ -150,10 +176,10 @@ theorem physical_step_exact {PhysicalState : Type}
 
 /-- A physical trace: physical steps, one per submitted turn. -/
 inductive Trace {PhysicalState : Type}
-    (PhysicalStep : PhysicalState → Turn R TxId Ev → PhysicalState → Type q) :
-    PhysicalState → List (Turn R TxId Ev) → PhysicalState → Type (max q 1)
+    (PhysicalStep : PhysicalState → Turn R TxId Ev D → PhysicalState → Type q) :
+    PhysicalState → List (Turn R TxId Ev D) → PhysicalState → Type (max q 1)
   | nil (p : PhysicalState) : Trace PhysicalStep p [] p
-  | snoc {p p' p'' : PhysicalState} {log : List (Turn R TxId Ev)} {t : Turn R TxId Ev} :
+  | snoc {p p' p'' : PhysicalState} {log : List (Turn R TxId Ev D)} {t : Turn R TxId Ev D} :
       Trace PhysicalStep p log p' → PhysicalStep p' t p'' → Trace PhysicalStep p (log ++ [t]) p''
 
 /-- **Crash recovery as a fold.**  Whatever crashes and refusals a refining
@@ -161,10 +187,10 @@ handler went through, its state represents the fold, from the genesis it
 started at, of a sublist of the submitted turns: every turn either took
 completely, in order, or not at all. -/
 theorem trace_represents_fold {PhysicalState : Type}
-    {PhysicalStep : PhysicalState → Turn R TxId Ev → PhysicalState → Type q}
+    {PhysicalStep : PhysicalState → Turn R TxId Ev D → PhysicalState → Type q}
     {Represents : PhysicalState → World R TxId D → Prop}
     (refinement : ImplementationRefinement H PhysicalState PhysicalStep Represents)
-    {p0 p : PhysicalState} {g : World R TxId D} {log : List (Turn R TxId Ev)}
+    {p0 p : PhysicalState} {g : World R TxId D} {log : List (Turn R TxId Ev D)}
     (start : Represents p0 g) (trace : Trace PhysicalStep p0 log p) :
     ∃ sub W, sub.Sublist log ∧ fold H g sub = some W ∧ Represents p W := by
   induction trace with

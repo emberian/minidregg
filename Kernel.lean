@@ -72,8 +72,9 @@ import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
 import Kernel.ResourceTransactionAudit
-import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired), Turn, admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, poles
+import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn, admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, poles
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
+import Kernel.TurnCensus  -- T1: every live admission constructor (33) is a Turn shape accepted by World.admit, its negation refused by name; step_conserves for Book postings
 import Kernel.TurnRecord  -- B2: an AcceptedCellEffect is a Leg (exactPost derived from step); ImplementationRefinement re-indexed by Turn/World, trace_represents_fold (crash recovery = fold of a sublist); model refines, torn install refuted
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles

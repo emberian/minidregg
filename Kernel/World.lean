@@ -8,10 +8,14 @@ DATAMODEL §3.3/§3.9, step B2.  The kernel's durable state is one value:
   layout with four namespaces: `journal : TxId ↦ (height, H(turn))`
   (append-only), `head : () ↦ (height, logRoot)` (RAM),
   `retired : CellId ↦ ()` (append-only), and `parent : CellId ↦ CellId`
-  (append-only; the room a cell was born in, K-ROOM).  The indexes and the history chain are
-  therefore state, written by the same guarded `Patch` primitive as every cell.
+  (append-only; the room a cell was born in, K-ROOM), `spent : D ↦ ()` (append-only;
+  the consumed nullifiers, T1) and `allowance : Lane ↦ Nat` (RAM; the remaining
+  meter, T1).  The indexes and the history chain are therefore state, written
+  by the same guarded `Patch` primitive as every cell.
 * `Turn` is deterministic data: a transaction id, the cells it creates, one
-  guarded patch per written cell (`Leg`), the cells it retires, and an event.
+  guarded patch per written cell (`Leg`), the cells it retires, and an event;
+  and (T1) the nullifiers it spends, its exact charge, its signing subject and
+  key epoch, the capability it exercised, and its height window.
   It carries no post bytes, no post roots and no signatures; the post is
   `Patch.run pre patch`.
 * `World.admit` is the one fail-closed transition (`step` is its `Option`
@@ -22,11 +26,38 @@ The system half of every accepted turn is the `sysPatch`: a `read retired c none
 guard per create, one `allocate journal txId (height, H turn)`, one
 `allocate retired c ()` per retire, the `head` write that advances the height
 and chains the log root, and one `allocate parent c room` per create born in a
-room.  A create's room must be a present cell when the create runs
+room; then (T1) one `allocate spent n ()` per nullifier and one
+`write allowance lane a (a - charge lane)` per charged lane.  A create's room must be a present cell when the create runs
 (`Reject.missingParent`); the row is written once and never rewritten, so
 `under R` coverage over `World.parentage` only grows (`step_narrows_stable`).  Journal freshness, retired-identifier refusal and
 monotone height are the store's own allocation/write guards, not a second
 checker.
+
+## One home per fact (T1, SURPASS §2(b))
+
+* **Spent nullifiers** live in `spent`; the deployed durable consumed set is the
+  twin T4 deletes.  **The clock** is the head's height (`fold_head`); a turn's
+  clock pin is its `notBefore`/`validUntil` window (`step_window`); the K-CLOCK
+  wall-time cell is an ordinary cell, pinned by a read leg.  **The meter** is
+  `allowance`, debited by the charge (`charge_le_allowance`), whose storage lane
+  is the patch bytes (`charge_is_patch_bytes`).
+* **Who is whose parent** lives in the system cell's `parent` rows, written by
+  `step` on every create (`step_parent_recorded`, `step_parent_exists`).  The
+  authority cell's `parent` plane (tag 13, `CredentialAuthorityCell`) is the
+  twin: birth writes the same fact there through one receiver's leg.  T7
+  deletes the plane and re-points `Admissible.scope`, delegate's `parentage`,
+  `realmWell` and `wellLedgerLoaded` at `World.parentage`.
+* **A Book is a cell** (the pay book, the purse, a well): a registry kind whose
+  postings are legs; conservation is a property of the leg
+  (`TurnCensus.step_conserves`), not a namespace here.  **The tariff** is a cell
+  too, or a pinned genesis value; operator pins (`fnGateway`,
+  `completionCustodianKey`, the dispatch pins) are Host configuration, not
+  world state — and replay must not read them (census (i).11).
+* **Indexes are not state.**  The presence index, the link store and the walk
+  accumulators are folds over the log; their theorem shape is
+  `index_from_replay : index (fold g log) = indexOf log`, which
+  `NativeHostReplay.Verified.index_from_replay` already has for the presence
+  index.  No namespace here holds them.
 
 The world root is a parameter here (`Checkpoint.check` takes the root
 function): its stage-F definition is C1's, its SMT definition D1/E1's.  The
@@ -34,10 +65,13 @@ native store and the host's open/submit path are C2's.
 -/
 import Theory.Store
 import Theory.TypedAuthorization
+import Theory.ResourceCost
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.World
 
 open Minidregg.Theory.Store
+open Minidregg.Theory.ResourceCost (Lane Charge)
 
 set_option autoImplicit false
 /- `World.World` is the world type of the `World` module. -/
@@ -96,18 +130,23 @@ inductive SysSpace
   | head
   | retired
   | parent
+  | spent
+  | allowance
   deriving DecidableEq, Repr
 
 section System
 
 variable (TxId D : Type)
 
-/-- System keys: transaction ids, the unit head key, cell ids. -/
+/-- System keys: transaction ids, the unit head key, cell ids, nullifiers
+(digests), meter lanes. -/
 @[reducible] def SysKey : SysSpace → Type
   | .journal => TxId
   | .head => Unit
   | .retired => CellId
   | .parent => CellId
+  | .spent => D
+  | .allowance => Lane
 
 /-- System values: `(height, turn digest)`, `(height, log root)`, presence. -/
 @[reducible] def SysValue : SysSpace → Type
@@ -115,36 +154,44 @@ variable (TxId D : Type)
   | .head => Nat × D
   | .retired => Unit
   | .parent => CellId
+  | .spent => Unit
+  | .allowance => Nat
 
-/-- The journal, the retired set and the parent rows only grow; the head is
-overwritten. -/
+/-- The journal, the retired set, the parent rows and the spent set only grow;
+the head and the meter are overwritten. -/
 def sysDiscipline : SysSpace → Discipline
   | .journal => .appendOnly
   | .head => .ram
   | .retired => .appendOnly
   | .parent => .appendOnly
+  | .spent => .appendOnly
+  | .allowance => .ram
 
 variable [DecidableEq TxId] [DecidableEq D]
 
-instance sysKeyDecEq : (s : SysSpace) → DecidableEq (SysKey TxId s)
+instance sysKeyDecEq : (s : SysSpace) → DecidableEq (SysKey TxId D s)
   | .journal => inferInstanceAs (DecidableEq TxId)
   | .head => inferInstanceAs (DecidableEq Unit)
   | .retired => inferInstanceAs (DecidableEq Nat)
   | .parent => inferInstanceAs (DecidableEq Nat)
+  | .spent => inferInstanceAs (DecidableEq D)
+  | .allowance => inferInstanceAs (DecidableEq Lane)
 
 instance sysValueDecEq : (s : SysSpace) → DecidableEq (SysValue D s)
   | .journal => inferInstanceAs (DecidableEq (Nat × D))
   | .head => inferInstanceAs (DecidableEq (Nat × D))
   | .retired => inferInstanceAs (DecidableEq Unit)
   | .parent => inferInstanceAs (DecidableEq Nat)
+  | .spent => inferInstanceAs (DecidableEq Unit)
+  | .allowance => inferInstanceAs (DecidableEq Nat)
 
 /-- The system cell's layout. -/
 def sysLayout : Layout.{0, 0, 0} where
   Namespace := SysSpace
-  Key := SysKey TxId
+  Key := SysKey TxId D
   Value := SysValue D
   discipline := sysDiscipline
-  keyDecEq := sysKeyDecEq TxId
+  keyDecEq := sysKeyDecEq TxId D
   valueDecEq := sysValueDecEq D
 
 end System
@@ -178,6 +225,19 @@ def retired (w : World R TxId D) (c : CellId) : Option Unit :=
 /-- The room a cell was born in. -/
 def parent (w : World R TxId D) (c : CellId) : Option CellId :=
   w.system ⟨SysSpace.parent, c⟩
+
+/-- The spent mark of a nullifier (T1: the durable consumed set's home). -/
+def spent (w : World R TxId D) (n : D) : Option Unit :=
+  w.system ⟨SysSpace.spent, n⟩
+
+/-- The recorded allowance of a meter lane. -/
+def allowanceOf (w : World R TxId D) (lane : Lane) : Option Nat :=
+  w.system ⟨SysSpace.allowance, lane⟩
+
+/-- The remaining meter: the recorded allowance per lane, zero where none is
+recorded (an unrecorded lane funds nothing). -/
+def meter (w : World R TxId D) : Charge :=
+  fun lane => (w.allowanceOf lane).getD 0
 
 /-- The cell a system address contributes to the parent rows' support. -/
 def parentKeyAt : Address (sysLayout TxId D) → Finset CellId
@@ -225,25 +285,74 @@ structure Leg (R : Registry) where
 first (each at an absent, never-retired id, with the empty store, and in the
 room it names — a cell present when the create runs — if any), then the
 legs (each a guarded patch at the store its cell holds), then the retires
-(each of a present cell whose store is empty). -/
-structure Turn (R : Registry) (TxId Ev : Type) where
+(each of a present cell whose store is empty).
+
+The T1 fields (each defaulted, so a turn that spends, charges and signs
+nothing is written as before):
+
+* `nullifiers` — the markers the turn consumes, allocated in the system cell's
+  `spent` namespace; a spent marker is refused (`Reject.nullifierSpent`) and,
+  underneath, by the allocation guard.  The durable consumed set's home.
+* `charge` — the exact resource charge, per meter lane.  Its storage lane is
+  the turn's patch bytes (`H.legBytes` summed over the legs: D2's "a record is
+  charged the bytes it writes", `charge_is_patch_bytes`); the whole charge is
+  debited from the `allowance` namespace and refused above it.
+* `subject`, `keyEpoch`, `capability` — who signed, at which key epoch, under
+  which capability.  They are turn data, bound by the turn digest into the
+  journal and the log chain; `admit` decides none of them (the authority
+  decision stays in the receiver until T3 derives the turn from it).
+* `notBefore`, `validUntil` — the clock pin: the height window the turn may be
+  journaled in (`valid_until` is a block height, 09-29).  The wall clock is
+  the K-CLOCK cell, pinned like any other read: by a read leg.
+
+The footprint (the addresses read, with the values they must hold) is not a
+field: it is the read ops of the legs (`Turn.footprint`), so it cannot
+disagree with what `admit` checks. -/
+structure Turn (R : Registry) (TxId Ev D : Type) where
   txId : TxId
   creates : List (CellId × R.Kind × Option CellId)
   legs : List (Leg R)
   retires : List CellId
   event : Ev
+  nullifiers : List D := []
+  charge : Charge := 0
+  subject : Option Theory.TypedAuthorization.SubjectId := none
+  keyEpoch : Nat := 0
+  capability : Option D := none
+  notBefore : Nat := 0
+  validUntil : Option Nat := none
 
 /-- The `(cell, room)` rows a turn's creates record. -/
-def Turn.parentRows {R : Registry} {TxId Ev : Type} (t : Turn R TxId Ev) :
+def Turn.parentRows {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) :
     List (CellId × CellId) :=
   t.creates.filterMap fun c => c.2.2.map fun room => (c.1, room)
+
+/-- Whether an op is a read (a guard that changes nothing). -/
+def Op.isRead {L : Layout.{0, 0, 0}} : Op L → Bool
+  | .read _ _ _ => true
+  | _ => false
+
+/-- A leg's guards: its leading reads.  The turn's footprint is the guards of
+its legs — each the address it reads and the value that address must hold
+(K-FIELDS' address-level footprint).  It is read off the legs, never carried
+beside them. -/
+def Leg.guards {R : Registry} (leg : Leg R) : Patch (R.layout leg.kind) :=
+  leg.patch.takeWhile Op.isRead
+
+/-- The cells the turn's footprint pins. -/
+def Turn.footprint {R : Registry} {TxId Ev D : Type} (t : Turn R TxId Ev D) : List CellId :=
+  (t.legs.filter fun leg => !leg.guards.isEmpty).map Leg.cell
 
 /-- The hash surface history needs: a turn digest and the log chain.  Stage F
 instantiates both with cSHAKE over the turn's canonical bytes (C1). -/
 structure History (R : Registry) (TxId Ev D : Type) where
-  turnDigest : Turn R TxId Ev → D
+  turnDigest : Turn R TxId Ev D → D
   chain : D → D → D
   logRoot0 : D
+  /-- The bytes a leg writes, the storage charge's unit (D2).  Stage F counts
+  the canonical encoding of the leg's write, allocate and free ops; it has no
+  default, so no history charges nothing by omission. -/
+  legBytes : Leg R → Nat
 
 /-- Refusal reasons.  Every refusal leaves the world unchanged (`admit` returns
 no world on any error branch). -/
@@ -261,6 +370,11 @@ inductive Reject
   | guardFailed (cell : CellId) (index : Nat)
   | retireNonEmpty (cell : CellId)
   | missingParent (cell : CellId) (room : CellId)
+  | duplicateNullifier
+  | outsideWindow
+  | nullifierSpent
+  | chargeMismatch
+  | overAllowance
   deriving DecidableEq, Repr
 
 /-- The reason an `Except` refused, if it did. -/
@@ -273,8 +387,9 @@ section Step
 variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
 variable (H : History R TxId Ev D)
 
-/-- The system half of a turn, as one guarded patch on the system cell. -/
-def sysPatch (t : Turn R TxId Ev) (height : Nat) (logRoot : D) :
+/-- The B2/K-ROOM system half of a turn: retired guards, the journal row, the
+retires, the head, the parent rows. -/
+def sysCore (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) :
     Patch (sysLayout TxId D) :=
   t.creates.map (fun c => Op.read (L := sysLayout TxId D) SysSpace.retired c.1 none) ++
     [Op.allocate (L := sysLayout TxId D) SysSpace.journal t.txId (height, H.turnDigest t)] ++
@@ -282,6 +397,49 @@ def sysPatch (t : Turn R TxId Ev) (height : Nat) (logRoot : D) :
     [Op.write (L := sysLayout TxId D) SysSpace.head () (height, logRoot)
       (height + 1, H.chain logRoot (H.turnDigest t))] ++
     t.parentRows.map (fun row => Op.allocate (L := sysLayout TxId D) SysSpace.parent row.1 row.2)
+
+/-- The meter lanes, each once. -/
+def meterLanes : List Lane :=
+  [.incidences, .turnBytes, .memoryTouches, .witnessBytes, .proofWork, .storageBytes,
+    .networkBytes, .sideEffectCount, .feeDebit, .leaseByteBlocks]
+
+/-- The lanes a charge debits: those it charges a nonzero amount. -/
+def chargedLanes (charge : Charge) : List Lane :=
+  meterLanes.filter fun lane => charge lane ≠ 0
+
+/-- One spent mark per nullifier. -/
+def spentAllocs (ns : List D) : Patch (sysLayout TxId D) :=
+  ns.map fun n => Op.allocate (L := sysLayout TxId D) SysSpace.spent n ()
+
+/-- The meter debit: each listed lane goes from `avail` to `avail - charge`. -/
+def debits (lanes : List Lane) (charge avail : Charge) : Patch (sysLayout TxId D) :=
+  lanes.map fun lane =>
+    Op.write (L := sysLayout TxId D) SysSpace.allowance lane (avail lane) (avail lane - charge lane)
+
+/-- The system half of a turn, as one guarded patch on the system cell: the
+core, then the spent marks, then the meter debit from `avail` (the world's
+`meter`). -/
+def sysPatch (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) (avail : Charge) :
+    Patch (sysLayout TxId D) :=
+  sysCore H t height logRoot ++ spentAllocs t.nullifiers ++
+    debits (chargedLanes t.charge) t.charge avail
+
+/-- The patch bytes of a turn: the bytes its legs write. -/
+def patchBytes (t : Turn R TxId Ev D) : Nat :=
+  (t.legs.map H.legBytes).sum
+
+/-- The T1 checks, each a named refusal of something the store guards would
+also refuse (or, for the charge rule and the window, something no store guard
+sees): distinct nullifiers, the height window, unspent nullifiers, the charge
+rule (storage lane = patch bytes), the charge within the meter. -/
+def turnCheck (w : World R TxId D) (t : Turn R TxId Ev D) (height : Nat) : Option Reject :=
+  if ¬ t.nullifiers.Nodup then some .duplicateNullifier
+  else if ¬ (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) then
+    some .outsideWindow
+  else if ∃ n ∈ t.nullifiers, (w.spent n).isSome then some .nullifierSpent
+  else if t.charge .storageBytes ≠ patchBytes H t then some .chargeMismatch
+  else if Charge.fundedCheck t.charge w.meter = false then some .overAllowance
+  else none
 
 /-- A create's room, if it names one, is a present cell. -/
 def roomPresent (cells : Cells R) : Option CellId → Bool
@@ -333,7 +491,7 @@ def applyRetires : Cells R → List CellId → Except Reject (Cells R)
           else .error (.retireNonEmpty c)
 
 /-- The cell half of a turn: creates, then legs, then retires. -/
-def applyCells (cells : Cells R) (t : Turn R TxId Ev) : Except Reject (Cells R) :=
+def applyCells (cells : Cells R) (t : Turn R TxId Ev D) : Except Reject (Cells R) :=
   match applyCreates cells t.creates with
   | .error r => .error r
   | .ok c1 =>
@@ -343,12 +501,12 @@ def applyCells (cells : Cells R) (t : Turn R TxId Ev) : Except Reject (Cells R) 
 
 /-- A turn is well-shaped: it does something, and names each cell at most once
 per role. -/
-def Shaped (t : Turn R TxId Ev) : Prop :=
+def Shaped (t : Turn R TxId Ev D) : Prop :=
   ¬ (t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty) ∧
     (t.legs.map Leg.cell).Nodup ∧ (t.creates.map Prod.fst).Nodup ∧ t.retires.Nodup
 
 /-- **The one transition.**  Fail-closed: every error branch returns no world. -/
-def World.admit (w : World R TxId D) (t : Turn R TxId Ev) : Except Reject (World R TxId D) :=
+def World.admit (w : World R TxId D) (t : Turn R TxId Ev D) : Except Reject (World R TxId D) :=
   if t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty then .error .emptyTurn
   else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLegCell
   else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateCreate
@@ -358,23 +516,26 @@ def World.admit (w : World R TxId D) (t : Turn R TxId Ev) : Except Reject (World
     | none => .error .noHead
     | some (height, logRoot) =>
         if (w.journal t.txId).isSome then .error .replayedTransaction
-        else if ¬ Patch.ValidFrom w.system (sysPatch H t height logRoot) then
-          .error .retiredIdentifier
-        else
-          match applyCells w.cells t with
-          | .error r => .error r
-          | .ok cells => .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot)⟩
+        else match turnCheck H w t height with
+        | some r => .error r
+        | none =>
+          if ¬ Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) then
+            .error .retiredIdentifier
+          else
+            match applyCells w.cells t with
+            | .error r => .error r
+            | .ok cells => .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot w.meter)⟩
 
 /-- `step` is `admit` with the reason forgotten. -/
-def World.step (w : World R TxId D) (t : Turn R TxId Ev) : Option (World R TxId D) :=
+def World.step (w : World R TxId D) (t : Turn R TxId Ev D) : Option (World R TxId D) :=
   (World.admit H w t).toOption
 
 /-- The state after a log. -/
-def fold (g : World R TxId D) (log : List (Turn R TxId Ev)) : Option (World R TxId D) :=
+def fold (g : World R TxId D) (log : List (Turn R TxId Ev D)) : Option (World R TxId D) :=
   log.foldlM (World.step H) g
 
 /-- The log chain of a list of turns from a starting log root. -/
-def logChain (r : D) (log : List (Turn R TxId Ev)) : D :=
+def logChain (r : D) (log : List (Turn R TxId Ev D)) : D :=
   log.foldl (fun acc t => H.chain acc (H.turnDigest t)) r
 
 /-- A genesis world: height zero at the initial log root, empty journal. -/
@@ -401,12 +562,12 @@ variable (H : History R TxId Ev D)
 
 @[simp] theorem fold_nil (g : World R TxId D) : fold H g [] = some g := rfl
 
-theorem fold_cons (g : World R TxId D) (t : Turn R TxId Ev) (log : List (Turn R TxId Ev)) :
+theorem fold_cons (g : World R TxId D) (t : Turn R TxId Ev D) (log : List (Turn R TxId Ev D)) :
     fold H g (t :: log) = (World.step H g t).bind (fun w => fold H w log) := rfl
 
 /-- **History is a fold.**  Folding a concatenated log is folding the prefix,
 then the suffix from where the prefix left the world. -/
-theorem fold_append (g : World R TxId D) (l₁ l₂ : List (Turn R TxId Ev)) :
+theorem fold_append (g : World R TxId D) (l₁ l₂ : List (Turn R TxId Ev D)) :
     fold H g (l₁ ++ l₂) = (fold H g l₁).bind (fun w => fold H w l₂) := by
   induction l₁ generalizing g with
   | nil => rfl
@@ -416,7 +577,7 @@ theorem fold_append (g : World R TxId D) (l₁ l₂ : List (Turn R TxId Ev)) :
       | none => rfl
       | some w => exact ih w
 
-theorem fold_snoc (g : World R TxId D) (l : List (Turn R TxId Ev)) (t : Turn R TxId Ev) :
+theorem fold_snoc (g : World R TxId D) (l : List (Turn R TxId Ev D)) (t : Turn R TxId Ev D) :
     fold H g (l ++ [t]) = (fold H g l).bind (fun w => World.step H w t) := by
   rw [fold_append]
   cases fold H g l with
@@ -427,15 +588,15 @@ theorem fold_snoc (g : World R TxId D) (l : List (Turn R TxId Ev)) (t : Turn R T
 
 /-- The relational reading of history: a world is reached by a log when each
 turn in order is admitted at the world its prefix reached. -/
-inductive Reaches (g : World R TxId D) : List (Turn R TxId Ev) → World R TxId D → Prop
+inductive Reaches (g : World R TxId D) : List (Turn R TxId Ev D) → World R TxId D → Prop
   | nil : Reaches g [] g
-  | snoc {log : List (Turn R TxId Ev)} {t : Turn R TxId Ev} {w w' : World R TxId D} :
+  | snoc {log : List (Turn R TxId Ev D)} {t : Turn R TxId Ev D} {w w' : World R TxId D} :
       Reaches g log w → World.step H w t = some w' → Reaches g (log ++ [t]) w'
 
 /-- **Replay exactness (§4.3).**  The executable fold returns a world exactly
 when that world is reached by admitting the log turn by turn; the state after
 a log is therefore unique and is the fold. -/
-theorem fold_eq_some_iff (g : World R TxId D) (log : List (Turn R TxId Ev))
+theorem fold_eq_some_iff (g : World R TxId D) (log : List (Turn R TxId Ev D))
     (W : World R TxId D) : fold H g log = some W ↔ Reaches H g log W := by
   constructor
   · intro h
@@ -473,7 +634,7 @@ theorem cells_update_ne (cells : Cells R) {c x : CellId} (v : Option (Cell R))
     (h : x ≠ c) : cells.update c v x = cells x := by
   simp [DFinsupp.coe_update, Function.update_of_ne h]
 
-theorem step_eq_some {w w' : World R TxId D} {t : Turn R TxId Ev} :
+theorem step_eq_some {w w' : World R TxId D} {t : Turn R TxId Ev D} :
     World.step H w t = some w' ↔ World.admit H w t = .ok w' := by
   unfold World.step
   cases World.admit H w t <;> simp [Except.toOption]
@@ -481,13 +642,13 @@ theorem step_eq_some {w w' : World R TxId D} {t : Turn R TxId Ev} :
 /-- An accepted turn: well-shaped, the head present, the transaction id
 absent from the journal, the system patch valid, the cell half accepted, and
 the post system cell exactly `run` of the system patch. -/
-theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.admit H w t = .ok w') :
     Shaped t ∧ ∃ height logRoot, w.head = some (height, logRoot) ∧
       w.journal t.txId = none ∧
-      Patch.ValidFrom w.system (sysPatch H t height logRoot) ∧
+      Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) ∧
       applyCells w.cells t = .ok w'.cells ∧
-      w'.system = Patch.run w.system (sysPatch H t height logRoot) := by
+      w'.system = Patch.run w.system (sysPatch H t height logRoot w.meter) := by
   unfold World.admit at h
   by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty
   · rw [if_pos hE] at h; cases h
@@ -513,7 +674,11 @@ theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev}
       by_cases hJ : (w.journal t.txId).isSome
       · rw [if_pos hJ] at h; cases h
       rw [if_neg hJ] at h
-      by_cases hV : Patch.ValidFrom w.system (sysPatch H t height logRoot)
+      cases hk : turnCheck H w t height with
+      | some r => rw [hk] at h; cases h
+      | none =>
+      rw [hk] at h
+      by_cases hV : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter)
       swap
       · rw [if_pos hV] at h; cases h
       rw [if_neg (not_not.mpr hV)] at h
@@ -524,22 +689,58 @@ theorem admit_ok {w w' : World R TxId D} {t : Turn R TxId Ev}
           cases h
           exact ⟨height, logRoot, rfl, by simpa using hJ, hV, rfl, rfl⟩
 
+/-- The T1 half of an accepted turn: its checks passed at the height it was
+journaled at. -/
+theorem admit_ok_turnCheck {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.admit H w t = .ok w') :
+    ∃ height logRoot, w.head = some (height, logRoot) ∧ turnCheck H w t height = none := by
+  unfold World.admit at h
+  by_cases hE : t.legs.isEmpty ∧ t.creates.isEmpty ∧ t.retires.isEmpty
+  · rw [if_pos hE] at h; cases h
+  rw [if_neg hE] at h
+  by_cases hL : (t.legs.map Leg.cell).Nodup
+  swap
+  · rw [if_pos hL] at h; cases h
+  rw [if_neg (not_not.mpr hL)] at h
+  by_cases hC : (t.creates.map Prod.fst).Nodup
+  swap
+  · rw [if_pos hC] at h; cases h
+  rw [if_neg (not_not.mpr hC)] at h
+  by_cases hR : t.retires.Nodup
+  swap
+  · rw [if_pos hR] at h; cases h
+  rw [if_neg (not_not.mpr hR)] at h
+  cases hh : w.head with
+  | none => simp [hh] at h
+  | some p =>
+      obtain ⟨height, logRoot⟩ := p
+      simp only [hh] at h
+      by_cases hJ : (w.journal t.txId).isSome
+      · rw [if_pos hJ] at h; cases h
+      rw [if_neg hJ] at h
+      cases hk : turnCheck H w t height with
+      | some r => rw [hk] at h; cases h
+      | none => exact ⟨height, logRoot, rfl, hk⟩
+
 /-- The converse of `admit_ok`: every premise it names is also sufficient. -/
-theorem admit_of {w : World R TxId D} {t : Turn R TxId Ev} {height : Nat} {logRoot : D}
+theorem admit_of {w : World R TxId D} {t : Turn R TxId Ev D} {height : Nat} {logRoot : D}
     {cells : Cells R} (shaped : Shaped t) (hh : w.head = some (height, logRoot))
     (hj : w.journal t.txId = none)
-    (hv : Patch.ValidFrom w.system (sysPatch H t height logRoot))
+    (hk : turnCheck H w t height = none)
+    (hv : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter))
     (hc : applyCells w.cells t = .ok cells) :
-    World.admit H w t = .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot)⟩ := by
+    World.admit H w t = .ok ⟨cells, Patch.run w.system (sysPatch H t height logRoot w.meter)⟩ := by
   obtain ⟨hE, hL, hC, hR⟩ := shaped
   unfold World.admit
   rw [if_neg hE, if_neg (not_not.mpr hL), if_neg (not_not.mpr hC), if_neg (not_not.mpr hR)]
   simp only [hh]
-  rw [if_neg (by simp [hj]), if_neg (not_not.mpr hv)]
+  rw [if_neg (by simp [hj]), hk]
+  simp only
+  rw [if_neg (not_not.mpr hv)]
   simp only [hc]
 
 omit [DecidableEq TxId] in
-theorem applyCells_ok {cells cells' : Cells R} {t : Turn R TxId Ev}
+theorem applyCells_ok {cells cells' : Cells R} {t : Turn R TxId Ev D}
     (h : applyCells cells t = .ok cells') :
     ∃ c1 c2, applyCreates cells t.creates = .ok c1 ∧ applyLegs c1 t.legs = .ok c2 ∧
       applyRetires c2 t.retires = .ok cells' := by
@@ -764,11 +965,11 @@ theorem op_apply_write {L : Layout.{0, 0, 0}} (s : Store L) (sp : L.Namespace) (
 theorem op_apply_allocate {L : Layout.{0, 0, 0}} (s : Store L) (sp : L.Namespace) (k : L.Key sp)
     (v : L.Value sp) : Op.apply s (.allocate sp k v) = s.set ⟨sp, k⟩ (some v) := rfl
 
-theorem sys_space_ne {a b : SysSpace} {k : SysKey TxId a} {k' : SysKey TxId b} (h : a ≠ b) :
+theorem sys_space_ne {a b : SysSpace} {k : SysKey TxId D a} {k' : SysKey TxId D b} (h : a ≠ b) :
     (⟨a, k⟩ : Address (sysLayout TxId D)) ≠ ⟨b, k'⟩ :=
   fun e => h (congrArg Sigma.fst e)
 
-theorem sys_key_ne {a : SysSpace} {k k' : SysKey TxId a} (h : k ≠ k') :
+theorem sys_key_ne {a : SysSpace} {k k' : SysKey TxId D a} (h : k ≠ k') :
     (⟨a, k⟩ : Address (sysLayout TxId D)) ≠ ⟨a, k'⟩ :=
   fun e => h (eq_of_heq (Sigma.mk.inj e).2)
 
@@ -854,7 +1055,7 @@ theorem run_parentAllocs_mem (s : Store (sysLayout TxId D)) (rows : List (CellId
         exact Store.set_eq _ _ _
       · exact ih _ nodup.2 m'
 
-theorem parentRows_nodup (t : Turn R TxId Ev) (nodup : (t.creates.map Prod.fst).Nodup) :
+theorem parentRows_nodup (t : Turn R TxId Ev D) (nodup : (t.creates.map Prod.fst).Nodup) :
     (t.parentRows.map Prod.fst).Nodup := by
   unfold Turn.parentRows
   generalize t.creates = cs at nodup ⊢
@@ -873,22 +1074,207 @@ theorem parentRows_nodup (t : Turn R TxId Ev) (nodup : (t.creates.map Prod.fst).
           obtain ⟨r, _, rfl⟩ := Option.map_eq_some_iff.mp hc
           exact List.mem_map_of_mem cMember
 
-theorem mem_parentRows {t : Turn R TxId Ev} {c : CellId} {k : R.Kind} {room : CellId}
+theorem mem_parentRows {t : Turn R TxId Ev D} {c : CellId} {k : R.Kind} {room : CellId}
     (m : (c, k, some room) ∈ t.creates) : (c, room) ∈ t.parentRows :=
   List.mem_filterMap.mpr ⟨(c, k, some room), m, rfl⟩
 
-theorem sysPost_parent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
-    (height : Nat) (logRoot : D) (nodup : (t.creates.map Prod.fst).Nodup)
-    {c : CellId} {k : R.Kind} {room : CellId} (m : (c, k, some room) ∈ t.creates) :
-    Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.parent, c⟩ = some room := by
+/-! ### The T1 tail: spent marks and the meter debit -/
+
+theorem run_spentAllocs_ne (s : Store (sysLayout TxId D)) (ns : List D)
+    (a : Address (sysLayout TxId D)) (ha : a.1 ≠ SysSpace.spent) :
+    Patch.run s (spentAllocs ns) a = s a := by
+  induction ns generalizing s with
+  | nil => rfl
+  | cons n rest ih =>
+      show Patch.run (s.set ⟨SysSpace.spent, n⟩ (some ())) (spentAllocs rest) a = s a
+      rw [ih]
+      exact Store.set_ne _ _ _ _ (fun e => ha (congrArg Sigma.fst e))
+
+theorem run_spentAllocs_at (s : Store (sysLayout TxId D)) (ns : List D) (n : D) :
+    Patch.run s (spentAllocs ns) ⟨SysSpace.spent, n⟩ =
+      if n ∈ ns then some () else s ⟨SysSpace.spent, n⟩ := by
+  induction ns generalizing s with
+  | nil => simp only [List.not_mem_nil, if_false]; rfl
+  | cons n0 rest ih =>
+      show Patch.run (s.set ⟨SysSpace.spent, n0⟩ (some ())) (spentAllocs rest) _ = _
+      rw [ih]
+      by_cases hr : n ∈ rest
+      · simp [hr]
+      · by_cases e : n = n0
+        · subst e
+          simp only [hr, if_false, List.mem_cons, true_or, if_true]
+          exact Store.set_eq _ _ _
+        · simp only [hr, if_false, List.mem_cons, e, false_or]
+          exact Store.set_ne _ _ _ _ (sys_key_ne e)
+
+/-- The spent marks are valid exactly when the nullifiers are distinct and
+none is already spent. -/
+theorem validFrom_spentAllocs (s : Store (sysLayout TxId D)) (ns : List D) :
+    Patch.ValidFrom s (spentAllocs ns) ↔ ns.Nodup ∧ ∀ n ∈ ns, s ⟨SysSpace.spent, n⟩ = none := by
+  induction ns generalizing s with
+  | nil => exact ⟨fun _ => ⟨List.nodup_nil, by simp⟩, fun _ => trivial⟩
+  | cons n rest ih =>
+      show (Op.Enabled s (Op.allocate (L := sysLayout TxId D) SysSpace.spent n ()) ∧
+        Patch.ValidFrom (s.set ⟨SysSpace.spent, n⟩ (some ())) (spentAllocs rest)) ↔ _
+      rw [ih]
+      simp only [Op.Enabled, Store.Fresh, List.nodup_cons, List.mem_cons, forall_eq_or_imp]
+      constructor
+      · rintro ⟨⟨_, fresh⟩, nd, rest_fresh⟩
+        refine ⟨⟨fun m => ?_, nd⟩, fresh, fun x mx => ?_⟩
+        · have := rest_fresh n m
+          rw [Store.set_eq] at this
+          cases this
+        · have := rest_fresh x mx
+          by_cases e : x = n
+          · subst e; rw [Store.set_eq] at this; cases this
+          · rwa [Store.set_ne _ _ _ _ (sys_key_ne e)] at this
+      · rintro ⟨⟨notin, nd⟩, fresh, rest_fresh⟩
+        refine ⟨⟨fun e => Discipline.noConfusion e, fresh⟩, nd, fun x mx => ?_⟩
+        have e : x ≠ n := fun e => notin (e ▸ mx)
+        rw [Store.set_ne _ _ _ _ (sys_key_ne e)]
+        exact rest_fresh x mx
+
+theorem run_debits_ne (s : Store (sysLayout TxId D)) (lanes : List Lane) (charge avail : Charge)
+    (a : Address (sysLayout TxId D)) (ha : a.1 ≠ SysSpace.allowance) :
+    Patch.run s (debits lanes charge avail) a = s a := by
+  induction lanes generalizing s with
+  | nil => rfl
+  | cons l rest ih =>
+      show Patch.run (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l)))
+        (debits rest charge avail) a = s a
+      rw [ih]
+      exact Store.set_ne _ _ _ _ (fun e => ha (congrArg Sigma.fst e))
+
+theorem run_debits_at (s : Store (sysLayout TxId D)) (lanes : List Lane) (charge avail : Charge)
+    (l : Lane) :
+    Patch.run s (debits lanes charge avail) ⟨SysSpace.allowance, l⟩ =
+      if l ∈ lanes then some (avail l - charge l) else s ⟨SysSpace.allowance, l⟩ := by
+  induction lanes generalizing s with
+  | nil => simp only [List.not_mem_nil, if_false]; rfl
+  | cons l0 rest ih =>
+      show Patch.run (s.set ⟨SysSpace.allowance, l0⟩ (some (avail l0 - charge l0)))
+        (debits rest charge avail) _ = _
+      rw [ih]
+      by_cases hr : l ∈ rest
+      · simp [hr]
+      · by_cases e : l = l0
+        · subst e
+          simp only [hr, if_false, List.mem_cons, true_or, if_true]
+          exact Store.set_eq _ _ _
+        · simp only [hr, if_false, List.mem_cons, e, false_or]
+          exact Store.set_ne _ _ _ _ (sys_key_ne e)
+
+/-- The meter debit over distinct lanes is valid exactly when each lane holds
+the quoted allowance. -/
+theorem validFrom_debits (s : Store (sysLayout TxId D)) (lanes : List Lane) (charge avail : Charge)
+    (nodup : lanes.Nodup) :
+    Patch.ValidFrom s (debits lanes charge avail) ↔
+      ∀ l ∈ lanes, s ⟨SysSpace.allowance, l⟩ = some (avail l) := by
+  induction lanes generalizing s with
+  | nil => exact ⟨fun _ _ m => absurd m (by simp), fun _ => trivial⟩
+  | cons l rest ih =>
+      simp only [List.nodup_cons] at nodup
+      show (Op.Enabled s (Op.write (L := sysLayout TxId D) SysSpace.allowance l (avail l)
+          (avail l - charge l)) ∧
+        Patch.ValidFrom (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l)))
+          (debits rest charge avail)) ↔ _
+      rw [ih _ nodup.2]
+      simp only [Op.Enabled, List.mem_cons, forall_eq_or_imp]
+      have frame : ∀ x ∈ rest, (s.set ⟨SysSpace.allowance, l⟩ (some (avail l - charge l)))
+          ⟨SysSpace.allowance, x⟩ = s ⟨SysSpace.allowance, x⟩ := fun x mx =>
+        Store.set_ne _ _ _ _ (sys_key_ne (fun e => nodup.1 (e ▸ mx)))
+      constructor
+      · rintro ⟨⟨_, here⟩, rest_ok⟩
+        exact ⟨here, fun x mx => (frame x mx) ▸ rest_ok x mx⟩
+      · rintro ⟨here, rest_ok⟩
+        exact ⟨⟨rfl, here⟩, fun x mx => (frame x mx).symm ▸ rest_ok x mx⟩
+
+theorem meterLanes_nodup : (meterLanes : List Lane).Nodup := by decide
+
+theorem mem_meterLanes (l : Lane) : l ∈ meterLanes := by cases l <;> decide
+
+theorem mem_chargedLanes {charge : Charge} {l : Lane} : l ∈ chargedLanes charge ↔ charge l ≠ 0 := by
+  simp [chargedLanes, mem_meterLanes]
+
+theorem chargedLanes_nodup (charge : Charge) : (chargedLanes charge).Nodup :=
+  meterLanes_nodup.filter _
+
+/-- Off the T1 namespaces, the system patch is its core. -/
+theorem run_sysPatch_core (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) (a : Address (sysLayout TxId D))
+    (hs : a.1 ≠ SysSpace.spent) (ha : a.1 ≠ SysSpace.allowance) :
+    Patch.run s (sysPatch H t height logRoot avail) a = Patch.run s (sysCore H t height logRoot) a := by
   simp only [sysPatch, Patch.run_append]
+  rw [run_debits_ne _ _ _ _ _ ha, run_spentAllocs_ne _ _ _ hs]
+
+/-- The system patch's validity, block by block. -/
+theorem validFrom_sysPatch (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) :
+    Patch.ValidFrom s (sysPatch H t height logRoot avail) ↔
+      Patch.ValidFrom s (sysCore H t height logRoot) ∧
+        Patch.ValidFrom (Patch.run s (sysCore H t height logRoot)) (spentAllocs t.nullifiers) ∧
+        Patch.ValidFrom (Patch.run (Patch.run s (sysCore H t height logRoot))
+          (spentAllocs t.nullifiers)) (debits (chargedLanes t.charge) t.charge avail) := by
+  simp only [sysPatch, Patch.validFrom_append, Patch.run_append, and_assoc]
+
+/-- The core never touches the spent marks. -/
+theorem run_sysCore_spent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (n : D) :
+    Patch.run s (sysCore H t height logRoot) ⟨SysSpace.spent, n⟩ = s ⟨SysSpace.spent, n⟩ := by
+  simp only [sysCore, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
+  rw [op_apply_write, Store.set_ne _ _ _ _ (sys_space_ne (by decide)), op_apply_allocate]
+  rw [run_retireAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
+  exact Store.set_ne _ _ _ _ (sys_space_ne (by decide))
+
+/-- The core never touches the meter. -/
+theorem run_sysCore_allowance (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (l : Lane) :
+    Patch.run s (sysCore H t height logRoot) ⟨SysSpace.allowance, l⟩ =
+      s ⟨SysSpace.allowance, l⟩ := by
+  simp only [sysCore, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
+  rw [op_apply_write, Store.set_ne _ _ _ _ (sys_space_ne (by decide)), op_apply_allocate]
+  rw [run_retireAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
+  exact Store.set_ne _ _ _ _ (sys_space_ne (by decide))
+
+/-- **The spent marks after a turn**: the old ones plus the turn's. -/
+theorem sysPost_spent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) (n : D) :
+    Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.spent, n⟩ =
+      if n ∈ t.nullifiers then some () else s ⟨SysSpace.spent, n⟩ := by
+  simp only [sysPatch, Patch.run_append]
+  rw [run_debits_ne _ _ _ _ _ (fun e => SysSpace.noConfusion e), run_spentAllocs_at,
+    run_sysCore_spent]
+
+/-- **The meter after a turn**: each charged lane is debited from `avail`. -/
+theorem sysPost_allowance (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) (l : Lane) :
+    Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.allowance, l⟩ =
+      if t.charge l ≠ 0 then some (avail l - t.charge l) else s ⟨SysSpace.allowance, l⟩ := by
+  simp only [sysPatch, Patch.run_append]
+  rw [run_debits_at]
+  by_cases hl : t.charge l ≠ 0
+  · rw [if_pos (mem_chargedLanes.mpr hl), if_pos hl]
+  · rw [if_neg (fun m => hl (mem_chargedLanes.mp m)), if_neg hl,
+      run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
+
+theorem sysPost_parent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) (nodup : (t.creates.map Prod.fst).Nodup)
+    {c : CellId} {k : R.Kind} {room : CellId} (m : (c, k, some room) ∈ t.creates) :
+    Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.parent, c⟩ = some room := by
+  rw [run_sysPatch_core H _ _ _ _ _ _ (fun e => SysSpace.noConfusion e)
+    (fun e => SysSpace.noConfusion e)]
+  simp only [sysCore, Patch.run_append]
   exact run_parentAllocs_mem _ _ (parentRows_nodup t nodup) c room (mem_parentRows m)
 
-theorem sysPost_journal (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
-    (height : Nat) (logRoot : D) (x : TxId) :
-    Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.journal, x⟩ =
+theorem sysPost_journal (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) (x : TxId) :
+    Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.journal, x⟩ =
       if x = t.txId then some (height, H.turnDigest t) else s ⟨SysSpace.journal, x⟩ := by
-  simp only [sysPatch, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_sysPatch_core H _ _ _ _ _ _ (fun e => SysSpace.noConfusion e)
+    (fun e => SysSpace.noConfusion e)]
+  simp only [sysCore, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
   rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
   rw [op_apply_write, Store.set_ne _ _ _ _ (sys_space_ne (by decide)), op_apply_allocate]
   rw [run_retireAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
@@ -896,19 +1282,23 @@ theorem sysPost_journal (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
   · subst e; rw [if_pos rfl]; exact Store.set_eq _ _ _
   · rw [if_neg e]; exact Store.set_ne _ _ _ _ (sys_key_ne e)
 
-theorem sysPost_head (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
-    (height : Nat) (logRoot : D) :
-    Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.head, ()⟩ =
+theorem sysPost_head (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) :
+    Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.head, ()⟩ =
       some (height + 1, H.chain logRoot (H.turnDigest t)) := by
-  simp only [sysPatch, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_sysPatch_core H _ _ _ _ _ _ (fun e => SysSpace.noConfusion e)
+    (fun e => SysSpace.noConfusion e)]
+  simp only [sysCore, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
   rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
   exact Store.set_eq _ _ _
 
-theorem sysPost_retired (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
-    (height : Nat) (logRoot : D) (c : CellId) :
-    Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.retired, c⟩ =
+theorem sysPost_retired (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
+    (height : Nat) (logRoot : D) (avail : Charge) (c : CellId) :
+    Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.retired, c⟩ =
       if c ∈ t.retires then some () else s ⟨SysSpace.retired, c⟩ := by
-  simp only [sysPatch, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_sysPatch_core H _ _ _ _ _ _ (fun e => SysSpace.noConfusion e)
+    (fun e => SysSpace.noConfusion e)]
+  simp only [sysCore, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
   rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
   rw [op_apply_write, Store.set_ne _ _ _ _ (sys_space_ne (by decide)), op_apply_allocate]
   rw [run_retireAllocs_at]
@@ -917,27 +1307,39 @@ theorem sysPost_retired (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
   · simp only [hr, if_false]
     exact Store.set_ne _ _ _ _ (sys_space_ne (by decide))
 
-theorem sysPatch_valid_creates {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev}
-    {height : Nat} {logRoot : D} (hv : Patch.ValidFrom s (sysPatch H t height logRoot)) :
+theorem sysPatch_valid_creates {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev D}
+    {height : Nat} {logRoot : D} {avail : Charge}
+    (hv : Patch.ValidFrom s (sysPatch H t height logRoot avail)) :
     ∀ c ∈ t.creates, s ⟨SysSpace.retired, c.1⟩ = none := by
-  unfold sysPatch at hv
+  replace hv := ((validFrom_sysPatch H s t height logRoot avail).1 hv).1
+  unfold sysCore at hv
   simp only [List.append_assoc] at hv
   rw [Patch.validFrom_append] at hv
   exact (validFrom_createReads s t.creates).1 hv.1
 
 /-- The system patch of a turn with no creates or retires is valid exactly
 when the id is fresh and the head is where the patch quotes it. -/
-theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev}
-    {height : Nat} {logRoot : D} (hc : t.creates = []) (hr : t.retires = [])
+theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev D}
+    {height : Nat} {logRoot : D} {avail : Charge} (hc : t.creates = []) (hr : t.retires = [])
     (hj : s ⟨SysSpace.journal, t.txId⟩ = none)
-    (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot)) :
-    Patch.ValidFrom s (sysPatch H t height logRoot) := by
-  simp only [sysPatch, Turn.parentRows, hc, hr, List.map_nil, List.nil_append,
-    List.filterMap_nil, List.append_nil]
-  refine ⟨⟨fun e => Discipline.noConfusion e, hj⟩, ⟨rfl, ?_⟩, trivial⟩
-  show (s.set ⟨SysSpace.journal, t.txId⟩ (some (height, H.turnDigest t))) ⟨SysSpace.head, ()⟩ = _
-  rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)), hh]
-  rfl
+    (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot))
+    (hn : t.nullifiers.Nodup ∧ ∀ n ∈ t.nullifiers, s ⟨SysSpace.spent, n⟩ = none)
+    (hm : ∀ l, t.charge l ≠ 0 → s ⟨SysSpace.allowance, l⟩ = some (avail l)) :
+    Patch.ValidFrom s (sysPatch H t height logRoot avail) := by
+  rw [validFrom_sysPatch]
+  refine ⟨?_, ?_, ?_⟩
+  · simp only [sysCore, Turn.parentRows, hc, hr, List.map_nil, List.nil_append,
+      List.filterMap_nil, List.append_nil]
+    refine ⟨⟨fun e => Discipline.noConfusion e, hj⟩, ⟨rfl, ?_⟩, trivial⟩
+    show (s.set ⟨SysSpace.journal, t.txId⟩ (some (height, H.turnDigest t))) ⟨SysSpace.head, ()⟩ = _
+    rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)), hh]
+    rfl
+  · rw [validFrom_spentAllocs]
+    exact ⟨hn.1, fun n m => (run_sysCore_spent H s t height logRoot n).trans (hn.2 n m)⟩
+  · rw [validFrom_debits _ _ _ _ (chargedLanes_nodup _)]
+    intro l m
+    rw [run_spentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e), run_sysCore_allowance]
+    exact hm l (mem_chargedLanes.mp m)
 
 end Decompose
 
@@ -950,7 +1352,7 @@ variable (H : History R TxId Ev D)
 
 /-- **Frame through `step` (§4.2).**  A cell a turn neither creates, writes,
 nor retires is unchanged. -/
-theorem step_frame {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_frame {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') (x : CellId)
     (hc : x ∉ t.creates.map Prod.fst) (hl : x ∉ t.legs.map Leg.cell) (hr : x ∉ t.retires) :
     w'.cells x = w.cells x := by
@@ -962,7 +1364,7 @@ theorem step_frame {w w' : World R TxId D} {t : Turn R TxId Ev}
 created or retired by the same turn) was valid from the store the cell held in
 the pre-world, and the cell ends holding `run pre patch`.  There is no
 caller-supplied post. -/
-theorem step_leg {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_leg {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') (leg : Leg R) (m : leg ∈ t.legs)
     (hc : leg.cell ∉ t.creates.map Prod.fst) (hr : leg.cell ∉ t.retires) :
     ∃ pre, (w.cells leg.cell).bind (·.storeAt leg.kind) = some pre ∧
@@ -975,7 +1377,7 @@ theorem step_leg {w w' : World R TxId D} {t : Turn R TxId Ev}
   exact ⟨pre, hpre, hv, by rw [applyRetires_frame h3 _ hr, hpost]⟩
 
 /-- A create is at an absent, never-retired id. -/
-theorem step_create {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_create {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') (c : CellId) (k : R.Kind) (p : Option CellId)
     (m : (c, k, p) ∈ t.creates)
     (hl : c ∉ t.legs.map Leg.cell) (hr : c ∉ t.retires) :
@@ -987,7 +1389,7 @@ theorem step_create {w w' : World R TxId D} {t : Turn R TxId Ev}
   rw [applyRetires_frame h3 c hr, applyLegs_frame h2 c hl, hpost]
 
 /-- A retire removes the cell and marks its id retired. -/
-theorem step_retire {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_retire {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') (c : CellId) (m : c ∈ t.retires) :
     w'.cells c = none ∧ w'.retired c = some () := by
   obtain ⟨⟨_, _, _, hnd⟩, height, logRoot, _, _, _, hcells, hsys⟩ :=
@@ -1001,7 +1403,7 @@ theorem step_retire {w w' : World R TxId D} {t : Turn R TxId Ev}
 retired": a present post cell was present before or created at a
 read-guarded never-retired id, and retired ids are exactly the old ones plus
 this turn's retires, which are absent after it. -/
-theorem step_wf {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_wf {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (hwf : w.WF) (h : World.step H w t = some w') : w'.WF := by
   obtain ⟨⟨_, _, _, hnd⟩, height, logRoot, _, _, hv, hcells, hsys⟩ :=
     admit_ok H ((step_eq_some H).1 h)
@@ -1022,17 +1424,17 @@ theorem step_wf {w w' : World R TxId D} {t : Turn R TxId Ev}
 
 /-- **`birth_parent_recorded` (world).**  A create born in a room records the
 room in the system cell's `parent` rows, in the same accepted turn. -/
-theorem step_parent_recorded {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_parent_recorded {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') {c : CellId} {k : R.Kind} {room : CellId}
     (m : (c, k, some room) ∈ t.creates) : w'.parent c = some room := by
   obtain ⟨⟨_, _, hnd, _⟩, height, logRoot, _, _, _, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
   show w'.system _ = _
   rw [hsys]
-  exact sysPost_parent H _ t height logRoot hnd m
+  exact sysPost_parent H _ t height logRoot _ hnd m
 
 /-- **`birth_parent_must_exist` (world).**  A create's room was a present cell
 when the create ran: present before the turn, or created earlier in it. -/
-theorem step_parent_exists {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_parent_exists {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') {c : CellId} {k : R.Kind} {room : CellId}
     (m : (c, k, some room) ∈ t.creates) :
     w.cells room ≠ none ∨ room ∈ t.creates.map Prod.fst := by
@@ -1041,7 +1443,7 @@ theorem step_parent_exists {w w' : World R TxId D} {t : Turn R TxId Ev}
   exact applyCreates_room h1 c k room m
 
 /-- Parent rows are never rewritten or removed by an accepted turn. -/
-theorem step_parent_stable {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_parent_stable {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') {c room : CellId} (recorded : w.parent c = some room) :
     w'.parent c = some room := by
   obtain ⟨_, height, logRoot, _, _, hv, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
@@ -1053,7 +1455,7 @@ theorem step_parent_stable {w w' : World R TxId D} {t : Turn R TxId Ev}
 /-- **`narrows_stable` over the world.**  A delegation's narrowing checked at
 one world's parentage stays a narrowing at every world an accepted turn
 reaches from it. -/
-theorem step_narrows_stable {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_narrows_stable {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') {kind : Theory.TypedAuthorization.ResourceKind}
     {child parent : Theory.TypedAuthorization.Scope kind}
     (narrows : child.Narrows parent w.parentage) : child.Narrows parent w'.parentage :=
@@ -1061,7 +1463,7 @@ theorem step_narrows_stable {w w' : World R TxId D} {t : Turn R TxId Ev}
     narrows.targets, narrows.verbs, narrows.maxCost, narrows.fields, narrows.maxDelta⟩
 
 /-- Accepted turns carry the invariant along the whole log. -/
-theorem fold_wf {g W : World R TxId D} {log : List (Turn R TxId Ev)}
+theorem fold_wf {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
     (hg : g.WF) (h : fold H g log = some W) : W.WF := by
   induction log using List.reverseRecOn generalizing W with
   | nil => simp only [fold_nil, Option.some.injEq] at h; subst h; exact hg
@@ -1097,7 +1499,7 @@ section Journal
 variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
 variable (H : History R TxId Ev D)
 
-theorem step_head {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_head {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') :
     ∃ height logRoot, w.head = some (height, logRoot) ∧
       w'.head = some (height + 1, H.chain logRoot (H.turnDigest t)) := by
@@ -1106,7 +1508,7 @@ theorem step_head {w w' : World R TxId D} {t : Turn R TxId Ev}
 
 /-- **Monotone height, chained log root (§4.13).**  After a log, the head is
 the starting height plus the log's length, at the log chain of the turns. -/
-theorem fold_head {g W : World R TxId D} {log : List (Turn R TxId Ev)}
+theorem fold_head {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
     {h0 : Nat} {r0 : D} (hg : g.head = some (h0, r0)) (h : fold H g log = some W) :
     W.head = some (h0 + log.length, logChain H r0 log) := by
   induction log using List.reverseRecOn generalizing W with
@@ -1123,7 +1525,7 @@ theorem fold_head {g W : World R TxId D} {log : List (Turn R TxId Ev)}
           rw [hh']
           simp [logChain, List.foldl_append, Nat.add_assoc]
 
-theorem step_journal {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem step_journal {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') :
     ∃ height logRoot, w.head = some (height, logRoot) ∧ w.journal t.txId = none ∧
       ∀ x, w'.journal x =
@@ -1149,7 +1551,7 @@ private theorem getElem?_snoc {α : Type} (l : List α) (t : α) (i : Nat) :
 a transaction id is `(h, H turn)` exactly when the log's turn at height `h`
 carries that id.  In particular the journal is the index of the log, and a
 transaction id occurs at most once in an accepted log. -/
-theorem journal_exact {g W : World R TxId D} {log : List (Turn R TxId Ev)}
+theorem journal_exact {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
     (hg : Genesis H g) (hf : fold H g log = some W) (x : TxId) (i : Nat) (d : D) :
     W.journal x = some (i, d) ↔
       ∃ t, log[i]? = some t ∧ t.txId = x ∧ d = H.turnDigest t := by
@@ -1209,7 +1611,7 @@ theorem journal_exact {g W : World R TxId D} {log : List (Turn R TxId Ev)}
 
 /-- The DATAMODEL §4.9 form: the journal's height for an id is the log
 position carrying it. -/
-theorem journal_height_iff {g W : World R TxId D} {log : List (Turn R TxId Ev)}
+theorem journal_height_iff {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
     (hg : Genesis H g) (hf : fold H g log = some W) (x : TxId) (i : Nat) :
     (W.journal x).map Prod.fst = some i ↔ (log[i]?).map Turn.txId = some x := by
   constructor
@@ -1224,8 +1626,8 @@ theorem journal_height_iff {g W : World R TxId D} {log : List (Turn R TxId Ev)}
 
 /-- Replay detection: an accepted log never carries one transaction id at two
 heights. -/
-theorem fold_txId_unique {g W : World R TxId D} {log : List (Turn R TxId Ev)}
-    (hg : Genesis H g) (hf : fold H g log = some W) {i j : Nat} {ti tj : Turn R TxId Ev}
+theorem fold_txId_unique {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
+    (hg : Genesis H g) (hf : fold H g log = some W) {i j : Nat} {ti tj : Turn R TxId Ev D}
     (hi : log[i]? = some ti) (hj : log[j]? = some tj) (same : ti.txId = tj.txId) : i = j := by
   have ei := (journal_exact H hg hf ti.txId i (H.turnDigest ti)).2 ⟨ti, hi, rfl, rfl⟩
   have ej := (journal_exact H hg hf ti.txId j (H.turnDigest tj)).2 ⟨tj, hj, same.symm, rfl⟩
@@ -1243,14 +1645,14 @@ inductive Resubmission
   deriving DecidableEq, Repr
 
 /-- Classify a resubmission by the journal alone. -/
-def classify (w : World R TxId D) (t : Turn R TxId Ev) : Resubmission :=
+def classify (w : World R TxId D) (t : Turn R TxId Ev D) : Resubmission :=
   match w.journal t.txId with
   | none => .fresh
   | some (height, digest) => if digest = H.turnDigest t then .replay height else .conflict height
 
 /-- **Retry never commits twice.**  Resubmitting an accepted turn at the
 world it produced is refused as a replay. -/
-theorem admit_retry_refused {w w' : World R TxId D} {t : Turn R TxId Ev}
+theorem admit_retry_refused {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (h : World.step H w t = some w') :
     World.admit H w' t = .error .replayedTransaction := by
   obtain ⟨⟨hE, hL, hC, hR⟩, height, logRoot, _, _, _, _, hsys⟩ :=
@@ -1269,8 +1671,8 @@ theorem admit_retry_refused {w w' : World R TxId D} {t : Turn R TxId Ev}
 /-- **Retry exactness (§4.9, `execute_retry_after_install` restated).**  After
 an accepted log, resubmitting the turn at height `i` is classified as a replay
 of height `i`. -/
-theorem classify_replay {g W : World R TxId D} {log : List (Turn R TxId Ev)}
-    (hg : Genesis H g) (hf : fold H g log = some W) {i : Nat} {t : Turn R TxId Ev}
+theorem classify_replay {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
+    (hg : Genesis H g) (hf : fold H g log = some W) {i : Nat} {t : Turn R TxId Ev D}
     (ht : log[i]? = some t) : classify H W t = .replay i := by
   unfold classify
   rw [(journal_exact H hg hf t.txId i (H.turnDigest t)).2 ⟨t, ht, rfl, rfl⟩]
@@ -1279,8 +1681,8 @@ theorem classify_replay {g W : World R TxId D} {log : List (Turn R TxId Ev)}
 /-- A different turn under a recorded id is a conflict, whenever the digest
 separates the two turns (the digest's binding is the premise, refuted in
 `Example.digest_collision_hides_conflict`). -/
-theorem classify_conflict {g W : World R TxId D} {log : List (Turn R TxId Ev)}
-    (hg : Genesis H g) (hf : fold H g log = some W) {i : Nat} {t t' : Turn R TxId Ev}
+theorem classify_conflict {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
+    (hg : Genesis H g) (hf : fold H g log = some W) {i : Nat} {t t' : Turn R TxId Ev D}
     (ht : log[i]? = some t) (same : t'.txId = t.txId)
     (separates : H.turnDigest t ≠ H.turnDigest t') : classify H W t' = .conflict i := by
   unfold classify
@@ -1288,8 +1690,8 @@ theorem classify_conflict {g W : World R TxId D} {log : List (Turn R TxId Ev)}
   simp [separates]
 
 /-- An id the log never carried is fresh. -/
-theorem classify_fresh {g W : World R TxId D} {log : List (Turn R TxId Ev)}
-    (hg : Genesis H g) (hf : fold H g log = some W) {t : Turn R TxId Ev}
+theorem classify_fresh {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
+    (hg : Genesis H g) (hf : fold H g log = some W) {t : Turn R TxId Ev D}
     (absent : ∀ t' ∈ log, t'.txId ≠ t.txId) : classify H W t = .fresh := by
   unfold classify
   cases hj : W.journal t.txId with
@@ -1300,6 +1702,165 @@ theorem classify_fresh {g W : World R TxId D} {log : List (Turn R TxId Ev)}
       exact absurd hid (absent t' (List.mem_of_getElem? ht'))
 
 end Journal
+
+/-! ## T1: spent markers, the meter, the clock pin, the footprint -/
+
+section TurnLaws
+
+variable {R : Registry} {TxId Ev D : Type} [DecidableEq TxId] [DecidableEq D]
+variable (H : History R TxId Ev D)
+
+/-- `turnCheck` passes exactly when every T1 condition holds. -/
+theorem turnCheck_eq_none_iff {w : World R TxId D} {t : Turn R TxId Ev D} {height : Nat} :
+    turnCheck H w t height = none ↔
+      t.nullifiers.Nodup ∧
+      (t.notBefore ≤ height ∧ (t.validUntil.all fun u => decide (height ≤ u)) = true) ∧
+      (∀ n ∈ t.nullifiers, w.spent n = none) ∧
+      t.charge .storageBytes = patchBytes H t ∧
+      t.charge ≤ w.meter := by
+  unfold turnCheck
+  constructor
+  · intro h
+    split_ifs at h with h1 h2 h3 h4 h5 <;> try cases h
+    refine ⟨h1, h2, fun n m => ?_, by simpa using h4, by simpa using h5⟩
+    by_contra hne
+    exact h3 ⟨n, m, Option.isSome_iff_ne_none.mpr hne⟩
+  · rintro ⟨h1, h2, h3, h4, h5⟩
+    have h3' : ¬ ∃ n ∈ t.nullifiers, (w.spent n).isSome := fun ⟨n, m, hs⟩ => by
+      simp [h3 n m] at hs
+    have h5' : Charge.fundedCheck t.charge w.meter = true :=
+      (Charge.fundedCheck_eq_true_iff _ _).2 h5
+    simp only [h1, h2, h3', h4, h5', not_true_eq_false, not_false_eq_true, and_self, if_false,
+      ne_eq, reduceCtorEq]
+
+/-- The meter, read off the system cell. -/
+theorem meter_system {w : World R TxId D} (l : Lane) :
+    w.meter l = Option.getD (α := Nat) (w.system ⟨SysSpace.allowance, l⟩) 0 := rfl
+
+/-- **Spent markers only grow.**  A nullifier spent before a turn is spent
+after it (the `spent` namespace is append-only). -/
+theorem spent_monotone {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') {n : D} (spent : w.spent n = some ()) :
+    w'.spent n = some () := by
+  obtain ⟨_, height, logRoot, _, _, hv, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
+  show w'.system _ = _
+  rw [hsys]
+  exact Patch.appendOnly_present_preserved _ _ ⟨SysSpace.spent, n⟩ () hv rfl
+    (show w.system ⟨SysSpace.spent, n⟩ = some () from spent)
+
+/-- Along a whole log. -/
+theorem fold_spent_monotone {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
+    (h : fold H g log = some W) {n : D} (spent : g.spent n = some ()) : W.spent n = some () := by
+  induction log using List.reverseRecOn generalizing W with
+  | nil => simp only [fold_nil, Option.some.injEq] at h; subst h; exact spent
+  | append_singleton l t ih =>
+      rw [fold_snoc] at h
+      cases hl : fold H g l with
+      | none => rw [hl] at h; cases h
+      | some w => rw [hl] at h; exact spent_monotone H h (ih hl)
+
+/-- An accepted turn spends every nullifier it carries. -/
+theorem step_spends {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') {n : D} (m : n ∈ t.nullifiers) : w'.spent n = some () := by
+  obtain ⟨_, height, logRoot, _, _, _, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
+  show w'.system _ = _
+  rw [hsys, sysPost_spent, if_pos m]
+
+/-- **A spent nullifier is refused** (D2's `spent_marker_refused`, over `World`). -/
+theorem spent_refused {w : World R TxId D} {t : Turn R TxId Ev D} {n : D}
+    (m : n ∈ t.nullifiers) (spent : w.spent n = some ()) : World.step H w t = none := by
+  cases hs : World.step H w t with
+  | none => rfl
+  | some w' =>
+      obtain ⟨height, logRoot, _, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 hs)
+      have := ((turnCheck_eq_none_iff H).1 hk).2.2.1 n m
+      rw [spent] at this
+      cases this
+
+/-- **The charge stays within the allowance**, and the meter is debited by
+exactly the charge. -/
+theorem charge_le_allowance {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') :
+    t.charge ≤ w.meter ∧ ∀ l, w'.meter l = w.meter l - t.charge l := by
+  have ha := (step_eq_some H).1 h
+  obtain ⟨height, logRoot, hh, hk⟩ := admit_ok_turnCheck H ha
+  obtain ⟨_, height', logRoot', hh', _, _, _, hsys⟩ := admit_ok H ha
+  rw [hh] at hh'
+  obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hh')
+  refine ⟨((turnCheck_eq_none_iff H).1 hk).2.2.2.2, fun l => ?_⟩
+  rw [meter_system, meter_system (w := w), hsys, sysPost_allowance]
+  by_cases hl : t.charge l ≠ 0
+  · rw [if_pos hl]; rfl
+  · rw [if_neg hl]
+    simp only [not_not] at hl
+    rw [hl, Nat.sub_zero]
+
+/-- **The storage charge is the patch bytes** (D2's
+`storage_charge_is_written_bytes`, as SURPASS §2(b).6's `charge_is_patch_bytes`). -/
+theorem charge_is_patch_bytes {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') : t.charge .storageBytes = patchBytes H t := by
+  obtain ⟨height, logRoot, _, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)
+  exact ((turnCheck_eq_none_iff H).1 hk).2.2.2.1
+
+/-- **The clock pin.**  An accepted turn was journaled at a height inside its
+window. -/
+theorem step_window {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') :
+    ∃ height logRoot, w.head = some (height, logRoot) ∧ t.notBefore ≤ height ∧
+      ∀ u ∈ t.validUntil, height ≤ u := by
+  obtain ⟨height, logRoot, hh, hk⟩ := admit_ok_turnCheck H ((step_eq_some H).1 h)
+  obtain ⟨lo, hi⟩ := ((turnCheck_eq_none_iff H).1 hk).2.1
+  refine ⟨height, logRoot, hh, lo, fun u m => ?_⟩
+  rw [Option.mem_def] at m
+  rw [m] at hi
+  simpa using hi
+
+/-- Reads leave the store unchanged, so a valid run of reads has each read
+enabled at the starting store. -/
+theorem validFrom_reads {L : Layout.{0, 0, 0}} {s : Store L} :
+    ∀ {p : Patch L}, (∀ op ∈ p, Op.isRead op = true) → Patch.ValidFrom s p →
+      ∀ op ∈ p, op.Enabled s
+  | [], _, _, op, m => absurd m (by simp)
+  | op0 :: rest, reads, valid, op, m => by
+      have same : op0.apply s = s := by
+        have r := reads op0 (by simp)
+        cases op0 <;> first | rfl | cases r
+      rcases List.mem_cons.mp m with e | m'
+      · subst e; exact valid.1
+      · have v := valid.2
+        rw [same] at v
+        exact validFrom_reads (fun o mo => reads o (List.mem_cons_of_mem _ mo)) v op m'
+
+/-- **The footprint is pinned.**  A turn one of whose guards no longer holds
+at the pre-world — the value at a read address moved — is refused.  (A leg on
+a cell the turn neither creates nor retires; a created cell has no prior
+value to pin.) -/
+theorem footprint_pinned {w : World R TxId D} {t : Turn R TxId Ev D} (leg : Leg R)
+    (m : leg ∈ t.legs) (hc : leg.cell ∉ t.creates.map Prod.fst) (hr : leg.cell ∉ t.retires)
+    {pre : Store (R.layout leg.kind)}
+    (hpre : (w.cells leg.cell).bind (·.storeAt leg.kind) = some pre)
+    {op : Op (R.layout leg.kind)} (pinned : op ∈ leg.guards) (moved : ¬ op.Enabled pre) :
+    World.step H w t = none := by
+  cases hs : World.step H w t with
+  | none => rfl
+  | some w' =>
+      obtain ⟨pre', hpre', hv, _⟩ := step_leg H hs leg m hc hr
+      rw [hpre] at hpre'
+      cases hpre'
+      have split := List.takeWhile_append_dropWhile (p := Op.isRead) (l := leg.patch)
+      rw [← split, Patch.validFrom_append] at hv
+      exact absurd (validFrom_reads (fun o mo => List.all_eq_true.mp List.all_takeWhile o mo) hv.1 op pinned) moved
+
+/-- A turn that writes, creates and retires nothing is refused whether or not
+it spends: a spend must be pinned by at least one guard leg (the deployed
+`unguardedEventOnly` rule, which `emptyTurn` already is). -/
+theorem spend_needs_guard (w : World R TxId D) (t : Turn R TxId Ev D)
+    (hl : t.legs = []) (hc : t.creates = []) (hr : t.retires = []) :
+    rejectOf (World.admit H w t) = some .emptyTurn := by
+  unfold World.admit
+  simp [hl, hc, hr, rejectOf]
+
+end TurnLaws
 
 /-! ## Checkpoints (§4.4) -/
 
@@ -1326,14 +1887,14 @@ def check (rootOf : World R TxId D → Root) (c : Checkpoint R TxId D Root) : Bo
 
 /-- Recovery: a checkpoint that checks, then the suffix folded from it. -/
 def resume (rootOf : World R TxId D → Root) (c : Checkpoint R TxId D Root)
-    (suffix : List (Turn R TxId Ev)) : Option (World R TxId D) :=
+    (suffix : List (Turn R TxId Ev D)) : Option (World R TxId D) :=
   if c.check rootOf then fold H c.world suffix else none
 
 end Checkpoint
 
 /-- **Checkpoint soundness (§4.4).**  The world after the first `h` turns,
 folded over the rest of the log, is the world after the whole log. -/
-theorem checkpoint_suffix (g W_h : World R TxId D) (log : List (Turn R TxId Ev)) (h : Nat)
+theorem checkpoint_suffix (g W_h : World R TxId D) (log : List (Turn R TxId Ev D)) (h : Nat)
     (prefixed : fold H g (log.take h) = some W_h) :
     fold H W_h (log.drop h) = fold H g log := by
   conv_rhs => rw [← List.take_append_drop h log]
@@ -1345,7 +1906,7 @@ stored root is the honest world's root (the receipt chain's claim) and the
 root binds at that pair (the collision-resistance carrier, stated at the one
 pair compared; refuted in `Example.nonbinding_root_accepts_tamper`). -/
 theorem resume_sound {Root : Type} [DecidableEq Root] (rootOf : World R TxId D → Root)
-    (g W_h : World R TxId D) (log : List (Turn R TxId Ev)) (c : Checkpoint R TxId D Root)
+    (g W_h : World R TxId D) (log : List (Turn R TxId Ev D)) (c : Checkpoint R TxId D Root)
     (prefixed : fold H g (log.take c.height) = some W_h)
     (honestRoot : c.root = rootOf W_h)
     (binds : rootOf c.world = rootOf W_h → c.world = W_h)
@@ -1378,7 +1939,7 @@ def toyR : Registry where
   layout := fun _ => toyLayout
 
 abbrev ToyWorld := World toyR Nat Nat
-abbrev ToyTurn := Turn toyR Nat Unit
+abbrev ToyTurn := Turn toyR Nat Unit Nat
 
 /-- A toy digest: deliberately NOT binding (it sees only the id and the leg
 count), so the collision poles below are constructible. -/
@@ -1386,6 +1947,8 @@ def toyH : History toyR Nat Unit Nat where
   turnDigest := fun t => t.txId * 7 + t.legs.length
   chain := fun r d => r * 31 + d + 1
   logRoot0 := 1
+  -- The B2 toy charges no storage; `Kernel.TurnCensus` exercises the meter.
+  legBytes := fun _ => 0
 
 def g : ToyWorld := genesis toyH 0
 
@@ -1398,12 +1961,13 @@ def leg (c : CellId) (p : Patch toyLayout) : Leg toyR := ⟨c, false, p⟩
 
 def turn (x : Nat) (creates : List (CellId × Bool)) (legs : List (Leg toyR))
     (retires : List CellId := []) : ToyTurn :=
-  ⟨x, creates.map (fun c => (c.1, c.2, none)), legs, retires, ()⟩
+  { txId := x, creates := creates.map (fun c => (c.1, c.2, none)), legs := legs,
+    retires := retires, event := () }
 
 /-- A turn whose creates each name a room. -/
 def turnIn (x : Nat) (creates : List (CellId × Bool × Option CellId)) (legs : List (Leg toyR)) :
     ToyTurn :=
-  ⟨x, creates, legs, [], ()⟩
+  { txId := x, creates := creates, legs := legs, retires := [], event := () }
 
 /-- Create cells 0 and 1, each holding key 0. -/
 def t0 : ToyTurn := turn 1 [(0, false), (1, false)] [leg 0 [alloc 0 5], leg 1 [alloc 0 9]]
@@ -1803,4 +2367,37 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.reject_missingParent
 /-- info: 'Minidregg.Kernel.World.Example.reject_room_created_later' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.reject_room_created_later
+
+/-! ### T1 pins -/
+
+#assert_axioms admit_ok_turnCheck
+#assert_axioms turnCheck_eq_none_iff
+#assert_axioms meter_system
+#assert_axioms spent_monotone
+#assert_axioms fold_spent_monotone
+#assert_axioms step_spends
+#assert_axioms spent_refused
+#assert_axioms charge_le_allowance
+#assert_axioms charge_is_patch_bytes
+#assert_axioms step_window
+#assert_axioms validFrom_reads
+#assert_axioms footprint_pinned
+#assert_axioms spend_needs_guard
+#assert_axioms run_spentAllocs_ne
+#assert_axioms run_spentAllocs_at
+#assert_axioms validFrom_spentAllocs
+#assert_axioms run_debits_ne
+#assert_axioms run_debits_at
+#assert_axioms validFrom_debits
+#assert_axioms meterLanes_nodup
+#assert_axioms mem_meterLanes
+#assert_axioms mem_chargedLanes
+#assert_axioms chargedLanes_nodup
+#assert_axioms run_sysPatch_core
+#assert_axioms validFrom_sysPatch
+#assert_axioms run_sysCore_spent
+#assert_axioms run_sysCore_allowance
+#assert_axioms sysPost_spent
+#assert_axioms sysPost_allowance
+
 end Minidregg.Kernel.World

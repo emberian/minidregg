@@ -31,7 +31,7 @@ def benchR : Registry where
   Kind := Unit
   layout := fun _ => benchLayout
 
-abbrev BenchTurn := Turn benchR Nat Unit
+abbrev BenchTurn := Turn benchR Nat Unit UInt64
 abbrev BenchWorld := World benchR Nat UInt64
 
 /-- FNV-style mixing over the ops of every leg: a function of the turn's
@@ -54,6 +54,8 @@ def benchH : History benchR Nat Unit UInt64 where
   turnDigest := turnDigest
   chain := fun r d => mix (mix r 8) d.toNat
   logRoot0 := 0
+  -- The bench measures the fold, not the meter: no leg is charged storage.
+  legBytes := fun _ => 0
 
 def benchGenesis : BenchWorld := genesis benchH 0
 
@@ -66,13 +68,15 @@ def readOp (k v : Nat) : Op benchLayout := .read () k (some v)
 /-- Turn `i` of the log. -/
 def benchTurn (i : Nat) : BenchTurn :=
   if i < cells then
-    ⟨i + 1, [(i, (), none)], [⟨i, (), [allocOp 0 0]⟩], [], ()⟩
+    { txId := i + 1, creates := [(i, (), none)], legs := [⟨i, (), [allocOp 0 0]⟩], retires := [],
+      event := () }
   else
     let c := i % cells
     let r := i / cells
     let n := (c + 1) % cells
     let seen := if c + 1 = cells then r else r - 1
-    ⟨i + 1, [], [⟨c, (), [writeOp 0 (r - 1) r]⟩, ⟨n, (), [readOp 0 seen]⟩], [], ()⟩
+    { txId := i + 1, creates := [], legs := [⟨c, (), [writeOp 0 (r - 1) r]⟩, ⟨n, (), [readOp 0 seen]⟩],
+      retires := [], event := () }
 
 def benchLog (n : Nat) : List BenchTurn := (List.range n).map benchTurn
 
@@ -93,7 +97,9 @@ theorem bench_fold_1000 :
 does not hold) is refused. -/
 theorem bench_fold_1000_stale_refused :
     (fold benchH benchGenesis
-      ((benchLog 1000).set 500 ⟨501, [], [⟨0, (), [writeOp 0 7 8]⟩], [], ()⟩)).isNone = true := by
+      ((benchLog 1000).set 500
+        { txId := 501, creates := [], legs := [⟨0, (), [writeOp 0 7 8]⟩], retires := [],
+          event := () })).isNone = true := by
   native_decide
 
 /-- info: 'Minidregg.Kernel.WorldBench.bench_fold_1000' depends on axioms: [propext, Classical.choice, Quot.sound, bench_fold_1000._native.native_decide.ax_1_1] -/
