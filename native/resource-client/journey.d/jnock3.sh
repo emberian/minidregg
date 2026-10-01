@@ -87,7 +87,7 @@ FIELDS = {"inv/iron": 2, "inv/wood": 3, "inv/sword": 4}
 IRON, WOOD, SWORD = 2, 3, 4
 def slot(f, k): return {"target": "0", "slot": f"resource/field/{f}/before", "key": k, "type": "nat"}
 def out(k, f): return {"key": k, "target": "0", "field": str(f), "type": "nat"}
-def abi(fuel): return {"version": "2", "arm": "2", "fuel": str(fuel),
+def abi(fuel): return {"version": "3", "context": "live", "arm": "2", "fuel": str(fuel),
   "sample": [slot(f, k) for k, f in FIELDS.items()],
   "outputs": [out(k, f) for k, f in FIELDS.items()], "libraries": []}
 open(path("permit-all.json"), "w").write('{"type":"all","predicates":[]}\n')
@@ -165,13 +165,12 @@ row("inventory cell filled (iron 3, wood 2, sword 0) and given the law `ran forg
 
 # 3. a human's direct write of the same fields: law-denied
 rc, last = submit("human", scalar([write(IRON, 1, 3), write(WOOD, 1, 2), write(SWORD, 1, 0)]))
-# The public socket renders every authorization refusal as the one uniform
-# `admission | request refused` (non-disclosure; MR's named law-denied frame is on
-# the product line). The run check passed at prepare (no claim, nothing to check);
-# the identical writes WITH forge's claim are admitted below, so what refused this
-# is the law's `ran forge` leaf.
-row("a direct write (no run claim) is refused by the law (uniform admission refusal)",
-    rc != 0 and last == "outcome refused | admission | request refused", f"rc={rc} last={last[:200]}")
+# The authorized prepare names the law leaf that refused (MR's `law-denied` frame,
+# on this line since the final integration): `law-denied: ran <forge>`. The run
+# check passed at prepare (no claim, nothing to check); the identical writes WITH
+# forge's claim are admitted below.
+row("a direct write (no run claim) is refused by the law, naming its `ran forge` leaf",
+    rc != 0 and f"law-denied: ran {P['forge']}" in last, f"rc={rc} last={last[:200]}")
 
 # 4. op 134: the kernel's sample and the Lean steps; nock-run computes the output on it
 def dry(program, values):
