@@ -810,7 +810,6 @@ def intent (accepted : AcceptedMoney deployment profile ambient durable ingress)
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
   exactCharge := charge accepted
   event := event deployment.domain profile.semantics ingress
-  subject := some ingress.command.subject
   postRootsBound := accepted.physical.2.2.2.1
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
 
