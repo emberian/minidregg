@@ -4,6 +4,7 @@ nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
 import Kernel.DeclaredResourceScalar
 import Kernel.ContentResource
+import Kernel.ClockCellDomain
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -230,7 +231,7 @@ inductive Reject where
   | signature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
-  | observationRequired | observationRejected
+  | observationRequired | observationRejected | clockUnavailable
   deriving Repr
 
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
@@ -466,6 +467,9 @@ structure PreparedInvocation {F : Type} [Field F]
   distinct : (command.targets.map Target.target).Nodup
   directory : LoadedDirectory durable
   authority : Loaded deployment durable.snapshot
+  /-- The deployment clock of the same physical snapshot; its slots enter
+  every target law and its root is a read guard of the record. -/
+  clock : ClockCellDomain.Loaded deployment durable.snapshot
   targets : (i : TargetIndex command) → PreparedTarget deployment directory.directory
     authority.snapshot profile.semantics ambient command command.targets[i]
   marker : MarkerMode authority.snapshot profile.semantics command
@@ -478,10 +482,11 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     if distinct : (command.targets.map Target.target).Nodup then
       let directory ← requireSome .directoryUnavailable (loadDirectory durable)
       let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+      let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
       let targets ← collect command.targets (prepareTarget deployment directory.directory
         authority.snapshot profile.semantics ambient command)
       let marker ← prepareMarker authority.snapshot profile.semantics command
-      .ok ⟨nonempty, distinct, directory, authority, targets, marker⟩
+      .ok ⟨nonempty, distinct, directory, authority, clock, targets, marker⟩
     else .error .duplicateTargets
   else .error .emptyTargets
 

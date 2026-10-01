@@ -162,6 +162,7 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
   let preRoot := match primary with
     | some i => (prepared.targets i).pre.root
     | none => prepared.authority.snapshot.cell.root
+  Kernel.ClockCell.slots prepared.clock.clock ++
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val)
@@ -191,6 +192,22 @@ theorem projectWithCommon_exact (prepared : PreparedInvocation deployment profil
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     projectWithCommon prepared primary (projectCommonSlots prepared primary source) logical =
       project prepared primary source logical := rfl
+
+/-- **`now_slot_exact`.**  Every law judging a resource invocation reads
+`clock/now` as exactly the `now` of the clock cell held by the snapshot the
+record is prepared from (and guarded against, `domainGuards`). -/
+theorem now_slot_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    (project prepared primary source logical).get "clock/now" =
+        some (Int.ofNat prepared.clock.clock.now) ∧
+      Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock := by
+  refine ⟨?_, prepared.clock.clockExact⟩
+  simp [project, projectWithCommon, projectCommonSlots, Kernel.ClockCell.slots,
+    Minidregg.Pred.State.get]
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.now_slot_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms now_slot_exact
 
 /- The tuple's generic `pre` selector constructs a complete raw leg, including
 the hash of the entire signed command's request. These projections select the
@@ -544,8 +561,12 @@ def sourceGuards (prepared : PreparedInvocation deployment profile ambient durab
   (List.finRange command.targets.length).map fun i =>
     ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩
 
+/-- The domain reads of every invocation: the authority cell and the clock. -/
+def domainGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
+  prepared.authority.readGuards ++ [prepared.clock.readGuard]
+
 def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  sourceGuards prepared ++ prepared.authority.readGuards.filter fun guard =>
+  sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : PreparedInvocation deployment profile ambient durable command) : Prop :=
@@ -562,7 +583,7 @@ def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient
   let ws := writes prepared
   let ids := ws.map DataWrite.cellId
   let source := sourceGuards prepared
-  let guards := source ++ prepared.authority.readGuards.filter fun guard => guard.cellId ∉ ids
+  let guards := source ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ ids
   decide ids.Nodup &&
   decide (∀ write ∈ ws, write.expectedPre = durable.snapshot.model.roots write.cellId) &&
   decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
@@ -660,7 +681,7 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     (_accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ws := writes prepared
-  let guards := sourceGuards prepared ++ prepared.authority.readGuards.filter fun guard =>
+  let guards := sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
     guard.cellId ∉ ws.map DataWrite.cellId
   { transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
     writes := ws

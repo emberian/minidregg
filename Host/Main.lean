@@ -37,7 +37,9 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 84=checked session enrollment submit, 85=receipt-only enrollment lookup,
 86=private participant key enrollment plan, 87=private detached key assembly,
 88=checked participant key enrollment submit, 89=receipt-only key lookup,
-91=current resource birth intent from verified history.
+91=current resource birth intent from verified history,
+108=clock tick signing plan, 109=clock tick detached assembly,
+110=clock tick submit, 111=public clock view.
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -5152,6 +5154,29 @@ def run (arguments : List String) : IO UInt32 := do
                             let outcome := NativeHost.enrollmentLookupLoaded
                               pinnedConfig opened payload
                             return ((89 : UInt8), outcomeCodec.encode outcome)
+                        | 108 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.clockPlanLoaded pinnedConfig opened payload)
+                            let bytes := ClockTickReceiver.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "clock plan exceeds host frame bound")
+                            return ((108 : UInt8), bytes)
+                        | 109 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := ClockTickReceiver.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical clock plan")
+                            let ingress ← IO.ofExcept (NativeHost.clockAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "clock ingress exceeds host frame bound")
+                            return ((109 : UInt8), ingress)
+                        | 110 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.clockSubmitLoaded pinnedConfig opened payload
+                            return ((110 : UInt8), outcomeCodec.encode outcome)
+                        | 111 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let view ← IO.ofExcept (NativeHost.clockViewLoaded pinnedConfig opened)
+                            return ((111 : UInt8), ClockTickReceiver.viewCodec.encode view)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload

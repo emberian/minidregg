@@ -148,6 +148,11 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 !plan.is_empty() && sponsor.len() == 64 && possession.len() == 64
             }),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // K-CLOCK: tick plan, detached assembly (plan + one signature), submit, view.
+        [108 | 110, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [109, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [111] => true,
         _ => false,
     }
 }
@@ -205,6 +210,11 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
             })
             .unwrap_or(false),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // K-CLOCK: tick plan, detached assembly (plan + one signature), submit, view.
+        [108 | 110, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [109, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [111] => true,
         [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
         [33, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;

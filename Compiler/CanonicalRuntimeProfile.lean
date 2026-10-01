@@ -67,7 +67,7 @@ def installProjectionVersion : List UInt8 :=
 effects. Generic scalar views retain complete field identifiers and expose
 before/after/delta plus pair-total deltas only where the actual reads exist. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS/v4".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS/v5".toUTF8.toList
 
 /-- Typed content edits are source-derived canonical patches; atom payloads
 and exact old records belong to the command, not a host-side blob table. -/
@@ -174,6 +174,8 @@ def sourceComponents : List (List UInt8) :=
      [PolicySourceCell.registryTag.toNat, PolicySourceCell.schemaId,
       PolicySourceCell.wireVersion],
    StoreCodec.frame DeclaredEffectCell.wire,
+   StoreCodec.frame Kernel.ClockCell.wire,
+   Kernel.ClockCell.idCustomization,
    StoreCodec.rootCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,

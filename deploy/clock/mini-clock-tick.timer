@@ -1,0 +1,11 @@
+# One tick per minute: the resolution of `clock/now` for laws.
+[Unit]
+Description=Mini clock tick, once per minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
