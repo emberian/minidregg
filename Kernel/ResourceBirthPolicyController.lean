@@ -335,7 +335,7 @@ def oldAuthority (prepared : PreparedBirth profile.compilerProfile deployment pi
 policy-control grant per newborn. Sharing is a later authorized delegation,
 not permission to nominate extra arbitrary grants during creation. -/
 def ownerVerbs : (kind : ResourceKind) → Finset (Verb kind)
-  | .object => {.observeObject, .mutateObject, .delegateObject}
+  | .object => {.observeObject, .mutateObject, .delegateObject, .appendObject}
   | .account => {.observeAccount, .transfer, .delegateAccount}
   | .program => {.observeProgram, .installProgram, .delegateProgram}
 

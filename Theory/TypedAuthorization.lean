@@ -88,7 +88,64 @@ inductive Verb : ResourceKind → Type
   | installPolicy : Verb .program
   /-- Revoking a resource grant is independently scoped management authority. -/
   | revokeCapability : Verb .program
+  /-- Appending one entry to a stream object: "may speak, may not edit".
+  `mutateObject` covers it too (`Verb.AllowedBy`). -/
+  | appendObject : Verb .object
   deriving DecidableEq, Repr
+
+/-- The granted verbs that cover a requested verb: the verb itself, and for an
+append also `mutateObject` (whoever may edit an object may append to it). -/
+def Verb.grantors : {kind : ResourceKind} → Verb kind → List (Verb kind)
+  | _, .appendObject => [.appendObject, .mutateObject]
+  | _, verb => [verb]
+
+/-- `verb` is allowed by a granted verb set. -/
+def Verb.AllowedBy {kind : ResourceKind} (verb : Verb kind) (verbs : Finset (Verb kind)) : Prop :=
+  ∃ granted ∈ verb.grantors, granted ∈ verbs
+
+instance Verb.allowedByDecidable {kind : ResourceKind} (verb : Verb kind)
+    (verbs : Finset (Verb kind)) : Decidable (verb.AllowedBy verbs) := by
+  unfold Verb.AllowedBy; infer_instance
+
+theorem Verb.mem_grantors_self {kind : ResourceKind} (verb : Verb kind) : verb ∈ verb.grantors := by
+  cases verb <;> simp [Verb.grantors]
+
+theorem Verb.AllowedBy.of_mem {kind : ResourceKind} {verb : Verb kind} {verbs : Finset (Verb kind)}
+    (member : verb ∈ verbs) : verb.AllowedBy verbs :=
+  ⟨verb, verb.mem_grantors_self, member⟩
+
+theorem Verb.AllowedBy.mono {kind : ResourceKind} {verb : Verb kind} {small large : Finset (Verb kind)}
+    (sub : small ⊆ large) (allowed : verb.AllowedBy small) : verb.AllowedBy large :=
+  let ⟨granted, grantor, member⟩ := allowed
+  ⟨granted, grantor, sub member⟩
+
+@[simp] theorem Verb.allowedBy_singleton_self {kind : ResourceKind} (verb : Verb kind) :
+    verb.AllowedBy {verb} := Verb.AllowedBy.of_mem (Finset.mem_singleton_self verb)
+
+@[simp] theorem Verb.allowedBy_insert_self {kind : ResourceKind} (verb : Verb kind)
+    (verbs : Finset (Verb kind)) : verb.AllowedBy (insert verb verbs) :=
+  Verb.AllowedBy.of_mem (Finset.mem_insert_self verb verbs)
+
+/-- Every verb but `appendObject` is allowed exactly by itself. -/
+theorem Verb.allowedBy_iff_mem {kind : ResourceKind} {verb : Verb kind} {verbs : Finset (Verb kind)}
+    (notAppend : verb.grantors = [verb]) : verb.AllowedBy verbs ↔ verb ∈ verbs := by
+  unfold Verb.AllowedBy
+  rw [notAppend]
+  simp only [List.mem_singleton, exists_eq_left]
+
+/-- **Mutate covers append**, and nothing else covers it. -/
+theorem Verb.append_allowedBy_iff (verbs : Finset (Verb .object)) :
+    Verb.appendObject.AllowedBy verbs ↔ Verb.appendObject ∈ verbs ∨ Verb.mutateObject ∈ verbs := by
+  simp [Verb.AllowedBy, Verb.grantors]
+
+/-- A publish-only grant may not edit. -/
+theorem Verb.append_grant_cannot_mutate : ¬ Verb.mutateObject.AllowedBy {Verb.appendObject} := by
+  simp [Verb.AllowedBy, Verb.grantors]
+
+/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.append_allowedBy_iff' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Verb.append_allowedBy_iff
+/-- info: 'Minidregg.Theory.TypedAuthorization.Verb.append_grant_cannot_mutate' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Verb.append_grant_cannot_mutate
 
 /-- The complete semantic authorization request.  Verifiers receive this value
 directly; there are no prover-carried "bound target" strings to trust. -/
@@ -437,7 +494,7 @@ structure Scope (kind : ResourceKind) where
 structure Scope.Covers {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) (request : Request kind) : Prop where
   target : scope.targets.Covers parentage request.target
-  verb : request.verb ∈ scope.verbs
+  verb : request.verb.AllowedBy scope.verbs
   cost : request.cost ≤ scope.maxCost
 
 /-- `child.Narrows parent parentage` is the authority preorder at one parent
@@ -451,7 +508,7 @@ structure Scope.Narrows {kind : ResourceKind} (child parent : Scope kind)
 theorem Scope.covers_iff_components {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) (request : Request kind) :
     scope.Covers parentage request ↔
-      scope.targets.Covers parentage request.target ∧ request.verb ∈ scope.verbs ∧
+      scope.targets.Covers parentage request.target ∧ request.verb.AllowedBy scope.verbs ∧
         request.cost ≤ scope.maxCost :=
   ⟨fun covers => ⟨covers.target, covers.verb, covers.cost⟩,
     fun ⟨target, verb, cost⟩ => ⟨target, verb, cost⟩⟩
@@ -488,7 +545,7 @@ theorem Scope.covers_of_narrows {kind : ResourceKind}
     (hn : child.Narrows parent parentage) (hc : child.Covers parentage request) :
     parent.Covers parentage request :=
   { target := TargetSet.covers_of_narrows hn.targets hc.target
-    verb := hn.verbs hc.verb
+    verb := hc.verb.mono hn.verbs
     cost := le_trans hc.cost hn.maxCost }
 
 theorem Scope.covers_mono {kind : ResourceKind} {scope : Scope kind}
@@ -876,7 +933,7 @@ theorem program_edit_capability_cannot_install_policy
     ¬ cap.Admissible state request := by
   intro admitted
   have allowed := admitted.scope.verb
-  simp [codeOnly, policyChange] at allowed
+  simp [codeOnly, policyChange, Verb.AllowedBy, Verb.grantors] at allowed
 
 /-- Policy replacement authority does not silently acquire revocation authority. -/
 theorem policy_install_only_cannot_revoke
@@ -886,7 +943,7 @@ theorem policy_install_only_cannot_revoke
     ¬ cap.Admissible state request := by
   intro admitted
   have allowed := admitted.scope.verb
-  simp [installOnly, revocation] at allowed
+  simp [installOnly, revocation, Verb.AllowedBy, Verb.grantors] at allowed
 
 /-- A caller cannot pre-load a capability with a future issuer epoch.  Exact
 equality to current state rejects every strictly forward epoch. -/
@@ -994,7 +1051,7 @@ theorem demoCapability_admissible :
   · simp [Holder.Covers, demoCapability, demoRequest]
   · exact
       { target := by simp [TargetSet.Covers, demoCapability, demoScope, demoRequest, demoTarget]
-        verb := by simp [demoCapability, demoScope, demoRequest]
+        verb := by simp [demoCapability, demoScope, demoRequest, Verb.AllowedBy, Verb.grantors]
         cost := by norm_num [demoCapability, demoScope, demoRequest] }
   · norm_num [demoCapability, demoRequest]
   · norm_num [demoCapability, demoRequest]

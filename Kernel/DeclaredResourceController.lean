@@ -41,12 +41,12 @@ def rawLeg (prepared : PreparedInvocation deployment profile ambient durable com
     (source : Source command) : (incidence : Incidence command) → CandidateLegData (layout prepared) incidence
   | some i =>
       { pre := (prepared.targets i).pre
-        patch := targetPatch prepared.authority.snapshot profile.semantics command command.targets[i]
+        patch := targetPatch prepared.authority.snapshot profile.semantics ambient command command.targets[i]
           (prepared.targets i).pre
         request := ⟨command.targets[i].kind, requestFor prepared.authority.snapshot profile.semantics
           ambient command command.targets[i] (prepared.targets i).pre.root⟩
         Postcondition := fun logical =>
-          (targetPatch prepared.authority.snapshot profile.semantics command command.targets[i]
+          (targetPatch prepared.authority.snapshot profile.semantics ambient command command.targets[i]
             (prepared.targets i).pre).ResultAt
             (prepared.targets i).pre.logical logical }
   | none =>
@@ -119,6 +119,21 @@ def prepareTuple (prepared : PreparedInvocation deployment profile ambient durab
 
 abbrev bytesSlots := ResourceAuthorityProjection.bytesSlots
 
+/-- The policy slots of one stream append: the entry's fields as request
+slots, so a stream law can name its author (`request/subject`), its topics
+(`request/topic/…`) or its addressee (`request/to`); plus the position. -/
+def streamSlots (request : StreamCell.Append) (before : Store StreamCell.layout) :
+    List (String × Int) :=
+  [("request/topic/length", Int.ofNat request.topic.length),
+   ("stream/sequence", Int.ofNat (StreamCell.nextSeq before))] ++
+  bytesSlots "request/topic" 0 request.topic ++
+  (match request.recipient with
+    | some subject => [("request/to", Int.ofNat subject.value)]
+    | none => []) ++
+  (match request.ref with
+    | some (cell, sequence) => [("request/ref/cell", Int.ofNat cell), ("request/ref/sequence", Int.ofNat sequence)]
+    | none => [])
+
 /-- Exact scalar/content projection from the committed old and candidate final
 states. Local names remain convenient; joint names expose every declared
 participant without granting a view of unrelated cells. -/
@@ -128,6 +143,7 @@ def targetProjection (target : Target) (before after : Store target.layout) : Li
     cases payload with
     | scalar _ => exact DeclaredResourceProjection.project id before after
     | content content => exact ContentResource.project before after content
+    | append request => exact streamSlots request before
 
 def incidenceTarget (command : Command) : Incidence command → Target
   | some i => command.targets[i]

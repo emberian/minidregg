@@ -166,7 +166,7 @@ def rawLeg {F : Type} [Field F]
   | .inr index =>
       { pre := (grain.targets index).pre
         patch := DeclaredResourceController.targetPatch birth.prepared.pre.authority.snapshot
-          profile.semantics (source.grainCommand tariff)
+          profile.semantics ambient (source.grainCommand tariff)
           (source.grainCommand tariff).targets[index] (grain.targets index).pre
         request := ⟨(source.grainCommand tariff).targets[index].kind,
           DeclaredResourceController.requestFor birth.prepared.pre.authority.snapshot
@@ -174,7 +174,7 @@ def rawLeg {F : Type} [Field F]
             (source.grainCommand tariff).targets[index] (grain.targets index).pre.root⟩
         Postcondition := fun post =>
           (DeclaredResourceController.targetPatch birth.prepared.pre.authority.snapshot
-            profile.semantics (source.grainCommand tariff)
+            profile.semantics ambient (source.grainCommand tariff)
             (source.grainCommand tariff).targets[index] (grain.targets index).pre).ResultAt
               (grain.targets index).pre.logical post }
 

@@ -78,6 +78,7 @@ def verbTag {kind : ResourceKind} : Verb kind → Nat
   | .delegateProgram => 9
   | .installPolicy => 10
   | .revokeCapability => 11
+  | .appendObject => 13
 
 /-- Kind-directed decoding makes an ill-kinded verb tag fail rather than
 manufacturing an equality proof after the fact. -/
@@ -94,6 +95,7 @@ def decodeVerb (kind : ResourceKind) (tag : Nat) : Option (Verb kind) :=
   | .program, 9 => some .delegateProgram
   | .program, 10 => some .installPolicy
   | .program, 11 => some .revokeCapability
+  | .object, 13 => some .appendObject
   | _, _ => none
 
 @[simp] theorem decodeVerb_tag {kind : ResourceKind} (verb : Verb kind) :
@@ -385,7 +387,7 @@ def holderCoversCheck (holder : Holder) (subject : SubjectId) : Bool :=
 def scopeCoversCheck {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) (request : Request kind) : Bool :=
   decide (scope.targets.Covers parentage request.target) &&
-    (decide (request.verb ∈ scope.verbs) &&
+    (decide (request.verb.AllowedBy scope.verbs) &&
       decide (request.cost ≤ scope.maxCost))
 
 @[simp] theorem scopeCoversCheck_eq_true_iff {kind : ResourceKind}

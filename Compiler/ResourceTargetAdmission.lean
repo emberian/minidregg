@@ -20,7 +20,7 @@ abbrev Registry := CanonicalCellRegistry.registry
 
 /-- One shared role selection for ordinary resource observation and management. -/
 def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
-  | .content | .declaredObject => some .object
+  | .content | .declaredObject | .stream => some .object
   | .accountMetadata => some .account
   | .declaredProgram => some .program
   | _ => none

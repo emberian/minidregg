@@ -32,6 +32,7 @@ import Compiler.HyperdocumentCodec  -- the Hyperdocument value type tree on the 
 import Compiler.HyperdocumentCell  -- hyperdocument content, event-log and link-index cells are StoreCodec at declared wires; the four-slot/overflow pages and the bounded-page catalog, registry and upgrade are deleted (DATAMODEL §5 B1)
 import Compiler.CredentialAuthorityCell  -- the authority domain is one StoreCodec cell over typed planes; revoked/nullifier/registered are append-only presence planes; the page and LOOM/AUTH/STATE codecs are deleted (DATAMODEL §5 B1)
 import Compiler.DeployedCellRegistry  -- concrete dependent registry packs the four deployed cell kinds and witnesses create/delete rejection teeth without casts
+import Compiler.StreamCell  -- the stream cell: a dense append-only sequence log; one append = one Op.allocate at nextSeq (PLACE §4.4, K-STREAM)
 import Compiler.StoreCodec  -- the unbounded canonical store codec: sorted address-byte support, length-prefixed, no capacity or shard; general round-trip/canonicity, layout-digest frame (DATAMODEL §5 A2)
 import Compiler.PlanFootprintCodec  -- a plan footprint as canonical bytes: (wire address, optional wire value) reads, carried by the signed header (Theory.PlanBinding)
 import Compiler.IntStream  -- the one integer byte codec: zigzag base-255; the Book's Sum codec is deleted

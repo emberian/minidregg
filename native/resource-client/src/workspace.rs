@@ -453,14 +453,27 @@ fn list(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Result<()> {
+fn read(
+    root: &Path,
+    workspace: &Value,
+    resource_name: &str,
+    view: &str,
+    window: Option<(&str, &str)>,
+) -> Result<()> {
     let reference = reference(root, resource_name)?;
     let (attempt, nonce) = new_attempt(root)?;
-    let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+    let mut intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
         "purpose":{"type":"query","kind":member(&reference,"kind")?,
             "target":member(&reference,"target")?,"view":view},
         "grants":[{"kind":member(&reference,"kind")?,"target":member(&reference,"target")?,
             "capability":member(&reference,"observeCapability")?}]});
+    // A stream window (`tail`): the entries at positions start .. start+count-1.
+    if let Some((start, count)) = window {
+        field_decimal(start, "tail start")?;
+        field_decimal(count, "tail count")?;
+        intent["purpose"]["start"] = json!(start);
+        intent["purpose"]["count"] = json!(count);
+    }
     let mut bytes = serde_json::to_vec_pretty(&intent).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     let source = root.join("sources").join(format!("q-{nonce}.json"));
@@ -602,6 +615,48 @@ fn content_actions(actions: &Value) -> Result<Value> {
     Ok(json!({"type":"content","actions":actions}))
 }
 
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// One stream append: `{"type":"append","topic":TEXT,"text":TEXT[,"to":SUBJECT][,"ref":{cell,sequence}]}`.
+/// The Host derives the sequence position and the payload digest; the text rides in the signed command.
+fn stream_append(payload: &Value) -> Result<Value> {
+    let obj = payload
+        .as_object()
+        .ok_or("append payload must be an object")?;
+    if obj
+        .keys()
+        .any(|key| !matches!(key.as_str(), "type" | "topic" | "text" | "to" | "ref"))
+        || !obj.contains_key("topic")
+        || !obj.contains_key("text")
+    {
+        return Err("append payload has type, topic, text and optional to, ref".into());
+    }
+    let topic = member(payload, "topic")?;
+    let text = member(payload, "text")?;
+    if topic.len() > 64 {
+        return Err("append topic exceeds 64 bytes".into());
+    }
+    if text.len() > 4096 {
+        return Err("append text exceeds 4096 bytes".into());
+    }
+    let to = match obj.get("to") {
+        None | Some(Value::Null) => Value::Null,
+        Some(value) => {
+            let subject = value.as_str().ok_or("append to must be a decimal string")?;
+            field_decimal(subject, "append to")?;
+            json!(subject)
+        }
+    };
+    let reference = match obj.get("ref") {
+        None | Some(Value::Null) => Value::Null,
+        Some(value) => json!({"cell":member(value,"cell")?,"sequence":member(value,"sequence")?}),
+    };
+    Ok(json!({"type":"append","topic":to_hex(topic.as_bytes()),
+        "payload":to_hex(text.as_bytes()),"to":to,"ref":reference}))
+}
+
 fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &str) -> Result<()> {
     validate_name(proposal_id)?;
     let request = bounded_json(request_path)?;
@@ -659,16 +714,20 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
-                if payload_obj.len() != 2
-                    || !payload_obj.contains_key("type")
-                    || !payload_obj.contains_key("actions")
-                {
-                    return Err("payload may contain only type and actions".into());
-                }
-                let lowered = match member(payload, "type")? {
-                    "scalar" => scalar_actions(&payload["actions"], target)?,
-                    "content" => content_actions(&payload["actions"])?,
-                    _ => return Err("unsupported workspace payload type".into()),
+                let lowered = if member(payload, "type")? == "append" {
+                    stream_append(payload)?
+                } else {
+                    if payload_obj.len() != 2
+                        || !payload_obj.contains_key("type")
+                        || !payload_obj.contains_key("actions")
+                    {
+                        return Err("payload may contain only type and actions".into());
+                    }
+                    match member(payload, "type")? {
+                        "scalar" => scalar_actions(&payload["actions"], target)?,
+                        "content" => content_actions(&payload["actions"])?,
+                        _ => return Err("unsupported workspace payload type".into()),
+                    }
                 };
                 let capability = member(&reference, "operationCapability")?;
                 let observe = member(&reference, "observeCapability")?;
@@ -1172,16 +1231,27 @@ fn create(
     storage: &str,
     predicate_path: &Path,
     room_name: Option<&str>,
+    owner: Option<&str>,
 ) -> Result<()> {
     validate_name(name_value)?;
+    // `--owner SUBJECT`: the creator pays for and births a resource owned by
+    // another subject (a room founder birthing a member's stream); the owner
+    // and control grants are issued to that subject, not to the creator.
+    if let Some(owner) = owner {
+        decimal(owner, "resource owner")?;
+    }
+    let owner_subject = match owner {
+        Some(owner) => owner.to_owned(),
+        None => member(workspace, "subject")?.to_owned(),
+    };
     // `--in ROOM`: the new resource is born in the room a workspace reference
     // names. The Host refuses a room that is not a present resource cell.
     let room = match room_name {
         Some(room_name) => Some(member(&reference(root, room_name)?, "target")?.to_string()),
         None => None,
     };
-    if !matches!(storage, "content" | "declared") {
-        return Err("supported resource storage is content or declared".into());
+    if !matches!(storage, "content" | "declared" | "stream") {
+        return Err("supported resource storage is content, declared or stream".into());
     }
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = member_path(workspace, "namespaceRoot")?;
@@ -1198,6 +1268,9 @@ fn create(
         "subject":member(workspace,"subject")?});
     if let Some(room) = &room {
         requested_core["room"] = json!(room);
+    }
+    if owner.is_some() {
+        requested_core["owner"] = json!(owner_subject);
     }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
@@ -1247,7 +1320,7 @@ fn create(
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
                 "resources":[{"kind":"object","storage":storage,
-                    "target":reservation.ids["target"],"owner":member(workspace,"subject")?,
+                    "target":reservation.ids["target"],"owner":owner_subject,
                     "ownerCapability":reservation.ids["ownerCapability"],
                     "controlCapability":reservation.ids["controlCapability"],
                     "predicate":predicate}],
@@ -1449,7 +1522,15 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 } else {
                     "resource"
                 },
+                None,
             )
+        }
+        "tail" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            let start = os_string(args.required("from")?, "tail start")?;
+            let count = os_string(args.required("count")?, "tail count")?;
+            args.finish()?;
+            read(&root, &workspace, &name, "tail", Some((&start, &count)))
         }
         "submit" => {
             let source = path(args.required("intent")?);
@@ -1489,8 +1570,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => Some(os_string(value, "room name")?),
                 None => None,
             };
+            let owner = match args.optional("owner") {
+                Some(value) => Some(os_string(value, "resource owner")?),
+                None => None,
+            };
             args.finish()?;
-            create(&root, &workspace, &name, &storage, &predicate, room.as_deref())
+            create(
+                &root,
+                &workspace,
+                &name,
+                &storage,
+                &predicate,
+                room.as_deref(),
+                owner.as_deref(),
+            )
         }
         "recover" => {
             let attempt = path(args.required("attempt")?);

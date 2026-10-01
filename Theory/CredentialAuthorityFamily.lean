@@ -78,7 +78,9 @@ theorem DelegationShape.requires_delegate_verb {kind : ResourceKind}
     {request : Request kind} {child parent : Capability kind} {parentage : Parentage}
     (shape : DelegationShape request child parent parentage) :
     delegateVerb kind ∈ parent.scope.verbs := by
-  simpa only [shape.delegate] using shape.parentScope.verb
+  have allowed : (delegateVerb kind).AllowedBy parent.scope.verbs := by
+    simpa only [shape.delegate] using shape.parentScope.verb
+  exact (Verb.allowedBy_iff_mem (by cases kind <;> rfl)).mp allowed
 
 /-- A delegated child reaches nothing outside the requested cell's subtree:
 whatever it covers is the requested cell or a cell under it. -/
@@ -350,8 +352,8 @@ def exactRequestScope {kind : ResourceKind} (request : Request kind) : Scope kin
 
 theorem exactRequestScope_covers {kind : ResourceKind} (request : Request kind)
     (parentage : Parentage) : (exactRequestScope request).Covers parentage request := by
-  exact ⟨by simp [exactRequestScope, TargetSet.Covers], by simp [exactRequestScope],
-    by simp [exactRequestScope]⟩
+  exact ⟨by simp [exactRequestScope, TargetSet.Covers],
+    Verb.AllowedBy.of_mem (by simp [exactRequestScope]), by simp [exactRequestScope]⟩
 
 end Minidregg.Theory.CredentialAuthorityFamily
 

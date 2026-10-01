@@ -33,6 +33,7 @@ import Compiler.HyperdocumentCell
 import Compiler.CanonicalResourcePageMaterializer
 import Compiler.ResourceBirthCodec
 import Compiler.PolicySourceCell
+import Compiler.StreamCell
 import Theory.CanonicalResourceBookInvariant
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
@@ -59,13 +60,15 @@ inductive Kind where
   | accountMetadata
   | declaredProgram
   | policySource
+  /-- A dense append-only sequence log (`StreamCell`): a per-author stream. -/
+  | stream
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .stream]
 
-/-- Tags 1/2/3/5/6/8/9/10 are deployment pins.  Tag 3 is the one authority
+/-- Tags 1/2/3/5/6/8/9/10/11 are deployment pins.  Tag 3 is the one authority
 cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
 retired and decodes to nothing; tag 4 was never assigned. -/
 def Kind.tag : Kind → UInt8
@@ -77,6 +80,7 @@ def Kind.tag : Kind → UInt8
   | .accountMetadata => 8
   | .declaredProgram => 9
   | .policySource => PolicySourceCell.registryTag
+  | .stream => 11
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -87,6 +91,7 @@ def kindAtTag : UInt8 → Option Kind
   | 8 => some .accountMetadata
   | 9 => some .declaredProgram
   | 10 => some .policySource
+  | 11 => some .stream
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -109,6 +114,7 @@ def schemaRef : Kind → SchemaRef
   | .accountMetadata => ⟨⟨91007⟩, 2⟩
   | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
+  | .stream => ⟨⟨91011⟩, 1⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -124,6 +130,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .accountMetadata => EffectDeclaration.effectLayout
   | .declaredProgram => EffectDeclaration.effectLayout
   | .policySource => PolicySourceCell.layout
+  | .stream => StreamCell.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -134,6 +141,7 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .accountMetadata => DeclaredEffectCell.materializer
   | .declaredProgram => DeclaredEffectCell.materializer
   | .policySource => PolicySourceCell.materializer
+  | .stream => StreamCell.materializer
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -175,6 +183,8 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
     registry.materializer .accountMetadata = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_policy_source_materializer :
     registry.materializer .policySource = PolicySourceCell.materializer := rfl
+@[simp] theorem registry_stream_materializer :
+    registry.materializer .stream = StreamCell.materializer := rfl
 @[simp] theorem registry_program_materializer :
     registry.materializer .declaredProgram = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_lifecycle_root :
@@ -368,6 +378,7 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       (CanonicalResourceKernel.logicalBook state).AccountSupported
   | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
       (PolicySourceCell.recordAt state)
+  | .stream, state => StreamCell.StreamLaw state
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -419,6 +430,7 @@ injected as raw user initial payloads. -/
 def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
   | .content, state => state.support = ∅
+  | .stream, state => state.support = ∅
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
