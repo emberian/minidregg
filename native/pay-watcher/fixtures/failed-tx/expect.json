@@ -1,6 +1,7 @@
 {
   "description": "the signature list says success but the transaction's meta.err is non-null",
   "exit": 0,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "failedTransaction"

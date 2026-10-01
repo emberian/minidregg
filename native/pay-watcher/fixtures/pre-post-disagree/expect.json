@@ -1,6 +1,7 @@
 {
   "description": "PRE and POST balances of the watched account name different owners",
   "exit": 3,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "balanceEntriesDisagree"

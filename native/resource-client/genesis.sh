@@ -15,6 +15,13 @@
 # most 8 further genesis enrollments (a hosted operator's agent-grain subjects;
 # the only AgentGrain birth route is the historical birth intent, admitted only
 # against the genesis image). None may reuse the sponsor's subject or account.
+#
+# GENESIS_PAY_OBSERVER, if set, is an absolute path to a JSON object
+# {"subject","capability","controlCapability","enrolCapability"} (canonical
+# decimal strings) naming the PAY observer (deploy/pay/README.md): genesis then
+# installs the pay law and the observer's, the pay controller's and the
+# self-enrollment capabilities. Its subject must be one of the genesis
+# enrollments (the sponsor or an EXTRA_GENESIS_ENROLLMENTS entry).
 set -eu
 umask 077
 check_params() {
@@ -104,6 +111,20 @@ if [ -n "${EXTRA_GENESIS_ENROLLMENTS:-}" ]; then
   jq --slurpfile extra "$EXTRA_GENESIS_ENROLLMENTS" '.enrollments += $extra[0]' \
     "$dir/genesis.json" >"$dir/genesis-extended.json"
   mv "$dir/genesis-extended.json" "$dir/genesis.json"
+fi
+
+if [ -n "${GENESIS_PAY_OBSERVER:-}" ]; then
+  case "$GENESIS_PAY_OBSERVER" in /*) ;; *) echo 'genesis: GENESIS_PAY_OBSERVER must be absolute' >&2; exit 2;; esac
+  jq -e --slurpfile g "$dir/genesis.json" '
+    def dec: type == "string" and test("^(0|[1-9][0-9]*)$");
+    type == "object" and (keys == ["capability", "controlCapability", "enrolCapability", "subject"])
+    and ([.subject, .capability, .controlCapability, .enrolCapability] | all(dec))
+    and (.subject as $s | $g[0].enrollments | any(.key.subject == $s))' \
+    "$GENESIS_PAY_OBSERVER" >/dev/null ||
+    { echo 'genesis: the pay observer is invalid or not enrolled' >&2; exit 2; }
+  jq --slurpfile o "$GENESIS_PAY_OBSERVER" '.payObserver = $o[0]' \
+    "$dir/genesis.json" >"$dir/genesis-observed.json"
+  mv "$dir/genesis-observed.json" "$dir/genesis.json"
 fi
 
 jq -n --slurpfile p "$params" --slurpfile g "$dir/genesis.json" '

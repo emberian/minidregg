@@ -1,0 +1,11 @@
+{
+  "cursorAfter": {},
+  "description": "two dust transfers in one slot, listed in opposite orders by the two endpoints: both are settled, but `until` cuts at a position, so the cursor does not move",
+  "exit": 0,
+  "memos": [],
+  "observations": 0,
+  "reasons": [
+    "belowJournalFloor",
+    "cursorHeld"
+  ]
+}

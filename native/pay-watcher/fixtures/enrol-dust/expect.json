@@ -1,0 +1,11 @@
+{
+  "description": "1 unit and journalFloor-1 to the enrollment address are not emitted (belowJournalFloor, amount recorded); exactly journalFloor is",
+  "exit": 0,
+  "memos": [
+    "memo"
+  ],
+  "observations": 1,
+  "reasons": [
+    "belowJournalFloor"
+  ]
+}

@@ -3,7 +3,7 @@
 
 Every vector is a directory:
   config.json        the watcher config (receiptsDir = receipts)
-  receipts/          retained receipts, one file per credited signature
+  receipts/          retained receipts, one entry per decided transfer, SIGNATURE.ADDRESS (hex)
   endpoints/a, /b    one fixture endpoint each (file naming: transport::fixture_key)
   expect.json        exit code, observation count, and the event reasons that must appear
 
@@ -11,6 +11,7 @@ Keys are sha256 of a label and signatures sha512 of a label, so every value is a
 32/64-byte string with a real base58 spelling. Output is deterministic; rerunning rewrites
 the same bytes.
 """
+import base64
 import hashlib
 import json
 import os
@@ -103,7 +104,42 @@ def balance(index, amount, owner=BOOK0, mint=MINT, program=TOKEN_2022):
     }
 
 
-def transaction(signature, slot, keys, pre, post, err=None, loaded=None):
+MEMO_V2 = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+MEMO_V1 = "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"
+SYSTEM = "11111111111111111111111111111111"
+
+
+def transfer_ix(source=None, dest=None, amount=0, program=None, stack=None):
+    """A jsonParsed transferChecked, as the RPC renders it (cosmetic: the watcher reads balances)."""
+    return {
+        "parsed": {
+            "info": {
+                "authority": PAYER, "destination": dest or ATA0, "mint": MINT,
+                "source": source or PAYER_TA,
+                "tokenAmount": {"amount": str(amount), "decimals": 6},
+            },
+            "type": "transferChecked",
+        },
+        "program": "spl-token-2022",
+        "programId": program or TOKEN_2022,
+        "stackHeight": stack,
+    }
+
+
+def memo_ix(text, program=MEMO_V2, stack=None):
+    """A parsed SPL Memo: `parsed` is the memo text itself (a JSON string)."""
+    return {"parsed": text, "program": "spl-memo", "programId": program, "stackHeight": stack}
+
+
+def raw_memo_ix(data: bytes, program=MEMO_V2, stack=None):
+    """Memo bytes that are not UTF-8: the RPC cannot parse them and falls back to base58 `data`."""
+    return {"accounts": [], "data": b58(data), "programId": program, "stackHeight": stack}
+
+
+def transaction(signature, slot, keys, pre, post, err=None, loaded=None, instructions=None,
+                inner=None):
+    if instructions is None:
+        instructions = [transfer_ix()]
     return {
         "slot": slot,
         "blockTime": block_time(slot),
@@ -114,6 +150,7 @@ def transaction(signature, slot, keys, pre, post, err=None, loaded=None):
             "preTokenBalances": pre,
             "postTokenBalances": post,
             "loadedAddresses": loaded or {"writable": [], "readonly": []},
+            "innerInstructions": inner or [],
         },
         "transaction": {
             "signatures": [b58(signature)],
@@ -121,7 +158,8 @@ def transaction(signature, slot, keys, pre, post, err=None, loaded=None):
                 "accountKeys": [
                     {"pubkey": k, "signer": i == 0, "writable": True, "source": "transaction"}
                     for i, k in enumerate(keys)
-                ]
+                ],
+                "instructions": instructions,
             },
         },
     }
@@ -211,8 +249,8 @@ class Endpoint:
 
 
 def vector(name, description, expect, book=(BOOK0,), page_size=25, max_pages=4,
-           endpoints=None, receipts=()):
-    root = os.path.join(HERE, name)
+           endpoints=None, receipts=(), enrol=None, root=None):
+    root = os.path.join(root or HERE, name)
     shutil.rmtree(root, ignore_errors=True)
     os.makedirs(os.path.join(root, "receipts"))
     with open(os.path.join(root, "receipts", ".keep"), "w") as f:
@@ -222,12 +260,15 @@ def vector(name, description, expect, book=(BOOK0,), page_size=25, max_pages=4,
             f.write("")
     config = {
         "asset": {"mint": MINT, "tokenProgram": TOKEN_2022},
-        "book": [{"index": i, "address": a} for i, a in enumerate(book)],
+        "book": [{"index": i, "address": a} for i, a in enumerate(book) if a is not None],
         "maxPages": max_pages,
         "pageSize": page_size,
         "minEndpoints": 2,
         "receiptsDir": "receipts",
     }
+    if enrol is not None:
+        config["enrol"] = enrol
+    expect.setdefault("memos", ["none"] * expect["observations"])
     dump(os.path.join(root, "config.json"), config)
     for label, ep in endpoints.items():
         for rel, body in ep.files.items():
@@ -270,6 +311,286 @@ def happy():
     ep.tx(PAY2, pay2())
     ep.tx(PAY1, pay1())
     return ep
+
+
+# Enrolment (PAY.md §11) ---------------------------------------------------------------------
+# The enrollment address is the book row named by config `enrol.index`. Its observations carry
+# the transaction's one memo as raw bytes; the kernel parses them. The memos below follow the
+# §11.3 grammar, enrol:v1:<mini hex 64>:<ssh blob base64 68>:<mini-sig hex 128>:<ssh-sig hex 128>
+# (400 bytes), but their SIGNATURES ARE PLACEHOLDERS (sha512 of a label): nothing here holds a
+# key, and the watcher verifies nothing.
+ENROL = b58(key("enrollment address"))
+ENROL_TA = b58(key("enrollment token account"))
+BOOK5 = b58(key("book 5"))
+ATA5 = b58(key("token account 5"))
+EXCHANGE = b58(key("exchange hot wallet"))
+EXCHANGE_TA = b58(key("exchange token account"))
+ROUTER = b58(key("a router program"))
+FLOOR = 1_000_000  # 1 DREGG (PAY §11.8)
+
+
+def ssh_blob(label):
+    return base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + key(label)).decode()
+
+
+def enrol_memo(who="alice", mini=None, ssh=None, version="v1"):
+    return ":".join(["enrol", version, mini or key(who + " mini key").hex(), ssh or ssh_blob(who + " ssh key"),
+                     sig(who + " mini-sig").hex(), sig(who + " ssh-sig").hex()])
+
+
+ALICE = enrol_memo("alice")
+assert len(ALICE) == 400, len(ALICE)
+
+
+def enrol_tx(signature, slot, amount, memos=(), inner_memos=(), payer=PAYER, payer_ta=PAYER_TA,
+             pre_enrol=None, memo_program=MEMO_V2, memo_first=True):
+    """A payment of `amount` into ENROL_TA. `memos` are top-level memo instructions, placed
+    immediately BEFORE the transfer (where Token-2022's MemoTransfer extension looks) unless
+    `memo_first` is false; `inner_memos` are memo CPIs made by a router program."""
+    keys = [payer, payer_ta, ENROL_TA, MINT, TOKEN_2022, memo_program, ROUTER]
+    as_ix = lambda m, stack=None: m if isinstance(m, dict) else memo_ix(m, program=memo_program, stack=stack)
+    top = [as_ix(m) for m in memos]
+    inner = []
+    if inner_memos:
+        transfer = [{"accounts": [payer, payer_ta, ENROL_TA], "data": b58(b"route"),
+                     "programId": ROUTER, "stackHeight": None}]
+    else:
+        transfer = [transfer_ix(source=payer_ta, dest=ENROL_TA, amount=amount)]
+    ixs = top + transfer if memo_first else transfer + top
+    if inner_memos:
+        inner.append({"index": ixs.index(transfer[0]), "instructions": [
+            *[as_ix(m, 2) for m in inner_memos],
+            transfer_ix(source=payer_ta, dest=ENROL_TA, amount=amount, stack=2),
+        ]})
+    pre = [balance(1, 10_000_000_000, owner=payer)]
+    post = [balance(1, 10_000_000_000 - amount, owner=payer),
+            balance(2, (pre_enrol or 0) + amount, owner=ENROL)]
+    if pre_enrol is not None:
+        pre.append(balance(2, pre_enrol, owner=ENROL))
+    return transaction(signature, slot, keys, pre=pre, post=post, instructions=ixs, inner=inner)
+
+
+def enrol_endpoint(entries, txs, plain=None, tip=TIP_SLOT, until=None, pages=None):
+    """`entries` newest first for ENROL_TA as (sig, slot[, err]); `plain` = (entries, txs) for the
+    ordinary row BOOK0 (index 1). `until` = the cursor signature the watcher will send; `pages`
+    splits the enrollment listing into pages of that size (the watcher follows `before`)."""
+    ep = Endpoint()
+    ep.put("getSlot/finalized.json", envelope(tip))
+    ep.put(f"getBlockTime/{tip}.json", envelope(block_time(tip)))
+    for owner, acct in ((ENROL, ENROL_TA), (BOOK0, ATA0)):
+        ep.put(f"getTokenAccountsByOwner/{owner}.{MINT}.json",
+               envelope({"context": {"slot": tip}, "value": [token_account_entry(acct, owner=owner)]}))
+    rows = [(e[0], e[1], e[2] if len(e) > 2 else None) for e in entries]
+    suffix = f".until.{b58(until)}" if until else ""
+    size = pages or 25
+    chunks = [rows[k:k + size] for k in range(0, len(rows), size)] or [[]]
+    if len(chunks[-1]) == size:
+        chunks.append([])
+    before = None
+    for chunk in chunks:
+        name = ENROL_TA + (f".before.{b58(before)}" if before else "") + suffix
+        ep.put(f"getSignaturesForAddress/{name}.json", envelope(listing(*chunk)))
+        before = chunk[-1][0] if chunk else None
+    for s_, body in txs.items():
+        ep.tx(s_, body)
+    p_entries, p_txs = plain or ([], {})
+    ep.sigs(ATA0, [(s_, slot, None) for (s_, slot) in p_entries])
+    for s_, body in p_txs.items():
+        ep.tx(s_, body)
+    return ep
+
+
+def enrol_vector(name, description, expect, build=None, endpoints=None, page_size=25, max_pages=4,
+                 root=None, cursor_file=None, receipts=()):
+    vector(name, description, expect, book=(ENROL, BOOK0), page_size=page_size, max_pages=max_pages,
+           enrol={"index": 0, "journalFloor": FLOOR, **({"cursorFile": cursor_file} if cursor_file else {})},
+           endpoints=endpoints or same(build), root=root, receipts=receipts)
+
+
+def enrol_vectors():
+    E1, E2, E3, E4, E5 = (sig(f"enrol-{n}") for n in range(1, 6))
+
+    def happy():
+        return enrol_endpoint(
+            [(E5, 980), (E4, 970), (E3, 960), (E2, 940), (E1, 920)],
+            {
+                # a top-level v2 memo immediately before the transfer
+                E1: enrol_tx(E1, 920, 5_000_000_000, memos=[ALICE]),
+                # the memo is an inner instruction (a CPI through a router program)
+                E2: enrol_tx(E2, 940, 5_000_000_000, inner_memos=[enrol_memo("bob")], pre_enrol=5_000_000_000),
+                # the legacy Memo1 program
+                E3: enrol_tx(E3, 960, 5_000_000_000, memos=[enrol_memo("carol")], pre_enrol=10_000_000_000,
+                             memo_program=MEMO_V1),
+                # exactly the journal floor: emitted. The watcher does not know the price.
+                E4: enrol_tx(E4, 970, FLOOR, memos=[enrol_memo("dave")], pre_enrol=15_000_000_000),
+                # the SAME memo as E1 again: a second observation; the kernel decides renewal
+                E5: enrol_tx(E5, 980, 5_000_000_000, memos=[ALICE], pre_enrol=15_000_000_000 + FLOOR),
+            },
+            plain=([(PAY1, 900)], {PAY1: pay1()}),
+        )
+    enrol_vector("enrol-happy", "enrolment payments: a top-level v2 memo, an inner-instruction (CPI) memo, "
+                 "a legacy Memo1 memo, a payment of exactly the journal floor, and alice's memo twice (two "
+                 "observations); plus an ordinary payment to book row 1 whose memo is never read",
+                 {"exit": 0, "observations": 6, "reasons": [],
+                  "memos": ["memo", "memo", "memo", "memo", "memo", "none"]}, happy)
+
+    M1, E6 = sig("memo-only-1"), sig("enrol-6")
+
+    def other_tx():
+        memo_only = transaction(M1, 930, [PAYER, PAYER_TA, ENROL_TA, MINT, TOKEN_2022, MEMO_V2],
+                                pre=[balance(2, 0, owner=ENROL)], post=[balance(2, 0, owner=ENROL)],
+                                instructions=[memo_ix(ALICE)])
+        return enrol_endpoint([(E6, 940), (M1, 930)],
+                              {M1: memo_only, E6: enrol_tx(E6, 940, 5_000_000_000, pre_enrol=0)})
+    enrol_vector("enrol-memo-other-tx", "alice's memo in a transaction that moves nothing, then the transfer "
+                 "in a DIFFERENT transaction with no memo: the memo is not joined to it (memo null)",
+                 {"exit": 0, "observations": 1, "reasons": ["zeroDelta"], "memos": ["none"]}, other_tx)
+
+    X1, P1, BOUNCE = sig("exchange-1"), sig("assigned-payer-plain"), sig("memo-transfer-bounce")
+
+    def no_memo():
+        return enrol_endpoint(
+            [(P1, 960), (BOUNCE, 955, {"InstructionError": [0, {"Custom": 1}]}), (X1, 950)],
+            {X1: enrol_tx(X1, 950, 7_000_000_000, payer=EXCHANGE, payer_ta=EXCHANGE_TA),
+             P1: enrol_tx(P1, 960, 2_000_000_000, pre_enrol=7_000_000_000)})
+    enrol_vector("enrol-no-memo", "an exchange-style withdrawal with no memo and a plain payment from an "
+                 "assigned payer (both emitted, memo null, memoError null: the kernel's memoMissing), and a "
+                 "memo-less send the MemoTransfer extension bounced (failed: skipped)",
+                 {"exit": 0, "observations": 2, "reasons": ["failedTransaction"], "memos": ["none", "none"]},
+                 no_memo)
+
+    long_ok = "x" * 566
+    cases = [
+        ("two-memos", [enrol_memo("erin"), enrol_memo("mallory")], True, "memoUnbound"),
+        ("note-after-transfer", ["thanks!", enrol_memo("frank")], False, "memoUnbound"),
+        ("inner-plus-top", None, True, "memoUnbound"),
+        ("not-utf8", [raw_memo_ix(b"enrol:v1:\xff\xfe")], True, "memoInvalid"),
+        ("567-bytes", ["x" * 567], True, "memoInvalid"),
+        ("566-bytes", [long_ok], True, "memo"),
+        ("v2", [enrol_memo("gina", version="v2")], True, "memo"),
+        ("prose", ["hello, please enrol me"], True, "memo"),
+    ]
+    C = [sig(f"bind-{n}") for n, *_ in cases]
+
+    def binding():
+        txs = {}
+        for i, (s_, (n, m, first, _)) in enumerate(zip(C, cases)):
+            if n == "inner-plus-top":
+                txs[s_] = enrol_tx(s_, 900 + 10 * i, FLOOR, memos=[enrol_memo("hana")],
+                                   inner_memos=[enrol_memo("ivan")], pre_enrol=i * FLOOR)
+            else:
+                txs[s_] = enrol_tx(s_, 900 + 10 * i, FLOOR, memos=m, pre_enrol=i * FLOOR, memo_first=first)
+        return enrol_endpoint([(s_, 900 + 10 * i) for i, s_ in reversed(list(enumerate(C)))], txs)
+    enrol_vector("enrol-memo-bind", "the memo binding: two memos, a note plus a memo, a top-level plus an inner "
+                 "memo (memoUnbound); non-UTF-8 bytes as base58 `data`, 567 bytes (memoInvalid); 566 bytes, a v2 "
+                 "memo and prose (one UTF-8 memo: emitted byte-exact, the kernel refuses the grammar)",
+                 {"exit": 0, "observations": len(cases), "reasons": ["memoInvalid", "memoUnbound"],
+                  "memos": [c[3] for c in cases]}, binding)
+
+    D1, D2, D3 = sig("dust-1"), sig("dust-floor-minus-1"), sig("dust-at-floor")
+
+    def dust():
+        return enrol_endpoint([(D3, 960), (D2, 950), (D1, 940)], {
+            D1: enrol_tx(D1, 940, 1, memos=["spam"]),
+            D2: enrol_tx(D2, 950, FLOOR - 1, memos=[ALICE], pre_enrol=1),
+            D3: enrol_tx(D3, 960, FLOOR, memos=[ALICE], pre_enrol=FLOOR),
+        })
+    enrol_vector("enrol-dust", "1 unit and journalFloor-1 to the enrollment address are not emitted "
+                 "(belowJournalFloor, amount recorded); exactly journalFloor is",
+                 {"exit": 0, "observations": 1, "reasons": ["belowJournalFloor"], "memos": ["memo"]}, dust)
+
+    S1 = sig("shared-0-and-5")
+
+    def shared():
+        ep = Endpoint().base(accounts=((ENROL, [ENROL_TA]), (BOOK0, [ATA0]), (BOOK5, [ATA5])))
+        for owner, acct in ((ENROL, ENROL_TA), (BOOK5, ATA5)):
+            ep.put(f"getTokenAccountsByOwner/{owner}.{MINT}.json",
+                   envelope({"context": {"slot": TIP_SLOT}, "value": [token_account_entry(acct, owner=owner)]}))
+        ep.sigs(ENROL_TA, [(S1, 940, None)])
+        ep.sigs(ATA5, [(S1, 940, None)])
+        ep.sigs(ATA0, [])
+        ep.tx(S1, transaction(
+            S1, 940, [PAYER, PAYER_TA, ENROL_TA, ATA5, MINT, TOKEN_2022, MEMO_V2],
+            pre=[balance(1, 10_000_000_000, owner=PAYER)],
+            post=[balance(1, 3_000_000_000, owner=PAYER), balance(2, 5_000_000_000, owner=ENROL),
+                  balance(3, 2_000_000_000, owner=BOOK5)],
+            instructions=[memo_ix(ALICE), transfer_ix(dest=ENROL_TA, amount=5_000_000_000),
+                          transfer_ix(dest=ATA5, amount=2_000_000_000)]))
+        return ep
+    vector("enrol-shared-tx", "one transaction pays the enrollment address (index 0) and book row 5: two "
+           "observations with one signature, the memo on index 0 only",
+           {"exit": 0, "observations": 2, "reasons": [], "memos": ["memo", "none"]},
+           book=(ENROL, BOOK0, None, None, None, BOOK5), enrol={"index": 0, "journalFloor": FLOOR},
+           endpoints=same(shared))
+
+    def disagree(alice, bob):
+        return enrol_endpoint([(E2, 940), (E1, 920)], {
+            E1: enrol_tx(E1, 920, 5_000_000_000, memos=[alice]),
+            E2: enrol_tx(E2, 940, 5_000_000_000, memos=[bob], pre_enrol=5_000_000_000),
+        })
+    enrol_vector("enrol-disagree", "for enrol-1 endpoint b reports a memo with eve's ssh key; for enrol-2 b "
+                 "reports the mini key in UPPERCASE: both are disagreements and nothing is emitted",
+                 {"exit": 3, "observations": 0, "reasons": ["endpointsDisagree"], "memos": []},
+                 endpoints={"a": disagree(ALICE, enrol_memo("bob")),
+                            "b": disagree(enrol_memo("alice", ssh=ssh_blob("eve ssh key")),
+                                          enrol_memo("bob", mini=key("bob mini key").hex().upper()))})
+
+    OLD, B1, B2, B3 = sig("enrol-behind-dust"), sig("behind-1"), sig("behind-2"), sig("behind-3")
+
+    def behind():
+        return enrol_endpoint(
+            [(B3, 960), (B2, 950), (B1, 940), (OLD, 900)],
+            {OLD: enrol_tx(OLD, 900, 5_000_000_000, memos=[ALICE]),
+             **{b: enrol_tx(b, 940 + 10 * k, 1, memos=["spam"], pre_enrol=5_000_000_000 + k)
+                for k, b in enumerate([B1, B2, B3])}},
+            pages=2)
+    enrol_vector("enrol-behind-dust", "an enrollment older than three dust transfers, with pageSize 2 and "
+                 "maxPages 1: an ordinary row would stop after one page; the enrollment index pages to the "
+                 "end and finds it",
+                 {"exit": 0, "observations": 1, "reasons": ["belowJournalFloor"], "memos": ["memo"]}, behind,
+                 page_size=2, max_pages=1)
+
+    H1, H2 = sig("held-1"), sig("held-2")
+
+    def held(order):
+        return enrol_endpoint(order, {H1: enrol_tx(H1, 940, 1, memos=["spam"]),
+                                      H2: enrol_tx(H2, 940, 2, memos=["spam"], pre_enrol=1)})
+    enrol_vector("enrol-cursor-held", "two dust transfers in one slot, listed in opposite orders by the two "
+                 "endpoints: both are settled, but `until` cuts at a position, so the cursor does not move",
+                 {"exit": 0, "observations": 0, "reasons": ["belowJournalFloor", "cursorHeld"], "memos": [],
+                  "cursorAfter": {}},
+                 endpoints={"a": held([(H2, 940), (H1, 940)]), "b": held([(H1, 940), (H2, 940)])})
+
+    # Two runs over one cursor file. Phase 1 (tip 1000): 300 memo-bearing dust transfers at slots
+    # 600..899 (12 pages of 25, past maxPages 4), all settled, so the cursor moves to the newest;
+    # the enrollment at slot 1050 is above the tip. Phase 2 (tip 1100): the watcher lists with
+    # `until` = the cursor, so its fixture has ONLY the `.until.` listing and no dust transaction:
+    # re-reading any dust would be a `transport` refusal.
+    DUST = [sig(f"cursor-dust-{k}") for k in range(300)]
+    LATE = sig("enrol-after-dust")
+    root = os.path.join(HERE, "enrol-cursor")
+    shutil.rmtree(root, ignore_errors=True)
+
+    def phase1():
+        return enrol_endpoint(
+            [(LATE, 1050)] + [(DUST[k], 600 + k) for k in reversed(range(300))],
+            {d: enrol_tx(d, 600 + k, 1 + k % 7, memos=["spam"], pre_enrol=k) for k, d in enumerate(DUST)})
+    enrol_vector("phase1", "300 memo-bearing dust transfers (12 pages) settle and move the cursor; the "
+                 "enrollment is above the tip",
+                 {"exit": 0, "observations": 0, "reasons": ["belowJournalFloor"], "memos": [],
+                  "cursorAfter": {key("enrollment token account").hex(): DUST[299].hex()}},
+                 endpoints={"a": phase1()}, root=root, cursor_file="../cursor.json")
+    # The two endpoints' answers are identical here; endpoint b is a symlink to a (1.4 MB saved).
+    os.symlink("a", os.path.join(root, "phase1", "endpoints", "b"))
+
+    def phase2():
+        return enrol_endpoint([(LATE, 1050)], {LATE: enrol_tx(LATE, 1050, 5_000_000_000, memos=[ALICE],
+                                                              pre_enrol=4000)},
+                              tip=1100, until=DUST[299])
+    enrol_vector("phase2", "the cursor from phase 1: only the enrollment is listed and fetched",
+                 {"exit": 0, "observations": 1, "reasons": [], "memos": ["memo"],
+                  "cursorAfter": {key("enrollment token account").hex(): DUST[299].hex()}},
+                 phase2, root=root, cursor_file="../cursor.json")
 
 
 def main():
@@ -348,7 +669,7 @@ def main():
     vector("retained", "pay-2 has a retained receipt (named in hex) and is not fetched; the newer "
            "pay-3 and the OLDER unreceipted pay-1 are both emitted",
            {"exit": 0, "observations": 2, "reasons": ["alreadyRetained"]},
-           endpoints=same(retained), receipts=[PAY2.hex()])
+           endpoints=same(retained), receipts=[PAY2.hex() + "." + key("book 0").hex()])
 
     def same_signature():
         ep = Endpoint().base(accounts=((BOOK0, [ATA0B, ATA0]),))
@@ -378,6 +699,8 @@ def main():
     vector("disagree", "endpoint b reports 2000 DREGG where endpoint a reports 1000",
            {"exit": 3, "observations": 0, "reasons": ["endpointsDisagree"]},
            endpoints={"a": single_tx(pay1())(), "b": disagree_b()})
+
+    enrol_vectors()
 
 
 if __name__ == "__main__":

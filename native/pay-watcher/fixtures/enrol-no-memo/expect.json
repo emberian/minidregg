@@ -1,0 +1,12 @@
+{
+  "description": "an exchange-style withdrawal with no memo and a plain payment from an assigned payer (both emitted, memo null, memoError null: the kernel's memoMissing), and a memo-less send the MemoTransfer extension bounced (failed: skipped)",
+  "exit": 0,
+  "memos": [
+    "none",
+    "none"
+  ],
+  "observations": 2,
+  "reasons": [
+    "failedTransaction"
+  ]
+}

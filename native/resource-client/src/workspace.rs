@@ -97,7 +97,7 @@ pub(crate) fn validate_name(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn private_dir(path: &Path) -> Result<()> {
+pub(crate) fn private_dir(path: &Path) -> Result<()> {
     let named = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
     unsafe extern "C" {

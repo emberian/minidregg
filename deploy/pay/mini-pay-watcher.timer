@@ -1,0 +1,11 @@
+[Unit]
+Description=Mini PAY watcher, one tick every 60 s
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=60s
+AccuracySec=5s
+Unit=mini-pay-watcher.service
+
+[Install]
+WantedBy=timers.target

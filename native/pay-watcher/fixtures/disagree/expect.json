@@ -1,6 +1,7 @@
 {
   "description": "endpoint b reports 2000 DREGG where endpoint a reports 1000",
   "exit": 3,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "endpointsDisagree"
