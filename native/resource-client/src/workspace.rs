@@ -2768,7 +2768,7 @@ fn document_actions(
 }
 
 /// The local reference names whose target is `document`, for rendering.
-fn names_for_target(root: &Path, document: &str) -> Vec<String> {
+pub(crate) fn names_for_target(root: &Path, document: &str) -> Vec<String> {
     let mut names = Vec::new();
     if let Ok(entries) = fs::read_dir(root.join("refs")) {
         for entry in entries.flatten() {

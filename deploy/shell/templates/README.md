@@ -11,8 +11,9 @@ order in which its verb reads its files.
 | `room invite STORY S player` | `DIR/init.player.json`, `DIR/law.management.open*`, `DIR/law.player*`, `story.json` `grants.player` | `story/README.md` |
 | `look` / `go N` / `take ITEM` | `story.json` `fields`, `items`, `scenes` | `story/README.md` ("The moves, as writes") |
 | `story seal STORY` | `DIR/law.management.sealed*`, plus each cell's `law.*` | `story/README.md` |
-| `summon ROOM as librarian\|gm\|runner [--budget N]` | `hermes/ROLE/budget.json`, `grants.json`, `program.md` | `hermes/README.md` |
-| `dismiss ROOM` | `hermes/ROLE/grants.json` (the grants to revoke) | `hermes/README.md` |
+| `summon ROOM as librarian\|runner [--budget N]` (gm: marked for MUD-GM) | `hermes/ROLE/budget.json`, `grants.json`, `program.md` (compiled into `mini`) | `hermes/README.md` |
+| `ask ROOM TEXT` | the room cell's `hermes` field (a signed read) | `hermes/README.md` |
+| `dismiss ROOM` | the summon record `HOME/hermes/ROOM.json` (the grants it made) | `hermes/README.md` |
 | `room new NAME --template workroom\|social\|story` | `room/T/template.shell` (compiled into `mini`; `room template show T` prints it) | `room/README.md` |
 | `room welcome NAME SUBJECT --template social` | `room/social/member.shell` | `room/README.md` |
 | `chat new ROOM` / `chat invite ROOM S` | `room/chat/law.author.json` (compiled into `mini`; `@SUBJECT` = the founder, or S) | `room/chat/README.md` |

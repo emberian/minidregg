@@ -111,6 +111,13 @@ committed; text that does not match prints [payload unavailable].
 pub(crate) const FOLLOW_INTERVAL_S: u64 = 3;
 /// Entries per signed tail window.
 const WINDOW: u64 = 256;
+
+/// What `chat invite` grants under the room by default: read the room and its
+/// streams, and append to one's own stream (the author law refuses any other).
+const MEMBER_GRANT: &[&str] = &["observe", "append"];
+/// The verbs `chat invite --verbs` may name under a room (`place` bears cells into it).
+const ROOM_VERBS: &[&str] = &["observe", "place", "append"];
+pub(crate) const LS_USAGE: &str = "room ls [ROOM] [--since HEIGHT] [--import] [--json]";
 /// The kernel's topic and payload limits (`StreamCell.maxTopicBytes`, `maxPayloadBytes`).
 const MAX_TOPIC: usize = 64;
 const MAX_PAYLOAD: usize = 4096;
@@ -149,14 +156,19 @@ pub(crate) enum Line {
     Unpin,
     React { number: u64, emoji: String },
     New { room: String, private: bool },
-    Invite { room: String, subject: String, name: Option<String>, enc: Option<String> },
+    Invite { room: String, subject: String, name: Option<String>, enc: Option<String>, verbs: Vec<String> },
+    /// `room ls [--in ROOM] [--since H] [--import] [--json]`: the cells under
+    /// the room the Host's signed `since` view names, with the roster's streams.
+    Ls { room: Option<String>, since: u64, import: bool, json: bool },
+    /// `summon`, `ask`, `dismiss` (PLACE §2.7): `crate::hermes`.
+    Hermes(crate::hermes::Line),
     Join { room: String, invitation: String },
     Enter(String),
     Rooms,
     Name { subject: String, name: String },
 }
 
-fn ref_name(value: &str, label: &str) -> Result<(), String> {
+pub(crate) fn ref_name(value: &str, label: &str) -> Result<(), String> {
     if value.is_empty()
         || value.len() > 40
         || !value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
@@ -166,7 +178,7 @@ fn ref_name(value: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn decimal(value: &str, label: &str) -> Result<(), String> {
+pub(crate) fn decimal(value: &str, label: &str) -> Result<(), String> {
     if value.is_empty() || value.len() > 40 || !value.bytes().all(|b| b.is_ascii_digit()) {
         return Err(format!("{label} must be a decimal number"));
     }
@@ -179,7 +191,7 @@ fn number(value: &str, label: &str) -> Result<u64, String> {
 }
 
 /// The first whitespace-separated word and the rest of the line, untouched.
-fn split(text: &str) -> Option<(&str, &str)> {
+pub(crate) fn split(text: &str) -> Option<(&str, &str)> {
     let text = text.trim_start();
     if text.is_empty() {
         return None;
@@ -190,7 +202,7 @@ fn split(text: &str) -> Option<(&str, &str)> {
 
 /// The free text at the end of a line: trimmed; one pair of matching outer
 /// quotes is removed, so `say 'hi'` and `say hi` say the same thing.
-fn free_text(rest: &str) -> String {
+pub(crate) fn free_text(rest: &str) -> String {
     let t = rest.trim();
     for q in ['\'', '"'] {
         if t.len() >= 2 && t.starts_with(q) && t.ends_with(q) {
@@ -211,6 +223,13 @@ fn emoji(value: &str) -> Result<String, String> {
 /// take the rest of the line as text, so apostrophes and `#` need no quoting.
 pub(crate) fn plan(line: &str) -> Option<Result<Line, String>> {
     let (verb, rest) = split(line)?;
+    if verb == "room" && split(rest).is_some_and(|(action, _)| action == "ls") {
+        let (_, after) = split(rest)?;
+        return Some(parse_ls(after));
+    }
+    if let Some(hermes) = crate::hermes::plan(verb, rest) {
+        return Some(hermes.map(Line::Hermes));
+    }
     let usage = |name: &str| VERBS.iter().find(|v| v.name == name).map(|v| v.usage).unwrap_or("");
     let parsed = match verb {
         "say" => parse_say(rest).map_err(|e| if e.is_empty() { usage("say").to_owned() } else { e }),
@@ -347,6 +366,35 @@ fn parse_tail(rest: &str) -> Result<Line, String> {
     Ok(Line::Tail { room, count, since, follow, json, held })
 }
 
+fn parse_ls(rest: &str) -> Result<Line, String> {
+    let words: Vec<&str> = rest.split_whitespace().collect();
+    let (mut room, mut since, mut import, mut json) = (None, 0u64, false, false);
+    let mut i = 0;
+    while i < words.len() {
+        match words[i] {
+            "--in" => {
+                let value = words.get(i + 1).ok_or("--in names a room")?;
+                ref_name(value, "room name")?;
+                room = Some((*value).to_owned());
+                i += 1;
+            }
+            "--since" => {
+                since = words.get(i + 1).and_then(|v| v.parse::<u64>().ok()).ok_or("--since takes a height")?;
+                i += 1;
+            }
+            "--import" => import = true,
+            "--json" => json = true,
+            word if room.is_none() && !word.starts_with("--") => {
+                ref_name(word, "room name")?;
+                room = Some(word.to_owned());
+            }
+            _ => return Err(LS_USAGE.to_owned()),
+        }
+        i += 1;
+    }
+    Ok(Line::Ls { room, since, import, json })
+}
+
 fn parse_chat(rest: &str) -> Result<Line, String> {
     let mut words: Vec<&str> = rest.split_whitespace().collect();
     // `--enc ENC-PUB|@FILE` (chat invite into a private room): taken out first.
@@ -361,14 +409,26 @@ fn parse_chat(rest: &str) -> Result<Line, String> {
     match words.as_slice() {
         ["new", room] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: false }),
         ["new", room, "--private"] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: true }),
-        ["invite", room, subject] | ["invite", room, subject, _] => {
+        ["invite", room, subject, more @ ..] if more.len() <= 3 => {
             ref_name(room, "room name")?;
             decimal(subject, "subject")?;
-            let name = words.get(3).map(|n| (*n).to_owned());
-            if let Some(n) = &name {
-                petname_ok(n)?;
+            let (mut name, mut verbs) = (None, MEMBER_GRANT.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>());
+            let mut rest = more.iter();
+            while let Some(word) = rest.next() {
+                if *word == "--verbs" {
+                    let list = rest.next().ok_or("--verbs takes V,V,…")?;
+                    verbs = list.split(',').map(str::to_owned).collect();
+                    if !verbs.iter().all(|v| ROOM_VERBS.contains(&v.as_str())) || !verbs.iter().any(|v| v == "observe") {
+                        return Err(format!("--verbs: observe and any of {} under the room", ROOM_VERBS.join(", ")));
+                    }
+                } else if name.is_none() {
+                    petname_ok(word)?;
+                    name = Some((*word).to_owned());
+                } else {
+                    return Err(String::new());
+                }
             }
-            Ok(Line::Invite { room: (*room).to_owned(), subject: (*subject).to_owned(), name, enc })
+            Ok(Line::Invite { room: (*room).to_owned(), subject: (*subject).to_owned(), name, enc, verbs })
         }
         ["join", room, ..] if words.len() >= 3 => {
             ref_name(room, "room name")?;
@@ -402,11 +462,11 @@ fn petname_ok(name: &str) -> Result<(), String> {
 /// (exit code, stderr text). stdout is printed as the verb goes.
 pub(crate) type Done = (i32, String);
 
-fn usage(message: impl Into<String>) -> Done {
+pub(crate) fn usage(message: impl Into<String>) -> Done {
     (EXIT_USAGE, format!("usage: {}\n", message.into()))
 }
 
-fn error(message: impl std::fmt::Display) -> Done {
+pub(crate) fn error(message: impl std::fmt::Display) -> Done {
     (EXIT_CLIENT, format!("error: {message}\n"))
 }
 
@@ -430,11 +490,11 @@ fn child_ending(code: Option<i32>, stderr: &str) -> Done {
 
 // ---------------------------------------------------------------- files
 
-fn chat_dir(session: &Session) -> PathBuf {
+pub(crate) fn chat_dir(session: &Session) -> PathBuf {
     session.home.join("chat")
 }
 
-fn private_dirs(path: &Path) -> Result<(), String> {
+pub(crate) fn private_dirs(path: &Path) -> Result<(), String> {
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -443,7 +503,7 @@ fn private_dirs(path: &Path) -> Result<(), String> {
 }
 
 /// Replace a small private JSON file (write a sibling, rename over).
-fn put_json(path: &Path, value: &Value) -> Result<(), String> {
+pub(crate) fn put_json(path: &Path, value: &Value) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         private_dirs(parent)?;
     }
@@ -455,7 +515,7 @@ fn put_json(path: &Path, value: &Value) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
 }
 
-fn get_json(path: &Path) -> Option<Value> {
+pub(crate) fn get_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&fs::read(path).ok()?).ok()
 }
 
@@ -463,17 +523,17 @@ fn get_json(path: &Path) -> Option<Value> {
 /// reference of the room cell; `grant` the reference whose observe capability
 /// reads the room and its streams (`under R`); `stream` my own stream.
 #[derive(Debug, Clone, PartialEq)]
-struct Room {
-    name: String,
-    grant: String,
-    stream: Option<String>,
+pub(crate) struct Room {
+    pub(crate) name: String,
+    pub(crate) grant: String,
+    pub(crate) stream: Option<String>,
 }
 
 fn room_path(session: &Session, room: &str) -> PathBuf {
     chat_dir(session).join("rooms").join(format!("{room}.json"))
 }
 
-fn load_room(session: &Session, room: &str) -> Result<Room, String> {
+pub(crate) fn load_room(session: &Session, room: &str) -> Result<Room, String> {
     let value = get_json(&room_path(session, room)).ok_or_else(|| {
         format!("this session has no room {room} (chat new {room}, or chat join {room} INVITATION)")
     })?;
@@ -492,7 +552,7 @@ fn save_room(session: &Session, room: &Room) -> Result<(), String> {
     )
 }
 
-fn current_room(session: &Session) -> Result<Room, String> {
+pub(crate) fn current_room(session: &Session) -> Result<Room, String> {
     let name = fs::read_to_string(chat_dir(session).join("current"))
         .map(|s| s.trim().to_owned())
         .map_err(|_| "no current room: chat enter ROOM (chat rooms lists yours)".to_owned())?;
@@ -522,12 +582,12 @@ fn set_petname(session: &Session, subject: &str, name: &str) -> Result<(), Strin
     put_json(&chat_dir(session).join("petnames.json"), &json!(names))
 }
 
-fn workspace_record(session: &Session) -> Result<Value, String> {
+pub(crate) fn workspace_record(session: &Session) -> Result<Value, String> {
     bounded_json(&session.workspace.join("workspace.json"))
         .map_err(|_| "this session has no workspace yet (init first)".to_owned())
 }
 
-fn reference(session: &Session, name: &str) -> Result<Value, String> {
+pub(crate) fn reference(session: &Session, name: &str) -> Result<Value, String> {
     crate::workspace::reference(&session.workspace, name)
 }
 
@@ -535,7 +595,7 @@ fn reference(session: &Session, name: &str) -> Result<Value, String> {
 
 /// One client operation in a child `mini` (the same binary), so its JSON does
 /// not reach the friend's terminal. Ok: the child's stdout.
-fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String, Done> {
+pub(crate) fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String, Done> {
     let exe = std::env::current_exe().map_err(|e| error(format!("cannot locate the mini client: {e}")))?;
     let mut cmd = Command::new(exe);
     cmd.arg(command);
@@ -556,7 +616,7 @@ fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String, Done> {
     }
 }
 
-fn os(value: impl AsRef<OsStr>) -> OsString {
+pub(crate) fn os(value: impl AsRef<OsStr>) -> OsString {
     value.as_ref().to_owned()
 }
 
@@ -586,7 +646,7 @@ fn backoff(attempt: u32) {
 /// `stale-root` answer at either step is not a decision about the request:
 /// the plan is made again from a fresh signed read (propose), or the same
 /// intent is signed again over a fresh challenge (submit, a new attempt).
-fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
+pub(crate) fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
     propose_submit_in(session, prefix, request, None)
 }
 
@@ -649,7 +709,7 @@ fn propose_submit_in(session: &Session, prefix: &str, request: &Value, sealed: O
 /// A signed read in this process (no JSON on the terminal). The attempt is
 /// retained under HOME/chat/reads/ROOM/LABEL.NONCE; older reads of the same
 /// label are removed once this one answered, so the newest is always kept.
-fn signed_read(
+pub(crate) fn signed_read(
     session: &Session,
     ws: &Value,
     room: &str,
@@ -739,9 +799,12 @@ pub(crate) fn roster_of(view: &Value) -> Roster {
             fields.insert(f, v.to_owned());
         }
     }
+    // The roster is the fields below the room cell's own fields (the
+    // tariff, Hermes: `credit::ROOM_FIELDS_START`); a field at or above it is
+    // never a member row.
     let members = fields
         .iter()
-        .filter(|(f, _)| **f >= 3 && **f % 2 == 1)
+        .filter(|(f, _)| **f >= 3 && **f % 2 == 1 && **f + 1 < crate::credit::ROOM_FIELDS_START)
         .filter_map(|(f, subject)| fields.get(&(f + 1)).map(|stream| (subject.clone(), stream.clone())))
         .collect();
     Roster { founder: fields.get(&2).cloned(), members }
@@ -930,7 +993,7 @@ fn read_room(session: &Session, room: &Room) -> Result<(Feed, Roster, Vec<String
 }
 
 /// Whether this session's reference for `room` is a private room's (PRIVATE-ROOMS).
-fn room_is_private(session: &Session, room: &str) -> bool {
+pub(crate) fn room_is_private(session: &Session, room: &str) -> bool {
     reference(session, room).is_ok_and(|r| r.get("private").is_some())
 }
 
@@ -1410,7 +1473,16 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
             tail(session, &room, count, since, follow, as_json, held)
         }
         Line::New { room, private } => chat_new(session, &room, private),
-        Line::Invite { room, subject, name, enc } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref()),
+        Line::Invite { room, subject, name, enc, verbs } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref(), &verbs),
+        Line::Ls { room, since, import, json: as_json } => {
+            let room = match room {
+                Some(name) => load_room(session, &name),
+                None => current_room(session),
+            }
+            .map_err(error)?;
+            room_ls(session, &room, since, import, as_json)
+        }
+        Line::Hermes(line) => crate::hermes::run(session, line),
         Line::Join { room, invitation } => chat_join(session, &room, &invitation),
         Line::Enter(name) => {
             load_room(session, &name).map_err(error)?;
@@ -1541,7 +1613,7 @@ fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow
 
 // ---------------------------------------------------------------- the template
 
-fn write_request(session: &Session, name: &str, value: &Value) -> Result<PathBuf, Done> {
+pub(crate) fn write_request(session: &Session, name: &str, value: &Value) -> Result<PathBuf, Done> {
     let dir = session.home.join("requests");
     private_dirs(&dir).map_err(error)?;
     let path = dir.join(format!("{name}.json"));
@@ -1552,7 +1624,7 @@ fn write_request(session: &Session, name: &str, value: &Value) -> Result<PathBuf
     Ok(path)
 }
 
-fn create_cell(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>) -> Result<Value, Done> {
+pub(crate) fn create_cell(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>) -> Result<Value, Done> {
     create_cell_as(session, name, storage, law, room, owner, None)
 }
 
@@ -1582,9 +1654,9 @@ fn create_cell_as(session: &Session, name: &str, storage: &str, law: &Value, roo
 
 /// Grant `recipient` the room (`observe` + `append` under ROOM), publish it,
 /// and return the recipient reference.
-fn room_grant(session: &Session, room: &str, recipient: &str) -> Result<Value, Done> {
+fn room_grant(session: &Session, room: &str, recipient: &str, verbs: &[String]) -> Result<Value, Done> {
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"delegate","name":room,
-        "recipient":recipient,"verbs":["observe","append"],"maxCost":"50000","room":true});
+        "recipient":recipient,"verbs":verbs,"maxCost":"50000","room":true});
     let done = propose_submit(session, "grant", &request)?;
     let id = done["id"].as_str().unwrap_or_default().to_owned();
     let ws = &session.workspace;
@@ -1632,7 +1704,7 @@ fn roster_write(session: &Session, room: &str, fields: &[(u64, &str)]) -> Result
     propose_submit(session, "roster", &request).map(|_| ())
 }
 
-fn me(session: &Session) -> Result<String, Done> {
+pub(crate) fn me(session: &Session) -> Result<String, Done> {
     let ws = workspace_record(session).map_err(error)?;
     Ok(member(&ws, "subject").map_err(error)?.to_owned())
 }
@@ -1652,7 +1724,7 @@ fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
     let stream_name = format!("{name}-me");
     let stream = create_cell(session, &stream_name, "stream", &law, Some(name), None)?;
     let stream_target = member(&stream, "target").map_err(error)?.to_owned();
-    let grant = room_grant(session, name, &me)?;
+    let grant = room_grant(session, name, &me, &MEMBER_GRANT.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>())?;
     let grant_name = format!("{name}-room");
     import_from(session, &grant_name, &grant)?;
     roster_write(session, name, &[(2, &me), (3, &me), (4, &stream_target)])?;
@@ -1666,7 +1738,26 @@ fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
     Ok(())
 }
 
-fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>) -> Result<(), Done> {
+/// What `chat invite` made: the invitation (the published room grant) and
+/// the invitee's stream cell.
+pub(crate) struct Invited {
+    pub invitation: Value,
+    pub stream: String,
+}
+
+fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>, verbs: &[String]) -> Result<(), Done> {
+    let invited = invite(session, name, subject, petname, enc, verbs)?;
+    println!("invited {} to {name}: their stream {} (you paid for it; they own it)", petname.unwrap_or(subject), invited.stream);
+    println!("give them this line:");
+    println!("chat join {name} {}", serde_json::to_string(&invited.invitation).expect("JSON"));
+    Ok(())
+}
+
+/// The founder adds `subject` to the roster of `name`: a room grant (`verbs`
+/// under the room), the member's stream born `--in` the room under the
+/// member's author law (the founder pays; the member owns it), the roster row;
+/// in a private room also the room key wrapped to `enc` (PRIVATE-ROOMS).
+pub(crate) fn invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>, verbs: &[String]) -> Result<Invited, Done> {
     let room = load_room(session, name).map_err(error)?;
     let private = room_is_private(session, name);
     let enc = match (private, enc) {
@@ -1695,7 +1786,10 @@ fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&st
         return Err(usage(format!("{subject} is already a member of {name}")));
     }
     let slot = 2 * (roster.members.len() as u64 + 1) + 1;
-    let invitation = room_grant(session, name, subject)?;
+    if slot + 1 >= crate::credit::ROOM_FIELDS_START {
+        return Err(usage(format!("the roster of {name} is full")));
+    }
+    let invitation = room_grant(session, name, subject, verbs)?;
     let stream_name = format!("{name}-{}", &subject[subject.len().saturating_sub(10)..]);
     let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), Some(subject))?;
     let stream_target = member(&stream, "target").map_err(error)?.to_owned();
@@ -1722,9 +1816,86 @@ fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&st
     }
     let path = chat_dir(session).join("invites").join(format!("{name}-{subject}.json"));
     put_json(&path, &invitation).map_err(error)?;
-    println!("invited {} to {name}: their stream {stream_target} (you paid for it; they own it)", petname.unwrap_or(subject));
-    println!("give them this line:");
-    println!("chat join {name} {}", serde_json::to_string(&invitation).expect("JSON"));
+    Ok(Invited { invitation, stream: stream_target })
+}
+
+/// `room ls`: the cells under the room that the Host's signed `since` view
+/// names (every transaction above HEIGHT that wrote a cell this grant sees
+/// under the room, and which cells), marked with the roster's streams and the
+/// names this workspace holds for them. `--import` names each unnamed cell
+/// `ROOM-cell-ID` under this room grant's capability, so later verbs can say
+/// it; the reference is a hint, every use is a signed request.
+fn room_ls(session: &Session, room: &Room, since: u64, import: bool, as_json: bool) -> Result<(), Done> {
+    let ws = workspace_record(session).map_err(error)?;
+    let grant = reference(session, &room.grant).map_err(error)?;
+    let room_cell = member(&grant, "target").map_err(error)?.to_owned();
+    let roster = roster_of(&signed_read(session, &ws, &room.name, "roster", &grant, "resource", &[])?);
+    let view = signed_read(session, &ws, &room.name, "since", &grant, "since", &[("height", since.to_string())])?;
+    let entries: Vec<Value> = view.get("entries").and_then(Value::as_array).cloned().unwrap_or_default();
+    // cell -> (first height, last height, writers)
+    let mut cells: BTreeMap<String, (String, String, Vec<String>)> = BTreeMap::new();
+    for entry in &entries {
+        let height = entry.get("height").and_then(Value::as_str).unwrap_or("0").to_owned();
+        let subject = entry.get("subject").and_then(Value::as_str).unwrap_or("").to_owned();
+        for cell in entry.get("cells").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+            let slot = cells.entry(cell.to_owned()).or_insert_with(|| (height.clone(), height.clone(), Vec::new()));
+            slot.1 = height.clone();
+            if !subject.is_empty() && !slot.2.contains(&subject) {
+                slot.2.push(subject.clone());
+            }
+        }
+    }
+    let root = &session.workspace;
+    let capability = member(&grant, "observeCapability").map_err(error)?.to_owned();
+    let mut rows = Vec::new();
+    for (cell, (first, last, writers)) in &cells {
+        let mut names = crate::workspace::names_for_target(root, cell);
+        let stream_of = roster.members.iter().find(|(_, s)| s == cell).map(|(subject, _)| subject.clone());
+        if names.is_empty() && import && *cell != room_cell {
+            let name = format!("{}-cell-{cell}", room.name);
+            client(
+                "workspace",
+                &[
+                    ("action", os("import")),
+                    ("dir", os(root)),
+                    ("name", os(&name)),
+                    ("kind", os("object")),
+                    ("target", os(cell)),
+                    ("observe-capability", os(&capability)),
+                    ("operation-capability", os(&capability)),
+                ],
+            )?;
+            names.push(name);
+        }
+        rows.push(json!({"cell":cell,"names":names,"room":*cell == room_cell,"stream":stream_of.is_some(),
+            "streamOf":stream_of,"firstHeight":first,"lastHeight":last,"writers":writers}));
+    }
+    if as_json {
+        println!("{}", json!({"type":"mini-room-ls-v1","room":room.name,"roomCell":room_cell,
+            "founder":roster.founder,"since":since.to_string(),"cells":rows,"entries":entries,
+            "authority":"signed since view under the room grant"}));
+    } else {
+        println!("# {} (cell {room_cell}): {} cells written above height {since}", room.name, rows.len());
+        for row in &rows {
+            let what = if row["room"] == json!(true) {
+                "the room".to_owned()
+            } else if let Some(owner) = row["streamOf"].as_str() {
+                format!("stream of {owner}")
+            } else {
+                "cell".to_owned()
+            };
+            let names: Vec<String> = row["names"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
+            println!(
+                "{:<22} {:<24} h{}..{} by {}  {}",
+                row["cell"].as_str().unwrap_or(""),
+                what,
+                row["firstHeight"].as_str().unwrap_or(""),
+                row["lastHeight"].as_str().unwrap_or(""),
+                row["writers"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(","),
+                names.join(",")
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1830,11 +2001,11 @@ mod tests {
         assert_eq!(plan("chat new den --private").unwrap().unwrap(), Line::New { room: "den".into(), private: true });
         assert_eq!(
             plan("chat invite commons 1234 bob").unwrap().unwrap(),
-            Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()), enc: None }
+            Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()), enc: None, verbs: vec!["observe".into(), "append".into()] }
         );
         assert_eq!(
             plan("chat invite den 1234 --enc ab12 bob").unwrap().unwrap(),
-            Line::Invite { room: "den".into(), subject: "1234".into(), name: Some("bob".into()), enc: Some("ab12".into()) }
+            Line::Invite { room: "den".into(), subject: "1234".into(), name: Some("bob".into()), enc: Some("ab12".into()), verbs: vec!["observe".into(), "append".into()] }
         );
         assert_eq!(
             plan(r#"chat join commons {"a": "b c"}"#).unwrap().unwrap(),

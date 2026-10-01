@@ -2,8 +2,5 @@
   "type": "mini-hermes-role-budget-v1",
   "role": "librarian",
   "fund": "100",
-  "feePerOperation": "tariff.base",
-  "tariffBaseObserved": "3",
-  "maxCostPerTurn": "50000",
-  "whenEmpty": "bookRefused at plan; Hermes stops writing and says so in its stream"
+  "note": "fund is the budget summon moves to ROOM-hermes when --budget is omitted. Each Hermes write is a turn: the room's tariff hermes/turn plus the fleet fee, paid to the room's till before the write; a turn the account cannot cover is refused bookRefused at plan, the write is not attempted, and Hermes says out of budget in its stream."
 }

@@ -561,6 +561,7 @@ mod tests {
 
     fn tool() -> ToolTask {
         ToolTask {
+            room: None,
             task: "10".into(),
             subject: "11".into(),
             capability: "12".into(),

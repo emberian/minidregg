@@ -1,0 +1,136 @@
+n	step	who	line	expect	got	verdict	wall_s	load1	note
+1	setup	alice	keygen mini.key	admitted	rc 0	ok	0.01	11.54	cc167ba0106df2982268c055696bd80d17cdc484941bf8a693a17cbfbdbb90a7 
+2	setup	OPERATOR	CUSTODY: copy alice's secret into the sponsor home (enroll plan+seal sign with both keys)	rc 0	rc 0	ok	0.01	11.54	
+3	setup	sponsor	enroll plan j14-alice j14-alice.key	admitted	rc 0	ok	2.05	11.54	{   "authority": "candidate-only",   "keyId": "14010733676557652122",   "plan": {     "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f50
+4	setup	sponsor	enroll seal j14-alice	admitted	rc 0	ok	0.63	11.54	{   "authority": "awaiting-admission",   "ingressSha256": "9431073bfe02ba8c08becb3a9801846b42e49d53ddd791648c82831a5b041931",   "keyId": "14010733676557652122",
+5	setup	sponsor	enroll submit j14-alice	admitted	rc 0	ok	2.05	12.14	{   "authority": "admitted-key-only",   "keyId": "14010733676557652122",   "keyPath": "/home/ember/build/j14/r4/steps/J14/h/sponsor/keys/j14-alice.key",   "publ
+6	setup	check	alice is enrolled as its own subject	true	true	ok	-	12.14	
+7	setup	OPERATOR	CUSTODY: remove the copy	rc 0	rc 0	ok	0.01	12.14	
+8	setup	OPERATOR	PROVISION: factory observation + an account owned by alice funded 5000	rc 0	rc 0	ok	8.42	12.41	
+9	setup	OPERATOR	DELIVER: the birth context into alice's HOME/provision/	rc 0	rc 0	ok	0.01	12.41	
+10	setup	alice	init mini.key 13359638610062316137	admitted	rc 0	ok	0.02	12.41	/home/ember/build/j14/r4/steps/J14/w/alice 
+11	setup	bob	keygen mini.key	admitted	rc 0	ok	0.01	12.41	a44143ee84af18767a29bd8330108bb725468f82bcb15a2340fdec7d37071f41 
+12	setup	OPERATOR	CUSTODY: copy bob's secret into the sponsor home (enroll plan+seal sign with both keys)	rc 0	rc 0	ok	0.00	12.41	
+13	setup	sponsor	enroll plan j14-bob j14-bob.key	admitted	rc 0	ok	2.10	12.41	{   "authority": "candidate-only",   "keyId": "9943913707875257839",   "plan": {     "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f504
+14	setup	sponsor	enroll seal j14-bob	admitted	rc 0	ok	0.61	12.41	{   "authority": "awaiting-admission",   "ingressSha256": "f3e2cb945150c4e82128ec42fabbba5c47444f11db11a9611e500b3c31b3c57a",   "keyId": "9943913707875257839", 
+15	setup	sponsor	enroll submit j14-bob	admitted	rc 0	ok	1.47	12.41	{   "authority": "admitted-key-only",   "keyId": "9943913707875257839",   "keyPath": "/home/ember/build/j14/r4/steps/J14/h/sponsor/keys/j14-bob.key",   "publicK
+16	setup	check	bob is enrolled as its own subject	true	true	ok	-	12.41	
+17	setup	OPERATOR	CUSTODY: remove the copy	rc 0	rc 0	ok	0.01	12.41	
+18	setup	OPERATOR	PROVISION: factory observation + an account owned by bob funded 100	rc 0	rc 0	ok	7.96	12.19	
+19	setup	OPERATOR	DELIVER: the birth context into bob's HOME/provision/	rc 0	rc 0	ok	0.01	12.19	
+20	setup	bob	init mini.key 16223136307288547696	admitted	rc 0	ok	0.02	12.19	/home/ember/build/j14/r4/steps/J14/w/bob 
+21	setup	hermes	keygen mini.key	admitted	rc 0	ok	0.01	12.19	c031ff03a110533d3bda2ee97b8e95928e893115a1a47a1aea4ec26e4c29b688 
+22	setup	OPERATOR	CUSTODY: copy hermes's secret into the sponsor home (enroll plan+seal sign with both keys)	rc 0	rc 0	ok	0.01	12.19	
+23	setup	sponsor	enroll plan j14-hermes j14-hermes.key	admitted	rc 0	ok	2.30	12.34	{   "authority": "candidate-only",   "keyId": "15983141017836411258",   "plan": {     "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f50
+24	setup	sponsor	enroll seal j14-hermes	admitted	rc 0	ok	0.59	12.34	{   "authority": "awaiting-admission",   "ingressSha256": "8b132e8550c55c94b11173de4202357a2aa410081abb2d981d772c3beb6c7f15",   "keyId": "15983141017836411258",
+25	setup	sponsor	enroll submit j14-hermes	admitted	rc 0	ok	1.84	12.34	{   "authority": "admitted-key-only",   "keyId": "15983141017836411258",   "keyPath": "/home/ember/build/j14/r4/steps/J14/h/sponsor/keys/j14-hermes.key",   "pub
+26	setup	check	hermes is enrolled as its own subject	true	true	ok	-	12.34	
+27	setup	OPERATOR	CUSTODY: remove the copy	rc 0	rc 0	ok	0.01	12.34	
+28	setup	OPERATOR	PROVISION: factory observation + an account owned by hermes funded 0	rc 0	rc 0	ok	8.09	12.36	
+29	setup	OPERATOR	DELIVER: the birth context into hermes's HOME/provision/	rc 0	rc 0	ok	0.01	12.36	
+30	setup	hermes	init mini.key 12883513865682616863	admitted	rc 0	ok	0.03	12.36	/home/ember/build/j14/r4/steps/J14/w/hermes 
+31	setup	OPERATOR	NODE: the node's Hermes is subject 12883513865682616863 (HOME/hermes/node.json)	rc 0	rc 0	ok	0.01	12.36	
+32	setup	alice	credit	admitted	rc 0	ok	1.10	12.36	account credit 5000  (asset 0, account 13566004984136138603, signed read at height 24) 
+33	room	alice	chat new lab	admitted	rc 0	ok	19.43	12.97	room lab: created (only you write its roster) room lab: your stream 14509996621820388745; you are its founder; it is your current room 
+34	room	alice	doc new lab-index 'any [ not (verb == write), subject == 13359638610062316137 ]' --in lab	admitted	rc 0	ok	4.46	12.97	/home/ember/build/j14/r4/steps/J14/w/alice/sources/create-lab-index.authoring/g0001/intent.bin {   "acceptedCount": "19",   "confirmation": "installed",   "even
+35	room	alice	doc append map lab-index 'lab: what we are writing, linked from here'	admitted	rc 0	ok	1.31	12.97	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j14/r4/steps/J14/w/alice/proposals/m
+36	room	alice	submit map	admitted	rc 0	ok	2.27	13.30	{   "acceptedCount": "20",   "confirmation": "installed",   "eventId": "95829253243914930814671895166353253278828438526840710315964153900265100093455",   "trans
+37	room	alice	tariff lab set hermes/turn 10	admitted	rc 0	ok	5.80	13.67	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j14/r4/steps/J14/w/alice/proposals/t
+38	room	alice	chat invite lab 16223136307288547696 bob --verbs observe,place,append	admitted	rc 0	ok	15.60	13.75	invited bob to lab: their stream 13930194877941221869 (you paid for it; they own it) give them this line: chat join lab {"authority":"hint-only","capability":"1
+39	room	OPERATOR	DELIVER: bob's invitation	rc 0	rc 0	ok	0.01	13.75	
+40	room	bob	chat join lab @lab-invite.json	admitted	rc 0	ok	0.99	13.75	joined lab: 2 members; it is your current room 
+41	summon	alice	summon lab as librarian --budget 100	admitted	rc 0	ok	65.34	11.56	lab: born its till lab-till (12207993260980836973); Hermes's turns pay into it lab: Hermes's account lab-hermes (9848549406423296759) holds 100, from your accou
+42	summon	check	the hand-off: account, invitation, index, digest, manifest	true	true	ok	-	11.56	
+43	summon	check	Hermes's account is owned by Hermes and funded 100	true	true	ok	-	11.56	
+44	summon	check	alice paid the budget and the births (signed reads before/after)	A0 - A1 >= 100	5000 - 4837 = 163	ok	-	11.56	births: till, account, Hermes's stream, digest, program, and their fees
+45	summon	alice	room status lab	admitted	rc 0	ok	3.07	11.28	room lab (18284936543784151509) at height 47   my window: none (guest; `pay lab week` buys one)   tariff: none set   till: account 12207993260980836973, balance
+46	summon	check	room status names Hermes and its budget account	true	true	ok	-	11.28	
+47	summon	alice	tariff lab	admitted	rc 0	ok	1.04	11.28	tariff of lab (room 18284936543784151509) at height 47   week         -   birth        -   hermes/turn  10   till         12207993260980836973   period       - 
+48	summon	check	the tariff: hermes/turn 10; hermes = 12883513865682616863	true	true	ok	-	11.28	
+49	program	bob	import lab-program object 10150923397589443648 11225197486037909322 11225197486037909322	admitted	rc 0	ok	0.01	11.28	lab-program 
+50	program	bob	doc show lab-program	admitted	rc 0	ok	0.94	11.28	# doc lab-program: document 10150923397589443648 cell root 1570306782067560767170864821441042765844267812801574078210086880348086427212 at height 47 (signed rea
+51	program	check	bob reads the librarian's program	true	true	ok	-	11.28	
+53	program	bob	submit bp	refused law-denied: subject == 13359638610062316137	rc 3	ok	1.43	11.10	refused: law-denied: subject == 13359638610062316137 (value 16223136307288547696) (Host refused prepare, reply byte 255) [law-denied: subject == 13359638610062316137]
+54	program	alice	doc append ap lab-hermes-librarian 'Founder: keep answers short.'	admitted	rc 0	ok	1.14	11.10	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j14/r4/steps/J14/w/alice/proposals/a
+55	program	alice	submit ap	admitted	rc 0	ok	2.57	10.85	{   "acceptedCount": "38",   "confirmation": "installed",   "eventId": "78702522834808322771192294836871659778452974770901727473611704682111113333149",   "trans
+56	hermes	OPERATOR	DELIVER: alice's hand-off into Hermes's inbox	rc 0	rc 0	ok	0.02	10.85	
+57	hermes	check	the deterministic provider listens on loopback 7743 (pid 2660700)	true	true	ok	-	10.85	
+58	attach1	bob	doc new paper --in lab	admitted	rc 0	ok	4.25	10.70	/home/ember/build/j14/r4/steps/J14/w/bob/sources/create-paper.authoring/g0001/intent.bin {   "acceptedCount": "39",   "confirmation": "installed",   "eventId": 
+59	attach1	bob	doc append p1 paper 'paper: what the librarian is for'	admitted	rc 0	ok	1.07	10.70	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j14/r4/steps/J14/w/bob/proposals/p1/
+60	attach1	bob	submit p1	admitted	rc 0	ok	2.72	10.56	{   "acceptedCount": "40",   "confirmation": "installed",   "eventId": "72377488150270043242908832994279336664367155997604130770363150626406369131601",   "trans
+61	attach1	bob	doc new data --in lab	admitted	rc 0	ok	5.08	10.52	/home/ember/build/j14/r4/steps/J14/w/bob/sources/create-data.authoring/g0001/intent.bin {   "acceptedCount": "41",   "confirmation": "installed",   "eventId": "
+62	attach1	bob	doc append d1 data 'data: the numbers'	admitted	rc 0	ok	1.12	10.52	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j14/r4/steps/J14/w/bob/proposals/d1/
+63	attach1	bob	submit d1	admitted	rc 0	ok	2.79	10.52	{   "acceptedCount": "42",   "confirmation": "installed",   "eventId": "86722307906181475185429289957391859779267043712756078425101959597104915067658",   "trans
+64	attach1	bob	say I put a draft in paper	admitted	rc 0	ok	4.31	10.56	said in lab (transaction …9747518739) 
+65	attach1	bob	say and the numbers are in data	admitted	rc 0	ok	4.46	10.91	said in lab (transaction …1094325733) 
+66	attach1	bob	say the librarian should find both	admitted	rc 0	ok	3.51	10.76	said in lab (transaction …8057540740) 
+67	attach1	OPERATOR	hermes attach: links both docs and digests three entries	rc 0	rc 0	ok	36.13	9.77	
+68	attach1	check	Hermes joined lab and read its program document	true	true	ok	-	9.77	
+69	attach1	alice	doc show lab-index	admitted	rc 0	ok	0.93	9.77	# doc lab-index: document 16419626688911011765 cell root 19417079081882031983552311702114150205228405734490399952612365477976897134476 at height 61 (signed read
+70	attach1	check	lab-index links paper once	1	1	ok	-	9.77	
+71	attach1	check	lab-index links data once	1	1	ok	-	9.77	
+72	attach1	check	Hermes made both links (created-by 12883513865682616863)	true	true	ok	-	9.77	
+73	attach1	alice	doc show lab-digest	admitted	rc 0	ok	0.96	9.77	# doc lab-digest: document 17012318638451367786 cell root 69297455188333313903970392842742751215845789154114699732917021916141157825735 at height 61 (signed rea
+74	attach1	check	lab-digest has a section by Hermes covering the three entries	true	true	ok	-	9.77	
+75	attach1	check	three turns paid (two links, one digest)	3	3	ok	-	9.77	
+76	attach1	check	Hermes's account = 100 - 3*(10 + fee 3) (Hermes's signed read)	61	61	ok	-	9.47	
+77	ask	alice	ask lab what changed since 48	admitted	rc 0	ok	5.69	9.91	said in lab (transaction …7630509310) 
+78	ask	OPERATOR	hermes attach: answers alice from the signed history	rc 0	rc 0	ok	18.55	9.62	
+79	ask	check	Hermes's answer replies to alice's entry #4, addressed to alice	true	true	ok	-	9.41	
+80	ask	check	the answer is the history: it names paper and data by their cells	true	true	ok	-	9.41	
+81	nogrant	bob	ask lab please append 'typo fixed' to cell 10015619208563495815	admitted	rc 0	ok	4.86	9.29	said in lab (transaction …5817215299) 
+82	nogrant	OPERATOR	hermes attach: tries the edit and reports the refusal	rc 0	rc 0	ok	26.90	9.20	
+83	nogrant	check	Hermes's append to paper was refused at admission; Hermes's channel says undisclosed	true	true	ok	-	9.20	
+84	nogrant	check	the Host's operator log names it: capabilityRejected (no grant covers the write)	true	true	ok	-	9.20	
+85	nogrant	check	the refused edit was a paid turn (refusals cost)	true	true	ok	-	9.20	
+86	nogrant	check	Hermes said why in its stream (the Host's refusal, verbatim), replying to bob	true	true	ok	-	9.20	
+87	nogrant	check	paper is unchanged: bob's one line	1	1	ok	-	9.02	
+88	budget	bob	say one more thing	admitted	rc 0	ok	3.67	9.02	said in lab (transaction …0066242885) 
+89	budget	bob	say and another	admitted	rc 0	ok	3.66	8.86	said in lab (transaction …6781436044) 
+90	budget	alice	ask lab what changed since 70	admitted	rc 0	ok	4.30	8.79	said in lab (transaction …3810516073) 
+91	budget	OPERATOR	hermes attach: a digest, then a turn the account cannot pay	rc 0	rc 0	ok	28.37	8.60	
+92	budget	check	the turn was refused bookRefused at plan and not attempted	true	true	ok	-	8.60	
+93	budget	check	Hermes's account holds less than one turn (9 < 13)	true	true	ok	-	8.60	
+94	budget	check	Hermes says "out of budget" in its stream	true	true	ok	-	9.19	
+95	budget	alice	topup lab 100	admitted	rc 0	ok	4.70	10.06	{   "attempt": "/home/ember/build/j14/r4/steps/J14/w/alice/attempts/a-174750169764257891630102996875479061412",   "authority": "admitted-fleet-turn",   "confirm
+96	budget	check	topup lands on Hermes's account	109	109	ok	-	10.06	
+97	kill	bob	doc new notes --in lab	admitted	rc 0	ok	5.33	10.70	/home/ember/build/j14/r4/steps/J14/w/bob/sources/create-notes.authoring/g0001/intent.bin {   "acceptedCount": "66",   "confirmation": "installed",   "eventId": 
+98	kill	bob	doc append n1 notes 'notes: loose ends'	admitted	rc 0	ok	1.20	10.70	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j14/r4/steps/J14/w/bob/proposals/n1/
+99	kill	bob	submit n1	admitted	rc 0	ok	2.34	10.64	{   "acceptedCount": "67",   "confirmation": "installed",   "eventId": "9161879192165711490955809972679884344553717627196264221467751948725740844245",   "transa
+100	kill	OPERATOR	SIGKILL the controller once a write's signed call is out (hr-9)	killed with call.bin	rc 137, call present, outcome at kill: no	ok	-	10.67	/home/ember/build/j14/r4/steps/J14/w/hermes/attempts/hr-9/call.bin
+101	kill	check	the journal holds op 9 paid and submitted, unresolved	true	true	ok	-	10.67	
+102	restart	OPERATOR	hermes attach: restart: the submitter is proven stopped, the attempt resolves by exact lookup	rc 0	rc 0	ok	21.90	10.64	
+103	restart	check	op 9 resolved after the restart (recovered, performed or refused, with its basis)	true	true	ok	-	10.64	
+104	restart	check	the submitter was proven stopped before the lookup	true	true	ok	-	10.64	
+105	restart	check	op 9 was submitted once (one attempt directory)	1	1	ok	-	10.64	
+106	restart	alice	doc show lab-index	admitted	rc 0	ok	1.04	10.59	# doc lab-index: document 16419626688911011765 cell root 108833589319807941840157763797335027690458110643849095122365763161961266811247 at height 81 (signed rea
+107	restart	check	lab-index links notes exactly once	1	1	ok	-	10.59	
+108	send	bob	ask lab what changed since 81	admitted	rc 0	ok	5.02	10.62	said in lab (transaction …5065160428) 
+109	send	OPERATOR	SIGKILL the controller with provider request 23 sent and unanswered (provider stopped)	killed	rc 137	ok	-	10.41	
+110	send	check	request 23: send journaled, no reply recorded	true	true	ok	-	10.41	
+111	send	OPERATOR	hermes attach: restart: request 23 is abandoned, a new request answers	rc 0	rc 0	ok	19.75	10.72	
+112	send	check	request 23 is journaled abandoned, never resent	true	true	ok	-	10.72	
+113	send	check	the provider's own log: every request the journal sent received once (27 sends)	27 27	27 27	ok	-	10.72	
+114	send	check	the provider received request 23 exactly once	1	1	ok	-	10.72	
+115	send	check	the question asked before the kill is answered after it	true	true	ok	-	10.66	
+116	dismiss	alice	dismiss lab	admitted	rc 0	ok	16.38	10.52	dismissed Hermes (12883513865682616863) from lab: revoked its grants on lab, lab-index, lab-digest; its stream and history stay; it returns the unspent budget t
+117	dismiss	OPERATOR	DELIVER: the dismissal into Hermes's inbox	rc 0	rc 0	ok	0.02	10.52	
+118	dismiss	OPERATOR	hermes attach: returns the remainder	rc 0	rc 0	ok	4.47	10.64	
+119	dismiss	check	Hermes returned its balance less the fee	67	67	ok	-	10.64	
+120	dismiss	check	Hermes's account is empty	0	0	ok	-	10.64	
+121	dismiss	check	alice received the remainder	4801	4801	ok	-	10.66	
+122	dismiss	hermes	read lab	refused revoked|no-grant|noGrant	rc 3	ok	1.16	10.66	refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host refused query, reply byte 255) [revoked|no-grant|noGrant]
+123	dismiss	hermes	doc show lab-index	refused revoked|no-grant|noGrant	rc 3	ok	1.18	10.66	refused: revoked: the grant, one of its ancestors, or one of its channels is revoked (phase observation) (Host refused query, reply byte 255) [revoked|no-grant|noGrant]
+124	dismiss	alice	room status lab	admitted	rc 0	ok	3.24	10.69	room lab (18284936543784151509) at height 89   my window: none (guest; `pay lab week` buys one)   tariff: none set   till: account 12207993260980836973, balance
+125	dismiss	check	room status no longer names a Hermes	true	true	ok	-	10.69	
+126	balances	check	Hermes's account: 100 + 100 - 10 turns*(10 + fee 3) - returned - fee = 0	0	0	ok	-	10.69	
+127	balances	OPERATOR	lab's till, read by the founder	rc 0	rc 0	ok	1.14	10.69	
+128	balances	check	lab's till = 10 turns * 10	100	100	ok	-	10.69	
+129	balances	OPERATOR	the till's hermes ledger (op 140)	rc 0	rc 0	ok	1.25	10.69	
+130	balances	check	one hermes ledger entry per paid turn, each 10 from Hermes	10	10	ok	-	10.69	
+131	audit	OPERATOR	stop the Host, cold audit re-admits every record, serve again	rc 0	rc 0	ok	106.84	12.01	
+132	audit	check	cold audit exit 0	0	0	ok	-	12.01	
+133	audit	OPERATOR	hermes attach: after the cold audit: dismissed, nothing to do	rc 0	rc 0	ok	0.01	12.01	
+134	audit	check	Hermes sent the provider nothing more	54	54	ok	-	12.01	
+135	audit	bob	tail --in lab -n 100	admitted	rc 0	ok	15.67	16.92	# lab · no topic · 3 members: s…316137, me, s…616863 #1 h52 me: I put a draft in paper #2 h53 me: and the numbers are in data #3 h54 me: the librarian sho
+136	audit	check	bob's tail after the audit shows Hermes's entries	true	true	ok	-	16.92	

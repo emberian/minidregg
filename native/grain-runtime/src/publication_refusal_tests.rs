@@ -123,6 +123,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         foreground_tool: None,
         dispatch_task: None,
         tool_task: Some(ToolTask {
+            room: None,
             task: "7102".into(),
             subject: "8".into(),
             capability: "81".into(),

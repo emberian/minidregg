@@ -1,23 +1,22 @@
 {
-  "type": "mini-hermes-role-grants-v1",
+  "type": "mini-hermes-role-grants-v2",
   "role": "gm",
+  "for": "MUD-GM: `summon STORY as gm` refuses on this branch; the story verbs (P-STORY) own the state and scene cells this role writes",
   "placeholders": {
     "{STORY}": "the story room name given to summon",
-    "{H}": "Hermes's subject, decimal, from enroll-or-reuse",
+    "{FOUNDER}": "the story's founder",
+    "{H}": "Hermes's subject",
     "{N}": "each scene number in story.json",
     "{S}": "each invited player's subject"
   },
-  "delegate": [
-    {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-state","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}
+  "room": ["observe", "append"],
+  "docs": [
+    {"name": "{STORY}-state", "verbs": ["observe", "mutate"]}
   ],
-  "delegateEach": [
-    {"over": "scenes in story.json",
-     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-scene-{N}","recipient":"{H}","verbs":["observe","mutate"],"maxCost":"50000"}},
-    {"over": "invited players",
-     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-player-{S}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}},
-    {"over": "invited players",
-     "request": {"type":"minidregg-workspace-proposal-v1","action":"delegate","name":"{STORY}-stream-{S}","recipient":"{H}","verbs":["observe"],"maxCost":"50000"}}
-  ],
-  "own": ["{STORY}-stream-{H}"],
-  "relaw": ["state", "scene"]
+  "each": {
+    "scenes": {"name": "{STORY}-scene-{N}", "verbs": ["observe", "mutate"], "from": "story.json scenes"},
+    "players": {"name": "{STORY}-player-{S}", "verbs": ["observe"], "from": "the invited players"}
+  },
+  "relaw": ["state", "scene"],
+  "program": {"name": "{STORY}-hermes-gm", "law": "any [ not (verb == write), subject == {FOUNDER} ]"}
 }

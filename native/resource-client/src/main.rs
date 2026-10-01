@@ -68,6 +68,8 @@ mod share_issue_receipt;
 #[cfg(unix)]
 mod chat;
 #[cfg(unix)]
+mod hermes;
+#[cfg(unix)]
 mod credit;
 mod keys;
 #[cfg(unix)]

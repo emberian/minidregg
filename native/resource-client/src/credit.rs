@@ -19,21 +19,37 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The room cell's tariff fields: name → declared field key of `R`.
+/// The first declared field key of the room cell's OWN fields (this table).
+/// A chat room's roster holds the fields below it (founder 2, member k at
+/// 2k+1 / 2k+2: `chat::roster_of`), so one room cell carries both a roster
+/// and a tariff; until 2026-10-01 the tariff sat at 1..7 and `hermes/turn`
+/// (3) was the first member's subject.
+pub(crate) const ROOM_FIELDS_START: u64 = 1001;
+
+/// The room cell's own fields: name → declared field key of `R` (the one
+/// list; a declared-cell birth that names its fields names these).
 /// `week`: credit a week costs (0 = free: the concierge issues on request);
-/// `birth` and `hermes/turn`: the room's prices for items 7/8 (stored, not yet
-/// charged by anything here); `till`: the room account `A_R` payments go to;
-/// `period`: a week's length in heights; `runner`: the concierge's own account
-/// `A_P` (`topup` funds it); `concierge`: the concierge's subject.
+/// `birth`: the room's birth price (stored, not charged by anything here);
+/// `hermes/turn`: what each Hermes turn pays the till (`credit --action
+/// turn`); `till`: the room account `A_R` payments go to; `period`: a week's
+/// length in heights; `runner`: the concierge's own account (`topup …
+/// concierge` funds it); `concierge`: the concierge's subject; `hermes`: the
+/// subject `summon` put on the roster (0 after `dismiss`); `hermes/account`:
+/// Hermes's budget account `A_P` (`topup` funds it).
 pub(crate) const TARIFF_FIELDS: &[(&str, &str)] = &[
-    ("week", "1"),
-    ("birth", "2"),
-    ("hermes/turn", "3"),
-    ("till", "4"),
-    ("period", "5"),
-    ("runner", "6"),
-    ("concierge", "7"),
+    ("week", "1001"),
+    ("birth", "1002"),
+    ("hermes/turn", "1003"),
+    ("till", "1004"),
+    ("period", "1005"),
+    ("runner", "1006"),
+    ("concierge", "1007"),
+    ("hermes", "1008"),
+    ("hermes/account", "1009"),
 ];
+
+/// The topic a Hermes turn's payment publishes on Hermes's account.
+pub(crate) const HERMES_TOPIC: &str = "hermes";
 
 /// Fields a founder sets by `tariff ROOM set FIELD N`; the rest are written
 /// by `room concierge` (install) and name accounts and subjects.
@@ -211,7 +227,7 @@ fn propose_and_submit(root: &Path, ws: &Value, id: &str, request: &Value) -> Res
 
 /// Write tariff fields of `R` in one scalar turn: `create` for a field `R`
 /// lacks, `write` (expecting the signed value just read) for one it holds.
-fn set_fields(root: &Path, ws: &Value, name: &str, room: &Room, values: &[(&str, String)]) -> Result<PathBuf> {
+pub(crate) fn set_fields(root: &Path, ws: &Value, name: &str, room: &Room, values: &[(&str, String)]) -> Result<PathBuf> {
     let mut actions = Vec::new();
     for (field, value) in values {
         let key = field_key(field)?;
@@ -225,6 +241,12 @@ fn set_fields(root: &Path, ws: &Value, name: &str, room: &Room, values: &[(&str,
         "targets":[{"name":name,"payload":{"type":"scalar","actions":actions}}]});
     let id = format!("tariff-{}-{}", room.height, workspace::random_nonce()?);
     propose_and_submit(root, ws, &id, &request)
+}
+
+/// The permit-all predicate an account birth names (accounts are governed by
+/// their capabilities and the Book, not a field law).
+pub(crate) fn write_permit(path: &Path) -> Result<()> {
+    write_json(path, &json!({"type":"all","predicates":[]}))
 }
 
 // ---------------------------------------------------------------- my account
@@ -247,6 +269,7 @@ pub(crate) fn my_account(root: &Path, ws: &Value, explicit: Option<&str>) -> Res
             if workspace::member(&reference, "kind")? == "account"
                 && !name.ends_with("-till")
                 && !name.ends_with("-runner")
+                && !name.ends_with("-hermes")
             {
                 accounts.push(name);
             }
@@ -713,17 +736,71 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = text(args.required("room")?, "room")?;
             let amount = text(args.required("amount")?, "amount")?;
             let account = opt(&mut args, "account")?;
+            let to = opt(&mut args, "to")?;
             args.finish()?;
             let current = room(&root, &ws, &name)?;
-            let runner = current.need("runner")?.to_owned();
+            // Hermes's budget when the room has a Hermes, else the
+            // concierge's runner account; `--to` says which.
+            let hermes = current.get("hermes/account").filter(|a| *a != "0").map(str::to_owned);
+            let (whose, destination) = match (to.as_deref(), hermes) {
+                (Some("hermes") | None, Some(hermes)) => ("Hermes's budget account", hermes),
+                (Some("hermes"), None) => return Err(format!("{name} has no Hermes (its founder summons one)")),
+                (Some("concierge") | None, _) => ("runner account", current.need("runner")?.to_owned()),
+                (Some(other), _) => return Err(format!("topup --to hermes|concierge, not {other}")),
+            };
             let account = my_account(&root, &ws, account.as_deref())?;
-            let result = crate::fleet::pay_turn(&root, &account, &runner, &amount, None, None)?;
+            let result = crate::fleet::pay_turn(&root, &account, &destination, &amount, None, None)?;
             println!(
-                "topped up {name}'s runner account {runner} by {amount} (fee {}, transaction {})",
+                "topped up {name}'s {whose} {destination} by {amount} (fee {}, transaction {})",
                 result["fee"].as_str().unwrap_or("?"),
                 result["receipt"]["transactionId"].as_str().unwrap_or("?")
             );
             Ok(())
+        }
+        // One Hermes turn's payment (PLACE §2.10 "every Hermes turn debits
+        // tariff.hermes/turn"): one fleet turn from Hermes's account to the
+        // room's till, `hermes/turn` credit plus the fleet fee, publishing
+        // MEMO on Hermes's `hermes` topic. An account that cannot cover it is
+        // refused at plan (`bookRefused`), which is what stops Hermes.
+        "turn" => {
+            let name = text(args.required("room")?, "room")?;
+            let account = text(args.required("account")?, "account")?;
+            let memo = text(args.required("memo")?, "memo")?;
+            args.finish()?;
+            let current = room(&root, &ws, &name)?;
+            let price = current.get("hermes/turn").unwrap_or("0").to_owned();
+            if price == "0" {
+                print_json(&json!({"type":"minidregg-hermes-turn-v1","room":name,"price":"0","paid":false,
+                    "note":"this room does not charge Hermes's turns (tariff hermes/turn is 0)"}))?;
+                return Ok(());
+            }
+            let till = current.need("till")?.to_owned();
+            let result = crate::fleet::pay_turn(&root, &account, &till, &price, None, Some((HERMES_TOPIC, memo.as_bytes())))?;
+            print_json(&json!({"type":"minidregg-hermes-turn-v1","room":name,"price":price,"paid":true,
+                "till":till,"fee":result["fee"],"transaction":result["receipt"]["transactionId"],
+                "sequence":result["publication"]["sequence"],"memo":memo}))
+        }
+        // Hermes returns what is left of a budget account to `--to` (the
+        // founder's account `dismiss` named): the balance less the fleet fee,
+        // one signed transfer. Nothing is returned when the balance does not
+        // cover the fee.
+        "return" => {
+            let account = text(args.required("account")?, "account")?;
+            let to = text(args.required("to")?, "to")?;
+            args.finish()?;
+            decimal(&to, "return account")?;
+            let (balance, asset, height, target) = crate::fleet::account_balance(&root, &account)?;
+            let fee = crate::fleet::tariff_base(&root)?;
+            let (balance_n, fee_n) = (number(&balance, "balance")?, number(&fee, "fee")?);
+            if balance_n <= fee_n {
+                return print_json(&json!({"type":"minidregg-hermes-return-v1","account":target,"balance":balance,
+                    "asset":asset,"height":height,"returned":"0","note":"the balance does not cover the fee"}));
+            }
+            let amount = (balance_n - fee_n).to_string();
+            let result = crate::fleet::pay_turn(&root, &account, &to, &amount, None, None)?;
+            print_json(&json!({"type":"minidregg-hermes-return-v1","account":target,"balance":balance,
+                "asset":asset,"height":height,"returned":amount,"fee":result["fee"],"to":to,
+                "transaction":result["receipt"]["transactionId"]}))
         }
         "renew" => {
             let name = text(args.required("room")?, "room")?;
@@ -789,6 +866,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             if let Some(runner) = current.get("runner") {
                 println!("  runner account: {runner}; concierge {}", current.get("concierge").unwrap_or("-"));
             }
+            if let Some(hermes) = current.get("hermes").filter(|h| *h != "0") {
+                let account = current.get("hermes/account").unwrap_or("-");
+                let price = current.get("hermes/turn").unwrap_or("0");
+                match crate::fleet::account_balance(&root, &format!("{name}-hermes")) {
+                    Ok((balance, _, _, _)) => println!("  hermes: {hermes}, budget account {account}, balance {balance}, {price} a turn"),
+                    Err(_) => println!("  hermes: {hermes}, budget account {account}, {price} a turn"),
+                }
+            }
             Ok(())
         }
         "ledger" => {
@@ -813,7 +898,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             adopt(&root, &ws, &inbox)
         }
-        _ => Err("credit action must be balance, room, tariff, pay, topup, renew, status, ledger, install or adopt".into()),
+        _ => Err("credit action must be balance, room, tariff, pay, topup, turn, return, renew, status, ledger, install or adopt".into()),
     }
 }
 
@@ -827,7 +912,11 @@ mod tests {
         keys.sort();
         keys.dedup();
         assert_eq!(keys.len(), TARIFF_FIELDS.len());
-        assert_eq!(field_key("week").unwrap(), "1");
+        assert_eq!(field_key("week").unwrap(), "1001");
+        // Every room field sits at or above the roster's ceiling.
+        for (_, key) in TARIFF_FIELDS {
+            assert!(key.parse::<u64>().unwrap() >= ROOM_FIELDS_START);
+        }
         assert!(field_key("weekly").is_err());
     }
 
@@ -841,7 +930,7 @@ mod tests {
 
     #[test]
     fn a_founder_sets_prices_not_accounts() {
-        for field in ["till", "runner", "concierge"] {
+        for field in ["till", "runner", "concierge", "hermes", "hermes/account"] {
             assert!(!SETTABLE.contains(&field));
         }
         for field in SETTABLE {
