@@ -37,6 +37,10 @@ structure GrainBirthTariffPin where
   perBirth : Nat
   deriving DecidableEq, Repr
 
+/-- C17 (claudesplosion planning/compute/c13-latency-fuel.md): the referee adds
+about 1 s at 1.5e6 steps on persvati; rounded down. -/
+def defaultNockFSync : Nat := 1000000
+
 structure Config where
   deployment : CanonicalCellRegistry.Deployment
   federation : FederationId
@@ -51,6 +55,12 @@ structure Config where
   /-- Public Ed25519 key of the separately controlled physical host custodian.
   Absence preserves the legacy profile and disables checked completion. -/
   completionCustodianKey : Option (List UInt8) := none
+  /-- The operator's synchronous budget for a run claim, in Lean Nock steps
+  (C17's measured `F_sync`). A run-claimed invocation above it is refused
+  `overSyncBudget` before the referee re-executes it. Operator-local admission
+  policy, not runtime semantics: it is not in `runtimeParameters`, and a
+  history admitted under a larger budget replays unchanged. -/
+  nockFSync : Nat := defaultNockFSync
 
 def Config.grainBirthTariffValue (config : Config) :
     Except String GrainResourceBirthController.Tariff := do
@@ -144,12 +154,27 @@ def policiesSourced (config : Config) (directory : Directory Nat CanonicalCellRe
     (logical : Store.Store CredentialAuthorityState.layout) : Bool :=
   decide (∀ address ∈ logical.support, policySourced config directory logical address = true)
 
+/-- One stored cell obeys its role and domain law (vacuous for an absent slot). -/
+def cellLawful (config : Config) (directory : Directory Nat CanonicalCellRegistry.registry)
+    (identifier : Digest) : Bool :=
+  match directory.slots identifier.value with
+  | .absent => true
+  | .present cell => CanonicalCellRegistry.cellCheck config.deployment identifier.value cell
+
+/-- Every enumerable cell of the image obeys its law. -/
+def cellsLawful (config : Config) (durable : Durable)
+    (directory : Directory Nat CanonicalCellRegistry.registry) : Bool :=
+  durable.image.cellIds.all (cellLawful config directory)
+
 structure Opened (config : Config) where
   private mk ::
   durable : Durable
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot
   pins : FactoryPins
+  /-- The cell-law check this image passed; a later image of the same session
+  re-checks only the cells whose bytes moved (`cellsLawfulFrom`). -/
+  lawful : cellsLawful config durable directory.directory = true
 
 def need {α : Type} (detail : String) : Option α → Except String α
   | none => .error detail
@@ -163,8 +188,16 @@ structure Validated (config : Config) (durable : Durable) where
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot
   pins : FactoryPins
+  lawful : cellsLawful config durable directory.directory = true
 
-def validateParts (config : Config) (durable : Durable) :
+/-- The one validation, over a supplied directory and cell-law check. The
+caller's directory must be the image's (`validatePartsWith_eq`) and its check
+must decide `cellsLawful` (`lawfulExact`); then this is `validateParts`, the
+same result and the same refusal in the same order. -/
+def validatePartsWith (config : Config) (durable : Durable)
+    (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory) :
     Except String (Validated config durable) := do
   if config.grainBirthTariff.isSome then
     let _ ← config.grainBirthTariffValue
@@ -173,15 +206,12 @@ def validateParts (config : Config) (durable : Durable) :
   check (decide config.deployment.Valid) "invalid deployment role identities"
   check (seedIdentity durable.image.seed == config.expectedSeed) "genesis identity mismatch"
   check (durable.logStart == config.logStart durable.image.seed) "log chain not rooted at this deployment's genesis"
-  let directory ← need "noncanonical native directory"
-    (CredentialAuthorityDomainReceiver.loadDirectory durable)
+  let directory ← need "noncanonical native directory" directory?
   let authority ← need "complete deployment authority unavailable"
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
-  check (durable.image.cellIds.all fun identifier =>
-    match directory.directory.slots identifier.value with
-    | .absent => true
-    | .present cell => CanonicalCellRegistry.cellCheck config.deployment identifier.value cell)
-    "native cell role or domain law refused"
+  let lawful ← if checked : lawfulCheck directory = true then
+      pure ((lawfulExact directory) ▸ checked)
+    else .error "native cell role or domain law refused"
   check (policiesSourced config directory.directory authority.snapshot.logical)
     "selected policy source/profile mismatch"
   let factoryHead ← need "factory policy head unavailable"
@@ -194,11 +224,97 @@ def validateParts (config : Config) (durable : Durable) :
       policyId := ⟨config.deployment.factoryId⟩
       policyAddress := factoryHead.address
       tariff := config.tariff }
-  pure ⟨directory, authority, pins⟩
+  pure ⟨directory, authority, pins, lawful⟩
+
+def validateParts (config : Config) (durable : Durable) :
+    Except String (Validated config durable) :=
+  validatePartsWith config durable (CredentialAuthorityDomainReceiver.loadDirectory durable)
+    (fun loaded => cellsLawful config durable loaded.directory) (fun _ => rfl)
+
+theorem validatePartsWith_eq (config : Config) (durable : Durable)
+    (directory? : Option (CredentialAuthorityDomainReceiver.LoadedDirectory durable))
+    (lawfulCheck : CredentialAuthorityDomainReceiver.LoadedDirectory durable → Bool)
+    (lawfulExact : ∀ loaded, lawfulCheck loaded = cellsLawful config durable loaded.directory)
+    (loaded : directory? = CredentialAuthorityDomainReceiver.loadDirectory durable) :
+    validatePartsWith config durable directory? lawfulCheck lawfulExact = validateParts config durable := by
+  subst loaded
+  have same : lawfulCheck = fun loaded => cellsLawful config durable loaded.directory :=
+    funext lawfulExact
+  subst same
+  rfl
 
 def validateLoaded (config : Config) (durable : Durable) : Except String (Opened config) :=
   (validateParts config durable).map fun parts =>
-    ⟨durable, parts.directory, parts.authority, parts.pins⟩
+    ⟨durable, parts.directory, parts.authority, parts.pins, parts.lawful⟩
+
+/-- A validated image's cell law holds at every identifier: outside the
+enumerable support the bytes are the absent default, so the slot is absent. -/
+theorem Opened.cellLawful_all {config : Config} (prior : Opened config) (identifier : Digest) :
+    cellLawful config prior.directory.directory identifier = true := by
+  by_cases member : identifier ∈ prior.durable.image.cellIds
+  · exact List.all_eq_true.mp prior.lawful identifier member
+  · have bytes := prior.directory.bytes_exact identifier.value
+    rw [Kernel.DurableCheckpoint.resume_outside_support ResourceBirthCodec.rootBytes
+      prior.durable.image prior.durable.baseHeight prior.durable.base prior.durable.snapshot
+      prior.durable.resumed ⟨identifier.value⟩ member, prior.directory.absentDefault] at bytes
+    have slot := ResourceBirthCodec.LifecycleImage.view_slot CanonicalCellRegistry.registry
+      prior.directory.directory identifier.value
+    cases view : ResourceBirthCodec.LifecycleImage.view CanonicalCellRegistry.registry
+        prior.directory.directory identifier.value with
+    | fresh =>
+        rw [view] at slot
+        unfold cellLawful
+        rw [← slot]
+        rfl
+    | retired =>
+        rw [view] at bytes
+        simp [ResourceBirthCodec.LifecycleImage.bytes] at bytes
+    | live cell =>
+        rw [view] at bytes
+        simp [ResourceBirthCodec.LifecycleImage.bytes] at bytes
+
+/-- The cell-law check of a later image of a session: a cell whose canonical
+bytes equal the prior validated image's passed already (`Opened.cellLawful_all`)
+and is not re-checked. `cellsLawfulFrom_eq`: it decides `cellsLawful`. -/
+def cellsLawfulFrom (config : Config) (prior : Opened config) (durable : Durable)
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) : Bool :=
+  durable.image.cellIds.all fun identifier =>
+    prior.durable.snapshot.canonicalBytes identifier == durable.snapshot.canonicalBytes identifier ||
+      cellLawful config loaded.directory identifier
+
+theorem cellsLawfulFrom_eq (config : Config) (prior : Opened config) (durable : Durable)
+    (loaded : CredentialAuthorityDomainReceiver.LoadedDirectory durable) :
+    cellsLawfulFrom config prior durable loaded = cellsLawful config durable loaded.directory := by
+  unfold cellsLawfulFrom cellsLawful
+  apply Bool.eq_iff_iff.mpr
+  simp only [List.all_eq_true, Bool.or_eq_true, beq_iff_eq]
+  constructor
+  · intro accepted identifier member
+    rcases accepted identifier member with same | lawful
+    · have held := prior.cellLawful_all identifier
+      unfold cellLawful at held ⊢
+      rwa [← CredentialAuthorityDomainReceiver.LoadedDirectory.slots_eq_of_bytes
+        prior.directory loaded identifier.value same]
+    · exact lawful
+  · intro lawful identifier member
+    exact Or.inr (lawful identifier member)
+
+/-- **Validation of a session's next image, incrementally**: the directory
+decodes only rows whose bytes moved (`loadDirectoryFrom`) and the cell law runs
+only on those cells (`cellsLawfulFrom`). `validateLoadedFrom_eq`: it is
+`validateLoaded` -- the same `Opened`, the same refusal. -/
+def validateLoadedFrom (config : Config) (prior : Opened config) (durable : Durable) :
+    Except String (Opened config) :=
+  (validatePartsWith config durable
+    (CredentialAuthorityDomainReceiver.loadDirectoryFrom prior.directory durable)
+    (cellsLawfulFrom config prior durable) (cellsLawfulFrom_eq config prior durable)).map
+    fun parts => ⟨durable, parts.directory, parts.authority, parts.pins, parts.lawful⟩
+
+theorem validateLoadedFrom_eq (config : Config) (prior : Opened config) (durable : Durable) :
+    validateLoadedFrom config prior durable = validateLoaded config durable := by
+  unfold validateLoadedFrom validateLoaded
+  rw [validatePartsWith_eq config durable _ _ _
+    (CredentialAuthorityDomainReceiver.loadDirectoryFrom_eq prior.directory durable)]
 
 /-- Validation wraps exactly the image it was given. -/
 theorem validateLoaded_durable {config : Config} {durable : Durable} {opened : Opened config}

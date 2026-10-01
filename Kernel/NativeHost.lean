@@ -127,8 +127,8 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
             factory :: authority :: allocations ++ sources)
     | .invoke bytes => do
         let command ← need "noncanonical invocation command" (DeclaredResourceController.commandCodec.decode bytes)
-        let prepared ← (DeclaredResourceController.prepare config.deployment profile
-          ⟨config.federation, height⟩ opened.durable command).mapError
+        let prepared ← (DeclaredResourceController.prepareFrom config.deployment profile
+          ⟨config.federation, height⟩ opened.durable (some opened.directory) command).mapError
             (fun reason => s!"invocation preparation: {repr reason}")
         let tuple ← need "invocation incidence collision" (DeclaredResourceController.prepareTuple prepared)
         let marker := DeclaredResourceController.operationMarker config.deployment.domain profile.semantics command
@@ -361,11 +361,42 @@ evaluated on the same projected step and resolved law that
 (`DeclaredResourceController.lawLeaf_fails`). Only the read-authorized
 preparation path consults it, so the requester learns the clause of a law over
 state it may already read. -/
+/-- The steps a command's run claim names, when they exceed the operator's
+synchronous budget `config.nockFSync`; `none` when the command claims no run or
+claims at most the budget (`overSyncBudget_admits`, `overSyncBudget_refuses`). -/
+def overSyncBudget (config : Config) (command : DeclaredResourceController.Command) : Option Nat :=
+  match command.run with
+  | some claim => if config.nockFSync < claim.steps then some claim.steps else none
+  | none => none
+
+theorem overSyncBudget_admits (config : Config) (command : DeclaredResourceController.Command)
+    (claim : NockRun.RunClaim) (run : command.run = some claim)
+    (within : claim.steps ≤ config.nockFSync) : overSyncBudget config command = none := by
+  simp [overSyncBudget, run, Nat.not_lt.mpr within]
+
+theorem overSyncBudget_refuses (config : Config) (command : DeclaredResourceController.Command)
+    (claim : NockRun.RunClaim) (run : command.run = some claim)
+    (over : config.nockFSync < claim.steps) : overSyncBudget config command = some claim.steps := by
+  simp [overSyncBudget, run, over]
+
+theorem overSyncBudget_unclaimed (config : Config) (command : DeclaredResourceController.Command)
+    (run : command.run = none) : overSyncBudget config command = none := by
+  simp [overSyncBudget, run]
+
+def overSyncBudgetDetail (config : Config) (steps : Nat) : String :=
+  s!"overSyncBudget: run claim of {steps} Lean steps exceeds the operator's synchronous budget nockFSync {config.nockFSync}"
+
+/-- The sync gate on a preparation draft: only an invocation carries a run claim. -/
+def draftOverSyncBudget (config : Config) : Draft → Option Nat
+  | .invoke bytes => (DeclaredResourceController.commandCodec.decode bytes).bind (overSyncBudget config)
+  | _ => none
+
 def invokeLawLeaf (config : Config) (opened : Opened config) : Draft → Option LawLeaf
   | .invoke bytes => do
       let command ← DeclaredResourceController.commandCodec.decode bytes
-      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
-        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+      let prepared ← (DeclaredResourceController.prepareFrom config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable (some opened.directory)
+        command).toOption
       let tuple ← DeclaredResourceController.prepareTuple prepared
       DeclaredResourceController.firstLawLeaf prepared tuple
   | _ => none
@@ -383,6 +414,9 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
   | .ok _ =>
       match signed.challenge.intent.purpose with
       | .prepare draft =>
+          -- Before the referee re-executes anything (`invokeLawLeaf`, `prepareLoaded`).
+          if let some steps := draftOverSyncBudget config draft then
+            return .error ⟨.operationRejected, overSyncBudgetDetail config steps, none⟩
           match invokeLawLeaf config opened draft with
           | some leaf => return .error (Refusal.lawDenied (some leaf))
           | none => return ((prepareLoaded config opened draft).mapError
@@ -1117,8 +1151,11 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       match DeclaredResourceController.commandCodec.decode signed.commandBytes with
       | none => return refused .malformed "invoke" "noncanonical command"
       | some command =>
-          match ← DeclaredResourceController.withAcceptedLoaded config.deployment config.profile
-              ⟨config.federation, height⟩ config.signature opened.durable signed
+          -- The operator's synchronous budget, before the referee re-executes the claim.
+          if let some steps := overSyncBudget config command then
+            return refused .operationRejected "overSyncBudget" (overSyncBudgetDetail config steps)
+          match ← DeclaredResourceController.withAcceptedLoadedFrom config.deployment config.profile
+              ⟨config.federation, height⟩ config.signature opened.durable (some opened.directory) signed
               (fun _ shape accepted => do
                 let intent := accepted.dataIntent shape
                 if (FnConsumerProgress.recognizedLegacyIntentAnyGateway?

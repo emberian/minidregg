@@ -697,13 +697,16 @@ structure PreparedInvocation {F : Type} [Field F]
   runChecked : checkCommandRun deployment.domain directory.directory ambient command
     (fun i => (targets i).pre.logical) = .ok run
 
-def prepare {F : Type} [Field F] (deployment : Deployment)
+/-- `prepare` over a directory the caller already holds for this image (the
+Host's `Opened.directory`), or `none` for an image whose directory does not load.
+`prepare_eq_prepareFrom`: with any held directory it is `prepare`. -/
+def prepareFrom {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
-    (durable : Durable) (command : Command) :
+    (durable : Durable) (directory? : Option (LoadedDirectory durable)) (command : Command) :
     Except Reject (PreparedInvocation deployment profile ambient durable command) := do
   if nonempty : command.targets ≠ [] then
     if distinct : (command.targets.map Target.target).Nodup then
-      let directory ← requireSome .directoryUnavailable (loadDirectory durable)
+      let directory ← requireSome .directoryUnavailable directory?
       let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
       let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
       let targets ← collect command.targets (prepareTarget deployment directory.directory
@@ -715,6 +718,21 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
       | .ok run => .ok ⟨nonempty, distinct, directory, authority, clock, targets, marker, run, checked⟩
     else .error .duplicateTargets
   else .error .emptyTargets
+
+def prepare {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    (durable : Durable) (command : Command) :
+    Except Reject (PreparedInvocation deployment profile ambient durable command) :=
+  prepareFrom deployment profile ambient durable (loadDirectory durable) command
+
+/-- A held directory of the image prepares exactly what `prepare` does. -/
+theorem prepare_eq_prepareFrom {F : Type} [Field F] (deployment : Deployment)
+    (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
+    (durable : Durable) (held : LoadedDirectory durable) (command : Command) :
+    prepare deployment profile ambient durable command =
+      prepareFrom deployment profile ambient durable (some held) command := by
+  unfold prepare
+  rw [LoadedDirectory.load_eq held]
 
 /-- The authority cell after the transaction: the (empty) authority read patch
 applied to the loaded cell. -/
