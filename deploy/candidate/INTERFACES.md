@@ -208,6 +208,7 @@ these; everything else is `254 operation unavailable`:
 | 103, 104 | pay command signing plan / assembly (P2) | command / pair: plan, 64-byte signature | `DREGG/PAY/PLAN/v1` / ingress |
 | 105, 106 | pay submit (blind: every refusal is `undisclosed`) / lookup | ingress | `OUTCOME/v4` |
 | 107 | public pay-cell view (no assignment map) | empty | `DREGG/PAY/VIEW/v1` |
+| 130 | dry run (P-AFFORDANCES): plan as op 1, assemble as op 11, submit as op 2 over a Store writer that never appends — commits nothing, consumes no nullifier | pair: signed observation (as op 1), signature list over the plan op 1 derives | admitted: `SIGNING-PLAN/v4` (the would-be footprint); otherwise byte 255 + `OUTCOME/v4` naming the reason (a plan-time law refusal names its clause) |
 
 `mini serve-operator` serves a separate owner-private socket (same framing,
 peer UID must equal the server's) with the lifecycle, dispatch, share-issue,

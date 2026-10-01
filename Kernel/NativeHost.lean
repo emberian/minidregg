@@ -914,13 +914,17 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
     PayCell.tariffOf pay.cell.logical, PayCell.clockOf pay.cell.logical,
     PayCell.nextFree pay.cell.logical, PayCellDomain.bookRows pay.cell.logical⟩
 
-def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
+/-- The submission path, over the Store writer it is handed. The served path
+passes `config.transport` (`submitLoadedWith`); the dry run (`Host.DryRun`,
+op 130) passes a writer that never appends, so both run this one program. -/
+def submitLoadedVia (transport : DurableReceiverIO.Transport) (config : Config)
+    (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
   match call with
   | .revoke bytes =>
       match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
-          ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
+          ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "revoke" s!"{repr reason}"
       | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
@@ -930,7 +934,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .delegate bytes =>
       match ← CapabilityDelegationReceiver.receiveLoaded config.deployment config.profile
-          ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
+          ⟨config.federation, height⟩ config.signature transport opened.durable bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "delegate" s!"{repr reason}"
       | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
@@ -943,7 +947,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
         let tariff := config.grainBirthTariffValue.toOption
         let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩
         match ← GrainResourceBirthReceiver.receiveLoaded config.profile config.deployment
-            opened.pins tariff ambient config.signature config.transport
+            opened.pins tariff ambient config.signature transport
             opened.durable bytes with
         | .historical receipt => return ← confirm .replayed receipt.transactionId receipt.eventId
         | .confirmed kind receipt => return ← confirm kind receipt.transactionId receipt.eventId
@@ -952,7 +956,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
         | .unavailable detail => return .unavailable detail.toUTF8.toList
         | .uncertain detail => return .uncertain detail.toUTF8.toList
       match ← ResourceBirthReceiver.receiveLoaded config.profile config.deployment opened.pins
-          config.signature config.transport opened.durable height bytes with
+          config.signature transport opened.durable height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused (birthReason reason) "birth" (birthRejection reason)
       | .contention => return .contention
@@ -960,7 +964,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       | .uncertain detail => return .uncertain detail.toUTF8.toList
   | .install bytes =>
       match ← PolicyInstallReceiver.receiveLoaded config.profile config.deployment config.signature
-          config.transport opened.durable config.federation height bytes with
+          transport opened.durable config.federation height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "install" s!"{repr reason}"
       | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
@@ -979,7 +983,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
                     config.deployment.domain config.profile.semantics intent).isSome then
                   return .rejected .physicalPreparation
                 return .settlement (← DurableReceiverIO.receiveLoaded
-                  config.transport ResourceBirthCodec.rootBytes opened.durable intent))
+                  transport ResourceBirthCodec.rootBytes opened.durable intent))
               pure with
           | .replayed record => confirm .replayed record.transactionId record.event.event.eventId
           | .rejected reason => return refused .operationRejected "invoke" s!"{repr reason}"
@@ -995,6 +999,10 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
               | .contention => return .contention
               | .unavailable detail => return .unavailable detail.toUTF8.toList
               | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome :=
+  submitLoadedVia config.transport config opened call confirm
 
 def submitLoaded (config : Config) (opened : Opened config) (call : SignedCall) : IO Outcome :=
   submitLoadedWith config opened call (confirmed config)
