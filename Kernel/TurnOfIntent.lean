@@ -7,8 +7,9 @@ constructors are indexed by it, so one function covers all of them.
 `Turn.ofIntent` reads each written cell's canonical post image at its registry
 kind and emits the leg as the **difference** against the cell the world holds:
 
-* an absent cell whose post decodes to a cell is a `create` plus a leg of
-  allocations from the empty store;
+* an absent cell whose post decodes to a cell is a `create` born with the
+  post image's ROM part (`romPart`, T3b) plus a leg of allocations of the rest
+  from that image;
 * a present cell whose post decodes at the same kind is a leg that guards every
   unchanged present address (a read) and modifies every changed one (`write`,
   `allocate`, `free`), in the codec's address order;
@@ -25,8 +26,10 @@ The derived patch is *stricter* than the durable layer: it is checked against
 every namespace's discipline.  `legPatch_valid_iff` says the leg is valid
 exactly when **some** guarded patch takes the held store to the post image, so
 `Refusal.notAPatch` fires exactly on images no guarded patch reaches -- a
-rewrite of an append-only row, or a birth of a ROM image (§ 5 of the T3
-report: install's policy-source cell).
+rewrite of an append-only row, or a ROM write into an existing cell.  It never
+fires on a birth (`Codec.birthPatch_valid`, `Delta.create_patchOk`): since T3b
+a create carries its ROM image, so install's policy-source cell and every
+initial-policy birth's are turns.
 
 What `ofIntent` refuses, by name (`Refusal`): an undecodable post image, a kind
 change, a removal of a present cell, a post image no guarded patch reaches, a
@@ -423,6 +426,22 @@ theorem legPatch_self_valid (k : R.Kind) (s : Store (R.layout k)) :
     Patch.ValidFrom s (C.legPatch k s s) :=
   (C.legPatch_valid_iff k s s).mpr ⟨[], trivial, rfl⟩
 
+/-- **A birth's leg is always valid (T3b)**: from the born ROM image
+`romPart s'`, the leg to `s'` only allocates the non-ROM addresses, each fresh. -/
+theorem birthPatch_valid (k : R.Kind) (s' : Store (R.layout k)) :
+    Patch.ValidFrom (romPart s') (C.legPatch k (romPart s') s') := by
+  unfold legPatch
+  rw [diff_validFrom_iff (C.cover_nodup k _ _)]
+  intro a _ op h
+  obtain ⟨ne, -, -, -, hcase⟩ := changeOp_spec h
+  by_cases hrom : (R.layout k).discipline a.1 = .rom
+  · exact (ne (by rw [romPart_apply, if_pos hrom])).elim
+  · have hnone : romPart s' a = none := by rw [romPart_apply, if_neg hrom]
+    rcases hcase with ⟨_, y, _, rfl⟩ | ⟨x, hs, _, _⟩ | ⟨x, y, hs, _, _, _⟩
+    · exact ⟨hrom, hnone⟩
+    · rw [hnone] at hs; cases hs
+    · rw [hnone] at hs; cases hs
+
 /-- A codec from a decoder and one `StoreCodec.Wire` per kind: the support is
 the wire's canonical (address-byte) order, so the derived leg's op order is
 canonical -- G-NORM's open "op order" gap, closed by the wire. -/
@@ -531,22 +550,29 @@ def deltaOf (C : Codec R) (cells : CellId → Option (Cell R)) (w : DataWrite) :
           | none => .error (.kindChanged w.cellId.value)
           | some s' => .ok (.change pre.kind pre.store s')
 
-/-- Whether a delta's leg patch is valid from its pre store. -/
+/-- Whether a delta's leg patch is valid from its pre store (a birth's is the
+born ROM image). -/
 def Delta.patchOk (C : Codec R) : Delta R → Bool
   | .absent => true
-  | .create k s' => decide (Patch.ValidFrom 0 (C.legPatch k 0 s'))
+  | .create k s' => decide (Patch.ValidFrom (romPart s') (C.legPatch k (romPart s') s'))
   | .change k s s' => decide (Patch.ValidFrom s (C.legPatch k s s'))
 
-/-- The create a delta contributes. -/
-def Delta.create? (c : CellId) : Delta R → Option (CellId × R.Kind × Option CellId)
-  | .create k _ => some (c, k, none)
+/-- The create a delta contributes: the cell born with the post image's ROM
+part (T3b). -/
+def Delta.create? (c : CellId) : Delta R → Option (CellId × Cell R × Option CellId)
+  | .create k s' => some (c, ⟨k, romPart s'⟩, none)
   | _ => none
 
 /-- The leg a delta contributes. -/
 def Delta.leg? (C : Codec R) (c : CellId) : Delta R → Option (Leg R)
   | .absent => none
-  | .create k s' => some ⟨c, k, C.legPatch k 0 s'⟩
+  | .create k s' => some ⟨c, k, C.legPatch k (romPart s') s'⟩
   | .change k s s' => some ⟨c, k, C.legPatch k s s'⟩
+
+/-- A birth is never `notAPatch` (T3b). -/
+theorem Delta.create_patchOk (C : Codec R) (k : R.Kind) (s' : Store (R.layout k)) :
+    (Delta.create k s').patchOk C = true :=
+  decide_eq_true (C.birthPatch_valid k s')
 
 /-- The first refusal one write carries, if any. -/
 def writeRefusal (C : Codec R) (cells : CellId → Option (Cell R)) (w : DataWrite) :
@@ -574,14 +600,21 @@ def guardIds (ws : List DataWrite) (gs : List ReadGuard) : List CellId :=
 def guardLeg (C : Codec R) (cells : CellId → Option (Cell R)) (c : CellId) : Option (Leg R) :=
   (cells c).map fun cell => ⟨c, cell.kind, C.legPatch cell.kind cell.store cell.store⟩
 
+/-- The storage bytes of creates and legs: the legs' bytes plus the born
+images' (`World.patchBytes`). -/
+def storageOf (H : History R TransactionId StableEvent D)
+    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) : Nat :=
+  (legs.map H.legBytes).sum + (creates.map fun c => H.imageBytes c.2.1).sum
+
 /-- The turn's charge: the intent's, with the storage lane the patch bytes. -/
-def chargeOf (H : History R TransactionId StableEvent D) (legs : List (Leg R)) (exact : Charge) :
+def chargeOf (H : History R TransactionId StableEvent D)
+    (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (exact : Charge) :
     Charge :=
-  fun l => if l = .storageBytes then (legs.map H.legBytes).sum else exact l
+  fun l => if l = .storageBytes then storageOf H creates legs else exact l
 
 /-- The creates of an intent. -/
 def createsOf (C : Codec R) (cells : CellId → Option (Cell R)) (intent : DataIntent rootBytes) :
-    List (CellId × R.Kind × Option CellId) :=
+    List (CellId × Cell R × Option CellId) :=
   (deltas C cells intent.writes).filterMap fun d => d.2.create? d.1
 
 /-- The legs of an intent: guard legs, then write legs. -/
@@ -599,7 +632,8 @@ def turnOf (B : Bridge R D) (H : History R TransactionId StableEvent D)
     retires := []
     event := intent.event
     nullifiers := intent.nullifiers.map B.key
-    charge := chargeOf H (legsOf B.codec cells intent) intent.exactCharge
+    charge := chargeOf H (createsOf B.codec cells intent) (legsOf B.codec cells intent)
+      intent.exactCharge
     subject := intent.subject }
 
 /-- **The derived turn** against held cells.  Every check is named; the first
@@ -619,7 +653,7 @@ def ofCells (B : Bridge R D) (H : History R TransactionId StableEvent D)
           else if ¬ (t.creates.map Prod.fst).Nodup then .error .duplicateWrite
           else if ¬ (t.legs.map Leg.cell).Nodup then .error .duplicateLeg
           else if t.legs.isEmpty ∧ t.creates.isEmpty then .error .noEffect
-          else if (t.legs.map H.legBytes).sum > intent.exactCharge .storageBytes then
+          else if storageOf H t.creates t.legs > intent.exactCharge .storageBytes then
             .error .storageAboveCharge
           else .ok t
 
@@ -639,7 +673,7 @@ structure Derived (B : Bridge R D) (H : History R TransactionId StableEvent D)
   creates_nodup : (t.creates.map Prod.fst).Nodup
   legs_nodup : (t.legs.map Leg.cell).Nodup
   nonempty : ¬ (t.legs.isEmpty = true ∧ t.creates.isEmpty = true)
-  storage : (t.legs.map H.legBytes).sum ≤ intent.exactCharge .storageBytes
+  storage : storageOf H t.creates t.legs ≤ intent.exactCharge .storageBytes
 
 omit [DecidableEq D] in
 theorem ofCells_ok {B : Bridge R D} {H : History R TransactionId StableEvent D}
@@ -731,9 +765,10 @@ theorem deltas_unique {B : Bridge R D} {H : History R TransactionId StableEvent 
   exact Except.ok.inj hδ'
 
 theorem mem_createsOf {C : Codec R} {cells : CellId → Option (Cell R)}
-    {intent : DataIntent rootBytes} {x : CellId × R.Kind × Option CellId} :
+    {intent : DataIntent rootBytes} {x : CellId × Cell R × Option CellId} :
     x ∈ createsOf C cells intent ↔
-      ∃ c k s', (c, Delta.create k s') ∈ deltas C cells intent.writes ∧ x = (c, k, none) := by
+      ∃ c k s', (c, Delta.create k s') ∈ deltas C cells intent.writes ∧
+        x = (c, ⟨k, romPart s'⟩, none) := by
   unfold createsOf
   rw [List.mem_filterMap]
   constructor
@@ -816,21 +851,22 @@ def postCell (C : Codec R) (cells : CellId → Option (Cell R)) (intent : DataIn
   | some bytes => (C.decode bytes).getD (cells c)
   | none => cells c
 
-theorem applyCreates_exists : ∀ (cells : Cells R) (cs : List (CellId × R.Kind × Option CellId)),
-    (cs.map Prod.fst).Nodup → (∀ x ∈ cs, x.2.2 = none ∧ cells x.1 = none) →
+theorem applyCreates_exists : ∀ (cells : Cells R) (cs : List (CellId × Cell R × Option CellId)),
+    (cs.map Prod.fst).Nodup →
+    (∀ x ∈ cs, x.2.2 = none ∧ cells x.1 = none ∧ RomOnly x.2.1.store) →
     ∃ cells', applyCreates cells cs = .ok cells'
   | cells, [], _, _ => ⟨cells, rfl⟩
   | cells, (c, k, p) :: rest, nd, h => by
       rw [List.map_cons, List.nodup_cons] at nd
-      obtain ⟨hp, hc⟩ := h (c, k, p) (by simp)
-      simp only at hp hc
+      obtain ⟨hp, hc, hrom⟩ := h (c, k, p) (by simp)
+      simp only at hp hc hrom
       subst hp
-      obtain ⟨cells', h'⟩ := applyCreates_exists (cells.update c (some ⟨k, 0⟩)) rest nd.2
+      obtain ⟨cells', h'⟩ := applyCreates_exists (cells.update c (some k)) rest nd.2
         fun x hx => ⟨(h x (by simp [hx])).1, by
           rw [cells_update_ne _ _ (fun e => nd.1 (by
             simpa [← e] using List.mem_map_of_mem (f := Prod.fst) hx))]
-          exact (h x (by simp [hx])).2⟩
-      exact ⟨cells', by simp only [applyCreates, hc, roomPresent]; exact h'⟩
+          exact (h x (by simp [hx])).2.1, (h x (by simp [hx])).2.2⟩
+      exact ⟨cells', by simp only [applyCreates, hc, roomPresent, if_pos hrom]; exact h'⟩
 
 theorem applyLegs_exists : ∀ (cells : Cells R) (legs : List (Leg R)), (legs.map Leg.cell).Nodup →
     (∀ leg ∈ legs, ∃ pre, cells leg.cell = some ⟨leg.kind, pre⟩ ∧ Patch.ValidFrom pre leg.patch) →
@@ -962,17 +998,18 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
   have hretires : t.retires = [] := by rw [teq]; rfl
   have htx : t.txId = intent.transactionId := by rw [teq]; rfl
   have hnull : t.nullifiers = intent.nullifiers.map B.key := by rw [teq]; rfl
-  have hcharge : t.charge = chargeOf H t.legs intent.exactCharge := by
+  have hcharge : t.charge = chargeOf H t.creates t.legs intent.exactCharge := by
     rw [teq]; rfl
   have hnb : t.notBefore = 0 := by rw [teq]; rfl
   have hvu : t.validUntil = none := by rw [teq]; rfl
   -- creates
-  have creates_spec : ∀ x ∈ t.creates, x.2.2 = none ∧ w.cells x.1 = none := by
+  have creates_spec : ∀ x ∈ t.creates, x.2.2 = none ∧ w.cells x.1 = none ∧
+      RomOnly x.2.1.store := by
     intro x m
     rw [hcreates] at m
     obtain ⟨c, k, s', m', rfl⟩ := mem_createsOf.mp m
     obtain ⟨w0, -, rfl, hδ⟩ := mem_deltas.mp m'
-    exact ⟨rfl, (hcells _).trans (deltaOf_spec hδ).1⟩
+    exact ⟨rfl, (hcells _).trans (deltaOf_spec hδ).1, romPart_romOnly s'⟩
   have created_iff : ∀ c, c ∈ t.creates.map Prod.fst ↔
       ∃ k s', (c, Delta.create k s') ∈ deltas B.codec cells intent.writes := by
     intro c
@@ -983,7 +1020,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       obtain ⟨c', k, s', m', rfl⟩ := mem_createsOf.mp hx
       exact ⟨k, s', m'⟩
     · rintro ⟨k, s', m⟩
-      exact List.mem_map.mpr ⟨(c, k, none), by
+      exact List.mem_map.mpr ⟨(c, ⟨k, romPart s'⟩, none), by
         rw [hcreates]; exact mem_createsOf.mpr ⟨c, k, s', m, rfl⟩, rfl⟩
   have created_written : ∀ c, c ∈ t.creates.map Prod.fst → c ∈ writeIds intent.writes := by
     intro c m
@@ -992,10 +1029,11 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
   obtain ⟨c1, h1⟩ := applyCreates_exists w.cells t.creates d.creates_nodup
     fun x m => creates_spec x m
   have c1_created : ∀ c k s', (c, Delta.create k s') ∈ deltas B.codec cells intent.writes →
-      c1 c = some ⟨k, 0⟩ := by
+      c1 c = some ⟨k, romPart s'⟩ := by
     intro c k s' m
-    have mc : (c, k, none) ∈ t.creates := by rw [hcreates]; exact mem_createsOf.mpr ⟨c, k, s', m, rfl⟩
-    exact (applyCreates_mem h1 d.creates_nodup c k none mc).2
+    have mc : (c, (⟨k, romPart s'⟩ : Cell R), none) ∈ t.creates := by
+      rw [hcreates]; exact mem_createsOf.mpr ⟨c, k, s', m, rfl⟩
+    exact (applyCreates_mem h1 d.creates_nodup c _ none mc).2
   have c1_frame : ∀ c, c ∉ t.creates.map Prod.fst → c1 c = w.cells c :=
     fun c hc => applyCreates_frame h1 c hc
   -- each leg's pre store in `c1`
@@ -1016,7 +1054,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       | create k s' =>
           simp only [Delta.leg?, Option.some.injEq] at hl
           subst hl
-          exact ⟨0, c1_created _ k s' md, of_decide_eq_true ok⟩
+          exact ⟨romPart s', c1_created _ k s' md, of_decide_eq_true ok⟩
       | change k s s' =>
           simp only [Delta.leg?, Option.some.injEq] at hl
           subst hl
@@ -1065,7 +1103,7 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
       rw [hnull] at m
       obtain ⟨n0, m0, rfl⟩ := List.mem_map.mp m
       exact unspent n0 m0
-    · rw [hcharge]; simp [chargeOf, patchBytes]
+    · rw [hcharge]; simp [chargeOf, storageOf, patchBytes]
   have hv : Patch.ValidFrom w.system (sysPatch H t height logRoot w.meter) := by
     refine sysPatch_valid_unroomed H (fun c m => (creates_spec c m).1) hretires
       (fun c _ => unretired c.1) (by rw [htx]; exact fresh) hh ⟨?_, ?_⟩ ?_
@@ -1112,9 +1150,9 @@ theorem ofCells_step (B : Bridge R D) (H : History R TransactionId StableEvent D
         exact spec.1
     | create k s' =>
         rw [postCell_written d.writes_nodup hw0 spec.2]
-        have ml : (⟨w0.cellId.value, k, B.codec.legPatch k 0 s'⟩ : Leg R) ∈ t.legs := by
+        have ml : (⟨w0.cellId.value, k, B.codec.legPatch k (romPart s') s'⟩ : Leg R) ∈ t.legs := by
           rw [hlegs]; exact mem_legsOf.mpr (.inr ⟨_, _, md, rfl⟩)
-        rw [c2_leg _ ml 0 (c1_created _ k s' md), B.codec.legPatch_run]
+        rw [c2_leg _ ml (romPart s') (c1_created _ k s' md), B.codec.legPatch_run]
     | change k s s' =>
         rw [postCell_written d.writes_nodup hw0 spec.2]
         have ml : (⟨w0.cellId.value, k, B.codec.legPatch k s s'⟩ : Leg R) ∈ t.legs := by
@@ -1192,7 +1230,7 @@ theorem ofCells_fields {B : Bridge R D} {H : History R TransactionId StableEvent
   · rw [teq]; simp [turnOf, chargeOf, e]
   · have := d.storage
     rw [teq] at this ⊢
-    simpa [turnOf, chargeOf] using this
+    simpa [turnOf, chargeOf, storageOf] using this
 
 end Derive
 

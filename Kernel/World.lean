@@ -12,7 +12,8 @@ DATAMODEL §3.3/§3.9, step B2.  The kernel's durable state is one value:
   the consumed nullifiers, T1) and `allowance : Lane ↦ Nat` (RAM; the remaining
   meter, T1).  The indexes and the history chain are therefore state, written
   by the same guarded `Patch` primitive as every cell.
-* `Turn` is deterministic data: a transaction id, the cells it creates, one
+* `Turn` is deterministic data: a transaction id, the cells it creates (each
+  born with its ROM image, T3b), one
   guarded patch per written cell (`Leg`), the cells it retires, and an event;
   and (T1) the nullifiers it spends, its exact charge, its signing subject and
   key epoch, the capability it exercised, and its height window.
@@ -21,6 +22,15 @@ DATAMODEL §3.3/§3.9, step B2.  The kernel's durable state is one value:
 * `World.admit` is the one fail-closed transition (`step` is its `Option`
   shadow), `fold` is `List.foldlM step`, and a `Checkpoint` is a world at a
   height with its root.
+
+**ROM is set at birth (T3b).**  A create carries the born cell: its kind and an
+initial image.  The image must be `RomOnly` (every present address is in a ROM
+namespace; `Reject.imageNotRom` names the cell otherwise), so RAM and
+append-only contents still enter a cell only through a guarded leg, and ROM
+contents enter only at birth: after it, no valid patch moves a ROM address
+(`step_rom_preserved`, `rom_cell_immutable_after_birth`).  The empty create is
+the image `0`.  The image's bytes are charged (`History.imageBytes`, part of
+`patchBytes`).
 
 The system half of every accepted turn is the `sysPatch`: a `read retired c none`
 guard per create, one `allocate journal txId (height, H turn)`, one
@@ -121,6 +131,55 @@ theorem eq_of_storeAt {cell : Cell R} {k : R.Kind} {s : Store (R.layout k)}
   · exact absurd h (by simp)
 
 end Cell
+
+/-! ## Birth images: ROM is set at birth (T3b) -/
+
+section RomImage
+
+variable {L : Layout.{0, 0, 0}}
+
+/-- A birth image is ROM-only: every present address is in a ROM namespace.
+ROM is initialized at birth and only read afterwards; RAM and append-only
+contents enter a cell only through guarded operations (a leg). -/
+def RomOnly (s : Store L) : Prop := ∀ a, s a ≠ none → L.discipline a.1 = .rom
+
+instance romOnlyDecidable (s : Store L) : Decidable (RomOnly s) :=
+  decidable_of_iff (∀ a ∈ s.support, L.discipline a.1 = .rom)
+    (forall_congr' fun _ => imp_congr_left DFinsupp.mem_support_iff)
+
+theorem romOnly_zero : RomOnly (0 : Store L) := fun _ h => absurd rfl h
+
+/-- The ROM part of a store: its entries at ROM addresses. -/
+def romPart (s : Store L) : Store L :=
+  DFinsupp.filter (fun a => L.discipline a.1 = .rom) s
+
+theorem romPart_apply (s : Store L) (a : Address L) :
+    romPart s a = if L.discipline a.1 = .rom then s a else none := by
+  unfold romPart
+  rw [DFinsupp.filter_apply]
+  rfl
+
+theorem romPart_romOnly (s : Store L) : RomOnly (romPart s) := by
+  intro a h
+  rw [romPart_apply] at h
+  split at h
+  · assumption
+  · exact absurd rfl h
+
+theorem romPart_of_romOnly {s : Store L} (h : RomOnly s) : romPart s = s := by
+  apply DFinsupp.ext
+  intro a
+  rw [romPart_apply]
+  split
+  · rfl
+  · rename_i nr
+    cases e : s a with
+    | none => rfl
+    | some v => exact absurd (h a (by rw [e]; exact Option.some_ne_none v)) nr
+
+theorem romPart_zero : romPart (0 : Store L) = 0 := romPart_of_romOnly romOnly_zero
+
+end RomImage
 
 /-! ## The system cell's layout -/
 
@@ -282,7 +341,8 @@ structure Leg (R : Registry) where
   patch : Patch (R.layout kind)
 
 /-- The turn record: deterministic data, no post bytes or roots.  Creates run
-first (each at an absent, never-retired id, with the empty store, and in the
+first (each at an absent, never-retired id, born as the cell it carries — its
+kind and its `RomOnly` image, `0` for an empty create — and in the
 room it names — a cell present when the create runs — if any), then the
 legs (each a guarded patch at the store its cell holds), then the retires
 (each of a present cell whose store is empty).
@@ -310,7 +370,7 @@ field: it is the read ops of the legs (`Turn.footprint`), so it cannot
 disagree with what `admit` checks. -/
 structure Turn (R : Registry) (TxId Ev D : Type) where
   txId : TxId
-  creates : List (CellId × R.Kind × Option CellId)
+  creates : List (CellId × Cell R × Option CellId)
   legs : List (Leg R)
   retires : List CellId
   event : Ev
@@ -353,6 +413,10 @@ structure History (R : Registry) (TxId Ev D : Type) where
   the canonical encoding of the leg's write, allocate and free ops; it has no
   default, so no history charges nothing by omission. -/
   legBytes : Leg R → Nat
+  /-- The bytes a birth image writes (T3b): a ROM image is written once, at
+  birth, and is charged like a leg's writes.  Stage F counts the canonical
+  encoding of the image's entries; no default, for the same reason. -/
+  imageBytes : Cell R → Nat
 
 /-- Refusal reasons.  Every refusal leaves the world unchanged (`admit` returns
 no world on any error branch). -/
@@ -375,6 +439,9 @@ inductive Reject
   | nullifierSpent
   | chargeMismatch
   | overAllowance
+  /-- A create's image holds a present address outside a ROM namespace (T3b):
+  only ROM is set at birth. -/
+  | imageNotRom (cell : CellId)
   deriving DecidableEq, Repr
 
 /-- The reason an `Except` refused, if it did. -/
@@ -424,9 +491,10 @@ def sysPatch (t : Turn R TxId Ev D) (height : Nat) (logRoot : D) (avail : Charge
   sysCore H t height logRoot ++ spentAllocs t.nullifiers ++
     debits (chargedLanes t.charge) t.charge avail
 
-/-- The patch bytes of a turn: the bytes its legs write. -/
+/-- The patch bytes of a turn: the bytes its legs write, plus the bytes its
+births' images write (T3b). -/
 def patchBytes (t : Turn R TxId Ev D) : Nat :=
-  (t.legs.map H.legBytes).sum
+  (t.legs.map H.legBytes).sum + (t.creates.map fun c => H.imageBytes c.2.1).sum
 
 /-- The T1 checks, each a named refusal of something the store guards would
 also refuse (or, for the charge rule and the window, something no store guard
@@ -446,16 +514,18 @@ def roomPresent (cells : Cells R) : Option CellId → Bool
   | none => true
   | some room => (cells room).isSome
 
-/-- Create the listed cells, each at an absent id, with the empty store, each
-in a room that is present when it is created (an earlier create of the same
-turn counts). -/
-def applyCreates : Cells R → List (CellId × R.Kind × Option CellId) → Except Reject (Cells R)
+/-- Create the listed cells, each at an absent id, born as the cell it
+carries, each in a room that is present when it is created (an earlier create
+of the same turn counts).  The born image must be `RomOnly` (T3b). -/
+def applyCreates : Cells R → List (CellId × Cell R × Option CellId) → Except Reject (Cells R)
   | cells, [] => .ok cells
-  | cells, (c, k, p) :: rest =>
+  | cells, (c, b, p) :: rest =>
       match cells c, roomPresent cells p with
       | some _, _ => .error (.cellPresent c)
       | none, false => .error (.missingParent c (p.getD 0))
-      | none, true => applyCreates (cells.update c (some ⟨k, 0⟩)) rest
+      | none, true =>
+          if RomOnly b.store then applyCreates (cells.update c (some b)) rest
+          else .error (.imageNotRom c)
 
 /-- Apply one leg: the cell is present at the leg's kind and the patch is
 valid from the store it holds. -/
@@ -755,7 +825,7 @@ theorem applyCells_ok {cells cells' : Cells R} {t : Turn R TxId Ev D}
 
 /-! ### Creates -/
 
-theorem applyCreates_frame : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
+theorem applyCreates_frame : ∀ {cells cells' : Cells R} {cs : List (CellId × Cell R × Option CellId)},
     applyCreates cells cs = .ok cells' → ∀ x, x ∉ cs.map Prod.fst → cells' x = cells x
   | cells, cells', [], h, x, _ => by cases h; rfl
   | cells, cells', (c, k, p) :: rest, h, x, hx => by
@@ -763,13 +833,17 @@ theorem applyCreates_frame : ∀ {cells cells' : Cells R} {cs : List (CellId × 
       split at h
       · cases h
       · cases h
-      · have hxc : x ≠ c := fun e => hx (by simp [e])
-        have hxr : x ∉ rest.map Prod.fst := fun m => hx (List.mem_cons_of_mem _ m)
-        rw [applyCreates_frame h x hxr, cells_update_ne _ _ hxc]
+      · split at h
+        · have hxc : x ≠ c := fun e => hx (by simp [e])
+          have hxr : x ∉ rest.map Prod.fst := fun m => hx (List.mem_cons_of_mem _ m)
+          rw [applyCreates_frame h x hxr, cells_update_ne _ _ hxc]
+        · cases h
 
-theorem applyCreates_mem : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
+/-- Each create's cell is absent before and holds exactly the born cell after
+the creates. -/
+theorem applyCreates_mem : ∀ {cells cells' : Cells R} {cs : List (CellId × Cell R × Option CellId)},
     applyCreates cells cs = .ok cells' → (cs.map Prod.fst).Nodup →
-      ∀ c k p, (c, k, p) ∈ cs → cells c = none ∧ cells' c = some ⟨k, 0⟩
+      ∀ c b p, (c, b, p) ∈ cs → cells c = none ∧ cells' c = some b
   | _, _, [], _, _, _, _, _, m => absurd m (by simp)
   | cells, cells', (c0, k0, p0) :: rest, h, nd, c, k, p, m => by
       unfold applyCreates at h
@@ -777,20 +851,48 @@ theorem applyCreates_mem : ∀ {cells cells' : Cells R} {cs : List (CellId × R.
       · cases h
       · cases h
       · rename_i hc0 _
-        simp only [List.map_cons, List.nodup_cons] at nd
-        rcases List.mem_cons.mp m with e | m'
-        · simp only [Prod.mk.injEq] at e
-          obtain ⟨rfl, rfl, rfl⟩ := e
-          refine ⟨hc0, ?_⟩
-          rw [applyCreates_frame h c nd.1, cells_update_self]
-        · have hne : c ≠ c0 := fun e => nd.1 (e ▸ List.mem_map_of_mem (f := Prod.fst) m')
-          obtain ⟨hnone, hpost⟩ := applyCreates_mem h nd.2 c k p m'
-          rw [cells_update_ne _ _ hne] at hnone
-          exact ⟨hnone, hpost⟩
+        split at h
+        · simp only [List.map_cons, List.nodup_cons] at nd
+          rcases List.mem_cons.mp m with e | m'
+          · simp only [Prod.mk.injEq] at e
+            obtain ⟨rfl, rfl, rfl⟩ := e
+            refine ⟨hc0, ?_⟩
+            rw [applyCreates_frame h c nd.1, cells_update_self]
+          · have hne : c ≠ c0 := fun e => nd.1 (e ▸ List.mem_map_of_mem (f := Prod.fst) m')
+            obtain ⟨hnone, hpost⟩ := applyCreates_mem h nd.2 c k p m'
+            rw [cells_update_ne _ _ hne] at hnone
+            exact ⟨hnone, hpost⟩
+        · cases h
+
+/-- **Every born image is ROM-only (T3b).** -/
+theorem applyCreates_romOnly : ∀ {cells cells' : Cells R} {cs : List (CellId × Cell R × Option CellId)},
+    applyCreates cells cs = .ok cells' → ∀ c b p, (c, b, p) ∈ cs → RomOnly b.store
+  | _, _, [], _, _, _, _, m => absurd m (by simp)
+  | cells, cells', (c0, b0, p0) :: rest, h, c, b, p, m => by
+      unfold applyCreates at h
+      split at h
+      · cases h
+      · cases h
+      · split at h
+        · rename_i hrom
+          rcases List.mem_cons.mp m with e | m'
+          · simp only [Prod.mk.injEq] at e
+            obtain ⟨rfl, rfl, rfl⟩ := e
+            exact hrom
+          · exact applyCreates_romOnly h c b p m'
+        · cases h
+
+/-- **Refusal pole (T3b): an image outside ROM is refused**, naming the cell:
+a fresh create in a present room whose image holds a non-ROM address. -/
+theorem applyCreates_image_refused (cells : Cells R) (c : CellId) (b : Cell R)
+    (p : Option CellId) (rest : List (CellId × Cell R × Option CellId))
+    (fresh : cells c = none) (room : roomPresent cells p = true) (bad : ¬ RomOnly b.store) :
+    applyCreates cells ((c, b, p) :: rest) = .error (.imageNotRom c) := by
+  simp [applyCreates, fresh, room, bad]
 
 /-- A create's room was present when the create ran: present before the turn,
 or created by an earlier create of the same turn. -/
-theorem applyCreates_room : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
+theorem applyCreates_room : ∀ {cells cells' : Cells R} {cs : List (CellId × Cell R × Option CellId)},
     applyCreates cells cs = .ok cells' →
       ∀ c k room, (c, k, some room) ∈ cs → cells room ≠ none ∨ room ∈ cs.map Prod.fst
   | _, _, [], _, _, _, _, m => absurd m (by simp)
@@ -800,6 +902,9 @@ theorem applyCreates_room : ∀ {cells cells' : Cells R} {cs : List (CellId × R
       · cases h
       · cases h
       · rename_i _ hp0
+        split at h
+        swap
+        · cases h
         rcases List.mem_cons.mp m with e | m'
         · simp only [Prod.mk.injEq] at e
           obtain ⟨rfl, rfl, rfl⟩ := e
@@ -814,13 +919,13 @@ theorem applyCreates_room : ∀ {cells cells' : Cells R} {cs : List (CellId × R
 
 /-- Refusal pole: a create whose room is absent (and not created earlier in the
 same turn) is refused, naming the cell and the room. -/
-theorem applyCreates_missing_room (cells : Cells R) (c : CellId) (k : R.Kind) (room : CellId)
-    (rest : List (CellId × R.Kind × Option CellId))
+theorem applyCreates_missing_room (cells : Cells R) (c : CellId) (b : Cell R) (room : CellId)
+    (rest : List (CellId × Cell R × Option CellId))
     (fresh : cells c = none) (absent : cells room = none) :
-    applyCreates cells ((c, k, some room) :: rest) = .error (.missingParent c room) := by
+    applyCreates cells ((c, b, some room) :: rest) = .error (.missingParent c room) := by
   simp [applyCreates, fresh, roomPresent, absent]
 
-theorem applyCreates_present : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
+theorem applyCreates_present : ∀ {cells cells' : Cells R} {cs : List (CellId × Cell R × Option CellId)},
     applyCreates cells cs = .ok cells' → ∀ x, cells' x ≠ none →
       cells x ≠ none ∨ x ∈ cs.map Prod.fst
   | _, _, [], h, x, hx => by cases h; exact .inl hx
@@ -829,7 +934,10 @@ theorem applyCreates_present : ∀ {cells cells' : Cells R} {cs : List (CellId �
       split at h
       · cases h
       · cases h
-      · rcases applyCreates_present h x hx with p | m
+      · split at h
+        swap
+        · cases h
+        rcases applyCreates_present h x hx with p | m
         · by_cases e : x = c
           · exact .inr (by simp [e])
           · rw [cells_update_ne _ _ e] at p; exact .inl p
@@ -973,13 +1081,13 @@ theorem sys_key_ne {a : SysSpace} {k k' : SysKey TxId D a} (h : k ≠ k') :
     (⟨a, k⟩ : Address (sysLayout TxId D)) ≠ ⟨a, k'⟩ :=
   fun e => h (eq_of_heq (Sigma.mk.inj e).2)
 
-theorem run_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × R.Kind × Option CellId)) :
+theorem run_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × Cell R × Option CellId)) :
     Patch.run s (cs.map (fun c => Op.read (L := sysLayout TxId D) SysSpace.retired c.1 none)) = s := by
   induction cs with
   | nil => rfl
   | cons c rest ih => exact ih
 
-theorem validFrom_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × R.Kind × Option CellId)) :
+theorem validFrom_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × Cell R × Option CellId)) :
     Patch.ValidFrom s (cs.map (fun c => Op.read (L := sysLayout TxId D) SysSpace.retired c.1 none)) ↔
       ∀ c ∈ cs, s ⟨SysSpace.retired, c.1⟩ = none := by
   induction cs with
@@ -1074,9 +1182,9 @@ theorem parentRows_nodup (t : Turn R TxId Ev D) (nodup : (t.creates.map Prod.fst
           obtain ⟨r, _, rfl⟩ := Option.map_eq_some_iff.mp hc
           exact List.mem_map_of_mem cMember
 
-theorem mem_parentRows {t : Turn R TxId Ev D} {c : CellId} {k : R.Kind} {room : CellId}
-    (m : (c, k, some room) ∈ t.creates) : (c, room) ∈ t.parentRows :=
-  List.mem_filterMap.mpr ⟨(c, k, some room), m, rfl⟩
+theorem mem_parentRows {t : Turn R TxId Ev D} {c : CellId} {b : Cell R} {room : CellId}
+    (m : (c, b, some room) ∈ t.creates) : (c, room) ∈ t.parentRows :=
+  List.mem_filterMap.mpr ⟨(c, b, some room), m, rfl⟩
 
 /-! ### The T1 tail: spent marks and the meter debit -/
 
@@ -1261,7 +1369,7 @@ theorem sysPost_allowance (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
 
 theorem sysPost_parent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev D)
     (height : Nat) (logRoot : D) (avail : Charge) (nodup : (t.creates.map Prod.fst).Nodup)
-    {c : CellId} {k : R.Kind} {room : CellId} (m : (c, k, some room) ∈ t.creates) :
+    {c : CellId} {b : Cell R} {room : CellId} (m : (c, b, some room) ∈ t.creates) :
     Patch.run s (sysPatch H t height logRoot avail) ⟨SysSpace.parent, c⟩ = some room := by
   rw [run_sysPatch_core H _ _ _ _ _ _ (fun e => SysSpace.noConfusion e)
     (fun e => SysSpace.noConfusion e)]
@@ -1376,17 +1484,27 @@ theorem step_leg {w w' : World R TxId D} {t : Turn R TxId Ev D}
   rw [applyCreates_frame h1 _ hc] at hpre
   exact ⟨pre, hpre, hv, by rw [applyRetires_frame h3 _ hr, hpost]⟩
 
-/-- A create is at an absent, never-retired id. -/
+/-- A create is at an absent, never-retired id, and the cell is born as the
+create carries it (the empty create: `⟨k, 0⟩`). -/
 theorem step_create {w w' : World R TxId D} {t : Turn R TxId Ev D}
-    (h : World.step H w t = some w') (c : CellId) (k : R.Kind) (p : Option CellId)
-    (m : (c, k, p) ∈ t.creates)
+    (h : World.step H w t = some w') (c : CellId) (b : Cell R) (p : Option CellId)
+    (m : (c, b, p) ∈ t.creates)
     (hl : c ∉ t.legs.map Leg.cell) (hr : c ∉ t.retires) :
-    w.cells c = none ∧ w.retired c = none ∧ w'.cells c = some ⟨k, 0⟩ := by
+    w.cells c = none ∧ w.retired c = none ∧ w'.cells c = some b := by
   obtain ⟨⟨_, _, hnd, _⟩, _, _, _, _, hv, hcells, _⟩ := admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
-  obtain ⟨hnone, hpost⟩ := applyCreates_mem h1 hnd c k p m
-  refine ⟨hnone, sysPatch_valid_creates H hv (c, k, p) m, ?_⟩
+  obtain ⟨hnone, hpost⟩ := applyCreates_mem h1 hnd c b p m
+  refine ⟨hnone, sysPatch_valid_creates H hv (c, b, p) m, ?_⟩
   rw [applyRetires_frame h3 c hr, applyLegs_frame h2 c hl, hpost]
+
+/-- **Only ROM is set at birth (T3b)**: every image an accepted turn creates is
+`RomOnly`. -/
+theorem step_create_romOnly {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') (c : CellId) (b : Cell R) (p : Option CellId)
+    (m : (c, b, p) ∈ t.creates) : RomOnly b.store := by
+  obtain ⟨_, _, _, _, _, _, hcells, _⟩ := admit_ok H ((step_eq_some H).1 h)
+  obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
+  exact applyCreates_romOnly h1 c b p m
 
 /-- A retire removes the cell and marks its id retired. -/
 theorem step_retire {w w' : World R TxId D} {t : Turn R TxId Ev D}
@@ -1425,8 +1543,8 @@ theorem step_wf {w w' : World R TxId D} {t : Turn R TxId Ev D}
 /-- **`birth_parent_recorded` (world).**  A create born in a room records the
 room in the system cell's `parent` rows, in the same accepted turn. -/
 theorem step_parent_recorded {w w' : World R TxId D} {t : Turn R TxId Ev D}
-    (h : World.step H w t = some w') {c : CellId} {k : R.Kind} {room : CellId}
-    (m : (c, k, some room) ∈ t.creates) : w'.parent c = some room := by
+    (h : World.step H w t = some w') {c : CellId} {b : Cell R} {room : CellId}
+    (m : (c, b, some room) ∈ t.creates) : w'.parent c = some room := by
   obtain ⟨⟨_, _, hnd, _⟩, height, logRoot, _, _, _, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
   show w'.system _ = _
   rw [hsys]
@@ -1435,12 +1553,12 @@ theorem step_parent_recorded {w w' : World R TxId D} {t : Turn R TxId Ev D}
 /-- **`birth_parent_must_exist` (world).**  A create's room was a present cell
 when the create ran: present before the turn, or created earlier in it. -/
 theorem step_parent_exists {w w' : World R TxId D} {t : Turn R TxId Ev D}
-    (h : World.step H w t = some w') {c : CellId} {k : R.Kind} {room : CellId}
-    (m : (c, k, some room) ∈ t.creates) :
+    (h : World.step H w t = some w') {c : CellId} {b : Cell R} {room : CellId}
+    (m : (c, b, some room) ∈ t.creates) :
     w.cells room ≠ none ∨ room ∈ t.creates.map Prod.fst := by
   obtain ⟨_, _, _, _, _, _, hcells, _⟩ := admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, _, _⟩ := applyCells_ok hcells
-  exact applyCreates_room h1 c k room m
+  exact applyCreates_room h1 c b room m
 
 /-- Parent rows are never rewritten or removed by an accepted turn. -/
 theorem step_parent_stable {w w' : World R TxId D} {t : Turn R TxId Ev D}
@@ -1461,6 +1579,100 @@ theorem step_narrows_stable {w w' : World R TxId D} {t : Turn R TxId Ev D}
     (narrows : child.Narrows parent w.parentage) : child.Narrows parent w'.parentage :=
   ⟨Theory.TypedAuthorization.TargetSet.narrows_mono (fun _ _ recorded => step_parent_stable H h recorded)
     narrows.targets, narrows.verbs, narrows.maxCost, narrows.fields, narrows.maxDelta⟩
+
+/-- Retired marks are never removed by an accepted turn. -/
+theorem step_retired_stable {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') {c : CellId} (marked : w.retired c = some ()) :
+    w'.retired c = some () := by
+  obtain ⟨_, height, logRoot, _, _, hv, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
+  show w'.system _ = _
+  rw [hsys]
+  exact Patch.appendOnly_present_preserved _ _ ⟨SysSpace.retired, c⟩ () hv rfl
+    (show w.system ⟨SysSpace.retired, c⟩ = some () from marked)
+
+/-- A retired, absent id stays absent: no create reaches a retired id. -/
+theorem step_retired_absent {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') {c : CellId} (marked : w.retired c = some ())
+    (absent : w.cells c = none) : w'.cells c = none := by
+  obtain ⟨_, height, logRoot, _, _, hv, hcells, _⟩ := admit_ok H ((step_eq_some H).1 h)
+  obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
+  by_contra present
+  have p1 := applyLegs_present h2 c (applyRetires_present h3 c present)
+  rcases applyCreates_present h1 c p1 with p0 | mc
+  · exact p0 absent
+  · obtain ⟨⟨c', b, p⟩, mem, rfl⟩ := List.mem_map.mp mc
+    have fresh := sysPatch_valid_creates H hv (c', b, p) mem
+    have : w.retired c' = none := fresh
+    rw [marked] at this
+    cases this
+
+/-- **A present cell's ROM never moves (T3b)**: after any accepted turn a cell
+present before is either retired (absent, its id marked) or present at the
+same kind with every ROM address unchanged.  This is `Patch.rom_preserved`
+restated at the world: a ROM write into an existing cell has no turn. -/
+theorem step_rom_preserved {w w' : World R TxId D} {t : Turn R TxId Ev D}
+    (h : World.step H w t = some w') {c : CellId} {k : R.Kind} {s : Store (R.layout k)}
+    (held : w.cells c = some ⟨k, s⟩) :
+    (w'.cells c = none ∧ w'.retired c = some ()) ∨
+      ∃ s', w'.cells c = some ⟨k, s'⟩ ∧
+        ∀ a : Address (R.layout k), (R.layout k).discipline a.1 = .rom → s' a = s a := by
+  obtain ⟨⟨_, hnd, hcnd, hrnd⟩, height, logRoot, _, _, hv, hcells, hsys⟩ :=
+    admit_ok H ((step_eq_some H).1 h)
+  obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
+  by_cases hr : c ∈ t.retires
+  · refine .inl ⟨(applyRetires_mem h3 hrnd c hr).2, ?_⟩
+    show w'.system _ = _
+    rw [hsys, sysPost_retired, if_pos hr]
+  right
+  have hc : c ∉ t.creates.map Prod.fst := by
+    intro mc
+    obtain ⟨⟨c', b, p⟩, mem, e⟩ := List.mem_map.mp mc
+    simp only at e
+    subst e
+    rw [(applyCreates_mem h1 hcnd c' b p mem).1] at held
+    cases held
+  have e1 : c1 c = w.cells c := applyCreates_frame h1 c hc
+  rw [applyRetires_frame h3 c hr]
+  by_cases hl : c ∈ t.legs.map Leg.cell
+  · obtain ⟨leg, ml, el⟩ := List.mem_map.mp hl
+    obtain ⟨pre, hb, hvp, hpost⟩ := applyLegs_mem h2 hnd leg ml
+    rw [el, e1, held] at hb
+    simp only [Option.bind_some] at hb
+    obtain ⟨ek, hs⟩ := Cell.mk.inj (Cell.eq_of_storeAt hb)
+    subst ek
+    have hs' := eq_of_heq hs
+    subst hs'
+    refine ⟨_, by rw [← el]; exact hpost, fun a rom => ?_⟩
+    exact Patch.rom_preserved _ leg.patch a hvp rom
+  · exact ⟨s, by rw [applyLegs_frame h2 c hl, e1, held], fun _ _ => rfl⟩
+
+/-- **`rom_cell_immutable_after_birth` (T3b).**  Once a cell holds a store, no
+log of accepted turns moves any of its ROM addresses: at the end of the log the
+cell is either retired for good or present at the same kind with the same ROM
+values.  In particular a ROM cell born with its image keeps that image; the
+image can be written only by the create that carries it. -/
+theorem rom_cell_immutable_after_birth {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
+    (h : fold H g log = some W) {c : CellId} {k : R.Kind} {s : Store (R.layout k)}
+    (held : g.cells c = some ⟨k, s⟩) :
+    (W.cells c = none ∧ W.retired c = some ()) ∨
+      ∃ s', W.cells c = some ⟨k, s'⟩ ∧
+        ∀ a : Address (R.layout k), (R.layout k).discipline a.1 = .rom → s' a = s a := by
+  induction log using List.reverseRecOn generalizing W with
+  | nil =>
+      simp only [fold_nil, Option.some.injEq] at h
+      subst h
+      exact .inr ⟨s, held, fun _ _ => rfl⟩
+  | append_singleton l t ih =>
+      rw [fold_snoc] at h
+      cases hl : fold H g l with
+      | none => rw [hl] at h; cases h
+      | some w =>
+          rw [hl] at h
+          rcases ih hl with ⟨absent, marked⟩ | ⟨s1, held1, same1⟩
+          · exact .inl ⟨step_retired_absent H h marked absent, step_retired_stable H h marked⟩
+          · rcases step_rom_preserved H h held1 with gone | ⟨s2, held2, same2⟩
+            · exact .inl gone
+            · exact .inr ⟨s2, held2, fun a rom => (same2 a rom).trans (same1 a rom)⟩
 
 /-- Accepted turns carry the invariant along the whole log. -/
 theorem fold_wf {g W : World R TxId D} {log : List (Turn R TxId Ev D)}
@@ -1949,6 +2161,7 @@ def toyH : History toyR Nat Unit Nat where
   logRoot0 := 1
   -- The B2 toy charges no storage; `Kernel.TurnCensus` exercises the meter.
   legBytes := fun _ => 0
+  imageBytes := fun _ => 0
 
 def g : ToyWorld := genesis toyH 0
 
@@ -1961,13 +2174,14 @@ def leg (c : CellId) (p : Patch toyLayout) : Leg toyR := ⟨c, false, p⟩
 
 def turn (x : Nat) (creates : List (CellId × Bool)) (legs : List (Leg toyR))
     (retires : List CellId := []) : ToyTurn :=
-  { txId := x, creates := creates.map (fun c => (c.1, c.2, none)), legs := legs,
+  { txId := x, creates := creates.map (fun c => (c.1, ⟨c.2, 0⟩, none)), legs := legs,
     retires := retires, event := () }
 
 /-- A turn whose creates each name a room. -/
 def turnIn (x : Nat) (creates : List (CellId × Bool × Option CellId)) (legs : List (Leg toyR)) :
     ToyTurn :=
-  { txId := x, creates := creates, legs := legs, retires := [], event := () }
+  { txId := x, creates := creates.map (fun c => (c.1, ⟨c.2.1, 0⟩, c.2.2)), legs := legs,
+    retires := [], event := () }
 
 /-- Create cells 0 and 1, each holding key 0. -/
 def t0 : ToyTurn := turn 1 [(0, false), (1, false)] [leg 0 [alloc 0 5], leg 1 [alloc 0 9]]
@@ -2178,6 +2392,102 @@ theorem nonbinding_root_accepts_tamper :
 
 end Example
 
+/-! ## Poles for ROM birth (T3b): a ROM image is born with its cell and never written after -/
+
+namespace RomExample
+
+inductive Space
+  | code
+  | heap
+  deriving DecidableEq, Repr
+
+/-- A ROM `code` namespace and a RAM `heap`, `Nat` keys and values. -/
+abbrev romLayout : Layout.{0, 0, 0} where
+  Namespace := Space
+  Key := fun _ => Nat
+  Value := fun _ => Nat
+  discipline
+    | .code => .rom
+    | .heap => .ram
+
+abbrev romR : Registry where
+  Kind := Unit
+  layout := fun _ => romLayout
+
+/-- A nonempty image is charged 16 bytes. -/
+def romH : History romR Nat Unit Nat where
+  turnDigest := fun t => t.txId
+  chain := fun r d => r + d + 1
+  logRoot0 := 0
+  legBytes := fun _ => 0
+  imageBytes := fun b => if b.store = 0 then 0 else 16
+
+/-- Genesis, with 64 storage bytes funded. -/
+def g : World romR Nat Nat :=
+  ⟨0, (genesisSystem romH).set ⟨SysSpace.allowance, Lane.storageBytes⟩ (some (64 : Nat))⟩
+
+/-- The ROM image `code[0] = 42`. -/
+def image : Store romLayout := (0 : Store romLayout).set ⟨Space.code, 0⟩ (some 42)
+/-- An image that is not ROM-only: `heap[0] = 42`. -/
+def badImage : Store romLayout := (0 : Store romLayout).set ⟨Space.heap, 0⟩ (some 42)
+
+def birthOf (x : Nat) (s : Store romLayout) (storage : Nat) : Turn romR Nat Unit Nat :=
+  { txId := x, creates := [(0, ⟨(), s⟩, none)], legs := [], retires := [], event := (),
+    charge := fun l => if l = .storageBytes then storage else 0 }
+
+def leg0 (p : Patch romLayout) : Leg romR := ⟨0, (), p⟩
+
+def legTurn (x : Nat) (p : Patch romLayout) : Turn romR Nat Unit Nat :=
+  { txId := x, creates := [], legs := [leg0 p], retires := [], event := () }
+
+def codeAt (w : World romR Nat Nat) : Option Nat :=
+  (w.cells 0).bind fun cell => (cell.store : Store romLayout) ⟨Space.code, 0⟩
+
+/-- **Satisfiable: a ROM cell born with its image is admitted**, holds the
+image, and is charged the image's 16 bytes. -/
+theorem rom_birth_admitted :
+    ((World.step romH g (birthOf 1 image 16)).map fun w =>
+      (codeAt w, w.meter .storageBytes)) = some (some 42, 48) := by
+  decide +kernel
+
+/-- **Refuted: the same image written into an EXISTING ROM cell.**  Cell 0
+born empty, then a leg allocating `code[0] = 42`: refused at the allocation,
+which is the ROM refusal (`Store.Op.no_enabled_rom_write`). -/
+theorem rom_write_into_existing_refused :
+    ((World.step romH g (birthOf 1 0 0)).map fun w =>
+      rejectOf (World.admit romH w (legTurn 2 [.allocate Space.code 0 42]))) =
+      some (some (.guardFailed 0 0)) := by
+  decide +kernel
+
+/-- **Refuted: a born ROM image is never rewritten** -- not by a write ... -/
+theorem rom_overwrite_after_birth_refused :
+    ((World.step romH g (birthOf 1 image 16)).map fun w =>
+      rejectOf (World.admit romH w (legTurn 2 [.write Space.code 0 42 43]))) =
+      some (some (.guardFailed 0 0)) := by
+  decide +kernel
+
+/-- ... while the cell's RAM is still written by a leg, and a read of the ROM
+guards it. -/
+theorem rom_cell_ram_written :
+    ((World.step romH g (birthOf 1 image 16)).map fun w =>
+      rejectOf (World.admit romH w
+        (legTurn 2 [.read Space.code 0 (some 42), .allocate Space.heap 0 7]))) =
+      some none := by
+  decide +kernel
+
+/-- **Refuted: a create whose image violates the layout** (a present non-ROM
+address), by name. -/
+theorem bad_image_refused :
+    rejectOf (World.admit romH g (birthOf 1 badImage 16)) = some (.imageNotRom 0) := by
+  decide +kernel
+
+/-- **Refuted: an uncharged image** -- the storage lane must be the image bytes. -/
+theorem uncharged_image_refused :
+    rejectOf (World.admit romH g (birthOf 1 image 0)) = some .chargeMismatch := by
+  decide +kernel
+
+end RomExample
+
 /-! ## Axiom pins -/
 
 /-- info: 'Minidregg.Kernel.World.Cell.eq_of_storeAt' depends on axioms: [propext] -/
@@ -2367,6 +2677,35 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.reject_missingParent
 /-- info: 'Minidregg.Kernel.World.Example.reject_room_created_later' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.reject_room_created_later
+
+/-! ### T3b pins -/
+
+#assert_axioms romOnly_zero
+#assert_axioms romPart_apply
+#assert_axioms romPart_romOnly
+#assert_axioms romPart_of_romOnly
+#assert_axioms romPart_zero
+#assert_axioms applyCreates_romOnly
+#assert_axioms applyCreates_image_refused
+#assert_axioms step_create_romOnly
+#assert_axioms step_retired_stable
+#assert_axioms step_retired_absent
+#assert_axioms step_rom_preserved
+#assert_axioms rom_cell_immutable_after_birth
+#assert_axioms RomExample.rom_birth_admitted
+#assert_axioms RomExample.rom_write_into_existing_refused
+#assert_axioms RomExample.rom_overwrite_after_birth_refused
+#assert_axioms RomExample.rom_cell_ram_written
+#assert_axioms RomExample.bad_image_refused
+#assert_axioms RomExample.uncharged_image_refused
+/-- info: 'Minidregg.Kernel.World.rom_cell_immutable_after_birth' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms rom_cell_immutable_after_birth
+/-- info: 'Minidregg.Kernel.World.step_rom_preserved' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms step_rom_preserved
+/-- info: 'Minidregg.Kernel.World.applyCreates_image_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms applyCreates_image_refused
+/-- info: 'Minidregg.Kernel.World.RomExample.rom_birth_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms RomExample.rom_birth_admitted
 
 /-! ### T1 pins -/
 

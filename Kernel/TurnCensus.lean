@@ -29,23 +29,29 @@ layout (`total` over a finite account set).  The deployed Book cell
 (`Theory.CanonicalResourceKernel`) has its own layout; instantiating this at
 it is T9's.
 
-## What T3 starts from (statement only; not proved here)
+## THE LIST (T3b): every admission is a turn
 
-```lean
-theorem host_submit_is_step
-    (accepted : NativeHostReplay.NativeAdmission config opened intent)
-    (turn : Turn.ofIntent w intent = .ok t)              -- t : Turn R TxId Ev Digest
-    (represents : Represents loaded w) :                 -- Represents : Loaded → World R TxId Digest → Prop
-    Host.submit loaded intent = .ok (loaded', receipt) →
-      ∃ w', World.admit H w t = .ok w' ∧ Represents loaded' w' ∧
-        receipt.worldRoot = rootOf w' ∧
-        receipt.height = (w.head.map Prod.fst).getD 0 + 1
-```
+T3 left a list of admissions that were not turns: the six receivers that create
+a ROM policy-source cell (`install` always; `birth`, `grainBirth` with initial
+policies; and `applicationShareIssue`, `applicationGrainShareIssue`,
+`applicationAgentLifetimeGrantIssue`, whose nested birth descriptor always
+carries exactly one initial policy -- traced in `Kernel.HostRefinesWorld`).
+T3b's create carries its ROM image (`World.applyCreates`), so each of those
+shapes is now a turn.  `Ctor.turn` writes the ROM birth for each of the six
+(`Ctor.romBirth`), and
 
-`H := WorldRoot.cshakeHistory encode logRoot0 legBytes` (T1 made `legBytes` an
-explicit argument: stage F must say what a leg's bytes are), `Turn` carries
-`nullifiers := intent.nullifiers` (as digests), `charge := intent.exactCharge`,
-`subject := intent.subject`, and the read guards become read legs.
+* `every_admission_is_turn`: every one of the 33 shapes is accepted, and each
+  of the six carries a nonempty ROM image;
+* `theList_empty`: the constructors whose shape is refused -- none;
+* `rom_by_leg_refused` (the pole): T3's encoding of the same births -- an
+  empty create plus a leg allocating the ROM row -- is refused for all six, so
+  without the ROM birth the list would be exactly those six
+  (`theListWithoutRomBirth_eq`).
+
+The final `host_submit_is_step` statement for T4 is in
+`Kernel.HostRefinesWorld`'s module doc.  `H := WorldRoot.cshakeHistory encode
+logRoot0 legBytes imageBytes` (stage F must say what a leg's bytes and a birth
+image's bytes are).
 -/
 import Kernel.World
 import Theory.AssertAxioms
@@ -64,12 +70,16 @@ set_option autoImplicit false
 inductive Kind
   | authority | resource | policy | book | stream | ticket | lifecycle | gateway | clock
   | well | content
+  /-- A policy-source cell: ROM, born with its record (T3b). -/
+  | source
   deriving DecidableEq, Repr
 
-/-- Every census cell has a RAM row namespace and an append-only log. -/
+/-- Every census cell has a RAM row namespace, an append-only log and a ROM
+source row (set only at birth, T3b). -/
 inductive Space
   | rows
   | log
+  | source
   deriving DecidableEq, Repr
 
 /-- Census layout: `Nat` keys, `Int` values (a Book row is a signed balance). -/
@@ -80,6 +90,7 @@ def layout : Layout.{0, 0, 0} where
   discipline
     | .rows => .ram
     | .log => .appendOnly
+    | .source => .rom
 
 /-- The census registry: every kind over the census layout. -/
 abbrev R : Registry where
@@ -98,12 +109,22 @@ def rewriteLog (k : Nat) (b a : Int) : Op layout := .write Space.log k b a
 
 def leg (c : CellId) (k : Kind) (p : Patch layout) : Leg R := ⟨c, k, p⟩
 
+/-- A cell born empty. -/
+def fresh (k : Kind) : Cell R := ⟨k, 0⟩
+
+/-- A policy-source cell born holding `v` in its ROM row. -/
+def src (v : Int) : Cell R := ⟨.source, (0 : Store layout).set ⟨Space.source, (0 : Nat)⟩ (some v)⟩
+
+/-- A leg op allocating the ROM source row (never enabled). -/
+def sa (v : Int) : Op layout := .allocate Space.source (0 : Nat) v
+
 /-- The census history: a leg is charged 16 bytes per op that writes. -/
 def censusH : History R Nat Unit Nat where
   turnDigest := fun t => t.txId
   chain := fun r d => r + d + 1
   logRoot0 := 0
   legBytes := fun l => 16 * (l.patch.filter fun op => !Op.isRead op).length
+  imageBytes := fun b => if b.store = 0 then 0 else 16
 
 /-! ## The census world -/
 
@@ -150,12 +171,14 @@ def w0 : CWorld := ⟨cells0, system0⟩
 
 /-- A census turn: the storage lane is the patch bytes unless `storage`
 overrides it (the mis-charged negation); `fee` is the fee lane. -/
-def mk (creates : List (CellId × Kind × Option CellId)) (legs : List (Leg R)) (ns : List Nat)
+def mk (creates : List (CellId × Cell R × Option CellId)) (legs : List (Leg R)) (ns : List Nat)
     (fee : Nat := 0) (x : Nat := 1) (notBefore : Nat := 0) (validUntil : Option Nat := none)
     (cap : Option Nat := none) (storage : Option Nat := none) : CTurn :=
   { txId := x, creates := creates, legs := legs, retires := [], event := (), nullifiers := ns,
     charge := fun l =>
-      if l = .storageBytes then storage.getD (legs.map censusH.legBytes).sum
+      if l = .storageBytes then
+        storage.getD ((legs.map censusH.legBytes).sum +
+          (creates.map fun c => censusH.imageBytes c.2.1).sum)
       else if l = .feeDebit then fee else 0,
     subject := some ⟨1⟩, keyEpoch := 0, capability := cap, notBefore := notBefore,
     validUntil := validUntil }
@@ -198,24 +221,26 @@ def gateGuard : Leg R := leg cGate .gateway [rd 0 (some 1)]
 /-- **`Turn.ofConstructor`**: each receiver's census shape, at representative
 inputs. -/
 def Ctor.turn : Ctor → CTurn
-  -- birth: a resource cell born in a room, the birth record, its marker
-  | .birth => mk [(20, .resource, some cRoom)]
+  -- birth: a resource cell born in a room, its initial policy's ROM source,
+  -- the birth record, its marker
+  | .birth => mk [(20, fresh .resource, some cRoom), (24, src 1, none)]
       [leg cAuth .authority [rd 1 (some 1), lg 1 1], leg 20 .resource [al 0 0]] [101]
   -- grain birth: two grain targets, two markers
-  | .grainBirth => mk [(21, .resource, none), (22, .resource, none)]
+  | .grainBirth => mk [(21, fresh .resource, none), (22, fresh .resource, none), (25, src 2, none)]
       [leg cAuth .authority [lg 2 1], leg 21 .resource [al 0 0], leg 22 .resource [al 0 0]]
       [102, 103]
   -- invoke: the capability guard, the target write, a validity height
   | .invoke => mk [] [capGuard, leg cRes .resource [wr 0 10 11]] [104]
       (validUntil := some 256) (cap := some 1)
-  | .install => mk [] [capGuard, leg cPolicy .policy [wr 0 1 2]] [105]
+  -- install: the successor's ROM source cell is born with its record
+  | .install => mk [(26, src 3, none)] [capGuard, leg cPolicy .policy [wr 0 1 2]] [105]
   | .delegate => mk [] [leg cAuth .authority [rd 1 (some 1), lg 3 1]] [106] (cap := some 1)
   | .revoke => mk [] [leg cAuth .authority [lg 4 1]] [107]
   | .participantKeyEnrollment => mk [] [leg cAuth .authority [lg 5 1]] [108]
   | .participantFactoryProvisioning => mk [] [leg cAuth .authority [lg 6 1]] [109]
       (validUntil := some 10)
   -- fleet: the payer's fee debit, the topic cell created explicitly
-  | .fleetTurn => mk [(23, .stream, none)]
+  | .fleetTurn => mk [(23, fresh .stream, none)]
       [leg cBook .book [wr 0 100 95], leg 23 .stream [lg 0 1]] [110] (fee := 5)
   -- pay book: a balanced posting
   | .payBook => mk [] [leg cBook .book [wr 0 100 90, wr 1 0 10]] [111]
@@ -224,10 +249,13 @@ def Ctor.turn : Ctor → CTurn
   | .realmWell => mk [] [leg cWell .well [wr 0 50 40]] [113]
   | .clockTick => mk [] [leg cClock .clock [wr 0 1000 1001]] [114]
   | .selectiveRelease => mk [] [leg cContent .content [al 0 1]] [115]
-  | .applicationShareIssue => mk [] [leg cTicket .ticket [al 0 1]] [116]
-  | .applicationGrainShareIssue => mk [] [leg cTicket .ticket [al 1 1]] [117]
+  -- the share issues and the lifetime grant: the nested birth's one initial
+  -- policy is a ROM source cell
+  | .applicationShareIssue => mk [(27, src 4, none)] [leg cTicket .ticket [al 0 1]] [116]
+  | .applicationGrainShareIssue => mk [(28, src 5, none)] [leg cTicket .ticket [al 1 1]] [117]
   | .applicationSessionEnrollment => mk [] [leg cTicket .ticket [al 2 1]] [118]
-  | .applicationAgentLifetimeGrantIssue => mk [] [leg cTicket .ticket [al 3 1]] [119]
+  | .applicationAgentLifetimeGrantIssue => mk [(29, src 6, none)] [leg cTicket .ticket [al 3 1]]
+      [119]
   | .applicationDispatch => mk [] [leg cTicket .ticket [al 4 1]] [120]
   -- agent dispatch: the reserve is a purse debit, so a stale purse is a guard
   | .applicationAgentDispatch => mk [] [leg cBook .book [wr 0 100 90], leg cTicket .ticket [al 5 1]]
@@ -252,9 +280,9 @@ def Ctor.turn : Ctor → CTurn
 /-- Each constructor's negation: the case its receiver must refuse. -/
 def Ctor.negation : Ctor → CTurn
   -- a room that does not exist
-  | .birth => mk [(20, .resource, some 55)] [leg 20 .resource [al 0 0]] [101]
+  | .birth => mk [(20, fresh .resource, some 55)] [leg 20 .resource [al 0 0]] [101]
   -- one of the two markers already spent
-  | .grainBirth => mk [(21, .resource, none)] [leg 21 .resource [al 0 0]] [102, 99]
+  | .grainBirth => mk [(21, fresh .resource, none)] [leg 21 .resource [al 0 0]] [102, 99]
   -- the target moved under the signed guard
   | .invoke => mk [] [capGuard, leg cRes .resource [wr 0 9 11]] [104] (cap := some 1)
   | .install => mk [] [capGuard, leg cPolicy .policy [wr 0 1 2]] [99]
@@ -356,7 +384,7 @@ theorem turn_negation_refused (c : Ctor) :
 /-- The four constructors that write no cell are nullifier-only turns: no
 create, no retire, every leg a pure read guard, one nullifier. -/
 def NullifierOnly (t : CTurn) : Prop :=
-  t.creates = [] ∧ t.retires = [] ∧ t.nullifiers ≠ [] ∧
+  t.creates.isEmpty = true ∧ t.retires = [] ∧ t.nullifiers ≠ [] ∧
     ∀ l ∈ t.legs, ∀ op ∈ l.patch, Op.isRead op = true
 
 instance (t : CTurn) : Decidable (NullifierOnly t) := by
@@ -366,6 +394,90 @@ theorem no_cell_ctors_nullifier_only :
     ∀ c ∈ [Ctor.selectedSourcePublication, .fnConsumerNamespace, .fnSelectedPoll, .fnEmptyPollV2],
       NullifierOnly c.turn ∧ c.turn.legs ≠ [] := by
   decide
+
+/-! ## THE LIST (T3b): every admission is a turn -/
+
+/-- The receivers whose accepted intents create a ROM policy-source cell. -/
+def Ctor.romBirth : Ctor → Bool
+  | .birth | .grainBirth | .install | .applicationShareIssue | .applicationGrainShareIssue
+  | .applicationAgentLifetimeGrantIssue => true
+  | _ => false
+
+/-- A ROM birth: a create carrying a nonempty, ROM-only image. -/
+def HasRomBirth (t : CTurn) : Bool :=
+  t.creates.any fun x => decide (x.2.1.store ≠ 0 ∧ RomOnly x.2.1.store)
+
+/-- T3's encoding of the same birth: the source cell created empty, then a leg
+allocating its ROM row.  (Non-ROM-birth constructors: their own turn.) -/
+def Ctor.romByLeg : Ctor → CTurn
+  | .birth => mk [(20, fresh .resource, some cRoom), (24, fresh .source, none)]
+      [leg cAuth .authority [rd 1 (some 1), lg 1 1], leg 20 .resource [al 0 0],
+        leg 24 .source [sa 1]] [101]
+  | .grainBirth => mk [(21, fresh .resource, none), (22, fresh .resource, none),
+        (25, fresh .source, none)]
+      [leg cAuth .authority [lg 2 1], leg 21 .resource [al 0 0], leg 22 .resource [al 0 0],
+        leg 25 .source [sa 2]] [102, 103]
+  | .install => mk [(26, fresh .source, none)]
+      [capGuard, leg cPolicy .policy [wr 0 1 2], leg 26 .source [sa 3]] [105]
+  | .applicationShareIssue => mk [(27, fresh .source, none)]
+      [leg cTicket .ticket [al 0 1], leg 27 .source [sa 4]] [116]
+  | .applicationGrainShareIssue => mk [(28, fresh .source, none)]
+      [leg cTicket .ticket [al 1 1], leg 28 .source [sa 5]] [117]
+  | .applicationAgentLifetimeGrantIssue => mk [(29, fresh .source, none)]
+      [leg cTicket .ticket [al 3 1], leg 29 .source [sa 6]] [119]
+  | c => c.turn
+
+/-- The source cell each ROM-birth constructor creates. -/
+def Ctor.sourceCell : Ctor → CellId
+  | .birth => 24
+  | .grainBirth => 25
+  | .install => 26
+  | .applicationShareIssue => 27
+  | .applicationGrainShareIssue => 28
+  | .applicationAgentLifetimeGrantIssue => 29
+  | _ => 0
+
+/-- **THE LIST**: the constructors whose turn the one transition refuses. -/
+def theList : List Ctor :=
+  Ctor.all.filter fun c => (rejectOf (World.admit censusH w0 c.turn)).isSome
+
+/-- The list T3 had: the ROM-birth constructors under the empty-create
+encoding. -/
+def theListWithoutRomBirth : List Ctor :=
+  Ctor.all.filter fun c => c.romBirth && (rejectOf (World.admit censusH w0 c.romByLeg)).isSome
+
+theorem every_admission_is_turn_all :
+    ∀ c ∈ Ctor.all, rejectOf (World.admit censusH w0 c.turn) = none ∧
+      (c.romBirth = true → HasRomBirth c.turn = true) := by
+  decide +kernel
+
+/-- **`every_admission_is_turn`.**  Each of the 33 admission shapes is
+accepted by the one transition, and each receiver that creates a ROM
+policy-source cell does so by a create carrying its image. -/
+theorem every_admission_is_turn (c : Ctor) :
+    rejectOf (World.admit censusH w0 c.turn) = none ∧
+      (c.romBirth = true → HasRomBirth c.turn = true) :=
+  every_admission_is_turn_all c (Ctor.mem_all c)
+
+/-- **THE LIST is empty.** -/
+theorem theList_empty : theList = [] := by decide +kernel
+
+theorem rom_by_leg_refused_all :
+    ∀ c ∈ Ctor.all, c.romBirth = true →
+      rejectOf (World.admit censusH w0 c.romByLeg) = some (.guardFailed c.sourceCell 0) := by
+  decide +kernel
+
+/-- **The pole: without the ROM birth, the six are not turns.**  Writing the
+source row by a leg after an empty create is the ROM write refusal. -/
+theorem rom_by_leg_refused (c : Ctor) (rom : c.romBirth = true) :
+    rejectOf (World.admit censusH w0 c.romByLeg) = some (.guardFailed c.sourceCell 0) :=
+  rom_by_leg_refused_all c (Ctor.mem_all c) rom
+
+/-- Without ROM birth THE LIST is exactly the six. -/
+theorem theListWithoutRomBirth_eq :
+    theListWithoutRomBirth = [.birth, .grainBirth, .install, .applicationShareIssue,
+      .applicationGrainShareIssue, .applicationAgentLifetimeGrantIssue] := by
+  decide +kernel
 
 /-! ## `step_conserves`: a Book leg of postings conserves its totals (T9) -/
 
@@ -474,5 +586,13 @@ theorem payBook_conserves {w w' : CWorld} (h : World.step censusH w (Ctor.turn .
 #assert_axioms step_conserves
 #assert_axioms payPostings_balanced
 #assert_axioms payBook_conserves
+#assert_axioms every_admission_is_turn
+#assert_axioms theList_empty
+#assert_axioms rom_by_leg_refused
+#assert_axioms theListWithoutRomBirth_eq
+/-- info: 'Minidregg.Kernel.TurnCensus.every_admission_is_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms every_admission_is_turn
+/-- info: 'Minidregg.Kernel.TurnCensus.theList_empty' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms theList_empty
 
 end Minidregg.Kernel.TurnCensus

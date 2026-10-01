@@ -1,38 +1,124 @@
 /-
 # Kernel.HostRefinesWorld -- the present Host is an implementation refinement of `World.step`
 
-SURPASS §2(b), stage 0, lane T3.  No Host byte changes.  The deployed
+SURPASS §2(b), stage 0, lanes T3 and T3b.  No Host byte changes.  The deployed
 transition is `DurableDataIntent.execute` (reached through
-`DurableCheckpoint.prepare`) followed by the append that `Loaded.extend` makes;
-its state is `DurableReceiverIO.Loaded`.  This module says what it means for a
-`Loaded` to represent a `World` and proves that every deployed step -- accepted,
-refused, replayed, crashed before or after the atomic install -- represents
-either the old world or the world `World.step` produces on the turn
-`Turn.ofIntent` derives from the admitted intent.
+`DurableCheckpoint.prepare`) followed by the append that `Loaded.extend` makes
+and the checkpoint rebase `afterCheckpoint` may make; its state is
+`DurableReceiverIO.Loaded`.  This module says what it means for a `Loaded` to
+represent a `World` and proves that every deployed step -- accepted, refused,
+replayed, crashed before or after the atomic install, rebased on a stored
+checkpoint -- represents either the old world or the world `World.step`
+produces on the turn `Turn.ofIntent` derives from the admitted intent.
 
-* `Represents B p w` (`SnapRepresents` on `p.snapshot` at `p.height`): every
-  cell's canonical bytes decode to the world's cell; the spent set is the
-  consumed set under the injective key; the journal holds exactly the
-  journaled ids; the head height is the log length; every meter lane but
-  storage is the deployed allowance; the storage lane is at least the deployed
-  one; no cell is retired; the system cell holds no parent rows.  Each of the
-  last three is a named gap, not a weakening (see the T3 report, §3).
-* `ofIntent_run`: from a represented snapshot, an intent the executor accepts
-  and its derived turn, `World.step` accepts the turn and its world represents
-  `DataSnapshot.install` one height up.
-* `deployed_refines_step`: an `ImplementationRefinement` instance for
-  `HostStep` (execute under any schedule, then append).  `extendStep`,
-  `refusedStep` and `failedAppendStep` show the real code paths are `HostStep`s.
-* `host_trace_represents_fold`: whatever refusals and crashes the deployed Host
-  went through, its state represents the fold of a sublist of what it was
-  given.
-* The refuting poles: `appendOnly_rewrite_has_no_turn` and
-  `rom_image_has_no_turn` (no turn at all produces such a cell), the deployed
-  instance `policy_source_birth_has_no_turn` (install's and every
-  initial-policy birth's source cell), and the toy run where `ofIntent` refuses
-  the rewrite while deriving and stepping the satisfiable write.
+* `Represents B p w` (`SnapRepresents` on `p.snapshot` at `p.height`).  Over the
+  deployed bridge (`DeployedRepresents`, `Kernel.DeployedBridge.bridge`) its
+  cells field says every deployed cell's bytes ARE the canonical lifecycle
+  encoding of the world's cell (`deployedRepresents_cells`).
+* `ofIntent_run`, `deployed_refines_step` (an `ImplementationRefinement` over
+  every schedule), `host_trace_represents_fold`: unchanged statements; since
+  T3b they cover install and every birth with initial policies, because a
+  create carries its ROM image (`World.applyCreates`) and a birth's leg is never
+  `notAPatch` (`TurnOfIntent.Delta.create_patchOk`).
+* `confirmed_represents`: the confirmed append path, checkpoint rebase
+  included -- `afterCheckpoint (p.extend ready) stored` represents the stepped
+  world (`represents_rebaseD`, under `BaseHonest`).
+* ROM births: `policy_source_birth_is_turn` (the deployed source birth is an
+  accepted turn holding the record), `ofIntent_policySource_birth` (the derived
+  turn of an intent writing a source cell creates it with the record),
+  `birth_rom_image` (a born cell's ROM is exactly its create's image), and the
+  poles `policy_source_rewrite_has_no_turn` (the record in an EXISTING source
+  cell is never rewritten) and `appendOnly_rewrite_has_no_turn`.
+* The three rows T3 inferred are traced: `shareIssue_…`,
+  `grainShareIssue_…`, `lifetimeGrantIssue_birth_has_one_initial_policy`.
+
+## THE LIST
+
+Empty.  `TurnCensus.every_admission_is_turn` decides it for all 33 shapes and
+`TurnCensus.theList_empty`; `TurnCensus.theListWithoutRomBirth_eq` is the pole
+(without ROM birth the list is exactly the six source-creating receivers).
+
+## `Represents`, field by field, and what T4 must prove of each
+
+* `cells` -- exact, over the real codec (`decodeCell`, one wire per kind).
+  Nothing left model-side.
+* `spent` -- exact (the consumed set, under the injective `digestKey`).
+* `journal` -- presence of the id only (G-JOURNAL, not narrowed: the model
+  journals `(height, H.turnDigest t)` of the DERIVED turn, which does not
+  determine the recorded intent -- its storage lane is replaced and its writes
+  are diffs against the pre-state -- so no function of the deployed record is
+  the model digest).  T4/T5 must prove, once the log holds turns:
+  `∀ x, w.journal x = (p.turns.findIdx? (·.txId = x)).map fun i => (i, H.turnDigest p.turns[i]!)`.
+* `head` -- the height is the log length.  G-CLOCK narrowed:
+  `represents_logicalHeight` (`logicalHeight config p = config.genesisHeight + h`).
+  T4 must prove the window translation for every receiver that pins a height:
+  `ofAdmission_window : derived = .ok t → (t.notBefore ≤ h ∧ ∀ u ∈ t.validUntil, h ≤ u) ↔
+    receiverHeightCheck admitted (config.genesisHeight + h)`.
+* `meter` -- exact on 9 lanes.  `storage` -- `≤` (G-CHARGE).  T5 must prove
+  `intent.exactCharge .storageBytes = storageOf H t.creates t.legs` for every
+  admitted intent and its derived `t` (the legs' bytes plus the born images'),
+  after which the field is an equality.
+* `retired` -- none (G-RETIRE: the Host never retires; `decodeCell_retired`
+  refuses a retired image).
+* `parent` -- none (G-PARENT, T7): T7 must prove
+  `∀ c, w.parent c = (CredentialAuthorityState.parentOf (authorityStore p)) c`, then delete plane 13.
+* capability / key epoch / window -- not in `DataIntent` (G-AUTH): T4 must
+  prove `ofAdmission_auth : derived = .ok t → t.capability = some (capDigest admitted) ∧
+    t.keyEpoch = subjectKeyEpoch admitted`.
+* rebase (G-REBASE) -- closed: `represents_rebaseD`, `confirmed_represents`.
+  Its premise `BaseHonest p` holds at genesis, is kept by `extend` and
+  established by `rebaseD`.  T4 must prove it for the cold open:
+  `load_baseHonest : DurableReceiverIO.load transport rootBytes = .ok p → BaseHonest p`
+  (a stored checkpoint's consumed list is its prefix's nullifiers; today that
+  rests on the checkpoint MAC, i.e. custody).
+
+## The statement left for T4
+
+```lean
+theorem host_submit_is_step
+    (H : History deployedR TransactionId StableEvent Digest)
+      -- stage F: WorldRoot.cshakeHistory encode logRoot0 legBytes imageBytes
+    {config : NativeHost.Config} {opened : NativeHost.Opened config}
+    {intent : DataIntent ResourceBirthCodec.rootBytes}
+    (admitted : NativeHostReplay.NativeAdmission config opened intent)
+    {w : World deployedR TransactionId Digest}
+    (represents : DeployedRepresents opened.durable w) (honest : BaseHonest opened.durable)
+    {t : DTurn deployedR Digest} (derived : Turn.ofAdmission bridge H w admitted = .ok t)
+    {ready : Ready ResourceBirthCodec.rootBytes opened.durable.image opened.durable.baseHeight
+      opened.durable.base opened.durable.snapshot intent}
+    (prepared : DurableCheckpoint.prepare opened.durable.image opened.durable.baseHeight
+      opened.durable.base opened.durable.snapshot opened.durable.withinLog opened.durable.resumed
+      intent = .inl ready)
+    (stored : Bool) {receipt : NativeHostCodec.Receipt}
+    (sealed : NativeHost.historicalReceipt config
+      (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored)
+      intent.transactionId intent.event.eventId = some receipt) :
+    ∃ w', World.admit H w t = .ok w' ∧
+      DeployedRepresents (DurableReceiverIO.afterCheckpoint (opened.durable.extend ready) stored) w' ∧
+      receipt.acceptedCount = (w.head.map Prod.fst).getD 0 + 1 ∧
+      receipt.worldRoot = WorldRoot.rootOf S w'
+```
+
+Its state half is `confirmed_represents` (proved here, for any bridge).  What
+T4 adds is the receipt (`acceptedCount` from `represents.head`; `worldRoot`
+needs `Loaded.worldRoot = WorldRoot.rootOf S w'`, the root-cache agreement),
+and then the cutover itself: `Loaded` becomes a `World`, `Represents` becomes
+equality, `prepare`+`extend` becomes `World.admit` + append.
+
+Its two poles, which T4 must keep:
+
+* satisfiable -- `Example.toy_refined` (the derived turn steps and the
+  installed snapshot represents it) lifted through `confirmed_represents`; a
+  deployed source birth (`policy_source_birth_is_turn`).
+* refuting -- an admitted intent whose derived turn is refused is a deployed
+  step that installs nothing:
+  `Turn.ofAdmission bridge H w admitted = .error r → ∀ ready, prepare … ≠ .inl ready`
+  is what the cutover must make TRUE (today the durable layer would install an
+  append-only rewrite, `Example.toy_rewrite_refused` shows `ofIntent` refusing
+  it); and `policy_source_rewrite_has_no_turn` (no turn rewrites a ROM record).
 -/
 import Kernel.TurnOfIntent
+import Kernel.DeployedBridge
 import Kernel.TurnRecord
 import Compiler.DurableReceiverIO
 import Compiler.CanonicalCellRegistry
@@ -51,6 +137,7 @@ open Minidregg.Kernel.DurableDataIntent
   (DataIntent DataSnapshot StableEvent StableNullifier TransactionId Outcome execute)
 open Minidregg.Compiler.DurableReceiverIO (Loaded)
 open Minidregg.Kernel.DurableCheckpoint (Ready)
+open Minidregg.Kernel.DeployedBridge (deployedR sourceCell)
 
 set_option autoImplicit false
 
@@ -60,44 +147,40 @@ section CellCases
 
 variable {R : Registry} {TxId Ev D' : Type} [DecidableEq TxId] [DecidableEq D']
 
-theorem storeAt_zero {k k' : R.Kind} {pre : Store (R.layout k')}
-    (h : (⟨k, 0⟩ : Cell R).storeAt k' = some pre) : pre = 0 := by
-  unfold Cell.storeAt at h
-  split at h
-  · rename_i e
-    subst e
-    exact (Option.some.inj h).symm
-  · cases h
-
 /-- **What one accepted step does to one cell**: nothing; retires it; runs a
-valid leg from the store it held (or from the empty store of a cell the turn
-created); or creates it empty. -/
+valid leg from the store it held (or from the ROM image a create of the turn
+gave it); or creates it, born as the create carries it (T3b). -/
 theorem step_cell_cases (H : History R TxId Ev D') {w w' : World R TxId D'}
     {t : Turn R TxId Ev D'} (h : World.step H w t = some w') (c : CellId) :
     w'.cells c = w.cells c ∨ w'.cells c = none ∨
       (∃ leg ∈ t.legs, leg.cell = c ∧ ∃ pre,
-        ((w.cells c).bind (·.storeAt leg.kind) = some pre ∨ (w.cells c = none ∧ pre = 0)) ∧
+        ((w.cells c).bind (·.storeAt leg.kind) = some pre ∨
+          (w.cells c = none ∧ RomOnly pre ∧
+            ∃ room, (c, (⟨leg.kind, pre⟩ : Cell R), room) ∈ t.creates)) ∧
         Patch.ValidFrom pre leg.patch ∧ w'.cells c = some ⟨leg.kind, Patch.run pre leg.patch⟩) ∨
-      (∃ k, w.cells c = none ∧ w'.cells c = some ⟨k, 0⟩) := by
+      (∃ b room, (c, b, room) ∈ t.creates ∧ w.cells c = none ∧ w'.cells c = some b) := by
   obtain ⟨shaped, height, logRoot, -, -, -, hc, -⟩ := admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hc
   by_cases hr : c ∈ t.retires
   · exact .inr (.inl (applyRetires_mem h3 shaped.2.2.2 c hr).2)
   have e3 : w'.cells c = c2 c := applyRetires_frame h3 c hr
   by_cases hcr : c ∈ t.creates.map Prod.fst
-  · obtain ⟨⟨xc, k0, room⟩, mx, ex⟩ := List.mem_map.mp hcr
+  · obtain ⟨⟨xc, b0, room⟩, mx, ex⟩ := List.mem_map.mp hcr
     simp only at ex
     subst ex
-    obtain ⟨hnone, hc1⟩ := applyCreates_mem h1 shaped.2.2.1 xc k0 room mx
+    obtain ⟨hnone, hc1⟩ := applyCreates_mem h1 shaped.2.2.1 xc b0 room mx
+    have hrom := applyCreates_romOnly h1 xc b0 room mx
     by_cases hl : xc ∈ t.legs.map Leg.cell
     · obtain ⟨leg, ml, el⟩ := List.mem_map.mp hl
       obtain ⟨pre, hb, hvp, hpost⟩ := applyLegs_mem h2 shaped.2.1 leg ml
       rw [el, hc1] at hb
       simp only [Option.bind_some] at hb
-      refine .inr (.inr (.inl ⟨leg, ml, el, pre, .inr ⟨hnone, storeAt_zero hb⟩, hvp, ?_⟩))
+      have eb := Cell.eq_of_storeAt hb
+      subst eb
+      refine .inr (.inr (.inl ⟨leg, ml, el, pre, .inr ⟨hnone, hrom, room, mx⟩, hvp, ?_⟩))
       rw [e3, ← el]
       exact hpost
-    · exact .inr (.inr (.inr ⟨k0, hnone, by rw [e3, applyLegs_frame h2 xc hl, hc1]⟩))
+    · exact .inr (.inr (.inr ⟨b0, room, mx, hnone, by rw [e3, applyLegs_frame h2 xc hl, hc1]⟩))
   · have e1 : c1 c = w.cells c := applyCreates_frame h1 c hcr
     by_cases hl : c ∈ t.legs.map Leg.cell
     · obtain ⟨leg, ml, el⟩ := List.mem_map.mp hl
@@ -120,13 +203,13 @@ theorem appendOnly_rewrite_has_no_turn (H : History R TxId Ev D') {w w' : World 
     (s' : Store (R.layout k)) (rewrite : s' a ≠ some x) :
     w'.cells c ≠ some ⟨k, s'⟩ := by
   intro e
-  rcases step_cell_cases H h c with h1 | h1 | ⟨leg, -, el, pre, hpre, hv, hpost⟩ | ⟨k0, hn, -⟩
+  rcases step_cell_cases H h c with h1 | h1 | ⟨leg, -, el, pre, hpre, hv, hpost⟩ | ⟨b, room, -, hn, -⟩
   · rw [h1, held] at e
     have := (Cell.mk.inj (Option.some.inj e)).2
     exact rewrite (eq_of_heq this ▸ row)
   · rw [h1] at e; cases e
   · subst el
-    rcases hpre with hb | ⟨hn, -⟩
+    rcases hpre with hb | ⟨hn, -, -⟩
     · rw [held] at hb
       simp only [Option.bind_some] at hb
       obtain ⟨ek, hs⟩ := Cell.mk.inj (Cell.eq_of_storeAt hb)
@@ -141,61 +224,151 @@ theorem appendOnly_rewrite_has_no_turn (H : History R TxId Ev D') {w w' : World 
     · rw [held] at hn; cases hn
   · rw [held] at hn; cases hn
 
-/-- **The refuting pole for births: a ROM image has no turn.**  A cell absent
-before a turn never ends holding a store with a present ROM address: a
-created cell starts empty and no valid patch writes ROM.  The world model has
-no create-with-image. -/
-theorem rom_image_has_no_turn (H : History R TxId Ev D') {w w' : World R TxId D'}
+/-- **A born cell's ROM is the image its create carried (T3b).**  If a cell
+absent before an accepted turn is present after it, the turn has a create of
+that cell whose image is exactly the post store's ROM part: ROM enters a cell
+only at birth, through the create that carries it. -/
+theorem birth_rom_image (H : History R TxId Ev D') {w w' : World R TxId D'}
     {t : Turn R TxId Ev D'} (h : World.step H w t = some w') {c : CellId}
-    (absent : w.cells c = none) {k : R.Kind} (s' : Store (R.layout k))
-    (a : Address (R.layout k)) (rom : (R.layout k).discipline a.1 = .rom)
-    (present : s' a ≠ none) : w'.cells c ≠ some ⟨k, s'⟩ := by
-  intro e
-  rcases step_cell_cases H h c with h1 | h1 | ⟨leg, -, el, pre, hpre, hv, hpost⟩ | ⟨k0, -, hk⟩
-  · rw [h1, absent] at e; cases e
-  · rw [h1] at e; cases e
+    (absent : w.cells c = none) {k : R.Kind} {s' : Store (R.layout k)}
+    (post : w'.cells c = some ⟨k, s'⟩) :
+    ∃ room, (c, (⟨k, romPart s'⟩ : Cell R), room) ∈ t.creates := by
+  rcases step_cell_cases H h c with h1 | h1 | ⟨leg, -, el, pre, hpre, hv, hpost⟩ |
+      ⟨b, room, mem, -, hb⟩
+  · rw [h1, absent] at post; cases post
+  · rw [h1] at post; cases post
   · subst el
-    rcases hpre with hb | ⟨-, rfl⟩
+    rcases hpre with hb | ⟨-, rom, room, mem⟩
     · rw [absent] at hb; cases hb
-    · rw [hpost] at e
-      obtain ⟨ek, hs⟩ := Cell.mk.inj (Option.some.inj e)
+    · rw [hpost] at post
+      obtain ⟨ek, hs⟩ := Cell.mk.inj (Option.some.inj post)
       subst ek
-      have := eq_of_heq hs
-      have kept := Patch.rom_preserved 0 leg.patch a hv rom
-      rw [this] at kept
-      exact present kept
-  · rw [hk] at e
-    obtain ⟨ek, hs⟩ := Cell.mk.inj (Option.some.inj e)
-    subst ek
-    have := eq_of_heq hs
-    exact present (by rw [← this]; rfl)
+      have hs' := eq_of_heq hs
+      subst hs'
+      refine ⟨room, ?_⟩
+      have e : romPart (Patch.run pre leg.patch) = pre := by
+        apply DFinsupp.ext
+        intro a
+        rw [romPart_apply]
+        split
+        · rename_i hr
+          exact Patch.rom_preserved pre leg.patch a hv hr
+        · rename_i hr
+          cases hp : pre a with
+          | none => rfl
+          | some v => exact absurd (rom a (by rw [hp]; exact Option.some_ne_none v)) hr
+      rw [e]
+      exact mem
+  · rw [hb] at post
+    have e := Option.some.inj post
+    subst e
+    refine ⟨room, ?_⟩
+    rw [romPart_of_romOnly (step_create_romOnly H h c _ room mem)]
+    exact mem
+
+/-- **No birth, no cell**: an absent cell that no create of the turn names is
+still absent after it.  (T3's `rom_image_has_no_turn` is this with the create
+premise made explicit: since T3b a create may carry a ROM image.) -/
+theorem birth_needs_create (H : History R TxId Ev D') {w w' : World R TxId D'}
+    {t : Turn R TxId Ev D'} (h : World.step H w t = some w') {c : CellId}
+    (absent : w.cells c = none) (noCreate : ∀ b room, (c, b, room) ∉ t.creates) :
+    w'.cells c = none := by
+  cases hpost : w'.cells c with
+  | none => rfl
+  | some cell =>
+      obtain ⟨room, mem⟩ := birth_rom_image H h absent (k := cell.kind) (s' := cell.store) hpost
+      exact absurd mem (noCreate _ room)
 
 end CellCases
 
-/-! ## 2. The deployed instance of the ROM pole: policy source births -/
+/-! ## 2. Policy-source births are turns (T3b) -/
 
-/-- The deployed registry as a world registry. -/
-def deployedR : Registry where
-  Kind := Minidregg.Compiler.CanonicalCellRegistry.Kind
-  layout := Minidregg.Compiler.CanonicalCellRegistry.layout
+/-- The birth turn of a policy-source cell: one create carrying the record's
+ROM image, charged the image's bytes, and nothing else. -/
+def sourceBirth {D' : Type} (H : History deployedR TransactionId StableEvent D')
+    (x : TransactionId) (c : CellId)
+    (record : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord) (ev : StableEvent) :
+    DTurn deployedR D' :=
+  { txId := x, creates := [(c, sourceCell record, none)], legs := [], retires := [], event := ev,
+    charge := fun l => if l = .storageBytes then H.imageBytes (sourceCell record) else 0 }
 
-/-- **Install's policy-source cell has no turn.**  Every accepted install, and
-every birth whose descriptor carries initial policies, writes a fresh
-`policySource` cell holding its record (`PolicyInstallReceiver.successorCreate`,
+/-- **`policy_source_birth_is_turn`.**  Every accepted install, and every
+birth whose descriptor carries initial policies, writes a fresh `policySource`
+cell holding its record (`PolicyInstallReceiver.successorCreate`,
 `ResourceBirthController.PreparedBirth.initial_source_write`).  That layout is
-ROM (`PolicySourceCell.layout`), so no turn of the world model creates it. -/
-theorem policy_source_birth_has_no_turn {TxId Ev D' : Type} [DecidableEq TxId] [DecidableEq D']
+ROM; since T3b a create carries its ROM image, so at any world with a head, a
+fresh transaction id, an absent unretired cell and the image's bytes funded,
+the birth is an accepted turn and the cell holds exactly the record. -/
+theorem policy_source_birth_is_turn {D' : Type} [DecidableEq D']
+    (H : History deployedR TransactionId StableEvent D') {w : World deployedR TransactionId D'}
+    {height : Nat} {logRoot : D'} (hh : w.head = some (height, logRoot))
+    {x : TransactionId} (fresh : w.journal x = none) {c : CellId} (absent : w.cells c = none)
+    (unretired : w.retired c = none)
+    (record : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord) (ev : StableEvent)
+    (funded : H.imageBytes (sourceCell record) ≤ w.meter .storageBytes) :
+    ∃ w', World.step H w (sourceBirth H x c record ev) = some w' ∧
+      w'.cells c = some (sourceCell record) := by
+  have shaped : Shaped (sourceBirth H x c record ev) := by
+    refine ⟨?_, ?_, ?_, ?_⟩ <;> simp [sourceBirth]
+  have funded' : (sourceBirth H x c record ev).charge ≤ w.meter := by
+    intro l
+    by_cases e : l = .storageBytes
+    · subst e
+      simpa [sourceBirth] using funded
+    · simp [sourceBirth, e]
+  have hk : turnCheck H w (sourceBirth H x c record ev) height = none := by
+    rw [turnCheck_eq_none_iff]
+    refine ⟨by simp [sourceBirth], ⟨by simp [sourceBirth], by simp [sourceBirth]⟩,
+      by simp [sourceBirth], by simp [sourceBirth, patchBytes], funded'⟩
+  have hv : Patch.ValidFrom w.system
+      (sysPatch H (sourceBirth H x c record ev) height logRoot w.meter) := by
+    refine sysPatch_valid_unroomed H (by simp [sourceBirth]) rfl
+      (by
+        intro y hy
+        simp only [sourceBirth, List.mem_singleton] at hy
+        subst hy
+        exact unretired)
+      fresh hh ⟨by simp [sourceBirth], by simp [sourceBirth]⟩ ?_
+    intro l hl
+    have pos : 0 < w.meter l := lt_of_lt_of_le (Nat.pos_of_ne_zero hl) (funded' l)
+    rw [meter_system] at pos ⊢
+    revert pos
+    cases w.system ⟨SysSpace.allowance, l⟩ with
+    | none => intro pos; exact absurd pos (lt_irrefl 0)
+    | some a => intro _; rfl
+  have hcells : applyCells w.cells (sourceBirth H x c record ev) =
+      .ok (w.cells.update c (some (sourceCell record))) := by
+    have rom : RomOnly (sourceCell record).store :=
+      Minidregg.Kernel.DeployedBridge.policySource_romOnly _
+    simp [applyCells, applyCreates, sourceBirth, absent, roomPresent, rom, applyLegs,
+      applyRetires]
+  refine ⟨_, (step_eq_some H).2 (admit_of H shaped hh fresh hk hv hcells), ?_⟩
+  exact cells_update_self _ _ _
+
+/-- **The pole: the same record written into an EXISTING source cell has no
+turn.**  A policy-source cell holding `r` is, after any accepted turn, retired
+or still holding `r`: the record is ROM (`World.step_rom_preserved`). -/
+theorem policy_source_rewrite_has_no_turn {TxId Ev D' : Type} [DecidableEq TxId] [DecidableEq D']
     (H : History deployedR TxId Ev D') {w w' : World deployedR TxId D'}
     {t : Turn deployedR TxId Ev D'} (h : World.step H w t = some w') {c : CellId}
-    (absent : w.cells c = none) (record : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord) :
-    w'.cells c ≠ some ⟨Minidregg.Compiler.CanonicalCellRegistry.Kind.policySource,
-      Minidregg.Compiler.PolicySourceCell.stateOfOption (some record)⟩ :=
-  rom_image_has_no_turn H h absent _ Minidregg.Compiler.PolicySourceCell.recordAddress rfl
-    (by
-      show (Store.set 0 Minidregg.Compiler.PolicySourceCell.recordAddress (some record))
-        Minidregg.Compiler.PolicySourceCell.recordAddress ≠ none
-      rw [Store.set_eq]
-      exact Option.some_ne_none _)
+    {r : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord}
+    (held : w.cells c = some (sourceCell r))
+    (r' : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord) (other : r' ≠ r) :
+    w'.cells c ≠ some (sourceCell r') := by
+  intro e
+  rcases step_rom_preserved H h held with ⟨gone, -⟩ | ⟨s', post, same⟩
+  · rw [gone] at e; cases e
+  · rw [post] at e
+    have hs := eq_of_heq (Cell.mk.inj (Option.some.inj e)).2
+    have kept : Minidregg.Compiler.PolicySourceCell.recordAt
+          (Minidregg.Compiler.PolicySourceCell.stateOfOption (some r')) =
+        Minidregg.Compiler.PolicySourceCell.recordAt
+          (Minidregg.Compiler.PolicySourceCell.stateOfOption (some r)) := by
+      have k := same Minidregg.Compiler.PolicySourceCell.recordAddress rfl
+      rw [hs] at k
+      exact k
+    simp only [Minidregg.Compiler.PolicySourceCell.recordAt_stateOfOption] at kept
+    exact other (Option.some.inj kept)
 
 /-! ## 3. Representation -/
 
@@ -557,6 +730,266 @@ def failedAppendStep (B : Bridge R D) (H : History R TransactionId StableEvent D
     · exact absurd hi (by unfold execute; split <;> (try split) <;> simp [Installs])
     · rw [hi]; rfl
 
+/-! ### `Represents` survives the checkpoint rebase (G-REBASE, T3b)
+
+A confirmed append ends in `afterCheckpoint (p.extend ready) stored`, which
+re-materializes the head as a fresh checkpoint base (`Loaded.rebaseD`) when a
+checkpoint was stored.  The rebased snapshot is `State.snapshot` of
+`State.ofSnapshot`: every enumerable identifier with its current bytes, the
+whole log's journal, the whole log's nullifiers, the remaining allowance.  It
+agrees with the replayed snapshot on everything `Represents` reads -- given
+that the base the loaded state was resumed from consumed exactly its prefix's
+nullifiers (`BaseHonest`).  That premise holds at the genesis base, is kept by
+`extend` and established by `rebaseD`; a cold open from a stored checkpoint
+supplies it by custody (the checkpoint MAC), which is T4's to state. -/
+
+/-- What a replay does to the journal and the consumed set. -/
+theorem replay_model :
+    ∀ (records : List DurableReceiver.IntentRecord) (before after : DataSnapshot rootBytes),
+      DurableReceiver.replay rootBytes before records = some after →
+        after.model.journal =
+            (records.map fun r => (r.transactionId, DurableCheckpoint.IntentRecord.erase r)).reverse ++
+              before.model.journal ∧
+          ∀ n, after.model.consumed n =
+            (decide (n ∈ records.flatMap DurableReceiver.IntentRecord.nullifiers) ||
+              before.model.consumed n)
+  | [], before, after, h => by
+      simp only [DurableReceiver.replay, Option.some.injEq] at h
+      subst h
+      exact ⟨by simp, fun n => by simp⟩
+  | r :: rs, before, after, h => by
+      unfold DurableReceiver.replay at h
+      cases hb : r.bind? rootBytes with
+      | none => rw [hb] at h; cases h
+      | some intent =>
+          rw [hb] at h
+          change (match DurableDataIntent.execute .complete before intent with
+            | .accepted next => DurableReceiver.replay rootBytes next rs
+            | _ => none) = some after at h
+          split at h
+          · rename_i next he
+            have hn : next = DataSnapshot.install before intent := by
+              rcases execute_cases .complete before intent with ⟨-, -, -, a⟩ | ⟨i, -⟩
+              · rw [he] at a; exact a
+              · rw [he] at i; cases i
+            obtain ⟨hj, hc⟩ := replay_model rs next after h
+            have he' := DurableCheckpoint.IntentRecord.erase_bind hb
+            subst hn
+            refine ⟨?_, fun n => ?_⟩
+            · rw [hj]
+              show _ ++ ((intent.erase.transactionId, intent.erase) :: before.model.journal) = _
+              rw [he']
+              simp [DurableCheckpoint.IntentRecord.erase]
+            · rw [hc n]
+              show (decide _ || (if n ∈ intent.erase.nullifiers then true else
+                before.model.consumed n)) = _
+              rw [he']
+              by_cases hm : n ∈ r.nullifiers <;>
+                simp [hm, DurableCheckpoint.IntentRecord.erase, List.flatMap_cons]
+          · cases h
+
+/-- What a resume is: the whole log's journal, and the base's consumed set plus
+the replayed suffix's nullifiers. -/
+theorem resume_model {image : DurableReceiver.Image} {bh : Nat} {st : DurableCheckpoint.State}
+    {snap : DataSnapshot rootBytes} (h : DurableCheckpoint.resume rootBytes image bh st = some snap) :
+    snap.model.journal =
+        (image.accepted.map fun r => (r.transactionId, DurableCheckpoint.IntentRecord.erase r)).reverse ∧
+      ∀ n, snap.model.consumed n =
+        (decide (n ∈ (image.accepted.drop bh).flatMap DurableReceiver.IntentRecord.nullifiers) ||
+          decide (n ∈ st.consumed)) := by
+  unfold DurableCheckpoint.resume at h
+  split at h
+  · obtain ⟨hj, hc⟩ := replay_model _ _ _ h
+    refine ⟨?_, fun n => hc n⟩
+    rw [hj]
+    show _ ++ ((image.accepted.take bh).map fun r =>
+      (r.transactionId, DurableCheckpoint.IntentRecord.erase r)).reverse = _
+    rw [← List.reverse_append, ← List.map_append, List.take_append_drop]
+  · cases h
+
+/-- The base a loaded state was resumed from consumed exactly its prefix's
+nullifiers. -/
+def BaseHonest (p : Loaded rootBytes) : Prop :=
+  ∀ n, n ∈ p.base.consumed ↔
+    n ∈ (p.image.accepted.take p.baseHeight).flatMap DurableReceiver.IntentRecord.nullifiers
+
+/-- An honest loaded state has consumed exactly its log's nullifiers. -/
+theorem consumed_of_honest {p : Loaded rootBytes} (honest : BaseHonest p) (n : StableNullifier) :
+    p.snapshot.model.consumed n =
+      decide (n ∈ p.image.accepted.flatMap DurableReceiver.IntentRecord.nullifiers) := by
+  rw [(resume_model p.resumed).2 n]
+  conv => rhs; rw [← List.take_append_drop p.baseHeight p.image.accepted]
+  rw [List.flatMap_append]
+  by_cases h1 : n ∈ (p.image.accepted.drop p.baseHeight).flatMap
+      DurableReceiver.IntentRecord.nullifiers
+  · simp only [h1, decide_true, Bool.true_or, List.mem_append, or_true]
+  · simp only [h1, decide_false, Bool.false_or, List.mem_append, or_false]
+    exact decide_eq_decide.mpr (honest n)
+
+theorem lookup_map_self (l : List DurableDataIntent.CellId) (f : DurableDataIntent.CellId → List UInt8)
+    (c : DurableDataIntent.CellId) :
+    DurableReceiver.Seed.lookup (l.map fun x => (x, f x)) c = if c ∈ l then some (f c) else none := by
+  induction l with
+  | nil => rfl
+  | cons x rest ih =>
+      simp only [List.map_cons, DurableReceiver.Seed.lookup, List.mem_cons]
+      by_cases e : x = c
+      · subst e; simp
+      · rw [if_neg e, ih]
+        by_cases m : c ∈ rest
+        · simp [m]
+        · simp [m, Ne.symm e]
+
+/-- **The rebased snapshot agrees with the loaded one** on bytes, journal,
+consumed set and allowance, at the same height. -/
+theorem rebase_agrees {p p' : Loaded rootBytes} (honest : BaseHonest p) (h : p.rebase = some p') :
+    (∀ c, p'.snapshot.canonicalBytes c = p.snapshot.canonicalBytes c) ∧
+      p'.snapshot.model.journal = p.snapshot.model.journal ∧
+      (∀ n, p'.snapshot.model.consumed n = p.snapshot.model.consumed n) ∧
+      p'.snapshot.model.available = p.snapshot.model.available ∧ p'.height = p.height ∧
+      BaseHonest p' := by
+  have fields : p'.image = p.image ∧ p'.baseHeight = p.image.accepted.length ∧
+      p'.base = DurableCheckpoint.State.ofSnapshot p.image p.snapshot := by
+    unfold Loaded.rebase at h
+    dsimp only at h
+    split at h
+    · cases h
+    · split at h
+      · cases h
+      · cases h
+        exact ⟨rfl, rfl, rfl⟩
+  obtain ⟨himg, hbh, hbase⟩ := fields
+  have resumed := p'.resumed
+  rw [himg, hbh, hbase] at resumed
+  unfold DurableCheckpoint.resume at resumed
+  rw [if_pos (DurableCheckpoint.ofSnapshot_admissible _ _), List.drop_length,
+    List.take_length] at resumed
+  simp only [DurableReceiver.replay, Option.some.injEq] at resumed
+  have hp' : p'.height = p.height := by
+    show p'.image.accepted.length = p.image.accepted.length
+    rw [himg]
+  refine ⟨fun c => ?_, ?_, fun n => ?_, ?_, hp', ?_⟩
+  · rw [← resumed]
+    show (DurableReceiver.Seed.lookup (p.image.cellIds.map fun c => (c, p.snapshot.canonicalBytes c))
+      c).getD p.image.seed.absentBytes = _
+    rw [lookup_map_self]
+    by_cases m : c ∈ p.image.cellIds
+    · simp [m]
+    · simp only [m, if_false, Option.getD_none]
+      exact (DurableCheckpoint.resume_outside_support rootBytes _ _ _ _ p.resumed c m).symm
+  · rw [← resumed, (resume_model p.resumed).1]
+    rfl
+  · rw [← resumed, consumed_of_honest honest]
+    rfl
+  · rw [← resumed]
+    rfl
+  · intro n
+    rw [himg, hbh, hbase, List.take_length]
+    rfl
+
+/-- **`represents_rebaseD`.**  An honest loaded state that represents a world
+still represents it after the checkpoint rebase. -/
+theorem represents_rebaseD (B : Bridge R D) {p : Loaded rootBytes} {w : World R TransactionId D}
+    (honest : BaseHonest p) (rep : Represents B p w) : Represents B p.rebaseD w := by
+  unfold Loaded.rebaseD
+  cases hr : p.rebase with
+  | none => exact rep
+  | some p' =>
+      obtain ⟨hbytes, hj, hc, ha, hh, -⟩ := rebase_agrees honest hr
+      show SnapRepresents B p'.snapshot p'.height w
+      refine ⟨fun c => ?_, fun d => ?_, fun x => ?_, ?_, fun l e => ?_, ?_, rep.retired, rep.parent⟩
+      · rw [hbytes]; exact rep.cells c
+      · simp only [hc]; exact rep.spent d
+      · rw [hj]; exact rep.journal x
+      · rw [hh]; exact rep.head
+      · rw [ha]; exact rep.meter l e
+      · rw [ha]; exact rep.storage
+
+/-- Honesty survives the rebase. -/
+theorem baseHonest_rebaseD {p : Loaded rootBytes} (honest : BaseHonest p) :
+    BaseHonest p.rebaseD := by
+  unfold Loaded.rebaseD
+  cases hr : p.rebase with
+  | none => exact honest
+  | some p' => exact (rebase_agrees honest hr).2.2.2.2.2
+
+/-- Honesty survives an append: the base and its height are unchanged, and the
+prefix they name is unchanged. -/
+theorem baseHonest_extend {p : Loaded rootBytes} (honest : BaseHonest p) {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes p.image p.baseHeight p.base p.snapshot intent) :
+    BaseHonest (p.extend ready) := by
+  intro n
+  show n ∈ p.base.consumed ↔ n ∈ ((p.image.accepted ++ [DurableReceiver.IntentRecord.ofIntent intent]).take
+    p.baseHeight).flatMap DurableReceiver.IntentRecord.nullifiers
+  rw [List.take_append_of_le_length p.withinLog]
+  exact honest n
+
+/-- **The pole: a rebase that drops a cell breaks representation.**  The
+materialized checkpoint must carry every enumerable identifier; a state whose
+cell list omits a present cell re-materializes it as the absent slot. -/
+theorem rebase_dropping_cell_breaks (B : Bridge R D) {height : Nat}
+    {w : World R TransactionId D} (st : DurableCheckpoint.State) (prefixRecords : List DurableReceiver.IntentRecord)
+    {c : CellId} (dropped : (⟨c⟩ : DurableDataIntent.CellId) ∉ st.cells.map Prod.fst)
+    (absentReads : B.codec.decode st.absentBytes = some none) (present : w.cells c ≠ none) :
+    ¬ SnapRepresents B (DurableCheckpoint.State.snapshot rootBytes st prefixRecords) height w := by
+  intro rep
+  have e := rep.cells c
+  have bytes : (DurableCheckpoint.State.snapshot rootBytes st prefixRecords).canonicalBytes ⟨c⟩ =
+      st.absentBytes := by
+    show (DurableReceiver.Seed.lookup st.cells ⟨c⟩).getD st.absentBytes = _
+    rw [DurableReceiver.Seed.lookup_missing _ _ dropped]
+    rfl
+  rw [bytes, absentReads] at e
+  exact present (Option.some.inj e).symm
+
+/-- **The confirmed append path, rebase included.**  From an honest loaded
+state representing `w`, the deployed successor `afterCheckpoint (p.extend
+ready) stored` -- what `receiveLoadedDetailedWithFresh` returns on a confirmed
+read-back -- represents the world `World.step` produces on the derived turn,
+and stays honest. -/
+theorem confirmed_represents (B : Bridge R D) (H : History R TransactionId StableEvent D)
+    {p : Loaded rootBytes} {w : World R TransactionId D} (rep : Represents B p w)
+    (honest : BaseHonest p) {intent : DataIntent rootBytes}
+    (ready : Ready rootBytes p.image p.baseHeight p.base p.snapshot intent)
+    {t : DTurn R D} (derived : Turn.ofLoaded B H p intent = .ok t) (stored : Bool) :
+    ∃ w', World.step H w t = some w' ∧
+      Represents B (Minidregg.Compiler.DurableReceiverIO.afterCheckpoint (p.extend ready) stored) w' ∧
+      BaseHonest (Minidregg.Compiler.DurableReceiverIO.afterCheckpoint (p.extend ready) stored) := by
+  have derived' : Turn.ofIntent B H w intent = .ok t := (ofLoaded_eq B H rep intent).symm.trans derived
+  rcases execute_cases .complete p.snapshot intent with ⟨-, fresh, prepared, after⟩ | ⟨hi, -⟩
+  · obtain ⟨w', hs, hrep0⟩ := ofIntent_run B H rep derived' fresh prepared
+    have hnext : ready.next = DataSnapshot.install p.snapshot intent := by
+      rw [ready.executed] at after
+      exact after
+    have hrep : Represents B (p.extend ready) w' := by
+      unfold Represents
+      have hh : (p.extend ready).height = p.height + 1 := by
+        simp [Loaded.height, Loaded.extend, DurableReceiver.Image.append]
+      have hsnap : (p.extend ready).snapshot = ready.next := rfl
+      rw [hh, hsnap, hnext]
+      exact hrep0
+    refine ⟨w', hs, ?_, ?_⟩
+    · unfold Minidregg.Compiler.DurableReceiverIO.afterCheckpoint
+      split
+      · exact represents_rebaseD B (baseHonest_extend honest ready) hrep
+      · exact hrep
+    · unfold Minidregg.Compiler.DurableReceiverIO.afterCheckpoint
+      split
+      · exact baseHonest_rebaseD (baseHonest_extend honest ready)
+      · exact baseHonest_extend honest ready
+  · rw [ready.executed] at hi
+    simp [Installs] at hi
+
+/-- **The clock offset (G-CLOCK, narrowed).**  Under `Represents`, the
+deployed logical height every receiver pins (`NativeHost.logicalHeight`) is the
+genesis height plus the world's head height: the offset is one constant. -/
+theorem represents_logicalHeight (B : Bridge R D)
+    {p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes} {w : World R TransactionId D}
+    (rep : Represents B p w) (config : NativeHost.Config) :
+    ∃ h r, w.head = some (h, r) ∧ NativeHost.logicalHeight config p = config.genesisHeight + h := by
+  obtain ⟨r, hr⟩ := rep.head
+  exact ⟨p.height, r, hr, rfl⟩
+
 end Represent
 
 /-! ## 4. All 33 constructors: the admitted object is the intent -/
@@ -595,6 +1028,112 @@ theorem ofAdmission_run (B : Bridge R D) (H : History R TransactionId StableEven
   · rw [installs] at hi; cases hi
 
 end Admission
+
+/-! ## 5. The deployed bridge, the ROM births, and the traced rows (T3b) -/
+
+section Deployed
+
+open Minidregg.Kernel.DeployedBridge (bridge encodeCell)
+
+/-- **`Represents` over the real codecs.** -/
+abbrev DeployedRepresents (p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes)
+    (w : World deployedR TransactionId Theory.TypedAuthorization.Digest) : Prop :=
+  Represents bridge p w
+
+/-- Its cells field, instantiated: every deployed cell's bytes are the
+canonical lifecycle encoding of the world's cell. -/
+theorem deployedRepresents_cells {p : Loaded Minidregg.Compiler.ResourceBirthCodec.rootBytes}
+    {w : World deployedR TransactionId Theory.TypedAuthorization.Digest}
+    (rep : DeployedRepresents p w) (c : CellId) :
+    p.snapshot.canonicalBytes ⟨c⟩ = encodeCell (w.cells c) :=
+  (Minidregg.Kernel.DeployedBridge.deployed_cells_iff (fun c => p.snapshot.canonicalBytes ⟨c⟩)
+    (fun c => w.cells c)).mp rep.cells c
+
+/-- **The derived turn of a deployed source birth carries the record**: if an
+intent writes an absent cell with the canonical bytes of a policy-source cell
+(as install's `successorCreate` and every initial-policy birth do), the turn
+`ofIntent` derives over the deployed bridge creates that cell born with the
+record.  Together with `Delta.create_patchOk` (a birth is never `notAPatch`)
+this is why install and the births are on no list. -/
+theorem ofIntent_policySource_birth {D' : Type} [DecidableEq D']
+    {B : Bridge deployedR D'} (hcodec : B.codec = bridge.codec)
+    {H : History deployedR TransactionId StableEvent D'} {w : World deployedR TransactionId D'}
+    {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes} {t : DTurn deployedR D'}
+    (h : Turn.ofIntent B H w intent = .ok t) {wr : DurableDataIntent.DataWrite}
+    (hw : wr ∈ intent.writes) (absent : w.cells wr.cellId.value = none)
+    {record : Minidregg.Compiler.CanonicalPolicyAdmission.PolicyRecord}
+    (post : wr.canonicalPostBytes = encodeCell (some (sourceCell record))) :
+    (wr.cellId.value, sourceCell record, none) ∈ t.creates := by
+  have d := ofCells_ok h
+  obtain ⟨δ, hδ, -, md⟩ := delta_of_write d hw
+  have spec := deltaOf_spec hδ
+  have dec : B.codec.decode wr.canonicalPostBytes = some (some (sourceCell record)) := by
+    rw [hcodec, post]
+    exact Minidregg.Kernel.DeployedBridge.bridge_decode_total_on_registry _
+  rw [d.eq]
+  cases δ with
+  | absent => rw [spec.2] at dec; cases dec
+  | change k s s' => exact absurd (spec.1.symm.trans absent) (Option.some_ne_none _)
+  | create k s' =>
+      rw [spec.2] at dec
+      have e := Option.some.inj (Option.some.inj dec)
+      have hk : k = .policySource := (Cell.mk.inj e).1
+      subst hk
+      have hs := eq_of_heq (Cell.mk.inj e).2
+      subst hs
+      have rom : romPart (L := deployedR.layout .policySource)
+            (Minidregg.Compiler.PolicySourceCell.stateOfOption (some record)) =
+          Minidregg.Compiler.PolicySourceCell.stateOfOption (some record) :=
+        romPart_of_romOnly (Minidregg.Kernel.DeployedBridge.policySource_romOnly _)
+      exact mem_createsOf.mpr ⟨_, _, _, md,
+        Prod.ext rfl (Prod.ext (congrArg (Cell.mk (R := deployedR) .policySource) rom.symm) rfl)⟩
+
+/-! ### The three inferred rows, traced (T3 §2: 13, 14, 16)
+
+Each of `applicationShareIssue`, `applicationGrainShareIssue`,
+`applicationAgentLifetimeGrantIssue` admits a nested birth whose descriptor is
+pinned to the source's `expectedDescriptor` (`sourceDescriptor`), and that
+descriptor carries exactly one initial policy: the ticket / grant policy
+record.  So every accepted intent of the three creates one policy-source cell
+(through `PreparedBirth.initial_source_write`) -- a ROM birth, a turn since
+T3b. -/
+
+theorem shareIssue_birth_has_one_initial_policy {F : Type} [Field F] [DecidableEq F]
+    {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config}
+    {pins : Minidregg.Theory.ResourceBirth.FactoryPins}
+    {durable : ResourceBirthController.Concrete.Durable}
+    {height : Minidregg.Theory.TypedAuthorization.Height}
+    {ingress : ApplicationShareIssueSource.Ingress}
+    (accepted : ApplicationShareIssueAdmission.Accepted profile config pins durable height ingress) :
+    accepted.birth.descriptor.initialPolicies.length = 1 := by
+  rw [accepted.sourceDescriptor]
+  rfl
+
+theorem grainShareIssue_birth_has_one_initial_policy {F : Type} [Field F] [DecidableEq F]
+    {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config}
+    {pins : Minidregg.Theory.ResourceBirth.FactoryPins}
+    {durable : ResourceBirthController.Concrete.Durable}
+    {ambient : DeclaredResourceController.Ambient}
+    {ingress : ApplicationShareIssueGrainSource.Ingress}
+    (accepted : ApplicationShareIssueGrainAdmission.Accepted profile config pins durable ambient
+      ingress) :
+    accepted.decoded.source.birth.initialPolicies.length = 1 := by
+  rw [accepted.sourceDescriptor]
+  rfl
+
+theorem lifetimeGrantIssue_birth_has_one_initial_policy {F : Type} [Field F] [DecidableEq F]
+    {profile : Minidregg.Compiler.CanonicalRuntimeProfile.Profile F} {config : NativeHost.Config}
+    {pins : Minidregg.Theory.ResourceBirth.FactoryPins}
+    {durable : ResourceBirthController.Concrete.Durable}
+    {height : Minidregg.Theory.TypedAuthorization.Height}
+    {ingress : ApplicationAgentLifetimeGrantSource.Ingress}
+    (accepted : ApplicationAgentLifetimeGrantAdmission.Accepted profile config pins durable height
+      ingress) :
+    accepted.birth.descriptor.initialPolicies.length = 1 := by
+  rw [accepted.sourceDescriptor]
+  rfl
+
+end Deployed
 
 /-! ## 5. Poles on a toy registry, in the real pipeline -/
 
@@ -655,6 +1194,7 @@ def toyH : History toyR TransactionId StableEvent Nat where
   chain := fun _ _ => 0
   logRoot0 := 0
   legBytes := fun _ => 0
+  imageBytes := fun _ => 0
 
 /-- Cell 0 holds `log = 1, heap = 5`. -/
 def w0 : World toyR TransactionId Nat :=
@@ -764,15 +1304,50 @@ theorem toy_refined :
         exact ⟨t, w', rfl, hs, hr⟩
   · rw [installs] at hi; cases hi
 
+/-- **Rebase, satisfiable**: the checkpoint state that keeps cell 0's bytes
+re-materializes a snapshot that still represents `w0`. -/
+theorem toy_rebase_keeping_cell_represents :
+    SnapRepresents toyB (DurableCheckpoint.State.snapshot toyRoot ⟨[], [(⟨0⟩, [1, 5])], [], 0⟩ [])
+      0 w0 := by
+  rw [show (⟨[], [(⟨0⟩, [1, 5])], [], 0⟩ : DurableCheckpoint.State) =
+    DurableCheckpoint.State.ofSeed ⟨[], [(⟨0⟩, [1, 5])], 0⟩ from rfl,
+    DurableCheckpoint.ofSeed_snapshot]
+  exact toy_represents
+
+/-- **Rebase, refuted**: the checkpoint state that drops cell 0 does not. -/
+theorem toy_rebase_dropping_cell_breaks :
+    ¬ SnapRepresents toyB (DurableCheckpoint.State.snapshot toyRoot ⟨[], [], [], 0⟩ []) 0 w0 :=
+  rebase_dropping_cell_breaks toyB _ [] (c := 0) (by simp) rfl
+    (by rw [show w0.cells 0 = some (toyCell 1 5) from cells_update_self _ _ _]; simp)
+
 end Example
 
 /-! ## Axiom pins -/
 
-#assert_axioms storeAt_zero
 #assert_axioms step_cell_cases
 #assert_axioms appendOnly_rewrite_has_no_turn
-#assert_axioms rom_image_has_no_turn
-#assert_axioms policy_source_birth_has_no_turn
+#assert_axioms birth_rom_image
+#assert_axioms birth_needs_create
+#assert_axioms policy_source_birth_is_turn
+#assert_axioms policy_source_rewrite_has_no_turn
+#assert_axioms replay_model
+#assert_axioms resume_model
+#assert_axioms consumed_of_honest
+#assert_axioms lookup_map_self
+#assert_axioms rebase_agrees
+#assert_axioms represents_rebaseD
+#assert_axioms baseHonest_rebaseD
+#assert_axioms baseHonest_extend
+#assert_axioms rebase_dropping_cell_breaks
+#assert_axioms confirmed_represents
+#assert_axioms represents_logicalHeight
+#assert_axioms deployedRepresents_cells
+#assert_axioms ofIntent_policySource_birth
+#assert_axioms shareIssue_birth_has_one_initial_policy
+#assert_axioms grainShareIssue_birth_has_one_initial_policy
+#assert_axioms lifetimeGrantIssue_birth_has_one_initial_policy
+#assert_axioms Example.toy_rebase_keeping_cell_represents
+#assert_axioms Example.toy_rebase_dropping_cell_breaks
 #assert_axioms cellsOf_eq
 #assert_axioms ofLoaded_eq
 #assert_axioms execute_cases
@@ -802,10 +1377,18 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms ofAdmission_run
 /-- info: 'Minidregg.Kernel.HostRefinesWorld.appendOnly_rewrite_has_no_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms appendOnly_rewrite_has_no_turn
-/-- info: 'Minidregg.Kernel.HostRefinesWorld.rom_image_has_no_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms rom_image_has_no_turn
-/-- info: 'Minidregg.Kernel.HostRefinesWorld.policy_source_birth_has_no_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms policy_source_birth_has_no_turn
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.birth_rom_image' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms birth_rom_image
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.policy_source_birth_is_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms policy_source_birth_is_turn
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.policy_source_rewrite_has_no_turn' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms policy_source_rewrite_has_no_turn
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.represents_rebaseD' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms represents_rebaseD
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.confirmed_represents' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms confirmed_represents
+/-- info: 'Minidregg.Kernel.HostRefinesWorld.Example.toy_rebase_dropping_cell_breaks' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Example.toy_rebase_dropping_cell_breaks
 /-- info: 'Minidregg.Kernel.HostRefinesWorld.Example.toy_rewrite_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Example.toy_rewrite_refused
 /-- info: 'Minidregg.Kernel.HostRefinesWorld.Example.toy_refined' depends on axioms: [propext, Classical.choice, Quot.sound] -/

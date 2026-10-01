@@ -56,6 +56,7 @@ def benchH : History benchR Nat Unit UInt64 where
   logRoot0 := 0
   -- The bench measures the fold, not the meter: no leg is charged storage.
   legBytes := fun _ => 0
+  imageBytes := fun _ => 0
 
 def benchGenesis : BenchWorld := genesis benchH 0
 
@@ -68,7 +69,7 @@ def readOp (k v : Nat) : Op benchLayout := .read () k (some v)
 /-- Turn `i` of the log. -/
 def benchTurn (i : Nat) : BenchTurn :=
   if i < cells then
-    { txId := i + 1, creates := [(i, (), none)], legs := [⟨i, (), [allocOp 0 0]⟩], retires := [],
+    { txId := i + 1, creates := [(i, ⟨(), 0⟩, none)], legs := [⟨i, (), [allocOp 0 0]⟩], retires := [],
       event := () }
   else
     let c := i % cells
