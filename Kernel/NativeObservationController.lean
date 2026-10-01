@@ -808,7 +808,11 @@ def sinceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/SINCE-VIEW/v1".toUTF8.toLi
 def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
   NativeHostCodec.framed sinceViewFrame (StreamCodec.list sinceEntryStream)
 
-def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList
+/-- v2 (DOCUVERSE-ON-FINAL): `(height, root, narrowed bytes)`. K-FIELDS gave the
+view a root and narrowed its bytes on final while the K-INDEX line kept
+`(height, bytes)` under the same `v1` name: two shapes, one frame. A v1 view
+refuses (`v1_at_view_refused`). -/
+def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v2".toUTF8.toList
 
 /-- `(height, root, lifecycle bytes)`: the cell's root at that height (none
 when it was not live) and its lifecycle bytes, a live cell narrowed to the
@@ -817,6 +821,20 @@ restricted to some fields learns no other field of the cell's past either. -/
 def atViewCodec : IndexedProgram.LawfulCodec (Nat × Option Digest × List UInt8) :=
   NativeHostCodec.framed atViewFrame
     (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option digestStream) bytesStream))
+
+/-- A v1 at-height view (either line's shape) refuses to decode. -/
+theorem v1_at_view_refused (payload : List UInt8) :
+    atViewCodec.decode ("DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList ++ payload) = none := by
+  have len : ("DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList).length = atViewFrame.length := by
+    decide +kernel
+  have ne : "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList ≠ atViewFrame := by
+    decide +kernel
+  simp only [atViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
+    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
+  rfl
+
+/-- info: 'Minidregg.Kernel.NativeObservationController.v1_at_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v1_at_view_refused
 
 /-- The at-height view of stored lifecycle bytes under `fields`. -/
 def atView (fields : Option (Finset CellField)) (bytes : List UInt8) : Option Digest × List UInt8 :=

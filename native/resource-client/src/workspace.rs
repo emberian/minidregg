@@ -3134,6 +3134,22 @@ pub(crate) fn create(
     complete_birth(root, name_value, &source, &receipt, &reservation, program_cell).map(|_| ())
 }
 
+/// `doc-new`: a content cell and its document in one verb: the birth, then
+/// `createDocument` (an empty root container). Without the document a cell
+/// holds atoms in no tree: an appended line would stand in no order and `doc
+/// show` would print nothing (K-ELEMENT-TREE `appendLeaf`).
+fn doc_new(root: &Path, workspace: &Value, name: &str, predicate_path: &Path, room: Option<&str>) -> Result<()> {
+    create(root, workspace, name, "content", predicate_path, room, "object", None, None)?;
+    let element = random_nonce()?;
+    submit_content(
+        root,
+        workspace,
+        name,
+        vec![json!({"type":"createDocument","rootElement":element,"schema":"0"})],
+        "document",
+    )
+}
+
 /// A declared account the sponsor births for another admitted subject, funded
 /// from the context fee payer (the shape `provision` uses). The owner holds
 /// both root grants, so this workspace retains only a hint-only handoff record
@@ -4369,6 +4385,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let diff = doc_diff(&root, &workspace, &name, &from, &to)?;
             print_changes(format, &diff, crate::render::history::diff_text, crate::render::history::diff_html)
         }
+        "doc-new" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let predicate = path(args.required("predicate")?);
+            let room = args.optional("in").map(|value| os_string(value, "room name")).transpose()?;
+            args.finish()?;
+            doc_new(&root, &workspace, &name, &predicate, room.as_deref())
+        }
         "doc-range" => {
             let name = os_string(args.required("name")?, "document name")?;
             let from = line_number(args.required("from")?, "--from")?;
@@ -4390,7 +4413,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             doc_push(&root, &workspace, &name, &file, &proposal_id, &attempt)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-range, doc-pull or doc-push".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-new, doc-range, doc-pull or doc-push".into(),
         ),
     }
 }

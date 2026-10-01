@@ -48,6 +48,7 @@ printf 'n\tstep\twho\tline\texpect\trc\tverdict\tnote\n' >"$TABLE"
 : >"$TRANSCRIPT"
 N=0; FAILED=0; FIRST_FAIL=""
 WEB_PID=""
+TRACE=0   # the transcript starts after the friends' setup
 trap '[ -n "$WEB_PID" ] && kill "$WEB_PID" 2>/dev/null' EXIT
 
 ws_of() { if [ "$1" = sponsor ]; then echo "$SPONSOR_WS"; else echo "$WS/$1"; fi; }
@@ -63,9 +64,10 @@ say() {
     --workspace "$(ws_of "$who")" --home "$H/$who" --line "$line" <"$input" >"$L/$stem.out" 2>"$L/$stem.err"
   RC=$?
   OUT=$L/$stem.out; ERR=$L/$stem.err
+  [ "$TRACE" = 1 ] || return 0
   {
     printf '%s> %s\n' "$who" "$line"
-    sed 's/^/  /' "$OUT"
+    head -40 "$OUT" | sed 's/^/  /' 
     grep -E '^(refused|undecided|error|usage): |^workspace (range|transclusion|line|mark)' "$ERR" | sed 's/^/  ! /' | head -3
   } >>"$TRANSCRIPT"
 }
@@ -155,6 +157,7 @@ for f in amy ben cal rhea; do
   ok setup "$f" "init mini.key ${SUBJ[$f]}"
 done
 B=${SUBJ[ben]}
+TRACE=1
 
 # ------------------------------------------------ two documents, four grants
 ok J22 amy "doc new paper"
@@ -167,11 +170,11 @@ grant J19 amy g-cal paper cal observe paper
 for part in read annotate; do
   case $part in
     read) jq -n --arg r "${SUBJ[rhea]}" '{type:"minidregg-workspace-proposal-v1",action:"delegate",
-            name:"paper",recipient:$r,verbs:["observe"],maxCost:"50000"}' >"$H/amy/requests/g-rhea-read.json" ;;
+            name:"paper",recipient:$r,verbs:["observe"],maxCost:"50000"}' >"$H/amy/requests/rhea-read.json" ;;
     annotate) jq -n --arg r "${SUBJ[rhea]}" '{type:"minidregg-workspace-proposal-v1",action:"delegate",
-            name:"paper",recipient:$r,verbs:["mutate"],maxCost:"50000",fields:["annotations"]}' >"$H/amy/requests/g-rhea-annotate.json" ;;
+            name:"paper",recipient:$r,verbs:["observe","mutate"],maxCost:"50000",fields:["annotations"]}' >"$H/amy/requests/rhea-annotate.json" ;;
   esac
-  ok J22 amy "propose g-rhea-$part @g-rhea-$part.json"
+  ok J22 amy "propose g-rhea-$part @rhea-$part.json"
   ok J22 amy "submit g-rhea-$part"
   ok J22 amy "publish g-rhea-$part"
 done
