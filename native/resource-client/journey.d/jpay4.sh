@@ -371,9 +371,17 @@ while time.time() < deadline and proc.poll() is None:
              if n.startswith("pay-report-1100-")
              and os.path.exists(os.path.join(OBS, "attempts", n, "submit-marker.json"))]
     if marks:
-        # half a second after the marker: the frame is sent and the client waits on the Host
-        time.sleep(0.5)
-        os.killpg(proc.pid, signal.SIGKILL); killed_at = marks[0]; break
+        # Freeze the service first, then give the client half a second to connect and send its
+        # frame into the socket buffer, then kill it: the frame is sent and no outcome can come
+        # back. A timing-only kill raced a fast Host (BRAID-HOST, 10-01: the submit answered
+        # inside the half second, the outcome landed, and there was no lost submit to settle).
+        os.killpg(server.pid, signal.SIGSTOP)
+        try:
+            time.sleep(0.5)
+            os.killpg(proc.pid, signal.SIGKILL); killed_at = marks[0]
+        finally:
+            os.killpg(server.pid, signal.SIGCONT)
+        break
     time.sleep(0.02)
 proc.wait()
 obs_e = json.load(open(os.path.join(STATE, "tick", "observations.json")))["observations"]
