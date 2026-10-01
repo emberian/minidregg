@@ -158,7 +158,7 @@ address = lambda i: hashlib.sha256(f"jpay2 fixture deposit address {i}".encode()
 tariff = lambda version: {"version": str(version), "asset": "0", "mint": "07" * 32,
                           "tokenProgram": "09" * 32, "decimals": "6", "creditPerAtomic": "1",
                           "maxPerObservation": "10000000000", "minTickSlots": "1500",
-                          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000"}
+                          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}
 nonce = [100]
 def book_command(v, book, start, t):
     nonce[0] += 1

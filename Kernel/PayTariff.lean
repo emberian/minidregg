@@ -20,7 +20,13 @@ Version 2 (`DREGG/PAY/TARIFF/v2`, PAY §11) adds self-enrollment:
 `168 · nodeHourRate`), `enrolIndex` (the book index whose observations go to
 the enrollment receiver; `none` = self-enrollment off) and `journalFloor`
 (atomic units below which an enrollment-index transfer is not admitted at
-all, so dust cannot buy a journal row).  A v1 tariff's bytes refuse to decode.  The genesis
+all, so dust cannot buy a journal row).  A v1 tariff's bytes refuse to decode.
+
+Version 3 (`DREGG/PAY/TARIFF/v3`, COMPUTE §9 D4, lane C3 K-JOB-MONEY) adds the
+job market's slash split: `slashCallerPermille`, the share of a slashed bond
+minted back to the caller, in thousandths; the rest of the bond is never
+re-minted and stays in the well.  Valid only at most 1000.  The default is
+500 (half to the caller, half burned).  A v2 tariff's bytes refuse to decode.  The genesis
 default (`genesisDefault`) is deliberately invalid until the operator sets a
 tariff; while it is invalid, no deposit index is assigned
 (`PayAssignmentReceiver.assignment_requires_valid_tariff`).
@@ -72,12 +78,16 @@ structure Tariff where
   enrolIndex : Option Nat
   /-- Enrollment-index transfers below this many atomic units are refused. -/
   journalFloor : Nat
+  /-- Thousandths of a slashed job bond minted to the caller (COMPUTE §9 D4);
+  the remainder is never minted and stays in the well. -/
+  slashCallerPermille : Nat
   deriving DecidableEq, Repr
 
 def Tariff.valid (t : Tariff) : Prop :=
   0 < t.version ∧ t.mint.length = 32 ∧ t.tokenProgram.length = 32 ∧
     t.mint ≠ zeroKey ∧ t.tokenProgram ≠ zeroKey ∧
-    0 < t.creditPerAtomic ∧ 0 < t.maxPerObservation ∧ 0 < t.nodeHourRate
+    0 < t.creditPerAtomic ∧ 0 < t.maxPerObservation ∧ 0 < t.nodeHourRate ∧
+    t.slashCallerPermille ≤ 1000
 
 instance (t : Tariff) : Decidable t.valid := by
   unfold Tariff.valid
@@ -110,7 +120,7 @@ theorem creditFor_under_cap (t : Tariff) (amount : Nat) (under : amount ≤ t.ma
 /-- One node week, in credit: `168 · nodeHourRate`. -/
 def Tariff.weekCredit (t : Tariff) : Nat := 168 * t.nodeHourRate
 
-/-! ## Codec `DREGG/PAY/TARIFF/v2` -/
+/-! ## Codec `DREGG/PAY/TARIFF/v3` -/
 
 def tariffStream : StreamCodec Tariff :=
   StreamCodec.xmap
@@ -124,11 +134,12 @@ def tariffStream : StreamCodec Tariff :=
                   (StreamCodec.product StreamCodec.nat
                     (StreamCodec.product StreamCodec.nat
                       (StreamCodec.product (StreamCodec.option StreamCodec.nat)
-                        StreamCodec.nat))))))))))
+                        (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))))))
     (fun t => (t.version, t.asset, t.mint, t.tokenProgram, t.decimals, t.creditPerAtomic,
-      t.maxPerObservation, t.minTickSlots, t.nodeHourRate, t.enrolIndex, t.journalFloor))
-    (fun (version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor) =>
-      ⟨version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor⟩)
+      t.maxPerObservation, t.minTickSlots, t.nodeHourRate, t.enrolIndex, t.journalFloor,
+      t.slashCallerPermille))
+    (fun (version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash) =>
+      ⟨version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor, slash⟩)
     (by intro t; cases t; rfl)
 
 /-- A frame-prefixed codec that refuses every non-canonical byte string. -/
@@ -150,7 +161,7 @@ theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec 
     (framed frame stream).encode value = bytes :=
   Minidregg.Compiler.ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) accepted
 
-def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v2".toUTF8.toList
+def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v3".toUTF8.toList
 
 def tariffCodec : LawfulCodec Tariff := framed tariffFrame tariffStream
 
@@ -165,7 +176,8 @@ theorem tariff_canonical {bytes : List UInt8} {t : Tariff}
 
 /-- Installed at genesis: asset 0, 6 decimals, rate 1, cap 10⁴ tokens,
 heartbeat 1500 slots, node rate 5 952 380 credit/hour (PAY §11.8),
-self-enrollment off, journal floor 1 token, and a zeroed mint and program.
+self-enrollment off, journal floor 1 token, a slashed bond split half to the
+caller, and a zeroed mint and program.
 Invalid until the operator sets the real token (`genesisDefault_invalid`). -/
 def genesisDefault : Tariff where
   version := 0
@@ -179,6 +191,7 @@ def genesisDefault : Tariff where
   nodeHourRate := 5952380
   enrolIndex := none
   journalFloor := 1000000
+  slashCallerPermille := 500
 
 theorem genesisDefault_invalid : ¬ genesisDefault.valid := by decide
 
@@ -186,7 +199,7 @@ theorem genesisDefault_invalid : ¬ genesisDefault.valid := by decide
 probes and the concrete theorem poles set.  Self-enrollment is off. -/
 def exampleTariff : Tariff :=
   ⟨1, 0, List.replicate 32 7, List.replicate 32 9, 6, 1, 10000000000, 1500, 5952380, none,
-    1000000⟩
+    1000000, 500⟩
 
 /-- Refuting pole of the node rate: a tariff with a zero node rate is invalid. -/
 theorem zero_node_rate_invalid : ¬ { exampleTariff with nodeHourRate := 0 }.valid := by decide
@@ -194,6 +207,10 @@ theorem zero_node_rate_invalid : ¬ { exampleTariff with nodeHourRate := 0 }.val
 /-- A tariff with a named (non-zero) mint and program is valid: the
 satisfiable pole of `Tariff.valid`. -/
 theorem named_tariff_valid : exampleTariff.valid := by decide
+
+/-- Refuting pole of the slash split: more than the whole bond to the caller is invalid. -/
+theorem slash_split_over_whole_invalid :
+    ¬ { exampleTariff with slashCallerPermille := 1001 }.valid := by decide
 
 #assert_axioms creditFor_le_cap
 #assert_axioms creditFor_pos
@@ -204,5 +221,6 @@ theorem named_tariff_valid : exampleTariff.valid := by decide
 #assert_axioms genesisDefault_invalid
 #assert_axioms named_tariff_valid
 #assert_axioms zero_node_rate_invalid
+#assert_axioms slash_split_over_whole_invalid
 
 end Minidregg.Kernel.PayTariff

@@ -25,11 +25,11 @@ refill requires a valid tariff.  The payer must hold the owner grant on `A`
 not be the issuer well (`payerIsIssuer`): a burn from the well to itself moves
 no value and would fund the purse from nothing.
 
-`purse_never_mints` and `ledger_identity` are the audit statements: along a
-log of accepted observation reports and refills, `−well` moves by exactly the
-credits minted minus the credits burned into purses, and along any purse
-history of generic transitions and accepted refills, the purse's allowance
-never exceeds its start plus the sum of the burns that funded it.
+`purse_never_mints` is the purse's audit statement: along any purse history
+of generic transitions and accepted refills, the purse's allowance never
+exceeds its start plus the sum of the burns that funded it.  The Book's side,
+`−well` moving by exactly the credits minted minus the credits burned (into
+purses and into jobs) plus the jobs' payouts, is `PayLedger.ledger_identity`.
 -/
 import Kernel.AgentGrain
 import Kernel.PayAssignmentReceiver
@@ -305,77 +305,6 @@ theorem refill_requires_balance {tariff : Option Tariff}
 
 /-! ## The audit statements -/
 
-/-- One accepted posting to the Book of the pay line: an observation report
-(P3) or a refill (this lane). -/
-inductive Entry where
-  | observe (plan : PayObservation.Plan)
-  | refill (plan : Plan)
-
-def Entry.batch : Entry → Batch
-  | .observe plan => plan.batch
-  | .refill plan => plan.batch
-
-/-- A log of accepted postings, each decided at the Book the previous ones produced. -/
-inductive LedgerLog : Book → List Entry → Book → Prop
-  | nil (book : Book) : LedgerLog book [] book
-  | observe {book final : Book} {plan : PayObservation.Plan} {rest : List Entry}
-      (decided : ∃ store tip observations,
-        PayObservation.decideObservations store book tip observations = .ok plan)
-      (tail : LedgerLog (plan.batch.apply book) rest final) :
-      LedgerLog book (.observe plan :: rest) final
-  | refill {book final : Book} {plan : Plan} {rest : List Entry}
-      (decided : ∃ tariff stored subject purse account amount gain,
-        decideRefill tariff stored subject book purse account amount gain = .ok plan)
-      (tail : LedgerLog (plan.batch.apply book) rest final) :
-      LedgerLog book (.refill plan :: rest) final
-
-/-- Σ credited in `asset` by the log's observation reports. -/
-def creditedIn (asset : AssetId) : List Entry → Int
-  | [] => 0
-  | .observe plan :: rest =>
-      (if plan.tariff.asset = asset then PayObservationProofs.creditSum plan.credits else 0) +
-        creditedIn asset rest
-  | .refill _ :: rest => creditedIn asset rest
-
-/-- Σ burned in `asset` by the log's refills. -/
-def refilledIn (asset : AssetId) : List Entry → Int
-  | [] => 0
-  | .observe _ :: rest => refilledIn asset rest
-  | .refill plan :: rest =>
-      (if plan.asset = asset then Int.ofNat plan.amount else 0) + refilledIn asset rest
-
-/-- **The ledger identity** (extends P3's `well_tracks_observed`): along any
-log of accepted reports and refills, `−well_h = −well_0 + Σ credited − Σ burned
-into purses`.  Every credit in circulation came from an observed payment, and
-every credit a purse received left circulation into the well. -/
-theorem ledger_identity {initial final : Book} {log : List Entry}
-    (accepted : LedgerLog initial log final) (asset : AssetId) :
-    -(final.balance asset asset) =
-      -(initial.balance asset asset) + creditedIn asset log - refilledIn asset log := by
-  induction accepted with
-  | nil book => simp [creditedIn, refilledIn]
-  | observe decided tail induction =>
-      rename_i book final plan rest
-      obtain ⟨store, tip, observations, decision⟩ := decided
-      rw [induction, PayObservationProofs.Plan.batch_apply,
-        PayObservationProofs.mints_well_balance plan.tariff.asset asset book plan.credits
-          (PayObservationProofs.decided_payers decision)]
-      by_cases same : plan.tariff.asset = asset
-      · simp [creditedIn, refilledIn, same]; ring
-      · simp [creditedIn, refilledIn, same]
-  | refill decided tail induction =>
-      rename_i book final plan rest
-      obtain ⟨tariff, stored, subject, purse, account, amount, gain, decision⟩ := decided
-      obtain ⟨_, _, issuer, _, _, acct, _, _, _, _⟩ := decideRefill_ok decision
-      subst acct
-      rw [induction]
-      by_cases same : plan.asset = asset
-      · subst same
-        rw [burn_well plan book issuer]
-        simp [creditedIn, refilledIn]; ring
-      · rw [burn_other_well plan book asset same]
-        simp [creditedIn, refilledIn, same]
-
 /-- One purse's history: generic transitions (the installed `transitionPolicy`,
 which the generic receiver evaluates) and accepted refills, each refill
 recording the burn that funded it. -/
@@ -461,7 +390,6 @@ theorem fixture_genesis_tariff_refused :
 #assert_axioms refill_conserves
 #assert_axioms refill_requires_owner
 #assert_axioms refill_requires_balance
-#assert_axioms ledger_identity
 #assert_axioms purse_never_mints
 #assert_axioms fixture_refill_accepted
 #assert_axioms fixture_overclaim_unbalanced

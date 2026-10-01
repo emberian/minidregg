@@ -36,7 +36,7 @@ from `bookAt`.
 
 Wire: the store codec with layout name `DREGG/PAY/CELL/v2` (its frame commits
 to the name and every namespace's codec identifier); the tariff value is
-`DREGG/PAY/TARIFF/v2`.  A v1 cell refuses to decode.
+`DREGG/PAY/TARIFF/v3`.  A v2 cell refuses to decode.
 -/
 import Compiler.StoreCodec
 import Kernel.PayTariff
@@ -318,7 +318,7 @@ def wire : Wire layout where
     | .sshIndex => "ssh-ed25519-blob/bytes"
     | .journal => "soltx-nullifier/bytes"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v2"
+    | .tariff => "DREGG/PAY/TARIFF/v3"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
     | .clock => "DREGG/PAY/CLOCK/v1"

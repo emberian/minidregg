@@ -45,6 +45,7 @@ import Kernel.PayAssignmentReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
 import Kernel.PurseRefillReceiver
+import Kernel.JobMoneyReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -746,6 +747,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : PurseRefillReceiver.AcceptedRefill config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (PurseRefillReceiver.intent accepted)
+  | jobMoney {ingress : JobMoneyReceiver.DecodedIngress}
+      (accepted : JobMoneyReceiver.AcceptedMoney config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (JobMoneyReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1580,6 +1585,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨PurseRefillReceiver.intent accepted,
           .payRefill accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := JobMoneyReceiver.decodeIngress bytes then
+    match ← JobMoneyReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"job money refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨JobMoneyReceiver.intent accepted,
+          .jobMoney accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
