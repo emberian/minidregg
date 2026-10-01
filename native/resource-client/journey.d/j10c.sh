@@ -30,13 +30,13 @@
 #             reads stand.
 #
 # Hook contract: journey.sh (executed). Exported: MINI HOST CONFIG SOCKET
-# SHELL_BIN SPONSOR_WS NEWCOMER_WS NEWCOMER_SUBJECT JOURNEY_WORLD
+# SHELL_BIN SPONSOR_WS SPONSOR_SUBJECT NEWCOMER_WS NEWCOMER_SUBJECT JOURNEY_WORLD
 # JOURNEY_STEP_DIR. Last stdout line: the row table. Last stderr line: the
 # detail. Exit 0 only when every row is ok.
 set -u
 umask 077
 : "${JOURNEY_STEP_DIR:?}" "${SHELL_BIN:?}" "${MINI:?}" "${HOST:?}" "${CONFIG:?}" "${SOCKET:?}" \
-  "${SPONSOR_WS:?}" "${NEWCOMER_WS:?}" "${NEWCOMER_SUBJECT:?}" "${JOURNEY_WORLD:?}"
+  "${SPONSOR_WS:?}" "${SPONSOR_SUBJECT:?}" "${NEWCOMER_WS:?}" "${NEWCOMER_SUBJECT:?}" "${JOURNEY_WORLD:?}"
 SD=$JOURNEY_STEP_DIR
 W=$JOURNEY_WORLD
 H=$SD/h; WS=$SD/w; L=$SD/log
@@ -248,9 +248,10 @@ handoff redeleg alice i-nc
 printf '%s\n' "$REF" >"$SD/nc-ref.json"
 operator redeleg "the newcomer imports its invite" \
   "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name lab3c --from-ref "$SD/nc-ref.json"
-jq -n --arg d "$D" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"lab3c",
-  recipient:$d,verbs:["observe"],maxCost:"100",room:true}' >"$SD/nc-redeleg.json"
-raw redeleg newcomer "re-delegates its invite to dave (own namespace)" ok \
+# (to the sponsor: a grant to dave here would keep dave a member after bob's kick)
+jq -n --arg s "$SPONSOR_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"lab3c",
+  recipient:$s,verbs:["observe"],maxCost:"100",room:true}' >"$SD/nc-redeleg.json"
+raw redeleg newcomer "re-delegates its invite to the sponsor (own namespace)" ok \
   "$MINI" workspace --action propose --dir "$NEWCOMER_WS" --request "$SD/nc-redeleg.json" --proposal-id k10c-nc
 raw redeleg newcomer "submits the re-delegation" ok \
   "$MINI" workspace --action submit --dir "$NEWCOMER_WS" \
