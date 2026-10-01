@@ -51,8 +51,11 @@ The atoms transcribe the SHAPE of breadstuffs' `StateConstraint`/`SimpleConstrai
 
 ## Boundary
 
-Core Lean only (Init) — trivially within the Pred boundary {Mathlib, Theory, Pred}.
+Core Lean (Init) plus `Pred.HashEqDigest`, whose one import is the leaf cSHAKE256 module
+`Compiler.Sp800185Cshake256Core` (Init + `Mathlib.Data.Nat.Digits.Defs`, no candidate code): the
+`hashEq` atom evaluates a hash, and this is the kernel's one executable cSHAKE256.
 -/
+import Pred.HashEqDigest
 
 namespace Minidregg.Pred
 
@@ -75,6 +78,31 @@ deriving Repr, DecidableEq
 /-- Fail-closed read: the scalar at `k`, or `none` if absent (mirrors `Value.scalar`). -/
 def State.get (s : State) (k : Slot) : Option Int :=
   (s.slots.find? (fun p => p.1 == k)).map (·.2)
+
+/-! ### The `hashEq` opening — read from the new state, fail-closed.
+
+The context of a commitment is the cell the step is about. Every policy projection names it
+`request/target` (`CanonicalRuntimeProfile.requestSlots`), so the atom reads it there; the slot
+names it was given are the field half of the context. -/
+
+/-- The slot carrying the id of the cell a step is about. -/
+def hashEqCellSlot : Slot := "request/target"
+
+/-- The opening of `hashEq value blinder commit` on a state: `none` if the cell, the value or the
+blinder is absent, or the encoding's domain is exceeded. -/
+def hashEqOpening (s : State) (value blinder commit : Slot) : Option HashEqDigest.Opening :=
+  match s.get hashEqCellSlot, s.get value, s.get blinder with
+  | some cell, some x, some r =>
+      let o : HashEqDigest.Opening := ⟨cell, value, blinder, commit, x, r⟩
+      if o.Admissible then some o else none
+  | _, _, _ => none
+
+/-- The `hashEq` decision under a hash `H`: the opening exists, the commit slot is present, and it
+holds the opening's digest. The deployed atom is this at `HashEqDigest.deployed`. -/
+def hashEqHolds (H : HashEqDigest.Hash) (s : State) (value blinder commit : Slot) : Bool :=
+  match hashEqOpening s value blinder commit, s.get commit with
+  | some o, some c => decide (HashEqDigest.digestWith H o = c)
+  | _, _ => false
 
 /-! ## §2. The witnessed leaf's identifier — a code/key, NOT a function.
 
@@ -114,6 +142,10 @@ inductive Pred where
   /-- **The escape hatch** — a third-party-discharged claim named by the opaque code `vk`.
   First-party `eval` FAILS CLOSED; admission requires an explicit oracle via `evalWith`. -/
   | witnessed (vk : Vk)
+  /-- **Commit–reveal**: `new[commit]` is the cSHAKE256 digest of the opening
+  (`request/target`, the three slot names, `new[value]`, `new[blinder]`); see
+  `Pred.HashEqDigest`. Fails closed on any absent slot or out-of-domain value. -/
+  | hashEq    (value blinder commit : Slot)
   /-- Boolean negation. -/
   | not       (p : Pred)
   /-- Conjunction over the inlined child list (raw constructor; prefer `Pred.all`). -/
@@ -206,6 +238,7 @@ mutual
                         | some o, some n => decide (o ≤ n)
                         | _,      _      => false
     | .witnessed vk  => O vk old new
+    | .hashEq v b c  => hashEqHolds HashEqDigest.deployed new v b c
     | .not q         => !(evalWith O q old new)
     | .allL ps       => evalWithAll O ps old new
     | .anyL ps       => evalWithAny O ps old new

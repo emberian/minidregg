@@ -91,13 +91,17 @@ theorem worker_cannot_submit_input :
 #guard_msgs (whitespace := lax) in
 #print axioms worker_generation_exact
 
-/-- info: 'Minidregg.Kernel.AgentGrain.reservation_accepted' depends on axioms: [propext] -/
+-- The next three gained `Quot.sound` with `Pred.hashEq`: they mention `Pred.eval`, whose
+-- definition now reaches the Keccak-f[1600] lane operations (`Sp800185Cshake256Core.theta` and
+-- siblings are `[propext, Quot.sound]`). A definition's closure, not a proof step; no
+-- `Classical.choice` (`Pred.HashEqDigest.frame` keeps `Nat.digits` out of the evaluator).
+/-- info: 'Minidregg.Kernel.AgentGrain.reservation_accepted' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms reservation_accepted
-/-- info: 'Minidregg.Kernel.AgentGrain.overspend_refused' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.AgentGrain.overspend_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms overspend_refused
-/-- info: 'Minidregg.Kernel.AgentGrain.reconnect_before_reconcile_refused' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.AgentGrain.reconnect_before_reconcile_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
 #print axioms reconnect_before_reconcile_refused
 /-- info: 'Minidregg.Kernel.AgentGrain.hard_trip_invalidates_generation' depends on axioms: [propext, Classical.choice, Quot.sound] -/

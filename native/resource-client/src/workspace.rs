@@ -39,6 +39,22 @@ fn field_decimal(value: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
+/// A canonical signed decimal, as the Host's `int` reader accepts: no `+`, no leading zero, no
+/// `-0`. Field values are exact integers on the Store (`int/zigzag-base255`); a `hashEq` commit
+/// or blinder is a 256-bit integer, so the bound is the digit count of 2^256 plus slack, not i64.
+fn signed_decimal(value: &str, field: &str) -> Result<()> {
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    if digits.is_empty()
+        || digits.len() > 80
+        || (digits.len() > 1 && digits.starts_with('0'))
+        || (value.starts_with('-') && digits == "0")
+        || !digits.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(format!("{field} must be a canonical signed decimal"));
+    }
+    Ok(())
+}
+
 fn decimal_leq(left: &str, right: &str) -> bool {
     left.len() < right.len() || left.len() == right.len() && left <= right
 }
@@ -550,9 +566,7 @@ fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
             .ok_or("scalar key lacks field")?;
         decimal(field, "scalar field")?;
         let value = member(action, "value")?;
-        if value.parse::<i64>().is_err() {
-            return Err("scalar value must be a signed integer".into());
-        }
+        signed_decimal(value, "scalar value")?;
         let mut lowered_action = json!({"type":tag,
             "key":{"type":"object","resource":target,"field":field},"value":value});
         if tag == "write" {
@@ -562,8 +576,7 @@ fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
             if !expected.is_null()
                 && expected
                     .as_str()
-                    .and_then(|value| value.parse::<i64>().ok())
-                    .is_none()
+                    .map_or(true, |value| signed_decimal(value, "write expected").is_err())
             {
                 return Err("write expected must be null or signed integer".into());
             }
@@ -1560,6 +1573,33 @@ mod tests {
         assert!(content_actions(&json!([{"type":"link","link":"1","source":null,
             "target":{"type":"document","page":{"contentDomain":"9","pageNumber":"1","expectedRoot":"3"},"id":"2"},
             "relation":"0"}])).is_err());
+    }
+
+    #[test]
+    fn scalar_value_is_a_canonical_signed_decimal_of_any_width() {
+        let action = |value: &str| {
+            scalar_actions(
+                &json!([{"type":"create","key":{"type":"object","field":"2"},"value":value}]),
+                "123",
+            )
+        };
+        // A hashEq commitment: a 256-bit integer, past i64.
+        let commit = "14088966009597722056427368520402764894210252134876007857874900863984935149567";
+        assert_eq!(action(commit).unwrap()["actions"][0]["value"], commit);
+        assert!(action("-5").is_ok());
+        assert!(action("0").is_ok());
+        for bad in ["", "-", "+1", "01", "-0", "-01", "1.0", " 1", &"9".repeat(81)] {
+            assert!(action(bad).is_err(), "{bad:?} accepted");
+        }
+        let write = |expected: &str| {
+            scalar_actions(
+                &json!([{"type":"write","key":{"type":"object","field":"2"},
+                    "value":"1","expected":expected}]),
+                "123",
+            )
+        };
+        assert!(write(commit).is_ok());
+        assert!(write("01").is_err());
     }
 
     #[test]

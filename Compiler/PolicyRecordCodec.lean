@@ -52,10 +52,15 @@ inductive Token where
   | any
   | nil
   | cons
+  /-- Tag 15. Tags 11–14 are taken on sibling branches (`eqSlots`, `leSlots`, `leSlotsOff`,
+  `ran`); the integrator reconciles the numbering once. -/
+  | hashEq (value blinder commit : String)
   deriving DecidableEq, Repr
 
 def slotIntStream := StreamCodec.product stringStream IntStream.intStream
 def slotListStream := StreamCodec.product stringStream (StreamCodec.list IntStream.intStream)
+def slotTripleStream :=
+  StreamCodec.product stringStream (StreamCodec.product stringStream stringStream)
 
 def encodeToken : Token → List UInt8
   | .eq slot value => 0 :: slotIntStream.encode (slot, value)
@@ -69,6 +74,7 @@ def encodeToken : Token → List UInt8
   | .any => [8]
   | .nil => [9]
   | .cons => [10]
+  | .hashEq value blinder commit => 15 :: slotTripleStream.encode (value, (blinder, commit))
 
 def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 0 :: bytes => do
@@ -94,6 +100,9 @@ def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 8 :: suffix => some (.any, suffix)
   | 9 :: suffix => some (.nil, suffix)
   | 10 :: suffix => some (.cons, suffix)
+  | 15 :: bytes => do
+      let ((value, (blinder, commit)), suffix) ← slotTripleStream.decodePrefix bytes
+      some (.hashEq value blinder commit, suffix)
   | _ => none
 
 theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
@@ -115,6 +124,7 @@ def step : Token → Stack → Option Stack
   | .writeOnce slot, stack => some (.inl (.writeOnce slot) :: stack)
   | .monotone slot, stack => some (.inl (.monotone slot) :: stack)
   | .witnessed identifier, stack => some (.inl (.witnessed ⟨identifier⟩) :: stack)
+  | .hashEq value blinder commit, stack => some (.inl (.hashEq value blinder commit) :: stack)
   | .not, .inl predicate :: stack => some (.inl (.not predicate) :: stack)
   | .all, .inr predicates :: stack => some (.inl (.allL predicates) :: stack)
   | .any, .inr predicates :: stack => some (.inl (.anyL predicates) :: stack)
@@ -138,6 +148,7 @@ def tokensInto : Pred → List Token → List Token
   | .writeOnce slot, suffix => .writeOnce slot :: suffix
   | .monotone slot, suffix => .monotone slot :: suffix
   | .witnessed vk, suffix => .witnessed vk.id :: suffix
+  | .hashEq value blinder commit, suffix => .hashEq value blinder commit :: suffix
   | .not predicate, suffix => tokensInto predicate (.not :: suffix)
   | .allL predicates, suffix => listTokensInto predicates (.all :: suffix)
   | .anyL predicates, suffix => listTokensInto predicates (.any :: suffix)
@@ -159,6 +170,7 @@ theorem runTokens_tokensInto (predicate : Pred) (suffix : List Token) (stack : S
   | writeOnce slot => rfl
   | monotone slot => rfl
   | witnessed vk => cases vk; rfl
+  | hashEq value blinder commit => rfl
   | not predicate =>
       rw [tokensInto, runTokens_tokensInto]
       rfl
@@ -296,6 +308,22 @@ theorem rejects_trailing (record : PolicyRecord) (suffix : List UInt8)
 theorem unknown_token_rejected (suffix : List UInt8) :
     decodeToken (255 :: suffix) = none := rfl
 
+/-- `hashEq` is tag 15 with a (string, string, string) payload. -/
+theorem hashEq_tag (value blinder commit : String) :
+    (encodeToken (.hashEq value blinder commit)).head? = some 15 := rfl
+
+theorem hashEq_token_round_trip (value blinder commit : String) (suffix : List UInt8) :
+    decodeToken (encodeToken (.hashEq value blinder commit) ++ suffix) =
+      some (.hashEq value blinder commit, suffix) :=
+  decodeToken_encode _ _
+
+/-- On this branch tags 11–14 and 16 decode to nothing: a record carrying a sibling branch's atom
+refuses here rather than being reinterpreted, and so does a tag past `hashEq`. -/
+theorem unassigned_tags_rejected (suffix : List UInt8) :
+    decodeToken (11 :: suffix) = none ∧ decodeToken (12 :: suffix) = none ∧
+      decodeToken (13 :: suffix) = none ∧ decodeToken (14 :: suffix) = none ∧
+      decodeToken (16 :: suffix) = none := ⟨rfl, rfl, rfl, rfl, rfl⟩
+
 theorem wrong_stack_sort_rejected : decodePred [.nil, .not] = none := rfl
 
 theorem stack_underflow_rejected : decodePred [.cons] = none := rfl
@@ -338,3 +366,12 @@ end Minidregg.Compiler.PolicyRecordCodec
 /-- info: 'Minidregg.Compiler.PolicyRecordCodec.v2_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Compiler.PolicyRecordCodec.v2_frame_refused
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.hashEq_tag' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.hashEq_tag
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.hashEq_token_round_trip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.hashEq_token_round_trip
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.unassigned_tags_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.unassigned_tags_rejected
