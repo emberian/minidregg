@@ -1,7 +1,7 @@
 name: Build and gates
 
-# The same gate as scripts/local-gates.sh, on every push: proof hygiene, the
-# umbrella build, emitted-artifact drift, and the build-closure census.
+# The same gate as scripts/local-gates.sh (its header lists the gates). The
+# local run on a Linux build box is the bar, not this workflow.
 on:
   push:
   workflow_dispatch:

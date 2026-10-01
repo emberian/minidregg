@@ -5,8 +5,11 @@ The only lawful home for cross-boundary apex theorems: `Assurance/` is
 unrestricted, so a kernel object (a receipt word) may meet a proof-system
 object (the code + claim) here — nowhere else.
 
-Every file here is hand-written. Axiom pins are `#guard_msgs in #print axioms`
-lines written beside each theorem; nothing generates them.
+Every file here is hand-written, except `SheetLaw.lean` §2, the mechanical embed of the
+MUD sheet law JSON (`scripts/gen-sheetlaw.py --check`, gate 1). Axiom pins are
+`#guard_msgs in #print axioms` lines written beside each theorem; nothing generates them.
+SheetLaw and ItemLaw live here, not in Theory: they judge a law by
+`Kernel.DeclaredResourceController`, and Theory may import only Mathlib and Theory.
 -/
 import Assurance.CapabilityRevocationAudit
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
@@ -125,3 +128,5 @@ import Assurance.ReleaseGateRouting -- the release-gate routing lemma and its bi
 import Assurance.JointPostconditionWitness
 import Assurance.NativeObservationAudit
 import Assurance.CanonicalResourceBookInvariantAudit
+import Assurance.SheetLaw  -- MUD item 6: the literal law.sheet as a Pred, judged by the kernel (checked_leg_policy_eval: every CheckedLeg satisfies its installed law); stranger_write_bounded, deaths monotone and alive raised only by clause 23 over any accepted history, death_is_reachable; without K-CLOCK nobody revives; regenerated from mud-law-fix 8280b8d7: clause 33 refuses the referee's smite (smite_refused, death_needs_hp) and a clockless death fails closed (death_needs_clock)
+import Assurance.ItemLaw  -- MUD item 6: no_dupe_unique over the literal law.item (holder or referee writes; the referee never moves a held item; a holder who never writes keeps it, by induction over the accepted log), kernel_holder_or_referee over CheckedLeg; the law alone admits two concurrent gives, the durable CAS refuses the second

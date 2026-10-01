@@ -1,43 +1,65 @@
 #!/usr/bin/env bash
-# check-import-boundary.sh — mechanical enforcement of the ATLAS §7
-# candidate-independence boundary:
+# check-import-boundary.sh — the library tier rule, as the tree obeys it.
 #
-#   Theory/ (and the Theory.lean root) may import ONLY Mathlib and Theory itself
-#           — the metatheory must never know the candidate (no Kernel/Pred/
-#           Effects/Compiler/Selvage/Assurance imports).
-#   Selvage/   (and the Selvage.lean root) may import ONLY Mathlib, Theory, and Selvage.
+# Each row names the libraries a library's modules may import. It is the rule
+# measured on 2026-10-01 (lane GATES), not an aspiration, and every row is
+# checked on every tracked .lean file (direct imports; Theory and Selvage are
+# closed under their rows, so their transitive closure is checked too):
 #
-# Exits 1 listing every offending import line; prints OK lines when clean.
+#   Theory    Mathlib Theory                     the metatheory never knows the candidate
+#   Selvage   Mathlib Theory Selvage             the proof system knows only the metatheory
+#   Pred      Mathlib Theory Pred Compiler
+#   Kernel    Mathlib Theory Pred Compiler Kernel
+#   Compiler  Mathlib Lean Std Init Theory Pred Kernel Selvage Assurance Compiler
+#   Assurance Mathlib Theory Pred Kernel Compiler Selvage Assurance
+#   Effects   Mathlib Kernel Compiler Effects
+#   Host      Lean Theory Kernel Compiler Host    (no Mathlib, no Selvage, no Assurance)
+#
+# Two consequences worth naming: Host and Effects are SINKS (no library imports
+# either; only the roots Minidregg and AxiomCensus do), and Pred/Kernel/Compiler/
+# Assurance are ONE strongly connected group at library level (Kernel<->Compiler,
+# Pred<->Compiler, Compiler<->Assurance all occur; acyclic only per module). So
+# "Compiler cannot import Kernel" is NOT a rule of this tree (25 Compiler imports
+# of Kernel), and the tier line that does hold is: Theory < Selvage < {the group}
+# < {Effects, Host}.
+#
+# A new edge between libraries is a red until this table is changed on purpose.
+# Exits 1 listing every offending import line, with the edge it would add.
 set -u
 cd "$(dirname "$0")/.." || exit 1
-
-status=0
-
-# check_boundary <label> <allowed-module-prefix-regex> <file...>
-check_boundary() {
-  local label="$1" allowed="$2"
-  shift 2
-  if [ "$#" -eq 0 ]; then
-    echo "OK: ${label}: no .lean files to check"
-    return
-  fi
-  local offenders
-  offenders=$(grep -HnE '^import[[:space:]]' "$@" 2>/dev/null \
-    | grep -vE ":[0-9]+:import[[:space:]]+(${allowed})(\.|[[:space:]]|$)")
-  if [ -n "${offenders}" ]; then
-    echo "FAIL: ${label}: imports outside the allowed set {${allowed}}:"
-    echo "${offenders}" | sed 's/^/  /'
-    status=1
-  else
-    echo "OK: ${label}: all imports within {${allowed}}"
-  fi
+python3 - <<'PY'
+import re, subprocess, sys
+ALLOWED = {
+    "Theory":    {"Mathlib", "Theory"},
+    "Selvage":   {"Mathlib", "Theory", "Selvage"},
+    "Pred":      {"Mathlib", "Theory", "Pred", "Compiler"},
+    "Kernel":    {"Mathlib", "Theory", "Pred", "Compiler", "Kernel"},
+    "Compiler":  {"Mathlib", "Lean", "Std", "Init", "Theory", "Pred", "Kernel", "Selvage", "Assurance", "Compiler"},
+    "Assurance": {"Mathlib", "Theory", "Pred", "Kernel", "Compiler", "Selvage", "Assurance"},
+    "Effects":   {"Mathlib", "Kernel", "Compiler", "Effects"},
+    "Host":      {"Lean", "Theory", "Kernel", "Compiler", "Host"},
 }
-
-# shellcheck disable=SC2046  # controlled filenames, no spaces
-check_boundary "Theory" 'Mathlib|Minidregg\.Theory|Theory' \
-  Theory.lean $(find Theory -name '*.lean' 2>/dev/null | sort)
-
-check_boundary "Selvage" 'Mathlib|Minidregg\.Theory|Minidregg\.Selvage|Theory|Selvage' \
-  Selvage.lean $(find Selvage -name '*.lean' 2>/dev/null | sort)
-
-exit "${status}"
+files = [f for f in subprocess.check_output(["git", "ls-files", "-z", "--", "*.lean"]).decode().split("\0") if f]
+bad, counts = [], {}
+for f in files:
+    lib = f.split("/")[0].removesuffix(".lean")
+    if lib not in ALLOWED:
+        continue
+    for n, line in enumerate(open(f, encoding="utf-8"), 1):
+        m = re.match(r"import\s+(\S+)", line)
+        if not m:
+            continue
+        parts = m.group(1).split(".")
+        tgt = parts[1] if parts[0] == "Minidregg" and len(parts) > 1 else parts[0]
+        counts[(lib, tgt)] = counts.get((lib, tgt), 0) + 1
+        if tgt not in ALLOWED[lib]:
+            bad.append(f"  {f}:{n}: {line.strip()}   [new edge {lib} -> {tgt}]")
+for lib in ALLOWED:
+    edges = sorted((t, c) for (l, t), c in counts.items() if l == lib)
+    print(f"{lib:9s} -> " + " ".join(f"{t}:{c}" for t, c in edges))
+if bad:
+    print("FAIL: import-boundary: imports outside the tier table (scripts/check-import-boundary.sh):")
+    print("\n".join(bad))
+    sys.exit(1)
+print("OK: import-boundary: every import of " + " ".join(ALLOWED) + " is inside its row")
+PY

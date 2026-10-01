@@ -171,11 +171,15 @@ and adversarial readings are all welcome; the most valuable contribution is
 a demonstration that one of our theorems is vacuous, because either the
 instruments catch it (good) or they gain a new tooth (better).
 
-Build: `lake build Minidregg`. The gate is `scripts/local-gates.sh`, and
-`.github/workflows/build.yml` runs it on every push: proof hygiene, the
-umbrella build, emitted-file drift (the build may change no tracked file), the build-closure census, and
-`native/resource-client/journey.sh` on any revision that has it. The import boundary
-(`scripts/check-import-boundary.sh`) enforces that `Theory/` is
-candidate-independent (Mathlib-only) and `Selvage/` sits on `Theory` alone.
+Build: `lake build Minidregg`. The gate is `scripts/local-gates.sh`. It runs
+every gate even after one is red and exits with the number of red gates: proof
+hygiene, the umbrella build (with AxiomCensus and every executable), emitted-file
+drift (the build may change no tracked file), the prover glue, the build-closure
+census, the Host.Main closure against its pin (`scripts/gates/host-closure.pin`),
+the import tier table (`scripts/check-import-boundary.sh`: `Theory/` imports only
+Mathlib and Theory, `Selvage/` only Mathlib, Theory and Selvage; the full table is
+in the script), the `@[export]` census, the filtered native tests
+(`scripts/check-rust-tests.sh`), and the journey from this tree on a fresh Store
+(`scripts/check-journey.sh`).
 Unsigned commits indicate autonomous agent work; the evidence ledger records
 exact committed-source replays on independent machines.
