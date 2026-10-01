@@ -262,6 +262,7 @@ def prologue (job : FeeFirstJob lease) : DataIntent M.rootBytes where
       canonicalBytes := ReactiveTerminalCell.frame 191
         [ReactiveTerminalCell.encodeDigest job.admissionId,
           ReactiveTerminalCell.encodeNat lease.requestContext.nonce] }
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 

@@ -23,6 +23,7 @@ transport and the OS durability floor; no Lean theorem proves those systems.
 The MAC key file's custody is the operator's (`DurableCheckpointCodec`).
 -/
 import Compiler.DurableCheckpointCodec
+import Kernel.PresenceIndex
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -313,6 +314,10 @@ structure Loaded (rootBytes : List UInt8 → Digest) where
   chainExact : chain = chainAfter logStart image.accepted
   /-- The world root, cached; `worldRoot_eq` below. -/
   roots : RootCache
+  /-- The presence index of the accepted log, cached and advanced by one
+  `admit` per append. It is a function of the log, never stored. -/
+  index : PresenceIndex.Index
+  indexExact : index = PresenceIndex.ofRecords image.accepted
 
 def Loaded.height {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) : Nat :=
   loaded.image.accepted.length
@@ -346,7 +351,8 @@ def loadImage (rootBytes : List UInt8 → Digest) (logStart : Digest) (image : I
   | some snapshot =>
       let chain := chainAfter logStart image.accepted
       .ok ⟨image, 0, State.ofSeed image.seed, snapshot, Nat.zero_le _, resumed, logStart, chain,
-        rfl, RootCache.ofEntries (entriesOf image snapshot chain)⟩
+        rfl, RootCache.ofEntries (entriesOf image snapshot chain),
+        PresenceIndex.ofRecords image.accepted, rfl⟩
 
 theorem loadImage_image {rootBytes : List UInt8 → Digest} {logStart : Digest} {image : Image}
     {loaded : Loaded rootBytes} (built : loadImage rootBytes logStart image = .ok loaded) :
@@ -422,7 +428,8 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some snapshot =>
             return .ok ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
-              rfl, RootCache.ofEntries (entriesOf image snapshot headChain)⟩
+              rfl, RootCache.ofEntries (entriesOf image snapshot headChain),
+              PresenceIndex.ofRecords image.accepted, rfl⟩
       else return .error "checkpoint beyond the log head"
 
 inductive Confirmation where
@@ -474,7 +481,10 @@ def Loaded.extend {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
     ready.resumed, loaded.logStart, chain,
     by show chainStep loaded.chain record = _
        rw [loaded.chainExact]; simp [chainAfter, Image.append, List.foldl_append, record],
-    loaded.roots.writeAll (recordSlots (loaded.image.accepted.length + 1) chain record)⟩
+    loaded.roots.writeAll (recordSlots (loaded.image.accepted.length + 1) chain record),
+    loaded.index.admit (loaded.image.accepted.length + 1) record,
+    by rw [loaded.indexExact]
+       exact (PresenceIndex.ofRecords_snoc loaded.image.accepted record).symm⟩
 
 /-- Materialize the head as a fresh base (no replayed suffix), as a cold
 open of a checkpoint at the head would. -/
@@ -490,7 +500,7 @@ def Loaded.rebase {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes
       -- state; a disagreement keeps the old base (and `extendFrom` refuses).
       if roots.root ≠ loaded.roots.root then none else
       some ⟨loaded.image, height, state, snapshot, Nat.le_refl _, resumed, loaded.logStart,
-        loaded.chain, loaded.chainExact, roots⟩
+        loaded.chain, loaded.chainExact, roots, loaded.index, loaded.indexExact⟩
 
 def Loaded.rebaseD {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
     Loaded rootBytes :=
@@ -503,6 +513,88 @@ theorem Loaded.rebaseD_image {rootBytes : List UInt8 → Digest} (loaded : Loade
   split
   · rfl
   · split <;> rfl
+
+/-- **The index is the replay's index**: the cached index is the fold of the
+whole log, and equally the fold of the checkpoint's prefix advanced by the
+replayed suffix, which is the shape a resumed open computes. -/
+theorem Loaded.index_from_replay {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.index = PresenceIndex.ofRecords loaded.image.accepted ∧
+      loaded.index = (PresenceIndex.ofRecords (loaded.image.accepted.take loaded.baseHeight)).extend
+        loaded.baseHeight (loaded.image.accepted.drop loaded.baseHeight) := by
+  refine ⟨loaded.indexExact, ?_⟩
+  have prefixLength : (loaded.image.accepted.take loaded.baseHeight).length = loaded.baseHeight := by
+    rw [List.length_take]; exact Nat.min_eq_left loaded.withinLog
+  rw [loaded.indexExact]
+  conv => lhs; rw [← List.take_append_drop loaded.baseHeight loaded.image.accepted]
+  rw [PresenceIndex.ofRecords_append, prefixLength]
+
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.index_from_replay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.index_from_replay
+
+/-! ## A past height (K-HISTORY-READ) -/
+
+/-- The image cut at log height `height`: the seed and the first `height` records. -/
+def Loaded.prefixImage {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (height : Nat) : Image :=
+  ⟨loaded.image.seed, loaded.image.accepted.take height⟩
+
+/-- The state at log height `height`: the loaded checkpoint plus the records
+after it up to `height` (D2's resume, on the cut image) when the checkpoint is
+at or below `height`; otherwise the genesis fold of the prefix. The Store keeps
+every record since the seed (the audit walk needs them), so the retention floor
+is height 0. -/
+def Loaded.atPrefix {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    (height : Nat) : Option (DataSnapshot rootBytes) :=
+  if loaded.baseHeight ≤ height then
+    resume rootBytes (loaded.prefixImage height) loaded.baseHeight loaded.base
+  else
+    resume rootBytes (loaded.prefixImage height) 0 (State.ofSeed loaded.image.seed)
+
+theorem Loaded.prefixImage_current {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.prefixImage loaded.height = loaded.image := by
+  unfold prefixImage height
+  rw [List.take_length]
+
+/-- **At the current height the past read is the current state**: the same
+snapshot every current read decodes. -/
+theorem Loaded.atPrefix_current {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes) :
+    loaded.atPrefix loaded.height = some loaded.snapshot := by
+  unfold atPrefix
+  rw [if_pos (show loaded.baseHeight ≤ loaded.height from loaded.withinLog), loaded.prefixImage_current]
+  exact loaded.resumed
+
+/-- **Below the checkpoint the past read is the genesis fold of the prefix.** -/
+theorem Loaded.atPrefix_below {rootBytes : List UInt8 → Digest} (loaded : Loaded rootBytes)
+    {height : Nat} (below : height < loaded.baseHeight) :
+    loaded.atPrefix height = (loaded.prefixImage height).restore rootBytes := by
+  unfold atPrefix
+  rw [if_neg (by omega)]
+  exact resume_genesis rootBytes (loaded.prefixImage height)
+
+/-- **At or above the checkpoint the past read is the checkpoint plus the
+suffix fold** — and, for an honest checkpoint (`resume_sound`'s premises), the
+genesis fold of the prefix. -/
+theorem Loaded.atPrefix_from_checkpoint {rootBytes : List UInt8 → Digest}
+    (loaded : Loaded rootBytes) {height : Nat} (above : loaded.baseHeight ≤ height)
+    (atBase : DataSnapshot rootBytes)
+    (seedValid : (loaded.image.seed.cells.map Prod.fst).Nodup)
+    (stateValid : loaded.base.Admissible (loaded.prefixImage height))
+    (prefixReplay : replay rootBytes (loaded.image.seed.snapshot rootBytes)
+      ((loaded.image.accepted.take height).take loaded.baseHeight) = some atBase)
+    (honest : loaded.base.snapshot rootBytes
+      ((loaded.image.accepted.take height).take loaded.baseHeight) = atBase) :
+    loaded.atPrefix height = (loaded.prefixImage height).restore rootBytes := by
+  unfold atPrefix
+  rw [if_pos above]
+  exact resume_sound rootBytes (loaded.prefixImage height) loaded.baseHeight loaded.base atBase
+    seedValid stateValid prefixReplay honest
+
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_current
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_below' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_below
+/-- info: 'Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_from_checkpoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.DurableReceiverIO.Loaded.atPrefix_from_checkpoint
 
 /-- Seal and store a checkpoint of the head. A failed write loses nothing (the
 log is complete); the caller then keeps its old base. -/

@@ -693,6 +693,7 @@ def charge (accepted : AcceptedAssignment deployment profile ambient durable ing
 def intent (accepted : AcceptedAssignment deployment profile ambient durable ingress) :
     DataIntent rootBytes where
   transactionId := transactionId deployment.domain profile.semantics ingress
+  subject := some ingress.command.subject
   writes := writes accepted.prepared
   readGuards := readGuards accepted.prepared
   nullifiers := [nullifier deployment.domain profile.semantics ingress]

@@ -289,6 +289,7 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
         FnSelectiveReleaseIngress.releaseNullifier ingress.packet.release]
     exactCharge := charge ingress writes guards
     event := FnSelectiveReleaseIngress.event ingress
+    subject := some (FnSelectiveReleaseIngress.command ingress).subject
     postRootsBound := DeclaredResourceController.writes_roots_bound operation
     guardsReadOnly := DeclaredResourceController.readGuards_readonly operation shape }
 

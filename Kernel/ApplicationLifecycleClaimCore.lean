@@ -88,6 +88,7 @@ def intentFromCurrent {config : NativeHost.Config} {opened : NativeHost.Opened c
               ingress.source).canonicalBytes.length
         | other => ordinary.exactCharge other
       event := wireEvent
+      subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
 

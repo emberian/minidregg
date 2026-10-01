@@ -1143,6 +1143,7 @@ def baseIntent : DataIntent StoreCodec.rootBytes where
   nullifiers := []
   exactCharge := 0
   event := event
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_singleton] at member

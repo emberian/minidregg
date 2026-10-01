@@ -166,6 +166,7 @@ def intent (accepted : AcceptedRevocation deployment profile ambient durable ing
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
   exactCharge := charge accepted
   event := event deployment.domain profile.semantics ingress
+  subject := some ingress.command.2.subject
   postRootsBound := writes_roots_bound accepted.prepared
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
 

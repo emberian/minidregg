@@ -111,6 +111,7 @@ def candidateIntent
         [ApplicationDispatchAdmissionIngress.nullifier ingress]
       exactCharge := charge checked
       event := ApplicationDispatchAdmissionIngress.event ingress
+      subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
 

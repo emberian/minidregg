@@ -816,6 +816,13 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
           n := n + 1
     pure n
 
+/-- The whole presence index, log heights (operator output only). -/
+def presenceIndexJson (index : PresenceIndex.Index) : Lean.Json :=
+  .mkObj [("lastSeen", .arr <| index.lastSeen.toArray.map fun entry =>
+      .arr #[.str (toString entry.1.1.value), .str (toString entry.1.2.value), .str (toString entry.2)]),
+    ("touched", .arr <| index.touched.toArray.map fun entry =>
+      .arr #[.str (toString entry.1.value), .str (toString entry.2)])]
+
 def failure (reason : RefusalReason) (phase detail : String) : List UInt8 :=
   outcomeCodec.encode (.refused reason phase.toUTF8.toList detail.toUTF8.toList)
 
@@ -5682,9 +5689,15 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "audit", [] =>
           withPinnedSignature config fun pinnedConfig => do
-            let count ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+            let (count, index) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
             IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
+            IO.println s!"index {(presenceIndexJson index).compress}"
             pure 0
+      | "presence-index", [] =>
+          let (base, height, index) ← IO.ofExcept (← NativeHost.presenceIndex config)
+          IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"
+          IO.println s!"index {(presenceIndexJson index).compress}"
+          pure 0
       | "prepare", [input, output] =>
           let plan ← IO.ofExcept (← NativeHost.prepare config (← readBytes input))
           writeBytes output (signingPlanCodec.encode plan)

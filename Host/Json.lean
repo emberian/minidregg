@@ -706,18 +706,25 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
         let p ← exactObject (path ++ ".purpose") ["type", "draft"] purposeJson
         pure (.prepare (← draft (path ++ ".purpose.draft") (← field (path ++ ".purpose") "draft" p)))
     | "query" => do
+        let at_ := path ++ ".purpose"
+        -- `since` and `at` carry a height, `tail` a window (start, count); the
+        -- other views carry nothing.
+        let hasHeight := (purposeJson.getObjVal? "height").toOption.isSome
         let windowed := (purposeJson.getObjVal? "start").toOption.isSome
-        let p ← exactObject (path ++ ".purpose")
-          (["type", "kind", "target", "view"] ++ (if windowed then ["start", "count"] else [])) purposeJson
-        let view ← match ← string (path ++ ".purpose.view") (← field (path ++ ".purpose") "view" p) with
-          | "resource" => pure QueryView.resource | "policy" => pure .policy
-          | "capability" => pure .capability
-          | "tail" =>
-              if windowed then
-                pure (.tail (← nat (path ++ ".purpose.start") (← field (path ++ ".purpose") "start" p))
-                  (← nat (path ++ ".purpose.count") (← field (path ++ ".purpose") "count" p)))
-              else failAt (path ++ ".purpose") "a tail view names start and count"
-          | _ => failAt (path ++ ".purpose.view") "unknown query view"
+        let p ← exactObject at_ (["type", "kind", "target", "view"] ++
+          (if hasHeight then ["height"] else []) ++ (if windowed then ["start", "count"] else []))
+          purposeJson
+        let view ← match ← string (at_ ++ ".view") (← field at_ "view" p), hasHeight, windowed with
+          | "resource", false, false => pure QueryView.resource
+          | "policy", false, false => pure .policy
+          | "capability", false, false => pure .capability
+          | "who", false, false => pure .who
+          | "since", true, false => do pure (.since (← nat (at_ ++ ".height") (← field at_ "height" p)))
+          | "at", true, false => do pure (.atHeight (← nat (at_ ++ ".height") (← field at_ "height" p)))
+          | "tail", false, true => do
+              pure (.tail (← nat (at_ ++ ".start") (← field at_ "start" p))
+                (← nat (at_ ++ ".count") (← field at_ "count" p)))
+          | _, _, _ => failAt (at_ ++ ".view") "unknown query view, or a height/window on a view that takes none"
         pure (.query ⟨← resourceKind (path ++ ".purpose.kind") (← field (path ++ ".purpose") "kind" p),
           ← nat (path ++ ".purpose.target") (← field (path ++ ".purpose") "target" p), view⟩)
     | _ => failAt (path ++ ".purpose.type") "expected prepare or query"
@@ -2866,8 +2873,10 @@ private def intentJson (value : Intent) : Lean.Json := .mkObj
        ("target", decimal q.target),
        ("view", match q.view with
          | .resource => "resource" | .policy => "policy" | .capability => "capability"
+         | .who => "who" | .since _ => "since" | .atHeight _ => "at"
          | .tail _ _ => "tail")] : List (String × Lean.Json)) ++
        (match q.view with
+         | .since h | .atHeight h => [("height", decimal h)]
          | .tail start count => [("start", decimal start), ("count", decimal count)]
          | _ => []))),
    ("grants", .arr <| value.grants.toArray.map fun g => .mkObj
@@ -3345,6 +3354,26 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ("domain", decimal value.domain.value), ("semantics", decimal value.semantics.value),
         ("previous", value.previous.map (fun d => decimal d.value) |>.getD .null),
         ("predicate", predicateJson value.predicate)]
+  | "view-who" => do
+      let value ← decoded "view-who" NativeObservationController.whoViewCodec bytes
+      pure <| .mkObj [("type", "who"), ("members", .arr <| value.toArray.map fun (subject, seen) =>
+        .mkObj [("subject", decimal subject), ("lastSeen", (seen.map decimal).getD .null)])]
+  | "view-since" => do
+      let value ← decoded "view-since" NativeObservationController.sinceViewCodec bytes
+      pure <| .mkObj [("type", "since"), ("entries", .arr <| value.toArray.map fun entry =>
+        .mkObj [("height", decimal entry.height), ("subject", (entry.subject.map decimal).getD .null),
+          ("transaction", decimal entry.transaction),
+          ("cells", .arr <| entry.cells.toArray.map decimal)])]
+  | "view-at" => do
+      let (height, lifecycle) ← decoded "view-at" NativeObservationController.atViewCodec bytes
+      match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
+      | some .fresh => pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "fresh")]
+      | some .retired => pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "retired")]
+      | some (.live cell) => do
+          let view ← resourceJson (PackedCell.bytes CanonicalCellRegistry.registry cell, [])
+          pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "live"),
+            ("canonical", hexJson lifecycle), ("resource", view)]
+      | none => failAt "view-at" "noncanonical lifecycle bytes"
   | "view-object-capability" => CapabilityInspection.inspect .object bytes
   | "view-account-capability" => CapabilityInspection.inspect .account bytes
   | "view-program-capability" => CapabilityInspection.inspect .program bytes
@@ -3355,7 +3384,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, or view-capability"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, view-capability, view-who, view-since, or view-at"
 
 private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),

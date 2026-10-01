@@ -120,6 +120,7 @@ def intent (accepted : Accepted profile config pins durable ambient ingress) :
   nullifiers := nullifiers config.deployment.domain ingress accepted.decoded accepted.tariff
   exactCharge := charge accepted
   event := event config.deployment.domain ingress
+  subject := some accepted.decoded.source.birth.creator
   postRootsBound := writes_roots_bound accepted
   guardsReadOnly := readGuards_readonly accepted
 

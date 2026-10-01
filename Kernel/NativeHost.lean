@@ -41,15 +41,25 @@ def openExisting (config : Config) : IO (Except String (Opened config)) := do
 /-- Operator audit: the genesis re-admission of every retained signed ingress
 by its real native receiver at its original prefix height, compared with the
 stored history record for record (formerly the request path's `verifyLoaded`).
-Returns the number of accepted records audited. -/
-def audit (config : Config) : IO (Except String Nat) := do
+Returns the number of accepted records audited and the presence index of the
+re-admitted history (`NativeHostReplay.Verified.index_from_replay`: it is the
+stored log's index). -/
+def audit (config : Config) : IO (Except String (Nat × PresenceIndex.Index)) := do
   match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable =>
       match ← NativeHostReplay.verifyLoaded config durable with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
-      | .ok verified => return .ok verified.receipts.length
+      | .ok verified => return .ok (verified.receipts.length, verified.opened.durable.index)
+
+/-- Operator read of the whole presence index after an ordinary (checkpoint +
+suffix) open. Local administration only: the operator holds the Store. -/
+def presenceIndex (config : Config) : IO (Except String (Nat × Nat × PresenceIndex.Index)) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened =>
+      return .ok (opened.durable.baseHeight, opened.durable.height, opened.durable.index)
 
 /-- Explicit local administration, separate from the signed network protocol.
 The exact operator-pinned source genesis must have no accepted transactions. -/
@@ -395,8 +405,8 @@ def queryLoaded (config : Config) (opened : Opened config)
   | .error refusal => return .error refusal
   | .ok token =>
       match token.queryResult with
-      | some view => return .ok view
-      | none => return .error (.of .malformed)
+      | .ok view => return .ok view
+      | .error reason => return .error (.of reason)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
 def query (config : Config) (bytes : List UInt8) : IO (Except Refusal (List UInt8)) := do

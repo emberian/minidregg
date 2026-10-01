@@ -289,6 +289,7 @@ def intent (deposit : Deposit M portal authState pre) : DataIntent M.rootBytes w
   nullifiers := [deposit.nullifier]
   exactCharge := AuthorizedResourceCharge.exactCharge deposit.manifest deposit.accepted
   event := deposit.event
+  subject := none
   postRootsBound := by
     intro write present
     simp only [List.mem_cons, List.mem_nil_iff, or_false] at present
@@ -482,6 +483,7 @@ def intent (fill : Fill M portal authState) : DataIntent M.rootBytes where
   nullifiers := [fill.nullifier]
   exactCharge := fill.charge
   event := fill.event
+  subject := none
   postRootsBound := by
     intro write present
     simp only [List.mem_cons, List.mem_nil_iff, or_false] at present
@@ -697,6 +699,7 @@ def intent (close : Close M) : DataIntent M.rootBytes where
       domain := close.nullifier.domain
       eventId := ⟨Nat.pair close.terms.orderId close.after.phase.tag⟩
       canonicalBytes := stateBytes close.terms close.after }
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 

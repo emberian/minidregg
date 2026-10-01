@@ -70,11 +70,13 @@ structure IntentRecord where
   nullifiers : List StableNullifier
   exactCharge : Charge
   event : StableEvent
+  /-- The signing subject (`DataIntent.subject`). -/
+  subject : Option SubjectId
 
 def IntentRecord.ofIntent {rootBytes : List UInt8 → Digest}
     (intent : DataIntent rootBytes) : IntentRecord :=
   ⟨intent.transactionId, intent.writes, intent.readGuards, intent.nullifiers,
-    intent.exactCharge, intent.event⟩
+    intent.exactCharge, intent.event, intent.subject⟩
 
 def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecord) :
     Option (DataIntent rootBytes) :=
@@ -89,6 +91,7 @@ def IntentRecord.bind? (rootBytes : List UInt8 → Digest) (record : IntentRecor
           nullifiers := record.nullifiers
           exactCharge := record.exactCharge
           event := record.event
+          subject := record.subject
           postRootsBound := by simpa using roots
           guardsReadOnly := by simpa using guards }
     else none
