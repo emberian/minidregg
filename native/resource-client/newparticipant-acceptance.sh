@@ -10,6 +10,11 @@ if [ "$#" -ne 5 ]; then
   exit 2
 fi
 HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 ROOT=$5
+# The template owner budget (every owner capability's maxCost). A birth intent's
+# observation costs its byte length, so a fixture that births a Nock program
+# (J-NOCK-2b, ~566 KB) raises it; the default is unchanged.
+OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-100000}
+case "$OWNER_BUDGET" in ''|*[!0-9]*) echo 'NEWPARTICIPANT_OWNER_BUDGET must be decimal' >&2; exit 2;; esac
 for executable in "$HOST" "$MINI" "$STORE" "$VERIFIER"; do
   case "$executable" in /*) ;; *) echo "binary path must be absolute: $executable" >&2; exit 2;; esac
   [ -x "$executable" ] || { echo "not executable: $executable" >&2; exit 2; }
@@ -32,7 +37,7 @@ NEWCOMER_PUBLIC=$(od -An -tx1 -v "$ROOT/newcomer.pub" | tr -d ' \n')
 
 cat >"$ROOT/operator.json" <<EOF
 {"domain":8501,"federation":9,"factoryId":10,"resourceBookId":11,
- "authorityCellId":12,"issuer":5,"ownerBudget":100000,"lifetime":10000,
+ "authorityCellId":12,"issuer":5,"ownerBudget":$OWNER_BUDGET,"lifetime":10000,
  "tariffBase":3,"tariffPerBirth":2,"tariffPerGrant":1,
  "tariffPerInitialPayloadByte":0,"collector":99,"asset":0,
  "genesisHeight":10,"expectedSeed":0,"storageBinary":"$STORE",
@@ -71,7 +76,7 @@ CONFIG="$ROOT/deployment/pinned-config.json"
 cat >"$ROOT/sponsor-birth-context.json" <<EOF
 {"type":"minidregg-participant-birth-context-v1",
  "genesis":$(cat "$ROOT/genesis.json"),
- "template":{"issuer":"5","ownerBudget":"100000","lifetime":"10000"},
+ "template":{"issuer":"5","ownerBudget":"$OWNER_BUDGET","lifetime":"10000"},
  "sourceCapabilities":["41"],"funding":[],"feePayer":"7",
  "grants":[{"kind":"object","target":"10","capability":"54"},
    {"kind":"account","target":"7","capability":"41"}]}

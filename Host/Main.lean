@@ -38,6 +38,13 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 86=private participant key enrollment plan, 87=private detached key assembly,
 88=checked participant key enrollment submit, 89=receipt-only key lookup,
 91=current resource birth intent from verified history.
+117=Nock program check (pair: minimal jam bytes, ABI JSON) -> JSON verdict and the
+canonical DREGG/NOCK/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
+118=Nock program show (decimal programId) -> JSON, 119=Nock sample (JSON request)
+-> JSON with the kernel's canonical sample jam, 120=Nock run dry run (JSON
+{programId, caller, room, targets, values}) -> JSON with the kernel's sample at
+the Host's logical height, the oracle's verdict, Lean steps, output and decoded
+writes. 117-120 only read the Store.
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -899,6 +906,15 @@ def sessionOpened (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (NativeHost.Opened config) := do
   return (← sessionCurrent config state).opened
+
+/-- The live directory, for the Nock program reads (ops 117-119). -/
+def nockDirectory (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config))) :
+    IO (Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) := do
+  let opened ← sessionOpened config state
+  match CredentialAuthorityDomainReceiver.loadDirectory opened.durable with
+  | some loaded => pure loaded.directory
+  | none => throw (IO.userError "nock: the store directory does not decode")
 
 def sessionConfirmed (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -5201,6 +5217,51 @@ def run (arguments : List String) : IO UInt32 := do
                             let intent ← applicationCurrentBirthIntentSession
                               pinnedConfig state false payload
                             return ((31 : UInt8), intent)
+                        | 117 =>
+                            let (jam, abiBytes) ← splitPair payload
+                            let some abiSource := String.fromUTF8? abiBytes.toByteArray
+                              | throw (IO.userError "nock program ABI is not UTF-8")
+                            let program ← IO.ofExcept
+                              (Minidregg.Host.Json.nockProgramOf jam abiSource)
+                            let directory ← nockDirectory pinnedConfig state
+                            let verdict := Minidregg.Kernel.NockProgramCell.checkProgram
+                              pinnedConfig.deployment.domain directory program
+                            return ((117 : UInt8),
+                              (Minidregg.Host.Json.nockCheckJson program verdict).compress.toUTF8.toList)
+                        | 118 =>
+                            let some source := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "nock program id is not UTF-8")
+                            let some value := source.trimAscii.toString.toNat?
+                              | throw (IO.userError "nock program id is not a decimal")
+                            let directory ← nockDirectory pinnedConfig state
+                            let programId : Minidregg.Theory.TypedAuthorization.Digest := ⟨value⟩
+                            let program := CanonicalCellRegistry.loadProgram
+                              pinnedConfig.deployment.domain directory programId
+                            return ((118 : UInt8), (Minidregg.Host.Json.nockShowJson
+                              pinnedConfig.deployment.domain programId program).compress.toUTF8.toList)
+                        | 119 =>
+                            let some source := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "nock sample request is not UTF-8")
+                            let (programId, ctx, targets, values) ← IO.ofExcept
+                              (Minidregg.Host.Json.nockSampleRequest source)
+                            let directory ← nockDirectory pinnedConfig state
+                            let verdict := Minidregg.Kernel.NockProgramCell.sampleFor
+                              pinnedConfig.deployment.domain directory programId ctx targets values
+                            return ((119 : UInt8),
+                              (Minidregg.Host.Json.nockSampleJson verdict).compress.toUTF8.toList)
+                        | 120 =>
+                            let some source := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "nock run request is not UTF-8")
+                            let (programId, caller, room, targets, values) ← IO.ofExcept
+                              (Minidregg.Host.Json.nockRunRequest source)
+                            let opened ← sessionOpened pinnedConfig state
+                            let height := NativeHost.logicalHeight pinnedConfig opened.durable
+                            let directory ← nockDirectory pinnedConfig state
+                            let verdict := Minidregg.Kernel.NockRun.dryRun
+                              pinnedConfig.deployment.domain directory programId
+                              ⟨height, caller, room⟩ targets values
+                            return ((120 : UInt8), (Minidregg.Host.Json.nockRunJson programId height
+                              verdict).compress.toUTF8.toList)
                         | 91 =>
                             unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth request exceeds host frame bound")

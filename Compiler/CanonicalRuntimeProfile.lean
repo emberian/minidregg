@@ -173,6 +173,16 @@ def sourceComponents : List (List UInt8) :=
    (StreamCodec.list StreamCodec.nat).encode
      [PolicySourceCell.registryTag.toNat, PolicySourceCell.schemaId,
       PolicySourceCell.wireVersion],
+   NockProgramCodec.wireFrame,
+   NockProgramCodec.programFrame,
+   NockProgramCodec.abiFrame,
+   NockProgramCodec.codeCustomization,
+   NockProgramCodec.programCustomization,
+   NockProgramCodec.rootCustomization,
+   NockProgramCodec.idCustomization,
+   (StreamCodec.list StreamCodec.nat).encode
+     [NockProgramCodec.registryTag.toNat, NockProgramCodec.schemaId,
+      NockProgramCodec.wireVersion, NockProgramCodec.abiVersion],
    StoreCodec.frame DeclaredEffectCell.wire,
    StoreCodec.rootCustomization,
    CanonicalResourcePageMaterializer.wireFrame,

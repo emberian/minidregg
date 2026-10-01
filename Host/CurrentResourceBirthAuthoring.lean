@@ -54,11 +54,13 @@ def intentLoadedAuthorized (config : NativeHost.Config)
             | return .error refused
           if descriptor.creator != intent.subject then
             return .error refused
+          -- Named, not folded into `refused`: a content-addressed cell (a Nock
+          -- program) born twice meets exactly this, and must say so.
           unless descriptor.createRequests.all (fun request =>
               match opened.directory.directory.slots request.cellId with
               | .absent => true
               | .present _ => false) do
-            return .error refused
+            return .error "resource birth target already present"
           return .ok (intentCodec.encode intent)
 
 end Minidregg.Host.CurrentResourceBirthAuthoring

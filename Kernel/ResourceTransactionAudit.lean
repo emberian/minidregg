@@ -15,7 +15,7 @@ variable {F : Type} [Field F] {deployment : Deployment}
   {durable : Durable} {command : Command}
 
 theorem empty_targets_refused (subject : SubjectId) (nonce : Nat) :
-    prepare deployment profile ambient durable ⟨subject, nonce, []⟩ = .error .emptyTargets := by
+    prepare deployment profile ambient durable ⟨subject, nonce, [], none⟩ = .error .emptyTargets := by
   simp [prepare]
 
 theorem duplicate_targets_refused (nonempty : command.targets ≠ [])

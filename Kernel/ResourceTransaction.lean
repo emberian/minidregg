@@ -4,6 +4,7 @@ nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
 import Kernel.DeclaredResourceScalar
 import Kernel.ContentResource
+import Kernel.NockRun
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -62,6 +63,11 @@ structure Command where
   subject : SubjectId
   nonce : Nat
   targets : List Target
+  /-- A Nock run whose product these writes claim to be (NOCK §2.4). Signed with
+  the command: the claim's steps are the fee its signer consents to. When
+  present, every write of every target must be a field write the re-executed
+  program's product names (`Kernel.NockRun.checkRun`). -/
+  run : Option NockRun.RunClaim := none
   deriving DecidableEq, Repr
 
 def Command.TargetsValid (command : Command) : Prop :=
@@ -101,16 +107,27 @@ def targetStream : StreamCodec Target :=
       ⟨kind, target, capability, version, root, payload, observe⟩)
     (by intro target; cases target; rfl)
 
+/-- `DREGG/NOCK/RUN/v1` inside the command: program id, sample jam, output jam, steps. -/
+def runClaimStream : StreamCodec NockRun.RunClaim :=
+  StreamCodec.xmap
+    (StreamCodec.product digestStream (StreamCodec.product bytesStream
+      (StreamCodec.product bytesStream StreamCodec.nat)))
+    (fun claim => (claim.programId, claim.sampleJam, claim.outputJam, claim.steps))
+    (fun (program, sample, output, steps) => ⟨program, sample, output, steps⟩)
+    (by intro claim; cases claim; rfl)
+
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap
     (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
-      (StreamCodec.product StreamCodec.nat (StreamCodec.list targetStream)))
-    (fun command => (command.subject, command.nonce, command.targets))
-    (fun (subject, nonce, targets) => ⟨subject, nonce, targets⟩)
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product (StreamCodec.list targetStream) (StreamCodec.option runClaimStream))))
+    (fun command => (command.subject, command.nonce, command.targets, command.run))
+    (fun (subject, nonce, targets, run) => ⟨subject, nonce, targets, run⟩)
     (by intro command; cases command; rfl)
 
-/-- Version 4: no authority root in the command. Version-3 commands refuse. -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [4]
+/-- Version 5: a command may carry a Nock `RunClaim` (K-RAN). Version-4 commands
+refuse; a version-5 command without a claim encodes `none`. -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [5]
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -237,6 +254,7 @@ inductive Reject where
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
   | observationRequired | observationRejected
+  | run (reason : NockRun.Refusal)
   deriving Repr
 
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
@@ -461,6 +479,87 @@ def sourceStore (domain : Digest) (directory : Directory Nat Registry) :
     CanonicalPolicyRegistry.PayloadStore where
   fetch := CanonicalCellRegistry.fetchPolicySource domain directory
 
+/-! ## The run check (K-RAN, NOCK §2.4) -/
+
+/-- Exact scalar/content projection from the committed old and candidate final
+states. Local names remain convenient; joint names expose every declared
+participant without granting a view of unrelated cells. -/
+def targetProjection (target : Target) (before after : Store target.layout) : List (String × Int) := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact DeclaredResourceProjection.project id before after
+    | content content => exact ContentResource.project before after content
+
+/-- The participant slot a sample reads: target `i`'s projection of its loaded
+pre-state (before = after = pre), so a program sees only committed values. -/
+def sampleRead (command : Command) (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (i : Nat) (slot : String) : Option Int :=
+  if h : i < command.targets.length then
+    (⟨targetProjection command.targets[(⟨i, h⟩ : Fin _)] (pre ⟨i, h⟩) (pre ⟨i, h⟩)⟩ :
+      Minidregg.Pred.State).get slot
+  else none
+
+/-- One action as a field write of the command's `i`-th target, when it is one. -/
+def actionWrite (i target : Nat) : DeclaredActionLowering.Action → Option NockRun.FieldWrite
+  | .write (.objectField object field) _ value =>
+      if object.value = target then some ⟨i, field.value, value⟩ else none
+  | .create (.objectField object field) value =>
+      if object.value = target then some ⟨i, field.value, value⟩ else none
+  | _ => none
+
+def targetWrites (i : Nat) (target : Target) : Option (List NockRun.FieldWrite) :=
+  match target.payload with
+  | .scalar actions => actions.mapM (actionWrite i target.target)
+  | .content _ => none
+
+def writesFrom : Nat → List Target → Option (List NockRun.FieldWrite)
+  | _, [] => some []
+  | i, target :: rest => do
+      let here ← targetWrites i target
+      let later ← writesFrom (i + 1) rest
+      pure (here ++ later)
+
+/-- Every write the command makes, as field writes; `none` when any action is not
+an own-object field write (a move, a content edit) — under a run claim that is a
+write the program's output cannot name. -/
+def commandWrites (command : Command) : Option (List NockRun.FieldWrite) :=
+  writesFrom 0 command.targets
+
+/-- What the controller learned from a checked run. -/
+structure CheckedRun where
+  claim : NockRun.RunClaim
+  fuel : Nat
+  verdict : NockRun.Verdict
+
+/-- The kernel's own context for a run: its height, the signer, no room. -/
+def runContext (ambient : Ambient) (command : Command) : NockProgramCell.Context :=
+  ⟨ambient.height, command.subject.value, 0⟩
+
+/-- Load the claimed program and its libraries, build the kernel's sample from
+the loaded pre-states, and re-execute. -/
+def checkClaim (domain : Digest) (directory : Directory Nat Registry) (ambient : Ambient)
+    (command : Command) (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (claim : NockRun.RunClaim) : Except NockRun.Refusal CheckedRun := do
+  let program ← NockRun.require .programUnknown
+    (CanonicalCellRegistry.loadProgram domain directory claim.programId)
+  let libraries ← program.abi.libraries.mapM fun library =>
+    NockRun.require .libraryUnknown (CanonicalCellRegistry.loadProgram domain directory library)
+  let sample ← NockRun.require .sampleUnavailable
+    (NockProgramCell.sampleOf program.abi (runContext ambient command)
+      (command.targets.map Target.target) (sampleRead command pre))
+  let writes ← NockRun.require .writeNotInOutput (commandWrites command)
+  let verdict ← NockRun.checkRun program libraries sample claim writes
+  pure ⟨claim, program.abi.fuel, verdict⟩
+
+/-- No claim: nothing to check. A claim: `checkClaim`, its refusal named `run`. -/
+def checkCommandRun (domain : Digest) (directory : Directory Nat Registry) (ambient : Ambient)
+    (command : Command) (pre : (i : Fin command.targets.length) → Store command.targets[i].layout) :
+    Except Reject (Option CheckedRun) :=
+  match command.run with
+  | none => .ok none
+  | some claim => ((checkClaim domain directory ambient command pre claim).map some).mapError .run
+
 structure PreparedInvocation {F : Type} [Field F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) where
@@ -472,6 +571,10 @@ structure PreparedInvocation {F : Type} [Field F]
   targets : (i : TargetIndex command) → PreparedTarget deployment directory.directory
     authority.snapshot profile.semantics ambient command command.targets[i]
   marker : MarkerMode authority.snapshot profile.semantics command
+  /-- The re-executed run, when the command claims one. -/
+  run : Option CheckedRun
+  runChecked : checkCommandRun deployment.domain directory.directory ambient command
+    (fun i => (targets i).pre.logical) = .ok run
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient)
@@ -484,7 +587,10 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
       let targets ← collect command.targets (prepareTarget deployment directory.directory
         authority.snapshot profile.semantics ambient command)
       let marker ← prepareMarker authority.snapshot profile.semantics command
-      .ok ⟨nonempty, distinct, directory, authority, targets, marker⟩
+      match checked : checkCommandRun deployment.domain directory.directory ambient command
+          (fun i => (targets i).pre.logical) with
+      | .error reason => .error reason
+      | .ok run => .ok ⟨nonempty, distinct, directory, authority, targets, marker, run, checked⟩
     else .error .duplicateTargets
   else .error .emptyTargets
 
@@ -505,4 +611,146 @@ theorem PreparedInvocation.authorityPost_logical {F : Type} [Field F] {deploymen
     Patch.run_nil]
   rfl
 
+
+/-! ## The run check is what prepared -/
+
+theorem checkCommandRun_none {domain : Digest} {directory : Directory Nat Registry} {ambient : Ambient}
+    {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    (unclaimed : command.run = none) :
+    checkCommandRun domain directory ambient command pre = .ok none := by
+  unfold checkCommandRun; rw [unclaimed]
+
+/-- **`checkClaim_sound`**: an accepted run check loaded the claimed program
+and its libraries from the directory, built the kernel's own sample from the
+loaded pre-states, and `NockRun.checkRun` accepted the command's writes. -/
+theorem checkClaim_sound {domain : Digest} {directory : Directory Nat Registry} {ambient : Ambient}
+    {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {claim : NockRun.RunClaim} {checked : CheckedRun}
+    (accepted : checkClaim domain directory ambient command pre claim = .ok checked) :
+    ∃ program libraries sample writes,
+      checked.claim = claim ∧
+      CanonicalCellRegistry.loadProgram domain directory checked.claim.programId = some program ∧
+      program.abi.libraries.mapM (fun library => NockRun.require .libraryUnknown
+        (CanonicalCellRegistry.loadProgram domain directory library)) = .ok libraries ∧
+      NockProgramCell.sampleOf program.abi (runContext ambient command)
+        (command.targets.map Target.target) (sampleRead command pre) = some sample ∧
+      commandWrites command = some writes ∧
+      checked.fuel = program.abi.fuel ∧
+      NockRun.checkRun program libraries sample checked.claim writes = .ok checked.verdict := by
+  unfold checkClaim at accepted
+  simp only [bind, Except.bind, pure, Except.pure] at accepted
+  cases hprog : CanonicalCellRegistry.loadProgram domain directory claim.programId with
+  | none => simp [hprog, NockRun.require] at accepted
+  | some program =>
+    simp only [hprog, NockRun.require_some] at accepted
+    cases hlibs : program.abi.libraries.mapM (fun library => NockRun.require .libraryUnknown
+        (CanonicalCellRegistry.loadProgram domain directory library)) with
+    | error e => rw [hlibs] at accepted; cases accepted
+    | ok libraries =>
+      rw [hlibs] at accepted
+      simp only at accepted
+      cases hsample : NockProgramCell.sampleOf program.abi (runContext ambient command)
+          (command.targets.map Target.target) (sampleRead command pre) with
+      | none => simp [hsample] at accepted
+      | some sample =>
+        simp only [hsample, NockRun.require_some] at accepted
+        cases hwrites : commandWrites command with
+        | none => simp [hwrites] at accepted
+        | some writes =>
+          simp only [hwrites, NockRun.require_some] at accepted
+          cases hrun : NockRun.checkRun program libraries sample claim writes with
+          | error e => simp [hrun] at accepted
+          | ok verdict =>
+            simp only [hrun, Except.ok.injEq] at accepted
+            subst accepted
+            exact ⟨program, libraries, sample, writes, rfl, hprog, hlibs, hsample, rfl, rfl, hrun⟩
+
+/-- **`checkCommandRun_sound`**: a checked run in a prepared invocation is the
+command's own claim, accepted by `checkClaim`. -/
+theorem checkCommandRun_sound {domain : Digest} {directory : Directory Nat Registry} {ambient : Ambient}
+    {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {checked : CheckedRun}
+    (accepted : checkCommandRun domain directory ambient command pre = .ok (some checked)) :
+    command.run = some checked.claim ∧
+      checkClaim domain directory ambient command pre checked.claim = .ok checked := by
+  unfold checkCommandRun at accepted
+  cases hclaim : command.run with
+  | none => rw [hclaim] at accepted; cases accepted
+  | some claim =>
+    rw [hclaim] at accepted
+    cases hc : checkClaim domain directory ambient command pre claim with
+    | error e => simp [hc, Except.map, Except.mapError] at accepted
+    | ok c =>
+      simp only [hc, Except.map, Except.mapError, Except.ok.injEq, Option.some.injEq] at accepted
+      subst accepted
+      obtain ⟨_, _, _, _, same, -⟩ := checkClaim_sound hc
+      rw [same]
+      exact ⟨rfl, hc⟩
+
+/-- A claim is never dropped: a command that claims a run is either refused
+with the claim's `run` refusal, or carries the checked run. -/
+theorem checkCommandRun_claimed {domain : Digest} {directory : Directory Nat Registry}
+    {ambient : Ambient} {command : Command}
+    {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {claim : NockRun.RunClaim} (claimed : command.run = some claim) :
+    checkCommandRun domain directory ambient command pre ≠ .ok none := by
+  unfold checkCommandRun
+  rw [claimed]
+  cases h : checkClaim domain directory ambient command pre claim <;>
+    simp [h, Except.map, Except.mapError]
+
+/-- **`PreparedInvocation.run_sound`**: a prepared invocation whose command claims
+a run carries that run checked against the kernel's own sample and the loaded
+pre-states, and `NockRun.checkRun` accepted exactly the command's writes. With
+`NockRun.no_accepted_of_output_mismatch` this is the T8 statement at the
+controller: no invocation prepares whose writes differ from the program's. -/
+theorem PreparedInvocation.run_sound {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command)
+    {claim : NockRun.RunClaim} (claimed : command.run = some claim) :
+    ∃ checked program libraries sample writes,
+      prepared.run = some checked ∧ checked.claim = claim ∧
+      CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory
+        claim.programId = some program ∧
+      program.abi.libraries.mapM (fun library => NockRun.require .libraryUnknown
+        (CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory library)) =
+          .ok libraries ∧
+      NockProgramCell.sampleOf program.abi (runContext ambient command)
+        (command.targets.map Target.target)
+        (sampleRead command fun i => (prepared.targets i).pre.logical) = some sample ∧
+      commandWrites command = some writes ∧
+      NockRun.checkRun program libraries sample claim writes = .ok checked.verdict := by
+  have h := prepared.runChecked
+  cases hrun : prepared.run with
+  | none => rw [hrun] at h; exact absurd h (checkCommandRun_claimed claimed)
+  | some checked =>
+    rw [hrun] at h
+    obtain ⟨same, hc⟩ := checkCommandRun_sound h
+    rw [claimed] at same
+    cases same
+    obtain ⟨program, libraries, sample, writes, -, hp, hl, hs, hw, -, hr⟩ := checkClaim_sound hc
+    exact ⟨checked, program, libraries, sample, writes, rfl, rfl, hp, hl, hs, hw, hr⟩
+
+/-- Without a claim, no run slot: the controller projects nothing under `run/`. -/
+theorem PreparedInvocation.run_unclaimed {F : Type} [Field F] {deployment : Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command)
+    (unclaimed : command.run = none) : prepared.run = none := by
+  have h := prepared.runChecked
+  rw [checkCommandRun_none unclaimed] at h
+  exact (Except.ok.inj h).symm
+
 end Minidregg.Kernel.DeclaredResourceController
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.checkCommandRun_none' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkCommandRun_none
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.checkClaim_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkClaim_sound
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.checkCommandRun_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkCommandRun_sound
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.checkCommandRun_claimed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkCommandRun_claimed
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.run_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.run_sound
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.run_unclaimed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.PreparedInvocation.run_unclaimed

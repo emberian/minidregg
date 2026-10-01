@@ -33,6 +33,7 @@ import Compiler.HyperdocumentCell
 import Compiler.CanonicalResourcePageMaterializer
 import Compiler.ResourceBirthCodec
 import Compiler.PolicySourceCell
+import Compiler.NockProgramCodec
 import Theory.CanonicalResourceBookInvariant
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
@@ -59,13 +60,15 @@ inductive Kind where
   | accountMetadata
   | declaredProgram
   | policySource
+  | nockProgram
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .nockProgram]
 
-/-- Tags 1/2/3/5/6/8/9/10 are deployment pins.  Tag 3 is the one authority
+/-- Tags 1/2/3/5/6/8/9/10/12 are deployment pins (12: a Nock program; 11 is the
+pay cell on `p2-pay`).  Tag 3 is the one authority
 cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
 retired and decodes to nothing; tag 4 was never assigned. -/
 def Kind.tag : Kind → UInt8
@@ -77,6 +80,7 @@ def Kind.tag : Kind → UInt8
   | .accountMetadata => 8
   | .declaredProgram => 9
   | .policySource => PolicySourceCell.registryTag
+  | .nockProgram => NockProgramCodec.registryTag
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -87,6 +91,7 @@ def kindAtTag : UInt8 → Option Kind
   | 8 => some .accountMetadata
   | 9 => some .declaredProgram
   | 10 => some .policySource
+  | 12 => some .nockProgram
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -109,11 +114,13 @@ def schemaRef : Kind → SchemaRef
   | .accountMetadata => ⟨⟨91007⟩, 2⟩
   | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
+  | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
   cases left <;> cases right <;>
-    simp [schemaRef, PolicySourceCell.schemaId, PolicySourceCell.wireVersion] at same ⊢
+    simp [schemaRef, PolicySourceCell.schemaId, PolicySourceCell.wireVersion,
+      NockProgramCodec.schemaId, NockProgramCodec.wireVersion] at same ⊢
 
 abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .content => Hyperdocument.layout
@@ -124,6 +131,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .accountMetadata => EffectDeclaration.effectLayout
   | .declaredProgram => EffectDeclaration.effectLayout
   | .policySource => PolicySourceCell.layout
+  | .nockProgram => NockProgramCodec.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -134,6 +142,7 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .accountMetadata => DeclaredEffectCell.materializer
   | .declaredProgram => DeclaredEffectCell.materializer
   | .policySource => PolicySourceCell.materializer
+  | .nockProgram => NockProgramCodec.materializer
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -175,6 +184,8 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
     registry.materializer .accountMetadata = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_policy_source_materializer :
     registry.materializer .policySource = PolicySourceCell.materializer := rfl
+@[simp] theorem registry_nock_program_materializer :
+    registry.materializer .nockProgram = NockProgramCodec.materializer := rfl
 @[simp] theorem registry_program_materializer :
     registry.materializer .declaredProgram = DeclaredEffectCell.materializer := rfl
 @[simp] theorem registry_lifecycle_root :
@@ -351,7 +362,7 @@ theorem empty_event_history_lawful (deployment : Deployment) :
 
 /-- Semantic identity of the source-owned loaded/final law. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v3".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v5".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -368,6 +379,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       (CanonicalResourceKernel.logicalBook state).AccountSupported
   | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
       (PolicySourceCell.recordAt state)
+  | .nockProgram, state => PresentLaw (NockProgramCodec.CellValid deployment.domain cellId)
+      (NockProgramCodec.programAt state)
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -405,7 +418,8 @@ def postStateCheck (deployment : Deployment) (cellId : Nat) (kind : Kind)
 def FinalPostLaw (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) : Prop :=
   before.kind = after.kind ∧ CellLaw deployment cellId before ∧ CellLaw deployment cellId after ∧
-    (before.kind = .policySource → PackedCell.bytes registry before = PackedCell.bytes registry after)
+    (before.kind = .policySource ∨ before.kind = .nockProgram →
+      PackedCell.bytes registry before = PackedCell.bytes registry after)
 
 instance finalPostLawDecidable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) : Decidable (FinalPostLaw deployment cellId before after) := by
@@ -419,6 +433,7 @@ injected as raw user initial payloads. -/
 def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
   | .content, state => state.support = ∅
+  | .nockProgram, state => PresentLaw NockProgramCodec.Admissible (NockProgramCodec.programAt state)
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
@@ -714,7 +729,7 @@ theorem policy_source_no_user_birth (deployment : Deployment) (cellId : Nat)
 theorem policy_source_final_bytes_immutable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) (source : before.kind = .policySource)
     (valid : FinalPostLaw deployment cellId before after) :
-    PackedCell.bytes registry before = PackedCell.bytes registry after := valid.2.2.2 source
+    PackedCell.bytes registry before = PackedCell.bytes registry after := valid.2.2.2 (Or.inl source)
 
 theorem policy_source_final_state_immutable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) (source : before.kind = .policySource)
@@ -751,6 +766,149 @@ theorem policy_source_identifier_collision_refused (domain : Digest)
   apply policy_source_occupied_refused domain _ right (policySourceCell left)
   rw [collision]
   exact Directory.insert_slot registry directory _ _
+
+/-! ## Nock program cells: content-addressed, immutable, born by friends
+
+A program cell is born through the ordinary resource birth (its creator's law,
+its creator's owner grant), never by a special capability. Its identifier is its
+content address, so the same record born twice meets an occupied identifier
+(`program_occupied_refused`); a different ABI over the same jam is a different
+program at a different identifier. -/
+
+def programCell (program : NockProgramCodec.Program) : PackedCell registry :=
+  ⟨.nockProgram, materialize NockProgramCodec.materializer
+    (NockProgramCodec.stateOfOption (some program))⟩
+
+def programCellId (domain : Digest) (program : NockProgramCodec.Program) : Nat :=
+  NockProgramCodec.physicalId domain (NockProgramCodec.programId program)
+
+def programCreate (domain : Digest) (program : NockProgramCodec.Program) :
+    CreateRequest (CellId := Nat) registry where
+  cellId := programCellId domain program
+  expectedPreRoot := CellSlot.root registry .absent
+  cell := programCell program
+
+/-- The program a packed cell holds, if it is a program cell. -/
+def cellProgram : PackedCell registry → Option NockProgramCodec.Program
+  | ⟨.nockProgram, payload⟩ => NockProgramCodec.programAt payload.logical
+  | _ => none
+
+@[simp] theorem cellProgram_programCell (program : NockProgramCodec.Program) :
+    cellProgram (programCell program) = some program := by
+  simp [cellProgram, programCell]
+
+/-- The program at `id`'s address in this directory, checked against the address. -/
+def loadProgram (domain : Digest) (directory : Directory Nat registry) (id : Digest) :
+    Option NockProgramCodec.Program :=
+  match directory.slots (NockProgramCodec.physicalId domain id) with
+  | .present cell =>
+      match cellProgram cell with
+      | some program => if NockProgramCodec.programId program = id then some program else none
+      | none => none
+  | _ => none
+
+theorem loadProgram_present (domain : Digest) (directory : Directory Nat registry)
+    (program : NockProgramCodec.Program)
+    (present : directory.slots (programCellId domain program) = .present (programCell program)) :
+    loadProgram domain directory (NockProgramCodec.programId program) = some program := by
+  unfold loadProgram
+  rw [show NockProgramCodec.physicalId domain (NockProgramCodec.programId program) =
+    programCellId domain program from rfl, present]
+  simp
+
+theorem loadProgram_programId {domain : Digest} {directory : Directory Nat registry}
+    {id : Digest} {program : NockProgramCodec.Program}
+    (loaded : loadProgram domain directory id = some program) :
+    NockProgramCodec.programId program = id := by
+  unfold loadProgram at loaded
+  split at loaded
+  · split at loaded
+    · split at loaded
+      · rename_i same
+        cases loaded
+        exact same
+      · cases loaded
+    · cases loaded
+  · cases loaded
+
+theorem missing_program_refused (domain : Digest) (directory : Directory Nat registry)
+    (id : Digest) (missing : directory.slots (NockProgramCodec.physicalId domain id) = .absent) :
+    loadProgram domain directory id = none := by
+  simp [loadProgram, missing]
+
+/-- Every library a program names is a program cell present here. -/
+def librariesPresent (domain : Digest) (directory : Directory Nat registry)
+    (program : NockProgramCodec.Program) : Bool :=
+  program.abi.libraries.all fun library => (loadProgram domain directory library).isSome
+
+/-- Every program born by `descriptor` names only libraries already present. -/
+def birthLibrariesPresent (domain : Digest) (directory : Directory Nat registry)
+    (descriptor : ResourceBirth.Descriptor registry) : Bool :=
+  descriptor.births.all fun item =>
+    match cellProgram item.create.cell with
+    | none => true
+    | some program => librariesPresent domain directory program
+
+theorem missing_library_refused (domain : Digest) (directory : Directory Nat registry)
+    (program : NockProgramCodec.Program) (library : Digest)
+    (named : library ∈ program.abi.libraries)
+    (missing : loadProgram domain directory library = none) :
+    librariesPresent domain directory program = false := by
+  unfold librariesPresent
+  rw [List.all_eq_false]
+  exact ⟨library, named, by simp [missing]⟩
+
+theorem birth_missing_library_refused (domain : Digest) (directory : Directory Nat registry)
+    (descriptor : ResourceBirth.Descriptor registry) (item : ResourceBirth.BirthItem registry)
+    (member : item ∈ descriptor.births) (program : NockProgramCodec.Program)
+    (holds : cellProgram item.create.cell = some program)
+    (missing : librariesPresent domain directory program = false) :
+    birthLibrariesPresent domain directory descriptor = false := by
+  unfold birthLibrariesPresent
+  rw [List.all_eq_false]
+  exact ⟨item, member, by simp [holds, missing]⟩
+
+/-- A friend may birth exactly an admissible program at its content address. -/
+theorem program_user_initial_iff (deployment : Deployment) (cellId : Nat)
+    (program : NockProgramCodec.Program) :
+    UserInitial deployment cellId (programCell program) ↔
+      deployment.Valid ∧ cellId = programCellId deployment.domain program ∧
+        NockProgramCodec.Admissible program := by
+  simp [UserInitial, CellLaw, LogicalLaw, UserShape, programCell, PresentLaw,
+    NockProgramCodec.CellValid, programCellId, and_assoc]
+
+theorem nonCanonical_birth_refused (deployment : Deployment) (cellId : Nat)
+    (program : NockProgramCodec.Program)
+    (bad : Noun.canonical program.jam = false) :
+    ¬ UserInitial deployment cellId (programCell program) := by
+  rw [program_user_initial_iff]
+  rintro ⟨_, _, admitted, _⟩
+  rw [bad] at admitted
+  cases admitted
+
+theorem wrong_address_birth_refused (deployment : Deployment) (cellId : Nat)
+    (program : NockProgramCodec.Program)
+    (elsewhere : cellId ≠ programCellId deployment.domain program) :
+    ¬ UserInitial deployment cellId (programCell program) := by
+  rw [program_user_initial_iff]
+  rintro ⟨_, same, _⟩
+  exact elsewhere same
+
+theorem program_occupied_refused (domain : Digest) (directory : Directory Nat registry)
+    (program : NockProgramCodec.Program) (occupant : PackedCell registry)
+    (occupied : directory.slots (programCreate domain program).cellId = .present occupant) :
+    CellRegistry.create registry directory (programCreate domain program) =
+      .error .duplicateCreate := by
+  simp [CellRegistry.create, occupied]
+
+theorem nock_program_final_state_immutable (deployment : Deployment) (cellId : Nat)
+    (before after : PackedCell registry) (program : before.kind = .nockProgram)
+    (valid : FinalPostLaw deployment cellId before after) : before = after := by
+  have bytesExact : cellCodec.encode before = cellCodec.encode after :=
+    valid.2.2.2 (Or.inr program)
+  have same := congrArg cellCodec.decode bytesExact
+  rw [cellCodec.decode_encode, cellCodec.decode_encode] at same
+  exact Option.some.inj same
 
 namespace Witness
 
@@ -801,3 +959,17 @@ end Minidregg.Compiler.CanonicalCellRegistry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.authority_identity_is_pinned
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.user_content_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.user_content_inhabited
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.program_user_initial_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.program_user_initial_iff
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.nonCanonical_birth_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.nonCanonical_birth_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.missing_library_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.missing_library_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birth_missing_library_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birth_missing_library_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.loadProgram_present' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.loadProgram_present
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.program_occupied_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.program_occupied_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.nock_program_final_state_immutable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.nock_program_final_state_immutable

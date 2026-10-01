@@ -85,6 +85,9 @@ fn request_from_envelope<'a>(
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
         [0..=11, ..] => true,
+        // NOCK K-NOCK-CELL / K-RAN: read-only program check / show / sample /
+        // run dry run (op 120 reads no target cell: values are the caller's).
+        [117..=120, ..] => true,
         [12 | 14] => true,
         [13 | 15, digits @ ..] => {
             !digits.is_empty()
@@ -130,11 +133,13 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && serde_json::from_slice::<serde_json::Value>(payload)
                     .is_ok_and(|value| value.is_object())
         }
+        // The source bound is 4 MiB, the client's current-birth source bound: a
+        // Nock program birth (NOCK K-NOCK-CELL) carries its jam as hex.
         [91, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
             exact_pair(pair).is_some_and(|(observation, source)| {
                 !observation.is_empty()
                     && !source.is_empty()
-                    && source.len() <= 256 * 1024
+                    && source.len() <= 4 * 1024 * 1024
                     && serde_json::from_slice::<serde_json::Value>(source)
                         .is_ok_and(|value| value.is_object())
             })
@@ -1055,6 +1060,23 @@ mod tests {
         oversized[1] = b'{';
         *oversized.last_mut().unwrap() = b'}';
         assert!(!allowed_operation(&oversized, false));
+        let mut oversized_birth = vec![91];
+        oversized_birth.extend_from_slice(&1u32.to_le_bytes());
+        oversized_birth.push(b'O');
+        let mut source = vec![b' '; 4 * 1024 * 1024 + 1];
+        source[0] = b'{';
+        *source.last_mut().unwrap() = b'}';
+        oversized_birth.extend_from_slice(&source);
+        assert!(!allowed_operation(&oversized_birth, false));
+    }
+
+    #[test]
+    fn nock_program_reads_are_public() {
+        assert!(allowed_operation(&[117, 0, 0, 0, 0], false));
+        assert!(allowed_operation(&[118, b'7'], false));
+        assert!(allowed_operation(&[119, b'{', b'}'], false));
+        assert!(allowed_operation(&[120, b'{', b'}'], false));
+        assert!(!allowed_operation(&[121, b'{', b'}'], false));
     }
 
     #[test]
