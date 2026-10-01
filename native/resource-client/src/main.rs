@@ -170,6 +170,38 @@ fn host_refusal_ending(decision: &HostDecision) -> Option<String> {
     }
 }
 
+/// The identity of one Host image file as the kernel reports it: device, inode,
+/// size, and both modification and status-change times. Replacing the file
+/// (new inode) or writing it in place (ctime moves, and no caller can set ctime)
+/// changes it.
+#[cfg(unix)]
+type HostImageIdentity = (u64, u64, u64, i64, i64, i64, i64);
+
+/// The SHA-256 of each Host image this process has hashed, with the identity
+/// of the file it hashed. A read is several Host requests and each binds the
+/// image's digest; the image is ~150 MB, so re-hashing it per request was most
+/// of a warm read (COLD-READ, 2026-10-01: 7 requests, ~0.1 s of hashing each).
+#[cfg(unix)]
+static HOST_IMAGE_SHA256: Mutex<Vec<(PathBuf, HostImageIdentity, String)>> = Mutex::new(Vec::new());
+
+#[cfg(unix)]
+fn host_image_identity(metadata: &fs::Metadata) -> HostImageIdentity {
+    use std::os::unix::fs::MetadataExt;
+    (
+        metadata.dev(),
+        metadata.ino(),
+        metadata.size(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    )
+}
+
+/// The digest of the selected Host image, hashed once per file identity per
+/// process. The identity is read from the open handle, before and after the
+/// hash; a file that changed while it was hashed is refused, and a later call
+/// that sees a different identity hashes again.
 #[cfg(unix)]
 fn host_image_sha256(host: &Path) -> Result<String> {
     let mut file = File::open(host).map_err(|error| {
@@ -178,17 +210,27 @@ fn host_image_sha256(host: &Path) -> Result<String> {
             host.display()
         )
     })?;
-    if !file
-        .metadata()
-        .map_err(|error| {
+    let inspect = |file: &File| {
+        file.metadata().map_err(|error| {
             format!(
                 "cannot inspect selected Host image {}: {error}",
                 host.display()
             )
-        })?
-        .is_file()
-    {
+        })
+    };
+    let metadata = inspect(&file)?;
+    if !metadata.is_file() {
         return Err("selected Host image is not a regular file".into());
+    }
+    let identity = host_image_identity(&metadata);
+    let mut cache = HOST_IMAGE_SHA256
+        .lock()
+        .map_err(|_| "Host image digest cache poisoned".to_owned())?;
+    if let Some((_, _, sha)) = cache
+        .iter()
+        .find(|(path, seen, _)| path == host && *seen == identity)
+    {
+        return Ok(sha.clone());
     }
     let mut digest = sha2::Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
@@ -200,10 +242,20 @@ fn host_image_sha256(host: &Path) -> Result<String> {
             )
         })?;
         if count == 0 {
-            return Ok(hex(&digest.finalize()));
+            break;
         }
         digest.update(&buffer[..count]);
     }
+    if host_image_identity(&inspect(&file)?) != identity {
+        return Err(format!(
+            "selected Host image {} changed while it was hashed",
+            host.display()
+        ));
+    }
+    let sha = hex(&digest.finalize());
+    cache.retain(|(path, _, _)| path != host);
+    cache.push((host.to_path_buf(), identity, sha.clone()));
+    Ok(sha)
 }
 
 #[cfg(unix)]
@@ -3165,6 +3217,27 @@ mod tests {
         let path = env::temp_dir().join(format!("mini-{name}-{}-{unique}", std::process::id()));
         fs::create_dir(&path).unwrap();
         path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_image_digest_is_cached_per_file_identity() {
+        let dir = scratch("host-image-digest");
+        let host = dir.join("minidregg-host");
+        let sha = |bytes: &[u8]| hex(&sha2::Sha256::digest(bytes));
+        fs::write(&host, b"first image").unwrap();
+        assert_eq!(host_image_sha256(&host).unwrap(), sha(b"first image"));
+        assert_eq!(host_image_sha256(&host).unwrap(), sha(b"first image"));
+        // Replaced by rename: a new inode, so the digest is taken again.
+        let staged = dir.join("staged");
+        fs::write(&staged, b"second image").unwrap();
+        fs::rename(&staged, &host).unwrap();
+        assert_eq!(host_image_sha256(&host).unwrap(), sha(b"second image"));
+        // Rewritten in place at the same length: the status-change time moves.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(&host, b"third  image").unwrap();
+        assert_eq!(host_image_sha256(&host).unwrap(), sha(b"third  image"));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
