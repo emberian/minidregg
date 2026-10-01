@@ -18,6 +18,7 @@ import Compiler.GrainResourceBirthAuthority
 import Theory.ResourceBirthAuthority
 import Kernel.CanonicalResourceEffect
 import Kernel.DurableDataIntent
+import Kernel.RoomBirthGate
 
 namespace Minidregg.Kernel.ResourceBirthController
 
@@ -418,6 +419,8 @@ inductive PreparationReject where
   | resourceBatch
   | physicalShape
   | finalCellLaw
+  /-- The room birth gate refused, by name (`Kernel.RoomBirthGate`). -/
+  | room (reason : RoomBirthGate.Refusal)
   deriving DecidableEq, Repr
 
 /-- Every component is obtained from this one restored image and the fixed
@@ -452,6 +455,10 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
     write.expectedPre = durable.snapshot.model.roots write.cellId
   finalCells : ∀ write ∈ planWrites deployment descriptor factory.payload book.payload
       resources.post grants.writes, PhysicalPostLaw deployment write
+  /-- The height the room birth gate was decided at: the admission height. -/
+  gateHeight : Height
+  /-- Every room birth passed the gate (`RoomBirthGate.Admitted`). -/
+  rooms : RoomBirthGate.Admitted pins directory authority gateHeight descriptor
 
 private def requirePreparation (condition : Prop) [Decidable condition]
     (reason : PreparationReject) : Except PreparationReject (PLift condition) :=
@@ -484,9 +491,13 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
   book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
+  gateHeight : Height
+  rooms : RoomBirthGate.Admitted pins directory authority gateHeight descriptor
 
+/-- `height` is the admission height the room birth gate decides capability
+validity at; every birth route passes through here. -/
 def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deployment)
-    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) :
+    (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry) (height : Height) :
     Except PreparationReject (PreparedPreAuthority profile deployment pins durable descriptor) := do
   let valid ← requirePreparation (deployment.Valid ∧ PinsBound deployment pins) .deployment
   let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
@@ -505,8 +516,11 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deploy
     (observeCell deployment directory.directory deployment.resourceBookId .resourceBook) .resourceBook
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
+  let rooms ← (RoomBirthGate.check pins directory authority height descriptor).mapError
+    PreparationReject.room
   .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
-    parents.down, initials.down, policiesBound.down, libraries.down, factory, book, authority⟩
+    parents.down, initials.down, policiesBound.down, libraries.down, factory, book, authority,
+    height, rooms.down⟩
 
 /-- Common post-authority physical checks. The authority route supplies only
 its already checked physical writes; allocation, conserved Book application,
@@ -553,9 +567,9 @@ def preparePostAuthority {profile : PolicyCompilerProfile F}
 list and every final payload are checked before policy evaluation. No step
 mutates the source image or installs a prefix of the birth. -/
 def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (descriptor : Descriptor Registry) :
+    (durable : Durable) (descriptor : Descriptor Registry) (height : Height) :
     Except PreparationReject (PreparedBirth profile deployment pins durable descriptor) := do
-  let pre ← preparePreAuthority profile deployment pins durable descriptor
+  let pre ← preparePreAuthority profile deployment pins durable descriptor height
   let grants ← fromOption
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment
       pre.authority descriptor)
@@ -567,7 +581,7 @@ def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
     pre.directory, pre.parentsPresent, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
-    post.writesUnique, post.writePreExact, post.finalCells⟩
+    post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms⟩
 
 /-- Preparation for the composite route retains a single old-image authority
 post covering initial grants and both replay markers. `operationMarker` here is
@@ -585,10 +599,10 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
 
 def prepareGrainBirth (profile : PolicyCompilerProfile F) (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (descriptor : Descriptor Registry)
-    (operationMarker : Nat) :
+    (operationMarker : Nat) (height : Height) :
     Except PreparationReject
       (PreparedGrainBirth profile deployment pins durable descriptor operationMarker) := do
-  let pre ← preparePreAuthority profile deployment pins durable descriptor
+  let pre ← preparePreAuthority profile deployment pins durable descriptor height
   let combined ← fromOption
     (GrainResourceBirthAuthority.prepare profile deployment pre.authority
       descriptor operationMarker) .authorityBatch
@@ -627,7 +641,7 @@ structure PreparedGrainDraft (profile : PolicyCompilerProfile F)
 
 def prepareGrainDraft (profile : PolicyCompilerProfile F) (deployment : Deployment)
     (pins : FactoryPins) (durable : Durable) (draft : Descriptor Registry)
-    (operationMarker : Nat) :
+    (operationMarker : Nat) (height : Height) :
     Except PreparationReject
       (PreparedGrainDraft profile deployment pins durable draft operationMarker) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
@@ -637,7 +651,7 @@ def prepareGrainDraft (profile : PolicyCompilerProfile F) (deployment : Deployme
     (GrainResourceBirthAuthority.prepare profile deployment authority
       draft operationMarker) .authorityBatch
   let descriptor := { draft with auxiliaryCreates := combined.auxiliaryCreates }
-  let prepared ← prepareGrainBirth profile deployment pins durable descriptor operationMarker
+  let prepared ← prepareGrainBirth profile deployment pins durable descriptor operationMarker height
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
@@ -700,7 +714,7 @@ structure PreparedDraft (profile : PolicyCompilerProfile F) (deployment : Deploy
   prepared : PreparedBirth profile deployment pins durable descriptor
 
 def prepareDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (pins : FactoryPins)
-    (durable : Durable) (draft : Descriptor Registry) :
+    (durable : Durable) (draft : Descriptor Registry) (height : Height) :
     Except PreparationReject (PreparedDraft profile deployment pins durable draft) := do
   let empty ← requirePreparation (draft.auxiliaryCreates = []) .auxiliaryCreates
   let authority ← fromOption
@@ -709,7 +723,7 @@ def prepareDraft (profile : PolicyCompilerProfile F) (deployment : Deployment) (
     (CredentialAuthorityDomainReceiver.prepareGrantBatch profile deployment authority draft)
     .authorityBatch
   let descriptor := { draft with auxiliaryCreates := grants.auxiliaryCreates }
-  let prepared ← prepareBirth profile deployment pins durable descriptor
+  let prepared ← prepareBirth profile deployment pins durable descriptor height
   .ok ⟨empty.down, descriptor, rfl, prepared⟩
 
 theorem PreparedDraft.user_source_preserved {deployment : Deployment} {pins : FactoryPins}
@@ -791,6 +805,49 @@ theorem birth_parent_must_exist {deployment : Deployment} {pins : FactoryPins}
       by simpa using written⟩, guardCell, ?_⟩
     rw [← guardCell]
     exact parentGuards_exact durable descriptor guard guardMember
+
+/-- **`birth_under_room_requires_grant`**, at the one preparation every birth
+route passes: a prepared birth of an item into room `R` names the creator's
+placing capability, admissible for the creator's `placeObject` request on `R` at
+the gate height, and `R`'s committed law accepts that request. -/
+theorem PreparedBirth.birth_under_room_requires_grant {deployment : Deployment}
+    {pins : FactoryPins} {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) :
+    ∃ placement cap, item.placement = some placement ∧
+      RoomBirthGate.storedAt prepared.authority placement = some cap ∧
+      cap.holder.Covers descriptor.creator ∧
+      cap.Admissible prepared.authority.snapshot.authState
+        (RoomBirthGate.placeRequest pins prepared.authority.snapshot.authState
+          (RoomBirthGate.roomRoot prepared.directory.directory room) prepared.gateHeight descriptor room) ∧
+      ∃ observed : ResourceTargetAdmission.Observed deployment prepared.directory.directory
+          .object room (RoomBirthGate.roomRoot prepared.directory.directory room),
+        ∃ law, RoomBirthGate.lawOf prepared.directory prepared.authority room = some law ∧
+          Minidregg.Pred.eval law
+            (RoomBirthGate.viewOf (RoomBirthGate.placeRequest pins
+              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot prepared.directory.directory room)
+              prepared.gateHeight descriptor room) observed)
+            (RoomBirthGate.viewOf (RoomBirthGate.placeRequest pins
+              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot prepared.directory.directory room)
+              prepared.gateHeight descriptor room) observed) = true :=
+  RoomBirthGate.birth_under_room_requires_grant prepared.rooms member inRoom
+
+/-- The same at the shared pre-authority preparation (the grain route's). -/
+theorem PreparedPreAuthority.birth_under_room_requires_grant {deployment : Deployment}
+    {pins : FactoryPins} {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedPreAuthority profile deployment pins durable descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) :
+    ∃ placement cap, item.placement = some placement ∧
+      RoomBirthGate.storedAt prepared.authority placement = some cap ∧
+      cap.holder.Covers descriptor.creator ∧
+      cap.Admissible prepared.authority.snapshot.authState
+        (RoomBirthGate.placeRequest pins prepared.authority.snapshot.authState
+          (RoomBirthGate.roomRoot prepared.directory.directory room) prepared.gateHeight descriptor room) :=
+  let ⟨placement, cap, named, stored, holder, admissible, _⟩ :=
+    RoomBirthGate.birth_under_room_requires_grant prepared.rooms member inRoom
+  ⟨placement, cap, named, stored, holder, admissible⟩
 
 /-- Refusal pole: when the loaded directory has no cell at the named room,
 no birth into that room is prepared. -/

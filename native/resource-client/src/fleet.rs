@@ -69,10 +69,18 @@ fn pair(first: &[u8], second: &[u8]) -> Result<Vec<u8>> {
 /// a diagnostic, never parsed into a decision.
 fn reply(frame: &[u8], operation: u8) -> Result<&[u8]> {
     match frame {
-        [255, body @ ..] => Err(format!(
-            "Host refused op{operation}: {}",
-            String::from_utf8_lossy(body)
-        )),
+        [255, body @ ..] => {
+            // The refusal frame is the Host's own encoded outcome; it is kept
+            // as the Host's decision (the shell renders it through the Host),
+            // never parsed here.
+            crate::note_host_decision(crate::HostDecision::RefusedFrame {
+                command: format!("fleet op{operation}"),
+                byte: 255,
+                encoded: body.to_vec(),
+                decoded: None,
+            });
+            Err(format!("Host refused op{operation}: {}", String::from_utf8_lossy(body)))
+        }
         [actual, body @ ..] if *actual == operation && !body.is_empty() => Ok(body),
         _ => Err(format!("fleet op{operation} returned an invalid frame")),
     }
@@ -371,6 +379,7 @@ fn attempt(
         outcome
     };
     if !confirmed(&outcome) {
+        crate::note_host_decision(crate::HostDecision::Outcome(outcome.clone()));
         let detail = outcome
             .get("detail")
             .and_then(Value::as_str)
@@ -533,6 +542,96 @@ fn poll(agent: &Agent, reference: &Value, topic: &str, since: &str, limit: &str)
     Ok(())
 }
 
+// ---------------------------------------------------------------- for `mini credit`
+
+/// One paid fleet turn from this workspace's account reference `name`:
+/// `amount` of `asset` (the pinned tariff asset when `None`) to account `to`,
+/// publishing `payload` on `topic` of the paying account when given. The
+/// result is the fleet turn result (`minidregg-fleet-turn-result-v1`), printed.
+pub(crate) fn pay_turn(
+    root: &Path,
+    name: &str,
+    to: &str,
+    amount: &str,
+    asset: Option<&str>,
+    publication: Option<(&str, &[u8])>,
+) -> Result<Value> {
+    let agent = agent(root)?;
+    let reference = account(&agent, name)?;
+    let asset = match asset {
+        Some(asset) => asset.to_owned(),
+        None => tariff(&agent)?.1,
+    };
+    let transfer = transfer_value(to, amount, &asset)?;
+    let publication = match publication {
+        Some((topic, payload)) => {
+            if payload.len() > MAX_PAYLOAD {
+                return Err("payload exceeds 16384 bytes".into());
+            }
+            json!({"topic":hex(&topic_bytes(topic)?),"sequence":"0","payload":hex(payload)})
+        }
+        None => Value::Null,
+    };
+    let verb = if publication.is_null() { "transfer" } else { "send" };
+    turn(&agent, &reference, verb, transfer, publication)
+}
+
+/// A signed current read of account reference `name`: (balance of the pinned
+/// asset, the asset, the signed view's height, the account id).
+pub(crate) fn account_balance(root: &Path, name: &str) -> Result<(String, String, String, String)> {
+    let agent = agent(root)?;
+    let reference = account(&agent, name)?;
+    let (_, asset) = tariff(&agent)?;
+    let (view, challenge, _) =
+        workspace::signed_view(&agent.root, &agent.workspace, &reference, "resource")?;
+    let height = field(&challenge, "height")?.to_owned();
+    Ok((
+        balance(&view, &asset).unwrap_or_else(|| "0".into()),
+        asset,
+        height,
+        field(&reference, "target")?.to_owned(),
+    ))
+}
+
+/// The incoming ledger of account reference `name` (Host op 180): accepted
+/// fleet turns that paid it above `since`, on `topic` (empty = every topic),
+/// behind this reader's signed observation of the account. Each entry gains
+/// `payloadText` when its payload is UTF-8.
+pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit: &str) -> Result<Value> {
+    canonical_decimal(since, "--since")?;
+    canonical_decimal(limit, "--limit")?;
+    if topic.len() > MAX_TOPIC {
+        return Err("topic must be 0..64 bytes".into());
+    }
+    let agent = agent(root)?;
+    let reference = account(&agent, name)?;
+    let (_, signed) = observe(&agent, &reference)?;
+    let request = serde_json::to_vec(&json!({"topic":hex(topic.as_bytes()),"cursor":since,"limit":limit}))
+        .map_err(|error| error.to_string())?;
+    let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 180, &pair(&signed, &request)?)?;
+    let mut value: Value =
+        serde_json::from_slice(reply(&frame, 180)?).map_err(|error| error.to_string())?;
+    if field(&value, "account")? != field(&reference, "target")? || field(&value, "topic")? != hex(topic.as_bytes()) {
+        return Err("incoming ledger answered for another account or topic".into());
+    }
+    let floor: u128 = since.parse().map_err(|_| "--since out of range")?;
+    let mut previous = floor;
+    let mut entries = value["entries"].as_array().cloned().unwrap_or_default();
+    for entry in &mut entries {
+        let height: u128 = field(entry, "height")?.parse().map_err(|_| "ledger height out of range")?;
+        if height <= previous {
+            return Err("incoming ledger is not strictly ascending above the cursor".into());
+        }
+        previous = height;
+        if let Ok(text_value) = String::from_utf8(decode_hex(field(entry, "payload")?)?) {
+            entry["payloadText"] = json!(text_value);
+        }
+    }
+    value["nextCursor"] = json!(previous.to_string());
+    value["entries"] = Value::Array(entries);
+    Ok(value)
+}
+
 /// Sponsor-backed join: admit the new key, open its workspace, and have the
 /// sponsor create one account owned by the new subject and funded by a Book
 /// posting from the sponsor's fee payer. Each step is resumable from its
@@ -628,6 +727,7 @@ fn join(mut args: Args) -> Result<()> {
                 operation: Some(field(&handoff, "operationCapability")?),
                 control: Some(field(&handoff, "controlCapability")?),
                 provenance: Some(&provenance),
+                room: None,
             },
         )?;
     }
@@ -748,7 +848,27 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             poll(&agent, &account(&agent, &name)?, &topic, &since, &limit)
         }
-        _ => Err("fleet action must be join, send, publish, transfer, lookup, receipt or poll".into()),
+        "incoming" => {
+            let name = text(args.required("account")?, "account reference")?;
+            let topic = args
+                .optional("topic")
+                .map(|value| text(value, "topic"))
+                .transpose()?
+                .unwrap_or_default();
+            let since = args
+                .optional("since")
+                .map(|value| text(value, "--since"))
+                .transpose()?
+                .unwrap_or_else(|| "0".into());
+            let limit = args
+                .optional("limit")
+                .map(|value| text(value, "--limit"))
+                .transpose()?
+                .unwrap_or_else(|| "64".into());
+            args.finish()?;
+            print_json(&incoming(&agent.root, &name, &topic, &since, &limit)?)
+        }
+        _ => Err("fleet action must be join, send, publish, transfer, lookup, receipt, poll or incoming".into()),
     }
 }
 

@@ -108,7 +108,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
           let descriptor ← need "noncanonical birth draft"
             (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
           let prepared ← (ResourceBirthController.Concrete.prepareDraft profile.compilerProfile
-            config.deployment opened.pins opened.durable descriptor).mapError
+            config.deployment opened.pins opened.durable descriptor height).mapError
               (fun reason => s!"birth preparation: {repr reason}")
           check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
             "birth source capability count mismatch"
@@ -828,6 +828,179 @@ def fleetHeadAuthorizedLoaded (config : Config) (opened : Opened config)
         (historicalReceipt config opened.durable record.transactionId record.event.eventId).map
           fun receipt => (record.transactionId, receipt)
       return .ok ⟨subject, payer, paid.length, head⟩
+/-! ## The incoming ledger of an account (op 180)
+
+A fleet turn's topic belongs to the PAYING account (`FleetTurn`, module doc),
+so a payee cannot read who paid it from any topic of its own. Its ledger is a
+read of the accepted journal: every fleet turn whose transfer names the
+observed account as its destination, at the height that record took, released
+behind a current signed observation of that account (the same gate as poll and
+head). A room's concierge renews member windows from this view (PLACE §2.10:
+the room account's `renew` ledger). It is a read; nothing is admitted here. -/
+
+/-- One accepted fleet turn that paid the observed account. `topic` and
+`payload` are the turn's own signed publication (empty when it published
+nothing). -/
+structure FleetIncomingEntry where
+  height : Nat
+  transactionId : Digest
+  subject : SubjectId
+  payer : Nat
+  asset : Nat
+  amount : Nat
+  topic : List UInt8
+  payload : List UInt8
+
+/-- An empty `topic` matches every paying turn; otherwise only turns that
+published on exactly that topic. -/
+def fleetTopicMatches (topic : List UInt8) : Option FleetTurn.Publication → Bool
+  | some publication => topic.isEmpty || publication.topic == topic
+  | none => topic.isEmpty
+
+/-- The ledger entry an accepted record contributes at `height`, if it is a
+fleet turn paying `account` on `topic`. -/
+def fleetIncomingEntry? (account : Nat) (topic : List UInt8) (height : Nat)
+    (record : DurableReceiver.IntentRecord) : Option FleetIncomingEntry :=
+  match FleetTurn.decodeIngress record.event.canonicalBytes with
+  | none => none
+  | some ingress =>
+      match ingress.command.transfer with
+      | none => none
+      | some transfer =>
+          if transfer.destination = account ∧
+              fleetTopicMatches topic ingress.command.publication = true then
+            some ⟨height, record.transactionId, ingress.command.subject, ingress.command.payer,
+              transfer.asset, transfer.amount,
+              (ingress.command.publication.map (·.topic)).getD [],
+              (ingress.command.publication.map (·.payload)).getD []⟩
+          else none
+
+/-- Entries strictly above `after`, the record at list position `i` taking
+height `start + i` (the journal's own height assignment: `sinceFrom`). -/
+def fleetIncomingFrom (account : Nat) (topic : List UInt8) (after : Nat) :
+    Nat → List DurableReceiver.IntentRecord → List FleetIncomingEntry
+  | _, [] => []
+  | height, record :: rest =>
+      (if after < height then (fleetIncomingEntry? account topic height record).toList else []) ++
+        fleetIncomingFrom account topic after (height + 1) rest
+
+/-- **An entry is a payment to the account.** Every entry the record yields
+decodes as a fleet turn whose transfer names `account` as destination, and
+the entry repeats that turn's signer, payer, asset and amount exactly. -/
+theorem fleetIncomingEntry?_sound {account : Nat} {topic : List UInt8} {height : Nat}
+    {record : DurableReceiver.IntentRecord} {entry : FleetIncomingEntry}
+    (found : fleetIncomingEntry? account topic height record = some entry) :
+    ∃ ingress transfer, FleetTurn.decodeIngress record.event.canonicalBytes = some ingress ∧
+      ingress.command.transfer = some transfer ∧ transfer.destination = account ∧
+      entry.height = height ∧ entry.transactionId = record.transactionId ∧
+      entry.subject = ingress.command.subject ∧ entry.payer = ingress.command.payer ∧
+      entry.asset = transfer.asset ∧ entry.amount = transfer.amount := by
+  unfold fleetIncomingEntry? at found
+  split at found
+  · cases found
+  · rename_i ingress decoded
+    split at found
+    · cases found
+    · rename_i transfer paid
+      split at found
+      · rename_i matched
+        cases found
+        exact ⟨ingress, transfer, decoded, paid, matched.1, rfl, rfl, rfl, rfl, rfl, rfl⟩
+      · cases found
+
+/-- **A payment to another account is never listed** (the refuting pole):
+a record whose decoded transfer names a different destination yields nothing. -/
+theorem fleetIncomingEntry?_other_destination {account : Nat} {topic : List UInt8}
+    {height : Nat} {record : DurableReceiver.IntentRecord} {ingress : FleetTurn.DecodedIngress}
+    {transfer : FleetTurn.Transfer}
+    (decoded : FleetTurn.decodeIngress record.event.canonicalBytes = some ingress)
+    (paid : ingress.command.transfer = some transfer) (other : transfer.destination ≠ account) :
+    fleetIncomingEntry? account topic height record = none := by
+  unfold fleetIncomingEntry?
+  rw [decoded]
+  simp only [paid]
+  rw [if_neg (fun both => other both.1)]
+
+/-- **The ledger is exact about what it names**: every entry is above
+`after`, at the height of a record in the log, and is that record's own
+payment to the account. -/
+theorem fleetIncomingFrom_sound {account : Nat} {topic : List UInt8} {after : Nat} :
+    ∀ {start : Nat} {log : List DurableReceiver.IntentRecord} {entry : FleetIncomingEntry},
+      entry ∈ fleetIncomingFrom account topic after start log →
+        after < entry.height ∧ ∃ index record, log[index]? = some record ∧
+          entry.height = start + index ∧
+          fleetIncomingEntry? account topic entry.height record = some entry
+  | _, [], _, member => by simp [fleetIncomingFrom] at member
+  | start, record :: rest, entry, member => by
+      simp only [fleetIncomingFrom, List.mem_append] at member
+      rcases member with here | later
+      · split at here
+        next above =>
+          rcases found : fleetIncomingEntry? account topic start record with _ | yielded
+          · rw [found] at here; simp at here
+          · rw [found] at here
+            simp only [Option.toList, List.mem_singleton] at here
+            subst here
+            obtain ⟨_, _, _, _, _, atHeight, _⟩ := fleetIncomingEntry?_sound found
+            refine ⟨atHeight ▸ above, 0, record, rfl, by rw [atHeight]; simp, ?_⟩
+            rw [atHeight]; exact found
+        next => simp at here
+      · obtain ⟨above, index, record', found, height, yields⟩ := fleetIncomingFrom_sound later
+        exact ⟨above, index + 1, record', by simpa using found, by rw [height]; omega, yields⟩
+
+/-- **The ledger misses no payment**: a record of the log above `after` that
+yields an entry at its height is listed. -/
+theorem fleetIncomingFrom_complete {account : Nat} {topic : List UInt8} {after : Nat} :
+    ∀ {start : Nat} {log : List DurableReceiver.IntentRecord} {index : Nat}
+      {record : DurableReceiver.IntentRecord} {entry : FleetIncomingEntry},
+      log[index]? = some record → after < start + index →
+      fleetIncomingEntry? account topic (start + index) record = some entry →
+      entry ∈ fleetIncomingFrom account topic after start log
+  | _, [], _, _, _, found, _, _ => by simp at found
+  | start, head :: rest, 0, record, entry, found, above, yields => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst found
+      simp only [Nat.add_zero] at above yields
+      simp [fleetIncomingFrom, above, yields]
+  | start, head :: rest, index + 1, record, entry, found, above, yields => by
+      simp only [List.getElem?_cons_succ] at found
+      have lifted : after < start + 1 + index := by omega
+      have shifted : fleetIncomingEntry? account topic (start + 1 + index) record = some entry := by
+        rw [show start + 1 + index = start + (index + 1) by omega]; exact yields
+      have next := fleetIncomingFrom_complete found lifted shifted
+      simp only [fleetIncomingFrom, List.mem_append]
+      exact Or.inr next
+
+structure FleetIncomingView where
+  subject : SubjectId
+  account : Nat
+  topic : List UInt8
+  cursor : Nat
+  /-- The current logical height (`logicalHeight`): the next record takes `tip + 1`. -/
+  tip : Nat
+  entries : List FleetIncomingEntry
+
+/-- Payments to the observed account above `cursor`, at most `limit`
+(bounded by `fleetPollMax`), behind a current signed observation of that
+account by its reader. -/
+def fleetIncomingAuthorizedLoaded (config : Config) (opened : Opened config)
+    (signedObservationBytes topic : List UInt8) (cursor limit : Nat) :
+    IO (Except Refusal FleetIncomingView) := do
+  if topic.length > FleetTurn.maxTopicBytes then
+    return .error { reason := .malformed, detail := "fleet topic must be 0..64 bytes" }
+  match ← fleetObservedAccount config opened signedObservationBytes with
+  | .error refusal => return .error refusal
+  | .ok (subject, account) =>
+      let entries := fleetIncomingFrom account topic cursor (config.genesisHeight + 1)
+        opened.durable.image.accepted
+      return .ok ⟨subject, account, topic, cursor, logicalHeight config opened.durable,
+        entries.take (min limit fleetPollMax)⟩
+
+#assert_axioms fleetIncomingEntry?_sound
+#assert_axioms fleetIncomingEntry?_other_destination
+#assert_axioms fleetIncomingFrom_sound
+#assert_axioms fleetIncomingFrom_complete
+
 /-! ## The pay cell (lane P2): session operations 103–107
 
 One plan/assembly/submission/lookup quartet serves both pay command families;

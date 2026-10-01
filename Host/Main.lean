@@ -42,6 +42,7 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 assembly, 98=checked fleet turn submit, 99=receipt-only fleet lookup, 100=topic
 poll since a cursor behind a signed account observation, 101=agent fleet head
 behind a signed account observation, 102=exact receipt by transaction id,
+180=incoming ledger: fleet turns that paid the observed account (P-CREDIT),
 103=pay command signing plan (either pay family), 104=pay detached assembly,
 105=pay submit, 106=pay receipt-only lookup, 107=public pay-cell view,
 108=payment observation signing plan, 109=observation detached assembly,
@@ -5238,6 +5239,19 @@ def run (arguments : List String) : IO UInt32 := do
                             | .ok view => return ((101 : UInt8),
                                 (Minidregg.Host.Json.fleetHeadJson view).compress.toUTF8.toList)
                             | .error refusal => return ((255 : UInt8), refusalFrame "fleet-head" refusal)
+                        | 180 =>
+                            let (observationBytes, requestBytes) ← splitPair payload
+                            let some text := String.fromUTF8? requestBytes.toByteArray
+                              | throw (IO.userError "fleet incoming request is not UTF-8")
+                            let request ← IO.ofExcept (Minidregg.Host.Json.parse text)
+                            let (topic, cursor, limit) ← IO.ofExcept
+                              (Minidregg.Host.Json.fleetPollRequest request)
+                            let opened ← sessionOpened pinnedConfig state
+                            match ← NativeHost.fleetIncomingAuthorizedLoaded pinnedConfig opened
+                                observationBytes topic cursor limit with
+                            | .ok view => return ((180 : UInt8),
+                                (Minidregg.Host.Json.fleetIncomingJson view).compress.toUTF8.toList)
+                            | .error refusal => return ((255 : UInt8), refusalFrame "fleet-incoming" refusal)
                         | 102 =>
                             let some text := String.fromUTF8? payload.toByteArray
                               | throw (IO.userError "transaction id is not UTF-8")

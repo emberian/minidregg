@@ -1762,7 +1762,7 @@ private def derive (config : Config) (opened : Opened config)
     | .ok tariff =>
         let source := ingress.source
         match GrainResourceBirthController.prepareSourceBirth config.profile.compilerProfile
-            config.deployment opened.pins opened.durable config.profile.semantics tariff source with
+            config.deployment opened.pins opened.durable config.profile.semantics tariff source height with
         | .error reason => return .error s!"historical grain-backed birth preparation: {repr reason}"
         | .ok birth =>
             let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩

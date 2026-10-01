@@ -320,6 +320,7 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .object, "mutate" => pure .mutateObject
   | .object, "delegate" => pure .delegateObject
   | .object, "append" => pure .appendObject
+  | .object, "place" => pure .placeObject
   | .account, "observe" => pure .observeAccount
   | .account, "transfer" => pure .transfer
   | .account, "delegate" => pure .delegateAccount
@@ -1351,7 +1352,9 @@ private def birthParts (path : String)
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
-  let roomField := if (raw.get? "room").isSome then ["room"] else []
+  -- A room birth names the creator's placing capability (`placement`), the
+  -- birth gate's evidence; a root birth names neither.
+  let roomField := if (raw.get? "room").isSome then ["room", "placement"] else []
   let obj ← exactObject path
     ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
@@ -1367,6 +1370,9 @@ private def birthParts (path : String)
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
+  let placement ← match obj.get? "placement" with
+    | none => pure none
+    | some value => (some ∘ CapabilityId.mk) <$> nat (path ++ ".placement") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨
       storage = "nock" ∨ storage = "job" do
@@ -1415,7 +1421,7 @@ private def birthParts (path : String)
         (AgentGrain.initialStore target budget)⟩
     else pure (NativeHostGenesis.declaredCell source target (kind = .account))
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
-    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room⟩
+    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room, placement⟩
   -- A workspace resource's owner holds it as a room: `under target`, the
   -- resource and everything later born into it.
   let asRoom {kind : ResourceKind} (cap : Capability kind) : Capability kind :=
@@ -3661,6 +3667,25 @@ private def streamRecordJson (sequence : Nat) (record : StreamCell.StreamRecord)
     ("ref", record.entry.ref.map (fun r => Lean.Json.mkObj
       [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null)]
 
+/-- A tail entry with its text. The reader's own check, over the bytes it holds:
+`payload` is shown only when it reproduces the digest the cell committed
+(`payloadState` "verified"); a payload the view did not carry is "absent", and
+one that does not reproduce the digest is "mismatch" and is not shown. -/
+private def streamTailEntryJson (sequence : Nat) (record : StreamCell.StreamRecord)
+    (payload : Option (List UInt8)) : Lean.Json :=
+  let (state, shown) : String × Lean.Json := match payload with
+    | none => ("absent", .null)
+    | some bytes =>
+        if StreamCell.payloadDigest bytes = record.entry.payloadDigest then ("verified", hexJson bytes)
+        else ("mismatch", .null)
+  .mkObj [("sequence", decimal sequence), ("author", decimal record.author.value),
+    ("height", decimal record.height), ("transaction", decimal record.transaction.value),
+    ("topic", hexJson record.entry.topic), ("payloadDigest", decimal record.entry.payloadDigest.value),
+    ("to", record.entry.recipient.map (fun s => decimal s.value) |>.getD .null),
+    ("ref", record.entry.ref.map (fun r => Lean.Json.mkObj
+      [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null),
+    ("payload", shown), ("payloadState", .str state)]
+
 private def streamCellJson (root : Digest) (store : Minidregg.Theory.Store.Store StreamCell.layout) : Lean.Json :=
   .mkObj [("root", decimal root.value), ("nextSeq", decimal (StreamCell.nextSeq store)),
     ("entries", .arr <| (StreamCell.tail store 1 store.support.card).toArray.map
@@ -4085,7 +4110,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "view-tail" => do
       let (root, next, entries) ← decoded "view-tail" NativeObservationController.tailViewCodec bytes
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
-        ("entries", .arr <| entries.toArray.map fun (k, r) => streamRecordJson k r)]
+        ("entries", .arr <| entries.toArray.map fun (k, r, p) => streamTailEntryJson k r p)]
   | "view-quotes" => quotesJson bytes
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
@@ -4163,6 +4188,18 @@ def fleetReceiptLookupJson (transactionId : Nat) (receipt : Option Receipt) : Le
   match receipt with
   | none => .mkObj [("type", "absent"), ("transactionId", decimal transactionId)]
   | some r => .mkObj [("type", "confirmed"), ("receipt", fleetReceiptJson r)]
+
+/-- The incoming ledger view (op 180): fleet turns that paid the observed
+account. Payload bytes are the turn's own signed publication. -/
+def fleetIncomingJson (view : NativeHost.FleetIncomingView) : Lean.Json := .mkObj
+  [("type", "minidregg-fleet-incoming-v1"), ("subject", decimal view.subject.value),
+   ("account", decimal view.account), ("topic", hexJson view.topic),
+   ("cursor", decimal view.cursor), ("tip", decimal view.tip),
+   ("entries", .arr <| view.entries.toArray.map fun entry => .mkObj
+     [("height", decimal entry.height), ("transactionId", decimal entry.transactionId.value),
+      ("subject", decimal entry.subject.value), ("payer", decimal entry.payer),
+      ("asset", decimal entry.asset), ("amount", decimal entry.amount),
+      ("topic", hexJson entry.topic), ("payload", hexJson entry.payload)])]
 
 /-- `{"topic": HEX, "cursor": DECIMAL, "limit": DECIMAL}` -/
 def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := do

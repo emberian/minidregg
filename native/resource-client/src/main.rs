@@ -62,6 +62,9 @@ mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
 #[cfg(unix)]
+mod chat;
+#[cfg(unix)]
+mod credit;
 mod keys;
 #[cfg(unix)]
 mod shell;
@@ -309,6 +312,8 @@ usage:
   mini fleet --action transfer --dir WORKSPACE --account NAME --to ACCOUNT --amount N [--asset ID]
   mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
+  mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT] [--limit N]
+  mini credit --action balance|room|tariff|pay|topup|renew|status|ledger|install|adopt --dir WORKSPACE [--room REF] … (PLACE §2.10; `mini shell` spells them credit / pay ROOM week / tariff / topup / room status|renew|concierge)
   mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
   mini well --action new --dir WORKSPACE --name NAME --in REALM --law LAW.json
   mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
@@ -2299,6 +2304,8 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "key" => keys::run(args),
         "fleet" => fleet::run(args),
+        #[cfg(unix)]
+        "credit" => credit::run(args),
         "well" => well::run(args),
         "pay" => pay::run(args),
         #[cfg(unix)]

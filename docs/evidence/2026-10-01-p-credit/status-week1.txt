@@ -1,0 +1,7 @@
+lab
+room lab (10428947152218123678) at height 49
+  adopted a member window from the inbox: capability 11787482321950018643, notAfter 60
+  my window: member until height 60 (11 heights left; capability 11787482321950018643)
+  tariff: week 100 credit for 12 heights
+  till: account 14809615720592431327 (its balance is the room's to read)
+  runner account: 17036544356322581062; concierge 17792213969701359209

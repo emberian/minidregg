@@ -1,0 +1,148 @@
+n	step	who	line	expect	got	verdict	wall_s	load1	note
+1	setup	alice	keygen mini.key	admitted	rc 0	ok	0.02	23.27	abcbed3bf58158ffc777af8343f38ba89744959d7db3340c4abb86e84f15017f 
+2	setup	OPERATOR	CUSTODY: copy alice's secret into the sponsor home (enroll plan+seal sign with both keys)	rc 0	rc 0	ok	0.01	23.27	
+3	setup	sponsor	enroll plan j17-alice j17-alice.key	admitted	rc 0	ok	2.81	23.81	{   "authority": "candidate-only",   "keyId": "11569932920465044246",   "plan": {     "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f50
+4	setup	sponsor	enroll seal j17-alice	admitted	rc 0	ok	0.71	23.81	{   "authority": "awaiting-admission",   "ingressSha256": "9047d5331b8bf6e3987bbc1c7dbfd795bafd6682cf99e5be09798bfb72ab9717",   "keyId": "11569932920465044246",
+5	setup	sponsor	enroll submit j17-alice	admitted	rc 0	ok	2.18	23.81	{   "authority": "admitted-key-only",   "keyId": "11569932920465044246",   "keyPath": "/home/ember/build/j17/r4/steps/J17/h/sponsor/keys/j17-alice.key",   "publ
+6	setup	check	alice is enrolled as its own subject	true	true	ok	-	23.81	
+7	setup	OPERATOR	CUSTODY: remove the copy	rc 0	rc 0	ok	0.01	23.81	
+8	setup	OPERATOR	PROVISION: factory observation + an account owned by alice funded 5000	rc 0	rc 0	ok	11.90	24.28	
+9	setup	OPERATOR	DELIVER: the birth context into alice's HOME/provision/	rc 0	rc 0	ok	0.03	24.28	
+10	setup	alice	init mini.key 18233291018461818434	admitted	rc 0	ok	0.02	24.28	/home/ember/build/j17/r4/steps/J17/w/alice 
+11	setup	bob	keygen mini.key	admitted	rc 0	ok	0.02	24.28	4d790af9776881451ae70250f592e1d57408aff9c116f6ab5bef40304a6694a4 
+12	setup	OPERATOR	CUSTODY: copy bob's secret into the sponsor home (enroll plan+seal sign with both keys)	rc 0	rc 0	ok	0.02	24.28	
+13	setup	sponsor	enroll plan j17-bob j17-bob.key	admitted	rc 0	ok	2.98	24.28	{   "authority": "candidate-only",   "keyId": "17674548729795270634",   "plan": {     "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f50
+14	setup	sponsor	enroll seal j17-bob	admitted	rc 0	ok	0.57	24.74	{   "authority": "awaiting-admission",   "ingressSha256": "e2b4136fac63a55ba004e19e028e383d9cdab183457446eb37031c88b56d1fdb",   "keyId": "17674548729795270634",
+15	setup	sponsor	enroll submit j17-bob	admitted	rc 0	ok	3.22	24.74	{   "authority": "admitted-key-only",   "keyId": "17674548729795270634",   "keyPath": "/home/ember/build/j17/r4/steps/J17/h/sponsor/keys/j17-bob.key",   "public
+16	setup	check	bob is enrolled as its own subject	true	true	ok	-	24.74	
+17	setup	OPERATOR	CUSTODY: remove the copy	rc 0	rc 0	ok	0.02	24.74	
+18	setup	OPERATOR	PROVISION: factory observation + an account owned by bob funded 0	rc 0	rc 0	ok	11.69	25.40	
+19	setup	OPERATOR	DELIVER: the birth context into bob's HOME/provision/	rc 0	rc 0	ok	0.01	25.40	
+20	setup	bob	init mini.key 10322412572256133520	admitted	rc 0	ok	0.02	25.40	/home/ember/build/j17/r4/steps/J17/w/bob 
+21	setup	carl	keygen mini.key	admitted	rc 0	ok	0.02	25.40	c10dce2dba5c3ea3c0b32f2e7045724b9bcba463b9e76c4a36b500a660dfb9df 
+22	setup	OPERATOR	CUSTODY: copy carl's secret into the sponsor home (enroll plan+seal sign with both keys)	rc 0	rc 0	ok	0.01	25.40	
+23	setup	sponsor	enroll plan j17-carl j17-carl.key	admitted	rc 0	ok	3.15	25.40	{   "authority": "candidate-only",   "keyId": "12225798252984513464",   "plan": {     "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f50
+24	setup	sponsor	enroll seal j17-carl	admitted	rc 0	ok	0.73	25.40	{   "authority": "awaiting-admission",   "ingressSha256": "b4a14df9ae7138b455b7eb16b4866681e71a0db9238885172d824a518c2b3e8f",   "keyId": "12225798252984513464",
+25	setup	sponsor	enroll submit j17-carl	admitted	rc 0	ok	3.01	25.04	{   "authority": "admitted-key-only",   "keyId": "12225798252984513464",   "keyPath": "/home/ember/build/j17/r4/steps/J17/h/sponsor/keys/j17-carl.key",   "publi
+26	setup	check	carl is enrolled as its own subject	true	true	ok	-	25.04	
+27	setup	OPERATOR	CUSTODY: remove the copy	rc 0	rc 0	ok	0.01	25.04	
+28	setup	OPERATOR	PROVISION: factory observation + an account owned by carl funded 50	rc 0	rc 0	ok	12.24	24.43	
+29	setup	OPERATOR	DELIVER: the birth context into carl's HOME/provision/	rc 0	rc 0	ok	0.01	24.43	
+30	setup	carl	init mini.key 10842538344538520908	admitted	rc 0	ok	0.02	24.43	/home/ember/build/j17/r4/steps/J17/w/carl 
+31	setup	con	keygen mini.key	admitted	rc 0	ok	0.02	24.43	5b76ea230edb9a5ce0c3b1ad25cee745b5fef86b5da37eebcc751febb470dd46 
+32	setup	OPERATOR	CUSTODY: copy con's secret into the sponsor home (enroll plan+seal sign with both keys)	rc 0	rc 0	ok	0.01	24.43	
+33	setup	sponsor	enroll plan j17-con j17-con.key	admitted	rc 0	ok	2.68	25.27	{   "authority": "candidate-only",   "keyId": "11009998075381100715",   "plan": {     "canonical": "44524547472f5041525449434950414e542f4b45592d454e524f4c4c2f50
+34	setup	sponsor	enroll seal j17-con	admitted	rc 0	ok	0.72	25.27	{   "authority": "awaiting-admission",   "ingressSha256": "c78818ba9891db644d19cda74f9cb63745373be8373425f147f087cdbd3b897c",   "keyId": "11009998075381100715",
+35	setup	sponsor	enroll submit j17-con	admitted	rc 0	ok	3.62	25.01	{   "authority": "admitted-key-only",   "keyId": "11009998075381100715",   "keyPath": "/home/ember/build/j17/r4/steps/J17/h/sponsor/keys/j17-con.key",   "public
+36	setup	check	con is enrolled as its own subject	true	true	ok	-	25.01	
+37	setup	OPERATOR	CUSTODY: remove the copy	rc 0	rc 0	ok	0.01	25.01	
+38	setup	OPERATOR	PROVISION: factory observation + an account owned by con funded 10	rc 0	rc 0	ok	13.38	25.13	
+39	setup	OPERATOR	DELIVER: the birth context into con's HOME/provision/	rc 0	rc 0	ok	0.01	25.13	
+40	setup	con	init mini.key 17792213969701359209	admitted	rc 0	ok	0.03	25.13	/home/ember/build/j17/r4/steps/J17/w/con 
+41	room	alice	room new lab --template workroom --concierge 17792213969701359209 --period 12	admitted	rc 0	ok	100.72	24.67	/home/ember/build/j17/r4/steps/J17/w/alice/sources/create-lab.authoring/g0001/intent.bin {   "acceptedCount": "18",   "confirmation": "installed",   "eventId": 
+42	room	check	the founder holds the till lab-till (an account)	true	true	ok	-	24.67	
+43	room	check	the program names lab, its till and the concierge	true	true	ok	-	24.67	
+44	room	alice	tariff lab set week 100	admitted	rc 0	ok	6.82	24.13	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j17/r4/steps/J17/w/alice/proposals/t
+45	room	alice	tariff lab set hermes/turn 2	admitted	rc 0	ok	6.54	23.48	{   "authority": "requires-current-admission",   "delegation": null,   "effect": "none",   "intentPath": "/home/ember/build/j17/r4/steps/J17/w/alice/proposals/t
+46	room	alice	tariff lab	admitted	rc 0	ok	1.17	23.12	tariff of lab (room 10428947152218123678) at height 44   week         100   birth        -   hermes/turn  2   till         14809615720592431327   period       1
+47	room	check	tariff lab shows week 100, period 12, the till and the concierge	true	true	ok	-	23.12	
+48	room	OPERATOR	DELIVER: alice's grants to the concierge into its inbox	rc 0	rc 0	ok	0.02	23.12	
+49	room	OPERATOR	INSTALL: the program alice's room concierge wrote	rc 0	rc 0	ok	0.01	23.12	
+50	room	OPERATOR	concierge pass (lab): adopts its grants; nothing paid yet	rc 0	rc 0	ok	3.42	23.12	
+51	room	check	the first pass issues nothing	0	0	ok	-	23.12	
+52	room	check	the concierge holds lab (room) and lab-till (observe on the till)	true	true	ok	-	23.12	
+53	guest	alice	room invite i-bob lab 10322412572256133520 --verbs observe,append	admitted	rc 0	ok	4.13	23.11	{   "authority": "requires-current-admission",   "delegation": {     "childCapability": "10306483296479431844",     "domain": "8501",     "kind": "object",     
+54	guest	alice	submit i-bob	admitted	rc 0	ok	4.47	22.94	{   "acceptedCount": "35",   "confirmation": "installed",   "eventId": "52240320222005860544500762593238876067966219796974714369772487676712619014841",   "trans
+55	guest	alice	publish i-bob	admitted	rc 0	ok	0.38	22.94	{   "acceptedCount": "35",   "confirmation": "replayed",   "eventId": "52240320222005860544500762593238876067966219796974714369772487676712619014841",   "transa
+56	guest	alice	export i-bob	admitted	rc 0	ok	0.01	22.94	{"authority":"hint-only","capability":"10306483296479431844","kind":"object","proposalSha256":"8ee968ee711da569d7fdc37dce2e1051536a288847548fceb60a7151488a8030"
+57	guest	bob	import lab {"authority":"hint-only","capability":"10306483296479431844","kind":"object","proposalSha256":"8ee968ee711da569d7fdc37dce2e1051536a288847548fceb60a7151488a8030","receipt":{"acceptedCount":"35","confirmation":"replayed","eventId":"52240320222005860544500762593238876067966219796974714369772487676712619014841","transactionId":"82511203415964464083261000186491729616661956693397012775219771978170605580439","type":"confirmed","worldRoot":"77046381373551158782091926001936131119826237737200180836828338649557497153512"},"recipient":"10322412572256133520","room":true,"target":"10428947152218123678","type":"minidregg-delegated-reference-v1"}	admitted	rc 0	ok	0.02	22.94	lab 
+58	guest	bob	read lab	admitted	rc 0	ok	1.24	22.94	{   "balances": [],   "cell": {     "entries": [       {         "key": {           "field": "1",           "resource": "10428947152218123678",           "type"
+59	guest	bob	credit	admitted	rc 0	ok	1.47	22.55	account credit 0  (asset 0, account 9877660218138729659, signed read at height 45) 
+60	guest	check	B holds 0 credit (signed read)	0	0	ok	-	22.55	
+61	guest	bob	room new bobroom	refused resourceBatch	rc 3	ok	3.55	22.34	refused: operation-rejected: birth preparation: Minidregg.Kernel.ResourceBirthController.Concrete.PreparationReject.resourceBatch (phase prepare) (Hos [resourceBatch]
+62	guest	bob	doc new early --in lab	refused notRoomMember	rc 3	ok	3.70	22.34	refused: operation-rejected: birth preparation: Minidregg.Kernel.ResourceBirthController.Concrete.PreparationReject.room (Minidregg.Kernel.RoomBirthGa [notRoomMember]
+63	guest	bob	pay lab week	refused bookRefused	rc 3	ok	3.93	22.64	 [bookRefused]
+64	status	bob	room status lab	admitted	rc 0	ok	1.55	22.50	room lab (10428947152218123678) at height 45   my window: none (guest; `pay lab week` buys one)   tariff: week 100 credit for 12 heights   till: account 1480961
+65	status	check	room status before paying: a guest, no window	true	true	ok	-	22.50	
+66	credit	OPERATOR	SPONSOR: name the sponsor's account	rc 0	rc 0	ok	1.52	22.50	
+67	credit	OPERATOR	SPONSOR: transfer 1000 credit to B's account 9877660218138729659 (the devnet mint)	rc 0	rc 0	ok	3.97	22.94	
+68	credit	bob	credit	admitted	rc 0	ok	1.34	22.94	credit 1000  (asset 0, account 9877660218138729659, signed read at height 46) 
+69	credit	check	B holds 1000 credit	1000	1000	ok	-	22.94	
+70	credit	bob	room new bobroom2	admitted	rc 0	ok	8.38	23.89	/home/ember/build/j17/r4/steps/J17/w/bob/sources/create-bobroom2.authoring/g0001/intent.bin {   "acceptedCount": "37",   "confirmation": "installed",   "eventId
+71	week1	bob	pay lab week	admitted	rc 0	ok	9.42	25.97	{   "attempt": "/home/ember/build/j17/r4/steps/J17/w/bob/attempts/a-117941298747183005466168546982111234226",   "authority": "admitted-fleet-turn",   "confirmat
+72	week1	OPERATOR	B's renew topic carries the payment (B's receipt)	rc 0	rc 0	ok	2.11	25.97	
+73	week1	check	renew #1 on B's topic names lab	true	true	ok	-	25.97	
+74	week1	OPERATOR	lab's till ledger (op 140, read by the founder)	rc 0	rc 0	ok	2.50	26.69	
+75	week1	check	the till's renew ledger holds B's 100 at one height	true	true	ok	-	26.69	
+76	week1	OPERATOR	concierge pass (lab): issues B's first week	rc 0	rc 0	ok	16.77	27.57	
+77	week1	check	the concierge delegated member to B with notAfter = h + 12	issued 10322412572256133520 60	issued 10322412572256133520 60	ok	-	27.57	
+78	week1	check	its journal names the entry it acted on (height, transaction, amount)	48 18739590769999263785620393229643513405952166431850547359423274760653105228613 100	48 18739590769999263785620393229643513405952166431850547359423274760653105228613 100	ok	-	27.57	
+79	week1	OPERATOR	DELIVER: the concierge's reference into B's inbox	rc 0	rc 0	ok	0.03	27.57	
+80	week1	bob	room status lab	admitted	rc 0	ok	3.22	27.85	lab room lab (10428947152218123678) at height 49   adopted a member window from the inbox: capability 11787482321950018643, notAfter 60   my window: member unti
+81	week1	check	room status: B adopted a member window until 60	true	true	ok	-	27.85	
+82	week1	bob	doc new bnotes --in lab	admitted	rc 0	ok	8.31	27.78	/home/ember/build/j17/r4/steps/J17/w/bob/sources/create-bnotes.authoring/g0001/intent.bin {   "acceptedCount": "40",   "confirmation": "installed",   "eventId":
+83	week1	check	B's doc names lab and B's window as its placing capability	true	true	ok	-	27.78	
+84	restart	OPERATOR	stop the Host, audit the closed Store, serve again	rc 0	rc 0	ok	80.51	27.72	
+85	restart	check	audit re-admitted the Store	0	0	ok	-	27.72	
+86	restart	OPERATOR	concierge pass (lab): after the restart: re-reads its journal	rc 0	rc 0	ok	13.70	26.85	
+87	restart	check	the concierge issues nothing twice	0	0	ok	-	26.85	
+88	restart	bob	room status lab	admitted	rc 0	ok	1.46	26.62	room lab (10428947152218123678) at height 50   my window: member until height 60 (10 heights left; capability 11787482321950018643)   tariff: week 100 credit fo
+89	restart	check	B's window stands after the restart	true	true	ok	-	26.62	
+90	restart	bob	read lab	admitted	rc 0	ok	1.56	26.62	{   "balances": [],   "cell": {     "entries": [       {         "key": {           "field": "1",           "resource": "10428947152218123678",           "type"
+91	expiry	alice	credit	admitted	rc 0	ok	1.20	26.62	account credit 4950  (asset 0, account 12337604260152084020, signed read at height 50) 
+92	expiry	OPERATOR	advance the height past 60 by alice's fleet publishes	height > 60	height 61 after 11 turns	ok	-	24.29	
+93	expiry	bob	doc new late --in lab	refused notRoomMember.*outsideValidity	rc 3	ok	3.66	24.29	refused: operation-rejected: birth preparation: Minidregg.Kernel.ResourceBirthController.Concrete.PreparationReject.room (Minidregg.Kernel.RoomBirthGa [notRoomMember.*outsideValidity]
+94	expiry	bob	read lab	refused refused: outside-validity	rc 3	ok	1.35	23.94	refused: outside-validity: the request is outside the grant's validity window (phase observation) (Host refused query, reply byte 255) [refused: outside-validity]
+95	expiry	bob	room status lab	admitted	rc 0	ok	1.28	23.94	room lab (10428947152218123678) at height 61   my window: ENDED at height 60 (1 heights ago; capability 11787482321950018643); `pay lab week` renews   tariff: w
+96	expiry	check	room status: B's window ENDED	true	true	ok	-	23.94	
+97	week2	bob	pay lab week	admitted	rc 0	ok	4.73	23.39	{   "attempt": "/home/ember/build/j17/r4/steps/J17/w/bob/attempts/a-103360863207004610001602778341678375393",   "authority": "admitted-fleet-turn",   "confirmat
+98	week2	OPERATOR	lab's till ledger above the first payment	rc 0	rc 0	ok	1.81	23.39	
+99	week2	OPERATOR	concierge pass (lab): re-issues B's week	rc 0	rc 0	ok	12.32	21.86	
+100	week2	check	the concierge re-issued B's window from the new payment: notAfter = h2 + 12	issued 10322412572256133520 74	issued 10322412572256133520 74	ok	-	21.86	
+101	week2	OPERATOR	DELIVER: the concierge's reference into B's inbox	rc 0	rc 0	ok	0.02	21.86	
+102	week2	bob	room status lab	admitted	rc 0	ok	2.44	21.86	lab room lab (10428947152218123678) at height 63   adopted a member window from the inbox: capability 12712599908594942363, notAfter 74   my window: member unti
+103	week2	check	room status: member until 74	true	true	ok	-	21.86	
+104	week2	bob	doc new again --in lab	admitted	rc 0	ok	6.52	21.55	/home/ember/build/j17/r4/steps/J17/w/bob/sources/create-again.authoring/g0001/intent.bin {   "acceptedCount": "54",   "confirmation": "installed",   "eventId": 
+105	week2	bob	read lab	admitted	rc 0	ok	1.43	21.27	{   "balances": [],   "cell": {     "entries": [       {         "key": {           "field": "1",           "resource": "10428947152218123678",           "type"
+106	carl	alice	room invite i-carl lab 10842538344538520908 --verbs observe	admitted	rc 0	ok	3.76	20.92	{   "authority": "requires-current-admission",   "delegation": {     "childCapability": "9827982298812780597",     "domain": "8501",     "kind": "object",     "
+107	carl	alice	submit i-carl	admitted	rc 0	ok	3.80	20.92	{   "acceptedCount": "55",   "confirmation": "installed",   "eventId": "51960420211604002955158641705504623760773517560172688360794203231632241882795",   "trans
+108	carl	alice	publish i-carl	admitted	rc 0	ok	0.33	20.92	{   "acceptedCount": "55",   "confirmation": "replayed",   "eventId": "51960420211604002955158641705504623760773517560172688360794203231632241882795",   "transa
+109	carl	alice	export i-carl	admitted	rc 0	ok	0.01	20.92	{"authority":"hint-only","capability":"9827982298812780597","kind":"object","proposalSha256":"4396b4df1d52acf1f7e22791bf53d4444a3caac45ba081e9050deebc479709f0",
+110	carl	carl	import lab {"authority":"hint-only","capability":"9827982298812780597","kind":"object","proposalSha256":"4396b4df1d52acf1f7e22791bf53d4444a3caac45ba081e9050deebc479709f0","receipt":{"acceptedCount":"55","confirmation":"replayed","eventId":"51960420211604002955158641705504623760773517560172688360794203231632241882795","transactionId":"113402681733414415961819166770792574386645460298268346357475203720185052337372","type":"confirmed","worldRoot":"29304502261406354221195601747789793992706049156554928934202412020082064983478"},"recipient":"10842538344538520908","room":true,"target":"10428947152218123678","type":"minidregg-delegated-reference-v1"}	admitted	rc 0	ok	0.02	20.92	lab 
+111	carl	carl	pay lab week	refused bookRefused	rc 3	ok	3.78	20.69	 [bookRefused]
+112	carl	carl	pay lab 40	admitted	rc 0	ok	6.20	20.87	{   "attempt": "/home/ember/build/j17/r4/steps/J17/w/carl/attempts/a-236712678238048161914158441921937902422",   "authority": "admitted-fleet-turn",   "confirma
+113	carl	OPERATOR	concierge pass (lab): an underpayment	rc 0	rc 0	ok	3.39	20.72	
+114	carl	check	the concierge journals underpaid and issues nothing	underpaid 10842538344538520908	underpaid 10842538344538520908	ok	-	20.72	
+115	carl	check	no reference was left for carl	true	true	ok	-	20.72	
+116	free	alice	room new commons --concierge 17792213969701359209 --period 12	admitted	rc 0	ok	49.30	22.76	/home/ember/build/j17/r4/steps/J17/w/alice/sources/create-commons.authoring/g0001/intent.bin {   "acceptedCount": "57",   "confirmation": "installed",   "eventI
+117	free	alice	tariff commons	admitted	rc 0	ok	1.63	22.76	tariff of commons (room 9657472034920644638) at height 72   week         0   birth        -   hermes/turn  -   till         16692745427168812881   period       
+118	free	check	commons is free (week 0)	true	true	ok	-	22.76	
+119	free	OPERATOR	DELIVER: alice's commons grants to the concierge	rc 0	rc 0	ok	0.04	22.76	
+120	free	OPERATOR	INSTALL: the commons program	rc 0	rc 0	ok	0.01	22.76	
+121	free	alice	room invite i-bob-c commons 10322412572256133520 --verbs observe	admitted	rc 0	ok	4.55	24.54	{   "authority": "requires-current-admission",   "delegation": {     "childCapability": "18227773270962179287",     "domain": "8501",     "kind": "object",     
+122	free	alice	submit i-bob-c	admitted	rc 0	ok	4.00	23.86	{   "acceptedCount": "63",   "confirmation": "installed",   "eventId": "42072324585682735889743211332733867516939696156872978864523423428826366598653",   "trans
+123	free	alice	publish i-bob-c	admitted	rc 0	ok	0.27	23.86	{   "acceptedCount": "63",   "confirmation": "replayed",   "eventId": "42072324585682735889743211332733867516939696156872978864523423428826366598653",   "transa
+124	free	alice	export i-bob-c	admitted	rc 0	ok	0.01	23.86	{"authority":"hint-only","capability":"18227773270962179287","kind":"object","proposalSha256":"4f4cb7f5b749cdbe38167577b8f0d57d7e6e5238085cb80496daabfa85efd04a"
+125	free	bob	import commons {"authority":"hint-only","capability":"18227773270962179287","kind":"object","proposalSha256":"4f4cb7f5b749cdbe38167577b8f0d57d7e6e5238085cb80496daabfa85efd04a","receipt":{"acceptedCount":"63","confirmation":"replayed","eventId":"42072324585682735889743211332733867516939696156872978864523423428826366598653","transactionId":"89979068131248562901183043898570638619684008888259880786206283048685452862862","type":"confirmed","worldRoot":"95802481851327349626438433967348122034162484199683971786262545861304197859454"},"recipient":"10322412572256133520","room":true,"target":"9657472034920644638","type":"minidregg-delegated-reference-v1"}	admitted	rc 0	ok	0.02	23.86	commons 
+126	free	bob	pay commons week	admitted	rc 0	ok	1.43	23.86	commons is free (week 0): request filed for the concierge (/home/ember/build/j17/r4/steps/J17/h/bob/outbox/17792213969701359209/request-9657472034920644638-1032
+127	free	check	B's request is filed in B's outbox	true	true	ok	-	23.86	
+128	free	OPERATOR	DELIVER: B's request to the concierge	rc 0	rc 0	ok	0.01	23.86	
+129	free	OPERATOR	concierge pass (commons): issues on request	rc 0	rc 0	ok	24.81	22.89	
+130	free	check	B (a standing member of commons) is issued a window; carl (no grant) is not	issued 10322412572256133520|not-a-member 10842538344538520908	issued 10322412572256133520|not-a-member 10842538344538520908	ok	-	22.89	
+131	free	OPERATOR	DELIVER: the concierge's commons reference into B's inbox	rc 0	rc 0	ok	0.03	22.89	
+132	free	bob	room status commons	admitted	rc 0	ok	3.43	22.58	commons room commons (9657472034920644638) at height 74   adopted a member window from the inbox: capability 13769925141937343423, notAfter 85   my window: memb
+133	free	check	room status commons: B is a member	true	true	ok	-	22.58	
+134	free	bob	doc new cnotes --in commons	admitted	rc 0	ok	10.40	22.11	/home/ember/build/j17/r4/steps/J17/w/bob/sources/create-cnotes.authoring/g0001/intent.bin {   "acceptedCount": "65",   "confirmation": "installed",   "eventId":
+135	balances	bob	credit	admitted	rc 0	ok	1.55	22.11	credit 766  (asset 0, account 9877660218138729659, signed read at height 75) 
+136	balances	check	B = 1000 - 2*100 - 2*fee(3) - 4 births*(base 3 + birth 2 + 2 grants*1)	766	766	ok	-	22.26	
+137	balances	OPERATOR	lab's till, read by the founder	rc 0	rc 0	ok	1.72	22.26	
+138	balances	check	lab's till = 2*100 + carl's 40	240	240	ok	-	22.26	
+139	balances	check	carl = 50 - 40 - fee(3)	7	7	ok	-	22.26	
+140	balances	bob	room status lab	admitted	rc 0	ok	2.89	25.92	room lab (10428947152218123678) at height 75   my window: ENDED at height 74 (1 heights ago; capability 12712599908594942363); `pay lab week` renews   tariff: w
+141	balances	check	room status after: the week-2 window (to 74) has ended by height 75	true	true	ok	-	25.92	
+142	audit	OPERATOR	stop the Host, cold audit re-admits every record, serve again	rc 0	rc 0	ok	158.47	26.35	
+143	audit	check	cold audit exit 0	0	0	ok	-	26.35	
+144	audit	bob	read lab	refused refused: outside-validity	rc 3	ok	14.50	25.17	refused: outside-validity: the request is outside the grant's validity window (phase observation) (Host refused query, reply byte 255) [refused: outside-validity]
+145	audit	bob	read lab-guest	admitted	rc 0	ok	1.37	25.17	{   "balances": [],   "cell": {     "entries": [       {         "key": {           "field": "1",           "resource": "10428947152218123678",           "type"
+146	audit	OPERATOR	concierge pass (lab): after the cold audit	rc 0	rc 0	ok	3.06	25.32	
+147	audit	check	nothing re-issued	0	0	ok	-	25.32	

@@ -266,7 +266,7 @@ def observeGrant (deployment : Deployment) (template : CanonicalRuntimeProfile.F
 
 def birthItem (identities : Ids) : BirthItem Registry :=
   ⟨⟨identities.account, CellSlot.root Registry .absent,
-    NativeHostGenesis.declaredPacked identities.account true⟩, .account, ⟨identities.subject⟩, none⟩
+    NativeHostGenesis.declaredPacked identities.account true⟩, .account, ⟨identities.subject⟩, none, none⟩
 
 def initialPolicy (deployment : Deployment) (semantics : Digest) (identities : Ids) :
     InitialPolicy :=

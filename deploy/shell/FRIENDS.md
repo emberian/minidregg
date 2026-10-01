@@ -118,6 +118,82 @@ mini> board new tasks                     # tasks 0 and 1: `board add`, `board t
 share a doc the same way as `notes` (delegate, publish, export/import). a doc lives in one
 content cell with no fixed size; its lines are ordered by their atom ids.
 
+rooms. a room is a resource that other things are born *in*; holding a grant under the
+room reaches the room and everything in it. the five verbs you'll use:
+```
+mini> room new lab                         # a bare room you found (`--law realm`: only you
+                                           #   place things; or start from a template, below)
+mini> room invite i1 lab SAMS-SUBJECT      # one grant under lab: observe + place (add things)
+mini> submit i1                            #   widen with --verbs observe,place,mutate,delegate;
+mini> publish i1                           #   narrow with --fields 1,2 or --max-delta 7=50
+mini> export i1                            # → the reference; sam runs `import lab <it>`
+sam> doc new notes --in lab                # sam adds a doc to the room (so does `create … --in lab`)
+mini> room members lab                     # who holds a standing grant under lab
+mini> room kick k1 lab SAMS-SUBJECT        # then `submit k1`: sam's grant, and every grant sam
+                                           #   handed on from it, is refused `revoked`
+```
+also `room list` (your rooms), `room law lab` (its current law). someone with no grant
+under lab can't add anything to it: they get `refused: … notRoomMember`. the room's law
+decides who may add things: changing it never revokes anyone's grant (the J7 rule), but a
+law like `any [ not (verb == place), subject in {YOU} ]` stops everyone else adding
+(`birthRefused`), while their reads keep working. you can't leave a room yourself yet
+(`room leave` says so): ask its founder to kick you.
+
+start a room from a template. `room new lab --template workroom` founds lab *with a map*:
+`lab/index` (a doc everyone in the room reads and only you write, and it only grows: its
+links are the room's map), `lab/wall` (a stream: what the room says), `lab/notes` (a draft
+anyone with write in the room edits) and `lab/tasks` (a list that only grows), linked from
+the index. `doc show lab/index` shows the map; `doc backlinks lab/wall` finds who points at
+the wall. `--template social` is index + wall + intro, and `room welcome lab SAMS-SUBJECT
+--template social` invites sam and bears sam a stream only sam may write (you pay for it,
+sam owns it). `--template story` is index + chapters (only grows) + scenes (a stream) + cast.
+a template is just the lines you'd type, in order, with `$ROOM` and `$ME` filled in:
+```
+mini> room template list                   # workroom, social, story
+mini> room template show workroom          # the file itself, every line a verb you know
+mini> room new mine --template @my.shell   # your own copy, from HOME/requests/my.shell
+```
+the first line that doesn't end done stops the rest, and the shell says which line and why
+(`refused: law-denied: …` with the clause); the lines before it stand. names under a room
+are yours: `lab/index` is your reference's name (sam may call it anything), never a path.
+
+## talking in a room
+
+a room is a place a few of you talk. whoever starts it is its founder:
+
+```
+mini> chat new commons                    # you found it; it becomes your current room
+mini> chat invite commons 1279008242 bob  # prints a `chat join commons {…}` line: send it to bob
+bob>  chat join commons {…}               # bob pastes the line you sent
+mini> say hello, friends                  # no quotes needed; apostrophes are fine
+mini> tail                                # the last 20 lines: #N, hHEIGHT, who, text
+mini> say --re 3 agreed                   # a reply to #3     (say --to bob … addresses bob)
+mini> react 3 +1                          # topic TEXT, pin N and unpin are the founder's
+mini> tail --follow                       # keep watching; ctrl-c stops
+```
+each of you writes only your own stream; the Host refuses a write to anyone else's, so
+nobody can put words in your mouth, and a line once said stays said. `#N` numbers never
+change. names are yours: `chat name SUBJECT bob` decides what *you* see. a line from
+Discord shows as `bridge via discord NAME#ID: …`: the bridge said it, quoting someone.
+`help chat` has the rest.
+
+## a week in a room
+
+some rooms charge. a room's price is its **tariff** (`tariff lab`: `week` credit buys
+`period` heights of membership); your balance is `credit`. paying is one line:
+
+```
+mini> credit                    # credit 1000  (a signed read of your account)
+mini> pay lab week              # one turn: the week's price to lab's till, marked renew
+mini> room status lab           # picks up the window the room's concierge issued you
+mini> doc new notes --in lab    # a member places cells in the room until the window ends
+```
+the window is a grant with an end height; past it the Host refuses you `outside-validity`
+and `room status` says ENDED. `pay lab week` again renews. a founder runs a room with
+`room new lab --template workroom --concierge SUBJECT`, sets prices with `tariff lab set
+week 100`, renews by hand with `room renew lab SUBJECT`, and funds the concierge with
+`topup lab N`. a room whose week is 0 is free: `pay` files a request instead.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
@@ -144,8 +220,8 @@ the reason after `refused:`:
 
 ## what not to expect yet
 
-- numbered fields, one scalar action per `invoke`, laws as JSON. no rooms, chat or paying
-  yet; docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
+- numbered fields, one scalar action per `invoke`, laws as JSON. paying is for room weeks (above); chat
+  rooms are new (`help chat`); docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
   pick a new one per request. `help guide` prints this guide.
 
 ## reaching me
@@ -155,8 +231,7 @@ because it holds the Host's own decoding.
 
 ## what's planned
 
-this is why you'd come back, with no dates promised: **rooms** (a place with members,
-where your stuff lives), **docs** and **streams** inside them, **laws in a one-line
+this is why you'd come back, with no dates promised: **streams** (chat) inside rooms, **laws in a one-line
 grammar** instead of JSON, **Hermes in a room** (an agent that reads the room and does
 small useful things), **paying with $DREGG** for a room's week (a few dollars), and
 eventually **a MUD** built from the same pieces.

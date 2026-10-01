@@ -514,16 +514,96 @@ def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF
 def resourceViewCodec : IndexedProgram.LawfulCodec ResourceView :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
 
+/-- The bytes a stream record's append carried, read from the accepted signed
+ingress of the record's own transaction, and shown only when they reproduce the
+digest the cell committed. The cell keeps the digest and the signed command
+keeps the bytes (K-STREAM); this is how a reader who may observe the stream
+gets the text. The lookup is a scan of the accepted log, like `since`. -/
+def streamPayload (accepted : List DurableReceiver.IntentRecord) (target : Nat)
+    (record : StreamCell.StreamRecord) : Option (List UInt8) := do
+  let intent ← accepted.find? (fun intent => decide (intent.transactionId = record.transaction))
+  let (_, _, signed) ← DeclaredResourceController.decodeSignedBytes intent.event.canonicalBytes
+  let command ← DeclaredResourceController.commandCodec.decode signed.commandBytes
+  let written ← command.targets.find? (fun written => decide (written.target = target))
+  match written.payload with
+  | .append request =>
+      if StreamCell.payloadDigest request.payload = record.entry.payloadDigest then
+        some request.payload
+      else none
+  | _ => none
+
+/-- **A shown payload is the signed append of that record's transaction.** The
+bytes reproduce the committed digest, and they are the append payload of the
+target `target` in the command of an accepted record whose transaction id is the
+one the stream record binds. -/
+theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {target : Nat}
+    {record : StreamCell.StreamRecord} {bytes : List UInt8}
+    (shown : streamPayload accepted target record = some bytes) :
+    StreamCell.payloadDigest bytes = record.entry.payloadDigest ∧
+      ∃ intent ∈ accepted, intent.transactionId = record.transaction ∧
+        ∃ ingress command written request,
+          DeclaredResourceController.decodeSignedBytes intent.event.canonicalBytes = some ingress ∧
+          DeclaredResourceController.commandCodec.decode ingress.2.2.commandBytes = some command ∧
+          written ∈ command.targets ∧ written.target = target ∧
+          written.payload = .append request ∧ request.payload = bytes := by
+  unfold streamPayload at shown
+  cases found : accepted.find? (fun intent => decide (intent.transactionId = record.transaction)) with
+  | none => simp [found] at shown
+  | some intent =>
+    cases decoded : DeclaredResourceController.decodeSignedBytes intent.event.canonicalBytes with
+    | none => simp [found, decoded] at shown
+    | some ingress =>
+      obtain ⟨domain, semantics, signed⟩ := ingress
+      cases commanded : DeclaredResourceController.commandCodec.decode signed.commandBytes with
+      | none => simp [found, decoded, commanded] at shown
+      | some command =>
+        cases writtenFound : command.targets.find? (fun written => decide (written.target = target)) with
+        | none => simp [found, decoded, commanded, writtenFound] at shown
+        | some written =>
+          simp only [found, decoded, commanded, writtenFound, Option.bind_some, bind] at shown
+          cases append : written.payload with
+          | scalar _ => simp [append] at shown
+          | content _ => simp [append] at shown
+          | append request =>
+            simp only [append] at shown
+            by_cases digestEq : StreamCell.payloadDigest request.payload = record.entry.payloadDigest
+            · simp only [digestEq, if_true, Option.some.injEq] at shown
+              subst shown
+              have sameTx := List.find?_some found
+              have sameTarget := List.find?_some writtenFound
+              simp only [decide_eq_true_eq] at sameTx sameTarget
+              exact ⟨digestEq, intent, List.mem_of_find?_eq_some found,
+                sameTx,
+                (domain, semantics, signed), command, written, request,
+                decoded, commanded, List.mem_of_find?_eq_some writtenFound,
+                sameTarget, append, rfl⟩
+            · simp [digestEq] at shown
+
 /-- A stream window: the cell root, its next sequence position, and the
-recorded entries in the window. -/
-def tailViewStream : StreamCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord)) :=
+recorded entries in the window, each with the payload `streamPayload` found. -/
+def tailViewStream :
+    StreamCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord × Option (List UInt8))) :=
   StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
-    (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCell.recordStream)))
+    (StreamCodec.list (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCell.recordStream (StreamCodec.option bytesStream)))))
 
-def tailViewFrame : List UInt8 := "DREGG/NATIVE-HOST/STREAM-TAIL/v1".toUTF8.toList
+/-- v2 carries each entry's payload; a v1 window (records only) refuses
+(`v1_tail_view_refused`). -/
+def tailViewFrame : List UInt8 := "DREGG/NATIVE-HOST/STREAM-TAIL/v2".toUTF8.toList
 
-def tailViewCodec : IndexedProgram.LawfulCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord)) :=
+def tailViewCodec :
+    IndexedProgram.LawfulCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord × Option (List UInt8))) :=
   NativeHostCodec.framed tailViewFrame tailViewStream
+
+theorem v1_tail_view_refused (payload : List UInt8) :
+    tailViewCodec.decode ("DREGG/NATIVE-HOST/STREAM-TAIL/v1".toUTF8.toList ++ payload) = none := by
+  have len : ("DREGG/NATIVE-HOST/STREAM-TAIL/v1".toUTF8.toList).length =
+      tailViewFrame.length := by decide +kernel
+  have ne : "DREGG/NATIVE-HOST/STREAM-TAIL/v1".toUTF8.toList ≠ tailViewFrame := by
+    decide +kernel
+  simp only [tailViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
+    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
+  rfl
 
 /-! ## Presence and past views (PLACE §2.5 K-INDEX, §4.5 K-HISTORY-READ)
 
@@ -838,7 +918,9 @@ def AuthorizedIntent.queryResult
     | .tail start count =>
         match checked.selected.packed with
         | ⟨.stream, payload⟩ => pure (tailViewCodec.encode (payload.root,
-            StreamCell.nextSeq payload.logical, StreamCell.tail payload.logical start count))
+            StreamCell.nextSeq payload.logical,
+            (StreamCell.tail payload.logical start count).map fun (sequence, record) =>
+              (sequence, record, streamPayload durable.image.accepted query.target record)))
         | _ => throw .malformed
   else throw .malformed
 
@@ -942,5 +1024,9 @@ theorem challenge_bound {context : Context deployment durable}
 #guard_msgs (whitespace := lax) in #print axioms challenge_bound
 
 end Minidregg.Kernel.NativeObservationController
+/-- info: 'Minidregg.Kernel.NativeObservationController.streamPayload_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.streamPayload_sound
+/-- info: 'Minidregg.Kernel.NativeObservationController.v1_tail_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.v1_tail_view_refused
 /-- info: 'Minidregg.Kernel.NativeObservationController.v3_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.v3_view_refused

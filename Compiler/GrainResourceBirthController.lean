@@ -292,14 +292,14 @@ def prepareSourceBirth {F : Type} [Field F]
     (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
     (durable : ResourceBirthController.Concrete.Durable)
-    (semantics : Digest) (tariff : Tariff) (source : Source) :
+    (semantics : Digest) (tariff : Tariff) (source : Source) (height : Height) :
     Except ResourceBirthController.Concrete.PreparationReject
       (PreparedSourceBirth profile deployment pins durable semantics tariff source) := do
   if shape : SourceShape deployment.domain semantics tariff source then
     let prepared ← ResourceBirthController.Concrete.prepareGrainBirth profile deployment
       pins durable source.birth
       (DeclaredResourceController.operationMarker deployment.domain semantics
-        (source.grainCommand tariff))
+        (source.grainCommand tariff)) height
     .ok ⟨shape, prepared⟩
   else .error .authorityBatch
 

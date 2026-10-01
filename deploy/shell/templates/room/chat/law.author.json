@@ -1,0 +1,1 @@
+{"type":"any","predicates":[{"type":"not","predicate":{"type":"memberOf","slot":"request/verb","values":["2","7"]}},{"type":"eq","slot":"request/subject","value":"@SUBJECT"}]}
