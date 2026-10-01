@@ -31,14 +31,16 @@ and the well; they sum to zero (`escrow_conserved`), so
 `Δheld + Δcirculating = 0` on fund and claim and `= −retired` on a slash, the
 retired credit having gone into the well.
 
-The job cell's FIELDS and its non-money law edges belong to C1 JOB-LAW
-(`Kernel/Job.lean` on the mud line).  The field numbers below are C1's
-(`deploy/shell/templates/job/fields.json`: escrow 8, provider 9, providerAcct
-10, bond 11; there is no `window` field).  `moneyPolicy`
-is the slot-gated branch C1's law must carry; `standInLaw` (pinned as
-`jobLaw`) is the job law of this branch until C1's lands.
+The job cell's FIELDS and its law are C1 JOB-LAW's (`Kernel/Job.lean`,
+`deploy/shell/templates/job/fields.json`: escrow 8, provider 9, providerAcct
+10, bond 11).  That law gates every money move on `Job.moneySlot`, which only
+this receiver projects (clause 44, `Job.money_frozen_without_slot`); the
+receiver accepts a job only when its installed law IS the job law at some
+parameters (`isJobLaw`, `isJobLaw_sound`), so the law cannot be one that lets
+an ordinary write move the money fields.
 -/
 import Kernel.PurseRefill
+import Kernel.Job
 
 namespace Minidregg.Kernel.JobMoney
 
@@ -105,12 +107,9 @@ def readJob (job : Nat) (store : Store effectLayout) : Option Job := do
   return ⟨← read stateField, ← read callerField, ← read callerAcctField, ← read priceField,
     ← read escrowField, ← read providerField, ← read providerAcctField, ← read bondField⟩
 
-/-- An order's store: the caller, its refund account and the price; nothing
-funded, nobody claimed (the stand-in for C1's `order` edge). -/
+/-- An order's money view (C1's order edge: clause 11 born unfunded, clause 12
+unclaimed): the caller, its refund account and the price. -/
 def ordered (caller callerAcct price : Nat) : Job := ⟨0, caller, callerAcct, price, 0, 0, 0, 0⟩
-
-def initialStore (job caller callerAcct price : Nat) : Store effectLayout :=
-  DeclaredFields.store job (ordered caller callerAcct price).values
 
 /-- The money leg as the job's declared writes: every money field compared at
 its old value and written at its new one (unchanged fields re-written), so a
@@ -248,7 +247,8 @@ inductive Reject where
   | alreadyFunded | heldAccountTaken
   | notFunded | alreadyClaimed | noProvider | bondBelowPrice | insufficientBalance | heldMismatch
   | notTerminal | alreadySettled | badPayee | bookRefused | unbalanced
-  | jobRefused
+  | jobRefused (clause : List Nat)
+  | clockUnavailable
   | jobCell (reason : DeclaredResourceScalar.Reject)
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
@@ -800,133 +800,76 @@ theorem griefing_cost_bounded (split : Nat) (j : Job) (book : Book) (submitter a
       DFinsupp.single_apply, Ne.symm notWell, sub_eq_add_neg]
   · simp [payouts, upheld, Nat.min_eq_left funded]
 
-/-! ## The law: the money branch is gated by a slot only the money receiver projects -/
+/-! ## The law: C1's job law, recognised -/
 
-/-- Projected only by `JobMoneyReceiver`; no other receiver may project a slot of this name. -/
-def moneySlot : String := "authority/operation/job-money"
+/-- The receiver's slots (`JobMoneyReceiver.moneySlots`): the money slot is
+`Job.moneySlot`, which C1's clause 44 requires of every money move. -/
 def actionSlot : String := "job/money/action"
 def accountSlot : String := "job/money/account"
 def amountSlot : String := "job/money/amount"
 
-private def nonnegative (slot : String) : Pred := .not (.le slot (-1))
+/-- `any [_, _, all [_, eq "request/subject" CALLER]]` (clause 0): CALLER. -/
+def callerOf : Pred → Option Int
+  | .anyL (.cons _ (.cons _ (.cons (.allL (.cons _ (.cons (.eq _ c) .nil))) .nil))) => some c
+  | _ => none
 
-/-- The fields a money edge never changes except as listed. -/
-def fundEdge : Pred := .all [
-  .eq actionSlot 1,
-  .eq "resource/field/0/before" 0, .eq "resource/field/0/after" 0,
-  .eqSlots "request/subject" "resource/field/3/before",
-  .eqSlots accountSlot "resource/field/4/before",
-  .eq "resource/field/8/before" 0,
-  .eqSlots "resource/field/8/after" "resource/field/5/after",
-  .eqSlots amountSlot "resource/field/5/after",
-  .eq "resource/field/3/delta" 0, .eq "resource/field/4/delta" 0, .eq "resource/field/5/delta" 0,
-  .eq "resource/field/9/delta" 0, .eq "resource/field/10/delta" 0,
-  .eq "resource/field/11/delta" 0]
+/-- `any [_, _, ran PROGRAM]` (clause 22): PROGRAM. -/
+def programOf : Pred → Option Nat
+  | .anyL (.cons _ (.cons _ (.cons (.ran program) .nil))) => some program
+  | _ => none
 
-def claimEdge : Pred := .all [
-  .eq actionSlot 2,
-  .eq "resource/field/0/before" 0, .eq "resource/field/0/after" 1,
-  .not (.le "resource/field/5/before" 0),
-  .eqSlots "resource/field/8/before" "resource/field/5/before",
-  .eq "resource/field/9/before" 0, .eq "resource/field/11/before" 0,
-  .eqSlots "resource/field/9/after" "request/subject",
-  .eqSlots "resource/field/10/after" accountSlot,
-  .eqSlots "resource/field/11/after" amountSlot,
-  .leSlots "resource/field/5/after" "resource/field/11/after",
-  .eq "resource/field/3/delta" 0, .eq "resource/field/4/delta" 0, .eq "resource/field/5/delta" 0,
-  .eq "resource/field/8/delta" 0]
+/-- `any [_, _, leSlotsOff _ _ k]` (clauses 34, 35): k. -/
+def offsetOf : Pred → Option Int
+  | .anyL (.cons _ (.cons _ (.cons (.leSlotsOff _ _ k) .nil))) => some k
+  | _ => none
 
-def settleEdge : Pred := .all [
-  .eq actionSlot 3,
-  .memberOf "resource/field/0/before" [3, 4, 5], .eq "resource/field/0/after" 6,
-  .eq "resource/field/8/after" 0, .eq "resource/field/11/after" 0,
-  nonnegative "resource/field/8/before", nonnegative "resource/field/11/before",
-  .eq "resource/field/3/delta" 0, .eq "resource/field/4/delta" 0, .eq "resource/field/5/delta" 0,
-  .eq "resource/field/9/delta" 0, .eq "resource/field/10/delta" 0]
+/-- The parameters a law would be the job law at: CALLER from clause 0, PROGRAM
+from clause 22, WINDOW and NEG_WINDOW from clauses 34 and 35. -/
+def lawParams : Pred → Option Minidregg.Kernel.Job.Params
+  | .allL clauses => do
+      let c := clauses.toList
+      let caller ← callerOf (← c[0]?)
+      let program ← programOf (← c[22]?)
+      let window ← offsetOf (← c[34]?)
+      let negWindow ← offsetOf (← c[35]?)
+      pure ⟨caller, program, window, negWindow⟩
+  | _ => none
 
-/-- The branch C1's job law carries for the money edges.  The amounts are not
-the law's: the receiver computes them from the job (`decideMoney`, `payouts`). -/
-def moneyPolicy : Pred := .all [.eq moneySlot 1, .any [fundEdge, claimEdge, settleEdge]]
+/-- **The pin.** An installed law is a job law exactly when it is C1's
+`Job.jobLaw` at the parameters read back from it. -/
+def isJobLaw (law : Pred) : Bool :=
+  match lawParams law with
+  | some p => decide (law = Minidregg.Kernel.Job.jobLaw p)
+  | none => false
 
-/-- The stand-in for C1's non-money edges on this branch: any mutation that
-changes only the state, never into or out of closed, and never a money field. -/
-def handSetEdge : Pred := .all [
-  .not (.eq moneySlot 1), .eq "request/verb" 2,
-  .not (.eq "resource/field/0/before" 6),
-  .memberOf "resource/field/0/after" [0, 1, 2, 3, 4, 5],
-  .eq "resource/field/3/delta" 0, .eq "resource/field/4/delta" 0, .eq "resource/field/5/delta" 0,
-  .eq "resource/field/8/delta" 0, .eq "resource/field/9/delta" 0,
-  .eq "resource/field/10/delta" 0, .eq "resource/field/11/delta" 0]
+theorem isJobLaw_sound {law : Pred} (pinned : isJobLaw law = true) :
+    ∃ p, law = Minidregg.Kernel.Job.jobLaw p := by
+  unfold isJobLaw at pinned
+  split at pinned
+  · rename_i p _
+    exact ⟨p, of_decide_eq_true pinned⟩
+  · cases pinned
 
-/-- The job law of this branch until C1's `Job.law` lands (birth storage `job`). -/
-def standInLaw : Pred := .any [handSetEdge, moneyPolicy, .memberOf "request/verb" [1, 3]]
+/-- **What the pin buys**: a pinned law moves no money without the receiver's
+slot (C1's clause 44 through `Job.money_frozen_without_slot`). -/
+theorem pinned_money_frozen_without_slot {law : Pred} (pinned : isJobLaw law = true)
+    {o n : State} (accepted : eval law o n = true) (mutation : n.get "request/verb" = some 2)
+    (s : Int) (born : n.get "resource/field/0/before" = some s)
+    (noSlot : n.get Minidregg.Kernel.Job.moneySlot ≠ some 1) :
+    n.get "resource/field/8/delta" = some 0 ∧ n.get "resource/field/11/delta" = some 0 ∧
+      ¬ (s = 0 ∧ n.get "resource/field/0/after" = some 1) ∧
+      ¬ ((s = 3 ∨ s = 4 ∨ s = 5) ∧ n.get "resource/field/0/after" = some 6) := by
+  obtain ⟨p, rfl⟩ := isJobLaw_sound pinned
+  exact Minidregg.Kernel.Job.money_frozen_without_slot p o n accepted mutation s born noSlot
 
-/-- **Without the money slot, a job's money never moves**: a mutation the
-stand-in law admits without `moneySlot` leaves escrow and bond unchanged and
-never closes the job. -/
-theorem standInLaw_money_frozen_without_slot (old st : Minidregg.Pred.State)
-    (accepted : Minidregg.Pred.eval standInLaw old st = true)
-    (mutation : st.get "request/verb" = some 2)
-    (noSlot : st.get moneySlot ≠ some 1) :
-    st.get "resource/field/8/delta" = some 0 ∧ st.get "resource/field/11/delta" = some 0 ∧
-      st.get "resource/field/0/after" ≠ some 6 := by
-  unfold standInLaw at accepted
-  rw [eval_any] at accepted
-  obtain ⟨branch, member, holds⟩ := List.any_eq_true.mp accepted
-  simp only [List.mem_cons, List.mem_nil_iff, or_false] at member
-  rcases member with rfl | rfl | rfl
-  · unfold handSetEdge at holds
-    rw [eval_all] at holds
-    have e := (List.all_eq_true.mp holds) (.eq "resource/field/8/delta" 0) (by simp)
-    have b := (List.all_eq_true.mp holds) (.eq "resource/field/11/delta" 0) (by simp)
-    have s := (List.all_eq_true.mp holds) (.memberOf "resource/field/0/after" [0, 1, 2, 3, 4, 5])
-      (by simp)
-    simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, decide_eq_true_eq] at e b s
-    refine ⟨e, b, fun six => ?_⟩
-    simp [six] at s
-  · unfold moneyPolicy at holds
-    rw [eval_all] at holds
-    have r := (List.all_eq_true.mp holds) (.eq moneySlot 1) (by simp)
-    simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, decide_eq_true_eq] at r
-    exact absurd r noSlot
-  · simp [Minidregg.Pred.eval, Minidregg.Pred.evalWith, mutation] at holds
-
-/-- **The law closes a job only from a terminal state**: a turn the money
-branch admits that writes state 6 starts in 3, 4 or 5. -/
-theorem moneyPolicy_closes_only_terminal (old st : Minidregg.Pred.State)
-    (accepted : Minidregg.Pred.eval moneyPolicy old st = true) (closes : st.get "resource/field/0/after" = some 6) :
-    ∃ s, st.get "resource/field/0/before" = some s ∧ (s = 3 ∨ s = 4 ∨ s = 5) := by
-  unfold moneyPolicy at accepted
-  rw [eval_all] at accepted
-  have edges := (List.all_eq_true.mp accepted) (.any [fundEdge, claimEdge, settleEdge]) (by simp)
-  rw [eval_any] at edges
-  obtain ⟨edge, member, holds⟩ := List.any_eq_true.mp edges
-  simp only [List.mem_cons, List.mem_nil_iff, or_false] at member
-  rcases member with rfl | rfl | rfl
-  · unfold fundEdge at holds
-    rw [eval_all] at holds
-    have zero := (List.all_eq_true.mp holds) (.eq "resource/field/0/after" 0) (by simp)
-    simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, decide_eq_true_eq] at zero
-    rw [closes] at zero; cases zero
-  · unfold claimEdge at holds
-    rw [eval_all] at holds
-    have one := (List.all_eq_true.mp holds) (.eq "resource/field/0/after" 1) (by simp)
-    simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, decide_eq_true_eq] at one
-    rw [closes] at one; cases one
-  · unfold settleEdge at holds
-    rw [eval_all] at holds
-    have from_ := (List.all_eq_true.mp holds) (.memberOf "resource/field/0/before" [3, 4, 5])
-      (by simp)
-    simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith] at from_
-    cases h : st.get "resource/field/0/before" with
-    | none => simp [h] at from_
-    | some s => exact ⟨s, rfl, by simp [h] at from_; omega⟩
-
-
-/-- The job law the money receiver accepts: an installed law that is exactly
-this predicate.  It has no management branch, so it cannot be replaced.  When
-C1's `Job.law` lands, it is the pinned law (and carries `moneyPolicy`). -/
-def jobLaw : Pred := standInLaw
+/-- Both poles of the pin: C1's law at the demo parameters is recognised; the
+permissive law and C1's law with one clause dropped are not. -/
+theorem isJobLaw_demo : isJobLaw (Minidregg.Kernel.Job.jobLaw Minidregg.Kernel.Job.demo) = true := by
+  decide +kernel
+theorem isJobLaw_refuses_open : isJobLaw (.allL .nil) = false := by decide +kernel
+theorem isJobLaw_refuses_trimmed :
+    isJobLaw (Pred.all ((Minidregg.Kernel.Job.jobClauses Minidregg.Kernel.Job.demo).dropLast)) =
+      false := by decide +kernel
 
 /-! ## Poles, kernel-decided on a concrete Book and job -/
 
@@ -1063,8 +1006,11 @@ theorem fixture_round_trip_slashed :
 #assert_axioms settle_requires_terminal
 #assert_axioms no_double_settle
 #assert_axioms griefing_cost_bounded
-#assert_axioms standInLaw_money_frozen_without_slot
-#assert_axioms moneyPolicy_closes_only_terminal
+#assert_axioms isJobLaw_sound
+#assert_axioms pinned_money_frozen_without_slot
+#assert_axioms isJobLaw_demo
+#assert_axioms isJobLaw_refuses_open
+#assert_axioms isJobLaw_refuses_trimmed
 #assert_axioms fixture_fund_accepted
 #assert_axioms fixture_fund_twice_refused
 #assert_axioms fixture_fund_not_caller_refused

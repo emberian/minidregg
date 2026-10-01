@@ -71,6 +71,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "doc", usage: "doc new NAME [draft|note] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
+    Verb { name: "job", usage: "job post ROOM PROGRAM --input N --price P --deadline SECONDS --account REF [--window SECONDS] [--name NAME] | job claim JOB --room ROOM --bond B --account REF [--name NAME] | job answer NAME [OUTPUT] | job check NAME | job settle NAME | job show NAME", operation: "mini job --action post|claim|answer|check|settle|show --dir WS (the job law, the job-money ops 160-163, the kernel's ran truth turn)" },
+    Verb { name: "jobs", usage: "jobs ROOM", operation: "mini job --action list --dir WS --room ROOM" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
     Verb { name: "pay", usage: "pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini pay --action address|status|audit --dir WS [--account REF]" },
@@ -649,6 +651,41 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             Plan::Exit
         }
         "key" => crate::keys::shell_plan(&session.workspace, &session.home, &w)?,
+        "job" => {
+            let Some(action) = w.get(1) else {
+                return Err(u.to_owned());
+            };
+            let positional: &[&str] = match action.as_str() {
+                "post" => &["room", "program"],
+                "claim" => &["job"],
+                "answer" => &["name", "output"],
+                "check" | "settle" | "show" => &["name"],
+                _ => return Err(u.to_owned()),
+            };
+            let mut flags = vec![flag("action", action.clone()), flag("dir", ws())];
+            let mut rest = w[2..].iter();
+            let mut taken = 0;
+            while let Some(word) = rest.next() {
+                if let Some(name) = word.strip_prefix("--") {
+                    if !matches!(name, "input" | "price" | "deadline" | "account" | "window" | "name" | "room" | "bond") {
+                        return Err(u.to_owned());
+                    }
+                    let value = rest.next().ok_or_else(|| u.to_owned())?;
+                    flags.push(flag(name, value.clone()));
+                } else if taken < positional.len() {
+                    flags.push(flag(positional[taken], word.clone()));
+                    taken += 1;
+                } else {
+                    return Err(u.to_owned());
+                }
+            }
+            client("job", flags)
+        }
+        "jobs" => {
+            arity(&w, 1, 1, u)?;
+            workspace_name(&w[1], "room name")?;
+            client("job", vec![flag("action", "list"), flag("dir", ws()), flag("room", w[1].clone())])
+        }
         "history" => {
             arity(&w, 0, 1, u)?;
             match w.get(1).map(String::as_str) {
@@ -1733,6 +1770,29 @@ mod tests {
     #[test]
     fn each_verb_is_exactly_one_client_operation() {
         let s = session();
+        assert_eq!(
+            client(plan(&s, "job post lab 42 --input 6 --price 1000 --deadline 600 --account purse").unwrap()),
+            (
+                "job".into(),
+                pairs(&[
+                    ("action", "post"),
+                    ("dir", "/w"),
+                    ("room", "lab"),
+                    ("program", "42"),
+                    ("input", "6"),
+                    ("price", "1000"),
+                    ("deadline", "600"),
+                    ("account", "purse"),
+                ]),
+                vec![]
+            )
+        );
+        assert_eq!(
+            client(plan(&s, "job answer j1 9").unwrap()).1,
+            pairs(&[("action", "answer"), ("dir", "/w"), ("name", "j1"), ("output", "9")])
+        );
+        assert_eq!(client(plan(&s, "jobs lab").unwrap()).1, pairs(&[("action", "list"), ("dir", "/w"), ("room", "lab")]));
+        assert!(plan(&s, "job post lab 42 --sneaky 1").is_err());
         assert_eq!(
             client(plan(&s, "submit first-action").unwrap()),
             (

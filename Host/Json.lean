@@ -1358,9 +1358,6 @@ private def birthParts (path : String)
         (if worker.isSome then grainWorkerFields raw else [])
     else if storage = "nock" then
       ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
-    else if storage = "job" then
-      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "caller",
-        "callerAcct", "price"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
       roomField) json
@@ -1369,12 +1366,12 @@ private def birthParts (path : String)
     | some value => some <$> nat (path ++ ".room") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨
-      storage = "nock" ∨ storage = "job" do
-    throw s!"{path}.storage: expected declared, content, grain, stream, nock or job"
+      storage = "nock" do
+    throw s!"{path}.storage: expected declared, content, grain, stream or nock"
   unless (storage = "declared" ∧ (kind = .object ∨ kind = .account)) ∨
-      ((storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨ storage = "nock" ∨
-        storage = "job") ∧ kind = .object) do
-    throw s!"{path}: declared storage is object/account; content, grain, stream, nock and job storage are object"
+      ((storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨ storage = "nock") ∧
+        kind = .object) do
+    throw s!"{path}: declared storage is object/account; content, grain, stream and nock storage are object"
   -- A Nock program cell has no chosen identifier: it is born at its content
   -- address, so the request names the program and the source derives the target.
   let program : Option NockProgramCodec.Program ← if storage = "nock" then do
@@ -1393,7 +1390,6 @@ private def birthParts (path : String)
     (← nat (path ++ ".controlCapability") (← field path "controlCapability" obj))
   let rulePredicate ← if storage = "grain" then
       pure (grainPolicy owner.value worker)
-    else if storage = "job" then pure JobMoney.standInLaw
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
@@ -1403,12 +1399,6 @@ private def birthParts (path : String)
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "stream" then
       pure ⟨.stream, CellState.materialize StreamCell.materializer 0⟩
-    else if storage = "job" then
-      let caller ← nat (path ++ ".caller") (← field path "caller" obj)
-      let callerAcct ← nat (path ++ ".callerAcct") (← field path "callerAcct" obj)
-      let price ← nat (path ++ ".price") (← field path "price" obj)
-      pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
-        (JobMoney.initialStore target caller callerAcct price)⟩
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer

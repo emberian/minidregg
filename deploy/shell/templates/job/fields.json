@@ -31,9 +31,8 @@
   },
   "placeholders": {
     "CALLER": "the ordering subject; the only subject that may order, void before claimBy, or delegate",
-    "PROGRAM": "the programId; field program is pinned to it",
+    "PROGRAM": "the programId (decimal); field program is pinned to it and `ran PROGRAM` reads run/program/PROGRAM, which the controller projects only for a re-executed, matching run claim (K-RAN)",
     "WINDOW": "the challenge window in clock seconds: finalAt = clock/now + WINDOW on the answer edge",
-    "NEG_WINDOW": "-WINDOW (a canonical decimal; the template cannot negate a placeholder)",
-    "RAN_SLOT": "the slot the kernel projects to 1 on an admitted run claim for PROGRAM: run/program/{PROGRAM} (K-RAN, Pred.ranSlot) on a tree with K-RAN"
+    "NEG_WINDOW": "-WINDOW (a canonical decimal; the template cannot negate a placeholder)"
   }
 }

@@ -7,14 +7,18 @@ two cells, decided by `JobMoney.decideMoney`:
 * the **job** (a declared object): the money edge, lowered as declared writes
   of its eight money fields, each compared at its loaded value, guarded at the
   job's exact pre-root, and admitted by the job's **installed law** evaluated
-  with the slot `JobMoney.moneySlot` this receiver alone projects;
+  as a write (`request/verb = 2`) by the signer, at the deployment clock, with
+  the slot `Job.moneySlot` this receiver alone projects;
 * the **Book**: a transfer into the job's held account — the account whose id
   is the job cell's id, registered fresh by the fund — or the payouts out of
   it (transfers to the payees, a burn of a slash's retired share into the well).
 
-The job law is pinned: the installed law must be exactly `JobMoney.jobLaw`
-(`notJobLaw`), a law with no management branch, so it cannot be swapped for one
-that lets an ordinary write move the money fields.
+The job law is pinned: the installed law must be C1's job law at some
+parameters (`JobMoney.isJobLaw`, else `notJobLaw`), a law whose management
+clause lets nobody install or revoke, so it cannot be swapped for one that lets
+an ordinary write move the money fields.  A refusal by the job law names the
+clause (`jobRefused path`, the `LawLeaf` path).  The clock cell is read at its
+exact root.
 
 Authorization depends on the action.  Fund and claim spend an account: the
 signer's capability-mode request is kind `account`, target and policy that
@@ -31,6 +35,7 @@ import Kernel.CapabilityRevocationController
 import Kernel.ResourceBirthController
 import Kernel.PayCellDomain
 import Kernel.JobMoney
+import Kernel.ClockCellDomain
 
 namespace Minidregg.Kernel.JobMoneyReceiver
 
@@ -312,14 +317,17 @@ def bookOf {deployment : Deployment} {directory : Directory Nat Registry}
 
 /-- The money slots this receiver projects, and nothing else does. -/
 def moneySlots (command : Command) : List (String × Int) :=
-  [(moneySlot, 1), (actionSlot, Int.ofNat command.action),
+  [(Minidregg.Kernel.Job.moneySlot, 1), (actionSlot, Int.ofNat command.action),
    (accountSlot, Int.ofNat command.account), (amountSlot, Int.ofNat command.amount)]
 
-/-- The job law's view of the money edge: the money slots, who signs, then the
-job's exact declared projection from its loaded store to the candidate post. -/
-def jobState (command : Command) (pre post : Store effectLayout) : Minidregg.Pred.State :=
-  ⟨moneySlots command ++ ("request/subject", Int.ofNat command.subject.value) ::
-    DeclaredResourceProjection.project command.job pre post⟩
+/-- The job law's view of the money edge: the money slots, a write by the
+signer, the deployment clock (`clock/now`, `clock/day`: the claim edge reads
+`claimBy`), then the job's exact declared projection from its loaded store to
+the candidate post. -/
+def jobState (command : Command) (clock : ClockCell.Clock) (pre post : Store effectLayout) :
+    Minidregg.Pred.State :=
+  ⟨moneySlots command ++ ("request/verb", 2) :: ("request/subject", Int.ofNat command.subject.value) ::
+    ClockCell.slots clock ++ DeclaredResourceProjection.project command.job pre post⟩
 
 /-- The job the directory holds at `job`, selected as a declared object. -/
 structure LoadedJob (deployment : Deployment) (directory : Directory Nat Registry) (job : Nat) where
@@ -346,6 +354,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   directory : LoadedDirectory durable
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   pay : PayCellDomain.Loaded deployment durable.snapshot
+  clock : ClockCellDomain.Loaded deployment durable.snapshot
   book : BookCell deployment directory.directory
   jobBefore : PackedCell Registry
   jobPresent : directory.directory.slots command.job = .present jobBefore
@@ -363,23 +372,25 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   jobLaw : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨command.job⟩
       (authority.snapshot.authState.policyRevision ⟨command.job⟩))
-  jobLawPinned : jobLaw.record.predicate = JobMoney.jobLaw
+  jobLawPinned : JobMoney.isJobLaw jobLaw.record.predicate = true
   jobAccepted : Minidregg.Pred.eval jobLaw.record.predicate ⟨[]⟩
-    (jobState command job.logical candidate.validated.apply.logical) = true
+    (jobState command clock.clock job.logical candidate.validated.apply.logical) = true
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨targetOf command⟩
       (authority.snapshot.authState.policyRevision ⟨targetOf command⟩))
 
 /-- The decision, in order: the loaded cells, the pinned authority root, the
 pure `JobMoney.decideMoney`, the marker, the job's declared-cell checks and patch
-validation, the job's installed law (pinned to `JobMoney.jobLaw`, then evaluated with the
-money slot), and the authorization policy's source.  Refusals before the signature check are named. -/
+validation, the job's installed law (pinned to C1's job law by `JobMoney.isJobLaw`, then
+evaluated as the signer's write at the clock with the money slot), and the authorization
+policy's source.  Refusals before the signature check are named. -/
 def prepare {F : Type} [Field F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (command : Command) : Except Reject (Prepared deployment profile ambient durable command) := do
   let directory ← requireSome .directoryUnavailable (loadDirectory durable)
   let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
   let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
+  let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
   let book ← requireSome .bookUnavailable
     (ResourceBirthController.Concrete.observeCell deployment directory.directory
       deployment.resourceBookId .resourceBook)
@@ -416,19 +427,20 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                 (CanonicalCellRegistry.loadPolicySource snapshot.domain directory.directory
                   (snapshot.authState.policyAddress ⟨command.job⟩
                     (snapshot.authState.policyRevision ⟨command.job⟩)))
-              if pinned : jobLaw.record.predicate = JobMoney.jobLaw then
+              if pinned : JobMoney.isJobLaw jobLaw.record.predicate = true then
               if jobAccepted : Minidregg.Pred.eval jobLaw.record.predicate ⟨[]⟩
-                  (jobState command job.logical candidate.validated.apply.logical) = true then
+                  (jobState command clock.clock job.logical candidate.validated.apply.logical) = true then
                 let source ← requireSome .policyUnavailable
                   (CanonicalCellRegistry.loadPolicySource snapshot.domain directory.directory
                     (snapshot.authState.policyAddress ⟨targetOf command⟩
                       (snapshot.authState.policyRevision ⟨targetOf command⟩)))
-                pure ⟨directory, authority, pay, book, jobBefore, present, job, selected, plan,
+                pure ⟨directory, authority, pay, clock, book, jobBefore, present, job, selected, plan,
                   decided,
                   CanonicalResourceKernel.AcceptedBatch.ofAdmission
                     (decideMoney_plan decided).1,
                   candidate, jobLaw, pinned, jobAccepted, source⟩
-              else throw .jobRefused
+              else throw (.jobRefused ((Minidregg.Pred.firstFailingLeaf jobLaw.record.predicate ⟨[]⟩
+                  (jobState command clock.clock job.logical candidate.validated.apply.logical)).getD []))
               else throw .notJobLaw
         else throw .replayedMarker
   else throw .staleAuthority
@@ -484,6 +496,7 @@ def project (prepared : Prepared deployment profile ambient durable command)
       (request prepared.authority.snapshot prepared.job profile.semantics ambient command
         prepared.plan) ++
     moneySlots command ++ [("job/money/job", Int.ofNat command.job)] ++
+    ClockCell.slots prepared.clock.clock ++
     DeclaredResourceProjection.project command.job prepared.job.logical logical ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode command) ++
     ResourceAuthorityProjection.grantSlots "authority/owner" (kindOf command) command.capability
@@ -637,8 +650,12 @@ def jobLawGuard (prepared : Prepared deployment profile ambient durable command)
 def payGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
   ⟨PayCellDomain.cellIdOf deployment, PayCellDomain.cellRoot prepared.pay.cell⟩
 
+/-- The clock the job law read (`claimBy`) is read at the clock cell's exact root. -/
+def clockGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
+  ⟨ClockCellDomain.cellIdOf deployment, ClockCellDomain.cellRoot prepared.clock.cell⟩
+
 def sourceGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
-  [policyGuard prepared, jobLawGuard prepared, payGuard prepared].dedup
+  [policyGuard prepared, jobLawGuard prepared, payGuard prepared, clockGuard prepared].dedup
 
 def readGuards (prepared : Prepared deployment profile ambient durable command) : List ReadGuard :=
   sourceGuards prepared ++
@@ -707,6 +724,7 @@ def intent (accepted : AcceptedMoney deployment profile ambient durable ingress)
   nullifiers := [nullifier deployment.domain profile.semantics ingress]
   exactCharge := charge accepted
   event := event deployment.domain profile.semantics ingress
+  subject := some ingress.command.subject
   postRootsBound := accepted.physical.2.2.2.1
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
 
