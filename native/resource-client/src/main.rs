@@ -59,12 +59,6 @@ mod selected_release;
 mod session_enrollment;
 #[cfg(unix)]
 mod render;
-// The shell's `doc` lines (deploy/shell/DOC-VERBS.md). No `mini shell` on this
-// tree: compiled and tested here, called by nothing until `shell.rs` declares it.
-#[cfg(unix)]
-#[allow(dead_code)]
-#[path = "shell/doc_render.rs"]
-mod shell_doc_render;
 #[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]

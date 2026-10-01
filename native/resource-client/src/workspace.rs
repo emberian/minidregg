@@ -1270,6 +1270,45 @@ fn submit_content(root: &Path, workspace: &Value, name: &str, actions: Vec<Value
     )
 }
 
+/// The atoms of live lines FROM..TO of NAME (`doc show`'s numbering), each a
+/// text line: a transclusion line is the source's lines, not this document's.
+fn line_atoms(document: &Value, name: &str, from: usize, to: usize) -> Result<Vec<String>> {
+    let lines = live_lines(document)?;
+    if from > to || to > lines.len() {
+        return Err(format!("{name} has {} lines; lines {from}..{to} are not a range of them", lines.len()));
+    }
+    lines[from - 1..to]
+        .iter()
+        .enumerate()
+        .map(|(offset, line)| match line["kind"].as_str() {
+            Some("atom") => member(line, "atom").map(str::to_owned),
+            _ => Err(format!("line {} of {name} is a transclusion, not a line of {name}", from + offset)),
+        })
+        .collect()
+}
+
+/// `transclude --from-line --to-line`: the first and last atom of SOURCE's
+/// lines FROM..TO, as this workspace reads SOURCE now.
+fn source_line_atoms(root: &Path, workspace: &Value, source: &str, from: usize, to: usize) -> Result<(String, String)> {
+    let reference = reference(root, source)?;
+    let atoms = line_atoms(&host_document(root, workspace, &reference)?, source, from, to)?;
+    match (atoms.first(), atoms.last()) {
+        (Some(first), Some(last)) => Ok((first.clone(), last.clone())),
+        _ => Err("an empty range".into()),
+    }
+}
+
+/// `doc-range`: publish lines FROM..TO of NAME as one run (`createRun`), the
+/// unit a transclusion's range is cut from. Whoever may write NAME may publish
+/// a range of it; a reader transcludes from it under the source's own law.
+fn doc_range(root: &Path, workspace: &Value, name: &str, from: usize, to: usize) -> Result<()> {
+    let reference = reference(root, name)?;
+    let atoms = line_atoms(&host_document(root, workspace, &reference)?, name, from, to)?;
+    let run = random_nonce()?;
+    eprintln!("workspace range: {run}");
+    submit_content(root, workspace, name, vec![json!({"type":"createRun","run":run,"atoms":atoms})], "range")
+}
+
 /// `doc-insert`: a new text line, at line AT or (absent) after the last line.
 fn doc_insert(root: &Path, workspace: &Value, name: &str, text: &str, at: Option<usize>) -> Result<()> {
     if text.contains('\n') {
@@ -3404,8 +3443,9 @@ fn document_actions(
             "append" => &["type", "text"],
             "edit" => &["type", "line", "text"],
             "link" => &["type", "to", "relation"],
+            "annotate" => &["type", "line", "text"],
             "push" => &["type", "bytes"],
-            _ => return Err("document action must be append, edit, link or push".into()),
+            _ => return Err("document action must be append, edit, annotate, link or push".into()),
         };
         if obj.len() != keys.len() || keys.iter().any(|key| !obj.contains_key(*key)) {
             return Err(format!("document action {} has unexpected fields", member(action, "type")?));
@@ -3443,6 +3483,24 @@ fn document_actions(
                 let before = atom_record(atom)?;
                 json!({"type":"editAtom","atom":member(atom,"id")?,"before":before,
                     "kind":before["kind"],"payload":text_argument(action)?,"tombstone":false})
+            }
+            "annotate" => {
+                let line = line_argument(action)?;
+                let seen = read_seen(root, name, "an annotation names a line as you last read it")?;
+                let lines = live_lines(&seen["document"])?;
+                let line_entry = lines.get(line - 1).ok_or_else(|| {
+                    format!("{name} had {} line(s) when you last read it", lines.len())
+                })?;
+                if line_entry["kind"] != "atom" {
+                    return Err(format!("line {line} of {name} is a transclusion; annotate its source"));
+                }
+                let atom = member(line_entry, "atom")?;
+                let record = page_entries(content_page(&seen["view"], name)?)?
+                    .iter()
+                    .find(|entry| entry["type"] == "atom" && entry["id"].as_str() == Some(atom))
+                    .ok_or_else(|| format!("line {line} of {name} names no atom of the page you read"))?;
+                json!({"type":"annotate","annotation":random_nonce()?,"atom":atom,
+                    "revision":member(record,"revision")?,"body":text_argument(action)?})
             }
             "link" => {
                 let to = member(action, "to")?;
@@ -4089,8 +4147,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "transclude" => {
             let host = os_string(args.required("name")?, "host name")?;
             let source = os_string(args.required("source")?, "source name")?;
-            let from = os_string(args.required("from")?, "first atom")?;
-            let to = os_string(args.required("to")?, "last atom")?;
+            // The source's range: its atom ids (`--from --to`), or its live line
+            // numbers as `doc show SOURCE` prints them (`--from-line --to-line`).
+            let lines = match (args.optional("from-line"), args.optional("to-line")) {
+                (Some(from), Some(to)) => Some((line_number(from, "--from-line")?, line_number(to, "--to-line")?)),
+                (None, None) => None,
+                _ => return Err("--from-line and --to-line go together".into()),
+            };
+            let (from, to) = match lines {
+                Some((from, to)) => source_line_atoms(&root, &workspace, &source, from, to)?,
+                None => (
+                    os_string(args.required("from")?, "first atom")?,
+                    os_string(args.required("to")?, "last atom")?,
+                ),
+            };
             let live = match args.optional("mode").as_deref() {
                 None => false,
                 Some(value) if value == OsStr::new("snapshot") => false,
@@ -4264,6 +4334,13 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let diff = doc_diff(&root, &workspace, &name, &from, &to)?;
             print_changes(format, &diff, crate::render::history::diff_text, crate::render::history::diff_html)
         }
+        "doc-range" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let from = line_number(args.required("from")?, "--from")?;
+            let to = line_number(args.required("to")?, "--to")?;
+            args.finish()?;
+            doc_range(&root, &workspace, &name, from, to)
+        }
         "doc-pull" => {
             let name = os_string(args.required("name")?, "reference name")?;
             args.finish()?;
@@ -4278,7 +4355,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             doc_push(&root, &workspace, &name, &file, &proposal_id, &attempt)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-pull or doc-push".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-range, doc-pull or doc-push".into(),
         ),
     }
 }

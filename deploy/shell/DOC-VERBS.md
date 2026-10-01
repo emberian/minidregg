@@ -6,23 +6,24 @@ exactly **one** workspace action. The shell supplies `--dir WORKSPACE` and spell
 The parser is `native/resource-client/src/shell/doc_render.rs` (`doc_flags`), and its tests pin
 every row below.
 
-**Status on the k-marks tree:** this tree has no `mini shell`. That lives on `final`
-(`native/resource-client/src/shell.rs`). `doc_render.rs` is compiled from `main.rs` by `#[path]`,
-its two tests run, and nothing calls it. **Integrator:**
-1. add `mod doc_render;` to `shell.rs` and delete the `#[path]` module in `main.rs`;
-2. in the `"doc"` arm, route the verbs below through `doc_flags`, wrapping the result in
-   `client("workspace", …)` with `flag("dir", ws())` first;
-3. pass `insert`'s TEXT through `text_argument` so that `@FILE` works;
-4. add the verbs to `VERBS[doc].usage` and the completion table (`("doc", 1)`);
-5. **delete** `doc annotate` / `doc quote`'s `Plan::NotHere` arms. Annotate is
-   `content_actions`' `annotate`, and quote is replaced by `doc transclude`.
+The `"doc"` arm of `native/resource-client/src/shell.rs` routes every verb below through
+`doc_flags` (`mod doc_render`), passing `insert`'s TEXT through `text_argument` so that `@FILE`
+works, with `--dir` prepended. `doc new`, `append`, `edit`, `annotate`, `link` and `push`
+spell a proposal request or name a session file and stay in `shell.rs`.
 
 | shell line | workspace action | prints |
 |---|---|---|
 | `doc show NAME` | `--action doc-show --name NAME` | the text rendering (notation below) |
 | `doc show NAME --raw` | `… --format raw` | the document's own live atoms, byte-exact, one per line |
 | `doc show NAME --json` | `… --format json` | the `Rendered` struct: rows + `line`, `depth`, `text`, `rendered`, `annotations`, `transcluded`; `outline`; `text` |
-| `doc show NAME --html` | `… --format html` | the same structure as semantic HTML, with classes and no CSS |
+| `doc show NAME --html` | `… --format html` | the same structure as semantic HTML, with classes and no CSS; `mini web`'s document is these bytes |
+| `doc show NAME --at H [--raw\|--json\|--html]` | `… --at H` | the document as it stood at height H, under your grant as it stood then (`refused: no-grant` otherwise) |
+| `doc history NAME [--json\|--html]` | `--action doc-history --name NAME [--format …]` | one row per write: height, subject, transaction, its changes where your grant stood |
+| `doc diff NAME H1 H2 [--json\|--html]` | `--action doc-diff --name NAME --from H1 --to H2 [--format …]` | `+ E`, `- E`, `~ E a -> b`, `moved E: after X -> after Y` |
+| `doc pull NAME` | `--action doc-pull --name NAME` | the live lines, bytes exact (a transclusion: `⟦transclusion T⟧`) |
+| `doc push ID NAME @FILE\|@-` | `--action doc-push …` | the actions it proposed; a stale line is refused by line |
+| `doc annotate ID NAME LINE TEXT\|@FILE` | `propose` (payload `document`: `annotate`) | — (then `submit ID`) |
+| `doc range NAME FROM TO` | `--action doc-range --name NAME --from FROM --to TO` | `workspace range: RUN` (stderr): lines FROM..TO published as one run |
 | `doc outline NAME` | `--action doc-outline --name NAME` | the heading lines, `N  text`, indented two spaces per depth |
 | `doc mark NAME LINE KIND` | `--action mark --name NAME --line LINE --kind KIND` | `workspace mark: ID` (stderr) |
 | `doc mark NAME LINE link TARGET` | `… --kind link --to TARGET` | also `workspace mark link: ID` |
@@ -31,15 +32,14 @@ its two tests run, and nothing calls it. **Integrator:**
 | `doc insert NAME N TEXT\|@FILE` | `--action doc-insert --name NAME --at N --text TEXT` | — |
 | `doc move NAME FROM TO` | `--action doc-move --name NAME --from FROM --to TO` | — |
 | `doc remove NAME N` | `--action doc-remove --name NAME --line N` | — |
-| `doc transclude NAME SOURCE FROM TO [snapshot\|live] [at N]` | `--action transclude --name NAME --source SOURCE --from FROM --to TO [--mode M] [--at N]` | `workspace transclusion: ID` |
+| `doc transclude NAME SOURCE FROM TO [snapshot\|live] [at N]` | `--action transclude --name NAME --source SOURCE --from-line FROM --to-line TO [--mode M] [--at N]` | `workspace transclusion: ID` |
 | `doc transclusions NAME` | `--action transclusions --name NAME` | every transclusion, as JSON with `text` |
 | `doc follow NAME T` | `--action follow --name NAME --transclusion T` | that one, re-read now; refused when you hold no read of its source |
 | `doc links NAME` / `doc backlinks NAME` | `--action doc-links` / `doc-backlinks` | the Host's link index; each backlink is followed by `    line N: <rendered>`, the referencing line as you read it |
 
-**Numbers.** `LINE`, `N`, `FROM` and `TO` (except in `transclude`) are **live line numbers**,
-the ones `doc show` prints. A struck line shows `-` and has no number. `FROM`/`TO` in
-`transclude` are the source's **atom ids** (the workspace action takes atom ids). `MARK` and
-`T` are decimal ids. A zero, a word, or a missing argument is a usage error, and nothing is sent.
+**Numbers.** `LINE`, `N`, `FROM` and `TO` are **live line numbers**, the ones `doc show` prints
+(in `transclude`, the SOURCE's, which must lie in one published range: `doc range`). A struck
+line shows `-` and has no number. `H`, `MARK` and `T` are decimals. A zero, a word, or a missing argument is a usage error, and nothing is sent.
 
 **Kinds.** `bold italic code heading link`. Any other kind is refused by name before sending
 (`unknownKind: underline (expected bold, italic, code, heading or link)`), the same text the Host uses.

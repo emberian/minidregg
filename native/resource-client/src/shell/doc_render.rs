@@ -3,14 +3,10 @@
 //! (without `--dir`, which the session supplies).  The spec is
 //! `deploy/shell/DOC-VERBS.md`.
 //!
-//! On the k-marks tree there is no `mini shell` (it lives on `final`), so this
-//! file is compiled from `main.rs` by path and nothing calls it.  Integrator:
-//! add `mod doc_render;` to `shell.rs`, delete the `#[path]` line in
-//! `main.rs`, and in the `"doc"` arm route `show outline mark unmark insert
-//! move remove transclude transclusions follow links backlinks` through
-//! `doc_flags`, passing the TEXT of `insert` through `text_argument` first
-//! (so `@FILE` works) and wrapping the flags in `client("workspace", …)` with
-//! `flag("dir", ws())` prepended.
+//! `shell.rs`'s `"doc"` arm routes every verb but `new`, `append`, `edit`,
+//! `link`, `annotate` and `push` (which spell a proposal request or name a
+//! session file) through `doc_flags`, after passing `insert`'s TEXT through
+//! `text_argument` (so `@FILE` works), and prepends `--dir`.
 
 /// The workspace flags for one `doc` line (`words[0] == "doc"`), or the usage
 /// text when the line is malformed.  Nothing is sent from here.
@@ -32,13 +28,69 @@ pub(crate) fn doc_flags(words: &[String]) -> Result<Vec<(&'static str, String)>,
     };
     let usage = |line: &str| Err(format!("usage: {line}"));
     let flags = match w.as_slice() {
-        ["doc", "show", name] => vec![("action", "doc-show".into()), ("name", (*name).into())],
-        ["doc", "show", name, format @ ("--raw" | "--json" | "--html")] => vec![
-            ("action", "doc-show".into()),
+        ["doc", "show", name, rest @ ..] => {
+            let mut flags = vec![("action", "doc-show"), ("name", *name)]
+                .into_iter()
+                .map(|(k, v)| (k, v.to_owned()))
+                .collect::<Vec<_>>();
+            let mut rest = rest.iter();
+            let mut format = None;
+            while let Some(word) = rest.next() {
+                match *word {
+                    "--at" | "at" => match (rest.next(), flags.iter().any(|(k, _)| *k == "at")) {
+                        (Some(h), false) => flags.push(("at", decimal(h, "H")?)),
+                        _ => return usage("doc show NAME [--at H] [--raw|--json|--html]"),
+                    },
+                    "--raw" | "--json" | "--html" if format.is_none() => format = Some(word.trim_start_matches("--")),
+                    _ => return usage("doc show NAME [--at H] [--raw|--json|--html]"),
+                }
+            }
+            if let Some(format) = format {
+                flags.push(("format", format.to_owned()));
+            }
+            flags
+        }
+        ["doc", "show", ..] => return usage("doc show NAME [--at H] [--raw|--json|--html]"),
+        ["doc", "history", name, rest @ ..] => {
+            let mut flags = vec![("action", "doc-history"), ("name", *name)]
+                .into_iter()
+                .map(|(k, v)| (k, v.to_owned()))
+                .collect::<Vec<_>>();
+            match rest {
+                [] => {}
+                [format @ ("--json" | "--html")] => flags.push(("format", format.trim_start_matches("--").into())),
+                _ => return usage("doc history NAME [--json|--html]"),
+            }
+            flags
+        }
+        ["doc", "history", ..] => return usage("doc history NAME [--json|--html]"),
+        ["doc", "diff", name, from, to, rest @ ..] => {
+            let mut flags = vec![
+                ("action", "doc-diff"),
+                ("name", *name),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k, v.to_owned()))
+            .collect::<Vec<_>>();
+            flags.push(("from", decimal(from, "H1")?));
+            flags.push(("to", decimal(to, "H2")?));
+            match rest {
+                [] => {}
+                [format @ ("--json" | "--html")] => flags.push(("format", format.trim_start_matches("--").into())),
+                _ => return usage("doc diff NAME H1 H2 [--json|--html]"),
+            }
+            flags
+        }
+        ["doc", "diff", ..] => return usage("doc diff NAME H1 H2 [--json|--html]"),
+        ["doc", "pull", name] => vec![("action", "doc-pull".into()), ("name", (*name).into())],
+        ["doc", "pull", ..] => return usage("doc pull NAME"),
+        ["doc", "range", name, from, to] => vec![
+            ("action", "doc-range".into()),
             ("name", (*name).into()),
-            ("format", format.trim_start_matches("--").into()),
+            ("from", number(from, "FROM")?),
+            ("to", number(to, "TO")?),
         ],
-        ["doc", "show", ..] => return usage("doc show NAME [--raw|--json|--html]"),
+        ["doc", "range", ..] => return usage("doc range NAME FROM TO"),
         ["doc", "outline", name] => vec![("action", "doc-outline".into()), ("name", (*name).into())],
         ["doc", "outline", ..] => return usage("doc outline NAME"),
         ["doc", verb @ ("backlinks" | "links" | "transclusions"), name] => vec![
@@ -97,8 +149,8 @@ pub(crate) fn doc_flags(words: &[String]) -> Result<Vec<(&'static str, String)>,
                 ("action", "transclude".into()),
                 ("name", (*name).into()),
                 ("source", (*source).into()),
-                ("from", decimal(from, "FROM atom")?),
-                ("to", decimal(to, "TO atom")?),
+                ("from-line", number(from, "FROM")?),
+                ("to-line", number(to, "TO")?),
             ];
             let mut rest = rest.iter();
             while let Some(word) = rest.next() {
@@ -120,7 +172,7 @@ pub(crate) fn doc_flags(words: &[String]) -> Result<Vec<(&'static str, String)>,
             ("transclusion", decimal(transclusion, "TRANSCLUSION")?),
         ],
         ["doc", "follow", ..] => return usage("doc follow NAME TRANSCLUSION"),
-        _ => return usage("doc show|outline|mark|unmark|insert|move|remove|transclude|transclusions|follow|links|backlinks …"),
+        _ => return usage("doc show|outline|history|diff|pull|range|mark|unmark|insert|move|remove|transclude|transclusions|follow|links|backlinks …"),
     };
     Ok(flags)
 }
@@ -161,9 +213,23 @@ mod tests {
             f(&[("action", "doc-move"), ("name", "paper"), ("from", "5"), ("to", "1")])
         );
         assert_eq!(
-            flags("doc transclude paper wall 1002 1004 live at 3").unwrap(),
-            f(&[("action", "transclude"), ("name", "paper"), ("source", "wall"), ("from", "1002"),
-                ("to", "1004"), ("mode", "live"), ("at", "3")])
+            flags("doc transclude paper wall 2 4 live at 3").unwrap(),
+            f(&[("action", "transclude"), ("name", "paper"), ("source", "wall"), ("from-line", "2"),
+                ("to-line", "4"), ("mode", "live"), ("at", "3")])
+        );
+        assert_eq!(
+            flags("doc show paper --at 77 --html").unwrap(),
+            f(&[("action", "doc-show"), ("name", "paper"), ("at", "77"), ("format", "html")])
+        );
+        assert_eq!(flags("doc history paper").unwrap(), f(&[("action", "doc-history"), ("name", "paper")]));
+        assert_eq!(
+            flags("doc diff paper 77 81 --json").unwrap(),
+            f(&[("action", "doc-diff"), ("name", "paper"), ("from", "77"), ("to", "81"), ("format", "json")])
+        );
+        assert_eq!(flags("doc pull paper").unwrap(), f(&[("action", "doc-pull"), ("name", "paper")]));
+        assert_eq!(
+            flags("doc range notes 2 3").unwrap(),
+            f(&[("action", "doc-range"), ("name", "notes"), ("from", "2"), ("to", "3")])
         );
         assert_eq!(
             flags("doc follow paper 77").unwrap(),
@@ -175,7 +241,9 @@ mod tests {
     fn malformed_lines_are_refused_before_anything_is_sent() {
         for bad in ["doc", "doc show", "doc show p --pdf", "doc mark p 0 bold", "doc mark p 2 underline",
             "doc mark p 2 link", "doc mark p 2 bold extra", "doc unmark p x", "doc move p 1",
-            "doc remove p two", "doc transclude p w 1 2 at", "doc follow p"] {
+            "doc remove p two", "doc transclude p w 1 2 at", "doc follow p", "doc show p --at",
+            "doc show p --at x", "doc show p --raw --html", "doc diff p 1", "doc history p --raw", "doc range p 0 2",
+            "doc pull"] {
             assert!(flags(bad).is_err(), "{bad} should be refused");
         }
         assert!(flags("doc mark p 2 underline").unwrap_err().starts_with("unknownKind: underline"));
