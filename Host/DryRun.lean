@@ -109,6 +109,22 @@ theorem dryRun_commits_nothing (t : DurableReceiverIO.Transport)
     dryRunVia { t with append, putCheckpoint, initializeSeed } config opened observation
       signatures = dryRunVia t config opened observation signatures := rfl
 
+/-- **The submission half never names the Store's writers through its config.**
+`submitLoadedVia` — the half of the dry run that could write — gives the same
+program under any `storage` (the Store's paths, and with them every writer
+`Config.transport` would build): it reaches the Store only through the
+transport it is handed. With `dryRun_commits_nothing`, no Store writer is
+reachable from the dry run's submission. (The plan half, op 1's
+`prepareAuthorizedLoaded`, takes no transport and is the existing read-only
+path; the same statement for it does not close by `rfl` — see the report.) -/
+theorem submit_storage_irrelevant (t : DurableReceiverIO.Transport)
+    (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    (storage : DurableReceiverIO.NativeConfig) (call : SignedCall)
+    (confirm : DurableReceiverIO.Confirmation → Minidregg.Theory.TypedAuthorization.Digest →
+      Minidregg.Theory.TypedAuthorization.Digest → IO Outcome) :
+    NativeHost.submitLoadedVia t { config with storage } (opened.restorage storage) call confirm =
+      NativeHost.submitLoadedVia t config opened call confirm := rfl
+
 /-- **The served submission and the dry run are one program.** Op 2 runs
 `submitLoadedWith`, which is `submitLoadedVia` over the Store's transport; the dry
 run runs `submitLoadedVia` over `dryTransport` of the same reader. -/
@@ -154,6 +170,7 @@ theorem dryReceive_admission_reaches_append (t : DurableReceiverIO.Transport)
 
 #assert_axioms dryTransport_writers_irrelevant
 #assert_axioms dryRun_commits_nothing
+#assert_axioms submit_storage_irrelevant
 #assert_axioms submit_is_via_store_transport
 #assert_axioms dryReceive_refusal_agrees
 #assert_axioms dryReceive_admission_reaches_append
