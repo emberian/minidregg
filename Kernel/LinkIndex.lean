@@ -599,6 +599,80 @@ theorem links_exact (log : List IntentRecord) (cell : CellId) :
     ((ofRecords log).links cell).map Entry.key = latestLinks cell log :=
   ((ofRecords_exact log).2.2 cell).1
 
+/-! ## A transclusion is a backlink of the document it reads
+
+A transclusion's forward link targets the TRANSCLUSION record (`TargetKey.of`
+keys it under its own id), not the source document, so the source's backlinks
+would miss it. `transclusionKeys index D` collects the keys of every live
+transclusion link whose reference reads D; a backlinks read of D asks them too,
+so a reader who may ask about D, and who sees the transcluding cell, gets the
+transclusion as a backlink of D (`transclusion_backlink_complete`), and only
+transclusions that read D are added (`transclusionKeys_sound`). -/
+
+/-- The document a link's target reads: a transclusion's source (the stored
+reference's `objectRoot`, the source cell's identifier); none otherwise. -/
+def transcludedDocument : LinkTarget → Option DocumentId
+  | .transclusion _ reference => some ⟨reference.source.objectRoot⟩
+  | _ => none
+
+/-- The keys of the live transclusion links that read `document`. -/
+def Index.transclusionKeys (index : Index) (document : DocumentId) : List TargetKey :=
+  (pairs index.sources).filterMap fun pair =>
+    if transcludedDocument pair.2.record.target = some document then
+      some (TargetKey.of pair.2.record.target)
+    else none
+
+/-- **Only transclusions of D are added**: each added key is the key of a live
+link of the log (in its cell's latest accepted write) whose transclusion reads D. -/
+theorem transclusionKeys_sound (log : List IntentRecord) (document : DocumentId) {key : TargetKey}
+    (member : key ∈ (ofRecords log).transclusionKeys document) :
+    ∃ cell link, link ∈ latestLinks cell log ∧ transcludedDocument link.2.target = some document ∧
+      TargetKey.of link.2.target = key := by
+  obtain ⟨unique, _, cells⟩ := ofRecords_exact log
+  obtain ⟨pair, paired, made⟩ := List.mem_filterMap.mp member
+  split at made
+  · rename_i reads
+    cases made
+    obtain ⟨source, inSources, sameCell, inEntries⟩ := mem_pairs.mp paired
+    have exactCell : lookup (ofRecords log).sources pair.1 = source.2 := by
+      rw [← sameCell]; exact lookup_of_mem unique inSources
+    rw [← exactCell] at inEntries
+    refine ⟨pair.1, pair.2.key, ?_, reads, rfl⟩
+    rw [← (cells pair.1).1]
+    exact List.mem_map_of_mem inEntries
+  · cases made
+
+/-- **A transclusion of D is a backlink of D**: every live link of a seen cell
+whose transclusion reads D is a row of D's backlinks once D's transclusion keys
+are asked, whatever else is asked. -/
+theorem transclusion_backlink_complete (log : List IntentRecord) (visible : CellId → Bool)
+    (keys : List TargetKey) {document : DocumentId} {cell : CellId} {key : LinkKey}
+    (live : key ∈ latestLinks cell log) (shown : visible cell = true)
+    (reads : transcludedDocument key.2.target = some document) :
+    ∃ entry, entry.key = key ∧
+      (cell, entry) ∈ (ofRecords log).backlinks visible ((ofRecords log).transclusionKeys document ++ keys) := by
+  apply backlinks_complete log visible _ live shown
+  obtain ⟨_, _, cells⟩ := ofRecords_exact log
+  rw [← (cells cell).1] at live
+  obtain ⟨entry, inEntries, sameKey⟩ := List.mem_map.mp live
+  have present : (cell, lookup (ofRecords log).sources cell) ∈ (ofRecords log).sources := by
+    rcases lookup_nil_or_mem (ofRecords log).sources cell with empty | found
+    · rw [empty] at inEntries; cases inEntries
+    · exact found
+  have target : entry.record = key.2 := by rw [← sameKey]; rfl
+  refine List.mem_append_left _ (List.mem_filterMap.mpr ⟨(cell, entry), ?_, ?_⟩)
+  · exact mem_pairs.mpr ⟨_, present, rfl, inEntries⟩
+  · simp [target, reads]
+
+namespace Example
+
+/-- Refuting pole: a link to a document reads no document as a transclusion,
+so it never adds a transclusion key. -/
+theorem document_link_reads_nothing (document : DocumentId) :
+    transcludedDocument (.document document) = none := rfl
+
+end Example
+
 /-! ## Poles -/
 
 namespace Example
@@ -628,5 +702,12 @@ end Example
 #guard_msgs (whitespace := lax) in #print axioms links_exact
 /-- info: 'Minidregg.Kernel.LinkIndex.mem_lookup_invert' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms mem_lookup_invert
+
+/-- info: 'Minidregg.Kernel.LinkIndex.transclusionKeys_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transclusionKeys_sound
+/-- info: 'Minidregg.Kernel.LinkIndex.transclusion_backlink_complete' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transclusion_backlink_complete
+/-- info: 'Minidregg.Kernel.LinkIndex.Example.document_link_reads_nothing' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Example.document_link_reads_nothing
 
 end Minidregg.Kernel.LinkIndex

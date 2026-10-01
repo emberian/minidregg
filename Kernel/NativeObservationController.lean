@@ -979,6 +979,21 @@ theorem backlinks_view_sound {visible : DurableDataIntent.CellId → Bool}
   rw [durable.linksExact] at member
   exact LinkIndex.backlinks_sound _ _ _ member
 
+/-- **A transclusion of the asked document is one of its backlinks**: the
+backlinks view asks the transclusion keys that read the target document
+(`LinkIndex.Index.transclusionKeys`) before the target's own keys, so every live
+transclusion of it in a cell the reader sees is a row
+(`LinkIndex.transclusion_backlink_complete` on the loaded index). -/
+theorem transclusion_backlinks_view_complete {visible : DurableDataIntent.CellId → Bool}
+    {keys : List LinkIndex.TargetKey} {document : Minidregg.Theory.Hyperdocument.DocumentId}
+    {cell : DurableDataIntent.CellId} {key : LinkIndex.LinkKey}
+    (live : key ∈ LinkIndex.latestLinks cell durable.image.accepted) (shown : visible cell = true)
+    (reads : LinkIndex.transcludedDocument key.2.target = some document) :
+    ∃ entry, entry.key = key ∧
+      (cell, entry) ∈ durable.links.backlinks visible (durable.links.transclusionKeys document ++ keys) := by
+  rw [durable.linksExact]
+  exact LinkIndex.transclusion_backlink_complete _ _ _ live shown reads
+
 /-- **A reader sees only backlinks from cells it may observe**: each row of
 the view a reader gets names a source cell that some standing capability the
 reader holds covers. -/
@@ -1044,7 +1059,8 @@ def AuthorizedIntent.queryResult
           grant query.target
     | .backlinks =>
         let visible := readable context intent.subject (genesisHeight + durable.height)
-        let keys := targetKeys checked.selected.packed grant.target
+        let keys := durable.links.transclusionKeys ⟨⟨grant.target⟩⟩ ++
+          targetKeys checked.selected.packed grant.target
         pure (linkViewCodec.encode (true,
           (durable.links.backlinks visible keys).map (linkRow genesisHeight)))
     | .links =>
@@ -1194,5 +1210,7 @@ theorem challenge_bound {context : Context deployment durable}
 /-- info: 'Minidregg.Kernel.NativeObservationController.challenge_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms challenge_bound
 
+/-- info: 'Minidregg.Kernel.NativeObservationController.transclusion_backlinks_view_complete' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.transclusion_backlinks_view_complete
 
 end Minidregg.Kernel.NativeObservationController
