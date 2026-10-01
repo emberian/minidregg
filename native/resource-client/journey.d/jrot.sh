@@ -49,6 +49,18 @@ write() {  # write WS ID FIELD : propose + submit a create of FIELD=1 on `rot`
       --intent "$1/proposals/$2/intent.json" --attempt "$1/attempts/$2"
 }
 status_of() { run "$1" "$MINI" key-status --workspace "$2" && cat "$D/$1.out"; }
+write_on() {  # write_on WS ID REF FIELD : propose + submit a create of FIELD=1 through reference REF
+  scalar "$3" "$4" 1 >"$D/req/$2.json"
+  run "$2-propose" "$MINI" workspace --action propose --dir "$1" --request "$D/req/$2.json" --proposal-id "$2" \
+    && run "$2-submit" "$MINI" workspace --action submit --dir "$1" \
+      --intent "$1/proposals/$2/intent.json" --attempt "$1/attempts/$2"
+}
+renounce() {  # renounce WS ID REF : propose + submit a renounce of the grant REF names (K-RENOUNCE)
+  jq -n --arg n "$3" '{type:"minidregg-workspace-proposal-v1",action:"renounce",name:$n}' >"$D/req/$2.json"
+  run "$2-propose" "$MINI" workspace --action propose --dir "$1" --request "$D/req/$2.json" --proposal-id "$2" \
+    && run "$2-submit" "$MINI" workspace --action submit --dir "$1" \
+      --intent "$1/proposals/$2/intent.json" --attempt "$1/attempts/$2"
+}
 
 # ---------------------------------------------------------------- the friend
 "$MINI" keygen --secret "$D/friend.key" --public "$D/friend.pub" --next-to "$D/offline/friend.next" \
@@ -86,6 +98,19 @@ run dpub "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --pro
   --attempt "$SPONSOR_WS/attempts/rot-grant" || die "publish: $(tail -1 "$D/dpub.err")"
 REF=$SPONSOR_WS/proposals/rot-grant/recipient-reference.json
 run fimport "$MINI" workspace --action import --dir "$FW" --name rot --from-ref "$REF" || die "friend import"
+# A second grant on the same resource, issued under the friend's FIRST key: the
+# one the friend renounces after rotating (K-RENOUNCE x K-PREROTATE).
+jq -n --arg r "$FRIEND" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"rot",
+  recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate-rn.json"
+run rnprop "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/delegate-rn.json" \
+  --proposal-id rn-grant || die "second grant propose: $(tail -1 "$D/rnprop.err")"
+run rnsub "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
+  --intent "$SPONSOR_WS/proposals/rn-grant/intent.json" --attempt "$SPONSOR_WS/attempts/rn-grant" \
+  || die "second grant submit: $(tail -1 "$D/rnsub.err")"
+run rnpub "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id rn-grant \
+  --attempt "$SPONSOR_WS/attempts/rn-grant" || die "second grant publish: $(tail -1 "$D/rnpub.err")"
+RNREF=$SPONSOR_WS/proposals/rn-grant/recipient-reference.json
+run frnimport "$MINI" workspace --action import --dir "$FW" --name rn --from-ref "$RNREF" || die "friend import rn"
 write "$FW" w-before 2
 row "the friend writes under the daily key" "installed" "rc=$(cat "$D/w-before-submit.rc")" \
   "$(installed "$FW/attempts/w-before/outcome.json" && echo 1 || echo 0)"
@@ -100,6 +125,7 @@ AW=$D/thief-ws
 run tinit "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --key "$D/stolen.key" --subject "$FRIEND" --dir "$AW" || die "thief init: $(tail -1 "$D/tinit.err")"
 run timport "$MINI" workspace --action import --dir "$AW" --name rot --from-ref "$REF" || die "thief import"
+run trnimport "$MINI" workspace --action import --dir "$AW" --name rn --from-ref "$RNREF" || die "thief import rn"
 "$MINI" keygen --secret "$D/thief.key" --public "$D/thief.pub" --no-prerotation >/dev/null 2>&1 || die "thief keygen"
 run trot1 "$MINI" rotate-key --workspace "$AW" --next-key "$D/thief.key"
 row "the thief (daily key) rotates to its own key: refused by name" "exit 3, notPrecommitted" \
@@ -147,6 +173,32 @@ write "$FW" w-second 4
 row "a second rotation works and the friend still writes" "epoch 3, installed" \
   "rc=$(cat "$D/frot2.rc") epoch=$(jq -r .keyEpoch "$D/frot2.out" 2>/dev/null)" \
   "$([ "$(cat "$D/frot2.rc")" = 0 ] && [ "$(jq -r .keyEpoch "$D/frot2.out")" = 3 ] && installed "$FW/attempts/w-second/outcome.json" && echo 1 || echo 0)"
+
+# ---------------------------------------------------------------- renounce after rotation
+# The grant rn was issued while the friend's first key was current. After two
+# rotations only the CURRENT key may give it up: the old key's renounce is
+# refused and changes nothing; the new key's is admitted and revokes exactly rn.
+renounce "$AW" rn-thief rn
+rc_thief=$(cat "$D/rn-thief-submit.rc" 2>/dev/null || cat "$D/rn-thief-propose.rc")
+row "the OLD key (stolen, two rotations ago) renounces the friend's grant: refused" "exit != 0, not confirmed" \
+  "rc=$rc_thief $(refusal rn-thief-submit)$(refusal rn-thief-propose)" \
+  "$([ "$rc_thief" != 0 ] && ! installed "$AW/attempts/rn-thief/outcome.json" && echo 1 || echo 0)"
+write_on "$FW" w-rn-1 rn 7
+row "the old key's renounce changed nothing: the friend still writes through rn" "installed" \
+  "rc=$(cat "$D/w-rn-1-submit.rc" 2>/dev/null)" \
+  "$(installed "$FW/attempts/w-rn-1/outcome.json" && echo 1 || echo 0)"
+renounce "$FW" rn-friend rn
+row "the friend, signing with the CURRENT key (epoch 3), renounces rn: admitted" "confirmed" \
+  "rc=$(cat "$D/rn-friend-submit.rc" 2>/dev/null) $(jq -r '.type // empty' "$FW/attempts/rn-friend/outcome.json" 2>/dev/null)" \
+  "$(jq -e '.type == "confirmed"' "$FW/attempts/rn-friend/outcome.json" >/dev/null 2>&1 && echo 1 || echo 0)"
+write_on "$FW" w-rn-2 rn 8
+row "a write through the renounced grant is refused, naming the revocation" "exit != 0, revoked" \
+  "$(refusal w-rn-2-propose)$(refusal w-rn-2-submit)" \
+  "$(! installed "$FW/attempts/w-rn-2/outcome.json" 2>/dev/null && cat "$D/w-rn-2-propose.err" "$D/w-rn-2-submit.err" 2>/dev/null | grep -qi revoked && echo 1 || echo 0)"
+write "$FW" w-after-rn 6
+row "the renounce took exactly rn: the friend's other grant (rot) still writes" "installed" \
+  "rc=$(cat "$D/w-after-rn-submit.rc" 2>/dev/null)" \
+  "$(installed "$FW/attempts/w-after-rn/outcome.json" && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------- no pre-rotation
 "$MINI" keygen --secret "$D/plain.key" --public "$D/plain.pub" --no-prerotation >"$D/pkeygen.out" 2>"$D/pkeygen.err" \
