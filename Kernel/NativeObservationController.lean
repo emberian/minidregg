@@ -687,6 +687,132 @@ theorem presence_views_share_footprint (context : Context deployment durable)
     requiredTargets context ⟨subject, nonce, .query query, grants⟩ = .ok [(query.kind, query.target)] :=
   rfl
 
+/-! ## Links and backlinks (K-DOC-INDEX)
+
+`backlinks` and `links` are ordinary queries with the one-target footprint
+(`presence_views_share_footprint`). `links` is the target's own forward index,
+part of the cell the grant already reads. `backlinks` names SOURCE cells, so
+each row is cut by what the reader may observe now: a source cell is shown
+only if a standing capability the reader holds (the `who` membership test,
+`standing`) covers it. This is the coverage of "the documents this reader can
+read", not of the one presented grant: the presented grant authorizes asking
+about the target, and the reader's other standing grants decide which sources
+it may learn about. -/
+
+/-- A stored object capability names `reader` and currently lets it observe `cell`. -/
+def holdsStanding (context : Context deployment durable) (reader : SubjectId) (height cell : Nat)
+    (named : CapabilityId) : Bool :=
+  match CredentialAuthorityState.readCapability context.authority.snapshot.cell .object named with
+  | some stored => decide (stored.head.holder = .subject reader) &&
+      standing context.authority.snapshot.authState height cell stored.head
+  | none => false
+
+/-- A cell the reader may observe at `height`: some standing capability it holds covers it. -/
+def readable (context : Context deployment durable) (reader : SubjectId) (height : Nat)
+    (cell : DurableDataIntent.CellId) : Bool :=
+  decide (∃ named ∈ capabilityIds context.authority.snapshot.cell.logical .object,
+    holdsStanding context reader height cell.value named = true)
+
+theorem readable_sound {context : Context deployment durable} {reader : SubjectId} {height : Nat}
+    {cell : DurableDataIntent.CellId} (shown : readable context reader height cell = true) :
+    ∃ named stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell .object named =
+        some stored ∧ stored.head.holder = .subject reader ∧
+      standing context.authority.snapshot.authState height cell.value stored.head = true := by
+  obtain ⟨named, _, holds⟩ := of_decide_eq_true shown
+  unfold holdsStanding at holds
+  split at holds
+  · rename_i stored found
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at holds
+    exact ⟨named, stored, found, holds.1, holds.2⟩
+  · cases holds
+
+/-- One link row: source cell, link id, the source range's start atom, the
+link's revision (the operation that wrote it), the absolute height from which
+it has been live, the target's kind and id, and the relation. -/
+structure LinkRow where
+  source : Nat
+  link : Nat
+  anchor : Option Nat
+  revision : Nat
+  height : Nat
+  kind : Nat
+  target : Nat
+  relation : Nat
+  deriving DecidableEq, Repr
+
+def linkRow (genesisHeight : Nat) (pair : DurableDataIntent.CellId × LinkIndex.Entry) : LinkRow :=
+  ⟨pair.1.value, pair.2.link.digest.value,
+    (pair.2.record.source.bind fun range => range.start.neighbor).map (·.digest.value),
+    pair.2.record.operation.digest.value, genesisHeight + pair.2.height,
+    LinkIndex.targetKind pair.2.record.target, LinkIndex.targetId pair.2.record.target,
+    pair.2.record.relation.value⟩
+
+def linkRowStream : StreamCodec LinkRow :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product (StreamCodec.option StreamCodec.nat) (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
+    (fun row => (row.source, row.link, row.anchor, row.revision, row.height, row.kind, row.target,
+      row.relation))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1, wire.2.2.2.2.2.1,
+      wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
+    (by intro row; cases row; rfl)
+
+def linkViewFrame : List UInt8 := "DREGG/NATIVE-HOST/LINK-VIEW/v1".toUTF8.toList
+
+/-- `(backlinks?, rows)`: which view, then its rows. -/
+def linkViewCodec : IndexedProgram.LawfulCodec (Bool × List LinkRow) :=
+  NativeHostCodec.framed linkViewFrame
+    (StreamCodec.product StreamCodec.bool (StreamCodec.list linkRowStream))
+
+/-- The keys a target cell answers to: its document, and its elements when it
+is a content cell. -/
+def targetKeys (packed : PackedCell Registry) (target : Nat) : List LinkIndex.TargetKey :=
+  match packed with
+  | ⟨.content, payload⟩ => LinkIndex.documentKeys ⟨⟨target⟩⟩ payload.logical
+  | _ => [.document ⟨⟨target⟩⟩]
+
+/-- **A backlinks view is exact about what it shows**: every row's source cell
+satisfies the reader's coverage, points at an asked key, is live in its source
+cell's latest accepted write, and has been live since its height
+(`LinkIndex.backlinks_sound` on the loaded index, `linksExact`). -/
+theorem backlinks_view_sound {visible : DurableDataIntent.CellId → Bool}
+    {keys : List LinkIndex.TargetKey} {pair : DurableDataIntent.CellId × LinkIndex.Entry}
+    (member : pair ∈ durable.links.backlinks visible keys) :
+    visible pair.1 = true ∧ LinkIndex.TargetKey.of pair.2.record.target ∈ keys ∧
+      pair.2.key ∈ LinkIndex.latestLinks pair.1 durable.image.accepted ∧
+      PresenceIndex.Occurs (LinkIndex.WroteLink pair.1 pair.2.key) durable.image.accepted
+        pair.2.height := by
+  rw [durable.linksExact] at member
+  exact LinkIndex.backlinks_sound _ _ _ member
+
+/-- **A reader sees only backlinks from cells it may observe**: each row of
+the view a reader gets names a source cell that some standing capability the
+reader holds covers. -/
+theorem backlinks_covered (context : Context deployment durable) (reader : SubjectId)
+    (height : Nat) (keys : List LinkIndex.TargetKey) {pair : DurableDataIntent.CellId × LinkIndex.Entry}
+    (member : pair ∈ durable.links.backlinks (readable context reader height) keys) :
+    ∃ named stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell .object named =
+        some stored ∧ stored.head.holder = .subject reader ∧
+      standing context.authority.snapshot.authState height pair.1.value stored.head = true :=
+  readable_sound (LinkIndex.backlinks_covered _ _ _ member)
+
+/-- **A links view is the cell's latest live links.** -/
+theorem links_view_exact (cell : DurableDataIntent.CellId) :
+    (durable.links.links cell).map LinkIndex.Entry.key = LinkIndex.latestLinks cell durable.image.accepted := by
+  rw [durable.linksExact]
+  exact LinkIndex.links_exact _ cell
+
+/-- info: 'Minidregg.Kernel.NativeObservationController.readable_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.readable_sound
+/-- info: 'Minidregg.Kernel.NativeObservationController.backlinks_view_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.backlinks_view_sound
+/-- info: 'Minidregg.Kernel.NativeObservationController.backlinks_covered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.backlinks_covered
+/-- info: 'Minidregg.Kernel.NativeObservationController.links_view_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.links_view_exact
+
 def AuthorizedIntent.queryResult
     {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
@@ -730,6 +856,14 @@ def AuthorizedIntent.queryResult
           match atBytes (durable := durable) genesisHeight height query.target with
           | some bytes => pure (atViewCodec.encode (height, bytes))
           | none => throw refused
+    | .backlinks =>
+        let visible := readable context intent.subject (genesisHeight + durable.height)
+        let keys := targetKeys checked.selected.packed grant.target
+        pure (linkViewCodec.encode (true,
+          (durable.links.backlinks visible keys).map (linkRow genesisHeight)))
+    | .links =>
+        pure (linkViewCodec.encode (false,
+          (durable.links.links ⟨grant.target⟩).map fun entry => linkRow genesisHeight (⟨grant.target⟩, entry)))
   else throw refused
 
 /-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_sound' depends on axioms: [propext, Quot.sound] -/

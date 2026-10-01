@@ -927,6 +927,14 @@ theorem step_tree (author : PrincipalRef) (operation : OperationId) (document : 
       split at accepted
       · cases accepted
       · exact appendLeaf_tree author operation document rfl tree accepted
+  | unlink link =>
+      simp only [step, retireLink] at accepted
+      split at accepted
+      · cases accepted
+      · split at accepted
+        · cases accepted
+          exact tree.set_other _ _ (by simp) (by simp)
+        · cases accepted
 
 theorem run_tree (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) {pre : ContentStore} {command : Command} {next : Progress}

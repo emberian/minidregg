@@ -17,17 +17,22 @@ the registry's `ContentLaw`, which every final cell runs.  Authorization and
 current installed Pred evaluation belong to the enclosing ResourceTransaction
 receiver.
 
-Command grammar v5 (`DREGG/CONTENT/MUTATE` ++ [5]) gives a document an element
-tree.  `createDocument` makes the root, an empty container; `createAtom` and
+Command grammar v6 (`DREGG/CONTENT/MUTATE` ++ [6]) adds `unlink` to v5, which
+gave a document an element tree.  `createDocument` makes the root, an empty container; `createAtom` and
 `transclude` append their new leaf (an `atom` or `embed` element carrying the
 record's own identifier) to the root; and `editElement` splices a detached
 element into a container, moves a child within one, or removes (detaches) one,
 each against the revision of the container its author read.  A line placed at
 position N is a `createAtom` and a `move` to N in one command, all or nothing.  Document order is the pre-order walk of the
-tree (`documentOrder`), never an identifier sort.  Versions 1–4 refuse to decode
-(`retired_command_refused`): v4 had no tree (a document's lines were ordered by
+tree (`documentOrder`), never an identifier sort.  Versions 1–5 refuse to decode
+(`retired_command_refused`): v5 had no `unlink` (its tail sum was one arm
+shorter), v4 had no tree (a document's lines were ordered by
 atom identifier), v3 had the atom `quote`, v2 no annotate and no atom revision,
 v1 the retired `ForwardTarget`.
+
+`unlink` retires one live link of the document: the record stays, with
+`tombstonedAt` set to the retiring operation, and the backlink index
+(`Kernel.LinkIndex`) drops it.
 
 `annotate` attaches an annotation record to one atom at the revision the
 annotator read and writes nothing else.  `transclude` writes a
@@ -180,6 +185,8 @@ inductive Action where
   /-- A new empty container (a section), appended to the root; refused in a
   cell that holds no document. -/
   | createContainer (element : ElementId)
+  /-- Retire a live link of this document (`tombstonedAt := operation`). -/
+  | unlink (link : LinkId)
   deriving DecidableEq
 
 abbrev ActionWire := Sum (ElementId × Digest)
@@ -189,7 +196,7 @@ abbrev ActionWire := Sum (ElementId × Digest)
         (Sum (RunId × List AtomId)
           (Sum (AnnotationId × AtomId × OperationId × List UInt8)
             (Sum (TransclusionId × LinkId × TranscludeRequest)
-              (Sum EditElement ElementId)))))))
+              (Sum EditElement (Sum ElementId LinkId))))))))
 
 def actionWireStream : StreamCodec ActionWire :=
   StreamCodec.sum
@@ -212,7 +219,8 @@ def actionWireStream : StreamCodec ActionWire :=
               (StreamCodec.sum
                 (StreamCodec.product (identifierStream .v1 .transclusion)
                   (StreamCodec.product (identifierStream .v1 .link) transcludeRequestStream))
-                (StreamCodec.sum editElementStream (identifierStream .v1 .element))))))))
+                (StreamCodec.sum editElementStream
+                  (StreamCodec.sum (identifierStream .v1 .element) (identifierStream .v1 .link)))))))))
 
 def Action.toWire : Action → ActionWire
   | .createDocument root schema => .inl (root, schema)
@@ -226,7 +234,8 @@ def Action.toWire : Action → ActionWire
   | .transclude transclusion linkId request =>
       .inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request)))))))
   | .editElement edit => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit)))))))
-  | .createContainer element => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr element)))))))
+  | .createContainer element => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element))))))))
+  | .unlink linkId => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr linkId))))))))
 
 def Action.ofWire : ActionWire → Action
   | .inl (root, schema) => .createDocument root schema
@@ -240,7 +249,8 @@ def Action.ofWire : ActionWire → Action
   | .inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request))))))) =>
       .transclude transclusion linkId request
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit))))))) => .editElement edit
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr element))))))) => .createContainer element
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element)))))))) => .createContainer element
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr linkId)))))))) => .unlink linkId
 
 @[simp] theorem Action.ofWire_toWire (action : Action) :
     Action.ofWire action.toWire = action := by cases action <;> rfl
@@ -257,7 +267,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 5
+def commandVersion : Nat := 6
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -285,16 +295,16 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- Version-1 through version-4 command frames refuse to decode. -/
+/-- Version-1 through version-5 command frames refuse to decode. -/
 theorem retired_command_refused (version : UInt8)
-    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4)
+    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5)
     (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
-    rcases retired with rfl | rfl | rfl | rfl <;> decide +kernel
+    rcases retired with rfl | rfl | rfl | rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -325,6 +335,8 @@ inductive Reject where
   | notAChild
   /-- A splice of an element that already has a place (or is the document root). -/
   | attached
+  /-- `unlink` named no live link of this document. -/
+  | unknownLink
   deriving DecidableEq, Repr
 
 /-! ## Lowering actions to guarded operations -/
@@ -351,6 +363,18 @@ def replaceAtom (document : DocumentId) (progress : Progress) (atom : AtomId)
   else
     .ok (progress.1.set ⟨.atoms, atom⟩ (some after),
       progress.2 ++ [.write .atoms atom before after])
+
+/-- Retire a live link of `document`: the exact stored record guards the write,
+and only `tombstonedAt` changes. -/
+def retireLink (document : DocumentId) (operation : OperationId) (progress : Progress)
+    (link : LinkId) : Except Reject Progress :=
+  match (show Option LinkRecord from progress.1 ⟨.links, link⟩) with
+  | none => .error .unknownLink
+  | some before =>
+      if before.sourceDocument = document ∧ before.tombstonedAt = none then
+        .ok (progress.1.set ⟨.links, link⟩ (some { before with tombstonedAt := some operation }),
+          progress.2 ++ [.write .links link before { before with tombstonedAt := some operation }])
+      else .error .unknownLink
 
 /-- Executable membership checker for the canonical stored-point law. -/
 def pointCheck (pre : ContentStore) (document : DocumentId) (point : StablePoint) : Bool :=
@@ -678,6 +702,7 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
       match rootOf progress.1 document with
       | none => .error .noSuchElement
       | some _ => appendLeaf author operation document progress element (.container [])
+  | .unlink link => retireLink document operation progress link
 
 def run (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (command : Command) : Except Reject Progress :=
@@ -928,6 +953,15 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
       split at accepted
       · cases accepted
       · exact (appendLeaf_step author operation document accepted).1 pre holds
+  | unlink link =>
+      simp only [step, retireLink] at accepted
+      split at accepted
+      · cases accepted
+      · rename_i before present
+        split at accepted
+        · cases accepted
+          exact executes_append pre progress _ holds ⟨rfl, present⟩
+        · cases accepted
 
 theorem foldlM_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (actions : List Action) (progress next : Progress)
@@ -1093,6 +1127,7 @@ def Action.tag : Action → Nat
   | .transclude .. => 6
   | .editElement .. => 7
   | .createContainer .. => 8
+  | .unlink .. => 9
 
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
@@ -1117,6 +1152,7 @@ def project (before after : ContentStore) (command : Command) : List (String × 
    ("content/transclusions", actionCount command 6),
    ("content/element-edits", actionCount command 7),
    ("content/container-creates", actionCount command 8),
+   ("content/unlinks", actionCount command 9),
    ("content/writes/body", bodyWrites before after),
    ("content/writes/annotations", annotationWrites before after),
    ("content/tombstones", (command.actions.filter fun action => match action with
@@ -1627,6 +1663,14 @@ theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document
       split at accepted
       · cases accepted
       · exact keepsAt_of_elementStep revision (appendLeaf_step author operation document accepted)
+  | unlink link =>
+      simp only [step, retireLink] at accepted
+      split at accepted
+      · cases accepted
+      · split at accepted
+        · cases accepted
+          exact keepsAt_set_other revision progress.1 .links link _ (by decide)
+        · cases accepted
 
 theorem run_keepsAt (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) (pre : ContentStore) (command : Command) (next : Progress)

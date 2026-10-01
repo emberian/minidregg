@@ -485,6 +485,79 @@ fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Resu
     )
 }
 
+/// The workspace's own reference names for a cell, else the cell id.
+fn cell_label(root: &Path, cell: &str) -> String {
+    let mut names: Vec<String> = fs::read_dir(root.join("refs"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            let stem = file.strip_suffix(".json")?.to_owned();
+            let value = reference(root, &stem).ok()?;
+            (value.get("target").and_then(Value::as_str) == Some(cell)).then_some(stem)
+        })
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        cell.to_owned()
+    } else {
+        names.join(",")
+    }
+}
+
+/// `doc backlinks NAME` / `doc links NAME`: one signed query of the Host's link
+/// index (K-DOC-INDEX). Backlinks name only source documents a standing grant
+/// of this workspace's subject covers; the Host decides that, not the client.
+fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Result<()> {
+    let own = reference(root, name)?;
+    let (result, challenge, _) = signed_view(root, workspace, &own, view)?;
+    let rows = result
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or("link view lacks rows")?;
+    let document = member(&own, "target")?;
+    let height = member(&challenge, "height")?;
+    let backlinks = view == "backlinks";
+    if backlinks {
+        println!(
+            "# backlinks to {name} (document {document}) from the documents this workspace can read at height {height}"
+        );
+    } else {
+        println!("# links from {name} (document {document}) at height {height}");
+    }
+    for row in rows {
+        if backlinks {
+            println!(
+                "{} link {} relation {} revision {} since {} target {} {}",
+                cell_label(root, member(row, "source")?),
+                member(row, "link")?,
+                member(row, "relation")?,
+                member(row, "revision")?,
+                member(row, "height")?,
+                member(row, "kind")?,
+                member(row, "target")?
+            );
+        } else {
+            println!(
+                "link {} -> {} {} relation {} revision {} since {}",
+                member(row, "link")?,
+                member(row, "kind")?,
+                cell_label(root, member(row, "target")?),
+                member(row, "relation")?,
+                member(row, "revision")?,
+                member(row, "height")?
+            );
+        }
+    }
+    println!(
+        "# {} {}",
+        rows.len(),
+        if backlinks { "backlink(s)" } else { "link(s)" }
+    );
+    Ok(())
+}
+
 fn signed_view(
     root: &Path,
     workspace: &Value,
@@ -1161,6 +1234,7 @@ fn content_actions(actions: &Value) -> Result<Value> {
                 &["type", "annotation", "atom", "revision", "body"],
             ),
             "transclude" => ("transclude", &["type", "transclusion", "link", "request"]),
+            "unlink" => ("unlink", &["type", "link"]),
             _ => return Err("unknown workspace content action".into()),
         };
         if obj.len() != fields.len() || fields.iter().any(|field| !obj.contains_key(*field)) {
@@ -1240,12 +1314,12 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 }
                 // The action grammar version the Host's controller requires per
                 // payload: the scalar declaration (1) or the content command
-                // grammar (`ContentResource.commandVersion`, 4), which an
+                // grammar (`ContentResource.commandVersion`, 6), which an
                 // observe-only `read` of a content cell is checked under too.
                 let (lowered, schema_version) = match member(payload, "type")? {
                     "scalar" => (scalar_actions(&payload["actions"], target)?, "1"),
-                    "content" => (content_actions(&payload["actions"])?, "5"),
-                    "read" => (json!({"type":"read"}), "5"),
+                    "content" => (content_actions(&payload["actions"])?, "6"),
+                    "read" => (json!({"type":"read"}), "6"),
                     _ => return Err("unsupported workspace payload type".into()),
                 };
                 // A read target's authorization leg is checked under the observe
@@ -2021,6 +2095,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             list(&root)
         }
+        "doc-backlinks" | "doc-links" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            doc_link_view(
+                &root,
+                &workspace,
+                &name,
+                if action == "doc-backlinks" {
+                    "backlinks"
+                } else {
+                    "links"
+                },
+            )
+        }
         "describe" | "read" => {
             let name = os_string(args.required("name")?, "reference name")?;
             args.finish()?;
@@ -2142,7 +2230,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             publish_delegation(&root, &proposal_id, &attempt)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit or recover".into(),
+            "workspace action must be init, import, list, describe, read, doc-backlinks, doc-links, submit or recover".into(),
         ),
     }
 }
@@ -2204,6 +2292,8 @@ mod tests {
             "reference":{}}])).is_err());
         assert!(content_actions(&json!([{"type":"transclude","transclusion":"1","link":"2",
             "request":{}}])).is_ok());
+        assert!(content_actions(&json!([{"type":"unlink","link":"9"}])).is_ok());
+        assert!(content_actions(&json!([{"type":"unlink","link":"9","before":"1"}])).is_err());
     }
 
     #[test]
