@@ -175,6 +175,8 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         // P-AFFORDANCES dry run: one signed observation (as op 1) and one
         // signature list. The Host re-plans, assembles and commits nothing.
         [130, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        // C-SAT-2 law-sat: one law-sat request (JSON); the Host reads no Store.
+        [150, request @ ..] => !request.is_empty() && request.len() < HOST_MAX_FRAME,
         [102, digits @ ..] => {
             !digits.is_empty()
                 && digits.len() <= 80

@@ -308,7 +308,7 @@ check D "control: the refused moves wrote nothing, field 2 = 2" is "$(field "$LA
 
 # ------------------------------------------------------------- A seals; A's repair is refused
 
-step E 0 sponsor "law seal board sealed"
+step E 0 sponsor "law seal board sealed --allow-unsatisfiable"
 check E "sealed renders to any []" jq -e '.predicate == {"type":"any","predicates":[]}' \
   "$RUN/homes/sponsor/requests/seal.json"
 step E 0 sponsor "submit seal"

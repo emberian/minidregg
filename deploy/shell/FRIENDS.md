@@ -69,13 +69,39 @@ laws. you can change the law and grants keep working:
 `law v2 notes {"type":"not","predicate":{"type":"any","predicates":[]}}`, then `submit v2`.
 this one still permits everything, and sam can still write. now lock it:
 ```
-mini> law lock notes {"type":"any","predicates":[]}    # "any of nothing": denies everything
+mini> law lock notes {"type":"any","predicates":[]} --allow-unsatisfiable   # "any of nothing": denies everything
 mini> submit lock
 mini> read notes                                       # refused: law-denied: …   (exit 3)
 mini> law unlock notes {"type":"all","predicates":[]}  # refused: law-denied: …
 ```
 that's the point: nobody can bypass it, not you as owner and not me. **a lock is
-permanent**, so lock throwaway things. `history` lists what you did and how each attempt ended.
+permanent**, so lock throwaway things. (`law` asks the Host first whether a law can ever
+pass; a lock can't, so without `--allow-unsatisfiable` it stops you and says so.)
+
+can a law ever pass? ask before you install it:
+```
+mini> law check "field 1 <= 0; field 1 monotone; field 1 == 1"
+UNSATISFIABLE: this law admits no step.
+these clauses contradict:
+  field 1 <= 0                 from clause [0] `field 1 <= 0`
+  field 1 >= 1                 from clause [2] `field 1 == 1`
+  (added up, they say 0 <= -1, which no value can make true)
+mini> law check "verb == read"
+satisfiable: admits e.g. verb = read
+WARNING: this law admits no write.
+mini> can --any board             # one write board's law admits, from its values now
+  a write this law admits, from the cell as it is now:
+    field 2 = 2    (now 1)
+  paste:
+    invoke ID board write 2 2 1
+```
+`law ID REF …` runs the same check before it proposes anything: a law no step can satisfy
+is refused on the spot, with the clauses that contradict (add `--allow-unsatisfiable` when
+you mean it, as for a lock); a law no write can pass is proposed with a warning. the answer
+is the Host's (it decides the law's arithmetic exactly and hands back a step it checked, or
+the contradiction), and asking writes nothing. a law with `ran`/`witnessed` or a hash
+commitment is outside what it can decide and says which clause; a law of more than about
+ten independent `any [ … ]` clauses is too many cases and says so too. `history` lists what you did and how each attempt ended.
 take a grant back with `revoke cut notes SAMS-SUBJECT`, then `submit cut`; sam's next read
 is `refused: revoked`.
 

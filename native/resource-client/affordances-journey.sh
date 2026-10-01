@@ -381,7 +381,7 @@ check R "after revocation: the record's refusal is shown" grep -q '^  # capabili
 
 # ------------------------------------------------------------- locked (J8: deny-all)
 
-step L 0 sponsor "law seal paper sealed"
+step L 0 sponsor "law seal paper sealed --allow-unsatisfiable"
 step L 0 sponsor "submit seal"
 cstep L sponsor "can paper"
 for v in read delegate law revoke; do
