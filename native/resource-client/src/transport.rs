@@ -273,7 +273,7 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         // and one canonical body; assembly carries one plan and one raw
         // signature; submit/lookup carry one signed ingress; head carries one
         // signed observation; receipt carries one canonical decimal id.
-        [96 | 100, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        [96 | 100 | 140, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         [97, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
             exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
         }

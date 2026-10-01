@@ -71,11 +71,14 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
-    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room leave NAME | room members NAME | room list | room law NAME", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true) | propose (action revoke) | not here (K-RENOUNCE) | who | local: references that are rooms | describe" },
+    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room leave NAME | room members NAME | room list | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true) | propose (action revoke) | not here (K-RENOUNCE) | who | local: references that are rooms | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
-    Verb { name: "pay", usage: "pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini pay --action address|status|audit --dir WS [--account REF]" },
+    Verb { name: "pay", usage: "pay ROOM week|N [--account REF] | pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini credit --action pay --room ROOM [--amount N] (one fleet turn: N, or the room's week, to its till, publishing renew; a free room files a request in HOME/outbox) | mini pay --action address|status|audit --dir WS [--account REF]" },
+    Verb { name: "credit", usage: "credit [ACCOUNT-REF]", operation: "mini credit --action balance (a signed read of my account)" },
+    Verb { name: "tariff", usage: "tariff ROOM | tariff ROOM set week|birth|hermes/turn|period N", operation: "mini credit --action tariff --room ROOM [--set FIELD --value N] (a signed read of the room cell's tariff fields | one scalar turn on the room cell: only its founder holds write)" },
+    Verb { name: "topup", usage: "topup ROOM N [--account REF]", operation: "mini credit --action topup --room ROOM --amount N (one fleet transfer to the room's runner account)" },
     Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB|guide]", operation: "local; `help guide` prints the friends' guide" },
@@ -216,7 +219,38 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
         "new" => {
             let name = w.get(2).ok_or_else(|| u.to_owned())?;
             ref_name(name, "room name")?;
-            let flags = room_flags(&w[3..], &["law", "referee", "in", "template"])?;
+            let flags = room_flags(&w[3..], &["law", "referee", "in", "template", "concierge", "period"])?;
+            // `--concierge SUBJECT [--period N]`: the room's lines, then one
+            // `room concierge` line (P-CREDIT): the room is born first, then
+            // its till, runner account and the concierge's grants.
+            if let Some(concierge) = room_flag(&flags, "concierge") {
+                decimal(concierge, "concierge subject")?;
+                workspace_name(name, "a room with a concierge (its lines name proposals after it)")?;
+                let mut first = format!("room new {name}");
+                for (flag_name, value) in &flags {
+                    if flag_name != "concierge" && flag_name != "period" {
+                        first.push_str(&format!(" --{flag_name} {value}"));
+                    }
+                }
+                let mut last = format!("room concierge {name} {concierge}");
+                if let Some(period) = room_flag(&flags, "period") {
+                    decimal(period, "period")?;
+                    last.push_str(&format!(" --period {period}"));
+                }
+                let founder = session_subject(session)?;
+                let text = match room_flag(&flags, "template") {
+                    Some(spec) => {
+                        let (_, text) = template::source(&session.home, spec, template::Part::Room)?;
+                        format!("{text}\n{last}\n")
+                    }
+                    None => format!("{first}\n{last}\n"),
+                };
+                let label = format!("room {name} with a concierge");
+                return template_plan(session, label, &text, &[("ROOM", name), ("ME", &founder)]);
+            }
+            if room_flag(&flags, "period").is_some() {
+                return Err("--period is the concierge's week (--concierge SUBJECT --period N)".into());
+            }
             if let Some(spec) = room_flag(&flags, "template") {
                 if flags.len() != 1 {
                     return Err("--template is the whole room: its first line births the room with its law (room template show T); give no other option".into());
@@ -349,6 +383,71 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
         "list" => {
             arity(w, 1, 1, u)?;
             Plan::Rooms
+        }
+        "status" => {
+            arity(w, 2, 2, u)?;
+            ref_name(&w[2], "room name")?;
+            Plan::Client {
+                command: "credit".into(),
+                flags: vec![
+                    flag("action", "status"),
+                    flag("dir", ws),
+                    flag("room", w[2].clone()),
+                    flag("inbox", session.home.join("inbox")),
+                ],
+                writes: vec![],
+            }
+        }
+        "renew" => {
+            if w.len() < 4 {
+                return Err(u.to_owned());
+            }
+            ref_name(&w[2], "room name")?;
+            decimal(&w[3], "member")?;
+            let flags = room_flags(&w[4..], &["for", "until"])?;
+            let mut out = vec![
+                flag("action", "renew"),
+                flag("dir", ws),
+                flag("room", w[2].clone()),
+                flag("subject", w[3].clone()),
+                flag("outbox", session.home.join("outbox")),
+            ];
+            match (room_flag(&flags, "for"), room_flag(&flags, "until")) {
+                (Some(n), None) => {
+                    decimal(n, "--for")?;
+                    out.push(flag("for", n));
+                }
+                (None, Some(h)) => {
+                    decimal(h, "--until")?;
+                    out.push(flag("not-after", h));
+                }
+                (None, None) => {}
+                _ => return Err("room renew takes --for N or --until H".into()),
+            }
+            Plan::Client { command: "credit".into(), flags: out, writes: vec![] }
+        }
+        "concierge" => {
+            if w.len() < 4 {
+                return Err(u.to_owned());
+            }
+            workspace_name(&w[2], "room name")?;
+            decimal(&w[3], "concierge subject")?;
+            let flags = room_flags(&w[4..], &["period", "fund"])?;
+            let mut out = vec![
+                flag("action", "install"),
+                flag("dir", ws),
+                flag("room", w[2].clone()),
+                flag("concierge", w[3].clone()),
+                flag("outbox", session.home.join("outbox")),
+                flag("program", session.home.join("concierge").join(format!("{}.json", w[2]))),
+            ];
+            for key in ["period", "fund"] {
+                if let Some(value) = room_flag(&flags, key) {
+                    decimal(value, key)?;
+                    out.push(flag(key, value));
+                }
+            }
+            Plan::Client { command: "credit".into(), flags: out, writes: vec![] }
         }
         _ => return Err(u.to_owned()),
     })
@@ -1102,6 +1201,79 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 _ => return Err(u.to_owned()),
             }
+        }
+        "pay" if w.get(1).is_some_and(|word| !matches!(word.as_str(), "address" | "status" | "audit")) => {
+            // `pay ROOM week|N [--account REF]` (P-CREDIT).
+            if !(w.len() == 3 || w.len() == 5) {
+                return Err(u.to_owned());
+            }
+            ref_name(&w[1], "room name")?;
+            let mut flags = vec![
+                flag("action", "pay"),
+                flag("dir", ws()),
+                flag("room", w[1].clone()),
+                flag("outbox", session.home.join("outbox")),
+            ];
+            match w[2].as_str() {
+                "week" => {}
+                amount => {
+                    decimal(amount, "amount")?;
+                    flags.push(flag("amount", amount));
+                }
+            }
+            if w.len() == 5 {
+                if w[3] != "--account" {
+                    return Err(u.to_owned());
+                }
+                workspace_name(&w[4], "account reference")?;
+                flags.push(flag("account", w[4].clone()));
+            }
+            client("credit", flags)
+        }
+        "credit" => {
+            arity(&w, 0, 1, u)?;
+            let mut flags = vec![flag("action", "balance"), flag("dir", ws())];
+            if let Some(account) = w.get(1) {
+                workspace_name(account, "account reference")?;
+                flags.push(flag("account", account.clone()));
+            }
+            client("credit", flags)
+        }
+        "tariff" => {
+            let mut flags = vec![flag("action", "tariff"), flag("dir", ws())];
+            match w.len() {
+                2 => {}
+                5 if w[2] == "set" => {
+                    decimal(&w[4], "tariff value")?;
+                    flags.push(flag("set", w[3].clone()));
+                    flags.push(flag("value", w[4].clone()));
+                }
+                _ => return Err(u.to_owned()),
+            }
+            ref_name(&w[1], "room name")?;
+            flags.push(flag("room", w[1].clone()));
+            client("credit", flags)
+        }
+        "topup" => {
+            if !(w.len() == 3 || w.len() == 5) {
+                return Err(u.to_owned());
+            }
+            ref_name(&w[1], "room name")?;
+            decimal(&w[2], "amount")?;
+            let mut flags = vec![
+                flag("action", "topup"),
+                flag("dir", ws()),
+                flag("room", w[1].clone()),
+                flag("amount", w[2].clone()),
+            ];
+            if w.len() == 5 {
+                if w[3] != "--account" {
+                    return Err(u.to_owned());
+                }
+                workspace_name(&w[4], "account reference")?;
+                flags.push(flag("account", w[4].clone()));
+            }
+            client("credit", flags)
         }
         "pay" => {
             arity(&w, 1, 2, u)?;
@@ -2100,6 +2272,45 @@ mod tests {
         );
         // observe, book and heartbeat belong to the operator and the watcher, not a friend.
         for line in ["pay observe", "pay book x", "pay audit x", "pay address ../x", "pay"] {
+            assert!(plan(&s, line).is_err(), "{line}");
+        }
+    }
+
+    #[test]
+    fn credit_verbs_are_one_client_operation_each() {
+        let s = session();
+        assert_eq!(
+            client(plan(&s, "credit").unwrap()),
+            ("credit".into(), pairs(&[("action", "balance"), ("dir", "/w")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay lab week").unwrap()),
+            ("credit".into(), pairs(&[("action", "pay"), ("dir", "/w"), ("room", "lab"), ("outbox", "/h/outbox")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay lab 40 --account purse").unwrap()),
+            ("credit".into(), pairs(&[("action", "pay"), ("dir", "/w"), ("room", "lab"), ("outbox", "/h/outbox"),
+                ("amount", "40"), ("account", "purse")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "tariff lab set week 100").unwrap()),
+            ("credit".into(), pairs(&[("action", "tariff"), ("dir", "/w"), ("set", "week"), ("value", "100"), ("room", "lab")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "topup lab 50").unwrap()),
+            ("credit".into(), pairs(&[("action", "topup"), ("dir", "/w"), ("room", "lab"), ("amount", "50")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "room status lab").unwrap()),
+            ("credit".into(), pairs(&[("action", "status"), ("dir", "/w"), ("room", "lab"), ("inbox", "/h/inbox")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "room renew lab 77 --for 12").unwrap()),
+            ("credit".into(), pairs(&[("action", "renew"), ("dir", "/w"), ("room", "lab"), ("subject", "77"),
+                ("outbox", "/h/outbox"), ("for", "12")]), vec![])
+        );
+        for line in ["pay lab", "pay lab -1", "pay lab week --wallet x", "tariff lab set week", "tariff lab set week x",
+            "topup lab", "room renew lab", "room renew lab 77 --for 1 --until 3", "credit a b", "room status"] {
             assert!(plan(&s, line).is_err(), "{line}");
         }
     }

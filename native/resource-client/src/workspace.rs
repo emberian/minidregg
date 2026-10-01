@@ -575,7 +575,7 @@ fn list(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read(
+pub(crate) fn read(
     root: &Path,
     workspace: &Value,
     resource_name: &str,
@@ -869,7 +869,7 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
     Ok(())
 }
 
-fn propose(
+pub(crate) fn propose(
     root: &Path,
     workspace: &Value,
     request_path: &Path,
@@ -1058,7 +1058,10 @@ fn propose(
             // Optional K-FIELDS narrowing: `"fields": ["1","annotations",...]`
             // (absent = the parent's fields) and `"maxDelta": [{"field":"7","max":"50"}]`
             // (absent = the parent's bounds). The Host decides narrowing.
-            let optional_keys = ["room", "fields", "maxDelta"]
+            // Optional `"notAfter": H`: the child's window ends at height H
+            // (absent = the parent's end); a concierge issues a member's week
+            // this way, and the Host's `Admissible.validUntil` enforces it.
+            let optional_keys = ["room", "fields", "maxDelta", "notAfter"]
                 .iter()
                 .filter(|key| obj.contains_key(**key))
                 .count();
@@ -1161,6 +1164,20 @@ fn propose(
             if !decimal_leq(child_before, parent_after) {
                 return Err("parent capability is outside its effective lifetime".into());
             }
+            let child_after = match obj.get("notAfter") {
+                None => parent_after,
+                Some(Value::String(requested)) => {
+                    field_decimal(requested, "delegation notAfter")?;
+                    if !decimal_leq(requested, parent_after) {
+                        return Err("delegation notAfter exceeds the parent's window".into());
+                    }
+                    if !decimal_leq(child_before, requested) {
+                        return Err("delegation notAfter is already past (below the current height)".into());
+                    }
+                    requested.as_str()
+                }
+                Some(_) => return Err("delegation notAfter must be a decimal string".into()),
+            };
             let mut ancestors = head
                 .get("ancestors")
                 .and_then(Value::as_array)
@@ -1200,7 +1217,7 @@ fn propose(
             let mut child = json!({"id":child_id,"root":member(head,"root")?,"parent":parent_id,
                 "issuer":member(head,"issuer")?,"holder":{"type":"subject","subject":recipient},
                 "targets":[target],"verbs":selected_verbs,"maxCost":maximum,
-                "notBefore":child_before,"notAfter":parent_after,
+                "notBefore":child_before,"notAfter":child_after,
                 "issuerEpoch":member(head,"issuerEpoch")?,"policyId":member(head,"policyId")?,
                 "policyEpoch":member(head,"policyEpoch")?,"ancestors":ancestors,
                 "channels":head.get("channels").ok_or("parent capability lacks channels")?});
@@ -1302,7 +1319,7 @@ fn propose(
     Ok(())
 }
 
-fn submit_intent(
+pub(crate) fn submit_intent(
     root: &Path,
     workspace: &Value,
     source: &Path,
@@ -1411,7 +1428,7 @@ fn bind_delegation_attempt(
     Ok(())
 }
 
-fn recover(root: &Path, attempt: &Path) -> Result<()> {
+pub(crate) fn recover(root: &Path, attempt: &Path) -> Result<()> {
     let attempt = absolute(attempt)?;
     let attempts = fs::canonicalize(root.join("attempts")).map_err(|error| error.to_string())?;
     let candidate = fs::canonicalize(&attempt).map_err(|error| error.to_string())?;
@@ -1446,7 +1463,7 @@ pub(crate) fn accepted_outcome(attempt: &Path) -> Result<Option<Value>> {
     Ok(None)
 }
 
-fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<()> {
+pub(crate) fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<()> {
     validate_name(proposal_id)?;
     let proposal_dir = root.join("proposals").join(proposal_id);
     private_dir(&proposal_dir)?;

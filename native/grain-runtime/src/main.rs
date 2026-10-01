@@ -2,6 +2,7 @@
 //! exclusively a signed call to the native Lean host through `mini`.
 mod application_api_tools;
 mod application_tools;
+mod concierge;
 #[cfg(test)]
 mod birth_lifecycle_tests;
 mod control;
@@ -17533,6 +17534,15 @@ fn clear_stale_control_socket(path: &Path) -> Result<()> {
 
 fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
+    if args.len() >= 3 && args[1] == "concierge" {
+        return match concierge::main(&args[2..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("grain-runtime concierge: {error}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if args.len() == 2 && args[1] == "tool-id" {
         let mut bytes = [0u8; 16];
         let result =
