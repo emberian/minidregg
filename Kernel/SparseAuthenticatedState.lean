@@ -17,6 +17,7 @@ The names below `export`ed from `Theory.Store` and `Theory.CellState` are
 aliases of the one definition each, not copies.
 -/
 import Theory.Store
+import Theory.StoreNormalize
 import Theory.CellState
 
 namespace Minidregg.Kernel.SparseAuthenticatedState
@@ -38,6 +39,12 @@ export Minidregg.Theory.Store.Patch (accessFootprint writeFootprint allocationFo
   freeFootprint run ValidFrom Executes run_append validFrom_append accessFootprint_append
   writeFootprint_append mem_writeFootprint_iff mem_allocationFootprint_iff run_frame
   changed_only_declared)
+
+-- The normal form of a patch (`Theory.StoreNormalize`): under validity, its
+-- write footprint is exactly the set of changed addresses.
+export Minidregg.Theory.Store.Patch (normalize Normal normalize_validFrom_iff normalize_valid
+  normalize_refuses normalize_run normalize_writeFootprint_subset normalize_idem
+  normalize_writeFootprint_exact normalize_writeFootprint_eq_diff)
 
 end Trace
 
