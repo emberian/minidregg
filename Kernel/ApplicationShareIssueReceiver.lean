@@ -129,6 +129,7 @@ def intent (accepted : Accepted profile config pins durable height ingress) :
     [issueNullifier config.deployment.domain ingress accepted.birth.descriptor]
   exactCharge := charge accepted
   event := event config.deployment.domain ingress
+  subject := some accepted.birth.descriptor.creator
   postRootsBound := composite_roots_bound accepted
   guardsReadOnly := compositeGuards_readonly accepted
 

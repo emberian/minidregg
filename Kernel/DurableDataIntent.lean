@@ -103,6 +103,11 @@ structure DataIntent (rootBytes : List UInt8 -> TypedAuthorization.Digest) where
   nullifiers : List StableNullifier
   exactCharge : Charge
   event : StableEvent
+  /-- The subject whose signed ingress this intent admits; `none` when no
+  subject signs it (a host-internal settlement or a model fixture).  The
+  presence index (`Kernel.PresenceIndex`) reads it, and the audit walk's
+  re-admission compares it with the rest of the record. -/
+  subject : Option TypedAuthorization.SubjectId
   postRootsBound : forall write, write ∈ writes ->
     rootBytes write.canonicalPostBytes = write.exactPost
   guardsReadOnly : forall guard, guard ∈ readGuards ->
@@ -564,6 +569,7 @@ def intent : DataIntent lengthRoot where
   nullifiers := [nullifier]
   exactCharge := fun _ => 1
   event := event
+  subject := none
   postRootsBound := by simp [write, lengthRoot]
   guardsReadOnly := by simp [guard, write, readCell, writeCell]
 
@@ -576,6 +582,7 @@ def claimOnlyIntent : DataIntent lengthRoot where
   nullifiers := [nullifier]
   exactCharge := fun _ => 1
   event := event
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 
@@ -592,6 +599,7 @@ def claimOnlyNoGuard : DataIntent lengthRoot where
   nullifiers := [nullifier]
   exactCharge := fun _ => 1
   event := event
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 
@@ -605,6 +613,7 @@ def claimOnlyNoClaim : DataIntent lengthRoot where
   nullifiers := []
   exactCharge := fun _ => 1
   event := event
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 
@@ -672,6 +681,7 @@ def tamperedIntent : DataIntent lengthRoot where
   nullifiers := intent.nullifiers
   exactCharge := intent.exactCharge
   event := intent.event
+  subject := none
   postRootsBound := by simp [tamperedWrite, write, lengthRoot]
   guardsReadOnly := by simp [intent, guard, tamperedWrite, write, readCell, writeCell]
 

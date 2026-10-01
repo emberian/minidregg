@@ -458,27 +458,298 @@ def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF
 def resourceViewCodec : IndexedProgram.LawfulCodec (List UInt8 × List (Nat × Int)) :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
 
+/-! ## Presence and past views (PLACE §2.5 K-INDEX, §4.5 K-HISTORY-READ)
+
+`who`, `since` and `at` are ordinary queries: the footprint is the one target
+and its grant is checked by the same source-owned observation admission as a
+current read (`presence_views_share_footprint`). What they reveal is then cut
+by the reader's own grant: only cells under the room that grant covers. -/
+
+/-- The capability ids of one kind held in the authority cell. -/
+def capabilityIds (logical : Minidregg.Theory.Store.Store CredentialAuthorityState.layout) (kind : ResourceKind) :
+    Finset CapabilityId :=
+  logical.support.biUnion fun address =>
+    match address with
+    | ⟨.capability held, named⟩ => if held = kind then {named} else ∅
+    | _ => ∅
+
+/-- A capability that currently lets its holder observe `room`: it covers the
+room, carries the observe verb, is inside its window at `height`, and nothing
+in its lineage is revoked or out of epoch. `Capability.Admissible` minus the
+request (the holder is whoever it names). -/
+def standing {kind : ResourceKind} (state : AuthState) (height room : Nat)
+    (cap : Capability kind) : Bool :=
+  decide (cap.scope.targets.Covers state.parent ⟨room⟩) &&
+    decide (observeVerb kind ∈ cap.scope.verbs) &&
+    decide (cap.notBefore ≤ height) && decide (height ≤ cap.notAfter) &&
+    decide (cap.policyEpoch = state.policyEpoch cap.policyId) &&
+    decide (cap.issuerEpoch = state.issuerEpoch cap.issuer) &&
+    decide (RevocationKey.capability cap.id ∉ state.revoked) &&
+    decide (∀ ancestor ∈ cap.ancestors, RevocationKey.capability ancestor ∉ state.revoked) &&
+    decide (∀ channel ∈ cap.channels, RevocationKey.channel channel ∉ state.revoked)
+
+/-- The members of `room`: the subjects holding a standing capability over it,
+in subject order. Membership is what the room's grants say, not who acted. -/
+def members (context : Context deployment durable) (kind : ResourceKind) (room height : Nat) :
+    List SubjectId :=
+  let state := context.authority.snapshot.authState
+  let cell := context.authority.snapshot.cell
+  let held : Finset Nat := (capabilityIds cell.logical kind).biUnion fun named =>
+    match CredentialAuthorityState.readCapability cell kind named with
+    | some stored =>
+        match stored.head.holder with
+        | .subject subject => if standing state height room stored.head then {subject.value} else ∅
+        | .bearer => ∅
+    | none => ∅
+  (held.sort (· ≤ ·)).map SubjectId.mk
+
+/-- A cell the reader may learn about: under the room, and covered by the
+reader's own grant (a member with an explicit `{R}` grant learns nothing
+about cells born in `R` it cannot read). -/
+def sees {kind : ResourceKind} (parentage : Parentage) (reader : Capability kind) (room : Nat)
+    (cell : DurableDataIntent.CellId) : Bool :=
+  decide (parentage.Descends cell.value room) &&
+    decide (reader.scope.targets.Covers parentage ⟨cell.value⟩)
+
+def maxOf : List Nat → Option Nat
+  | [] => none
+  | height :: rest => some ((maxOf rest).elim height (max height))
+
+theorem mem_of_maxOf : ∀ {heights : List Nat} {top : Nat}, maxOf heights = some top → top ∈ heights
+  | [], _, found => by simp [maxOf] at found
+  | height :: rest, top, found => by
+      simp only [maxOf, Option.some.injEq] at found
+      cases below : maxOf rest with
+      | none => simp [below] at found; simp [found]
+      | some other =>
+          simp only [below, Option.elim_some] at found
+          rcases Nat.le_total height other with le | ge
+          · rw [Nat.max_eq_right le] at found
+            exact List.mem_cons_of_mem _ (found ▸ mem_of_maxOf below)
+          · rw [Nat.max_eq_left ge] at found
+            simp [found]
+
+/-- The greatest log height at which `subject` wrote a cell the reader sees. -/
+def whoSeen (index : PresenceIndex.Index) (visible : DurableDataIntent.CellId → Bool)
+    (subject : SubjectId) : Option Nat :=
+  maxOf (index.touched.filterMap fun entry =>
+    if visible entry.1 then index.lastSeenAt entry.1 subject else none)
+
+/-- **`who` reveals only visible cells**: a reported height is the index's
+`lastSeen` of a cell the reader sees. -/
+theorem whoSeen_sound {index : PresenceIndex.Index} {visible : DurableDataIntent.CellId → Bool}
+    {subject : SubjectId} {height : Nat} (seen : whoSeen index visible subject = some height) :
+    ∃ cell, visible cell = true ∧ index.lastSeenAt cell subject = some height := by
+  obtain ⟨entry, _, found⟩ := List.mem_filterMap.mp (mem_of_maxOf seen)
+  by_cases shown : visible entry.1 = true
+  · rw [if_pos shown] at found
+    exact ⟨entry.1, shown, found⟩
+  · rw [if_neg shown] at found
+    cases found
+
+/-- **`who` is refutable against the log**: on the loaded index, a reported
+height is a height at which a record signed by that subject wrote a cell the
+reader sees (`PresenceIndex.lastSeen_exact`). -/
+theorem whoSeen_exact {visible : DurableDataIntent.CellId → Bool} {subject : SubjectId}
+    {height : Nat} (seen : whoSeen durable.index visible subject = some height) :
+    ∃ cell, visible cell = true ∧
+      PresenceIndex.Occurs (PresenceIndex.SignedWrite cell subject) durable.image.accepted height ∧
+      ∀ other, PresenceIndex.Occurs (PresenceIndex.SignedWrite cell subject)
+        durable.image.accepted other → other ≤ height := by
+  obtain ⟨cell, shown, last⟩ := whoSeen_sound seen
+  rw [durable.indexExact] at last
+  exact ⟨cell, shown, (PresenceIndex.lastSeen_exact _ cell subject height).mp last⟩
+
+/-- One `since` entry: its absolute height, signer, transaction and the
+visible cells it wrote (the others are not named). -/
+structure SinceEntry where
+  height : Nat
+  subject : Option Nat
+  transaction : Nat
+  cells : List Nat
+  deriving DecidableEq, Repr
+
+def sinceFrom (visible : DurableDataIntent.CellId → Bool) (after : Nat) :
+    Nat → List DurableReceiver.IntentRecord → List SinceEntry
+  | _, [] => []
+  | height, record :: rest =>
+      let cells := (PresenceIndex.cellsOf record).filter visible
+      (if after < height ∧ cells ≠ [] then
+        [⟨height, record.subject.map (·.value), record.transactionId.value, cells.map (·.value)⟩]
+      else []) ++ sinceFrom visible after (height + 1) rest
+
+/-- **`since` is exact about what it names**: every entry is a record above
+`after`, at its own height, with its own signer, naming only visible cells
+that record wrote. -/
+theorem sinceFrom_sound {visible : DurableDataIntent.CellId → Bool} {after : Nat} :
+    ∀ {start : Nat} {log : List DurableReceiver.IntentRecord} {entry : SinceEntry},
+      entry ∈ sinceFrom visible after start log →
+        after < entry.height ∧ ∃ index record, log[index]? = some record ∧
+          entry.height = start + index ∧ entry.subject = record.subject.map (·.value) ∧
+          ∀ cell ∈ entry.cells, ∃ written ∈ PresenceIndex.cellsOf record,
+            written.value = cell ∧ visible written = true
+  | _, [], _, member => by simp [sinceFrom] at member
+  | start, record :: rest, entry, member => by
+      simp only [sinceFrom, List.mem_append] at member
+      rcases member with here | later
+      · split at here
+        next above =>
+          simp only [List.mem_singleton] at here
+          subst here
+          refine ⟨above.1, 0, record, rfl, by simp, rfl, fun cell inCells => ?_⟩
+          obtain ⟨written, kept, rfl⟩ := List.mem_map.mp inCells
+          obtain ⟨wrote, shown⟩ := List.mem_filter.mp kept
+          exact ⟨written, wrote, rfl, shown⟩
+        next => simp at here
+      · obtain ⟨above, index, found, at_, height, subject, cells⟩ := sinceFrom_sound later
+        exact ⟨above, index + 1, found, by simp; exact at_, by rw [height]; omega, subject, cells⟩
+
+/-- The canonical bytes of `target` as of absolute height `height`; refused
+above the current height and below the genesis height (the retention floor:
+the Store keeps every record since the seed). -/
+def atBytes (genesisHeight height target : Nat) : Option (List UInt8) :=
+  if genesisHeight ≤ height ∧ height - genesisHeight ≤ durable.height then
+    (durable.atPrefix (height - genesisHeight)).map fun snapshot => snapshot.canonicalBytes ⟨target⟩
+  else none
+
+theorem atBytes_current (genesisHeight target : Nat) :
+    atBytes (durable := durable) genesisHeight (genesisHeight + durable.height) target =
+      some (durable.snapshot.canonicalBytes ⟨target⟩) := by
+  unfold atBytes
+  rw [if_pos ⟨Nat.le_add_right _ _, by omega⟩, Nat.add_sub_cancel_left, durable.atPrefix_current]
+  rfl
+
+theorem atBytes_above_refused {genesisHeight height : Nat} (target : Nat)
+    (above : genesisHeight + durable.height < height) :
+    atBytes (durable := durable) genesisHeight height target = none := by
+  unfold atBytes
+  rw [if_neg (by omega)]
+
+theorem atBytes_below_floor {genesisHeight height : Nat} (target : Nat)
+    (below : height < genesisHeight) :
+    atBytes (durable := durable) genesisHeight height target = none := by
+  unfold atBytes
+  rw [if_neg (by omega)]
+
+/-- **`at` is a fold of the prefix**: below the loaded checkpoint, the bytes
+are the genesis replay of the first `height - genesisHeight` records
+(`Loaded.atPrefix_below`; above it, `Loaded.atPrefix_from_checkpoint`). -/
+theorem at_is_fold_prefix {genesisHeight height : Nat} (target : Nat)
+    (floor : genesisHeight ≤ height)
+    (below : height - genesisHeight < durable.baseHeight) :
+    atBytes (durable := durable) genesisHeight height target =
+      ((durable.prefixImage (height - genesisHeight)).restore ResourceBirthCodec.rootBytes).map
+        fun snapshot => snapshot.canonicalBytes ⟨target⟩ := by
+  unfold atBytes
+  rw [if_pos ⟨floor, Nat.le_trans (Nat.le_of_lt below) durable.withinLog⟩, durable.atPrefix_below below]
+
+/-- **At the current height, `at` is the ordinary read**: the lifecycle bytes
+of exactly the packed cell a current resource read returns. -/
+theorem at_current_eq_read (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable)
+    {target : Nat} {packed : PackedCell Registry}
+    (present : directory.directory.slots target = .present packed) (genesisHeight : Nat) :
+    atBytes (durable := durable) genesisHeight (genesisHeight + durable.height) target =
+      some (ResourceBirthCodec.LifecycleImage.bytes Registry (.live packed)) := by
+  rw [atBytes_current, ← directory.bytes_exact target]
+  simp [ResourceBirthCodec.LifecycleImage.view, present]
+
+def whoViewStream : StreamCodec (List (Nat × Option Nat)) :=
+  StreamCodec.list (StreamCodec.product StreamCodec.nat (StreamCodec.option StreamCodec.nat))
+
+def whoViewFrame : List UInt8 := "DREGG/NATIVE-HOST/WHO-VIEW/v1".toUTF8.toList
+
+def whoViewCodec : IndexedProgram.LawfulCodec (List (Nat × Option Nat)) :=
+  NativeHostCodec.framed whoViewFrame whoViewStream
+
+def sinceEntryStream : StreamCodec SinceEntry :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option StreamCodec.nat)
+      (StreamCodec.product StreamCodec.nat (StreamCodec.list StreamCodec.nat))))
+    (fun entry => (entry.height, entry.subject, entry.transaction, entry.cells))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2⟩)
+    (by intro entry; cases entry; rfl)
+
+def sinceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/SINCE-VIEW/v1".toUTF8.toList
+
+def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
+  NativeHostCodec.framed sinceViewFrame (StreamCodec.list sinceEntryStream)
+
+def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList
+
+/-- `(height, lifecycle bytes)`: the cell's canonical stored bytes at that height. -/
+def atViewCodec : IndexedProgram.LawfulCodec (Nat × List UInt8) :=
+  NativeHostCodec.framed atViewFrame (StreamCodec.product StreamCodec.nat bytesStream)
+
+/-- Every query view, `who`/`since`/`at` included, has the same one-target
+footprint as a current read of that target: the same grant, the same check. -/
+theorem presence_views_share_footprint (context : Context deployment durable)
+    (subject : SubjectId) (nonce : Nat) (query : Query) (grants : List GrantRef) :
+    requiredTargets context ⟨subject, nonce, .query query, grants⟩ = .ok [(query.kind, query.target)] :=
+  rfl
+
 def AuthorizedIntent.queryResult
     {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
-    (accepted : AuthorizedIntent context profile federation genesisHeight intent) : Option (List UInt8) := do
-  let .query query := intent.purpose | none
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent) :
+    Except String (List UInt8) := do
+  let .query query := intent.purpose | throw "signed observation purpose is not a query"
   if present : 0 < intent.grants.length then
     let grant := intent.grants.get ⟨0, present⟩
     let checked := accepted.grants ⟨0, present⟩
+    let state := context.authority.snapshot.authState
+    let reader := CredentialAuthorityState.readCapability context.authority.snapshot.cell
+      grant.kind grant.capability
     match query.view with
-    | .resource => some (resourceViewCodec.encode
+    | .resource => pure (resourceViewCodec.encode
         (PackedCell.bytes CanonicalCellRegistry.registry checked.selected.packed,
           checked.selected.accountBalances))
     | .policy => do
-        let address := context.authority.snapshot.authState.policyAddress ⟨grant.target⟩
-          (context.authority.snapshot.authState.policyRevision ⟨grant.target⟩)
-        let source ← CanonicalCellRegistry.loadPolicySource deployment.domain context.directory.directory address
-        some (PolicyRecordCodec.encode source.record)
+        let address := state.policyAddress ⟨grant.target⟩ (state.policyRevision ⟨grant.target⟩)
+        let some source := CanonicalCellRegistry.loadPolicySource deployment.domain
+            context.directory.directory address | throw refused
+        pure (PolicyRecordCodec.encode source.record)
     | .capability => do
-        let stored ← CredentialAuthorityState.readCapability context.authority.snapshot.cell grant.kind grant.capability
-        some ((CredentialAuthorityEntryCodec.storedCapabilityStream grant.kind).encode stored)
-  else none
+        let some stored := reader | throw refused
+        pure ((CredentialAuthorityEntryCodec.storedCapabilityStream grant.kind).encode stored)
+    | .who => do
+        let some stored := reader | throw refused
+        let visible := sees state.parent stored.head query.target
+        let height := genesisHeight + durable.height
+        pure (whoViewCodec.encode ((members context grant.kind query.target height).map fun subject =>
+          (subject.value, (whoSeen durable.index visible subject).map (genesisHeight + ·))))
+    | .since after => do
+        let some stored := reader | throw refused
+        let visible := sees state.parent stored.head query.target
+        pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) durable.image.accepted))
+    | .atHeight height =>
+        if height > genesisHeight + durable.height then
+          throw s!"history read refused: height {height} is above the current height {genesisHeight + durable.height}"
+        else if height < genesisHeight then
+          throw s!"history read refused: height {height} is below the retention floor {genesisHeight}"
+        else
+          match atBytes (durable := durable) genesisHeight height query.target with
+          | some bytes => pure (atViewCodec.encode (height, bytes))
+          | none => throw refused
+  else throw refused
+
+/-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_sound' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.whoSeen_sound
+/-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.whoSeen_exact
+/-- info: 'Minidregg.Kernel.NativeObservationController.sinceFrom_sound' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.sinceFrom_sound
+/-- info: 'Minidregg.Kernel.NativeObservationController.atBytes_current' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atBytes_current
+/-- info: 'Minidregg.Kernel.NativeObservationController.atBytes_above_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atBytes_above_refused
+/-- info: 'Minidregg.Kernel.NativeObservationController.atBytes_below_floor' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atBytes_below_floor
+/-- info: 'Minidregg.Kernel.NativeObservationController.at_is_fold_prefix' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_is_fold_prefix
+/-- info: 'Minidregg.Kernel.NativeObservationController.at_current_eq_read' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_current_eq_read
+/-- info: 'Minidregg.Kernel.NativeObservationController.presence_views_share_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.presence_views_share_footprint
 
 theorem observation_request_actual_root (context : Context deployment durable)
     (semantics : Digest) (federation : FederationId) (height : Nat) (intent : Intent)

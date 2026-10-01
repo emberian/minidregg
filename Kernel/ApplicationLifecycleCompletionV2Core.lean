@@ -101,6 +101,7 @@ def intent {config : Config} {opened : Opened config}
         ingress.creationMarker.toList
       exactCharge := charge accepted
       event := ApplicationLifecycleCompletionV2Ingress.event ingress
+      subject := some (ingress.source.command config.deployment.domain config.profile.semantics).subject
       postRootsBound := DeclaredResourceController.writes_roots_bound accepted.prepared
       guardsReadOnly := guarded }
 

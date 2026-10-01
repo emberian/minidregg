@@ -215,6 +215,7 @@ def candidateIntent {config : Config} {opened : Opened config}
           ApplicationAgentLifetimeDispatchReserveCore.claimNullifier reserved]
       exactCharge := charge checked
       event := ApplicationAgentLifetimeDispatchIngress.event ingress
+      subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
 

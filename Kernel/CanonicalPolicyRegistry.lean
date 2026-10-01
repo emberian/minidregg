@@ -305,6 +305,7 @@ def guardPolicyRegistry
   nullifiers := intent.nullifiers
   exactCharge := intent.exactCharge
   event := intent.event
+  subject := none
   postRootsBound := intent.postRootsBound
   guardsReadOnly := by
     intro guard member

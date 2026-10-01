@@ -198,6 +198,7 @@ def intent (settlement : FinalizeSettlement binding finalized) :
   nullifiers := settlement.terminalPlan.intent.nullifiers
   exactCharge := binding.openCell.exactCharge
   event := settlement.terminalPlan.event
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_cons] at member

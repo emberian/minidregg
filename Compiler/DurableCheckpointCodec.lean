@@ -5,7 +5,7 @@ The host's durable store is three objects (the whole-image `DREGG.DURABLE.IMAGE`
 record is gone):
 
 * the **seed**, written once at bootstrap (`DREGG.DURABLE.SEED/v1`);
-* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG/v1`)
+* the **log**: entry `h` (1-based) is one accepted record (`DREGG.DURABLE.LOG/v2`: the record and its signing subject)
   and a 32-byte tag. The log is chained by C1's log root: `chain₀ = logStart seed`
   (the host passes `NativeHostCodec.logRoot0 domain semantics`), and
   `chainₕ = Kernel.WorldRoot.chainDigest chainₕ₋₁ (recordDigest recordₕ)`; the tag of
@@ -92,10 +92,35 @@ theorem decode_canonical (framed : Framed α) {bytes : List UInt8} {value : α}
       next ok => cases Option.some.inj decoded; exact ok.2
       next => contradiction
 
+/-- Bytes carrying any other frame refuse: the frame is the first stream
+value, so a decode would re-encode to a different first value. -/
+theorem decode_other_frame (framed : Framed α) {other : List UInt8}
+    (different : other ≠ framed.frame) (tail : List UInt8) :
+    framed.decode (bytesStream.encode other ++ tail) = none := by
+  cases decoded : framed.decode (bytesStream.encode other ++ tail) with
+  | none => rfl
+  | some value =>
+      have exact := decode_canonical framed decoded
+      have prefixed := bytesStream.decodePrefix_encode framed.frame (framed.stream.encode value)
+      simp only [encode, StreamCodec.product] at exact
+      rw [exact, bytesStream.decodePrefix_encode] at prefixed
+      exact absurd (congrArg Prod.fst (Option.some.inj prefixed)) different
+
 end Framed
 
 def seedFrame : Framed Seed := ⟨"DREGG.DURABLE.SEED".toUTF8.toList ++ [1], seedStream⟩
-def recordFrame : Framed IntentRecord := ⟨"DREGG.DURABLE.LOG".toUTF8.toList ++ [1], intentStream⟩
+/-- Version 2: a record carries its signing subject (`IntentRecord.subject`),
+which the presence index folds. A v1 record refuses (`v1_record_refused`). -/
+def recordFrame : Framed IntentRecord := ⟨"DREGG.DURABLE.LOG".toUTF8.toList ++ [2], intentStream⟩
+
+def retiredRecordFrameV1 : List UInt8 := "DREGG.DURABLE.LOG".toUTF8.toList ++ [1]
+
+theorem v1_record_refused (tail : List UInt8) :
+    recordFrame.decode (bytesStream.encode retiredRecordFrameV1 ++ tail) = none :=
+  Framed.decode_other_frame recordFrame (by decide +kernel) tail
+
+/-- info: 'Minidregg.Compiler.DurableCheckpointCodec.v1_record_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v1_record_refused
 
 /-! ## The MAC key -/
 

@@ -30,6 +30,7 @@ def later : DataIntent Witness.lengthRoot where
   nullifiers := []
   exactCharge := fun _ => 1
   event := { Witness.event with eventId := ⟨83⟩ }
+  subject := none
   postRootsBound := by simp [laterWrite, Witness.lengthRoot]
   guardsReadOnly := by simp
 
