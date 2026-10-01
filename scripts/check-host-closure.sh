@@ -41,8 +41,8 @@ def closure(roots):
 host = closure(["Host.Main"])
 exe_roots = re.findall(r'^\[\[lean_exe\]\]\s*\nname\s*=\s*"[^"]+"\s*\nroot\s*=\s*"([^"]+)"',
                        open("lakefile.toml").read(), re.M)
-# what gate 2 builds: the umbrella, AxiomCensus and every lean_exe root
-umbrella = closure(["Minidregg", "AxiomCensus"] + exe_roots)
+# what the lake-build gate builds: every lean_lib root and every lean_exe root
+umbrella = closure(libs + exe_roots)
 lib_of = lambda m: m.split(".")[0]
 print(f"{'library':10s} {'Host.Main':>10s} {'gate 2':>9s} {'total':>6s}  built-but-not-deployed")
 rows = []

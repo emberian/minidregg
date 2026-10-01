@@ -6,8 +6,8 @@
 #
 #   hygiene        no bare `#print axioms`, no project `axiom`; Assurance/SheetLaw.lean
 #                  §2 is the embed of the MUD sheet JSON (scripts/gen-sheetlaw.py --check)
-#   lake-build     lake build Minidregg AxiomCensus + every lean_exe (minidregg-host,
-#                  nock-eval, the two benches): every library module elaborates, every
+#   lake-build     lake build every lean_lib + every lean_exe in lakefile.toml (Minidregg,
+#                  AxiomCensus, minidregg-host, nock-eval, ...): every library module elaborates, every
 #                  pinned axiom footprint is compared, the tree-wide #assert_axioms_tree
 #                  runs, and the Host executable links
 #   drift          the build changed no tracked file (Lean-emitted descriptors, vectors,
@@ -31,6 +31,10 @@ export PATH=$HOME/.elan/bin:$PATH
 lake=${LAKE:-lake}
 logdir=$repo_root/build-logs/local-gates
 mkdir -p "$logdir"
+# lake-build builds EVERY lean_lib and lean_exe the lakefile declares (the umbrella,
+# AxiomCensus, any other root library, the executables), read from the lakefile so a
+# new root library cannot be left out of the gate.
+lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
 GATES=(hygiene lake-build drift prover-glue build-closure host-closure import-tiers exports rust-tests journey)
@@ -39,7 +43,7 @@ red=0
 only=${LOCAL_GATES_ONLY:-}
 
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
-g_lake-build()    { "$lake" build Minidregg AxiomCensus $exe_targets; }
+g_lake-build()    { echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
 g_drift() {
   local after; after=$(git diff --binary | git hash-object --stdin)
   if [[ "$tree_before" != "$after" ]]; then
