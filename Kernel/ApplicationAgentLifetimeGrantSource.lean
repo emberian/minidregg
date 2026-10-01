@@ -182,7 +182,7 @@ def grantPage (domain : Digest) (spec : Spec) (operation : Nat) :
     Except String ContentResource.ContentStore := do
   match ContentResource.run
       ⟨spec.grant.approval.issuer, .object, spec.grantOwnerCapability⟩
-      ⟨⟨operation⟩⟩ (ContentResource.documentOf spec.grant.source.resource)
+      ⟨⟨operation⟩⟩ (ContentResource.documentOf spec.grant.source.resource) .closed
       ContentResource.initialStore
       ⟨[ApplicationAgentLifetimeGrant.initialAction domain spec.grant]⟩ with
   | .ok progress => pure progress.1

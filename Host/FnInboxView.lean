@@ -113,6 +113,7 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
     | .content command => .mkObj
         [("type", toJson "content"), ("actionCount", number command.actions.length),
          ("actions", .arr (command.actions.toArray.map contentActionJson))]
+    | .read => .mkObj [("type", toJson "read")]
   .mkObj [("kind", toJson kind), ("target", number target.target),
     ("payload", payload)]
 

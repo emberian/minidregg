@@ -22,6 +22,9 @@ def atom : AtomId := ⟨⟨101⟩⟩
 def document : DocumentId := documentOf 100
 def empty : ContentStore := initialStore
 
+/-- The admission context of a transaction with no read targets. -/
+def ctx : Context := .closed
+
 /-- The post of an accepted run, or the empty store for a refusal. -/
 def postOf : Except Reject Progress → ContentStore
   | .ok progress => progress.1
@@ -34,9 +37,9 @@ def refusalOf : Except Reject Progress → Option Reject
 
 def original : AtomRecord := ⟨document, .text, [0, 104, 105, 255], author, operation, operation, none⟩
 def create : Command := ⟨[.createAtom atom .text original.payload]⟩
-def created : ContentStore := postOf (run author operation document empty create)
+def created : ContentStore := postOf (run author operation document ctx empty create)
 
-theorem create_accepted : refusalOf (run author operation document empty create) = none := by
+theorem create_accepted : refusalOf (run author operation document ctx empty create) = none := by
   decide
 
 theorem create_exact_bytes_and_provenance :
@@ -45,10 +48,10 @@ theorem create_exact_bytes_and_provenance :
 def edit : EditAtomPayload :=
   ⟨atom, original, .inlineObject ⟨42⟩, [255, 0, 1, 2, 3], false⟩
 def editCommand : Command := ⟨[.editAtom edit]⟩
-def edited : ContentStore := postOf (run author nextOperation document created editCommand)
+def edited : ContentStore := postOf (run author nextOperation document ctx created editCommand)
 
 theorem edit_exact_bytes_and_provenance :
-    refusalOf (run author nextOperation document created editCommand) = none ∧
+    refusalOf (run author nextOperation document ctx created editCommand) = none ∧
       Hyperdocument.lookup edited .atoms atom = some (editAtomRecord nextOperation edit) := by
   decide
 
@@ -60,16 +63,16 @@ theorem edit_keeps_original_creation :
 
 /-- Same byte length is insufficient: the entire old atom record must match. -/
 theorem stale_same_length_bytes_refused :
-    refusalOf (run author nextOperation document created
+    refusalOf (run author nextOperation document ctx created
       ⟨[.editAtom { edit with before := { original with payload := [0, 104, 106, 255] } }]⟩) =
       some .staleAtom := by decide
 
 theorem duplicate_identity_refused :
-    refusalOf (run author nextOperation document created create) = some .duplicateAddress := by
+    refusalOf (run author nextOperation document ctx created create) = some .duplicateAddress := by
   decide
 
 theorem forged_old_document_refused :
-    refusalOf (run author nextOperation document created
+    refusalOf (run author nextOperation document ctx created
       ⟨[.editAtom { edit with before := { original with document := ⟨⟨999⟩⟩ } }]⟩) =
       some .wrongDocument := by decide
 
@@ -82,7 +85,7 @@ theorem ordinary_edit_cannot_resurrect :
 def linkId : LinkId := ⟨⟨102⟩⟩
 def remote : LinkTarget := .document ⟨⟨8001⟩⟩
 def linked : ContentStore :=
-  postOf (run author nextOperation document created ⟨[.link linkId none remote ⟨55⟩]⟩)
+  postOf (run author nextOperation document ctx created ⟨[.link linkId none remote ⟨55⟩]⟩)
 
 theorem typed_reference_created :
     Hyperdocument.lookup linked .links linkId =
@@ -95,14 +98,14 @@ def seventeenAtoms : Command :=
   ⟨(List.range 17).map fun n => .createAtom ⟨⟨200 + n⟩⟩ .text [9]⟩
 
 theorem seventeen_atoms_accepted :
-    refusalOf (run author nextOperation document created seventeenAtoms) = none ∧
-      Hyperdocument.lookup (postOf (run author nextOperation document created seventeenAtoms))
+    refusalOf (run author nextOperation document ctx created seventeenAtoms) = none ∧
+      Hyperdocument.lookup (postOf (run author nextOperation document ctx created seventeenAtoms))
         .atoms ⟨⟨216⟩⟩ = some ⟨document, .text, [9], author, nextOperation, nextOperation, none⟩ := by
   decide
 
 /-- An earlier successful insertion is not returned when a later action fails. -/
 theorem failed_batch_has_no_post :
-    refusalOf (run author operation document empty
+    refusalOf (run author operation document ctx empty
       ⟨[.createAtom atom .text original.payload,
         .createAtom atom .text [99]]⟩) = some .duplicateAddress := by decide
 
@@ -142,10 +145,10 @@ def linkedDocument : Command :=
     .createRun runId [atom],
     .link linkId (some anchoredRange) remote ⟨55⟩]⟩
 
-def linkedDocumentStore : ContentStore := postOf (run author operation document empty linkedDocument)
+def linkedDocumentStore : ContentStore := postOf (run author operation document ctx empty linkedDocument)
 
 theorem complete_linked_document_accepted :
-    refusalOf (run author operation document empty linkedDocument) = none := by decide
+    refusalOf (run author operation document ctx empty linkedDocument) = none := by decide
 
 theorem complete_linked_document_has_exact_post :
     Hyperdocument.lookup linkedDocumentStore .documents document =
@@ -161,17 +164,91 @@ theorem complete_link_source_has_canonical_membership :
   rangeCheck_sound _ _ _ (by decide)
 
 theorem nonexistent_source_anchor_refused :
-    refusalOf (run author operation document created
+    refusalOf (run author operation document ctx created
       ⟨[.link linkId (some anchoredRange) remote ⟨55⟩]⟩) = some .invalidSourceRange := by
   decide
 
 theorem run_cannot_name_absent_atom :
-    refusalOf (run author operation document empty ⟨[.createRun runId [atom]]⟩) =
+    refusalOf (run author operation document ctx empty ⟨[.createRun runId [atom]]⟩) =
       some .invalidRun := by decide
 
 theorem run_cannot_duplicate_atom :
-    refusalOf (run author operation document created ⟨[.createRun runId [atom, atom]]⟩) =
+    refusalOf (run author operation document ctx created ⟨[.createRun runId [atom, atom]]⟩) =
       some .invalidRun := by decide
+
+
+/-! ## Transclusion poles: a range of a five-line source, edited inside, outside, and at an endpoint -/
+
+def lineAtom (n : Nat) : AtomId := ⟨⟨300 + n⟩⟩
+def sourceRun : RunId := ⟨⟨310⟩⟩
+def line (n : Nat) : AtomRecord := ⟨document, .text, [UInt8.ofNat n], author, operation, operation, none⟩
+
+/-- Source document 100: five lines, one run. -/
+def sourceWrite : Command :=
+  ⟨((List.range 5).map fun n => .createAtom (lineAtom (n + 1)) .text [UInt8.ofNat (n + 1)]) ++
+    [.createRun sourceRun ((List.range 5).map fun n => lineAtom (n + 1))]⟩
+def source0 : ContentStore := postOf (run author operation document ctx empty sourceWrite)
+
+/-- Lines 2..4: before line 2, after line 4, both endpoints under one policy. -/
+def lines2to4 (death : EndpointDeathPolicy) : StableRange :=
+  ⟨⟨sourceRun, some (lineAtom 2), .before, death⟩, ⟨sourceRun, some (lineAtom 4), .after, death⟩⟩
+def pins2to4 : List (AtomId × OperationId) :=
+  [(lineAtom 2, operation), (lineAtom 3, operation), (lineAtom 4, operation)]
+def request (death : EndpointDeathPolicy) (mode : TransclusionMode) : TranscludeRequest :=
+  ⟨100, lines2to4 death, mode, pins2to4⟩
+def opening (death : EndpointDeathPolicy) : RangeOpening := .ofRequest (request death .live) 0
+
+def editLine (n : Nat) (payload : List UInt8) (tombstone : Bool) : Command :=
+  ⟨[.editAtom ⟨lineAtom n, line n, .text, payload, tombstone⟩]⟩
+def insideEdited : ContentStore := postOf (run author nextOperation document ctx source0 (editLine 3 [33] false))
+def outsideEdited : ContentStore := postOf (run author nextOperation document ctx source0 (editLine 5 [55] false))
+def endpointDeleted : ContentStore := postOf (run author nextOperation document ctx source0 (editLine 4 [4] true))
+
+theorem source_written : refusalOf (run author operation document ctx empty sourceWrite) = none := by
+  decide
+
+/-- The admission's disclosure check holds the opening on the source as read,
+and refuses it once a line inside the range has moved. -/
+theorem opening_checked_at_admission :
+    openingHolds source0 (request .keepTombstone .snapshot) = true ∧
+      openingHolds outsideEdited (request .keepTombstone .snapshot) = true ∧
+      openingHolds insideEdited (request .keepTombstone .snapshot) = false := by
+  decide
+
+/-- A range survives edits at, inside and outside it, by its declared policy:
+- inside: the live rendering changes and says `revised`; the snapshot says
+  `moved` and, read `at` the opening (source0), is exactly the pinned lines;
+- outside: neither rendering changes;
+- an endpoint dies: `invalidate` renders nothing, `keepTombstone` keeps the
+  slot (the dead line shows no bytes), `preferNext` retargets the endpoint to
+  the next live line. -/
+theorem range_survives_endpoint_edit :
+    renderLive source0 (opening .keepTombstone) = .live [[2], [3], [4]] false ∧
+    renderLive insideEdited (opening .keepTombstone) = .live [[2], [33], [4]] true ∧
+    renderSnapshot insideEdited (opening .keepTombstone) = .moved 0 ∧
+    renderSnapshot source0 (opening .keepTombstone) = .snapshot [[2], [3], [4]] ∧
+    renderLive outsideEdited (opening .keepTombstone) = renderLive source0 (opening .keepTombstone) ∧
+    renderSnapshot outsideEdited (opening .keepTombstone) =
+      renderSnapshot source0 (opening .keepTombstone) ∧
+    renderLive endpointDeleted (opening .invalidate) = .invalidated ∧
+    renderLive endpointDeleted (opening .keepTombstone) = .live [[2], [3]] true ∧
+    renderLive endpointDeleted (opening .preferNext) = .live [[2], [3], [5]] true := by
+  decide
+
+def host : DocumentId := documentOf 200
+def transclusionId : TransclusionId := ⟨⟨401⟩⟩
+def transcludeLink : LinkId := ⟨⟨402⟩⟩
+def read : SourceRead := ⟨⟨61⟩, ⟨77⟩⟩
+def covered : Context := ⟨5, fun source => if source = 100 then some read else none⟩
+
+/-- Refused by name without a read target on the source; admitted with one. -/
+theorem transclude_needs_a_read :
+    refusalOf (run author operation host ctx empty
+        ⟨[.transclude transclusionId transcludeLink (request .keepTombstone .snapshot)]⟩) =
+      some .sourceNotCovered ∧
+    refusalOf (run author operation host covered empty
+        ⟨[.transclude transclusionId transcludeLink (request .keepTombstone .snapshot)]⟩) = none := by
+  decide
 
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.create_exact_bytes_and_provenance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms create_exact_bytes_and_provenance
@@ -179,5 +256,12 @@ theorem run_cannot_duplicate_atom :
 #guard_msgs (whitespace := lax) in #print axioms seventeen_atoms_accepted
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.authored_history_cannot_be_injected_at_birth' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authored_history_cannot_be_injected_at_birth
+
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.range_survives_endpoint_edit' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms range_survives_endpoint_edit
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.opening_checked_at_admission' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms opening_checked_at_admission
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.transclude_needs_a_read' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transclude_needs_a_read
 
 end Minidregg.Kernel.ContentResource.Audit

@@ -5,7 +5,7 @@
 use crate::current_birth;
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
-    absolute, author, hex, path, query, query_retained, retry, submit, Args, Result, SOCKET,
+    absolute, author, hex, inspect, path, query, query_retained, retry, submit, Args, Result, SOCKET,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -512,6 +512,292 @@ fn signed_view(
     Ok((result, challenge, attempt.join("signed-observation.bin")))
 }
 
+/// A signed read of one reference `at` a past height (K-HISTORY-READ): the
+/// retained `view.bin` (an `atViewCodec` binary) and its presentation.
+fn signed_at(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    height: &str,
+) -> Result<(Value, PathBuf)> {
+    decimal(height, "history height")?;
+    let (attempt, nonce) = new_attempt(root)?;
+    let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+        "purpose":{"type":"query","kind":member(reference,"kind")?,
+            "target":member(reference,"target")?,"view":"at","height":height},
+        "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
+            "capability":member(reference,"observeCapability")?}]});
+    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    private_file(
+        &source,
+        &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
+    )?;
+    let result = query_retained(
+        &member_path(workspace, "host")?,
+        &member_path(workspace, "config")?,
+        &source,
+        OsStr::new("intent"),
+        &member_path(workspace, "key")?,
+        "view-at",
+        &attempt,
+    )?;
+    Ok((result, attempt.join("view.bin")))
+}
+
+fn entries(view: &Value) -> Result<&Vec<Value>> {
+    view.get("cell")
+        .and_then(|cell| cell.get("entries"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| "signed view is not a content cell".to_owned())
+}
+
+/// The workspace reference naming cell `target`, if this workspace holds one.
+fn reference_for_target(root: &Path, target: &str) -> Result<Option<Value>> {
+    let dir = root.join("refs");
+    let Ok(listing) = fs::read_dir(&dir) else {
+        return Ok(None);
+    };
+    let mut names: Vec<String> = listing
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| name.strip_suffix(".json").map(str::to_owned))
+        .collect();
+    names.sort();
+    for name in names {
+        if let Ok(value) = reference(root, &name) {
+            if member(&value, "target")? == target {
+                return Ok(Some(value));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// `transclude`: one transaction that transcludes the atoms FROM..TO of one
+/// run of SOURCE into HOST.  HOST's target carries the content action; SOURCE's
+/// carries an observe-only `read`, so the admission checks this workspace's
+/// own observe grant on SOURCE, and the source's policy, at this height.  The
+/// opening (the range's live atoms at their revisions) is what this signed read
+/// of SOURCE shows; the Host refuses it `staleOpening` if SOURCE moved since.
+fn transclude(
+    root: &Path,
+    workspace: &Value,
+    host: &str,
+    source: &str,
+    from: &str,
+    to: &str,
+    live: bool,
+    death: &str,
+) -> Result<()> {
+    decimal(from, "first atom")?;
+    decimal(to, "last atom")?;
+    if !matches!(
+        death,
+        "invalidate"
+            | "keepTombstone"
+            | "preferPrevious"
+            | "preferNext"
+            | "preferPreviousThenNext"
+            | "preferNextThenPrevious"
+    ) {
+        return Err("--death must name an endpoint death policy".into());
+    }
+    let source_ref = reference(root, source)?;
+    let (view, _, _) = signed_view(root, workspace, &source_ref, "resource")?;
+    let cell = entries(&view)?;
+    let has = |run: &Value, atom: &str| {
+        run.get("atoms")
+            .and_then(Value::as_array)
+            .is_some_and(|atoms| atoms.iter().any(|value| value.as_str() == Some(atom)))
+    };
+    let run = cell
+        .iter()
+        .find(|entry| {
+            entry.get("type").and_then(Value::as_str) == Some("run") && has(entry, from) && has(entry, to)
+        })
+        .ok_or("no run of the source holds both endpoints")?;
+    let atoms: Vec<&str> = run["atoms"]
+        .as_array()
+        .ok_or("run lacks atoms")?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let first = atoms.iter().position(|atom| *atom == from).ok_or("first atom not in run")?;
+    let last = atoms.iter().position(|atom| *atom == to).ok_or("last atom not in run")?;
+    if first > last {
+        return Err("the range's first atom follows its last".into());
+    }
+    let target = member(&source_ref, "target")?;
+    let mut pins = Vec::new();
+    for atom in &atoms[first..=last] {
+        let record = cell.iter().find(|entry| {
+            entry.get("type").and_then(Value::as_str) == Some("atom")
+                && entry.get("id").and_then(Value::as_str) == Some(atom)
+        });
+        if let Some(record) = record {
+            if record.get("tombstonedAt").is_some_and(Value::is_null)
+                && member(record, "document")? == target
+            {
+                pins.push(json!({"atom":atom,"revision":member(record,"revision")?}));
+            }
+        }
+    }
+    let point = |atom: &str, bias: &str| {
+        json!({"run":run["id"],"neighbor":atom,"bias":bias,"death":death})
+    };
+    let id = random_nonce()?;
+    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
+        {"name":host,"payload":{"type":"content","actions":[{"type":"transclude",
+            "transclusion":id,"link":random_nonce()?,
+            "request":{"source":target,"range":{"start":point(from,"before"),"finish":point(to,"after")},
+                "mode":if live {"live"} else {"snapshot"},"pins":pins}}]}},
+        {"name":source,"payload":{"type":"read"}}]});
+    let proposal_id = format!("transclude-{id}");
+    let request_path = root.join("sources").join(format!("{proposal_id}.json"));
+    private_file(
+        &request_path,
+        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+    )?;
+    propose(root, workspace, &request_path, &proposal_id)?;
+    eprintln!("workspace transclusion: {id}");
+    let attempt = root.join("attempts").join(&proposal_id);
+    submit_intent(
+        root,
+        workspace,
+        &root.join("proposals").join(&proposal_id).join("intent.json"),
+        "intent",
+        false,
+        Some(attempt.as_path()),
+    )
+}
+
+/// Render HOST's transclusions over this workspace's own source reads: a
+/// current read of each source this workspace can read (a refused read
+/// contributes nothing, so the transclusion renders `unavailable` with its
+/// shape only), and, for a snapshot whose pins moved, a read of the source
+/// `at` the opening's height.  With `only`, that one transclusion, and its
+/// source read must succeed (`follow`: re-resolve at the current height).
+fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<()> {
+    let host_ref = reference(root, host_name)?;
+    let (host_view, _, signed) = signed_view(root, workspace, &host_ref, "resource")?;
+    let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
+    let records: Vec<&Value> = entries(&host_view)?
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("transclusion"))
+        .filter(|entry| only.is_none_or(|id| entry.get("id").and_then(Value::as_str) == Some(id)))
+        .collect();
+    if let Some(id) = only {
+        if records.is_empty() {
+            return Err(format!("{host_name} holds no transclusion {id}"));
+        }
+    }
+    let mut sources = Vec::new();
+    let mut readable = std::collections::BTreeMap::new();
+    for record in &records {
+        let source = member(&record["opening"], "source")?.to_owned();
+        if readable.contains_key(&source) {
+            continue;
+        }
+        let read = match reference_for_target(root, &source)? {
+            Some(reference) => match signed_view(root, workspace, &reference, "resource") {
+                Ok((_, _, signed)) => {
+                    let bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
+                    sources.push(json!({"target":source,"view":hex(&bin)}));
+                    Some(reference)
+                }
+                Err(error) if only.is_some() => {
+                    return Err(format!("follow refused: no read of source {source}: {error}"))
+                }
+                Err(_) => None,
+            },
+            None if only.is_some() => {
+                return Err(format!("follow refused: no reference to source {source}"))
+            }
+            None => None,
+        };
+        readable.insert(source, read);
+    }
+    let render = |sources: &Vec<Value>| -> Result<Value> {
+        let (attempt, _) = new_attempt(root)?;
+        make_private_dir(&attempt)?;
+        let input = attempt.join("transclusions-in.json");
+        private_file(
+            &input,
+            &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":sources}))
+                .map_err(|error| error.to_string())?,
+        )?;
+        inspect(
+            &member_path(workspace, "host")?,
+            &member_path(workspace, "config")?,
+            "view-transclusions",
+            &input,
+            &attempt.join("transclusions.json"),
+        )
+    };
+    let current = render(&sources)?;
+    let mut shown = Vec::new();
+    for item in current["transclusions"].as_array().ok_or("Host rendered no transclusions")? {
+        if only.is_some_and(|id| item.get("id").and_then(Value::as_str) != Some(id)) {
+            continue;
+        }
+        let mut item = item.clone();
+        let source = member(&item["opening"], "source")?.to_owned();
+        if member(&item["render"], "view")? == "moved" {
+            if let Some(Some(reference)) = readable.get(&source) {
+                let height = member(&item["opening"], "height")?.to_owned();
+                let (_, bin) = signed_at(root, workspace, reference, &height)?;
+                let at = fs::read(&bin).map_err(|error| error.to_string())?;
+                let again = render(&vec![json!({"target":source,"at":hex(&at)})])?;
+                if let Some(found) = again["transclusions"].as_array().and_then(|all| {
+                    all.iter().find(|other| other.get("id") == item.get("id"))
+                }) {
+                    item["render"] = found["render"].clone();
+                    item["at"] = json!(height);
+                }
+            }
+        }
+        let atoms = member(&item["opening"], "atoms")?.to_owned();
+        let text = match member(&item["render"], "view")? {
+            "unavailable" => format!("[transclusion: {atoms} atoms of {source}, not readable by you]"),
+            "snapshot" | "live" => {
+                let lines: Vec<String> = item["render"]["lines"]
+                    .as_array()
+                    .map(|lines| {
+                        lines
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(|line| {
+                                String::from_utf8_lossy(&crate::decode_hex(line).unwrap_or_default()).into_owned()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let mark = if item["render"]["view"] == "snapshot" {
+                    match item.get("at") {
+                        Some(height) => format!("snapshot at {}", height.as_str().unwrap_or("?")),
+                        None => "snapshot".to_owned(),
+                    }
+                } else if item["render"]["revised"] == true {
+                    "live, revised".to_owned()
+                } else {
+                    "live".to_owned()
+                };
+                format!("[{mark} of {source}]\n{}", lines.join("\n"))
+            }
+            other => format!("[transclusion of {source}: {other}]"),
+        };
+        item["text"] = json!(text);
+        shown.push(item);
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({"type":"transclusions","host":member(&host_ref,"target")?,
+            "transclusions":shown}))
+        .map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
 fn signed_authority_root(challenge: &Value) -> Result<&str> {
     let root = challenge
         .get("authorityRoot")
@@ -598,7 +884,7 @@ fn content_actions(actions: &Value) -> Result<Value> {
                 "annotate",
                 &["type", "annotation", "atom", "revision", "body"],
             ),
-            "quote" => ("quote", &["type", "element", "link", "reference"]),
+            "transclude" => ("transclude", &["type", "transclusion", "link", "request"]),
             _ => return Err("unknown workspace content action".into()),
         };
         if obj.len() != fields.len() || fields.iter().any(|field| !obj.contains_key(*field)) {
@@ -665,7 +951,12 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
-                if payload_obj.len() != 2
+                let read_only = payload.get("type").and_then(Value::as_str) == Some("read");
+                if read_only {
+                    if payload_obj.len() != 1 {
+                        return Err("a read payload may contain only type".into());
+                    }
+                } else if payload_obj.len() != 2
                     || !payload_obj.contains_key("type")
                     || !payload_obj.contains_key("actions")
                 {
@@ -673,13 +964,21 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 }
                 // The action grammar version the Host's controller requires per
                 // payload: the scalar declaration (1) or the content command
-                // grammar (`ContentResource.commandVersion`, 3).
+                // grammar (`ContentResource.commandVersion`, 4), which an
+                // observe-only `read` of a content cell is checked under too.
                 let (lowered, schema_version) = match member(payload, "type")? {
                     "scalar" => (scalar_actions(&payload["actions"], target)?, "1"),
-                    "content" => (content_actions(&payload["actions"])?, "3"),
+                    "content" => (content_actions(&payload["actions"])?, "4"),
+                    "read" => (json!({"type":"read"}), "4"),
                     _ => return Err("unsupported workspace payload type".into()),
                 };
-                let capability = member(&reference, "operationCapability")?;
+                // A read target's authorization leg is checked under the observe
+                // verb, so it carries the observe capability.
+                let capability = if read_only {
+                    member(&reference, "observeCapability")?
+                } else {
+                    member(&reference, "operationCapability")?
+                };
                 let observe = member(&reference, "observeCapability")?;
                 target_rows.push(json!({"kind":kind,"target":target,"capability":capability,
                     "observeCapability":observe,"schemaVersion":schema_version,
@@ -1484,6 +1783,34 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 attempt.as_deref(),
             )
         }
+        "transclude" => {
+            let host = os_string(args.required("name")?, "host name")?;
+            let source = os_string(args.required("source")?, "source name")?;
+            let from = os_string(args.required("from")?, "first atom")?;
+            let to = os_string(args.required("to")?, "last atom")?;
+            let live = match args.optional("mode").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("snapshot") => false,
+                Some(value) if value == OsStr::new("live") => true,
+                _ => return Err("--mode must be snapshot or live".into()),
+            };
+            let death = match args.optional("death") {
+                Some(value) => os_string(value, "death policy")?,
+                None => "keepTombstone".to_owned(),
+            };
+            args.finish()?;
+            transclude(&root, &workspace, &host, &source, &from, &to, live, &death)
+        }
+        "transclusions" | "follow" => {
+            let host = os_string(args.required("name")?, "host name")?;
+            let only = if action == "follow" {
+                Some(os_string(args.required("transclusion")?, "transclusion")?)
+            } else {
+                None
+            };
+            args.finish()?;
+            transclusions(&root, &workspace, &host, only.as_deref())
+        }
         "propose" => {
             let request = path(args.required("request")?);
             let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
@@ -1571,6 +1898,10 @@ mod tests {
             "revision":"3","body":"00","extra":"4"}])).is_err());
         assert!(content_actions(&json!([{"type":"annotate","annotation":"1","atom":"2",
             "revision":"3","body":"00"}])).is_ok());
+        assert!(content_actions(&json!([{"type":"quote","element":"1","link":"2",
+            "reference":{}}])).is_err());
+        assert!(content_actions(&json!([{"type":"transclude","transclusion":"1","link":"2",
+            "request":{}}])).is_ok());
     }
 
     #[test]

@@ -69,7 +69,6 @@ deriving instance Countable for AtomKind
 deriving instance Countable for TransclusionMode
 deriving instance Countable for AtomRecord
 deriving instance Countable for RunRecord
-deriving instance Countable for EmbedRef
 deriving instance Countable for ElementBody
 deriving instance Countable for ElementRecord
 deriving instance Countable for AnchorBias

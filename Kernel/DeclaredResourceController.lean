@@ -41,12 +41,12 @@ def rawLeg (prepared : PreparedInvocation deployment profile ambient durable com
     (source : Source command) : (incidence : Incidence command) → CandidateLegData (layout prepared) incidence
   | some i =>
       { pre := (prepared.targets i).pre
-        patch := targetPatch prepared.authority.snapshot profile.semantics command command.targets[i]
+        patch := targetPatch prepared.authority.snapshot profile.semantics ambient command command.targets[i]
           (prepared.targets i).pre
         request := ⟨command.targets[i].kind, requestFor prepared.authority.snapshot profile.semantics
           ambient command command.targets[i] (prepared.targets i).pre.root⟩
         Postcondition := fun logical =>
-          (targetPatch prepared.authority.snapshot profile.semantics command command.targets[i]
+          (targetPatch prepared.authority.snapshot profile.semantics ambient command command.targets[i]
             (prepared.targets i).pre).ResultAt
             (prepared.targets i).pre.logical logical }
   | none =>
@@ -128,15 +128,11 @@ def targetProjection (target : Target) (before after : Store target.layout) : Li
     cases payload with
     | scalar _ => exact DeclaredResourceProjection.project id before after
     | content content => exact ContentResource.project before after content
+    | read => exact ContentResource.project before after ⟨[]⟩
 
 def incidenceTarget (command : Command) : Incidence command → Target
   | some i => command.targets[i]
   | none => command.first
-
-def observeVerb : (kind : ResourceKind) → Verb kind
-  | .object => .observeObject
-  | .account => .observeAccount
-  | .program => .observeProgram
 
 /-- This signature is specific to the exact proposed joint command, one
 participant's real loaded pre-state and the current authority snapshot. -/
@@ -499,6 +495,58 @@ def AcceptedInvocation.declaration [DecidableEq F]
     (accepted : AcceptedInvocation prepared signed) :=
   accepted.tuple.toDeclaration (portals prepared accepted.tuple) accepted.apex
 
+/-- Disclosure is decided at transclusion time.  An accepted invocation whose
+content target transcludes `request` carries an observe-only read target on the
+source cell whose read leg was admitted — the transcluder's own observe
+capability, signed for this exact command and checked against the source's
+current policy at this height — and whose loaded state holds the opening.  A
+transcluder without a grant covering the source has no admissible read leg,
+so the transclusion is refused. -/
+theorem transclude_requires_source_coverage [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {signed : SignedCommand} (accepted : AcceptedInvocation prepared signed)
+    (i : TargetIndex command) (content : ContentResource.Command)
+    (hostPayload : command.targets[i].payload = .content content)
+    (transclusion : Hyperdocument.TransclusionId) (link : Hyperdocument.LinkId)
+    (request : ContentResource.TranscludeRequest)
+    (member : .transclude transclusion link request ∈ content.actions) :
+    ∃ j : TargetIndex command, command.targets[j].target = request.source ∧
+      command.targets[j].payload = .read ∧
+      Nonempty (ReadLeg prepared j (signed.observeEnvelopes[j.val]?.getD [])) ∧
+      ∃ store, command.targets[j].contentStore? (prepared.targets j).pre = some store ∧
+        ContentResource.openingHolds store request = true := by
+  have all := prepared.openings
+  unfold openingsCheck at all
+  have atHost := List.all_eq_true.mp all i (List.mem_finRange i)
+  simp only [hostPayload] at atHost
+  have atAction := List.all_eq_true.mp atHost _ member
+  simp only at atAction
+  obtain ⟨j, _, holds⟩ := List.any_eq_true.mp atAction
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at holds
+  obtain ⟨⟨sameTarget, isRead⟩, opening⟩ := holds
+  have different : i.val ≠ j.val := by
+    intro same
+    have equal : i = j := Fin.ext same
+    subst equal
+    rw [hostPayload] at isRead
+    cases isRead
+  have many : command.requiresObservation = true := by
+    simp only [Command.requiresObservation, decide_eq_true_eq]
+    have := i.isLt
+    have := j.isLt
+    omega
+  refine ⟨j, sameTarget, isRead, ⟨accepted.observations many j⟩, ?_⟩
+  have checked : (match command.targets[j].contentStore? (prepared.targets j).pre with
+      | some store => ContentResource.openingHolds store request
+      | none => false) = true := opening
+  split at checked
+  · rename_i store found
+    exact ⟨store, found, checked⟩
+  · cases checked
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.transclude_requires_source_coverage' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transclude_requires_source_coverage
+
 def AcceptedInvocation.legs [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) : accepted.declaration.AcceptedLegs :=
@@ -535,14 +583,29 @@ def targetWrite (prepared : PreparedInvocation deployment profile ambient durabl
   ResourceBirthController.Concrete.packedWrite command.targets[i].target (prepared.targets i).before
     (packTarget command.targets[i] (prepared.targets i).candidate.post)
 
-/-- The physical writes are the targets' alone: the authority incidence is a
-read, so the authority cell enters as a read guard (`readGuards`). -/
+/-- An observe-only read target is read, not written. -/
+def Target.isRead (target : Target) : Bool := decide (target.payload = .read)
+
+/-- A read target enters as a read guard on its cell's current root, as the
+authority cell does: the commit refuses if the cell moved, and nothing of it
+is stored or charged. -/
+def targetReadGuard (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) : ReadGuard :=
+  ⟨⟨command.targets[i].target⟩,
+    ResourceBirthCodec.physicalRoot (ResourceBirthCodec.LifecycleImage.live (prepared.targets i).before)⟩
+
+/-- The physical writes are the written targets' alone: the authority incidence
+and every observe-only read target are reads, so their cells enter as read
+guards (`readGuards`). -/
 def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  (List.finRange command.targets.length).map (targetWrite prepared)
+  (List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then none else some (targetWrite prepared i)
 
 def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  (List.finRange command.targets.length).map fun i =>
-    ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩
+  (List.finRange command.targets.length).map (fun i =>
+    ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩) ++
+  (List.finRange command.targets.length).filterMap fun i =>
+    if command.targets[i].isRead then some (targetReadGuard prepared i) else none
 
 def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
   sourceGuards prepared ++ prepared.authority.readGuards.filter fun guard =>
@@ -583,8 +646,11 @@ instance physicalShapeDecidable (prepared : PreparedInvocation deployment profil
 theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
   intro write member
-  obtain ⟨i, _, rfl⟩ := List.mem_map.mp member
-  rfl
+  obtain ⟨i, _, produced⟩ := List.mem_filterMap.mp member
+  split at produced
+  · cases produced
+  · cases produced
+    rfl
 
 theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) :
@@ -675,15 +741,17 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
 
 /-- **Charging rule: a record is charged the bytes it writes.**  The storage
 charge of an accepted invocation is exactly the canonical bytes of the cells
-its record writes, and those writes are the targets' alone (one per target):
-the authority cell is read (a guard), neither stored nor charged. -/
+its record writes, and those writes are the written targets' alone (one per
+target that is not an observe-only read): the authority cell and every read
+target are read (guards), neither stored nor charged. -/
 theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
         ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
       (accepted.dataIntent shape).writes =
-        (List.finRange command.targets.length).map (targetWrite prepared) :=
+        (List.finRange command.targets.length).filterMap (fun i =>
+          if command.targets[i].isRead then none else some (targetWrite prepared i)) :=
   ⟨rfl, rfl⟩
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]

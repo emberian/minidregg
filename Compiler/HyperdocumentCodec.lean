@@ -231,15 +231,6 @@ def atomRecordStream : StreamCodec AtomRecord :=
       tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; rfl)
 
-def embedRefStream : StreamCodec EmbedRef :=
-  StreamCodec.xmap
-    (StreamCodec.product (identifierStream .v1 .document)
-      (StreamCodec.product (identifierStream .v1 .atom)
-        (StreamCodec.product (identifierStream .v1 .operationIntent) transclusionModeStream)))
-    (fun value => (value.document, value.atom, value.revision, value.mode))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
-    (by intro value; rfl)
-
 /-! ## Stored stable ranges
 
 `Hyperdocument.StableRange` is the canonical stored/wire shape; the operational
@@ -292,7 +283,7 @@ def elementBodyStream : StreamCodec ElementBody where
       | .container children =>
           (StreamCodec.list (identifierStream .v1 .element)).encode children
       | .runs runs => (StreamCodec.list (identifierStream .v1 .run)).encode runs
-      | .embed reference => embedRefStream.encode reference
+      | .embed transclusion => (identifierStream .v1 .transclusion).encode transclusion
       | .opaque schema payload =>
           digestStream.encode schema ++ bytesStream.encode payload
   decodePrefix bytes := do
@@ -307,8 +298,9 @@ def elementBodyStream : StreamCodec ElementBody where
           (StreamCodec.list (identifierStream .v1 .run)).decodePrefix afterTag
         some (.runs runs, suffix)
     | 2 => do
-        let (reference, suffix) ← embedRefStream.decodePrefix afterTag
-        some (.embed reference, suffix)
+        let (transclusion, suffix) ←
+          (identifierStream .v1 .transclusion).decodePrefix afterTag
+        some (.embed transclusion, suffix)
     | _ => do
         let (schema, afterSchema) ← digestStream.decodePrefix afterTag
         let (payload, suffix) ← bytesStream.decodePrefix afterSchema
@@ -320,7 +312,7 @@ def elementBodyStream : StreamCodec ElementBody where
         StreamCodec.nat.decodePrefix_encode,
         (StreamCodec.list (identifierStream .v1 .element)).decodePrefix_encode,
         (StreamCodec.list (identifierStream .v1 .run)).decodePrefix_encode,
-        embedRefStream.decodePrefix_encode, digestStream.decodePrefix_encode,
+        (identifierStream .v1 .transclusion).decodePrefix_encode, digestStream.decodePrefix_encode,
         bytesStream.decodePrefix_encode]
 
 def linkTargetTag : LinkTarget -> Nat

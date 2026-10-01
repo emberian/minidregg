@@ -31,6 +31,12 @@ abbrev Ambient := DeclaredResourceScalar.Ambient
 inductive Payload where
   | scalar (actions : List DeclaredActionLowering.Action)
   | content (command : ContentResource.Command)
+  /-- An observe-only read of a content cell: no patch, authorized under the
+  observe verb.  A `transclude` of another target of the same command names
+  this cell as its source; this read is where the admission checks the
+  transcluder's grant and the source's own policy at this height, and its
+  loaded state is what the opening is checked against. -/
+  | read
   deriving DecidableEq
 
 /-- A content command shows as its canonical command bytes. -/
@@ -39,6 +45,7 @@ instance : Repr Payload where
     | .scalar actions => Repr.addAppParen ("Payload.scalar " ++ reprArg actions) prec
     | .content command =>
         Repr.addAppParen ("Payload.content " ++ reprArg (ContentResource.commandCodec.encode command)) prec
+    | .read => "Payload.read"
 
 structure Target where
   kind : ResourceKind
@@ -83,9 +90,16 @@ def Command.requiresObservation (command : Command) : Bool := decide (1 < comman
 
 def payloadStream : StreamCodec Payload :=
   StreamCodec.xmap
-    (StreamCodec.sum (StreamCodec.list DeclaredResourceScalar.actionStream) ContentResource.commandStream)
-    (fun payload => match payload with | .scalar actions => .inl actions | .content command => .inr command)
-    (fun payload => match payload with | .inl actions => .scalar actions | .inr command => .content command)
+    (StreamCodec.sum (StreamCodec.list DeclaredResourceScalar.actionStream)
+      (StreamCodec.sum ContentResource.commandStream StoreCodec.unitStream))
+    (fun payload => match payload with
+      | .scalar actions => .inl actions
+      | .content command => .inr (.inl command)
+      | .read => .inr (.inr ()))
+    (fun payload => match payload with
+      | .inl actions => .scalar actions
+      | .inr (.inl command) => .content command
+      | .inr (.inr ()) => .read)
     (by intro payload; cases payload <;> rfl)
 
 def targetStream : StreamCodec Target :=
@@ -109,8 +123,10 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, targets) => ⟨subject, nonce, targets⟩)
     (by intro command; cases command; rfl)
 
-/-- Version 4: no authority root in the command. Version-3 commands refuse. -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [4]
+/-- Version 5 (K-TRANSCLUDE): a target's payload may be an observe-only `read`.
+Version 4 had no authority root in the command; version-3 and version-4
+commands refuse. -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [5]
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -164,6 +180,18 @@ def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
 
 abbrev ordinaryVerb := DeclaredResourceScalar.ordinaryVerb
 
+def observeVerb : (kind : ResourceKind) → Verb kind
+  | .object => .observeObject
+  | .account => .observeAccount
+  | .program => .observeProgram
+
+/-- The verb a target's authorization leg is checked under: observe for an
+observe-only read target, the kind's ordinary write verb otherwise. -/
+def Target.verb (target : Target) : Verb target.kind :=
+  match target.payload with
+  | .read => observeVerb target.kind
+  | _ => ordinaryVerb target.kind
+
 /-- The original expression is retained as a specification for the optimized
 request construction. It is not called by the production request path. -/
 def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -174,7 +202,7 @@ def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (amb
   subject := command.subject
   subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
   target := ⟨target.target⟩
-  verb := ordinaryVerb target.kind
+  verb := target.verb
   argsDigest := argsDigest snapshot.domain semantics command
   effectsDigest := effectsDigest snapshot.domain semantics command
   nonce := command.nonce
@@ -198,7 +226,7 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     subject := command.subject
     subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
     target := ⟨target.target⟩
-    verb := ordinaryVerb target.kind
+    verb := target.verb
     argsDigest := (Sp800185Cshake256.hash
       "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList framedBytes).digest
     effectsDigest := (Sp800185Cshake256.hash
@@ -246,7 +274,7 @@ def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
 actions, a hyperdocument content cell for content commands. -/
 def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
   | .scalar _ => EffectDeclaration.effectLayout
-  | .content _ => Hyperdocument.layout
+  | .content _ | .read => Hyperdocument.layout
 
 def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
@@ -254,6 +282,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
     cases payload with
     | scalar _ => exact DeclaredEffectCell.materializer
     | content _ => exact HyperdocumentCell.contentMaterializer
+    | read => exact HyperdocumentCell.contentMaterializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
 
@@ -269,6 +298,7 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
     cases payload with
     | scalar _ => exact DeclaredResourceScalar.packDeclared kind cell
     | content _ => exact ⟨.content, cell⟩
+    | read => exact ⟨.content, cell⟩
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
     Option (TargetCell target) := by
@@ -277,6 +307,11 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
     cases payload with
     | scalar _ => exact CanonicalCellRegistry.selectDeclared deployment id kind cell
     | content _ => exact if kind = .object then
+        if CanonicalCellRegistry.CellLaw deployment id cell then
+          match cell with | ⟨.content, value⟩ => some value | _ => none
+        else none
+      else none
+    | read => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
           match cell with | ⟨.content, value⟩ => some value | _ => none
         else none
@@ -292,6 +327,24 @@ def contentAuthor (command : Command) (target : Target) : Hyperdocument.Principa
 
 def contentOperation (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
     Hyperdocument.OperationId := ⟨effectsDigest snapshot.domain semantics command⟩
+
+/-- The source policy identity a transclusion records: the policy id, epoch and
+revision the source cell's read leg is checked against at this height. -/
+def sourcePolicy (snapshot : AuthoritySnapshot) (source : Nat) : Digest :=
+  ContentResource.contentDigest "DREGG/CONTENT/DISCLOSURE-POLICY"
+    ((StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat)).encode
+      (source, snapshot.authState.policyEpoch ⟨source⟩, snapshot.authState.policyRevision ⟨source⟩))
+
+/-- What a content target's actions consume of their transaction: the height,
+and for each cell the transaction reads observe-only, the observe capability
+that read carries and the source's policy. -/
+def contentContext (snapshot : AuthoritySnapshot) (ambient : Ambient) (command : Command) :
+    ContentResource.Context :=
+  ⟨ambient.height, fun source =>
+    (command.targets.find? fun target =>
+        decide (target.target = source) && decide (target.payload = .read)).bind
+      fun target => target.observeCapability.map fun capability =>
+        ⟨capability, sourcePolicy snapshot source⟩⟩
 
 /-- The only target computation. It invokes source-owned typed operations,
 never a host supplied post. Every branch returns the post store the source
@@ -312,14 +365,20 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if version != ContentResource.commandVersion then throw .unsupportedVersion
         if root != pre.root then throw .staleTarget
         match ContentResource.prepareCell ⟨command.subject, kind, capability⟩
-            (contentOperation snapshot semantics command) (ContentResource.documentOf id) pre content with
+            (contentOperation snapshot semantics command) (ContentResource.documentOf id)
+            (contentContext snapshot ambient command) pre content with
         | .error reason => .error (.content reason)
         | .ok prepared => .ok prepared.post.logical
+    | read => exact do
+        if kind != .object then throw .wrongRole
+        if version != ContentResource.commandVersion then throw .unsupportedVersion
+        if root != pre.root then throw .staleTarget
+        pure pre.logical
 
 /-- The target's one guarded patch, generated by its source operation from the
 loaded store: the scalar declaration's own lowering, or the content run's patch. -/
-def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command)
-    (target : Target) (pre : TargetCell target) : Patch target.layout := by
+def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) : Patch target.layout := by
   cases target with
   | mk kind id capability version root payload observe =>
     cases payload with
@@ -328,10 +387,11 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : C
     | content content =>
         let computed := ContentResource.run ⟨command.subject, kind, capability⟩
           (contentOperation snapshot semantics command) (ContentResource.documentOf id)
-          pre.logical content
+          (contentContext snapshot ambient command) pre.logical content
         exact match computed with
           | .ok progress => progress.2
           | .error _ => []
+    | read => exact []
 
 /-- One declaration is the complete transaction, fixed by the receiving plan.
 The family outcome is the actual typed result; mode evidence certifies the
@@ -347,14 +407,24 @@ def targetFamily (_deployment : Deployment) (snapshot : AuthoritySnapshot)
   outcomeCodec := fun _ => target.outcomeCodec
   ModeEvidence := fun _ post => PLift (computeTarget snapshot semantics ambient command target pre = .ok post)
   Postcondition := fun _ _ logical =>
-    (targetPatch snapshot semantics command target pre).ResultAt pre.logical logical
+    (targetPatch snapshot semantics ambient command target pre).ResultAt pre.logical logical
   effectDigest := fun _ => effectsDigest snapshot.domain semantics command
-  patch := fun _ _ => targetPatch snapshot semantics command target pre
+  patch := fun _ _ => targetPatch snapshot semantics ambient command target pre
   nullifier := fun _ _ => none
   Release := fun _ _ => Empty
   DeclassificationAuthority := fun _ _ => Empty
   ReleaseAuthorization := fun _ _ _ => Empty
   DisclosureAllowed := fun _ _ decision => decision = .sealed
+
+/-- A prepared target's loaded content store, for a content or read target. -/
+def Target.contentStore? (target : Target) (cell : TargetCell target) :
+    Option ContentResource.ContentStore := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact none
+    | content _ => exact some cell.logical
+    | read => exact some cell.logical
 
 structure PreparedTarget (deployment : Deployment) (directory : Directory Nat Registry)
     (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -387,7 +457,7 @@ def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
       | .error reason => .error reason
       | .ok post =>
         match validate target.materializer pre pre.root
-            (targetPatch snapshot semantics command target pre) with
+            (targetPatch snapshot semantics ambient command target pre) with
         | .rejected _ => .error .patchValidation
         | .accepted validated =>
           let candidate : PolicyInstall.Candidate
@@ -416,6 +486,25 @@ def collect {α : Type} {E : Type} {P : α → Type} :
 
 abbrev TargetIndex (command : Command) := Fin command.targets.length
 abbrev Incidence (command : Command) := Option (TargetIndex command)
+
+/-- Every `transclude` of every content target names a cell this transaction
+reads observe-only, and that cell's loaded state (this height) holds the
+opening. -/
+def openingsCheck (command : Command)
+    (stores : TargetIndex command → Option ContentResource.ContentStore) : Bool :=
+  (List.finRange command.targets.length).all fun i =>
+    match command.targets[i].payload with
+    | .content content => content.actions.all fun action =>
+        match action with
+        | .transclude _ _ request => (List.finRange command.targets.length).any fun j =>
+            decide (command.targets[j].target = request.source) &&
+              decide (command.targets[j].payload = .read) &&
+              match stores j with
+              | some store => ContentResource.openingHolds store request
+              | none => false
+        | _ => true
+    | _ => true
+
 
 def incidences (command : Command) : List (Incidence command) :=
   (List.finRange command.targets.length).map some ++ [none]
@@ -471,6 +560,8 @@ structure PreparedInvocation {F : Type} [Field F]
   authority : Loaded deployment durable.snapshot
   targets : (i : TargetIndex command) → PreparedTarget deployment directory.directory
     authority.snapshot profile.semantics ambient command command.targets[i]
+  /-- Every transclusion's opening holds on its source read, at this height. -/
+  openings : openingsCheck command (fun j => command.targets[j].contentStore? (targets j).pre) = true
   marker : MarkerMode authority.snapshot profile.semantics command
 
 def prepare {F : Type} [Field F] (deployment : Deployment)
@@ -483,8 +574,11 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
       let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
       let targets ← collect command.targets (prepareTarget deployment directory.directory
         authority.snapshot profile.semantics ambient command)
-      let marker ← prepareMarker authority.snapshot profile.semantics command
-      .ok ⟨nonempty, distinct, directory, authority, targets, marker⟩
+      if openings : openingsCheck command
+          (fun j => command.targets[j].contentStore? (targets j).pre) = true then
+        let marker ← prepareMarker authority.snapshot profile.semantics command
+        .ok ⟨nonempty, distinct, directory, authority, targets, openings, marker⟩
+      else .error (.content .staleOpening)
     else .error .duplicateTargets
   else .error .emptyTargets
 

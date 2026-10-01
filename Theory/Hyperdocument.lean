@@ -300,22 +300,14 @@ inductive TransclusionMode where
   | live
   deriving DecidableEq, Repr
 
-/-- An embed names one atom of a source document at the revision its author
-read.  It stores no source bytes: a reader sees the quoted bytes only through
-its own read of the source (`ContentResource.renderQuote`).  `snapshot` (a
-quote) shows the bytes only while the source atom is still at `revision`;
-`live` (a transclusion) shows the current bytes and says whether they moved. -/
-structure EmbedRef where
-  document : DocumentId
-  atom : AtomId
-  revision : OperationId
-  mode : TransclusionMode
-  deriving DecidableEq, Repr
-
+/-- A transclusion is placed in the element tree by an `embed` element naming
+its `TransclusionRecord`.  The element stores no source bytes and no source
+reference of its own: the record is the one durable reference
+(`ContentResource.transclude`). -/
 inductive ElementBody where
   | container (children : List ElementId)
   | runs (runs : List RunId)
-  | embed (reference : EmbedRef)
+  | embed (transclusion : TransclusionId)
   | opaque (schema : Digest) (payload : List UInt8)
   deriving DecidableEq, Repr
 

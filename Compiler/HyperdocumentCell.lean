@@ -355,16 +355,18 @@ def contentNamespaces : List Hyperdocument.Namespace :=
   [.documents, .atoms, .runs, .elements, .fields, .conflicts, .links,
     .transclusions, .marks, .annotations]
 
-/-- Record codec version per namespace.  v2: atoms carry `revision`, an
-element's embed names an atom at a revision with a mode, and an annotation
-carries an anchor and an inline-or-reference body.  The layout digest in every
-cell frame covers these ids, so a v1 content cell refuses to load. -/
+/-- Record codec version per namespace.  v2: atoms carry `revision` and an
+annotation carries an anchor and an inline-or-reference body.  v3 (elements,
+K-TRANSCLUDE): an element's embed names a `TransclusionRecord`, never an atom.
+The layout digest in every cell frame covers these ids, so a v1 or v2 content
+cell refuses to load. -/
 def contentRecordVersion : Hyperdocument.Namespace → String
-  | .atoms | .elements | .annotations => "v2"
+  | .elements => "v3"
+  | .atoms | .annotations => "v2"
   | _ => "v1"
 
 def contentWire : Wire Hyperdocument.layout where
-  name := "minidregg/hyperdocument-content/v2"
+  name := "minidregg/hyperdocument-content/v3"
   namespaces := contentNamespaces
   namespaces_complete := by intro space; cases space <;> simp [contentNamespaces]
   namespaceStream := namespaceStream
