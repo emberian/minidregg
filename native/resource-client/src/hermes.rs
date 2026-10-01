@@ -260,6 +260,42 @@ pub(crate) fn runner_cells(program: &str) -> Result<(Vec<String>, Vec<String>), 
 
 // ---------------------------------------------------------------- summon
 
+/// Run `f` with this process's stdout pointed at /dev/null: the in-process
+/// client operations summon composes (births, field writes) print their JSON
+/// for scripts; a friend's terminal gets summon's own lines instead. Errors
+/// still reach stderr.
+fn quietly<T>(f: impl FnOnce() -> T) -> T {
+    use std::io::Write;
+    unsafe extern "C" {
+        fn dup(fd: i32) -> i32;
+        fn dup2(from: i32, to: i32) -> i32;
+        fn close(fd: i32) -> i32;
+    }
+    let _ = std::io::stdout().flush();
+    let null = fs::OpenOptions::new().write(true).open("/dev/null");
+    let saved = unsafe { dup(1) };
+    let gagged = match (&null, saved >= 0) {
+        (Ok(file), true) => {
+            use std::os::unix::io::AsRawFd;
+            unsafe { dup2(file.as_raw_fd(), 1) >= 0 }
+        }
+        _ => false,
+    };
+    let result = f();
+    let _ = std::io::stdout().flush();
+    if gagged {
+        unsafe {
+            dup2(saved, 1);
+        }
+    }
+    if saved >= 0 {
+        unsafe {
+            close(saved);
+        }
+    }
+    result
+}
+
 fn err(message: impl std::fmt::Display) -> Done {
     (crate::shell::EXIT_CLIENT, format!("error: {message}\n"))
 }
@@ -396,25 +432,25 @@ fn summon(
     state["role"] = json!(role_name);
     let done = |state: &Value, step: &str| state["steps"].get(step).is_some();
     let out = outbox(session, &h);
-    let mut tariff = crate::credit::room(&root, &ws, room).map_err(err)?;
+    let mut tariff = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
     // 1. the till
     if tariff.fields.get("till").is_none() {
         let permit = root.join("sources").join("credit-permit-all.json");
         crate::credit::write_permit(&permit).map_err(err)?;
         let till_name = format!("{room}-till");
         if chat::reference(session, &till_name).is_err() {
-            workspace::create(&root, &ws, &till_name, "declared", &permit, None, "account", None, None, None).map_err(err)?;
+            quietly(|| workspace::create(&root, &ws, &till_name, "declared", &permit, None, "account", None, None, None)).map_err(err)?;
         }
         let till = target(session, &till_name)?;
-        crate::credit::set_fields(&root, &ws, room, &tariff, &[("till", till.clone())]).map_err(err)?;
+        quietly(|| crate::credit::set_fields(&root, &ws, room, &tariff, &[("till", till.clone())])).map_err(err)?;
         println!("{room}: born its till {till_name} ({till}); Hermes's turns pay into it");
-        tariff = crate::credit::room(&root, &ws, room).map_err(err)?;
+        tariff = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
     }
     let turn = tariff.fields.get("hermes/turn").cloned().unwrap_or_else(|| "0".into());
     // 2. the budget account
     let account_name = format!("{room}-hermes");
     if !done(&state, "account") {
-        let handoff = workspace::create_funded_account(&root, &ws, &account_name, &json!({"type":"all","predicates":[]}), &h, &fund)
+        let handoff = quietly(|| workspace::create_funded_account(&root, &ws, &account_name, &json!({"type":"all","predicates":[]}), &h, &fund))
             .map_err(err)?;
         put(&out.join(format!("{account_name}.json")), &handoff)?;
         state["steps"]["account"] = json!(member(&handoff, "target").map_err(err)?);
@@ -490,13 +526,13 @@ fn summon(
     }
     // 6. the room's hermes fields
     if !done(&state, "fields") {
-        let current = crate::credit::room(&root, &ws, room).map_err(err)?;
-        crate::credit::set_fields(&root, &ws, room, &current, &[("hermes", h.clone()), ("hermes/account", account.clone())]).map_err(err)?;
+        let current = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
+        quietly(|| crate::credit::set_fields(&root, &ws, room, &current, &[("hermes", h.clone()), ("hermes/account", account.clone())])).map_err(err)?;
         state["steps"]["fields"] = json!(true);
         put(&state_file, &state)?;
     }
     // 7. the hand-off for Hermes's controller
-    let my_account = crate::credit::my_account(&root, &ws, None).map_err(err)?;
+    let my_account = quietly(|| crate::credit::my_account(&root, &ws, None)).map_err(err)?;
     let founder_account = target(session, &my_account)?;
     let manifest = json!({"type":"mini-hermes-summon-v1","room":room,"roomCell":target(session, &chat_room.name)?,
         "role":role_name,"hermes":h,"founder":me,"founderAccount":founder_account,
@@ -520,7 +556,7 @@ fn summon(
 fn room_hermes(session: &Session, room: &str) -> Result<Option<String>, Done> {
     let root = session.workspace.clone();
     let ws = workspace::load(&root).map_err(err)?;
-    let current = crate::credit::room(&root, &ws, room).map_err(err)?;
+    let current = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
     Ok(current.fields.get("hermes").filter(|h| h.as_str() != "0").cloned())
 }
 
@@ -564,8 +600,8 @@ fn dismiss(session: &Session, room: &str) -> Result<(), Done> {
     }
     let root = session.workspace.clone();
     let ws = workspace::load(&root).map_err(err)?;
-    let current = crate::credit::room(&root, &ws, room).map_err(err)?;
-    crate::credit::set_fields(&root, &ws, room, &current, &[("hermes", "0".into()), ("hermes/account", "0".into())]).map_err(err)?;
+    let current = quietly(|| crate::credit::room(&root, &ws, room)).map_err(err)?;
+    quietly(|| crate::credit::set_fields(&root, &ws, room, &current, &[("hermes", "0".into()), ("hermes/account", "0".into())])).map_err(err)?;
     let notice = json!({"type":"mini-hermes-dismiss-v1","room":room,"hermes":h,"founder":me,
         "returnTo":state["manifest"]["founderAccount"],"account":state["manifest"]["account"],
         "revoked":revoked});
