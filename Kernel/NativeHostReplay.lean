@@ -679,7 +679,8 @@ def LifetimeDispatchAt.intent {config : Config} {opened : Opened config}
   ApplicationAgentLifetimeDispatchCore.candidateIntent admitted.checked
 
 /-- Evidence is one of the actual privately admitted receiving objects,
-not a supplied policy decision, signature Boolean, or arbitrary DataIntent. -/
+never a policy decision, signature Boolean, or arbitrary DataIntent handed in
+from outside. -/
 inductive NativeAdmission (config : Config) (opened : Opened config) : DataIntent rootBytes → Prop
   | birth (accepted : ResourceBirthPolicyController.Concrete.AcceptedBirth
       config.profile config.deployment opened.pins opened.durable
