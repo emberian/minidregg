@@ -5,7 +5,8 @@
 use crate::current_birth;
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
-    absolute, author, hex, inspect, path, query, query_retained, retry, submit, Args, Result, SOCKET,
+    absolute, author, hex, inspect, path, print_json, query, query_retained, retry, submit, Args,
+    Result, SOCKET,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -593,19 +594,25 @@ fn signed_view(
     Ok((result, challenge, attempt.join("signed-observation.bin")))
 }
 
-/// A signed read of one reference `at` a past height (K-HISTORY-READ): the
-/// retained `view.bin` (an `atViewCodec` binary) and its presentation.
-fn signed_at(
+/// A signed query of a referenced resource with `view` (and `height` for
+/// `since`/`at`), retained in a fresh attempt. The Host renders `view.bin`
+/// with `inspection`; returns that rendering and the attempt directory.
+fn doc_query(
     root: &Path,
     workspace: &Value,
     reference: &Value,
-    height: &str,
+    view: &str,
+    height: Option<&str>,
+    inspection: &str,
 ) -> Result<(Value, PathBuf)> {
-    decimal(height, "history height")?;
     let (attempt, nonce) = new_attempt(root)?;
-    let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
-        "purpose":{"type":"query","kind":member(reference,"kind")?,
-            "target":member(reference,"target")?,"view":"at","height":height},
+    let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
+        "target":member(reference,"target")?,"view":view});
+    if let Some(height) = height {
+        decimal(height, "height")?;
+        purpose["height"] = json!(height);
+    }
+    let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,"purpose":purpose,
         "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
             "capability":member(reference,"observeCapability")?}]});
     let source = root.join("sources").join(format!("q-{nonce}.json"));
@@ -613,16 +620,30 @@ fn signed_at(
         &source,
         &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
     )?;
-    let result = query_retained(
+    eprintln!("workspace read attempt: {}", attempt.display());
+    let value = query_retained(
         &member_path(workspace, "host")?,
         &member_path(workspace, "config")?,
         &source,
         OsStr::new("intent"),
         &member_path(workspace, "key")?,
-        "view-at",
+        inspection,
         &attempt,
     )?;
-    Ok((result, attempt.join("view.bin")))
+    Ok((value, attempt))
+}
+
+/// A signed read of one reference `at` a past height (K-HISTORY-READ), under
+/// the grant as it stood at that height: the retained `view.bin` (an
+/// `atViewCodec` binary) and its presentation.
+fn signed_at(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    height: &str,
+) -> Result<(Value, PathBuf)> {
+    let (value, attempt) = doc_query(root, workspace, reference, "at", Some(height), "view-at")?;
+    Ok((value, attempt.join("view.bin")))
 }
 
 fn entries(view: &Value) -> Result<&Vec<Value>> {
@@ -772,11 +793,29 @@ fn rendered_document(
     workspace: &Value,
     host_name: &str,
     only: Option<&str>,
+    at: Option<&str>,
 ) -> Result<(String, Value, Vec<Value>)> {
     let host_ref = reference(root, host_name)?;
-    let (host_view, _, signed) = signed_view(root, workspace, &host_ref, "resource")?;
-    let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
-    let records: Vec<&Value> = entries(&host_view)?
+    // The host page: current, or `at` a past height under the grant as it stood
+    // then (the Host refuses the read otherwise; that refusal is the answer).
+    let (host_view, host_bin) = match at {
+        None => {
+            let (view, _, signed) = signed_view(root, workspace, &host_ref, "resource")?;
+            (view, signed.with_file_name("view.bin"))
+        }
+        Some(height) => {
+            let (view, bin) = signed_at(root, workspace, &host_ref, height)?;
+            (view["resource"].clone(), bin)
+        }
+    };
+    let host_bin = fs::read(host_bin).map_err(|error| error.to_string())?;
+    let no_entries = Vec::new();
+    let host_entries = if at.is_some() && host_view.is_null() {
+        &no_entries
+    } else {
+        entries(&host_view)?
+    };
+    let records: Vec<&Value> = host_entries
         .iter()
         .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("transclusion"))
         .filter(|entry| only.is_none_or(|id| entry.get("id").and_then(Value::as_str) == Some(id)))
@@ -793,11 +832,29 @@ fn rendered_document(
         if readable.contains_key(&source) {
             continue;
         }
-        let read = match reference_for_target(root, &source)? {
-            Some(reference) => match signed_view(root, workspace, &reference, "resource") {
-                Ok((_, _, signed)) => {
+        // A page at height H reads each source `at` H too: what the reader
+        // could see then, under its grants as they stood then.
+        let attempt = |reference: &Value| -> Result<Value> {
+            match at {
+                None => {
+                    let (_, _, signed) = signed_view(root, workspace, reference, "resource")?;
                     let bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
-                    sources.push(json!({"target":source,"view":hex(&bin)}));
+                    Ok(json!({"target":source,"view":hex(&bin)}))
+                }
+                Some(height) => {
+                    let (view, bin) = signed_at(root, workspace, reference, height)?;
+                    if view["state"] != "live" {
+                        return Err(format!("source {source} is not live at height {height}"));
+                    }
+                    let bin = fs::read(bin).map_err(|error| error.to_string())?;
+                    Ok(json!({"target":source,"at":hex(&bin)}))
+                }
+            }
+        };
+        let read = match reference_for_target(root, &source)? {
+            Some(reference) => match attempt(&reference) {
+                Ok(read) => {
+                    sources.push(read);
                     Some(reference)
                 }
                 Err(error) if only.is_some() => {
@@ -889,7 +946,7 @@ fn rendered_document(
 
 /// `transclusions` / `follow`: HOST's rendered transclusions.
 fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<()> {
-    let (host, _, shown) = rendered_document(root, workspace, host_name, only)?;
+    let (host, _, shown) = rendered_document(root, workspace, host_name, only, None)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({"type":"transclusions","host":host,
@@ -1084,8 +1141,8 @@ fn doc_remove(root: &Path, workspace: &Value, name: &str, line: usize) -> Result
 /// a struck line shows as `-`; a transclusion is one line, shown as this
 /// workspace's own read of its source renders it; a section is a heading.
 /// Nothing is sorted here: the order is the kernel's.
-fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
-    let (host, document, shown) = rendered_document(root, workspace, name, None)?;
+fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>) -> Result<()> {
+    let (host, document, shown) = rendered_document(root, workspace, name, None, at)?;
     let order = document["order"].as_array().ok_or("document view has no order")?;
     let mut depth = std::collections::BTreeMap::<String, usize>::new();
     if let Some(root_element) = document["root"].as_str() {
@@ -1138,11 +1195,125 @@ fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({"type":"document","host":host,
+            "height":document["height"],"state":document["state"],
             "root":document["root"],"rootRevision":document["rootRevision"],
             "lines":lines,"text":text.join("\n")}))
         .map_err(|error| error.to_string())?
     );
     Ok(())
+}
+
+fn view_hex(attempt: &Path) -> Result<String> {
+    let path = attempt.join("view.bin");
+    fs::read(&path)
+        .map(|bytes| hex(&bytes))
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))
+}
+
+/// Render `input` with the Host's `kind` inspection, retained beside `attempt`.
+fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> Result<()> {
+    let input_path = attempt.join(format!("{kind}-input.json"));
+    private_file(
+        &input_path,
+        &serde_json::to_vec(input).map_err(|error| error.to_string())?,
+    )?;
+    let rendered = inspect(
+        &member_path(workspace, "host")?,
+        &member_path(workspace, "config")?,
+        kind,
+        &input_path,
+        &attempt.join(format!("{kind}.json")),
+    )?;
+    print_json(&rendered)
+}
+
+/// Whether a client error is the Host's `at` refusal (its reason travels hex
+/// encoded in the refusal outcome).
+fn history_refused(error: &str) -> bool {
+    let reason = error
+        .split("encoded refusal: ")
+        .nth(1)
+        .map(|rest| {
+            let digits: String = rest.chars().take_while(char::is_ascii_hexdigit).collect();
+            (0..digits.len() / 2)
+                .filter_map(|index| u8::from_str_radix(&digits[2 * index..2 * index + 2], 16).ok())
+                .collect::<Vec<u8>>()
+        })
+        .unwrap_or_default();
+    String::from_utf8_lossy(&reason).contains("history read refused")
+}
+
+/// The heights whose `at` reads render a document's history: for each `since`
+/// entry that wrote `target`, its height and the height below it, ascending.
+fn history_heights(since: &Value, target: &str) -> Result<Vec<u64>> {
+    let entries = since
+        .get("entries")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "since view lacks entries".to_owned())?;
+    let mut heights = Vec::new();
+    for entry in entries {
+        let wrote = entry
+            .get("cells")
+            .and_then(Value::as_array)
+            .is_some_and(|cells| cells.iter().any(|cell| cell.as_str() == Some(target)));
+        if !wrote {
+            continue;
+        }
+        let height: u64 = member(entry, "height")?
+            .parse()
+            .map_err(|_| "since entry height is not a decimal".to_owned())?;
+        if height > 0 {
+            heights.push(height - 1);
+        }
+        heights.push(height);
+    }
+    heights.sort_unstable();
+    heights.dedup();
+    Ok(heights)
+}
+
+/// `doc history NAME`: `since 0` cut to the document, and the `at` reads at
+/// each row's height and the one below it; a height the grant did not cover
+/// contributes no read. The Host renders the rows and their atom changes.
+fn doc_history(root: &Path, workspace: &Value, name: &str) -> Result<()> {
+    let reference = reference(root, name)?;
+    let target = member(&reference, "target")?;
+    let (since, attempt) = doc_query(
+        root,
+        workspace,
+        &reference,
+        "since",
+        Some("0"),
+        "view-since",
+    )?;
+    let mut reads = Vec::new();
+    for height in history_heights(&since, target)? {
+        match doc_query(
+            root,
+            workspace,
+            &reference,
+            "at",
+            Some(&height.to_string()),
+            "view-at",
+        ) {
+            Ok((_, read)) => reads.push(view_hex(&read)?),
+            Err(error) if history_refused(&error) => {
+                eprintln!("doc history: no read at height {height}: {error}");
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let input = json!({"target": target, "since": view_hex(&attempt)?, "at": reads});
+    doc_render(workspace, &attempt, "view-history", &input)
+}
+
+/// `doc diff NAME H1 H2`: the atom changes between the two `at` reads.
+fn doc_diff(root: &Path, workspace: &Value, name: &str, from: &str, to: &str) -> Result<()> {
+    let reference = reference(root, name)?;
+    let (_, left) = doc_query(root, workspace, &reference, "at", Some(from), "view-at")?;
+    let (_, right) = doc_query(root, workspace, &reference, "at", Some(to), "view-at")?;
+    let input = json!({"left": view_hex(&left)?, "right": view_hex(&right)?});
+    doc_render(workspace, &right, "view-diff", &input)
 }
 
 fn signed_authority_root(challenge: &Value) -> Result<&str> {
@@ -2166,11 +2337,6 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             transclude(&root, &workspace, &host, &source, &from, &to, live, &death, at)
         }
-        "doc-show" => {
-            let name = os_string(args.required("name")?, "document name")?;
-            args.finish()?;
-            doc_show(&root, &workspace, &name)
-        }
         "doc-insert" => {
             let name = os_string(args.required("name")?, "document name")?;
             let text = os_string(args.required("text")?, "line text")?;
@@ -2229,8 +2395,29 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             publish_delegation(&root, &proposal_id, &attempt)
         }
+        "doc-show" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            let at = args
+                .optional("at")
+                .map(|value| os_string(value, "height"))
+                .transpose()?;
+            args.finish()?;
+            doc_show(&root, &workspace, &name, at.as_deref())
+        }
+        "doc-history" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            doc_history(&root, &workspace, &name)
+        }
+        "doc-diff" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            let from = os_string(args.required("from")?, "height")?;
+            let to = os_string(args.required("to")?, "height")?;
+            args.finish()?;
+            doc_diff(&root, &workspace, &name, &from, &to)
+        }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, doc-backlinks, doc-links, submit or recover".into(),
+            "workspace action must be init, import, list, describe, read, doc-backlinks, doc-links, doc-show, doc-history, doc-diff, doc-insert, doc-move, doc-remove, transclude, transclusions, follow, submit or recover".into(),
         ),
     }
 }
@@ -2238,6 +2425,30 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doc_history_reads_each_row_and_the_height_below() {
+        let since = json!({"entries":[
+            {"height":"12","cells":["7","9"]},
+            {"height":"13","cells":["9"]},
+            {"height":"15","cells":["7"]},
+            {"height":"16","cells":["7"]}]});
+        assert_eq!(
+            history_heights(&since, "7").unwrap(),
+            vec![11, 12, 14, 15, 16]
+        );
+        assert_eq!(history_heights(&since, "8").unwrap(), Vec::<u64>::new());
+        assert!(history_heights(&json!({}), "7").is_err());
+        let refusal = format!(
+            "mini: host refused query; encoded refusal: 00ff{}",
+            hex(b"history read refused: x")
+        );
+        assert!(history_refused(&refusal));
+        assert!(!history_refused(
+            "mini: host refused query; encoded refusal: 6f62736572766174696f6e"
+        ));
+        assert!(!history_refused("cannot run host"));
+    }
 
     #[test]
     fn untrusted_reference_cannot_escape_scoped_workspace_or_replace_existing_name() {

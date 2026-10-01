@@ -33,6 +33,7 @@ import Kernel.ParticipantKeyEnrollment
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
+import Kernel.DocumentHistory
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -2943,13 +2944,34 @@ private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCo
   | some value => pure value
   | none => failAt path "noncanonical or wrong-family binary input"
 
-/-- The content store inside one signed resource view. -/
-private def contentOfView (path : String) (bytes : List UInt8) :
-    Result ContentResource.ContentStore := do
-  let value ← decoded path NativeObservationController.resourceViewCodec bytes
-  match Minidregg.Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.1 with
-  | some ⟨.content, payload⟩ => pure payload.logical
-  | _ => failAt path "not a content cell"
+/-! ## Documents: one renderer for the current page, a page at a height, and history
+
+Every page is the reader's own signed read of a content cell: a current
+`view-resource` read, or an `at` read, which the Host answers only when the
+reader's grant stood at that height (`NativeObservationController.atCovered`).
+`view-document` renders one page in the kernel's order (`DocumentHistory.lines`,
+whose keys are `ContentResource.documentOrder`) with its transclusions rendered
+against the source reads the reader supplied; `view-diff` and `view-history`
+diff two such pages with `DocumentHistory.diff` over the same line lists, so
+`doc diff`, `doc history` and `doc show [--at H]` cannot disagree on order. -/
+
+/-- One signed page: an `at` read's height, the lifecycle state, the cell root,
+and the content store (empty when the cell is fresh or retired at that height). -/
+private def pageOfView (path : String) (bytes : List UInt8) :
+    Result (Option Nat × String × Option Digest × ContentResource.ContentStore) := do
+  match NativeObservationController.resourceViewCodec.decode bytes with
+  | some value =>
+      match Minidregg.Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.1 with
+      | some ⟨.content, payload⟩ => pure (none, "live", some payload.root, payload.logical)
+      | _ => failAt path "not a content cell"
+  | none =>
+      let (height, lifecycle) ← decoded path NativeObservationController.atViewCodec bytes
+      match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
+      | some .fresh => pure (some height, "fresh", none, ContentResource.initialStore)
+      | some .retired => pure (some height, "retired", none, ContentResource.initialStore)
+      | some (.live ⟨.content, payload⟩) => pure (some height, "live", some payload.root, payload.logical)
+      | some (.live _) => failAt path "not a content cell"
+      | none => failAt path "noncanonical lifecycle bytes"
 
 private def transclusionViewJson : ContentResource.TransclusionView → Lean.Json
   | .unavailable atoms source => .mkObj [("view", "unavailable"), ("atoms", decimal atoms),
@@ -2961,66 +2983,85 @@ private def transclusionViewJson : ContentResource.TransclusionView → Lean.Jso
   | .invalidated => .mkObj [("view", "invalidated")]
   | .unresolved => .mkObj [("view", "unresolved")]
 
-/-- The content store inside one signed `at`-height read. -/
-private def contentOfAtView (path : String) (bytes : List UInt8) :
-    Result ContentResource.ContentStore := do
-  let (_, lifecycle) ← decoded path NativeObservationController.atViewCodec bytes
-  match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
-  | some (.live ⟨.content, payload⟩) => pure payload.logical
-  | _ => failAt path "not a live content cell at that height"
+/-- A content cell holds one document (`ContentLaw`); a view does not carry the
+cell's identifier, so the document is the one record of `documents`. -/
+private def documentOf? (store : ContentResource.ContentStore) : Option Hyperdocument.DocumentId :=
+  (StoreCodec.entries HyperdocumentCell.contentWire store).findSome? fun entry =>
+    match entry with
+    | ⟨⟨.documents, identifier⟩, _⟩ => some identifier
+    | _ => none
 
-/-- One element of the document order: its place (parent) and what stands
-there — a line's atom (bytes, revision, struck or not), a transclusion's embed,
-or a section. -/
+/-- The page's lines: `DocumentHistory.lines`, the kernel's document order. -/
+private def pageLines (store : ContentResource.ContentStore) :
+    List (Hyperdocument.ElementId × DocumentHistory.Line) :=
+  match documentOf? store with
+  | some document => DocumentHistory.lines store document
+  | none => []
+
+/-- What stands at one place: a line's atom (bytes, revision, author, struck or
+not), a transclusion's embed, or a section (the revision of its children's
+positions). -/
+private def lineValueJson : DocumentHistory.Line → List (String × Lean.Json)
+  | .atom atom (some record) => [("kind", .str "atom"), ("atom", decimal atom.digest.value),
+      ("payload", hexJson record.payload), ("revision", decimal record.revision.digest.value),
+      ("createdBy", principalJson record.createdBy), ("struck", .bool record.tombstonedAt.isSome)]
+  | .atom atom none => [("kind", .str "atom"), ("atom", decimal atom.digest.value), ("payload", .null)]
+  | .embed transclusion => [("kind", .str "embed"), ("transclusion", decimal transclusion.digest.value)]
+  | .section revision => [("kind", .str "container"), ("revision", decimal revision.digest.value)]
+  | .runs => [("kind", .str "runs")]
+  | .opaque => [("kind", .str "opaque")]
+  | .missing => [("kind", .str "missing")]
+
+/-- One element of the document order: its place (parent) and its line. -/
 private def orderEntryJson (store : ContentResource.ContentStore)
-    (element : Hyperdocument.ElementId) : Lean.Json :=
-  let place : List (String × Lean.Json) := [("element", decimal element.digest.value),
+    (row : Hyperdocument.ElementId × DocumentHistory.Line) : Lean.Json :=
+  let element := row.1
+  .mkObj <| [("element", decimal element.digest.value),
     ("parent", match ContentResource.parentOf store element with
       | some parent => decimal parent.digest.value
-      | none => .null)]
-  match ContentResource.elementAt store element with
-  | none => .mkObj (place ++ [("kind", .str "missing")])
-  | some record =>
-      match record.body with
-      | .atom atom =>
-          let line : List (String × Lean.Json) :=
-            match Hyperdocument.lookup store .atoms atom with
-            | some atomRecord => [("payload", hexJson atomRecord.payload),
-                ("revision", decimal atomRecord.revision.digest.value),
-                ("struck", .bool atomRecord.tombstonedAt.isSome)]
-            | none => [("payload", .null)]
-          .mkObj (place ++ [("kind", .str "atom"), ("atom", decimal atom.digest.value)] ++ line)
-      | .embed transclusion => .mkObj (place ++ [("kind", .str "embed"),
-          ("transclusion", decimal transclusion.digest.value)])
-      | .container children => .mkObj (place ++ [("kind", .str "container"),
-          ("revision", decimal record.revision.digest.value), ("children", decimal children.length)])
-      | .runs _ => .mkObj (place ++ [("kind", .str "runs")])
-      | .opaque _ _ => .mkObj (place ++ [("kind", .str "opaque")])
+      | none => .null)] ++ lineValueJson row.2 ++
+    match row.2 with
+    | .section _ => [("children", decimal (ContentResource.childrenOf store element).length)]
+    | _ => []
 
-/-- `view-document`: the host document in the kernel's order
-(`ContentResource.documentOrder`, the pre-order walk of its element tree), and
-every transclusion record of the host view rendered by
-`ContentResource.renderTransclusion` against the source views the reader
-itself obtained.  Input: `{"host": HEX, "sources": [{"target": DEC, "view": HEX}
-| {"target": DEC, "at": HEX}]}`: a signed `view-resource` binary, or a signed
-`view-at` binary of the source at a past height.  A transclusion whose source
-cell has no supplied view renders `unavailable`, with its shape only. -/
-private def documentJson (bytes : List UInt8) : Result Lean.Json := do
+private def pageJson (page : Option Nat × String × Option Digest × ContentResource.ContentStore) :
+    List (String × Lean.Json) :=
+  let store := page.2.2.2
+  let root := (documentOf? store).bind (ContentResource.rootOf store)
+  [("height", (page.1.map decimal).getD .null), ("state", .str page.2.1),
+    ("cellRoot", (page.2.2.1.map fun root => decimal root.value).getD .null),
+    ("root", (root.map fun element => decimal element.digest.value).getD .null),
+    ("rootRevision", match root.bind (ContentResource.elementAt store) with
+      | some record => decimal record.revision.digest.value
+      | none => .null),
+    ("order", .arr <| (pageLines store).toArray.map (orderEntryJson store))]
+
+private def jsonInput (kind : String) (bytes : List UInt8) : Result Lean.Json := do
   let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with
-    | some text => pure text | none => failAt "view-document" "input is not UTF-8"
-  let json ← match Lean.Json.parse text with
-    | .ok json => pure json | .error message => failAt "view-document" message
-  let obj ← exactObject "$" ["host", "sources"] json
-  let host ← contentOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
+    | some text => pure text | none => failAt kind "input is not UTF-8"
+  match Lean.Json.parse text with
+  | .ok json => pure json | .error message => failAt kind message
+
+/-- `view-document`: one page of the host document (`host`: a signed
+`view-resource` binary, or a signed `view-at` binary of the host at a past
+height) in the kernel's order, and every transclusion record of that page
+rendered by `ContentResource.renderTransclusion` against the source pages the
+reader itself obtained (`sources: [{"target": DEC, "view": HEX} | {"target":
+DEC, "at": HEX}]`). A transclusion whose source has no supplied live page
+renders `unavailable`, with its shape only. -/
+private def documentJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["host", "sources"] (← jsonInput "view-document" bytes)
+  let page ← pageOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
+  let host := page.2.2.2
   let sources ← list "$.sources" (fun path entry => do
       let atHeight := (entry.getObjVal? "at").toOption.isSome
-      let source ← exactObject path ["target", if atHeight then "at" else "view"] entry
+      let key := if atHeight then "at" else "view"
+      let source ← exactObject path ["target", key] entry
       let target ← nat (path ++ ".target") (← field path "target" source)
-      let store ← if atHeight then
-          contentOfAtView (path ++ ".at") (← decodeHex (path ++ ".at") (← field path "at" source))
-        else
-          contentOfView (path ++ ".view") (← decodeHex (path ++ ".view") (← field path "view" source))
-      pure (target, store)) (← field "$" "sources" obj)
+      let read ← pageOfView (path ++ "." ++ key) (← decodeHex (path ++ "." ++ key) (← field path key source))
+      unless read.2.1 = "live" do
+        failAt (path ++ "." ++ key) "not a live content cell at that height"
+      pure (target, read.2.2.2)) (← field "$" "sources" obj)
   let rendered := (StoreCodec.entries HyperdocumentCell.contentWire host).filterMap fun entry =>
     match entry with
     | ⟨⟨.transclusions, identifier⟩, record⟩ =>
@@ -3035,26 +3076,61 @@ private def documentJson (bytes : List UInt8) : Result Lean.Json := do
                 ("render", transclusionViewJson
                   (ContentResource.renderTransclusion source opening record.reference.mode))]
     | _ => none
-  -- A content cell holds one document (`ContentLaw`); a view does not carry the
-  -- cell's identifier, so the document is the one record of `documents`.
-  let document? : Option Hyperdocument.DocumentId :=
-    (StoreCodec.entries HyperdocumentCell.contentWire host).findSome? fun entry =>
-      match entry with
-      | ⟨⟨.documents, identifier⟩, _⟩ => some identifier
-      | _ => none
-  let root := document?.bind (ContentResource.rootOf host)
-  let order := match document? with
-    | some document => ContentResource.documentOrder host document
-    | none => []
-  pure <| .mkObj [("type", "document"),
-    ("root", match root with
-      | some element => decimal element.digest.value
-      | none => .null),
-    ("rootRevision", match root.bind (ContentResource.elementAt host) with
-      | some record => decimal record.revision.digest.value
-      | none => .null),
-    ("order", .arr <| order.toArray.map (orderEntryJson host)),
-    ("transclusions", .arr rendered.toArray)]
+  pure <| .mkObj ([("type", Lean.Json.str "document")] ++ pageJson page ++
+    [("transclusions", .arr rendered.toArray)])
+
+private def changeJson :
+    DocumentHistory.Change Hyperdocument.ElementId DocumentHistory.Line → Lean.Json
+  | .added element after => .mkObj [("type", "added"), ("element", decimal element.digest.value),
+      ("after", .mkObj (lineValueJson after))]
+  | .removed element before => .mkObj [("type", "removed"), ("element", decimal element.digest.value),
+      ("before", .mkObj (lineValueJson before))]
+  | .changed element before after => .mkObj [("type", "changed"),
+      ("element", decimal element.digest.value),
+      ("before", .mkObj (lineValueJson before)), ("after", .mkObj (lineValueJson after))]
+  | .moved element before after => .mkObj [("type", "moved"),
+      ("element", decimal element.digest.value),
+      ("before", (before.map fun other => decimal other.digest.value).getD .null),
+      ("after", (after.map fun other => decimal other.digest.value).getD .null)]
+
+private def pageDiff (left right : ContentResource.ContentStore) : Lean.Json :=
+  .arr ((DocumentHistory.diff (pageLines left) (pageLines right)).map changeJson).toArray
+
+/-- `view-diff`: `{"left": HEX, "right": HEX}`, each a signed page; the changes
+from left to right (`DocumentHistory.diff` over the two pages' lines). -/
+private def diffJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["left", "right"] (← jsonInput "view-diff" bytes)
+  let left ← pageOfView "$.left" (← decodeHex "$.left" (← field "$" "left" obj))
+  let right ← pageOfView "$.right" (← decodeHex "$.right" (← field "$" "right" obj))
+  pure <| .mkObj [("type", "diff"), ("from", .mkObj (pageJson left)), ("to", .mkObj (pageJson right)),
+    ("changes", pageDiff left.2.2.2 right.2.2.2)]
+
+/-- `view-history`: `{"target": DEC, "since": HEX, "at": [HEX]}` — a signed
+`since` read and the signed `at` reads the reader obtained. One row per
+`historyOf target` entry; `before`/`after` are the `at` reads at the row's
+height minus one and at its height, when the reader's grant covered them. -/
+private def historyJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["target", "since", "at"] (← jsonInput "view-history" bytes)
+  let target ← nat "$.target" (← field "$" "target" obj)
+  let entries ← decoded "$.since" NativeObservationController.sinceViewCodec
+    (← decodeHex "$.since" (← field "$" "since" obj))
+  let pages ← list "$.at" (fun path entry => do
+      let page ← pageOfView path (← decodeHex path entry)
+      match page.1 with
+      | some height => pure (height, page)
+      | none => failAt path "not an at read") (← field "$" "at" obj)
+  let pageAt := fun (height : Nat) => (pages.find? (·.1 = height)).map Prod.snd
+  let rows := (NativeObservationController.historyOf target entries).map fun entry =>
+    let before := if entry.height = 0 then none else pageAt (entry.height - 1)
+    let after := pageAt entry.height
+    .mkObj ([("height", decimal entry.height), ("subject", (entry.subject.map decimal).getD .null),
+      ("transaction", decimal entry.transaction),
+      ("before", (before.map fun page => Lean.Json.mkObj (pageJson page)).getD .null),
+      ("after", (after.map fun page => Lean.Json.mkObj (pageJson page)).getD .null)] ++
+      match before, after with
+      | some left, some right => [("changes", pageDiff left.2.2.2 right.2.2.2)]
+      | _, _ => [("changes", .null)])
+  pure <| .mkObj [("type", "history"), ("target", decimal target), ("rows", .arr rows.toArray)]
 
 private def launchPhysicalReportJson
     (report : ApplicationLifecycleCompletionV2Report.Report) : Result Lean.Json := do
@@ -3227,6 +3303,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let value ← decoded "view-resource" NativeObservationController.resourceViewCodec bytes
       resourceJson value
   | "view-document" => documentJson bytes
+  | "view-diff" => diffJson bytes
+  | "view-history" => historyJson bytes
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"
@@ -3278,6 +3356,6 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-document, view-policy, view-capability, view-who, view-since, view-at, view-backlinks, or view-links"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-document, view-policy, view-capability, view-who, view-since, view-at, view-backlinks, view-links, view-diff, or view-history"
 
 end Minidregg.Host.Json
