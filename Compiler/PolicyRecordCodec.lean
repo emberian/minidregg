@@ -47,6 +47,7 @@ inductive Token where
   | writeOnce (slot : String)
   | monotone (slot : String)
   | witnessed (identifier : String)
+  | ran (program : Nat)
   | not
   | all
   | any
@@ -69,6 +70,7 @@ def encodeToken : Token → List UInt8
   | .any => [8]
   | .nil => [9]
   | .cons => [10]
+  | .ran program => 14 :: StreamCodec.nat.encode program
 
 def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 0 :: bytes => do
@@ -94,6 +96,9 @@ def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 8 :: suffix => some (.any, suffix)
   | 9 :: suffix => some (.nil, suffix)
   | 10 :: suffix => some (.cons, suffix)
+  | 14 :: bytes => do
+      let (program, suffix) ← StreamCodec.nat.decodePrefix bytes
+      some (.ran program, suffix)
   | _ => none
 
 theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
@@ -115,6 +120,7 @@ def step : Token → Stack → Option Stack
   | .writeOnce slot, stack => some (.inl (.writeOnce slot) :: stack)
   | .monotone slot, stack => some (.inl (.monotone slot) :: stack)
   | .witnessed identifier, stack => some (.inl (.witnessed ⟨identifier⟩) :: stack)
+  | .ran program, stack => some (.inl (.ran program) :: stack)
   | .not, .inl predicate :: stack => some (.inl (.not predicate) :: stack)
   | .all, .inr predicates :: stack => some (.inl (.allL predicates) :: stack)
   | .any, .inr predicates :: stack => some (.inl (.anyL predicates) :: stack)
@@ -138,6 +144,7 @@ def tokensInto : Pred → List Token → List Token
   | .writeOnce slot, suffix => .writeOnce slot :: suffix
   | .monotone slot, suffix => .monotone slot :: suffix
   | .witnessed vk, suffix => .witnessed vk.id :: suffix
+  | .ran program, suffix => .ran program :: suffix
   | .not predicate, suffix => tokensInto predicate (.not :: suffix)
   | .allL predicates, suffix => listTokensInto predicates (.all :: suffix)
   | .anyL predicates, suffix => listTokensInto predicates (.any :: suffix)
@@ -159,6 +166,7 @@ theorem runTokens_tokensInto (predicate : Pred) (suffix : List Token) (stack : S
   | writeOnce slot => rfl
   | monotone slot => rfl
   | witnessed vk => cases vk; rfl
+  | ran program => rfl
   | not predicate =>
       rw [tokensInto, runTokens_tokensInto]
       rfl

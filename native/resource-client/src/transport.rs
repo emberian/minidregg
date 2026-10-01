@@ -85,8 +85,9 @@ fn request_from_envelope<'a>(
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
         [0..=11, ..] => true,
-        // NOCK K-NOCK-CELL: read-only program check / show / sample.
-        [117..=119, ..] => true,
+        // NOCK K-NOCK-CELL / K-RAN: read-only program check / show / sample /
+        // run dry run (op 120 reads no target cell: values are the caller's).
+        [117..=120, ..] => true,
         [12 | 14] => true,
         [13 | 15, digits @ ..] => {
             !digits.is_empty()
@@ -1074,7 +1075,8 @@ mod tests {
         assert!(allowed_operation(&[117, 0, 0, 0, 0], false));
         assert!(allowed_operation(&[118, b'7'], false));
         assert!(allowed_operation(&[119, b'{', b'}'], false));
-        assert!(!allowed_operation(&[120, b'{', b'}'], false));
+        assert!(allowed_operation(&[120, b'{', b'}'], false));
+        assert!(!allowed_operation(&[121, b'{', b'}'], false));
     }
 
     #[test]

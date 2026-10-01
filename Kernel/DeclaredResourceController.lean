@@ -119,16 +119,6 @@ def prepareTuple (prepared : PreparedInvocation deployment profile ambient durab
 
 abbrev bytesSlots := ResourceAuthorityProjection.bytesSlots
 
-/-- Exact scalar/content projection from the committed old and candidate final
-states. Local names remain convenient; joint names expose every declared
-participant without granting a view of unrelated cells. -/
-def targetProjection (target : Target) (before after : Store target.layout) : List (String × Int) := by
-  cases target with
-  | mk kind id capability version root payload observe =>
-    cases payload with
-    | scalar _ => exact DeclaredResourceProjection.project id before after
-    | content content => exact ContentResource.project before after content
-
 def incidenceTarget (command : Command) : Incidence command → Target
   | some i => command.targets[i]
   | none => command.first
@@ -153,6 +143,16 @@ def readRequest (prepared : PreparedInvocation deployment profile ambient durabl
 def firstIndex (prepared : PreparedInvocation deployment profile ambient durable command) : TargetIndex command :=
   ⟨0, List.length_pos_iff.mpr prepared.nonempty⟩
 
+/-- The controller's run slots (the reserved `run/` namespace): the checked
+program's `ranSlot` (read by `Pred.ran`), the oracle's step count and the ABI
+fuel. Absent unless the command's claim was re-executed and accepted. -/
+def runSlots : Option CheckedRun → List (String × Int)
+  | none => []
+  | some checked =>
+      [(Minidregg.Pred.ranSlot checked.claim.programId.value, 1),
+       ("run/steps", Int.ofNat checked.verdict.steps),
+       ("run/fuel", Int.ofNat checked.fuel)]
+
 /- These slots depend on the admitted tuple and incidence, but not on which
 old/new logical state the policy examines. Derive them here once per step;
 the caller cannot inject an independent request or command projection. -/
@@ -164,7 +164,8 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
     | none => prepared.authority.snapshot.cell.root
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
-    bytesSlots "command/bytes" 0 (commandCodec.encode source.val)
+    bytesSlots "command/bytes" 0 (commandCodec.encode source.val) ++
+    runSlots prepared.run
 
 def projectWithCommon (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (common : List (String × Int))
@@ -649,7 +650,8 @@ def sourceChargeFrom (prepared : PreparedInvocation deployment profile ambient d
   | .turnBytes => (signedBytes prepared.authority.snapshot.domain profile.semantics signed).length
   | .memoryTouches => ws.length + guards.length
   | .storageBytes => (ws.map fun write => write.canonicalPostBytes.length).sum
-  | .feeDebit | .witnessBytes | .proofWork | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
+  | .proofWork => (prepared.run.map fun checked => checked.verdict.steps).getD 0
+  | .feeDebit | .witnessBytes | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
 def sourceCharge (prepared : PreparedInvocation deployment profile ambient durable command)
     (signed : SignedCommand) : ResourceCost.Charge :=

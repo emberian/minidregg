@@ -151,7 +151,7 @@ def outboxCommand (domain semantics : Digest) (report : Report) :
     outboxNonce domain semantics report.prepared,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (outboxAtom domain semantics report.prepared)
-        (.inlineObject ⟨10⟩) (preparedCodec.encode report.prepared)]⟩, none⟩]⟩
+        (.inlineObject ⟨10⟩) (preparedCodec.encode report.prepared)]⟩, none⟩], none⟩
 
 theorem outboxCommand_exact_action (domain semantics : Digest) (report : Report) :
     (outboxCommand domain semantics report).targets =

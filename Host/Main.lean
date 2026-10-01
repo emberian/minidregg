@@ -41,7 +41,10 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 117=Nock program check (pair: minimal jam bytes, ABI JSON) -> JSON verdict and the
 canonical DREGG/NOCK/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
 118=Nock program show (decimal programId) -> JSON, 119=Nock sample (JSON request)
--> JSON with the kernel's canonical sample jam. 117-119 only read the Store.
+-> JSON with the kernel's canonical sample jam, 120=Nock run dry run (JSON
+{programId, caller, room, targets, values}) -> JSON with the kernel's sample at
+the Host's logical height, the oracle's verdict, Lean steps, output and decoded
+writes. 117-120 only read the Store.
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -5246,6 +5249,19 @@ def run (arguments : List String) : IO UInt32 := do
                               pinnedConfig.deployment.domain directory programId ctx targets values
                             return ((119 : UInt8),
                               (Minidregg.Host.Json.nockSampleJson verdict).compress.toUTF8.toList)
+                        | 120 =>
+                            let some source := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "nock run request is not UTF-8")
+                            let (programId, caller, room, targets, values) ← IO.ofExcept
+                              (Minidregg.Host.Json.nockRunRequest source)
+                            let opened ← sessionOpened pinnedConfig state
+                            let height := NativeHost.logicalHeight pinnedConfig opened.durable
+                            let directory ← nockDirectory pinnedConfig state
+                            let verdict := Minidregg.Kernel.NockRun.dryRun
+                              pinnedConfig.deployment.domain directory programId
+                              ⟨height, caller, room⟩ targets values
+                            return ((120 : UInt8), (Minidregg.Host.Json.nockRunJson programId height
+                              verdict).compress.toUTF8.toList)
                         | 91 =>
                             unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth request exceeds host frame bound")

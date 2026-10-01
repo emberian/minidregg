@@ -16,6 +16,9 @@ under negation and disjunction:
 * `le`/`monotone`: the forced order gadget from `PredOrderGadget`, selected by an
   explicit scalar width. Missing operands force false and impose no unused range.
 * `witnessed`: the first-party false indicator; negation composes faithfully.
+* `ran program`: exactly the `eq (ranSlot program) 1` gadget. Re-execution is a
+  controller fact (`Kernel.NockRun`); the circuit reads the slot the controller
+  projects after the check, it does not re-run Nock.
 * `not`/`all`/`any`: the same indicator algebra and child-prefix renaming.
 
 The general refinement quantifies over every auxiliary assignment for soundness
@@ -501,6 +504,9 @@ def lowerA (profile : CompilerProfile) : Pred → Term (AirSig F Wire) × Constr
              (.aux [] 0) (orderBits width))
   | .witnessed _ =>
       (cst 0, [])        -- first-party fail-closed: the indicator is constant 0
+  | .ran program =>
+      (mul' (vr (.pres true (Minidregg.Pred.ranSlot program))) (vr (.aux [] 0)),
+       isZero (eqD (Minidregg.Pred.ranSlot program) 1) (.aux [] 0) (.aux [] 1))
   | .not p =>
       let l := lowerA profile p
       (notT l.1, l.2)
@@ -536,6 +542,7 @@ def supported (profile : CompilerProfile) : Pred → Bool
   | .writeOnce _  => true
   | .monotone _   => match profile.order with | .disabled => false | .scalar _ => true
   | .witnessed _  => true
+  | .ran _        => true
   | .not p        => supported profile p
   | .allL ps      => supportedL profile ps
   | .anyL ps      => supportedL profile ps
@@ -554,6 +561,7 @@ def lits : Pred → List ℤ
   | .writeOnce _  => []
   | .monotone _   => []
   | .witnessed _  => []
+  | .ran _        => [1]
   | .not p        => lits p
   | .allL ps      => litsL ps
   | .anyL ps      => litsL ps
@@ -593,6 +601,8 @@ def wit (profile : CompilerProfile) : Pred → State → State → List ℕ → 
       | .scalar width => orderAux width
           ((old.get s).isSome && (new.get s).isSome) (intOf old s) (intOf new s) k
   | .witnessed _  => fun _ _ _ _ => 0
+  | .ran program  => fun _ new _ k =>
+      auxPair (valOf new (Minidregg.Pred.ranSlot program) - ((1 : Int) : F)) k
   | .not p        => wit profile p
   | .allL ps      => witL profile ps 0
   | .anyL ps      => witL profile ps 0
@@ -673,17 +683,12 @@ variable [DecidableEq F]
 
 -- (the mutual block generalizes section variables jointly; the linter's per-theorem
 -- "unused [DecidableEq F]" on `lowerL_forced profile hprofile` is a mutual-block artifact)
-set_option linter.unusedSectionVars false in
-mutual
-theorem lowerA_forced (profile : CompilerProfile)
-    (hprofile : profile.Admissible F) :
-    ∀ (p : Pred) (old new : State) (A : List ℕ → ℕ → F),
-      castInjOn F (intsOf p old new) → supported profile p = true →
-      inputsInRange profile p old new = true →
-      systemAccepts (stepAsg old new A) (lowerA profile p).2 →
-      eval (stepAsg old new A) (lowerA profile p).1
-        = if Minidregg.Pred.eval p old new = true then 1 else 0
-  | .eq s v, old, new, A, hinj, _, _, h => by
+/-- The `eq` gadget's forcing (shared by `eq` and `ran`, which lowers to it). -/
+theorem lowerA_forced_eq (profile : CompilerProfile) (s : Slot) (v : ℤ) (old new : State)
+    (A : List ℕ → ℕ → F) (hinj : castInjOn F (intsOf (.eq s v) old new))
+    (h : systemAccepts (stepAsg old new A) (lowerA profile (.eq s v)).2) :
+    eval (stepAsg old new A) (lowerA profile (.eq s v)).1
+      = if Minidregg.Pred.eval (.eq s v) old new = true then 1 else 0 := by
     simp only [lowerA] at h ⊢
     have hb := isZero_forced h
     simp only [eval_mul', eval_vr, hb, eval_eqD]
@@ -702,6 +707,20 @@ theorem lowerA_forced (profile : CompilerProfile)
       · have : ¬((x : F) - (v : F) = 0) := fun hc =>
           hxv (hinj x hx v hv (sub_eq_zero.mp hc))
         simp [hxv, this]
+
+set_option linter.unusedSectionVars false in
+mutual
+theorem lowerA_forced (profile : CompilerProfile)
+    (hprofile : profile.Admissible F) :
+    ∀ (p : Pred) (old new : State) (A : List ℕ → ℕ → F),
+      castInjOn F (intsOf p old new) → supported profile p = true →
+      inputsInRange profile p old new = true →
+      systemAccepts (stepAsg old new A) (lowerA profile p).2 →
+      eval (stepAsg old new A) (lowerA profile p).1
+        = if Minidregg.Pred.eval p old new = true then 1 else 0
+  | .eq s v, old, new, A, hinj, _, _, h => lowerA_forced_eq profile s v old new A hinj h
+  | .ran program, old, new, A, hinj, _, _, h =>
+    lowerA_forced_eq profile (Minidregg.Pred.ranSlot program) 1 old new A hinj h
   | .le s v, old, new, A, _, hsup, hrange, h => by
     cases hmode : profile.order with
     | disabled => simp [supported, hmode] at hsup
@@ -874,18 +893,31 @@ witness namespaces paste without any scoping side-conditions. -/
 section DecEqF
 variable [DecidableEq F]
 
-mutual
-theorem lowerA_complete (profile : CompilerProfile) :
-    ∀ (p : Pred) (old new : State), supported profile p = true →
-      inputsInRange profile p old new = true →
-      systemAccepts (stepAsg old new (wit profile (F := F) p old new)) (lowerA profile p).2
-  | .eq s v, old, new, _, _ => by
+/-- `ran program` compiles to exactly the `eq (ranSlot program) 1` system: the
+circuit reads the controller's run slot; it does not re-run Nock. -/
+theorem lowerA_ran_eq (profile : CompilerProfile) (program : Nat) :
+    lowerA (F := F) profile (.ran program) = lowerA profile (.eq (Minidregg.Pred.ranSlot program) 1) :=
+  rfl
+
+/-- The `eq` gadget's completeness (shared by `eq` and `ran`). -/
+theorem lowerA_complete_eq (profile : CompilerProfile) (s : Slot) (v : ℤ) (old new : State) :
+    systemAccepts (stepAsg old new (wit profile (F := F) (.eq s v) old new))
+      (lowerA profile (.eq s v)).2 := by
     simp only [lowerA]
     apply isZero_complete
     · show auxPair (valOf new s - (v : F)) 0 = _
       rw [eval_eqD]; simp [auxPair]
     · show auxPair (valOf new s - (v : F)) 1 = _
       rw [eval_eqD]; simp [auxPair]
+
+mutual
+theorem lowerA_complete (profile : CompilerProfile) :
+    ∀ (p : Pred) (old new : State), supported profile p = true →
+      inputsInRange profile p old new = true →
+      systemAccepts (stepAsg old new (wit profile (F := F) p old new)) (lowerA profile p).2
+  | .eq s v, old, new, _, _ => lowerA_complete_eq profile s v old new
+  | .ran program, old, new, _, _ =>
+    lowerA_complete_eq profile (Minidregg.Pred.ranSlot program) 1 old new
   | .le s v, old, new, hsup, hrange => by
     cases hmode : profile.order with
     | disabled => simp [supported, hmode] at hsup
@@ -1224,3 +1256,10 @@ views must expand through the same source AST and compiler. The output remains a
 -/
 
 end Minidregg.Compiler
+
+/-- info: 'Minidregg.Compiler.lowerA_forced_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.lowerA_forced_eq
+/-- info: 'Minidregg.Compiler.lowerA_complete_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.lowerA_complete_eq
+/-- info: 'Minidregg.Compiler.lowerA_ran_eq' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.lowerA_ran_eq

@@ -619,9 +619,30 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
     let intent = match member(&request, "action")? {
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
-            if obj.len() != 3 || !obj.contains_key("targets") {
-                return Err("invoke proposal may contain only type, action, targets".into());
+            let claimed = obj.contains_key("run");
+            if obj.len() != 3 + usize::from(claimed) || !obj.contains_key("targets") {
+                return Err("invoke proposal may contain only type, action, targets, run".into());
             }
+            // K-RAN: a Nock run claim rides inside the signed command; the Host
+            // parses it exactly (programId, sample, output, steps) and re-executes.
+            let run = match request.get("run") {
+                None => None,
+                Some(claim) => {
+                    let fields = claim.as_object().ok_or("run claim must be an object")?;
+                    if fields.len() != 4 {
+                        return Err("run claim may contain only programId, sample, output, steps".into());
+                    }
+                    field_decimal(member(claim, "programId")?, "run programId")?;
+                    field_decimal(member(claim, "steps")?, "run steps")?;
+                    for key in ["sample", "output"] {
+                        let hex = member(claim, key)?;
+                        if hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                            return Err("run claim jams must be hex".into());
+                        }
+                    }
+                    Some(claim.clone())
+                }
+            };
             let selected = request
                 .get("targets")
                 .and_then(Value::as_array)
@@ -683,10 +704,14 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                     "expectedTargetRoot":root_value,"payload":lowered}));
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
+            let mut command = json!({"subject":member(workspace,"subject")?,
+                "nonce":random_nonce()?,"targets":target_rows});
+            if let Some(claim) = run {
+                command["run"] = claim;
+            }
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
-                "purpose":{"type":"prepare","draft":{"type":"invoke",
-                    "command":{"subject":member(workspace,"subject")?,
-                    "nonce":random_nonce()?,"targets":target_rows}}},"grants":grants})
+                "purpose":{"type":"prepare","draft":{"type":"invoke","command":command}},
+                "grants":grants})
         }
         "install-policy" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
