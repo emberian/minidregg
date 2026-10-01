@@ -105,3 +105,8 @@ name = "Deployed"
 
 [[lean_lib]]
 name = "AxiomCensusResearch"
+
+# HOST-KECCAK: throughput of the compiled cSHAKE256/KMAC256 (Host.CshakeBench). Not part of the umbrella gate.
+[[lean_exe]]
+name = "cshake-bench"
+root = "Host.CshakeBench"

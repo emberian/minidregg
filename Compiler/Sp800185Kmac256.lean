@@ -8,7 +8,8 @@ NIST SP 800-185 KMAC256 with a 256-bit output:
 
 The permutation, padding and `bytepad`/`encode_string` framing are the ones
 `Sp800185Cshake256Core` already exports; this module adds `right_encode`, the
-function-name field, and nothing else.  It is the host's checkpoint and log
+function-name field, and the byte-array fast path proved equal to it
+(`kmac256Fast_eq`, attached with `@[csimp]`).  It is the host's checkpoint and log
 authenticator (`Compiler.DurableCheckpointCodec`).  No unforgeability theorem
 is stated here: KMAC's PRF security is the standard's, not a Lean proof.
 
@@ -40,7 +41,32 @@ theorem kmac256Bytes_length (key customization input : List UInt8) :
     (kmac256Bytes key customization input).length = 32 := by
   simp [kmac256Bytes, squeeze32, outputBytes]
 
-/-! ## Conformance against an independent implementation -/
+/-! ## The compiled path -/
+
+open Fast in
+/-- KMAC256 on the fast path: the key block, the input and the length suffix are
+pushed once into a byte array and absorbed by the word permutation. -/
+def kmac256Fast (key customization input : List UInt8) : List UInt8 :=
+  spongeBytes (pushList (pushList (pushList (pushList ByteArray.empty (kmacPrefix customization))
+    (bytepad (encodeString key) rateBytes)) input) (rightEncode 256)) 0x04
+
+open Fast in
+/-- **KMAC refinement**: for every key, customization and message, the fast
+path is `kmac256Bytes`. -/
+theorem kmac256Fast_eq (key customization input : List UInt8) :
+    kmac256Fast key customization input = kmac256Bytes key customization input := by
+  simp only [kmac256Fast, kmac256Bytes, sponge_fast_eq, pushList_data, empty_data,
+    List.nil_append, List.append_assoc]
+
+/-- The compiled Host's KMAC256 is the fast path. -/
+@[csimp] theorem kmac256Bytes_eq_fast : kmac256Bytes = kmac256Fast := by
+  funext key customization input
+  exact (kmac256Fast_eq key customization input).symm
+
+/-! ## Conformance against an independent implementation
+
+The `native_decide` vectors below are compiled after `kmac256Bytes_eq_fast`,
+so they evaluate the fast path. -/
 
 def kmacVectorKey : List UInt8 := (List.range 32).map fun i => UInt8.ofNat (0x40 + i)
 
@@ -72,11 +98,15 @@ theorem kmac256_key_separates :
 
 end Minidregg.Compiler.Sp800185Cshake256
 
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_length' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_length
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged' depends on axioms: [propext, Classical.choice, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Fast_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Fast_eq
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_eq_fast' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_eq_fast
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization' depends on axioms: [propext, Classical.choice, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates' depends on axioms: [propext, Classical.choice, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates
