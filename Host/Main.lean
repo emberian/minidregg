@@ -5320,7 +5320,11 @@ def run (arguments : List String) : IO UInt32 := do
                         | 115 =>
                             let opened ← sessionOpened pinnedConfig state
                             let outcome ← NativeHost.payRefillSubmitLoaded pinnedConfig opened payload
-                            return ((115 : UInt8), outcomeCodec.encode outcome)
+                            -- A refill is a friend's blind submission, like op 105: its
+                            -- refusal (notOwner, bookRefused, ...) is the uniform
+                            -- `undisclosed` frame (MR's rule).
+                            return ((115 : UInt8),
+                              outcomeCodec.encode (NativeHost.publicSubmissionOutcome outcome))
                         | 116 =>
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payRefillLookupLoaded pinnedConfig opened payload

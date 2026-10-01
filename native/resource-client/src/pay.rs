@@ -64,10 +64,6 @@ const PER_OBSERVATION: [&str; 10] = [
     "observationAfterTip",
     "bookAdmission",
 ];
-/// Fields the watcher emits that the v1 observation codec (`DREGG/PAY/OBSERVATION/v1`) does
-/// not carry. They are retained in the attempt's `records.json`; OBSERVATION/v2 (lane P3b-1)
-/// carries them into the report.
-const V2_ONLY_FIELDS: [&str; 2] = ["memo", "memoError"];
 
 #[derive(Clone, Copy)]
 struct Ops {
@@ -309,8 +305,14 @@ fn answer(outcome: Value) -> Answer {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
+            // A blind submission (op 105, MR's rule) answers the uniform `undisclosed`
+            // frame; the Host's reason field says so and nothing else is named.
+            let reason = match outcome.get("reason").and_then(Value::as_str) {
+                Some("undisclosed") => Some("undisclosed".to_owned()),
+                _ => refusal_reason(&phase, &detail),
+            };
             Answer::Refused {
-                reason: refusal_reason(&phase, &detail),
+                reason,
                 phase,
                 detail,
             }
@@ -856,15 +858,10 @@ impl Record {
         format!("{}.{}", self.signature, self.address)
     }
 
-    /// The v1 codec's record: the watcher's fields minus the ones only v2 carries.
-    fn v1(&self) -> Value {
-        let mut value = self.value.clone();
-        if let Some(object) = value.as_object_mut() {
-            for field in V2_ONLY_FIELDS {
-                object.remove(field);
-            }
-        }
-        value
+    /// The report's record (`DREGG/PAY/OBSERVATION/v2`): the watcher's fields as emitted,
+    /// `memo` and `memoError` included.
+    fn kernel(&self) -> Value {
+        self.value.clone()
     }
 
     fn short(&self) -> String {
@@ -944,7 +941,7 @@ fn report_command(
         "expectedAuthorityRoot":text(view, "authorityRoot")?,
         "expectedPayRoot":text(view, "payRoot")?,
         "tip":tip.value,
-        "observations":records.iter().map(Record::v1).collect::<Vec<_>>()}))
+        "observations":records.iter().map(Record::kernel).collect::<Vec<_>>()}))
 }
 
 /// Build (and retain) one report over `records` at `tip`, re-reading the pay view first:
@@ -1571,6 +1568,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_blind_refusal_reads_undisclosed_and_names_nothing_else() {
+        let blind = json!({"type":"refused","reason":"undisclosed",
+            "phase":hex("admission".as_bytes()),"detail":hex("request refused".as_bytes())});
+        let answer = answer(blind);
+        assert_eq!(answer.reason(), Some("undisclosed"));
+        assert_eq!(answer.render(), "refused undisclosed (phase admission)");
+    }
+
+    #[test]
     fn refusal_reasons_are_read_from_the_hosts_rendering_only() {
         assert_eq!(
             refusal_reason("pay-observation", "Minidregg.Kernel.PayObservation.Reject.stalePay"),
@@ -1604,14 +1610,14 @@ mod tests {
     }
 
     #[test]
-    fn a_v1_record_drops_only_the_fields_v2_carries() {
+    fn a_record_reaches_the_kernel_whole_memo_included() {
         let value = json!({"index":0,"address":"11".repeat(32),"signature":"22".repeat(64),
             "slot":1,"blockTime":2,"amount":3,"mint":"33".repeat(32),"tokenProgram":"44".repeat(32),
             "memo":null,"memoError":null});
         let record = Record::parse(&value).unwrap();
-        let v1 = record.v1();
-        assert!(v1.get("memo").is_none() && v1.get("memoError").is_none());
-        assert_eq!(v1.as_object().unwrap().len(), 8);
+        let kernel = record.kernel();
+        assert!(kernel.get("memo").is_some() && kernel.get("memoError").is_some());
+        assert_eq!(kernel.as_object().unwrap().len(), 10);
         assert_eq!(record.name(), format!("{}.{}", "22".repeat(64), "11".repeat(32)));
         assert!(Record::parse(&json!({"index":0,"address":"AA".repeat(32),
             "signature":"22".repeat(64),"amount":1})).is_err());

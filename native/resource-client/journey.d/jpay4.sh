@@ -114,8 +114,7 @@ for s in SUBJECTS:
     public[s] = open(path("keys", f"{s}.pub"), "rb").read().hex()
 def enrollment(s):
     return {"key": {"keyId": str(7000 + s), "keyEpoch": "2", "algorithm": "1", "subject": str(s),
-                    "publicKey": public[s], "activeFrom": "0", "activeUntil": "1000000",
-                    "revoked": False},
+                    "publicKey": public[s], "activeFrom": "0", "activeUntil": "1000000"},
             "accountId": str(acct(s)), "spendCapabilityId": str(1000 + s),
             "controlCapabilityId": str(2000 + s), "factoryObserveCapabilityId": str(3000 + s),
             "initialBalance": str(INITIAL), "accountPredicate": {"type": "all", "predicates": []}}
@@ -137,7 +136,8 @@ genesis = {"domain": "8501", "factoryId": "10", "resourceBookId": "11", "authori
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
-           "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP)}}
+           "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
+                           "controlCapability": "4031", "enrolCapability": "4032"}}
 json.dump(genesis, open(path("genesis.json"), "w"))
 mini("bootstrap", "--host", HOST, "--config", path("operator.json"), "--source", path("genesis.json"),
      "--dir", path("deployment"), check=True)
@@ -256,14 +256,17 @@ def observe(file, *extra):
 
 # ------------------------------------------------------------ rows
 r = mini("pay", "address", "--dir", WS[8])
-row("pay address before a valid tariff", r.returncode == 3 and "refused tariffInvalid" in r.stderr,
+# Op 105 is a blind submission (MR's rule): the refusal built to hit tariffInvalid reads
+# undisclosed on the wire; the address attempt is retained as refused and no index exists.
+row("pay address before a valid tariff", r.returncode == 3 and "refused undisclosed" in r.stderr,
     f"exit={r.returncode} {r.stderr.strip()[-100:]}")
 
 json.dump({"control": str(FACTORY_CONTROL),
            "book": [b58encode(bytes.fromhex(ROW0)), ROW1, b58encode(bytes.fromhex(ENROL_ROW)), FILLER],
            "tariff": {"version": "1", "asset": "0", "mint": b58encode(bytes.fromhex(MINT)),
                       "tokenProgram": PROGRAM, "decimals": "6", "creditPerAtomic": str(RATE),
-                      "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK)}},
+                      "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK),
+                      "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000"}},
           open(path("book.json"), "w"))
 r = mini("pay", "book", "--dir", WS[EMBER], "--source", path("book.json"))
 row("operator installs a 4-row book (base58 and hex rows) and the tariff", r.returncode == 0 and "confirmed" in r.stdout,
@@ -280,7 +283,8 @@ row("pay address again: the retained index, no second request",
     r2.returncode == 0 and r2.stdout == r.stdout and attempts_after == attempts_before,
     f"same_output={r2.stdout == r.stdout} assign_attempts={attempts_before}->{attempts_after}")
 r = mini("pay", "address", "--dir", WS[9], "--account", "stolen")
-row("subject 9 asks an address for subject 8's account", r.returncode == 3 and "refused notOwner" in r.stderr,
+# Built to hit notOwner; op 105 is blind (MR's rule), so the wire says undisclosed.
+row("subject 9 asks an address for subject 8's account", r.returncode == 3 and "refused undisclosed" in r.stderr,
     f"exit={r.returncode} {r.stderr.strip()[-100:]}")
 
 # A hostile fixture first, while nothing is credited: pay-1's POST balance is another mint.

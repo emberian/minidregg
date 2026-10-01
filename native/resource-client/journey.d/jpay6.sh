@@ -109,7 +109,7 @@ def enrollment(s):
     spend, control, observe = CAPS[s]
     return {"key": {"keyId": str(7000 + s if s >= 20 else 1001 * s), "keyEpoch": "2", "algorithm": "1",
                     "subject": str(s), "publicKey": keys[s].verify_key.encode().hex(),
-                    "activeFrom": "0", "activeUntil": "1000000", "revoked": False},
+                    "activeFrom": "0", "activeUntil": "1000000"},
             "accountId": str(s), "spendCapabilityId": str(spend), "controlCapabilityId": str(control),
             "factoryObserveCapabilityId": str(observe), "initialBalance": str(BALANCE[s]),
             "accountPredicate": {"type": "all", "predicates": []}}
@@ -206,7 +206,7 @@ def mini_query(name, subject, target, capability):
     view = json.load(open(path(f"{name}-query/view.json")))
     challenge = json.load(open(path(f"{name}-query/challenge.json")))
     cell = view.get("cell") or view.get("page")
-    return cell, challenge["signing"][0]["authorityRoot"]
+    return cell, challenge["authorityRoot"]
 def delegate(name, target, parent, child, holder, verbs, nonce):
     cell, authority = mini_query(name + "-pre", OPERATOR, target, parent)
     intent = {"subject": "7", "nonce": str(nonce), "purpose": {"type": "prepare", "draft": {
@@ -301,8 +301,12 @@ def row(name, expected, observed, ok):
     ROWS.append((name, expected, observed, "PASS" if ok else "FAIL"))
     print(f"{'PASS' if ok else 'FAIL'}\t{name}\t{observed}", file=sys.stderr)
 def refused_with(result, reason):
-    return result.get("type") == "refused" and result.get("detail", "").endswith("." + reason)
-def show(result): return f"{result.get('type')} {result.get('detail', '')}".strip()
+    # Op 115 is a blind submission (MR's rule, as op 105): every refusal is the
+    # uniform `undisclosed` frame. `reason` names the branch the command was
+    # built to hit, which the wire deliberately does not confirm; the ledger and
+    # purse rows that follow each refusal check that nothing moved.
+    return result.get("type") == "refused" and result.get("reason") == "undisclosed"
+def show(result): return f"{result.get('type')} {result.get('reason', '')} {result.get('detail', '')}".strip()
 
 nonce = [100]
 def fresh():
@@ -331,11 +335,12 @@ row("purse 7004 at birth", "generation 0, status 0, remaining 50, reserved 0",
 
 host = Host()
 r, _ = refill(host, FRIEND, CAPS[FRIEND][0], FRIEND, REFILL, REFILL)
-row("refill before a valid tariff (the credit asset is the tariff's)", "refused tariffInvalid", show(r),
+row("refill before a valid tariff (the credit asset is the tariff's)", "refused undisclosed (built to hit tariffInvalid)", show(r),
     refused_with(r, "tariffInvalid"))
 v = view(host)
 tariff = {"version": "1", "asset": "0", "mint": "85" * 32, "tokenProgram": "06" * 32, "decimals": "6",
-          "creditPerAtomic": "1", "maxPerObservation": "2000000000", "minTickSlots": "1500"}
+          "creditPerAtomic": "1", "maxPerObservation": "2000000000", "minTickSlots": "1500",
+          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000"}
 book_cmd = {"sponsor": str(OPERATOR), "control": str(FACTORY_CONTROL), "nonce": fresh(),
             "expectedFactoryRoot": v["factoryRoot"], "expectedAuthorityRoot": v["authorityRoot"],
             "expectedPayRoot": v["payRoot"], "bookStart": "0", "book": ["16" * 32], "tariff": tariff}
@@ -354,17 +359,17 @@ row("ledger before any refill", f"friend {FRIEND_BALANCE}, purse 50",
 
 host = Host()
 r, _ = refill(host, FRIEND, CAPS[FRIEND][0], FRIEND, REFILL, REFILL + 10_000_000)
-row("a purse leg claiming 60 000 000 with a 50 000 000 burn", "refused unbalanced (the joint commit)",
+row("a purse leg claiming 60 000 000 with a 50 000 000 burn", "refused undisclosed (built to hit unbalanced (the joint commit))",
     show(r), refused_with(r, "unbalanced"))
 r, _ = refill(host, STRANGER, CAPS[STRANGER][0], FRIEND, 1_000_000, 1_000_000)
-row("a stranger (subject 21, its own capability) burns the friend's account", "refused notOwner",
+row("a stranger (subject 21, its own capability) burns the friend's account", "refused undisclosed (built to hit notOwner)",
     show(r), refused_with(r, "notOwner"))
 r, _ = refill(host, STRANGER, CAPS[FRIEND][0], FRIEND, 1_000_000, 1_000_000)
-row("a stranger presents the friend's capability", "refused notOwner", show(r), refused_with(r, "notOwner"))
+row("a stranger presents the friend's capability", "refused undisclosed (built to hit notOwner)", show(r), refused_with(r, "notOwner"))
 r, _ = refill(host, FRIEND, CAPS[FRIEND][0], FRIEND, 0, 0)
-row("a zero refill", "refused zeroAmount", show(r), refused_with(r, "zeroAmount"))
+row("a zero refill", "refused undisclosed (built to hit zeroAmount)", show(r), refused_with(r, "zeroAmount"))
 r, _ = refill(host, FRIEND, CAPS[FRIEND][0], FRIEND, 1_000_000, 1_000_000, task=PUBLICATION)
-row("a refill of a declared object that is not an AgentGrain purse", "refused purseUnreadable",
+row("a refill of a declared object that is not an AgentGrain purse", "refused undisclosed (built to hit purseUnreadable)",
     show(r), refused_with(r, "purseUnreadable"))
 host.stop()
 led_poles, p_poles = ledger(), purse()
@@ -401,7 +406,7 @@ row("the joint delta at the credit coordinate", "Book circulating -50000000 + pu
 
 host = Host()
 r, _ = refill(host, FRIEND, CAPS[FRIEND][0], FRIEND, 20_000_000, 20_000_000)
-row("refill 20 000 000 with a 10 000 000 balance", "refused bookRefused", show(r), refused_with(r, "bookRefused"))
+row("refill 20 000 000 with a 10 000 000 balance", "refused undisclosed (built to hit bookRefused)", show(r), refused_with(r, "bookRefused"))
 host.stop()
 
 # ---------------------------------------------------------------- the Hermes half: the controller draws on the purse
@@ -606,7 +611,7 @@ finally:
 
 host = Host()
 r, _ = refill(host, FRIEND, CAPS[FRIEND][0], FRIEND, 1_000_000, 1_000_000)
-row("a refill while the purse holds the uncertain reservation", "refused purseRefused (the edge needs reserved = 0)",
+row("a refill while the purse holds the uncertain reservation", "refused undisclosed (built to hit purseRefused (the edge needs reserved = 0))",
     show(r), refused_with(r, "purseRefused"))
 host.stop()
 

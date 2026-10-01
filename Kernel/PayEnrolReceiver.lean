@@ -343,11 +343,13 @@ def renewBatch (tariff : Tariff) (collector : Nat) (plan : RenewPlan) :
 
 /-- Every authority entry an enrollment sets: the birth's grant batch (the
 account law and its two owner grants), the new subject's key, and the
-factory-observation grant. -/
+factory-observation grant, each grant and the key with the registration of
+its own revocation key (a capability is live only while registered and not
+revoked). -/
 def authorityEntries (descriptor : Descriptor Registry) (key : KeyRecord)
     (observe : AuthorityGrant) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   ResourceBirthAuthority.entries descriptor ++ NativeHostGenesis.keyEntries key ++
-    [ResourceBirthAuthority.grantEntry observe]
+    [ResourceBirthAuthority.grantEntry observe, ResourceBirthAuthority.grantRegistrationEntry observe]
 
 /-! ## The pay-cell patch of each decision -/
 

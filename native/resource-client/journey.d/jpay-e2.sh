@@ -75,7 +75,7 @@ for s in SUBJECTS:
 def enrollment(s):
     return {"key": {"keyId": str(7000 + s), "keyEpoch": "2", "algorithm": "1", "subject": str(s),
                     "publicKey": keys[s].verify_key.encode().hex(), "activeFrom": "0",
-                    "activeUntil": "1000000", "revoked": False},
+                    "activeUntil": "1000000"},
             "accountId": str(acct(s)), "spendCapabilityId": str(1000 + s),
             "controlCapabilityId": str(2000 + s), "factoryObserveCapabilityId": str(3000 + s),
             "initialBalance": "100", "accountPredicate": {"type": "all", "predicates": []}}
@@ -371,8 +371,11 @@ enrol_on = dict(book, nonce=fresh(), expectedAuthorityRoot=v["authorityRoot"], e
                 expectedFactoryRoot=v["factoryRoot"], bookStart="1", book=[],
                 tariff=dict(tariff_json(enrol_index=0), version="3"))
 r, _ = sign_and_submit(host, "pay-book", enrol_on, EMBER, PAY_OPS)
-row("tariff naming an unassigned enrollment index", "refused enrolIndexUnassigned", show(r),
-    refused(r, "enrolIndexUnassigned"))
+# Op 105 is blind (MR's rule): built to hit enrolIndexUnassigned, the wire answers the
+# uniform undisclosed frame, and the pay cell does not move.
+row("tariff naming an unassigned enrollment index", "refused undisclosed (built to hit enrolIndexUnassigned), pay root unchanged",
+    f"{r.get('type')} {r.get('reason', '')}",
+    r.get("type") == "refused" and r.get("reason") == "undisclosed" and view(host)["payRoot"] == v["payRoot"])
 r = heartbeat(host, 2000, OBSERVER, OBSERVER_CAP)
 row("genesis observer 30 heartbeat", "confirmed", show(r), r.get("type") == "confirmed")
 r = heartbeat(host, 3600, EMBER, PAY_CONTROL)
@@ -419,7 +422,7 @@ policy, challenge = mini_policy("pay-policy-before", EMBER, PAY_CONTROL)
 old_address = policy["address"]
 rc, r, tail = mini_submit("install", {"subject": str(EMBER), "nonce": fresh(), "purpose": {"type": "prepare", "draft": {
     "type": "install-source", "subject": str(EMBER), "control": str(PAY_CONTROL), "declaration": {
-        "expectedPreRoot": challenge["signing"][0]["authorityRoot"],
+        "expectedPreRoot": challenge["authorityRoot"],
         "expected": {"version": policy["version"], "address": old_address},
         "nonce": fresh(), "source": {"policyId": PAY_CELL, "version": str(int(policy["version"]) + 1),
             "domain": "8501", "semantics": SEMANTICS, "previous": old_address, "predicate": law(NEW_OBSERVER)}}}},

@@ -75,7 +75,7 @@ for s in SUBJECTS:
 def enrollment(s):
     return {"key": {"keyId": str(7000 + s), "keyEpoch": "2", "algorithm": "1", "subject": str(s),
                     "publicKey": keys[s].verify_key.encode().hex(), "activeFrom": "0",
-                    "activeUntil": "1000000", "revoked": False},
+                    "activeUntil": "1000000"},
             "accountId": str(acct(s)), "spendCapabilityId": str(1000 + s),
             "controlCapabilityId": str(2000 + s), "factoryObserveCapabilityId": str(3000 + s),
             "initialBalance": "100", "accountPredicate": {"type": "all", "predicates": []}}
@@ -404,20 +404,23 @@ def factory_policy(name):
 policy, challenge = factory_policy("factory-policy")
 rc, r, tail = mini_submit("observer-install", {"subject": str(OBSERVER), "nonce": fresh(), "purpose": {
     "type": "prepare", "draft": {"type": "install-source", "subject": str(OBSERVER), "control": str(ENROL_CAP),
-        "declaration": {"expectedPreRoot": challenge["signing"][0]["authorityRoot"],
+        "declaration": {"expectedPreRoot": challenge["authorityRoot"],
             "expected": {"version": policy["version"], "address": policy["address"]},
             "nonce": fresh(), "source": {"policyId": str(FACTORY), "version": str(int(policy["version"]) + 1),
                 "domain": "8501", "semantics": SEMANTICS, "previous": policy["address"],
                 "predicate": {"type": "all", "predicates": []}}}}},
     "grants": [{"kind": "program", "target": str(FACTORY), "capability": str(ENROL_CAP)}]}, OBSERVER)
-row("the observer installs a factory law with C_enrol", "refused: the plan's factory observation is refused",
+# Final's Host answers this blind prepare with the uniform undisclosed refusal (MR's rule);
+# the next row shows the confined law is still the factory's.
+row("the observer installs a factory law with C_enrol", "refused undisclosed: the plan's factory observation is refused",
     f"rc={rc} {r.get('type')} {tail[-120:]}", rc != 0 and r.get("type") != "confirmed"
-    and "observation refused" in tail)
+    and "refused: undisclosed" in tail)
 rc, out = query("observer-factory", path(f"subject-{OBSERVER}.key"), OBSERVER, "object", FACTORY,
                 3000 + OBSERVER, "policy")
 row("the observer observes the factory with its genesis observe grant (3030)",
     "refused by the confined factory law (ember's identical grant was admitted above)",
-    f"rc={rc} {out[-100:]}", rc != 0 and "observation refused" in out)
+    f"rc={rc} {out[-100:]}", rc != 0 and 'not (subject == 30)' in out
+    and 'not (slot "authority/operation/pay-self-enrol" == 1)' in out)
 
 # ---------------------------------------------------------------- cold reopen + audit
 host = Host()
