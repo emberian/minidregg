@@ -35,6 +35,7 @@ import Kernel.FleetTurn
 import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
 import Kernel.PayObservationReceiver
+import Kernel.PayEnrolReceiver
 import Compiler.PayEnrolSignatureIO
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
@@ -743,12 +744,15 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
       let observerPath := path ++ ".payObserver"
-      let observer ← exactObject observerPath ["subject", "capability", "controlCapability"]
+      let observer ← exactObject observerPath
+        ["subject", "capability", "controlCapability", "enrolCapability"]
         (← field path "payObserver" obj)
       pure (some (⟨⟨← nat (observerPath ++ ".subject") (← field observerPath "subject" observer)⟩,
         ⟨← nat (observerPath ++ ".capability") (← field observerPath "capability" observer)⟩,
         ⟨← nat (observerPath ++ ".controlCapability")
-          (← field observerPath "controlCapability" observer)⟩⟩ :
+          (← field observerPath "controlCapability" observer)⟩,
+        ⟨← nat (observerPath ++ ".enrolCapability")
+          (← field observerPath "enrolCapability" observer)⟩⟩ :
           NativeHostGenesis.PayObserver))
     else pure none
   pure {
@@ -2322,6 +2326,22 @@ private def payObservationCommand (json : Lean.Json) : Result (List UInt8) := do
       observations := ← list "$.observations" payObservationRecord (← field "$" "observations" obj) }
   return PayObservation.commandCodec.encode command
 
+/-- The observer's submission of ONE enrollment-index transfer (PAY §11.4,
+P3b-2): the watcher's record, the tip, `C_enrol` and the two roots read. -/
+private def payEnrolCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["observer", "capability", "nonce", "expectedAuthorityRoot",
+    "expectedPayRoot", "tip", "observation"] json
+  let command : PayEnrolReceiver.Command :=
+    { observer := ⟨← nat "$.observer" (← field "$" "observer" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩
+      expectedPayRoot := ⟨← nat "$.expectedPayRoot" (← field "$" "expectedPayRoot" obj)⟩
+      tip := ← payClock "$.tip" (← field "$" "tip" obj)
+      observation := ← payObservationRecord "$.observation" (← field "$" "observation" obj) }
+  return PayEnrolReceiver.commandCodec.encode command
+
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none) : Result (List UInt8) :=
@@ -2351,6 +2371,7 @@ def author (kind : String) (json : Lean.Json)
   | "pay-book" => payBook json
   | "pay-assign" => payAssign json
   | "pay-observation" => payObservationCommand json
+  | "pay-enrol" => payEnrolCommand json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2582,6 +2603,17 @@ private def payObservationCommandJson (command : PayObservation.Command) : Lean.
    ("heartbeat", .bool command.observations.isEmpty),
    ("observations", .arr (command.observations.map payObservationRecordJson).toArray)]
 
+private def payEnrolCommandJson (command : PayEnrolReceiver.Command) : Lean.Json := .mkObj
+  [("type", "pay-enrol-v1"),
+   ("canonical", hexJson (PayEnrolReceiver.commandCodec.encode command)),
+   ("observer", decimal command.observer.value),
+   ("capability", decimal command.capability.value),
+   ("nonce", decimal command.nonce),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value),
+   ("expectedPayRoot", decimal command.expectedPayRoot.value),
+   ("tip", payClockJson command.tip),
+   ("observation", payObservationRecordJson command.observation)]
+
 private def payCommandJson (bytes : List UInt8) : Lean.Json :=
   match PayBookReceiver.commandCodec.decode bytes with
   | some command => payBookCommandJson command
@@ -2591,25 +2623,10 @@ private def payCommandJson (bytes : List UInt8) : Lean.Json :=
       | none =>
           match PayObservation.commandCodec.decode bytes with
           | some command => payObservationCommandJson command
-          | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
-
-/-- The public enrollment view (op 112) in the shape the box's roster timer
-reads (ROSTER-SYNC): `{"view", "clock": {"hour"}, "entries": [{"subject",
-"miniKey", "sshBlob", "lease": {"expiresAt"} | null, "index"}]}`.  Hours and
-expiries are JSON integers; the subject is a decimal string. -/
-def payEnrolmentViewJson (view : PayCellDomain.EnrolmentView) : Lean.Json := .mkObj
-  [("view", "DREGG/PAY/ENROLMENT-VIEW/v1"),
-   ("clock", .mkObj [("hour", .num (Lean.JsonNumber.fromNat view.hour))]),
-   ("entries", .arr (view.entries.map fun entry => Lean.Json.mkObj
-     [("subject", decimal entry.subject),
-      ("miniKey", hexJson entry.miniKey),
-      ("sshBlob", hexJson entry.sshBlob),
-      ("lease", match entry.leaseUntil with
-        | none => .null
-        | some hour => .mkObj [("expiresAt", .num (Lean.JsonNumber.fromNat hour))]),
-      ("index", match entry.index with
-        | none => .null
-        | some index => .num (Lean.JsonNumber.fromNat index))]).toArray)]
+          | none =>
+              match PayEnrolReceiver.commandCodec.decode bytes with
+              | some command => payEnrolCommandJson command
+              | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
 
 private def payMemoRefusalName : PayEnrolMemo.Refusal → String
   | .shape => "memoShape" | .version => "memoVersion" | .badMiniKey => "memoBadMiniKey"
@@ -2695,6 +2712,48 @@ private def payJournalReasonName : PayEnrolMemo.JournalReason → String
   | .miniSigInvalid => "miniSigInvalid" | .sshSigInvalid => "sshSigInvalid"
   | .belowPrice => "belowPrice" | .sshKeyTaken => "sshKeyTaken"
   | .sshKeyMismatch => "sshKeyMismatch" | .subjectTaken => "subjectTaken"
+
+/-- The public enrollment view (op 112): `{"view", "clock": {"hour"},
+"entries": [{"subject", "miniKey", "sshBlob", "lease": {"expiresAt"} | null,
+"index"}], "journal": [{"signature", "address", "index", "amount", "slot",
+"reason"}]}`.  Hours, expiries and journal numbers are JSON integers; the
+subject is a decimal string.  v2 adds `journal` (P3b-2). -/
+def payEnrolmentViewJson (view : PayCellDomain.EnrolmentView) : Lean.Json := .mkObj
+  [("view", "DREGG/PAY/ENROLMENT-VIEW/v2"),
+   ("clock", .mkObj [("hour", .num (Lean.JsonNumber.fromNat view.hour))]),
+   ("entries", .arr (view.entries.map fun entry => Lean.Json.mkObj
+     [("subject", decimal entry.subject),
+      ("miniKey", hexJson entry.miniKey),
+      ("sshBlob", hexJson entry.sshBlob),
+      ("lease", match entry.leaseUntil with
+        | none => .null
+        | some hour => .mkObj [("expiresAt", .num (Lean.JsonNumber.fromNat hour))]),
+      ("index", match entry.index with
+        | none => .null
+        | some index => .num (Lean.JsonNumber.fromNat index))]).toArray),
+   ("journal", .arr (view.journal.map fun (key, row) => Lean.Json.mkObj
+     [("signature", hexJson ((key.drop 6).take 64)),
+      ("address", hexJson (key.drop 70)),
+      ("index", .num (Lean.JsonNumber.fromNat row.index)),
+      ("amount", .num (Lean.JsonNumber.fromNat row.amount)),
+      ("slot", .num (Lean.JsonNumber.fromNat row.slot)),
+      ("reason", payJournalReasonName row.reason)]).toArray)]
+
+/-- The identities a self-enrollment derives from a Mini key in this
+deployment (`PayEnrolReceiver.ids`): what a friend's client needs to act as
+its new subject (its account, its owner/control capabilities on it, its
+factory-observation capability, its key id and epoch). -/
+def payEnrolIdsJson (domain : Digest) (miniKeyHex : String) : Result Lean.Json := do
+  let miniKey ← decodeHex "$.miniKey" (.str miniKeyHex)
+  unless miniKey.length = 32 do failAt "$.miniKey" "a Mini key is 32 bytes"
+  let ids := PayEnrolReceiver.ids domain miniKey
+  pure <| .mkObj
+    [("type", "pay-enrol-ids-v1"), ("miniKey", hexJson miniKey),
+     ("subject", decimal ids.subject), ("account", decimal ids.account),
+     ("ownerCapability", decimal ids.ownerCapability),
+     ("controlCapability", decimal ids.controlCapability),
+     ("observeCapability", decimal ids.observeCapability),
+     ("keyId", decimal ids.keyId), ("keyEpoch", decimal PayEnrolReceiver.keyEpoch)]
 
 private def optionalNatJson : Option Nat → Lean.Json
   | none => .null
@@ -3443,6 +3502,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "pay-enrol-memo" => pure (payEnrolMemoJson bytes)
   | "pay-observation" => payObservationCommandJson <$>
       decoded "pay-observation" PayObservation.commandCodec bytes
+  | "pay-enrol" => payEnrolCommandJson <$>
+      decoded "pay-enrol" PayEnrolReceiver.commandCodec bytes
+  | "pay-enrol-ingress" => do
+      let ingress ← decoded "pay-enrol-ingress" PayEnrolReceiver.ingressCodec bytes
+      let command ← decoded "pay-enrol-ingress" PayEnrolReceiver.commandCodec ingress.commandBytes
+      pure <| .mkObj [("type", "pay-enrol-ingress-v1"),
+        ("command", payEnrolCommandJson command), ("envelope", hexJson ingress.envelope)]
   | "pay-observation-ingress" => do
       let ingress ← decoded "pay-observation-ingress" PayObservation.ingressCodec bytes
       let command ← decoded "pay-observation-ingress" PayObservation.commandCodec

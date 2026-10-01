@@ -978,6 +978,66 @@ def payObservationLookupLoaded (config : Config) (opened : Opened config) (bytes
           | some original => .confirmed .replayed original
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
+/-! ## Self-enrollment (lane P3b-2): session operations 117–120
+
+The observer's submission of one enrollment-index transfer
+(`DREGG/PAY/SELF-ENROL/v1`) has its own plan/assembly/submission/lookup
+quartet; its signed ingress is `DREGG/PAY/SELF-ENROL/SIGNED/v1`.  (113–116 are
+P6's.)  The plan runs the native verifier on the memo, because the decision
+the observer signs depends on both possession bits. -/
+
+def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
+  ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩
+
+def payEnrolPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    IO (Except String PayCellDomain.SigningPlan) := do
+  let some command := PayEnrolReceiver.commandCodec.decode commandBytes
+    | return .error "noncanonical pay enrolment command"
+  match ← PayEnrolReceiver.signingHeader config.deployment config.profile
+      (payEnrolAmbient config opened) opened.durable config.signature command with
+  | .error detail => return .error detail
+  | .ok header =>
+      return .ok ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+        CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def payEnrolAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "pay enrolment signature must be 64 bytes"
+  let header ← need "noncanonical pay enrolment header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (PayEnrolReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical pay enrolment plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PayEnrolReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def payEnrolSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← PayEnrolReceiver.receiveLoaded config.deployment config.profile
+      (payEnrolAmbient config opened) config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "pay-enrol" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of an enrolment submission.  Absence never
+submits. -/
+def payEnrolLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    Outcome :=
+  match PayEnrolReceiver.decodeIngress bytes with
+  | none => refused .malformed "pay-enrol" "noncanonical signed ingress"
+  | some ingress =>
+      match PayEnrolReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
 /-- One assigned deposit index and the Book balance of its payer in the
 tariff's asset. -/
 structure PayLedgerRow where

@@ -89,7 +89,8 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": str(OBSERVER_CAP + 1)}}
+                           "controlCapability": str(OBSERVER_CAP + 1),
+                           "enrolCapability": str(OBSERVER_CAP + 2)}}
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
