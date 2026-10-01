@@ -112,7 +112,7 @@ def enrollment(s):
     spend, control, observe = CAPS[s]
     return {"key": {"keyId": str(7000 + s if s >= 20 else 1001 * s), "keyEpoch": "2", "algorithm": "1",
                     "subject": str(s), "publicKey": keys[s].verify_key.encode().hex(),
-                    "activeFrom": "0", "activeUntil": "1000000"},
+                    "activeFrom": "0", "activeUntil": "1000000", "nextKeyDigest": None},
             "accountId": str(s), "spendCapabilityId": str(spend), "controlCapabilityId": str(control),
             "factoryObserveCapabilityId": str(observe), "initialBalance": str(BALANCE[s]),
             "accountPredicate": {"type": "all", "predicates": []}}

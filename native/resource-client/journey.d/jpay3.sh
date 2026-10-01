@@ -63,7 +63,7 @@ keys = {s: nacl.signing.SigningKey.generate() for s in SUBJECTS}
 def enrollment(s):
     return {"key": {"keyId": str(7000 + s), "keyEpoch": "2", "algorithm": "1", "subject": str(s),
                     "publicKey": keys[s].verify_key.encode().hex(), "activeFrom": "0",
-                    "activeUntil": "1000000"},
+                    "activeUntil": "1000000", "nextKeyDigest": None},
             "accountId": str(acct(s)), "spendCapabilityId": str(1000 + s),
             "controlCapabilityId": str(2000 + s), "factoryObserveCapabilityId": str(3000 + s),
             "initialBalance": "100", "accountPredicate": {"type": "all", "predicates": []}}

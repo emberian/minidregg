@@ -57,7 +57,7 @@ OBSERVER_PUBLIC=$(od -An -tx1 -v "$ROOT/pay/observer.pub" | tr -d ' \n')
 # and the self-enrollment capabilities.
 cat >"$ROOT/pay/genesis-enrollments.json" <<EOF
 [{"key":{"keyId":"7030","keyEpoch":"2","algorithm":"1","subject":"30",
-  "publicKey":"$OBSERVER_PUBLIC","activeFrom":"0","activeUntil":"1000000"},
+  "publicKey":"$OBSERVER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
   "accountId":"130","spendCapabilityId":"1030","controlCapabilityId":"2030",
   "factoryObserveCapabilityId":"3030","initialBalance":"100",
   "accountPredicate":{"type":"all","predicates":[]}}]
