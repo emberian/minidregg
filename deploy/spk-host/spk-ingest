@@ -96,7 +96,8 @@ timeout --kill-after=5s 150s systemd-run --unit="$unit" --wait --pipe --collect 
   -p PrivateTmp=yes \
   -p ProtectSystem=strict \
   -p "ReadWritePaths=$store" \
-  -p MemoryMax=1G \
+  -p MemoryMax=2G \
+  -p MemorySwapMax=0 \
   -p CPUQuota=100% \
   -p TasksMax=16 \
   -p RuntimeMaxSec=120 \

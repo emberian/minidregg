@@ -626,7 +626,7 @@ const INSTALL_ATTEMPT_ARTIFACTS: &[&str] = &[
 ];
 
 /// `spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk
-/// [--class S|M] [--import EXPORT_DIR --exporter-key HEX]`
+/// [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX]`
 fn install(
     host: &Host,
     source: &Path,
@@ -1284,7 +1284,7 @@ fn stop_receipt(dir: &Path) -> io::Result<Option<PathBuf>> {
 
 pub fn usage() -> &'static str {
     "spk-host grain install PROFILE APP_SOURCE.json APP_RECEIPT.json SIGNED.spk \
-     [--class S|M] [--import EXPORT_DIR --exporter-key HEX] | \
+     [--class S|M|L] [--import EXPORT_DIR --exporter-key HEX] | \
      grain route PROFILE APP ROUTE_REQUEST.json | grain start PROFILE APP | \
      grain stop PROFILE APP | grain status PROFILE APP | grain supervise PROFILE APP | \
      grain supervise-instance GRAINS_ROOT STORE-APP | grain export PROFILE APP OUT_DIR | \

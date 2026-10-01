@@ -19,9 +19,14 @@ not a claim inferred from file names.
 Run package parsing only through `spk-ingest HOST_BINARY HOST_SHA256 INBOX_SPK
 APP_UID` after placing a root-owned mode-0600 SPK directly in
 `/var/lib/minidregg/spk/inbox`. It starts a short-lived system unit with a
-1 GiB memory cap, 120-second runtime cap, 16-task cap, no network, a read-only
-host filesystem except the package store, and a SHA-pinned host executable.
-The parser's 256 MiB decompressed-output cap is **not** a peak-memory bound:
+2 GiB memory cap (no swap), 120-second runtime cap, 16-task cap, no network, a
+read-only host filesystem except the package store, and a SHA-pinned host
+executable. The host hands the parser a 768 MiB decompressed-output cap
+(`materialize::MAX_DECOMPRESSED_PACKAGE_BYTES`) instead of Bread's 256 MiB
+default, which refused 4 of 10 market packages (TT-RSS, Etherpad, Davros,
+Wekan; SPK-APPS 2026-10-01). The parse holds the plain stream and the decoded
+archive at once, about 2.2x the decompressed size (Wekan: 1.17 GB, 16 s).
+That cap is **not** a peak-memory bound by itself:
 the xz library can allocate an entire block before writing to the bounded
 sink. The cgroup is therefore part of the ingest boundary. A killed or failed
 unit is not an installed package.
@@ -106,8 +111,9 @@ it lands the call refuses with that reason and the app stays claimed.
 
 **Size classes** (`broker::CLASSES`; the kernel will pin the class in the app
 birth descriptor, K-SPK): S = `MemoryMax=512M`, `CPUWeight=50`, `TasksMax=256`,
-`IOWeight=50`, 512 MiB `/var`; M = `1G`, `100`, `512`, `100`, 1 GiB `/var`.
-`MemorySwapMax=0`. The class slices sit in `<prefix>-grains.slice`; with
+`IOWeight=50`, 512 MiB `/var`; M = `1G`, `100`, `512`, `100`, 1 GiB `/var`;
+L = `2G`, `200`, `1024`, `200`, 2 GiB `/var` (a Meteor+Mongo app such as
+Wekan, or a file store). `MemorySwapMax=0`. The class slices sit in `<prefix>-grains.slice`; with
 `mini.slice` at 3 GB, two class-S grains plus the Store fit, or one class M.
 
 **Backups and export.** `mini-spk-broker backup CONFIG OUT` (root, called by

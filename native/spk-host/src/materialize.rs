@@ -16,6 +16,14 @@ use minidregg_spk_rpc::{decode_bridge_config, BridgeConfig};
 use serde_json::{json, Value};
 
 const MAX_SPK_BYTES: u64 = 256 * 1024 * 1024;
+/// The decompressed-package bound handed to Bread's parser in place of its
+/// 256 MiB default. Measured 2026-10-01 (SPK-APPS): 4 of 10 market packages
+/// decompress past 256 MiB (TT-RSS 298 MiB, Etherpad 341 MiB, Davros 477 MiB,
+/// Wekan 525 MiB) and were refused `TooLarge`. The parse holds the plain
+/// stream and the decoded archive at once, about 2.2x the decompressed size
+/// (Wekan: 1.17 GB RSS, 16 s), so `spk-ingest` runs this with MemoryMax=2G.
+/// An xz bomb is still refused at this bound, before signature work.
+pub const MAX_DECOMPRESSED_PACKAGE_BYTES: usize = 768 * 1024 * 1024;
 const MAX_FILES: usize = 100_000;
 const MAX_DEPTH: usize = 64;
 const MAX_SIGNED_BRIDGE_CONFIG_BYTES: usize = 64 * 1024;
@@ -219,7 +227,8 @@ fn verified_identity(raw: &[u8], directory: PathBuf) -> io::Result<(Spk, Install
         raw_sha256.push_str(&format!("{byte:02x}"));
     }
     let raw_length = raw.len() as u64;
-    let spk = Spk::parse(raw).map_err(|e| invalid(format!("SPK verification failed: {e}")))?;
+    let spk = Spk::parse_with_limit(raw, MAX_DECOMPRESSED_PACKAGE_BYTES)
+        .map_err(|e| invalid(format!("SPK verification failed: {e}")))?;
     let manifest =
         SpkManifest::from_spk(&spk).map_err(|e| invalid(format!("SPK manifest failed: {e}")))?;
     let signed_manifest_sha256: [u8; 32] = Sha256::digest(
@@ -272,16 +281,24 @@ pub fn qualify_bridge_spk(package: &Path) -> io::Result<(InstalledPackage, Bridg
         .as_deref()
         .ok_or_else(|| invalid("bridge-only SPK lacks signed config"))?;
     let bridge = decode_bridge_config(member).map_err(invalid)?;
-    if bridge.save_identity_caps
-        || bridge.expect_app_hooks
-        || bridge
-            .api_path
-            .as_deref()
-            .is_some_and(|path| minidregg_signed_api_path::checked_prefix(path).is_err())
-    {
+    // Each refusal names the bridge-config field, so a survey of real
+    // packages can say which Sandstorm facility a package needs.
+    if bridge.save_identity_caps {
         return Err(invalid(
-            "signed bridge requires unsupported physical profile",
+            "signed bridge requires unsupported physical profile: saveIdentityCaps",
         ));
+    }
+    if bridge.expect_app_hooks {
+        return Err(invalid(
+            "signed bridge requires unsupported physical profile: expectAppHooks",
+        ));
+    }
+    if let Some(path) = bridge.api_path.as_deref() {
+        if let Err(error) = minidregg_signed_api_path::checked_prefix(path) {
+            return Err(invalid(format!(
+                "signed bridge requires unsupported physical profile: apiPath {path:?} ({error})"
+            )));
+        }
     }
     Ok((verified, bridge))
 }

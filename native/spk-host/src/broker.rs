@@ -63,6 +63,14 @@ pub const CLASSES: &[SizeClass] = &[
         io_weight: 100,
         volume_mib: 1024,
     },
+    SizeClass {
+        name: "L",
+        memory_max: "2G",
+        cpu_weight: 200,
+        tasks_max: 1024,
+        io_weight: 200,
+        volume_mib: 2048,
+    },
 ];
 
 pub fn class(name: &str) -> io::Result<SizeClass> {
@@ -70,7 +78,7 @@ pub fn class(name: &str) -> io::Result<SizeClass> {
         .iter()
         .copied()
         .find(|class| class.name == name)
-        .ok_or_else(|| invalid(format!("size class {name:?} refused (S or M)")))
+        .ok_or_else(|| invalid(format!("size class {name:?} refused (S, M or L)")))
 }
 
 pub fn store_key(text: &str) -> bool {
@@ -1340,7 +1348,8 @@ mod tests {
         assert!(Broker::check_coordinates("0123456789abcde", "1").is_err());
         assert_eq!(class("S").unwrap().memory_max, "512M");
         assert_eq!(class("M").unwrap().memory_max, "1G");
-        assert!(class("L").is_err());
+        assert_eq!(class("L").unwrap().memory_max, "2G");
+        assert!(class("XL").is_err());
         assert_eq!(
             volume_name("0123456789abcdef", "7701"),
             "0123456789abcdef-7701"
