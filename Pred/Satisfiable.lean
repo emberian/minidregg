@@ -17,8 +17,12 @@ atom and each negated atom is a short disjunction of systems (a negated inequali
 opposite inequality shifted by one, which over `Int` is again a difference constraint; a
 negated `memberOf` is the union of the gaps between the set's elements). A conjunction is a
 product and a disjunction a union. Every intermediate list is checked against `dnfCap`; past it
-the translation returns `none` instead of exploding. `witnessed`, `hashEq` and `ran` are outside
-the fragment, so a law containing one returns `none`.
+the translation returns `none` instead of exploding. Products and unions drop every system
+another one subsumes (`prune`), and a `memberOf` set becomes one interval per run of consecutive
+values, so a law of write-guarded clauses keeps a DNF near its clause count (`guardedEight` has
+4 systems, not `4^8`); a conjunction of genuinely independent disjunctions over different slots
+still grows exponentially and meets the cap. `witnessed`, `hashEq` and `ran` are outside the
+fragment, so a law containing one returns `none`.
 
 ## The decision (`DiffProblem.decide`)
 
@@ -117,6 +121,31 @@ def Con.upper (v : Node) (c : Int) : Con := ⟨v, .zero, c⟩
 /-- `c ≤ val v`. -/
 def Con.lower (v : Node) (c : Int) : Con := ⟨.zero, v, -c⟩
 
+/-- `a` asks for no more than `b`: every requirement of `a` is one of `b`'s, so any step
+satisfying `b` satisfies `a`. -/
+def Sys.sub (a b : Sys) : Bool :=
+  a.present.all (b.present.contains ·) && a.absent.all (b.absent.contains ·) &&
+    a.cons.all (b.cons.contains ·)
+
+/-- Add `s` unless a kept system asks for no more; drop the kept systems that ask for more. -/
+def pruneStep (acc : List Sys) (s : Sys) : List Sys :=
+  if acc.any (fun t => t.sub s) then acc else s :: acc.filter (fun t => !s.sub t)
+
+/-- Drop every system another one subsumes. A law guards each clause to the write verb, and the
+guards' branches on one slot multiply across clauses; all but the uniform choices are subsumed,
+so pruning keeps a guarded law's DNF near the number of its clauses instead of exponential. -/
+def prune (l : List Sys) : List Sys := (l.foldl pruneStep []).reverse
+
+/-- The largest `h' ≥ h` with `h, h+1, …, h'` all in `xs`, searching at most `f` steps. -/
+def extendUp (xs : List Int) : Nat → Int → Int
+  | 0, h => h
+  | f + 1, h => if xs.contains (h + 1) then extendUp xs f (h + 1) else h
+
+/-- The smallest `l ≤ h` with `l, …, h` all in `xs`, searching at most `f` steps. -/
+def extendDown (xs : List Int) : Nat → Int → Int
+  | 0, h => h
+  | f + 1, h => if xs.contains (h - 1) then extendDown xs f (h - 1) else h
+
 namespace Atom
 open Sys Con
 
@@ -127,8 +156,10 @@ def eqF (s : Slot) (v : Int) : List Sys :=
 def leT (s : Slot) (v : Int) : List Sys := [pres [.new s] [upper (.new s) v]]
 def leF (s : Slot) (v : Int) : List Sys := [gone (.new s), pres [.new s] [lower (.new s) (v + 1)]]
 
+/-- One interval per run of consecutive elements (`{0,1,2}` is one system, `0 ≤ x ≤ 2`). -/
 def memT (s : Slot) (xs : List Int) : List Sys :=
-  xs.map fun x => pres [.new s] [upper (.new s) x, lower (.new s) x]
+  prune (xs.map fun x => pres [.new s]
+    [upper (.new s) (extendUp xs xs.length x), lower (.new s) (extendDown xs xs.length x)])
 /-- Strictly below every element, or strictly between an element and every larger one. -/
 def memF (s : Slot) (xs : List Int) : List Sys :=
   gone (.new s) :: pres [.new s] (xs.map fun y => upper (.new s) (y - 1)) ::
@@ -161,16 +192,17 @@ end Atom
 
 /-! ## §3. The DNF, capped -/
 
-/-- The most systems any intermediate DNF may hold; past it the translation says `none`. -/
+/-- The most systems any intermediate DNF may hold before pruning; past it the translation says
+`none`. -/
 def dnfCap : Nat := 1024
 
 def capped (cap : Nat) (l : List Sys) : Option (List Sys) :=
   if l.length ≤ cap then some l else none
 
 def product (cap : Nat) (a b : List Sys) : Option (List Sys) :=
-  capped cap (a.flatMap fun s => b.map s.merge)
+  (capped cap (a.flatMap fun s => b.map s.merge)).map prune
 
-def union (cap : Nat) (a b : List Sys) : Option (List Sys) := capped cap (a ++ b)
+def union (cap : Nat) (a b : List Sys) : Option (List Sys) := (capped cap (a ++ b)).map prune
 
 /-- The atom's systems at polarity `b`, or `none` outside the fragment. -/
 def atomDnf (b : Bool) : Pred → Option (List Sys)
@@ -474,9 +506,64 @@ theorem covered_capped {cap : Nat} {l ss : List Sys} (h : capped cap l = some ss
     (hc : Covered o n l) : Covered o n ss := by
   unfold capped at h; split at h <;> cases h; exact hc
 
+theorem Sys.sub_holds {a b : Sys} (h : a.sub b = true) (hb : b.Holds o n) : a.Holds o n := by
+  simp only [Sys.sub, Bool.and_eq_true, List.all_eq_true, List.contains_iff_mem] at h
+  obtain ⟨⟨hp, ha⟩, hc⟩ := h
+  exact ⟨fun v hv => hb.1 v (hp v hv), fun v hv => hb.2.1 v (ha v hv),
+    fun c hc' => hb.2.2 c (hc c hc')⟩
+
+theorem Sys.sub_refl (a : Sys) : a.sub a = true := by
+  simp [Sys.sub, List.all_eq_true, List.contains_iff_mem]
+
+theorem Sys.sub_trans {a b c : Sys} (h₁ : a.sub b = true) (h₂ : b.sub c = true) :
+    a.sub c = true := by
+  simp only [Sys.sub, Bool.and_eq_true, List.all_eq_true, List.contains_iff_mem] at h₁ h₂ ⊢
+  exact ⟨⟨fun v hv => h₂.1.1 v (h₁.1.1 v hv), fun v hv => h₂.1.2 v (h₁.1.2 v hv)⟩,
+    fun c' hc => h₂.2 c' (h₁.2 c' hc)⟩
+
+/-- Everything `acc` or `l` held is subsumed by something the fold keeps. -/
+theorem foldl_prune_covers :
+    ∀ (l acc : List Sys) (s : Sys), (s ∈ acc ∨ s ∈ l) →
+      ∃ t ∈ l.foldl pruneStep acc, t.sub s = true
+  | [], acc, s, h => ⟨s, by simpa using h, Sys.sub_refl s⟩
+  | x :: l, acc, s, h => by
+      rw [List.foldl_cons]
+      have step : ∀ u, (u ∈ acc ∨ u = x) → ∃ t ∈ pruneStep acc x, t.sub u = true := by
+        intro u hu
+        unfold pruneStep
+        split
+        · rename_i hany
+          rcases hu with hu | rfl
+          · exact ⟨u, hu, Sys.sub_refl u⟩
+          · obtain ⟨t, ht, hts⟩ := List.any_eq_true.mp hany
+            exact ⟨t, ht, hts⟩
+        · rcases hu with hu | rfl
+          · by_cases hxu : x.sub u = true
+            · exact ⟨x, List.mem_cons_self .., hxu⟩
+            · exact ⟨u, List.mem_cons_of_mem _ (List.mem_filter.mpr ⟨hu, by simpa using hxu⟩),
+                Sys.sub_refl u⟩
+          · exact ⟨u, List.mem_cons_self .., Sys.sub_refl u⟩
+      rcases h with h | h
+      · obtain ⟨t, ht, hts⟩ := step s (.inl h)
+        obtain ⟨t', ht', hts'⟩ := foldl_prune_covers l (pruneStep acc x) t (.inl ht)
+        exact ⟨t', ht', Sys.sub_trans hts' hts⟩
+      · rcases List.mem_cons.mp h with rfl | h
+        · obtain ⟨t, ht, hts⟩ := step s (.inr rfl)
+          obtain ⟨t', ht', hts'⟩ := foldl_prune_covers l (pruneStep acc s) t (.inl ht)
+          exact ⟨t', ht', Sys.sub_trans hts' hts⟩
+        · exact foldl_prune_covers l (pruneStep acc x) s (.inr h)
+
+theorem covered_prune {l : List Sys} (h : Covered o n l) : Covered o n (prune l) := by
+  obtain ⟨s, hs, hh⟩ := h
+  obtain ⟨t, ht, hts⟩ := foldl_prune_covers l [] s (.inr hs)
+  exact ⟨t, List.mem_reverse.mpr ht, Sys.sub_holds hts hh⟩
+
 theorem covered_product {cap : Nat} {a b ss : List Sys} (h : product cap a b = some ss)
     (ha : Covered o n a) (hb : Covered o n b) : Covered o n ss := by
-  apply covered_capped h
+  unfold product at h
+  obtain ⟨raw, hraw, rfl⟩ := Option.map_eq_some_iff.mp h
+  apply covered_prune
+  apply covered_capped hraw
   obtain ⟨s, hs, hsh⟩ := ha
   obtain ⟨t, ht, hth⟩ := hb
   exact ⟨s.merge t, List.mem_flatMap.mpr ⟨s, hs, List.mem_map.mpr ⟨t, ht, rfl⟩⟩,
@@ -484,7 +571,10 @@ theorem covered_product {cap : Nat} {a b ss : List Sys} (h : product cap a b = s
 
 theorem covered_union {cap : Nat} {a b ss : List Sys} (h : union cap a b = some ss)
     (hab : Covered o n a ∨ Covered o n b) : Covered o n ss := by
-  apply covered_capped h
+  unfold union at h
+  obtain ⟨raw, hraw, rfl⟩ := Option.map_eq_some_iff.mp h
+  apply covered_prune
+  apply covered_capped hraw
   rcases hab with ⟨s, hs, hh⟩ | ⟨s, hs, hh⟩
   · exact ⟨s, List.mem_append_left _ hs, hh⟩
   · exact ⟨s, List.mem_append_right _ hs, hh⟩
@@ -522,10 +612,30 @@ theorem gap_of_not_mem (x : Int) :
             · omega
             · exact hzy y hy hzy'
 
+theorem le_extendUp (xs : List Int) : ∀ (f : Nat) (h : Int), h ≤ extendUp xs f h
+  | 0, _ => Int.le_refl _
+  | f + 1, h => by
+      simp only [extendUp]
+      split
+      · exact Int.le_trans (Int.le_add_of_nonneg_right (by decide)) (le_extendUp xs f (h + 1))
+      · exact Int.le_refl _
+
+theorem extendDown_le (xs : List Int) : ∀ (f : Nat) (h : Int), extendDown xs f h ≤ h
+  | 0, _ => Int.le_refl _
+  | f + 1, h => by
+      simp only [extendDown]
+      split
+      · have := extendDown_le xs f (h - 1); omega
+      · exact Int.le_refl _
+
 theorem memT_covered {s : Slot} {xs : List Int} {x : Int} (hs : n.get s = some x) (hm : x ∈ xs) :
-    Covered o n (Atom.memT s xs) :=
-  ⟨_, List.mem_map.mpr ⟨x, hm, rfl⟩, by
-    simp [Sys.Holds, Sys.pres, Con.Holds, Con.upper, Con.lower, Node.val, Node.read, hs]⟩
+    Covered o n (Atom.memT s xs) := by
+  apply covered_prune
+  refine ⟨_, List.mem_map.mpr ⟨x, hm, rfl⟩, ?_⟩
+  have h1 := le_extendUp xs xs.length x
+  have h2 := extendDown_le xs xs.length x
+  simp [Sys.Holds, Sys.pres, Con.Holds, Con.upper, Con.lower, Node.val, Node.read, hs]
+  omega
 
 theorem memF_covered {s : Slot} {xs : List Int} {x : Int} (hs : n.get s = some x) (hm : x ∉ xs) :
     Covered o n (Atom.memF s xs) := by
@@ -746,6 +856,17 @@ theorem falsifier_unsat :
       some (.unsat [.cycle [⟨.new "f/1", .zero, 0⟩, ⟨.zero, .new "f/1", -1⟩]]) := by
   rfl
 
+/-- The checker has teeth: on the falsifier's system it accepts the real certificate and refuses
+an unbalanced one (`new ≤ 0` alone) and an unbalanced one with a negative sum. -/
+theorem falsifier_checker_teeth :
+    falsifier.difference?.map (fun d => d.systems.map fun s =>
+      [(SysCert.cycle [⟨.new "f/1", .zero, 0⟩, ⟨.zero, .new "f/1", -1⟩]).check s,
+       (SysCert.cycle [⟨.new "f/1", .zero, 0⟩]).check s,
+       (SysCert.cycle [⟨.zero, .new "f/1", -1⟩]).check s,
+       (SysCert.clash (.new "f/1")).check s]) =
+      some [[true, false, false, false]] := by
+  rfl
+
 theorem falsifier_admits_nothing : ∀ o n, eval falsifier o n = false := by
   cases h : falsifier.difference? with
   | none =>
@@ -794,6 +915,21 @@ step that is not a write. -/
 theorem boardLaw_witness :
     LeafSample.boardLaw.difference?.map DiffProblem.decide =
       some (.witness ⟨[("resource/field/2/after", 0)]⟩ ⟨[("resource/field/2/after", 0)]⟩) := by
+  rfl
+
+/-- Eight write-guarded clauses on eight slots. Unpruned, the guards' branches multiply to
+`4^8` systems; subsumption keeps the three uniform guard choices and the one where every clause
+holds. -/
+def guardedEight : Pred :=
+  Pred.all (["f/0", "f/1", "f/2", "f/3", "f/4", "f/5", "f/6", "f/7"].map fun s =>
+    LeafSample.onWrite (.monotone s))
+
+theorem guardedEight_four_systems : guardedEight.difference?.map (·.systems.length) = some 4 := by
+  rfl
+
+/-- A run of consecutive values is one interval: `f/1 ∈ {0, 1, 2, 7}` is two systems. -/
+theorem memberOf_runs :
+    (Pred.memberOf "f/1" [0, 1, 2, 7]).difference?.map (·.systems.length) = some 2 := by
   rfl
 
 /-- A law outside the fragment: a third-party claim. -/

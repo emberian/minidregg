@@ -629,21 +629,76 @@ variable {o n : State}
 macro "back_simp" : tactic => `(tactic| simp_all [evalWith, Sys.merge, Sys.Holds, Sys.pres,
   Sys.gone, Con.Holds, Con.upper, Con.lower, Node.val, Node.read])
 
+theorem foldl_prune_mem :
+    ∀ (l acc : List Sys) (t : Sys), t ∈ l.foldl pruneStep acc → t ∈ acc ∨ t ∈ l
+  | [], _, _, h => .inl h
+  | x :: l, acc, t, h => by
+      rw [List.foldl_cons] at h
+      rcases foldl_prune_mem l (pruneStep acc x) t h with h | h
+      · unfold pruneStep at h
+        split at h
+        · exact .inl h
+        · rcases List.mem_cons.mp h with rfl | h
+          · exact .inr (List.mem_cons_self ..)
+          · exact .inl (List.mem_filter.mp h).1
+      · exact .inr (List.mem_cons_of_mem _ h)
+
+theorem mem_prune {l : List Sys} {t : Sys} (h : t ∈ prune l) : t ∈ l := by
+  rcases foldl_prune_mem l [] t (List.mem_reverse.mp h) with h | h
+  · cases h
+  · exact h
+
+theorem extendUp_mem (xs : List Int) :
+    ∀ (f : Nat) (h : Int), h ∈ xs → ∀ v, h ≤ v → v ≤ extendUp xs f h → v ∈ xs
+  | 0, h, hh, v, h1, h2 => by
+      simp only [extendUp] at h2
+      have : v = h := by omega
+      exact this ▸ hh
+  | f + 1, h, hh, v, h1, h2 => by
+      simp only [extendUp] at h2
+      split at h2
+      · rename_i hn
+        by_cases hv : v = h
+        · exact hv ▸ hh
+        · exact extendUp_mem xs f (h + 1) (List.contains_iff_mem.mp hn) v (by omega) h2
+      · have : v = h := by omega
+        exact this ▸ hh
+
+theorem extendDown_mem (xs : List Int) :
+    ∀ (f : Nat) (h : Int), h ∈ xs → ∀ v, extendDown xs f h ≤ v → v ≤ h → v ∈ xs
+  | 0, h, hh, v, h1, h2 => by
+      simp only [extendDown] at h1
+      have : v = h := by omega
+      exact this ▸ hh
+  | f + 1, h, hh, v, h1, h2 => by
+      simp only [extendDown] at h1
+      split at h1
+      · rename_i hn
+        by_cases hv : v = h
+        · exact hv ▸ hh
+        · exact extendDown_mem xs f (h - 1) (List.contains_iff_mem.mp hn) v h1 (by omega)
+      · have : v = h := by omega
+        exact this ▸ hh
+
 theorem memT_sound {s : Slot} {xs : List Int} {t : Sys} (ht : t ∈ Atom.memT s xs)
     (hh : t.Holds o n) : evalWith failClosed (.memberOf s xs) o n = true := by
-  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp ht
+  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp (mem_prune ht)
   obtain ⟨hp, _, hc⟩ := hh
   have hpres := hp (.new s) (by simp [Sys.pres])
-  have h1 := hc _ (by simp [Sys.pres] : Con.upper (.new s) x ∈ (Sys.pres _ _).cons)
-  have h2 := hc _ (by simp [Sys.pres] : Con.lower (.new s) x ∈ (Sys.pres _ _).cons)
+  have h1 := hc _ (by simp [Sys.pres] :
+    Con.upper (.new s) (extendUp xs xs.length x) ∈ (Sys.pres _ _).cons)
+  have h2 := hc _ (by simp [Sys.pres] :
+    Con.lower (.new s) (extendDown xs xs.length x) ∈ (Sys.pres _ _).cons)
   cases hg : n.get s with
   | none => simp [Node.read, hg] at hpres
   | some v =>
       simp only [Con.Holds, Con.upper, Con.lower, Node.val, Node.read, hg] at h1 h2
       simp only [Option.getD_some] at h1 h2
-      have : v = x := by omega
-      subst this
-      simp [evalWith, hg, List.contains_iff_mem, hx]
+      have hm : v ∈ xs := by
+        by_cases hvx : x ≤ v
+        · exact extendUp_mem xs xs.length x hx v hvx (by omega)
+        · exact extendDown_mem xs xs.length x hx v (by omega) (by omega)
+      simp [evalWith, hg, List.contains_iff_mem, hm]
 
 theorem memF_sound {s : Slot} {xs : List Int} {t : Sys} (ht : t ∈ Atom.memF s xs)
     (hh : t.Holds o n) : evalWith failClosed (.memberOf s xs) o n = false := by
@@ -722,14 +777,18 @@ theorem mem_capped {cap : Nat} {l ss : List Sys} (h : capped cap l = some ss) {t
 
 theorem mem_product {cap : Nat} {a b ss : List Sys} (h : product cap a b = some ss) {t : Sys}
     (ht : t ∈ ss) : ∃ t₁ ∈ a, ∃ t₂ ∈ b, t = t₁.merge t₂ := by
-  have := mem_capped h ht
+  unfold product at h
+  obtain ⟨raw, hraw, rfl⟩ := Option.map_eq_some_iff.mp h
+  have := mem_capped hraw (mem_prune ht)
   obtain ⟨t₁, h₁, h₂⟩ := List.mem_flatMap.mp this
   obtain ⟨t₂, h₃, h₄⟩ := List.mem_map.mp h₂
   exact ⟨t₁, h₁, t₂, h₃, h₄.symm⟩
 
 theorem mem_union {cap : Nat} {a b ss : List Sys} (h : union cap a b = some ss) {t : Sys}
-    (ht : t ∈ ss) : t ∈ a ∨ t ∈ b :=
-  List.mem_append.mp (mem_capped h ht)
+    (ht : t ∈ ss) : t ∈ a ∨ t ∈ b := by
+  unfold union at h
+  obtain ⟨raw, hraw, rfl⟩ := Option.map_eq_some_iff.mp h
+  exact List.mem_append.mp (mem_capped hraw (mem_prune ht))
 
 theorem evalAll_of_allAre (ps : PredList) (h : AllAre true o n ps) :
     evalWithAll failClosed ps o n = true := by
@@ -851,8 +910,8 @@ theorem atom_wf (b : Bool) (p : Pred) (l : List Sys) (h : atomDnf b p = some l) 
           simp only [Sys.pres, List.mem_cons, List.mem_map] at hc
           rcases hc with rfl | ⟨y, _, rfl⟩ <;> simp [Con.upper, Con.lower, Sys.pres]
       · intro t ht
-        simp only [if_true, Atom.memT] at ht
-        obtain ⟨x, _, rfl⟩ := List.mem_map.mp ht
+        simp only [if_true] at ht
+        obtain ⟨x, _, rfl⟩ := List.mem_map.mp (mem_prune ht)
         simp [Sys.WF, Sys.pres, Con.upper, Con.lower]
   | witnessed _ | hashEq _ _ _ | ran _ | not _ | allL _ | anyL _ => simp [atomDnf] at h
   | _ =>
