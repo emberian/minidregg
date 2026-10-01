@@ -428,6 +428,7 @@ def intent (accepted : AcceptedInstall profile deployment durable federation hei
   nullifiers := [operationNullifier deployment.domain accepted.ingress]
   exactCharge := charge accepted
   event := event deployment.domain accepted.ingress
+  subject := some accepted.ingress.ingress.subject
   postRootsBound := accepted.prepared.write_roots_bound
   guardsReadOnly := accepted.prepared.readGuards_readonly
 

@@ -134,6 +134,7 @@ def candidateIntent {config : Config} {opened : Opened config}
       nullifiers := base.nullifiers ++ [claimNullifier reserved]
       exactCharge := charge checked
       event := ApplicationDispatchAgentIngress.event ingress
+      subject := base.subject
       postRootsBound := base.postRootsBound
       guardsReadOnly := guarded }
 

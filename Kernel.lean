@@ -79,4 +79,5 @@ import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step
 import Kernel.TurnRecord  -- B2: an AcceptedCellEffect is a Leg (exactPost derived from step); ImplementationRefinement re-indexed by Turn/World, trace_represents_fold (crash recovery = fold of a sublist); model refines, torn install refuted
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles
+import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
 import Kernel.WorldRootCache -- C2: the world root cached, one path per write; cache = spec root (insertWrite_root, deployedOf_root), stale cache refuted

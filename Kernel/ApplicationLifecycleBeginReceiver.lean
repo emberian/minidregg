@@ -222,6 +222,7 @@ def intent {F : Type} [Field F] [DecidableEq F]
             (stableNullifier deployment.domain profile.semantics source).canonicalBytes.length
         | other => ordinary.exactCharge other
       event := event ingress
+      subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := guarded }
 

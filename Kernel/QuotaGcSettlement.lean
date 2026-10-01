@@ -742,6 +742,7 @@ def intent (plan : Plan M portal authState pre capacity) : DataIntent M.rootByte
   nullifiers := [plan.nullifier]
   exactCharge := plan.exactCharge
   event := plan.event
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_cons, List.mem_nil_iff, or_false] at member

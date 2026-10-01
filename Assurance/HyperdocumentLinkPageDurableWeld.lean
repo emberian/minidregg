@@ -333,6 +333,7 @@ def intent : DataIntent rootBytes where
   nullifiers := [nullifier]
   exactCharge := fun _ => 0
   event := durableEvent
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_cons] at member
@@ -511,6 +512,7 @@ def mismatchedIntent : DataIntent rootBytes where
   nullifiers := [nullifier]
   exactCharge := fun _ => 0
   event := durableEvent
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_cons] at member

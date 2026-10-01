@@ -172,6 +172,7 @@ noncomputable def ofHyperdocumentPublication
   nullifiers := publication.nullifiers.map wire.nullifier
   exactCharge := bounded.quote.exact
   event := wire.event
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_cons, List.not_mem_nil, or_false] at member

@@ -85,6 +85,7 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
     nullifiers := [nullifier ingress.spec]
     exactCharge := charge ingress
     event := event ingress
+    subject := some ⟨ingress.spec.packet.release.owner.subject⟩
     postRootsBound := by intro write present; cases present
     guardsReadOnly := by intro guard _; simp }
 

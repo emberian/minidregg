@@ -821,6 +821,7 @@ noncomputable def durableIntent : DurableDataIntent.DataIntent lengthRoot where
   nullifiers := []
   exactCharge := 0
   event := durableEvent
+  subject := none
   postRootsBound := by intro write member; simp at member; rcases member with rfl | rfl <;> rfl
   guardsReadOnly := by intro guard member; simp at member; subst guard; decide
 

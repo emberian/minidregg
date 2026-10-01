@@ -98,6 +98,7 @@ def Accepted.intent (config : NativeHost.Config) (opened : NativeHost.Opened con
     nullifiers := [frontierNullifier ingress.spec]
     exactCharge := charge ingress
     event := event ingress
+    subject := some ingress.spec.gatewaySubject
     postRootsBound := by intro write present; cases present
     guardsReadOnly := by intro guard _; simp }
 

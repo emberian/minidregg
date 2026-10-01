@@ -99,6 +99,7 @@ def intent {config : Config} {opened : Opened config}
         ApplicationLifecycleCompletionIngress.stableNullifier ingress]
       exactCharge := charge accepted
       event := ApplicationLifecycleCompletionIngress.event ingress
+      subject := some (ingress.source.command config.deployment.domain config.profile.semantics).subject
       postRootsBound := DeclaredResourceController.writes_roots_bound accepted.prepared
       guardsReadOnly := guarded }
 

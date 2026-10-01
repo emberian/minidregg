@@ -742,6 +742,7 @@ def baseUseIntent : DataIntent fullRoot where
   nullifiers := [useNullifier]
   exactCharge := fun _ => 1
   event := useEvent
+  subject := none
   postRootsBound := by
     intro write member
     have exact : write = useWrite := by simpa using member
