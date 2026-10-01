@@ -589,11 +589,17 @@ fn content_actions(actions: &Value) -> Result<Value> {
             "createAtom" => ("createAtom", &["type", "atom", "kind", "payload"]),
             "createDocument" => ("createDocument", &["type", "rootElement", "schema", "body"]),
             "createRun" => ("createRun", &["type", "run", "atoms"]),
-            _ => {
-                return Err(
-                    "workspace content proposal supports local creation actions only".into(),
-                )
-            }
+            "editAtom" => (
+                "editAtom",
+                &["type", "atom", "before", "kind", "payload", "tombstone"],
+            ),
+            "link" => ("link", &["type", "link", "source", "target", "relation"]),
+            "annotate" => (
+                "annotate",
+                &["type", "annotation", "atom", "revision", "body"],
+            ),
+            "quote" => ("quote", &["type", "element", "link", "reference"]),
+            _ => return Err("unknown workspace content action".into()),
         };
         if obj.len() != fields.len() || fields.iter().any(|field| !obj.contains_key(*field)) {
             return Err(format!("{tag} has unexpected fields"));
@@ -665,15 +671,18 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 {
                     return Err("payload may contain only type and actions".into());
                 }
-                let lowered = match member(payload, "type")? {
-                    "scalar" => scalar_actions(&payload["actions"], target)?,
-                    "content" => content_actions(&payload["actions"])?,
+                // The action grammar version the Host's controller requires per
+                // payload: the scalar declaration (1) or the content command
+                // grammar (`ContentResource.commandVersion`, 3).
+                let (lowered, schema_version) = match member(payload, "type")? {
+                    "scalar" => (scalar_actions(&payload["actions"], target)?, "1"),
+                    "content" => (content_actions(&payload["actions"])?, "3"),
                     _ => return Err("unsupported workspace payload type".into()),
                 };
                 let capability = member(&reference, "operationCapability")?;
                 let observe = member(&reference, "observeCapability")?;
                 target_rows.push(json!({"kind":kind,"target":target,"capability":capability,
-                    "observeCapability":observe,"schemaVersion":"1",
+                    "observeCapability":observe,"schemaVersion":schema_version,
                     "expectedTargetRoot":root_value,"payload":lowered}));
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
@@ -1557,9 +1566,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(lowered["actions"][0]["key"]["resource"], "123");
-        assert!(content_actions(&json!([{"type":"link","link":"1","source":null,
-            "target":{"type":"document","page":{"contentDomain":"9","pageNumber":"1","expectedRoot":"3"},"id":"2"},
-            "relation":"0"}])).is_err());
+        assert!(content_actions(&json!([{"type":"tombstoneDocument","document":"1"}])).is_err());
+        assert!(content_actions(&json!([{"type":"annotate","annotation":"1","atom":"2",
+            "revision":"3","body":"00","extra":"4"}])).is_err());
+        assert!(content_actions(&json!([{"type":"annotate","annotation":"1","atom":"2",
+            "revision":"3","body":"00"}])).is_ok());
     }
 
     #[test]
