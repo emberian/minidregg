@@ -4122,6 +4122,18 @@ def fleetReceiptLookupJson (transactionId : Nat) (receipt : Option Receipt) : Le
   | none => .mkObj [("type", "absent"), ("transactionId", decimal transactionId)]
   | some r => .mkObj [("type", "confirmed"), ("receipt", fleetReceiptJson r)]
 
+/-- The incoming ledger view (op 140): fleet turns that paid the observed
+account. Payload bytes are the turn's own signed publication. -/
+def fleetIncomingJson (view : NativeHost.FleetIncomingView) : Lean.Json := .mkObj
+  [("type", "minidregg-fleet-incoming-v1"), ("subject", decimal view.subject.value),
+   ("account", decimal view.account), ("topic", hexJson view.topic),
+   ("cursor", decimal view.cursor), ("tip", decimal view.tip),
+   ("entries", .arr <| view.entries.toArray.map fun entry => .mkObj
+     [("height", decimal entry.height), ("transactionId", decimal entry.transactionId.value),
+      ("subject", decimal entry.subject.value), ("payer", decimal entry.payer),
+      ("asset", decimal entry.asset), ("amount", decimal entry.amount),
+      ("topic", hexJson entry.topic), ("payload", hexJson entry.payload)])]
+
 /-- `{"topic": HEX, "cursor": DECIMAL, "limit": DECIMAL}` -/
 def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := do
   let obj ← exactObject "$" ["topic", "cursor", "limit"] json
