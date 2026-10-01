@@ -24,6 +24,8 @@
 #   M8     agent fleet (journey.d/m8.sh -> fleet-journey.sh, its own Store)
 #   J13    P-LAW: a law refusal names its clause (journey.d/j13.sh -> law-leaf-journey.sh, its own Store)
 #   JJOB1  COMPUTE C1: the job law on fresh cells; every lifecycle edge admitted and refused by clause (journey.d/jjob1.sh)
+#   J12A   P-AFFORDANCES: `can NAME`, each held verb dry-run (journey.d/j12a.sh -> affordances-journey.sh, its own Store)
+#   JINSPECT K-INSPECT-VIEWS: inspect caps|law|turn|receipt, why (journey.d/jinspect.sh -> inspect-journey.sh, its own Store)
 #   JPAY1  PAY P1: the pay watcher over fixtures (journey.d/jpay1.sh)
 #   JPAY2  PAY P2: the pay cell (journey.d/jpay2.sh, its own Store)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
@@ -37,7 +39,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jpriv1 m3 m4 m5 m6 m7 m8 j12 j12c j13 j17 jchat jpay1 jpay2 jpriv2 jjob1 jjob-money): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jpriv1 m3 m4 m5 m6 m7 m8 j12 j12c j13 j17 jchat jpay1 jpay2 jpriv2 jjob1 jjob-money j12a jinspect): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -54,7 +56,8 @@
 # Tunables: JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
-# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule).
+# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule);
+# JOURNEY_ONLY (space-separated step ids) runs only those steps.
 # Requires: Linux (/proc-free, but GNU date +%N, setsid, timeout), bash, jq, sha256sum.
 
 set -u
@@ -120,7 +123,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW K10C KT J17 JPRIV1 JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JCHAT JJOB1 JJOBM JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW K10C KT J17 JPRIV1 JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 J12A JINSPECT JCHAT JJOB1 JJOBM JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -167,6 +170,8 @@ TITLE[J12C]="a quote (transclusion) across rooms: four grants, four outcomes"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
 TITLE[JCHAT]="friends talk in a room: say, tail, topic, pin, react, the Discord bridge"
 TITLE[JJOB1]="C1 JOB-LAW: every job edge admitted and refused by clause"
+TITLE[J12A]="can NAME: each held verb dry-run, nothing committed (own Store)"
+TITLE[JINSPECT]="inspect views: cap tree, law, why, turn, receipt; nothing committed (own Store)"
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
@@ -261,6 +266,15 @@ frontier() {
 run_step() {
   local id=$1; shift
   local dep t0 t1 rc
+  # JOURNEY_ONLY="J0 JINSPECT": run only the named steps (re-running one step
+  # through the real harness). A skipped step is SKIPPED, never PASS, so a
+  # filtered run's frontier is the first skipped step and it exits non-zero.
+  if [ -n "${JOURNEY_ONLY:-}" ] && [[ " $JOURNEY_ONLY " != *" $id "* ]]; then
+    STATUS[$id]=SKIPPED; WALL[$id]=0.000; ART[$id]=""; DET[$id]="skipped: not in JOURNEY_ONLY"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" SKIPPED 0.000 "" "${DET[$id]}" >>"$TSV"
+    echo "STEP $id SKIPPED (JOURNEY_ONLY)" >&2
+    return
+  fi
   SD=$S/$id; mkdir -p -m 700 "$SD"
   DETAIL=""; ARTIFACT=""
   # JOURNEY_ONLY="ID ..." runs only those steps; the rest are SKIPPED (never
@@ -788,6 +802,8 @@ step_BD() { hook bind "two plans on disjoint cells are admitted in both orders w
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
 step_JJOB1() { hook jjob1 "the job law (COMPUTE §2.3, deploy/shell/templates/job) installs on fresh cells; every edge is admitted with the right subject and time and refused with the wrong one, each refusal naming its clause (lane C1 JOB-LAW; the run slot is a hand-set stand-in on this tree, no K-RAN)"; }
+step_J12A() { hook j12a "affordances-journey.sh: can NAME lists the verbs my grants cover, each prepared and dry-run (Host op 130) with the clause on a law refusal; root, height and audit unchanged around every can (lane p-affordances, J12A)" shell; }
+step_JINSPECT() { hook jinspect "inspect-journey.sh: the cap tree draws the delegation as a narrowing edge, law prints and round-trips the installed law, why names the clause + slots + the passing value (undisclosed: the dry run), turn lists the footprint and commits nothing (lane k-inspect, JINSPECT)" shell; }
 step_JPAY1() { hook jpay1 "finalized Solana transfers in fixtures become Observation records; disagreement and failed transactions refused (lane p1-watcher, J-PAY-1)"; }
 step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row book, assignments, refusals (uniform), lookup, reopen, audit (lane p2-pay, J-PAY-2)"; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
@@ -835,6 +851,8 @@ run_step J13 J0
 run_step JCHAT J0
 run_step JJOB1 J4
 run_step JJOBM J0
+run_step J12A J0
+run_step JINSPECT J0
 run_step JPAY1 J0
 run_step JPAY2 J0
 run_step JPAY3 J0

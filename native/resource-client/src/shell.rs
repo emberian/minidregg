@@ -58,6 +58,9 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "provision", usage: "provision NAME HOLDER FUNDING PREDICATE-JSON|@FILE [FACTORY-REF]", operation: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
     Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
     Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
+    Verb { name: "can", usage: "can [REF] [--all]", operation: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted" },
+    Verb { name: "inspect", usage: "inspect caps [REF] | inspect law REF | inspect receipt ID | inspect turn ID  [--json]", operation: "mini workspace --action inspect --view caps|law|receipt|turn [--name REF|ID] [--json true]: a Lean view (Host inspect cap-tree|law|receipt|turn) over bytes this workspace holds or reads with its own signed views; turn dry-runs (op 130), nothing is submitted" },
+    Verb { name: "why", usage: "why [ATTEMPT] [--json]", operation: "mini workspace --action inspect --view why [--name ATTEMPT] --refusals HOME/refusals: the last refusal held, explained from the Host's own frame (clause, slot values, the request value that passes it)" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
     Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
     Verb { name: "create", usage: "create NAME STORAGE LAW|PREDICATE-JSON|@FILE [--in ROOM] [--owner SUBJECT]", operation: "mini workspace --action create [--in ROOM] [--owner SUBJECT]" },
@@ -1454,6 +1457,52 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         "refs" => {
             arity(&w, 0, 0, u)?;
             client("workspace", vec![flag("action", "list"), flag("dir", ws())])
+        }
+        "inspect" | "why" => {
+            let json_out = w.iter().any(|word| word == "--json");
+            let rest: Vec<&String> = w[1..].iter().filter(|word| *word != "--json").collect();
+            let (view, name) = if w[0] == "why" {
+                match rest.as_slice() {
+                    [] => ("why", None),
+                    [attempt] => ("why", Some((*attempt).clone())),
+                    _ => return Err(u.to_owned()),
+                }
+            } else {
+                match rest.as_slice() {
+                    [view] if view.as_str() == "caps" => ("caps", None),
+                    [view, name] if matches!(view.as_str(), "caps" | "law" | "receipt" | "turn") => {
+                        (view.as_str(), Some((*name).clone()))
+                    }
+                    _ => return Err(u.to_owned()),
+                }
+            };
+            let mut flags = vec![flag("action", "inspect"), flag("dir", ws()), flag("view", view)];
+            if let Some(name) = name {
+                workspace_name(&name, "name")?;
+                flags.push(flag("name", name));
+            }
+            if view == "why" {
+                flags.push(flag("refusals", session.home.join("refusals")));
+            }
+            if json_out {
+                flags.push(flag("json", "true"));
+            }
+            client("workspace", flags)
+        }
+        "can" => {
+            arity(&w, 0, 2, u)?;
+            let mut flags = vec![flag("action", "can"), flag("dir", ws())];
+            for word in &w[1..] {
+                if word == "--all" {
+                    flags.push(flag("all", "true"));
+                } else if flags.iter().any(|(name, _)| name == "name") {
+                    return Err(u.to_owned());
+                } else {
+                    workspace_name(word, "reference name")?;
+                    flags.push(flag("name", word.clone()));
+                }
+            }
+            client("workspace", flags)
         }
         "read" | "describe" => {
             arity(&w, 1, 1, u)?;

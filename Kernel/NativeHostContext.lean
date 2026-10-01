@@ -151,6 +151,13 @@ structure Opened (config : Config) where
   authority : CredentialAuthorityDomainReceiver.Loaded config.deployment durable.snapshot
   pins : FactoryPins
 
+/-- The same opened image under a config that differs only in its Store paths:
+nothing an `Opened` holds depends on `storage`. (`Host.DryRun` uses it to state
+that a dry run never names the Store's writers.) -/
+def Opened.restorage {config : Config} (opened : Opened config)
+    (storage : DurableReceiverIO.NativeConfig) : Opened { config with storage } :=
+  ⟨opened.durable, opened.directory, opened.authority, opened.pins⟩
+
 def need {α : Type} (detail : String) : Option α → Except String α
   | none => .error detail
   | some value => .ok value

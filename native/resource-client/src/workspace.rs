@@ -29,6 +29,16 @@ pub(crate) mod private;
 #[path = "roomkey.rs"]
 pub(crate) mod roomkey;
 
+/// `can [NAME] [--all]` (P-AFFORDANCES): the verbs my grants cover, each
+/// prepared and dry-run against the current state, never submitted.
+#[path = "can.rs"]
+mod can;
+
+/// `inspect caps|law|receipt|turn`, `why` (K-INSPECT-VIEWS): Lean renderers
+/// over bytes this workspace holds or reads with its own signed views.
+#[path = "inspect_views.rs"]
+mod inspect_views;
+
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 39
@@ -883,6 +893,25 @@ pub(crate) fn propose(
     proposal_id: &str,
     private_room_name: Option<&str>,
 ) -> Result<()> {
+    let summary = propose_summary(root, workspace, request_path, proposal_id, private_room_name, false)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&summary).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// Author a proposal and return its summary. `fresh` makes a document `edit`
+/// name its line from this proposal's own signed read instead of the last
+/// `doc show` (`can`'s probes; `doc edit` keeps the read the friend saw).
+fn propose_summary(
+    root: &Path,
+    workspace: &Value,
+    request_path: &Path,
+    proposal_id: &str,
+    private_room_name: Option<&str>,
+    fresh: bool,
+) -> Result<Value> {
     validate_name(proposal_id)?;
     let request = bounded_json(request_path)?;
     if member(&request, "type")? != "minidregg-workspace-proposal-v1" {
@@ -1015,7 +1044,7 @@ pub(crate) fn propose(
                             key,
                         )?,
                         ("document", None) => content_actions(
-                            &document_actions(root, workspace, local_name, &view,
+                            &document_actions(root, workspace, local_name, &view, fresh,
                                 member(&challenge, "height")?, &payload["actions"])?,
                             false,
                         )?,
@@ -1023,7 +1052,7 @@ pub(crate) fn propose(
                         // a link would carry plaintext and refuses.
                         ("document", Some((room, key))) => private::seal_content(
                             content_actions(
-                                &document_actions(root, workspace, local_name, &view,
+                                &document_actions(root, workspace, local_name, &view, fresh,
                                     member(&challenge, "height")?, &payload["actions"])?,
                                 true,
                             )?,
@@ -1404,11 +1433,7 @@ pub(crate) fn propose(
         "delegation":delegation,"renounce":renounce});
     let bytes = serde_json::to_vec_pretty(&summary).map_err(|error| error.to_string())?;
     private_file(&proposal_dir.join("proposal.json"), &bytes)?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&summary).map_err(|error| error.to_string())?
-    );
-    Ok(())
+    Ok(summary)
 }
 
 pub(crate) fn submit_intent(
@@ -2666,6 +2691,7 @@ fn document_actions(
     workspace: &Value,
     name: &str,
     view: &Value,
+    fresh: bool,
     height: &str,
     actions: &Value,
 ) -> Result<Value> {
@@ -2695,9 +2721,13 @@ fn document_actions(
                 "kind":{"type":"text"},"payload":text_argument(action)?}),
             "edit" => {
                 let line = line_argument(action)?;
-                let seen = bounded_json(&seen_path(root, name)?).map_err(|_| {
-                    format!("doc show {name} first: an edit names a line as you last read it")
-                })?;
+                let seen = if fresh {
+                    json!({"view": view})
+                } else {
+                    bounded_json(&seen_path(root, name)?).map_err(|_| {
+                        format!("doc show {name} first: an edit names a line as you last read it")
+                    })?
+                };
                 let seen_page = content_page(&seen["view"], name)?;
                 let lines = page_lines(seen_page)?;
                 let atom = lines.get(line - 1).ok_or_else(|| {
@@ -3192,6 +3222,34 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 attempt.as_deref(),
             )
         }
+        "can" => {
+            let name = args
+                .optional("name")
+                .map(|value| os_string(value, "resource name"))
+                .transpose()?;
+            let all = match args.optional("all").as_deref().and_then(OsStr::to_str) {
+                None | Some("false") => false,
+                Some("true") => true,
+                _ => return Err("--all must be true or false".into()),
+            };
+            args.finish()?;
+            can::can(&root, &workspace, name.as_deref(), all)
+        }
+        "inspect" => {
+            let view = os_string(args.required("view")?, "inspect view")?;
+            let name = args
+                .optional("name")
+                .map(|value| os_string(value, "inspect name"))
+                .transpose()?;
+            let refusals = args.optional("refusals").map(path);
+            let json_out = match args.optional("json").as_deref().and_then(OsStr::to_str) {
+                None | Some("false") => false,
+                Some("true") => true,
+                _ => return Err("--json must be true or false".into()),
+            };
+            args.finish()?;
+            inspect_views::run(&root, &workspace, &view, name.as_deref(), refusals.as_deref(), json_out)
+        }
         "propose" => {
             let request = path(args.required("request")?);
             let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
@@ -3345,7 +3403,7 @@ mod tests {
         let workspace = json!({"subject":"7"});
         let current = page(vec![atom("401", "first", "7"), atom("402", "second", "1103")]);
         let lowered =
-            document_actions(&root, &workspace, "paper", &current, "9", &json!([{"type":"append","text":"hi"}]))
+            document_actions(&root, &workspace, "paper", &current, false, "9", &json!([{"type":"append","text":"hi"}]))
                 .unwrap();
         assert_eq!(lowered[0]["type"], "createAtom");
         assert_eq!(lowered[0]["payload"], "6869");
@@ -3353,12 +3411,12 @@ mod tests {
         assert!(content_actions(&lowered, false).is_ok());
         // An edit names the line as this workspace last read it.
         let edit = json!([{"type":"edit","line":"2","text":"better"}]);
-        assert!(document_actions(&root, &workspace, "paper", &current, "9", &edit)
+        assert!(document_actions(&root, &workspace, "paper", &current, false, "9", &edit)
             .unwrap_err()
             .contains("doc show paper first"));
         let seen = page(vec![atom("401", "first", "7"), atom("402", "old second", "1103")]);
         retain_seen(&root, "paper", &seen, &json!({"height":"3","worldRoot":"4"})).unwrap();
-        let lowered = document_actions(&root, &workspace, "paper", &current, "9", &edit).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, false, "9", &edit).unwrap();
         assert_eq!(lowered[0]["type"], "editAtom");
         assert_eq!(lowered[0]["atom"], "402");
         assert_eq!(lowered[0]["payload"], hex(b"better"));
@@ -3367,16 +3425,16 @@ mod tests {
         assert!(lowered[0]["before"].get("id").is_none() && lowered[0]["before"].get("canonical").is_none());
         assert!(content_actions(&lowered, false).is_ok());
         let past = json!([{"type":"edit","line":"3","text":"x"}]);
-        assert!(document_actions(&root, &workspace, "paper", &current, "9", &past)
+        assert!(document_actions(&root, &workspace, "paper", &current, false, "9", &past)
             .unwrap_err()
             .contains("had 2 line(s)"));
         // Rereading replaces what an edit names.
         retain_seen(&root, "paper", &current, &json!({"height":"5","worldRoot":"6"})).unwrap();
-        let lowered = document_actions(&root, &workspace, "paper", &current, "9", &edit).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, false, "9", &edit).unwrap();
         assert_eq!(lowered[0]["before"]["payload"], hex(b"second"));
         let declared = json!({"type":"resource","cell":{"root":"1",
             "entries":[{"key":{"type":"object","field":"0"},"value":"1"}]}});
-        assert!(document_actions(&root, &workspace, "shared", &declared, "9", &edit)
+        assert!(document_actions(&root, &workspace, "shared", &declared, false, "9", &edit)
             .unwrap_err()
             .contains("not a document"));
         let text = render_document(&root, "paper", "900", &current["cell"], "9").unwrap();
