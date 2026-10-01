@@ -237,8 +237,12 @@ def scalarCommand (command : Command) (d : Declaration) : DeclaredResourceScalar
     d.expectedPreRoot, d.operationNullifier,
     JobMoney.actions command.job d.plan.before d.plan.after⟩
 
-def jobPatch (command : Command) (d : Declaration) : Patch effectLayout :=
-  DeclaredResourceScalar.cellPatch (scalarCommand command d)
+/-- The job leg's patch: the money writes, then the kernel's ratchet of the
+job's blinding at the turn's height (K-HIDE-ROTATE). -/
+def jobPatch (command : Command) (d : Declaration) (pre : Store effectLayout) (height : Nat) :
+    Patch effectLayout :=
+  DeclaredResourceScalar.cellPatch (scalarCommand command d) ++
+    DeclaredEffectCell.blinding.patch pre height
 
 structure Mode {M : Materializer effectLayout Digest} (pre : Materialized M) (d : Declaration) : Type where
   rootExact : d.expectedPreRoot = pre.root
@@ -293,9 +297,9 @@ def family (snapshot : Snapshot) (job : JobCell) (semantics : Digest) (ambient :
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
   ModeEvidence := fun d _ => Mode job d
-  Postcondition := fun d _ post => (jobPatch command d).ResultAt job.logical post
+  Postcondition := fun d _ post => (jobPatch command d job.logical ambient.height).ResultAt job.logical post
   effectDigest := effectDigest snapshot.domain semantics command
-  patch := fun d _ => jobPatch command d
+  patch := fun d _ => jobPatch command d job.logical ambient.height
   nullifier := fun d _ => some d.operationNullifier
   Release := fun _ _ => Unit
   DeclassificationAuthority := fun _ _ => Unit
@@ -403,7 +407,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
           | .error reason => throw (.jobCell reason)
           | .ok _ =>
             match validate DeclaredEffectCell.materializer job job.root
-                (jobPatch command d) with
+                (jobPatch command d job.logical ambient.height) with
             | .rejected _ => throw .validation
             | .accepted validated =>
               let candidate : Candidate (family snapshot job profile.semantics ambient command)

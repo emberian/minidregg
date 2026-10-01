@@ -378,6 +378,14 @@ def contentWire : Wire Hyperdocument.layout where
   valueCodecId space := s!"hyperdocument-record/{namespaceTag space}/{contentRecordVersion space}"
   blinding := some ⟨.blinding, ()⟩
 
+/-- The content cell's blinding (K-HIDE-ROTATE): namespace `blinding` at key
+`()`, a digest; a ratchet link is its natural. -/
+def contentBlinding : StoreCodec.Blinding contentWire where
+  space := .blinding
+  key := ()
+  isBlinding := rfl
+  ofLink value := (⟨value⟩ : Digest)
+
 /-- The content cell materializer. -/
 def contentMaterializer : Hyperdocument.Materializer Digest :=
   StoreCodec.materializer contentWire

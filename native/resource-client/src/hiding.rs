@@ -24,6 +24,20 @@
 //! The Host holds each cell's blinding (it must, to serve openings), so the
 //! salts hide uncovered entries from OTHER READERS, not from the operator.
 //!
+//! The ratchet (K-HIDE-ROTATE).  The Host advances a blinded cell's blinding at
+//! every admitted write, at the write's admission height `h`
+//! (`StoreCodec.Blinding.patch`):
+//!
+//! ```text
+//! blinding_h = KMAC256(bytes(blinding_{h-1}), nat(h), 256, "DREGG.CELL.BLIND.RATCHET/v1")
+//! ```
+//!
+//! read as a little-endian natural, where `bytes` is the blinding's canonical
+//! value bytes (the KMAC key the salts use).  Every leaf is re-salted at every
+//! write, so a narrowed reader cannot tell which sealed entry moved.  The owner
+//! derives the current blinding from the birth blinding and the heights of the
+//! cell's writes (`ratcheted_blinding`); no new key material.
+//!
 //! A view carries the root and its opening (`{frame, items}`); `verify_view`
 //! recomputes every opened leaf and the root, and checks that every declared
 //! entry the view displays is one of the opened entries.
@@ -42,6 +56,7 @@ const CELL_BLINDING: &[u8] = b"DREGG.STORE.CELL-BLINDING/v1";
 const SALT: &[u8] = b"DREGG.STORE.SALT/v1";
 const LEAF: &[u8] = b"DREGG.STORE.LEAF/v1";
 const ROOT: &[u8] = b"DREGG.STORE.ROOT/v2";
+const RATCHET: &[u8] = b"DREGG.CELL.BLIND.RATCHET/v1";
 const RATE: usize = 136;
 
 /// The custody text printed with every blinding-key export.
@@ -273,11 +288,49 @@ fn salt_key(kind: &str, blinding: &str) -> Result<Vec<u8>> {
     }
 }
 
-/// The salt of one entry of a cell this key blinded: what the owner
-/// recomputes without asking the Host.
-pub(crate) fn owner_salt(seed: &[u8; 32], kind: &str, cell: &str, entry: &[u8]) -> Result<[u8; 32]> {
-    let blinding = cell_blinding(&blinding_key(seed), cell)?;
+/// One link of the ratchet: the blinding after a write at `height`
+/// (`StoreCodec.Blinding.step`).
+pub(crate) fn ratchet_step(kind: &str, blinding: &str, height: u64) -> Result<String> {
+    let tag = kmac256(&salt_key(kind, blinding)?, RATCHET, &nat_bytes(height));
+    Ok(Nat::from_le_bytes(&tag).to_decimal())
+}
+
+/// A cell's current blinding: the birth blinding this key derives, ratcheted
+/// once per write at each write's height, in order (`Blinding.chain`).
+pub(crate) fn ratcheted_blinding(
+    blinding_key: &[u8; 32],
+    kind: &str,
+    cell: &str,
+    heights: &[u64],
+) -> Result<String> {
+    let mut blinding = cell_blinding(blinding_key, cell)?;
+    for height in heights {
+        blinding = ratchet_step(kind, &blinding, *height)?;
+    }
+    Ok(blinding)
+}
+
+/// The salt of one entry of a cell this key blinded, after writes at
+/// `heights`: what the owner recomputes without asking the Host.
+pub(crate) fn owner_salt(
+    seed: &[u8; 32],
+    kind: &str,
+    cell: &str,
+    heights: &[u64],
+    entry: &[u8],
+) -> Result<[u8; 32]> {
+    let blinding = ratcheted_blinding(&blinding_key(seed), kind, cell, heights)?;
     Ok(kmac256(&salt_key(kind, &blinding)?, SALT, entry))
+}
+
+/// Parse a comma-separated list of write heights (empty: no writes).
+pub(crate) fn parse_heights(text: &str) -> Result<Vec<u64>> {
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    text.split(',')
+        .map(|part| part.parse::<u64>().map_err(|_| format!("not a height: {part:?}")))
+        .collect()
 }
 
 fn leaf(salt: &[u8], entry: &[u8]) -> [u8; 32] {
@@ -456,6 +509,35 @@ mod tests {
         let bytes = [0xffu8; 32];
         let value = Nat::from_le_bytes(&bytes);
         assert_eq!(Nat::from_decimal(&value.to_decimal()).unwrap(), value);
+    }
+
+    const RATCHET_DECLARED_12345_7: &str =
+        "73012239455807050975333662379447540217689878128794146030654509147050940574536";
+    const RATCHET_CONTENT_12345_7: &str =
+        "80507627128512150106691707307899077622696106983309464630822218806260128046661";
+
+    /// Lean's `ratchetTag` at a declared blinding 12345 (`intStream` key bytes)
+    /// and height 7, and at a content blinding 12345 (`digestStream`), computed
+    /// by the compiled Lean core (`StoreCodec.natOfLE (ratchetTag key 7)`).
+    #[test]
+    fn ratchet_matches_the_lean_core() {
+        assert_eq!(ratchet_step("declared", "12345", 7).unwrap(), RATCHET_DECLARED_12345_7);
+        assert_eq!(ratchet_step("content", "12345", 7).unwrap(), RATCHET_CONTENT_12345_7);
+    }
+
+    #[test]
+    fn ratchet_chain_folds_in_order() {
+        let key = blinding_key(&[1u8; 32]);
+        let birth = cell_blinding(&key, "7").unwrap();
+        assert_eq!(ratcheted_blinding(&key, "declared", "7", &[]).unwrap(), birth);
+        let one = ratchet_step("declared", &birth, 11).unwrap();
+        let two = ratchet_step("declared", &one, 12).unwrap();
+        assert_eq!(ratcheted_blinding(&key, "declared", "7", &[11, 12]).unwrap(), two);
+        assert_ne!(ratcheted_blinding(&key, "declared", "7", &[12, 11]).unwrap(), two);
+        assert_ne!(one, birth);
+        assert_eq!(parse_heights("11,12").unwrap(), vec![11, 12]);
+        assert!(parse_heights("").unwrap().is_empty());
+        assert!(parse_heights("1,x").is_err());
     }
 
     #[test]

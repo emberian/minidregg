@@ -665,11 +665,29 @@ def targetAmount (target : Target) :
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
 
-/-- A target's footprint, scanning only the patch's write footprint. -/
+/-- The address the kernel's blinding ratchet writes on every leg of a
+blinded target (K-HIDE-ROTATE).  It is not the leg's effect: no action writes
+it (`writableKeyCheck`), no scope names it, and it is left out of the
+footprint. -/
+def targetRatchet (target : Target) : Address target.layout → Bool := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact fun address => match address.2 with | .blinding => true | _ => false
+    | content _ => exact fun address => match address.1 with | .blinding => true | _ => false
+    | append _ => exact fun _ => false
+
+/-- What one write changed, but the ratchet's address. -/
+def changedEffect (target : Target) (pre post : Store target.layout) : Finset (Address target.layout) :=
+  (ResourceObservationAdmission.changed pre post).filter fun address => targetRatchet target address = false
+
+/-- A target's footprint, scanning only the patch's write footprint, without
+the ratchet's address. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
     (pre post : Store target.layout) : Footprint :=
   ResourceObservationAdmission.footprintOf
-    (ResourceObservationAdmission.changedWithin (Patch.writeFootprint patch) pre post)
+    (ResourceObservationAdmission.changedWithin
+      ((Patch.writeFootprint patch).filter fun address => targetRatchet target address = false) pre post)
     (targetField target) (targetAmount target) pre post
 
 /-- The footprint of one incidence: a target's write, or nothing for the
@@ -682,19 +700,29 @@ def legFootprint (prepared : PreparedInvocation deployment profile ambient durab
       (prepared.targets i).pre.logical (prepared.targets i).post)
   | none => none
 
-/-- **The leg's footprint is exactly what the write changed**: scanning the
-patch's write footprint finds every changed address of the target cell
-(`Patch.run_frame`), so it equals the whole-cell footprint. -/
+/-- **The leg's footprint is exactly what the write changed, but the
+ratchet**: scanning the patch's write footprint finds every changed address of
+the target cell (`Patch.run_frame`), so it equals the whole-cell footprint over
+every address except the blinding the kernel advanced. -/
 theorem legFootprint_exact (prepared : PreparedInvocation deployment profile ambient durable command)
     (i : TargetIndex command) :
-    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprint
+    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprintOf
+      (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
       (targetField command.targets[i]) (targetAmount command.targets[i])
       (prepared.targets i).pre.logical (prepared.targets i).post) := by
-  simp only [legFootprint, targetFootprint, ResourceObservationAdmission.footprint]
-  rw [ResourceObservationAdmission.changedWithin_eq_changed]
-  intro address outside
-  rw [← (prepared.targets i).postExact]
-  exact (Patch.run_frame _ _ address outside).symm
+  simp only [legFootprint, targetFootprint, changedEffect]
+  congr 2
+  have whole := ResourceObservationAdmission.changedWithin_eq_changed
+    (candidates := Patch.writeFootprint (targetPatch prepared.authority.snapshot profile.semantics
+      ambient command command.targets[i] (prepared.targets i).pre))
+    (pre := (prepared.targets i).pre.logical) (post := (prepared.targets i).post) (by
+      intro address outside
+      rw [← (prepared.targets i).postExact]
+      exact (Patch.run_frame _ _ address outside).symm)
+  rw [← whole]
+  ext address
+  simp only [ResourceObservationAdmission.changedWithin, Finset.mem_filter]
+  tauto
 
 /-- The authorizing capability's scope against a leg's footprint. Refusals
 name the failed coordinate: a field the scope does not name, or a named field
@@ -772,7 +800,8 @@ theorem CheckedLeg.fields_covered [DecidableEq F]
     {tuple : PreparedTuple (plan prepared)} {i : TargetIndex command} {envelope : List UInt8}
     (leg : CheckedLeg prepared tuple (some i) envelope) :
     ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
-      cap.scope.FieldsCover (ResourceObservationAdmission.footprint
+      cap.scope.FieldsCover (ResourceObservationAdmission.footprintOf
+        (changedEffect command.targets[i] (prepared.targets i).pre.logical (prepared.targets i).post)
         (targetField command.targets[i]) (targetAmount command.targets[i])
         (prepared.targets i).pre.logical (prepared.targets i).post) := by
   have fields := leg.fields

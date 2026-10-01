@@ -294,8 +294,8 @@ usage:
   mini socket-proxy --socket PUBLIC-SOCKET
   mini key --action export-blinding --secret KEY
   mini verify-view --view VIEW.json
-  mini key --action cell-blinding --secret KEY --cell CELL
-  mini key --action derive-salt --secret KEY --cell CELL --storage declared|content --entry HEX
+  mini key --action cell-blinding --secret KEY --cell CELL [--storage declared|content --heights H1,H2,...]
+  mini key --action derive-salt --secret KEY --cell CELL --storage declared|content [--heights H1,H2,...] --entry HEX
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
@@ -2747,24 +2747,56 @@ fn run(mut args: Args) -> Result<()> {
                     Ok(())
                 }
                 Some("cell-blinding") => {
+                    // With --heights, the cell's CURRENT blinding: the birth blinding
+                    // ratcheted once per write at each height (K-HIDE-ROTATE).
                     let cell = args.required("cell")?;
+                    let storage = args.optional("storage");
+                    let heights = args.optional("heights");
                     args.finish()?;
                     let cell = cell.to_str().ok_or("--cell must be UTF-8")?;
-                    println!("{}", hiding::cell_blinding(&hiding::blinding_key(&seed), cell)?);
+                    let key = hiding::blinding_key(&seed);
+                    match heights {
+                        None => println!("{}", hiding::cell_blinding(&key, cell)?),
+                        Some(heights) => {
+                            let storage = storage.ok_or("--heights needs --storage")?;
+                            let heights = hiding::parse_heights(
+                                heights.to_str().ok_or("--heights must be UTF-8")?,
+                            )?;
+                            println!(
+                                "{}",
+                                hiding::ratcheted_blinding(
+                                    &key,
+                                    storage.to_str().ok_or("--storage must be UTF-8")?,
+                                    cell,
+                                    &heights,
+                                )?
+                            );
+                        }
+                    }
                     Ok(())
                 }
                 Some("derive-salt") => {
                     let cell = args.required("cell")?;
                     let storage = args.required("storage")?;
                     let entry = args.required("entry")?;
+                    let heights = args.optional("heights");
                     args.finish()?;
                     let entry = workspace::private::decode_hex(
                         entry.to_str().ok_or("--entry must be UTF-8 hex")?,
                     )?;
+                    // The heights of the cell's writes since birth, in order: the
+                    // salts are keyed by the ratcheted blinding (K-HIDE-ROTATE).
+                    let heights = match heights {
+                        Some(text) => hiding::parse_heights(
+                            text.to_str().ok_or("--heights must be UTF-8")?,
+                        )?,
+                        None => Vec::new(),
+                    };
                     let salt = hiding::owner_salt(
                         &seed,
                         storage.to_str().ok_or("--storage must be UTF-8")?,
                         cell.to_str().ok_or("--cell must be UTF-8")?,
+                        &heights,
                         &entry,
                     )?;
                     println!("{}", hex(&salt));

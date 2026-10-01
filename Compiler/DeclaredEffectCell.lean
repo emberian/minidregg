@@ -96,6 +96,14 @@ def wire : Wire effectLayout where
   valueCodecId := fun _ => intCodecId
   blinding := some StateKey.blinding.address
 
+/-- The declared cell's blinding (K-HIDE-ROTATE): `StateKey.blinding`, an
+integer; a ratchet link is its non-negative natural. -/
+def blinding : Blinding wire where
+  space := ()
+  key := .blinding
+  isBlinding := rfl
+  ofLink value := Int.ofNat value
+
 /-- The declared-effect cell materializer: the generic store codec at `wire`,
 rooted by `StoreCodec.rootBytes`. -/
 def materializer : Materializer effectLayout Digest := StoreCodec.materializer wire
