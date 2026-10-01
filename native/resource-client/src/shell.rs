@@ -1534,7 +1534,13 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             };
             let mut flags = vec![flag("action", "inspect"), flag("dir", ws()), flag("view", view)];
             if let Some(name) = name {
-                workspace_name(&name, "name")?;
+                // caps/law name a reference (incl. lab/index under a room);
+                // receipt/turn/why name a proposal or attempt.
+                if matches!(view, "caps" | "law") {
+                    ref_name(&name, "reference name")?;
+                } else {
+                    workspace_name(&name, "name")?;
+                }
                 flags.push(flag("name", name));
             }
             if view == "why" {
@@ -1556,7 +1562,8 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 } else if flags.iter().any(|(name, _)| name == "name") {
                     return Err(u.to_owned());
                 } else {
-                    workspace_name(word, "reference name")?;
+                    // A reference name, incl. one under a room (lab/notes).
+                    ref_name(word, "reference name")?;
                     flags.push(flag("name", word.clone()));
                 }
             }
