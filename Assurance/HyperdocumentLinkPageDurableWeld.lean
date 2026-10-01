@@ -194,14 +194,20 @@ theorem eventPostBytes_exact :
   rfl
 
 theorem contentPostRoot_exact :
-    contentPostCell.root =
-      (Sp800185Cshake256.hash StoreCodec.rootCustomization contentPostBytes).digest :=
-  rfl
+    contentPostCell.root = StoreCodec.saltedRoot HyperdocumentCell.contentWire contentPostStore :=
+  StoreCodec.materializer_rootOf _ _
 
 theorem eventPostRoot_exact :
-    eventPostCell.root =
-      (Sp800185Cshake256.hash StoreCodec.rootCustomization eventPostBytes).digest :=
-  rfl
+    eventPostCell.root = StoreCodec.saltedRoot HyperdocumentCell.eventWire eventPostStore :=
+  StoreCodec.materializer_rootOf _ _
+
+/-- CONFESSED `native_decide`: the content and event layout digests differ.
+They are cSHAKE256 outputs, which the kernel does not evaluate; the compiled
+hash is run once here.  Only the dispatch below depends on it. -/
+theorem content_event_layouts_differ :
+    StoreCodec.layoutDigest HyperdocumentCell.eventWire ≠
+      StoreCodec.layoutDigest HyperdocumentCell.contentWire := by
+  native_decide
 
 /-! ## One authority-guarded durable intent -/
 
@@ -218,22 +224,35 @@ def authorityRootBytes (bytes : List UInt8) : Digest :=
     bytes.length⟩
 
 def rootBytes (bytes : List UInt8) : Digest :=
-  if (HyperdocumentCell.contentMaterializer.codec.decode bytes).isSome ∨
-      (HyperdocumentCell.eventMaterializer.codec.decode bytes).isSome then
-    StoreCodec.rootBytes bytes
+  if (HyperdocumentCell.contentMaterializer.codec.decode bytes).isSome then
+    StoreCodec.rootBytes HyperdocumentCell.contentWire bytes
+  else if (HyperdocumentCell.eventMaterializer.codec.decode bytes).isSome then
+    StoreCodec.rootBytes HyperdocumentCell.eventWire bytes
   else authorityRootBytes bytes
 
+/-- Stated against the materialized root, for a variable store: a concrete
+instance never asks the kernel to unfold the byte-level root and run the
+canonical decoder (and the cSHAKE256 layout digest inside it). -/
 @[simp] theorem rootBytes_content_encode (store : ContentStore) :
     rootBytes (HyperdocumentCell.contentMaterializer.codec.encode store) =
-      StoreCodec.rootBytes (HyperdocumentCell.contentMaterializer.codec.encode store) := by
+      (CellState.materialize HyperdocumentCell.contentMaterializer store).root := by
   unfold rootBytes
-  rw [if_pos (Or.inl (by rw [HyperdocumentCell.contentMaterializer.codec.decode_encode]; rfl))]
+  rw [if_pos (by rw [HyperdocumentCell.contentMaterializer.codec.decode_encode]; rfl)]
+  exact (StoreCodec.rootOf_eq_rootBytes HyperdocumentCell.contentWire store).symm
 
 @[simp] theorem rootBytes_event_encode (store : EventStore) :
     rootBytes (HyperdocumentCell.eventMaterializer.codec.encode store) =
-      StoreCodec.rootBytes (HyperdocumentCell.eventMaterializer.codec.encode store) := by
+      (CellState.materialize HyperdocumentCell.eventMaterializer store).root := by
   unfold rootBytes
-  rw [if_pos (Or.inr (by rw [HyperdocumentCell.eventMaterializer.codec.decode_encode]; rfl))]
+  have notContent : (HyperdocumentCell.contentMaterializer.codec.decode
+      (HyperdocumentCell.eventMaterializer.codec.encode store)).isSome = false := by
+    have refused := StoreCodec.decode_other_layout HyperdocumentCell.contentWire
+      HyperdocumentCell.eventWire store content_event_layouts_differ
+    simp only [Option.isSome_eq_false_iff, Option.isNone_iff_eq_none]
+    exact refused
+  rw [if_neg (by simp [notContent]),
+    if_pos (by rw [HyperdocumentCell.eventMaterializer.codec.decode_encode]; rfl)]
+  exact (StoreCodec.rootOf_eq_rootBytes HyperdocumentCell.eventWire store).symm
 
 @[simp] theorem contentPreRoot_bound :
     rootBytes contentPreBytes = contentPreCell.root :=
@@ -437,14 +456,11 @@ def staleBefore : DataSnapshot rootBytes where
 theorem rootBytes_of_first_byte (first : UInt8) (rest : List UInt8) (other : first ≠ 68) :
     rootBytes (first :: rest) = authorityRootBytes (first :: rest) := by
   unfold rootBytes
-  rw [if_neg]
-  rintro (content | event)
-  · rw [show HyperdocumentCell.contentMaterializer.codec.decode (first :: rest) = none from
-      StoreCodec.decode_other_first_byte HyperdocumentCell.contentWire first rest other] at content
-    cases content
-  · rw [show HyperdocumentCell.eventMaterializer.codec.decode (first :: rest) = none from
-      StoreCodec.decode_other_first_byte HyperdocumentCell.eventWire first rest other] at event
-    cases event
+  rw [show HyperdocumentCell.contentMaterializer.codec.decode (first :: rest) = none from
+      StoreCodec.decode_other_first_byte HyperdocumentCell.contentWire first rest other,
+    show HyperdocumentCell.eventMaterializer.codec.decode (first :: rest) = none from
+      StoreCodec.decode_other_first_byte HyperdocumentCell.eventWire first rest other]
+  rfl
 
 @[simp] theorem rootBytes_authority_exact :
     rootBytes authorityBytes = authorityRootBytes authorityBytes :=
@@ -593,9 +609,11 @@ structure PhysicalCeiling : Type 1 where
 #guard_msgs (whitespace := lax) in #print axioms accepted_content_post_exact
 /-- info: 'Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.eventPostRoot_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms eventPostRoot_exact
-/-- info: 'Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.positive_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.content_event_layouts_differ' depends on axioms: [propext, Classical.choice, Quot.sound, content_event_layouts_differ._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms content_event_layouts_differ
+/-- info: 'Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.positive_install' depends on axioms: [propext, Classical.choice, Quot.sound, content_event_layouts_differ._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms positive_install
-/-- info: 'Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.stale_authority_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.stale_authority_rejected' depends on axioms: [propext, Classical.choice, Quot.sound, content_event_layouts_differ._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms stale_authority_rejected
 
 end

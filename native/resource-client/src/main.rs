@@ -29,6 +29,7 @@ mod fleet;
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
+mod hiding;
 #[cfg(unix)]
 mod historical_call_receipt;
 #[cfg(unix)]
@@ -287,6 +288,10 @@ usage:
   mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT
   mini shell --remote DEST --workspace JOIN-ROOT/workspace --home SESSION-HOME [--line LINE]
   mini socket-proxy --socket PUBLIC-SOCKET
+  mini key --action export-blinding --secret KEY
+  mini verify-view --view VIEW.json
+  mini key --action cell-blinding --secret KEY --cell CELL
+  mini key --action derive-salt --secret KEY --cell CELL --storage declared|content --entry HEX
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
@@ -462,6 +467,11 @@ impl Args {
             return Err(format!("missing --{name}"));
         };
         Ok(self.values.remove(index).1)
+    }
+
+    fn peek(&self, name: &str) -> Option<&OsStr> {
+        let flag = OsString::from(format!("--{name}"));
+        self.values.iter().find(|(key, _)| *key == flag).map(|(_, value)| value.as_os_str())
     }
 
     fn optional(&mut self, name: &str) -> Option<OsString> {
@@ -702,6 +712,10 @@ fn keygen(secret: &Path, public: &Path, escrow: Option<(OsString, OsString)>) ->
         create_private(Path::new(&escrow_path), &wrapped.to_bytes())?;
     }
     eprintln!("{}", workspace::private::KEYGEN_NOTICE);
+    eprintln!(
+        "Your blinding key is derived from this seed (`mini key --action export-blinding`); it \
+keys the salts that hide each cell's fields from readers you have not named."
+    );
     println!("{}", hex(&signing.verifying_key().to_bytes()));
     Ok(())
 }
@@ -1444,6 +1458,19 @@ fn query_retained(
         &view_bin,
         &view_json,
     )?;
+    // K-NARROW-HIDE: a resource or at-height view is checked against its own
+    // root before it is shown; a view whose opening does not recompute the root
+    // is refused, with the signed view retained for inspection.
+    let presented = if inspection_kind == "view-resource" || inspection_kind == "view-at" {
+        let summary = hiding::verify_view(&presented)?;
+        let mut presented = presented;
+        if let Some(object) = presented.as_object_mut() {
+            object.insert("hiding".to_owned(), summary);
+        }
+        presented
+    } else {
+        presented
+    };
     if inspection_kind == "fn-inbox-resource"
         && presented.get("type").and_then(Value::as_str) != Some("fn-inbox-resource-summary-v1")
     {
@@ -2296,8 +2323,13 @@ fn run(mut args: Args) -> Result<()> {
         "clock" => clock::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
+        // mini key carries two verb families: the credential store (keys.rs) and the
+        // owner-derived hiding keys (K-NARROW-HIDE, the arm below). Route by --action.
         #[cfg(unix)]
-        "key" => keys::run(args),
+        "key" if !matches!(
+            args.peek("action").and_then(OsStr::to_str),
+            Some("export-blinding" | "cell-blinding" | "derive-salt")
+        ) => keys::run(args),
         "fleet" => fleet::run(args),
         "well" => well::run(args),
         "pay" => pay::run(args),
@@ -2639,6 +2671,52 @@ fn run(mut args: Args) -> Result<()> {
                 }
             };
             keygen(&secret, &public, escrow)
+        }
+        "verify-view" => {
+            let view = path(args.required("view")?);
+            args.finish()?;
+            let bytes = fs::read(&view)
+                .map_err(|error| format!("cannot read {}: {error}", view.display()))?;
+            let value: Value = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("{} is not JSON: {error}", view.display()))?;
+            print_json(&hiding::verify_view(&value)?)
+        }
+        "key" => {
+            let action = args.required("action")?;
+            let seed = hiding::read_seed(&path(args.required("secret")?))?;
+            match action.to_str() {
+                Some("export-blinding") => {
+                    args.finish()?;
+                    eprintln!("{}", hiding::BLINDING_NOTICE);
+                    println!("{}", hex(&hiding::blinding_key(&seed)));
+                    Ok(())
+                }
+                Some("cell-blinding") => {
+                    let cell = args.required("cell")?;
+                    args.finish()?;
+                    let cell = cell.to_str().ok_or("--cell must be UTF-8")?;
+                    println!("{}", hiding::cell_blinding(&hiding::blinding_key(&seed), cell)?);
+                    Ok(())
+                }
+                Some("derive-salt") => {
+                    let cell = args.required("cell")?;
+                    let storage = args.required("storage")?;
+                    let entry = args.required("entry")?;
+                    args.finish()?;
+                    let entry = workspace::private::decode_hex(
+                        entry.to_str().ok_or("--entry must be UTF-8 hex")?,
+                    )?;
+                    let salt = hiding::owner_salt(
+                        &seed,
+                        storage.to_str().ok_or("--storage must be UTF-8")?,
+                        cell.to_str().ok_or("--cell must be UTF-8")?,
+                        &entry,
+                    )?;
+                    println!("{}", hex(&salt));
+                    Ok(())
+                }
+                _ => Err("key --action is export-blinding, cell-blinding or derive-salt".to_owned()),
+            }
         }
         "bootstrap" => {
             if SOCKET.get().is_some() {

@@ -1344,6 +1344,27 @@ private theorem birthRootCapability_time_window {kind : ResourceKind}
       height + profile.template.lifetime := by
   constructor <;> rfl
 
+/-- K-NARROW-HIDE: put the owner-derived blinding into a newborn cell.  Only
+declared and content cells carry one; the owner's client derives it from its
+own key material and the cell id (`mini`, `hiding.rs`), so the host never
+chooses it. -/
+private def withBlinding (path : String) (blinding : Option Nat)
+    (cell : PackedCell CanonicalCellRegistry.registry) :
+    Result (PackedCell CanonicalCellRegistry.registry) := do
+  let some value := blinding | pure cell
+  unless 0 < value ∧ value < 2 ^ 256 do
+    throw s!"{path}.blinding: must be a nonzero 256-bit value"
+  match cell with
+  | ⟨.declaredObject, payload⟩ => pure ⟨.declaredObject, CellState.materialize _
+      (payload.logical.set EffectDeclaration.StateKey.blinding.address (some (Int.ofNat value)))⟩
+  | ⟨.accountMetadata, payload⟩ => pure ⟨.accountMetadata, CellState.materialize _
+      (payload.logical.set EffectDeclaration.StateKey.blinding.address (some (Int.ofNat value)))⟩
+  | ⟨.declaredProgram, payload⟩ => pure ⟨.declaredProgram, CellState.materialize _
+      (payload.logical.set EffectDeclaration.StateKey.blinding.address (some (Int.ofNat value)))⟩
+  | ⟨.content, payload⟩ => pure ⟨.content, CellState.materialize _
+      (payload.logical.set ⟨.blinding, ()⟩ (some (⟨value⟩ : Digest)))⟩
+  | _ => throw s!"{path}.blinding: this storage carries no blinding"
+
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
@@ -1352,6 +1373,7 @@ private def birthParts (path : String)
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
   let roomField := if (raw.get? "room").isSome then ["room"] else []
+  let blindingField := if (raw.get? "blinding").isSome then ["blinding"] else []
   let obj ← exactObject path
     ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
@@ -1360,7 +1382,7 @@ private def birthParts (path : String)
       ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
-      roomField) json
+      roomField ++ blindingField) json
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
@@ -1404,6 +1426,10 @@ private def birthParts (path : String)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
         (AgentGrain.initialStore target budget)⟩
     else pure (NativeHostGenesis.declaredCell source target (kind = .account))
+  let blinding ← match obj.get? "blinding" with
+    | none => pure none
+    | some value => some <$> nat (path ++ ".blinding") value
+  let cell ← withBlinding path blinding cell
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
     ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room⟩
   -- A workspace resource's owner holds it as a room: `under target`, the
@@ -3428,6 +3454,7 @@ private def stateKeyJson : Minidregg.Theory.EffectDeclaration.StateKey → Lean.
       ("resource", decimal account.value), ("field", decimal resource.value)]
   | .programCode resource => .mkObj [("type", "program"),
       ("resource", decimal resource.value)]
+  | .blinding => .mkObj [("type", "blinding")]
 
 private def declaredCellJson (root : Digest)
     (store : Store.Store EffectDeclaration.effectLayout) : Lean.Json :=
@@ -3607,10 +3634,20 @@ private def streamCellJson (root : Digest) (store : Minidregg.Theory.Store.Store
     ("entries", .arr <| (StreamCell.tail store 1 store.support.card).toArray.map
       fun (k, r) => streamRecordJson k r)]
 
+/-- The opening of a view's root (K-NARROW-HIDE): the store frame and one item
+per entry in canonical order — `{salt, entry}` where the reader may see the
+entry, `{leaf}` where it may not.  The client recomputes every opened leaf and
+the root from these alone. -/
+private def openingJson (opening : NativeObservationController.OpeningView) : Lean.Json :=
+  .mkObj [("frame", hexJson opening.1),
+    ("items", .arr <| opening.2.toArray.map fun
+      | .inl opened => .mkObj [("salt", hexJson opened.salt), ("entry", hexJson opened.entry)]
+      | .inr leaf => .mkObj [("leaf", hexJson leaf)])]
+
 /-- `cell.root` is the cell's own root (the view's leading digest); the
 entries are the cell as the reader's scope narrows it. -/
 private def resourceJson (value : NativeObservationController.ResourceView) : Result Lean.Json := do
-  let (root, bytes, balances) := value
+  let (root, bytes, balances, opening) := value
   let packed ← match Minidregg.Theory.CellRegistry.PackedCell.decode
       CanonicalCellRegistry.registry bytes with
     | some packed => pure packed
@@ -3621,7 +3658,8 @@ private def resourceJson (value : NativeObservationController.ResourceView) : Re
     | ⟨.stream, payload⟩ => streamCellJson root payload.logical
     | _ => .mkObj [("root", decimal root.value), ("canonical", hexJson bytes)]
   pure <| .mkObj [("type", "resource"), ("cell", view),
-    ("balances", .arr <| balances.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2])]
+    ("balances", .arr <| balances.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2]),
+    ("opening", openingJson opening)]
 
 private def wellCommandJson (command : RealmWellCodec.Command) : Lean.Json :=
   .mkObj [("type", "well-command-v1"), ("subject", decimal command.subject.value),
@@ -4040,13 +4078,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
           ("transaction", decimal entry.transaction),
           ("cells", .arr <| entry.cells.toArray.map decimal)])]
   | "view-at" => do
-      let (height, root, lifecycle) ← decoded "view-at" NativeObservationController.atViewCodec bytes
+      let (height, root, lifecycle, opening) ← decoded "view-at" NativeObservationController.atViewCodec bytes
       match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
       | some .fresh => pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "fresh")]
       | some .retired => pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "retired")]
       | some (.live cell) => do
           let view ← resourceJson (root.getD cell.payload.root,
-            PackedCell.bytes CanonicalCellRegistry.registry cell, [])
+            PackedCell.bytes CanonicalCellRegistry.registry cell, [], opening)
           pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "live"),
             ("canonical", hexJson lifecycle), ("resource", view)]
       | none => failAt "view-at" "noncanonical lifecycle bytes"

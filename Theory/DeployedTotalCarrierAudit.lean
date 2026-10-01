@@ -151,6 +151,7 @@ def totalHyperdocumentStateOf (marked : Nat -> Bool) :
   | ⟨.transclusions, _⟩ => show TransclusionRecord from baseTransclusionRecord
   | ⟨.marks, ⟨⟨identifier⟩⟩⟩ => show MarkRecord from markValue (marked identifier)
   | ⟨.annotations, _⟩ => show AnnotationRecord from baseAnnotationRecord
+  | ⟨.blinding, _⟩ => show Digest from baseDigest
 
 theorem totalHyperdocumentStateOf_injective :
     Function.Injective totalHyperdocumentStateOf := by

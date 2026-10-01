@@ -303,6 +303,7 @@ def namespaceTag : Hyperdocument.Namespace → UInt8
   | .transclusions => 7
   | .marks => 8
   | .annotations => 9
+  | .blinding => 10
 
 def namespaceOfTag : UInt8 → Option Hyperdocument.Namespace
   | 0 => some .documents
@@ -315,6 +316,7 @@ def namespaceOfTag : UInt8 → Option Hyperdocument.Namespace
   | 7 => some .transclusions
   | 8 => some .marks
   | 9 => some .annotations
+  | 10 => some .blinding
   | _ => none
 
 def namespaceStream : StreamCodec Hyperdocument.Namespace where
@@ -337,6 +339,7 @@ def contentKeyStream : (space : Hyperdocument.Namespace) → StreamCodec (Hyperd
   | .transclusions => identifierStream .v1 .transclusion
   | .marks => identifierStream .v1 .mark
   | .annotations => identifierStream .v1 .annotation
+  | .blinding => StoreCodec.unitStream
 
 def contentValueStream :
     (space : Hyperdocument.Namespace) → StreamCodec (Hyperdocument.Value space)
@@ -350,10 +353,11 @@ def contentValueStream :
   | .transclusions => transclusionRecordStream
   | .marks => markRecordStream
   | .annotations => annotationRecordStream
+  | .blinding => digestStream
 
 def contentNamespaces : List Hyperdocument.Namespace :=
   [.documents, .atoms, .runs, .elements, .fields, .conflicts, .links,
-    .transclusions, .marks, .annotations]
+    .transclusions, .marks, .annotations, .blinding]
 
 /-- Record codec version per namespace.  v2: atoms carry `revision`, an
 element's embed names an atom at a revision with a mode, and an annotation
@@ -364,7 +368,7 @@ def contentRecordVersion : Hyperdocument.Namespace → String
   | _ => "v1"
 
 def contentWire : Wire Hyperdocument.layout where
-  name := "minidregg/hyperdocument-content/v2"
+  name := "minidregg/hyperdocument-content/v3"
   namespaces := contentNamespaces
   namespaces_complete := by intro space; cases space <;> simp [contentNamespaces]
   namespaceStream := namespaceStream
@@ -372,6 +376,7 @@ def contentWire : Wire Hyperdocument.layout where
   valueStream := contentValueStream
   keyCodecId space := s!"hyperdocument-key/{namespaceTag space}/v1"
   valueCodecId space := s!"hyperdocument-record/{namespaceTag space}/{contentRecordVersion space}"
+  blinding := some ⟨.blinding, ()⟩
 
 /-- The content cell materializer. -/
 def contentMaterializer : Hyperdocument.Materializer Digest :=

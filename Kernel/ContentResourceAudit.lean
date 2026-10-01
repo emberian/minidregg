@@ -116,7 +116,8 @@ theorem neutral_content_birth_admitted :
   refine ⟨⟨by decide, ?_⟩, ?_⟩
   · intro left member
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
-  · rfl
+  · intro address member
+    exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
 
 theorem authored_history_cannot_be_injected_at_birth :
     ¬CanonicalCellRegistry.UserInitial deployment 100
@@ -127,9 +128,9 @@ theorem authored_history_cannot_be_injected_at_birth :
     change Hyperdocument.lookup created .atoms atom ≠ none
     rw [create_exact_bytes_and_provenance]
     simp
-  have shape : created.support = ∅ := admitted.2
-  rw [shape] at supported
-  exact Finset.notMem_empty _ supported
+  -- A birth may hold only its blinding; an atom is not one.
+  have shape := admitted.2 _ supported
+  cases shape
 
 def runId : RunId := ⟨⟨103⟩⟩
 def anchoredRange : StableRange :=
