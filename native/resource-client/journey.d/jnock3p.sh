@@ -123,7 +123,7 @@ def slot(f, k, t="nat"): return {"target": "0", "slot": f"resource/field/{f}/bef
 def out(k, f, t="nat"): return {"key": k, "target": "0", "field": str(f), "type": t}
 INV_SAMPLE = [slot(IRON, "inv/iron"), slot(WOOD, "inv/wood"), slot(SWORD, "inv/sword")]
 def abi(context, sample, outputs, libraries=(), fuel=1000000, version="4"):
-    return {"version": version, "context": context, "arm": "2", "fuel": str(fuel),
+    return {"evaluator": "nock", "version": version, "context": context, "arm": "2", "fuel": str(fuel),
             "sample": sample, "outputs": outputs, "libraries": list(libraries)}
 
 def check(name, jam_bytes, a):

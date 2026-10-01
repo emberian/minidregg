@@ -1083,7 +1083,7 @@ theorem cost_loop_outside {sh : Shape} (hs : HasShape loopF sh) : cost sh loopF 
 `0abb4cd92bdf38ea4efff2c12979e10965dda65f060ffe47b964ea0680ac3532`, 566,499 bytes, the whole
 stdlib core with forge's gate as arm 2). `forgeSampleJam` is the kernel's sample of K-RAN's
 journey run r5 (`kernel-sample.jam`, height 16): `[[16 7 0] ~[['target/0' id] ['inv/iron' 3]
-['inv/wood' 2] ['inv/sword' 0]]]`. The run is `*[[P sample] slam(2)]` (`NockRun.subjectFormula`).
+['inv/wood' 2] ['inv/sword' 0]]]`. The run is `*[[P sample] slam(2)]` (`NockEntry.subjectFormula`).
 
 These poles evaluate `cue`, `exec` and `acost` over a 566 KB noun, out of reach of the kernel's
 reducer, and are `native_decide`: they trust the compiler (flagged). Everything above them is

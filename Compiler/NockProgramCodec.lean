@@ -11,7 +11,8 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
   bytes) is refused `nonCanonical`. Compiled, `canonical` runs N-MUG's
   `@[csimp]` jam/cue (mug-keyed tables), each proved equal to its specification.
 * **Identity.** `codeDigest` is cSHAKE256 over the jam. `programId` is
-  cSHAKE256 over the whole `DREGG/NOCK/PROGRAM/v3` record (jam and ABI), and the
+  cSHAKE256 over the whole `DREGG/NOCK/PROGRAM/v3` record (evaluator id, jam and
+  ABI), and the
   cell id is `physicalId domain programId`. The ABI is in the identity because it
   decides what the kernel feeds the program: with the id over the jam alone, the
   first writer's ABI would be the only one any friend could ever use for that
@@ -140,7 +141,12 @@ structure Abi where
   context : ContextMode := .live
   deriving DecidableEq, Repr
 
+/-- A program record. `evaluator` is the registry id of the evaluator the code is
+for (`Compiler.Evaluator.id`; Nock's is `idOf "nock" "4K/Theory.Nock/v1"`): the kernel
+re-executes the program on that evaluator and on no other, and `programId` covers it,
+so the same bytes under another evaluator are another program (EVAL §1.4). -/
 structure Program where
+  evaluator : Digest
   jam : List UInt8
   abi : Abi
   deriving DecidableEq, Repr
@@ -193,8 +199,9 @@ def abiStream : StreamCodec Abi :=
     (by intro value; cases value; rfl)
 
 def programStream : StreamCodec Program :=
-  StreamCodec.xmap (StreamCodec.product bytesStream abiStream)
-    (fun p => (p.jam, p.abi)) (fun v => ⟨v.1, v.2⟩) (by intro value; cases value; rfl)
+  StreamCodec.xmap (StreamCodec.product digestStream (StreamCodec.product bytesStream abiStream))
+    (fun p => (p.evaluator, p.jam, p.abi)) (fun v => ⟨v.1, v.2.1, v.2.2⟩)
+    (by intro value; cases value; rfl)
 
 /-- A frame-tagged stream codec that accepts only its own re-encoding. -/
 def framedDecode {α : Type} (frame : List UInt8) (stream : StreamCodec α)
@@ -231,8 +238,8 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
 /-- `DREGG/NOCK/ABI/v4` -/
 def abiFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 52]
-/-- `DREGG/NOCK/PROGRAM/v3` (E2: ABI v4 inside; v1 and NC-2's v2 do not decode, and every
-`programId` changes). -/
+/-- `DREGG/NOCK/PROGRAM/v3` (E2: the record names its evaluator and carries ABI v4; v1 and
+NC-2's v2 do not decode, and every `programId` changes). -/
 def programFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 51]
 
@@ -309,7 +316,7 @@ theorem customizations_distinct :
 def codeDigest (jam : List UInt8) : Digest :=
   (Sp800185Cshake256.hash codeCustomization jam).digest
 
-/-- cSHAKE256 over the program record (jam and ABI): what a run claim names. -/
+/-- cSHAKE256 over the program record (evaluator id, jam and ABI): what a run claim names. -/
 def programId (program : Program) : Digest :=
   (Sp800185Cshake256.hash programCustomization (programCodec.encode program)).digest
 

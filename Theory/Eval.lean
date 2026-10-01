@@ -9,6 +9,13 @@ byte entry point, and `ByteRun.toBytes` its C ABI wire form
 2 exhausted · 3 malformed). Both were `Theory.Nock`'s (`Nock.Outcome`,
 `Nock.JamRun`, the body of `runJammedBytes`); nothing in them is Nock, and
 `Compiler.Evaluator` states every evaluator against them.
+
+`Ran` is one fueled evaluation in a single pass, the shape the kernel's referee
+consumes (`Kernel.Run`): the value and the count, or the failure and the count at
+which it stopped. EVAL §1.1's `Except Outcome (Output × Nat)` would drop the count
+on a crash and on exhaustion, and the kernel's refusals report it (`crash k`,
+`exhausted k`). `FieldWrite` is what a run's product names: the writes a command
+must make for its claim to be admitted (K-RAN), whatever evaluator produced them.
 -/
 
 namespace Minidregg.Theory
@@ -38,6 +45,28 @@ def ByteRun.toBytes : ByteRun → List UInt8
   | .crash k => 1 :: le8 k
   | .exhausted k => 2 :: le8 k
   | .malformed => 3 :: le8 0
+
+/-- One fueled evaluation: the value and the steps it took, or the failure and the
+steps at which it stopped. -/
+inductive Ran (Output : Type) where
+  | ok (out : Output) (steps : Nat)
+  | crash (steps : Nat)
+  | exhausted (steps : Nat)
+  deriving DecidableEq, Repr
+
+/-- The byte entry point's answer for this evaluation, the output serialized. -/
+def Ran.toByteRun {Output : Type} (encode : Output → List UInt8) : Ran Output → ByteRun
+  | .ok out k => .ok k (encode out)
+  | .crash k => .crash k
+  | .exhausted k => .exhausted k
+
+/-- One object-field write: field `field` of the command's `target`-th target
+(0-based, the signed target order) becomes `value`. -/
+structure FieldWrite where
+  target : Nat
+  field : Nat
+  value : Int
+  deriving DecidableEq, Repr
 
 end Eval
 end Minidregg.Theory

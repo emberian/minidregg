@@ -4,14 +4,9 @@ import Compiler.Evaluator
 open Minidregg.Compiler
 
 def noPole : Evaluator where
-  name := "nock-without-pole"
-  semantics := Evaluator.nock.semantics
-  Term := Evaluator.nock.Term
-  Output := Evaluator.nock.Output
+  toMachine := { Machine.nock with name := "nock-without-pole" }
   Spec := Evaluator.nock.Spec
   Crash := Evaluator.nock.Crash
-  run := Evaluator.nock.run
-  steps := Evaluator.nock.steps
   run_sound := Evaluator.nock.run_sound
   run_complete := Evaluator.nock.run_complete
   spec_deterministic := Evaluator.nock.spec_deterministic
@@ -19,18 +14,18 @@ def noPole : Evaluator where
   crash_not_spec := Evaluator.nock.crash_not_spec
   run_fuel_monotone := Evaluator.nock.run_fuel_monotone
   steps_stable := Evaluator.nock.steps_stable
-  Code := Evaluator.nock.Code
-  decode := Evaluator.nock.decode
-  canonical := Evaluator.nock.canonical
   canonical_unique := Evaluator.nock.canonical_unique
-  Input := Evaluator.nock.Input
-  encodeInput := Evaluator.nock.encodeInput
   encodeInput_injective := Evaluator.nock.encodeInput_injective
-  encodeOutput := Evaluator.nock.encodeOutput
   encodeOutput_injective := Evaluator.nock.encodeOutput_injective
-  decodeTerm := Evaluator.nock.decodeTerm
-  runBytes := Evaluator.nock.runBytes
   runBytes_sound := Evaluator.nock.runBytes_sound
   runBytes_crash_sound := Evaluator.nock.runBytes_crash_sound
-  exportFn := Evaluator.nock.exportFn
   export_is_run := Evaluator.nock.export_is_run
+  decodeTerm_encodeTerm := Evaluator.nock.decodeTerm_encodeTerm
+  oracle_ok := Evaluator.nock.oracle_ok
+  oracle_crash := Evaluator.nock.oracle_crash
+  oracle_exhausted := Evaluator.nock.oracle_exhausted
+  oracle_is_export := Evaluator.nock.oracle_is_export
+  sampleOf_overMax := Evaluator.nock.sampleOf_overMax
+  overMax_congr := Evaluator.nock.overMax_congr
+  sampleOf_pinned_of_fields := Evaluator.nock.sampleOf_pinned_of_fields
+  staleField_names := Evaluator.nock.staleField_names

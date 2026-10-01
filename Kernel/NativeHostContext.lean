@@ -51,6 +51,9 @@ structure Config where
   /-- Public Ed25519 key of the separately controlled physical host custodian.
   Absence preserves the legacy profile and disables checked completion. -/
   completionCustodianKey : Option (List UInt8) := none
+  /-- Compiled-in evaluators this operator disabled (K-EVAL); committed in the profile's
+  semantics, so every node of a deployment must agree. -/
+  disabledEvaluators : List Digest := []
 
 def Config.grainBirthTariffValue (config : Config) :
     Except String GrainResourceBirthController.Tariff := do
@@ -96,7 +99,7 @@ theorem Config.runtimeParameters_withoutOptionalModes (config : Config) :
            config.tariff.asset] := by simp [Config.runtimeParameters]
 
 def Config.profile (config : Config) :=
-  NativeHostProfile.profile config.template config.runtimeParameters
+  NativeHostProfile.profile config.template config.runtimeParameters config.disabledEvaluators
 
 attribute [local irreducible] Config.profile CanonicalRuntimeProfile.Profile.compilerProfile
 

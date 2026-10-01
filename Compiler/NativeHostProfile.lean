@@ -30,8 +30,10 @@ def fieldIdentity : Digest :=
   (Sp800185Cshake256.hash "DREGG.NATIVE.FIELD.IDENTITY/v1".toUTF8.toList fieldDescriptor).digest
 
 def profile (template : CanonicalRuntimeProfile.FactoryTemplate)
-    (receiverParameters : List UInt8) : CanonicalRuntimeProfile.Profile Field :=
+    (receiverParameters : List UInt8) (disabledEvaluators : List Digest := []) :
+    CanonicalRuntimeProfile.Profile Field :=
   .source template fieldIdentity babyBearP inferInstance orderWidth noWrap receiverParameters
+    disabledEvaluators
 
 theorem profile_order (template : CanonicalRuntimeProfile.FactoryTemplate)
     (parameters : List UInt8) :

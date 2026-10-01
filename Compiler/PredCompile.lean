@@ -17,7 +17,7 @@ under negation and disjunction:
   explicit scalar width. Missing operands force false and impose no unused range.
 * `witnessed`: the first-party false indicator; negation composes faithfully.
 * `ran program`: exactly the `eq (ranSlot program) 1` gadget. Re-execution is a
-  controller fact (`Kernel.NockRun`); the circuit reads the slot the controller
+  controller fact (`Kernel.Run`); the circuit reads the slot the controller
   projects after the check, it does not re-run Nock.
 * `not`/`all`/`any`: the same indicator algebra and child-prefix renaming.
 

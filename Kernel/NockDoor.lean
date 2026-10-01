@@ -39,7 +39,7 @@ of `[effects state']`; `steps` = the oracle's count of the whole run, boot
 included. A claim over another state or event number refuses `sampleStale`:
 concurrent pokes serialise.
 -/
-import Kernel.NockRun
+import Kernel.Run
 import Kernel.DeclaredResourceProjection
 
 namespace Minidregg.Kernel.NockDoor
@@ -47,7 +47,9 @@ open Minidregg.Theory
 open Minidregg.Compiler
 open Minidregg.Compiler.NockProgramCodec
 open Minidregg.Kernel.NockProgramCell
-open Minidregg.Kernel.NockRun
+open Minidregg.Kernel.Run
+open Minidregg.Kernel.NockEntry
+open Minidregg.Theory.Eval
 set_option autoImplicit false
 
 /-! ## The state as an atom -/
@@ -63,14 +65,14 @@ structure View where
   event : Nat
   deriving DecidableEq, Repr
 
-def readField (read : Nat → String → Option Int) (field : Nat) : Except NockRun.Refusal (Option Nat) :=
+def readField (read : Nat → String → Option Int) (field : Nat) : Except Run.Refusal (Option Nat) :=
   match read 0 (DeclaredResourceProjection.fieldName field "before") with
   | none => .ok none
   | some (.ofNat n) => .ok (some n)
   | some (.negSucc _) => .error .stateMalformed
 
 /-- The instance's view: both fields absent (never poked), or both present. -/
-def viewOf (door : Door) (read : Nat → String → Option Int) : Except NockRun.Refusal View :=
+def viewOf (door : Door) (read : Nat → String → Option Int) : Except Run.Refusal View :=
   match readField read door.state, readField read door.event with
   | .ok none, .ok none => .ok ⟨none, 0⟩
   | .ok (some s), .ok (some e) => .ok ⟨some s, e⟩
@@ -79,7 +81,7 @@ def viewOf (door : Door) (read : Nat → String → Option Int) : Except NockRun
   | _, _ => .error .stateMalformed
 
 /-- `0` for an unloaded instance (it runs on its boot state), `[0 state]` once loaded. -/
-def ustateOf (view : View) : Except NockRun.Refusal Noun :=
+def ustateOf (view : View) : Except Run.Refusal Noun :=
   match view.state with
   | none => .ok (.atom 0)
   | some a =>
@@ -172,14 +174,14 @@ def effectWrite (outputs : List OutputSlot) : Noun → Option FieldWrite
   | _ => none
 
 /-- Every effect a write, in order; the first that is not refuses. -/
-def effectWrites (outputs : List OutputSlot) : List Noun → Except NockRun.Refusal (List FieldWrite)
+def effectWrites (outputs : List OutputSlot) : List Noun → Except Run.Refusal (List FieldWrite)
   | [] => .ok []
   | e :: rest =>
     match effectWrite outputs e with
     | none => .error .effectNotWrite
     | some w => (effectWrites outputs rest).map (w :: ·)
 
-def decodeEffects (abi : Abi) (effects : Noun) : Except NockRun.Refusal (List FieldWrite) :=
+def decodeEffects (abi : Abi) (effects : Noun) : Except Run.Refusal (List FieldWrite) :=
   match itemsOf effects with
   | none => .error .outputMalformed
   | some items => effectWrites abi.outputs items
@@ -222,7 +224,7 @@ def stateWrites (door : Door) (view : View) (state : Noun) : List FieldWrite :=
 /-- **`checkPoke`**: re-execute the door's poke on the instance's own state and
 event number and decide `claim` against the command's `writes`. -/
 def checkPoke (program : Program) (door : Door) (view : View) (claim : RunClaim)
-    (writes : List FieldWrite) : Except NockRun.Refusal Verdict :=
+    (writes : List FieldWrite) : Except Run.Refusal (Verdict Noun) :=
   match Noun.cue program.jam with
   | none => .error .programMalformed
   | some trap =>
@@ -264,7 +266,7 @@ def checkPoke (program : Program) (door : Door) (view : View) (claim : RunClaim)
 
 /-- **Peek**: the peek arm slammed on `path` over the instance's stored state,
 at the ABI fuel. Takes no Store, returns no writes. -/
-def peek (program : Program) (door : Door) (view : View) (path : Noun) : Except NockRun.Refusal Ran :=
+def peek (program : Program) (door : Door) (view : View) (path : Noun) : Except Run.Refusal (Ran Noun) :=
   match Noun.cue program.jam with
   | none => .error .programMalformed
   | some trap =>
@@ -274,7 +276,7 @@ def peek (program : Program) (door : Door) (view : View) (path : Noun) : Except 
 
 /-- **Load**: the instance's state — the stored one, or the booted trap's own
 axis 6 for an instance never poked. -/
-def stateNow (program : Program) (view : View) : Except NockRun.Refusal Ran :=
+def stateNow (program : Program) (view : View) : Except Run.Refusal (Ran Noun) :=
   match Noun.cue program.jam with
   | none => .error .programMalformed
   | some trap =>
@@ -286,9 +288,9 @@ def stateNow (program : Program) (view : View) : Except NockRun.Refusal Ran :=
 the ABI fuel, and (when it ran) the product's decomposition and the writes it
 names. -/
 inductive DryPoke where
-  | refused (reason : NockRun.Refusal)
-  | ran (sample : Noun) (subject formula : Noun) (result : Ran)
-      (decoded : Option (Noun × Noun × Except NockRun.Refusal (List FieldWrite)))
+  | refused (reason : Run.Refusal)
+  | ran (sample : Noun) (subject formula : Noun) (result : Ran Noun)
+      (decoded : Option (Noun × Noun × Except Run.Refusal (List FieldWrite)))
 
 def dryPoke (program : Program) (door : Door) (view : View) (wire cause : Noun) : DryPoke :=
   match Noun.cue program.jam, ustateOf view with
@@ -327,7 +329,7 @@ names exactly `[effects state']`; and the command writes exactly the jam atom
 of `state'` to the state field — no other state value — plus the next event
 number and the effects' writes. -/
 theorem door_poke_sound {program : Program} {door : Door} {view : View} {claim : RunClaim}
-    {writes : List FieldWrite} {verdict : Verdict}
+    {writes : List FieldWrite} {verdict : Verdict Noun}
     (accepted : checkPoke program door view claim writes = .ok verdict) :
     ∃ trap ustate wire cause doorCore effects core state,
       Noun.cue program.jam = some trap ∧ ustateOf view = .ok ustate ∧
@@ -431,7 +433,7 @@ theorem door_state_stale_refused {program : Program} {door : Door} {view : View}
 /-- **`door_effects_are_writes`**: in an accepted poke, the effects are a Nock
 list and EVERY effect is a write the command makes. -/
 theorem door_effects_are_writes {program : Program} {door : Door} {view : View}
-    {claim : RunClaim} {writes : List FieldWrite} {verdict : Verdict}
+    {claim : RunClaim} {writes : List FieldWrite} {verdict : Verdict Noun}
     (accepted : checkPoke program door view claim writes = .ok verdict) :
     ∃ effects state items, verdict.output = .cell effects state ∧ itemsOf effects = some items ∧
       ∀ e ∈ items, ∃ w, effectWrite program.abi.outputs e = some w ∧ w ∈ writes := by
@@ -454,7 +456,7 @@ theorem door_effect_not_write_refused {program : Program} {door : Door} {view : 
       (pokeFormula program.abi.arm) (.cell doorCore (.cell effects core)))
     (listed : itemsOf effects = some items) (member : e ∈ items)
     (notWrite : effectWrite program.abi.outputs e = none)
-    (claim : RunClaim) (writes : List FieldWrite) (verdict : Verdict)
+    (claim : RunClaim) (writes : List FieldWrite) (verdict : Verdict Noun)
     (named : ∃ u event, claim.sampleJam = Noun.jam (.cell u (job event wire cause))) :
     checkPoke program door view claim writes ≠ .ok verdict := by
   intro accepted
@@ -479,7 +481,7 @@ event agree on the product, the written state, the writes and the steps —
 whatever fuel each runner brought. `audit` replays pokes in order and gets the
 same states (with `door_poke_sound`). -/
 theorem door_poke_deterministic {program : Program} {door : Door} {view : View}
-    {claim claim' : RunClaim} {writes writes' : List FieldWrite} {verdict verdict' : Verdict}
+    {claim claim' : RunClaim} {writes writes' : List FieldWrite} {verdict verdict' : Verdict Noun}
     (accepted : checkPoke program door view claim writes = .ok verdict)
     (accepted' : checkPoke program door view claim' writes' = .ok verdict')
     (sameEvent : claim.sampleJam = claim'.sampleJam) :
@@ -585,7 +587,7 @@ def counterTrap : Noun := .cell (Nock.op 1 counterDoor) (.atom 0)
 def counterDoorAbi : Door := ⟨22, 2, 3⟩
 
 def counter : Program :=
-  ⟨Noun.jam counterTrap,
+  ⟨Run.fixtureEvaluator, Noun.jam counterTrap,
     { version := abiVersion, arm := 23, sample := [], libraries := [], fuel := 10000,
       outputs := [{ key := "count", target := 0, field := 4, type := .nat }],
       door := some counterDoorAbi }⟩
@@ -606,7 +608,7 @@ def countEffects (n : Nat) : Noun := .cell (.cell (.atom countKey) (.atom n)) (.
 def counterWrites (n event : Nat) : List FieldWrite :=
   [⟨0, 2, jamAtom (.atom n)⟩, ⟨0, 3, event⟩, ⟨0, 4, n⟩]
 
-def ranOf : Except NockRun.Refusal Ran → Option Ran
+def ranOf : Except Run.Refusal (Ran Noun) → Option (Ran Noun)
   | .ok r => some r
   | .error _ => none
 
