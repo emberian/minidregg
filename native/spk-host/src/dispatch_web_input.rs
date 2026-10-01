@@ -126,11 +126,19 @@ pub(crate) struct PhysicalWebInput {
 /// The display label/handle are operator-configured UI text, never auth data.
 /// Every accepted ordinary HTTP header is represented or the call refuses;
 /// there is no silent drop of a Mini-signed header.
+/// `base_path` is the browser route's origin, `https://HOST` with no
+/// trailing slash: Sandstorm's `WebSession.Params.basePath`, from which
+/// sandstorm-http-bridge builds `X-Sandstorm-Base-Path` and absolute URLs.
+/// The bridge refuses anything without a scheme ("Base URL does not have a
+/// protocol scheme"), so the old "/" failed every web session at its first
+/// request (SPK-APPS 2026-10-01: EtherCalc, WordPress, Gogs, Hacker Slides,
+/// Roundcube, Simple Todos all 503). An API session carries no base path.
 pub(crate) fn physical_web_input(
     matched: &MatchedInspection,
     http: &HttpProjection<'_>,
     display_name: &str,
     preferred_handle: &str,
+    base_path: &str,
 ) -> io::Result<PhysicalWebInput> {
     let method = match matched.method.as_str() {
         "GET" => Method::Get,
@@ -213,9 +221,22 @@ pub(crate) fn physical_web_input(
         }
         None
     };
-    let kind = match http.route {
-        Route::Browser => SessionKind::Web,
-        Route::Api { .. } => SessionKind::Api,
+    let (kind, base_path) = match http.route {
+        Route::Browser => {
+            let host = base_path
+                .strip_prefix("https://")
+                .ok_or_else(|| invalid("browser session base path is not an https origin"))?;
+            if host.is_empty()
+                || host.len() > 253
+                || !host
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+            {
+                return Err(invalid("browser session base path is not an https origin"));
+            }
+            (SessionKind::Web, base_path.to_owned())
+        }
+        Route::Api { .. } => (SessionKind::Api, String::new()),
     };
     Ok(PhysicalWebInput {
         binding: SessionBinding {
@@ -237,7 +258,7 @@ pub(crate) fn physical_web_input(
                 preferred_handle: preferred_handle.to_owned(),
                 permissions: matched.effective_bits.clone(),
                 tab_id: Vec::new(),
-                base_path: "/".to_owned(),
+                base_path,
                 user_agent: user_agent.unwrap_or("Mini SPK Host").to_owned(),
                 acceptable_languages: Vec::new(),
             },
@@ -299,7 +320,7 @@ mod tests {
                 signed_path: "/repo.git/",
             },
         };
-        let projected = physical_web_input(&matched(), &http, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&matched(), &http, "Friend", "friend", "https://friend.example.test").unwrap();
         assert_eq!(projected.binding.params.identity_id, [0xaa; 32]);
         assert_eq!(projected.binding.params.permissions, [true, false]);
         assert_eq!(projected.binding.kind, SessionKind::Api);
@@ -322,7 +343,7 @@ mod tests {
             body: b"",
             route: Route::Api { signed_path: "/" },
         };
-        let projected = physical_web_input(&source, &http, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").unwrap();
         assert_eq!(projected.binding.kind, SessionKind::Api);
         assert_eq!(projected.binding.params.identity_id, [0xaa; 32]);
         assert_eq!(projected.request.path_and_query, "team/json?poll=1");
@@ -339,7 +360,7 @@ mod tests {
             body,
             route: Route::Api { signed_path: "/" },
         };
-        let projected = physical_web_input(&source, &post, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&source, &post, "Friend", "friend", "https://friend.example.test").unwrap();
         assert_eq!(projected.request.path_and_query, "");
         let posted = projected.request.body.unwrap();
         assert_eq!(posted.mime_type, "application/json");
@@ -366,7 +387,10 @@ mod tests {
             body: b"",
             route: Route::Browser,
         };
-        let projected = physical_web_input(&source, &http, "Friend", "friend").unwrap();
+        let projected = physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").unwrap();
+        assert_eq!(projected.binding.kind, SessionKind::Web);
+        assert_eq!(projected.binding.params.base_path, "https://friend.example.test");
+        assert!(physical_web_input(&source, &http, "Friend", "friend", "/").is_err());
         assert_eq!(projected.binding.kind, SessionKind::Web);
         assert_eq!(projected.request.context.cookies.len(), 2);
         assert_eq!(
@@ -379,7 +403,7 @@ mod tests {
             ordered_headers: &unsupported,
             ..http
         };
-        assert!(physical_web_input(&source, &http, "Friend", "friend").is_err());
+        assert!(physical_web_input(&source, &http, "Friend", "friend", "https://friend.example.test").is_err());
     }
 
     #[test]
@@ -394,7 +418,7 @@ mod tests {
                 signed_path: "/repo.git/",
             },
         };
-        let input = physical_web_input(&matched(), &http, "Friend", "friend").unwrap();
+        let input = physical_web_input(&matched(), &http, "Friend", "friend", "https://friend.example.test").unwrap();
         let body = input.request.body.unwrap();
         assert!(body.bytes.is_empty());
         assert!(body.mime_type.is_empty());
@@ -410,12 +434,16 @@ mod tests {
             body: b"",
             route: Route::Browser,
         };
-        assert!(physical_web_input(&matched(), &http, "Friend", "friend").is_err());
+        assert!(physical_web_input(&matched(), &http, "Friend", "friend", "https://friend.example.test").is_err());
         let empty = HttpProjection {
             ordered_headers: &[],
             ..http
         };
-        assert!(physical_web_input(&matched(), &empty, &"a".repeat(1025), "friend").is_err());
-        assert!(physical_web_input(&matched(), &empty, "Friend", &"a".repeat(257)).is_err());
+        assert!(physical_web_input(&matched(), &empty, &"a".repeat(1025), "friend", "https://friend.example.test").is_err());
+        assert!(physical_web_input(&matched(), &empty, "Friend", &"a".repeat(257), "https://friend.example.test").is_err());
+        // A browser session needs an https origin as its base path (the bridge
+        // refuses a scheme-less one); a path or a foreign scheme is refused here.
+        assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "/").is_err());
+        assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "http://x.test").is_err());
     }
 }

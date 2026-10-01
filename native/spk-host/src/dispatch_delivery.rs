@@ -76,6 +76,7 @@ impl ResidentHuman<'_> {
             http,
             self.display_name,
             self.preferred_handle,
+            &format!("https://{}", policy.expected_host),
         )?;
         let recorded = committed.record_delivery_requested(self.journal)?;
         if self
