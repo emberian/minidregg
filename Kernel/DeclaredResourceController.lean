@@ -145,12 +145,14 @@ def firstIndex (prepared : PreparedInvocation deployment profile ambient durable
   ⟨0, List.length_pos_iff.mpr prepared.nonempty⟩
 
 /-- The controller's run slots (the reserved `run/` namespace): the checked
-program's `ranSlot` (read by `Pred.ran`), the oracle's step count and the ABI
-fuel. Absent unless the command's claim was re-executed and accepted. -/
+program's `ranSlot` (read by `Pred.ran`), the evaluator it ran on (`evaluatorSlot`,
+which a law may pin), the oracle's step count and the ABI fuel. Absent unless the
+command's claim was re-executed and accepted. -/
 def runSlots : Option CheckedRun → List (String × Int)
   | none => []
   | some checked =>
       [(Minidregg.Pred.ranSlot checked.claim.programId.value, 1),
+       (Minidregg.Pred.evaluatorSlot checked.evaluator.value, 1),
        ("run/steps", Int.ofNat checked.verdict.steps),
        ("run/fuel", Int.ofNat checked.fuel)]
 
@@ -234,16 +236,17 @@ theorem targetProjection_unjoint (target : Target) (before after : Store target.
     | content content => exact contentProject_unjoint _ _ _
     | append request => exact streamSlots_unjoint _ _
 
-/-- A checked run's slots (`run/program/{id}`, `run/steps`, `run/fuel`) are not
-joint keys. -/
+/-- A checked run's slots (`run/program/{id}`, `run/evaluator/{id}`, `run/steps`,
+`run/fuel`) are not joint keys. -/
 theorem runSlots_unjoint (run : Option CheckedRun) : Unjoint (runSlots run) := by
   intro p hp
   cases run with
   | none => simp [runSlots] at hp
   | some checked =>
       simp only [runSlots, List.mem_cons, List.not_mem_nil, or_false] at hp
-      rcases hp with rfl | rfl | rfl
+      rcases hp with rfl | rfl | rfl | rfl
       · simp [Minidregg.Pred.ranSlot, String.toList_append]
+      · simp [Minidregg.Pred.evaluatorSlot, String.toList_append]
       · dsimp only; decide
       · dsimp only; decide
 

@@ -97,7 +97,10 @@ import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
 import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
-import Kernel.NockProgramCell -- NOCK K-NOCK-CELL: sampleOf (targets + ABI slots), sampleOf_injective/_deterministic; reads for ops 131-133
+import Kernel.NockProgramCell -- NOCK K-NOCK-CELL: the program cell's reads for ops 131-133
+import Kernel.Door -- K-EVAL E4: the door referee on any evaluator (EvalDoor: boot+poke / peek / load, the state codec); door_poke_sound / door_state_stale_refused / door_other_state_stale / door_poke_deterministic generic
 import Kernel.NockDoor -- NOCK N11: a NockApp kernel door (poke 23 / peek 22, state at axis 6) refereed by re-execution; door_poke_sound / door_state_stale_refused / door_effects_are_writes / door_peek_pure / door_load_deterministic; ops 135-137
-import Kernel.NockRun -- NOCK K-RAN: RunClaim, checkRun (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle; op 134 dryRun
+import Kernel.NockProgramCell.Sample -- NOCK K-NOCK-CELL: sampleOf (targets + ABI slots, context live|pinned, declared max), sampleOf_injective/_deterministic, declared_shape_sound
+import Kernel.NockEntry -- K-EVAL E2: Nock's entry into the run (N16 subjectFormula, the oracle = the export, decodeWrites, staleField), below Compiler.Evaluator
+import Kernel.Run -- K-RAN made generic (K-EVAL E2): RunClaim, resolve (registry; unknownEvaluator / evaluatorDisabled), checkRun E (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle over E.Spec and at Nock; op 134 dryRun
 import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every projected slot (fields, deltas, pair deltas) in the native order range R

@@ -29,6 +29,12 @@
 # the only AgentGrain birth route is the historical birth intent, admitted only
 # against the genesis image). None may reuse the sponsor's subject or account.
 #
+# The params may name compiled-in evaluators the operator disables
+# ("disabledEvaluators": ["nock"], registry names; K-EVAL E2/E3). They go into the
+# operator config, so the Host's runtime semantics digest commits them (and
+# genesis.json's expectedSemantics with it): a program record naming one is
+# refused evaluatorDisabled at birth and at run. Absent = none disabled.
+#
 # GENESIS_PAY_OBSERVER, if set, is an absolute path to a JSON object
 # {"subject","capability","controlCapability","enrolCapability"} (canonical
 # decimal strings) naming the PAY observer (deploy/pay/README.md): genesis then
@@ -55,6 +61,7 @@ check_params() {
           .factoryObserveCapabilityId, .tickCapabilityId] | all(int)))
     and (.clock.subject != .sponsor.subject and .clock.accountId != .sponsor.accountId)
     and (.meterAllowance | type == "object" and length == 10 and (map_values(int) | all))
+    and ((.disabledEvaluators // []) | type == "array" and all(type == "string" and length > 0))
   ' "$1" >/dev/null || { echo "genesis: params file fails the minidregg-candidate-genesis-params-v1 schema" >&2; exit 2; }
 }
 if [ "$#" -eq 2 ] && [ "$1" = --check ]; then
@@ -90,7 +97,8 @@ jq -n --slurpfile p "$params" --arg store "$store" --arg root "$dir/store" --arg
    tariffBase: $p.tariffBase, tariffPerBirth: $p.tariffPerBirth, tariffPerGrant: $p.tariffPerGrant,
    tariffPerInitialPayloadByte: $p.tariffPerInitialPayloadByte, collector: $p.collector,
    asset: $p.asset, genesisHeight: $p.genesisHeight, expectedSeed: 0,
-   storageBinary: $store, storageRoot: $root, signatureBinary: $verifier}' >"$dir/operator.json"
+   storageBinary: $store, storageRoot: $root, signatureBinary: $verifier}
+  + (if $p.disabledEvaluators then {disabledEvaluators: $p.disabledEvaluators} else {} end)' >"$dir/operator.json"
 
 "$host" "$dir/operator.json" profile >"$dir/profile.json"
 semantics=$(jq -er '.semantics | select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \

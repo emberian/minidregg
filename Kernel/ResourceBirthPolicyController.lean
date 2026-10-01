@@ -1344,7 +1344,8 @@ def admitDecodedNative [DecidableEq F]
     (profile : CanonicalRuntimeProfile.Profile F) (deployment : Deployment) (pins : FactoryPins)
     (native : CredentialSignatureIO.NativeConfig) (durable : Durable) (height : Height)
     (ingress : DecodedIngress) : IO (Except Reject (AcceptedBirth profile deployment pins durable height)) := do
-  match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile deployment pins
+  match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile
+      profile.disabledEvaluators deployment pins
       durable ingress.descriptor with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>

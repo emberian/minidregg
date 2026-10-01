@@ -116,4 +116,5 @@ import Compiler.PredRangeLeaf  -- an input-range refusal names the out-of-range 
 import Compiler.NativeOrderPoles  -- the native profile (ZMod (2^127-1), width 125) decides clock/now = 1,790,846,960 against small fields, balances 10^12 apart and the edges of R as eval does
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
-import Compiler.NockProgramCodec -- NOCK K-NOCK-CELL: program cell (jam + ABI), DREGG/NOCK/PROGRAM/v1 + ABI/v1, programId, birth admissibility
+import Compiler.NockProgramCodec -- NOCK K-NOCK-CELL: program cell (jam + ABI), DREGG/NOCK/PROGRAM/v3 + ABI/v4, programId, birth admissibility
+import Compiler.Evaluator -- K-EVAL: Machine (data) + Evaluator (every fact a field; exhausted_says_nothing required; E2: entry, oracle = export, writesOf, sample), Evaluator.nock, registry := [nock]

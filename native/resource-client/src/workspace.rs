@@ -1595,7 +1595,7 @@ struct BirthShape<'a> {
     /// `--in ROOM`: the workspace reference name of the room the resource is
     /// born in (its parent cell); `None` births at the root.
     room: Option<&'a str>,
-    /// `storage: "nock"`: the program's canonical DREGG/NOCK/PROGRAM bytes (hex)
+    /// `storage: "nock"`: the program's canonical DREGG/PROGRAM/v1 record bytes (hex)
     /// from the Host's own nock-check verdict and, when admissible, its cell id.
     /// A program is born at its content address, so no target is reserved.
     program: Option<(String, Option<String>)>,
@@ -2002,7 +2002,7 @@ pub(crate) fn create(
 ) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
     // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
-    // canonical DREGG/NOCK/PROGRAM/v1 bytes and, when admissible, its cell id.
+    // canonical DREGG/PROGRAM/v1 record bytes and, when admissible, its cell id.
     let program = match program_path {
         Some(path) => {
             let verdict = bounded_json_limit(path, MAX_PROGRAM_SOURCE)?;

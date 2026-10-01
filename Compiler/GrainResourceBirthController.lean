@@ -289,14 +289,14 @@ structure PreparedSourceBirth {F : Type} [Field F]
       (source.grainCommand tariff))
 
 def prepareSourceBirth {F : Type} [Field F]
-    (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F)
+    (profile : CanonicalPolicyAdmission.PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : CanonicalCellRegistry.Deployment) (pins : FactoryPins)
     (durable : ResourceBirthController.Concrete.Durable)
     (semantics : Digest) (tariff : Tariff) (source : Source) :
     Except ResourceBirthController.Concrete.PreparationReject
       (PreparedSourceBirth profile deployment pins durable semantics tariff source) := do
   if shape : SourceShape deployment.domain semantics tariff source then
-    let prepared ← ResourceBirthController.Concrete.prepareGrainBirth profile deployment
+    let prepared ← ResourceBirthController.Concrete.prepareGrainBirth profile disabled deployment
       pins durable source.birth
       (DeclaredResourceController.operationMarker deployment.domain semantics
         (source.grainCommand tariff))

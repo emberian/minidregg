@@ -117,10 +117,17 @@ structure Vk where
 deriving Repr, DecidableEq
 
 /-- The slot the resource controller projects when a command's writes were checked by
-re-executing the Nock program whose `programId` value is `program` (`Kernel.NockRun`):
+re-executing the program whose `programId` value is `program` (`Kernel.Run`):
 `run/program/<decimal id>` holds `1`. No cell field, request or content projection is
 named under `run/`; only the controller writes this namespace. -/
 def ranSlot (program : Nat) : Slot := "run/program/" ++ toString program
+
+/-- Beside `ranSlot`, the evaluator the checked run was re-executed on (K-EVAL, EVAL
+§1.4): `run/evaluator/<decimal evaluator id>` holds `1`. The law atom stays `ran P`
+(the program's id already covers its evaluator); a room that wants one evaluator only
+says so with `eq (evaluatorSlot id) 1`. Absent that leaf, any registered, enabled
+evaluator is admitted. -/
+def evaluatorSlot (evaluator : Nat) : Slot := "run/evaluator/" ++ toString evaluator
 
 /-! ## §3. The AST — the ONE predicate algebra.
 

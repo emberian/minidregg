@@ -59,7 +59,7 @@ behind a signed account observation, 102=exact receipt by transaction id,
 128=clock tick submit, 129=public clock view.
 
 131=Nock program check (pair: minimal jam bytes, ABI JSON) -> JSON verdict and the
-canonical DREGG/NOCK/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
+canonical DREGG/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
 132=Nock program show (decimal programId) -> JSON, 133=Nock sample (JSON request)
 -> JSON with the kernel's canonical sample jam, 134=Nock run dry run (JSON
 {programId, caller, room, targets, values}) -> JSON with the kernel's sample at
@@ -536,11 +536,32 @@ structure Settings where
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
   agentLifetimeDispatchServices : Option (List AgentLifetimeDispatchFixedSettings) := none
+  /-- Compiled-in evaluators (by registry name, e.g. `"nock"`) this operator disabled;
+  committed in the runtime semantics, so `expectedSemantics` must be computed with the same
+  list. A name the registry lacks refuses the config (`loadSettings`). -/
+  disabledEvaluators : Option (List String) := none
   deriving FromJson, ToJson
+
+/-- The disabled evaluators' registry ids, by name. `loadSettings` refuses a name the registry
+lacks (`Settings.checkDisabledEvaluators`), so the fallback below — an id derived from the
+name, which no compiled-in entry has, so it disables nothing — is never reached by a loaded
+config; it is deterministic, never an empty list standing in for a refusal. -/
+def Settings.disabledEvaluatorIds (settings : Settings) :
+    List Minidregg.Theory.TypedAuthorization.Digest :=
+  (settings.disabledEvaluators.getD []).map fun name =>
+    match Minidregg.Compiler.Evaluator.registry.find? (fun E => E.name == name) with
+    | some E => E.id
+    | none => Minidregg.Compiler.Evaluator.idOf name ""
+
+def Settings.checkDisabledEvaluators (settings : Settings) : Except String Unit :=
+  (settings.disabledEvaluators.getD []).forM fun name =>
+    if (Minidregg.Compiler.Evaluator.registry.find? (fun E => E.name == name)).isSome then .ok ()
+    else .error s!"disabledEvaluators: no compiled-in evaluator named {name}"
 
 def Settings.config (settings : Settings) : NativeHost.Config where
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
+  disabledEvaluators := settings.disabledEvaluatorIds
   template := ⟨⟨settings.issuer⟩, settings.ownerBudget, settings.lifetime⟩
   tariff := ⟨settings.tariffBase, settings.tariffPerBirth, settings.tariffPerGrant,
     settings.tariffPerInitialPayloadByte, settings.collector, settings.asset⟩
@@ -634,6 +655,7 @@ def loadSettings (path : System.FilePath) : IO Settings := do
   discard <| IO.ofExcept settings.providerServicePins
   discard <| IO.ofExcept settings.continuityIds
   discard <| IO.ofExcept settings.lifetimeDispatchPins
+  IO.ofExcept settings.checkDisabledEvaluators
   if let some tariff := settings.grainBirthTariff then
     unless 0 < tariff.base do
       throw (IO.userError "grainBirthTariff.base must be positive")
@@ -5497,6 +5519,7 @@ def run (arguments : List String) : IO UInt32 := do
                               (Minidregg.Host.Json.nockProgramOf jam abiSource)
                             let directory ← nockDirectory pinnedConfig state
                             let verdict := Minidregg.Kernel.NockProgramCell.checkProgram
+                              pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory program
                             return ((131 : UInt8),
                               (Minidregg.Host.Json.nockCheckJson program verdict).compress.toUTF8.toList)
@@ -5518,6 +5541,7 @@ def run (arguments : List String) : IO UInt32 := do
                               (Minidregg.Host.Json.nockSampleRequest source)
                             let directory ← nockDirectory pinnedConfig state
                             let verdict := Minidregg.Kernel.NockProgramCell.sampleFor
+                              pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory programId ctx targets values
                             return ((133 : UInt8),
                               (Minidregg.Host.Json.nockSampleJson verdict).compress.toUTF8.toList)
@@ -5529,7 +5553,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let height := NativeHost.logicalHeight pinnedConfig opened.durable
                             let directory ← nockDirectory pinnedConfig state
-                            let verdict := Minidregg.Kernel.NockRun.dryRun
+                            let verdict := Minidregg.Kernel.Run.dryRun
+                              pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory programId
                               ⟨height, caller, room⟩ targets values
                             return ((134 : UInt8), (Minidregg.Host.Json.nockRunJson programId height
@@ -5543,9 +5568,16 @@ def run (arguments : List String) : IO UInt32 := do
                             let verdict := match CanonicalCellRegistry.loadProgram
                                 pinnedConfig.deployment.domain directory programId with
                               | none => .refused .programUnknown
-                              | some program => match program.abi.door with
-                                | none => .refused .notDoor
-                                | some door => Minidregg.Kernel.NockDoor.dryPoke program door view wire cause
+                              | some program =>
+                                -- The dry run renders Nock nouns: Nock's door only.
+                                match Minidregg.Kernel.Run.resolve pinnedConfig.disabledEvaluators
+                                    program.evaluator with
+                                | .error reason => .refused reason
+                                | .ok E =>
+                                  if E.id ≠ Minidregg.Compiler.Evaluator.nock.id then .refused .doorUnsupported
+                                  else match program.abi.door with
+                                  | none => .refused .notDoor
+                                  | some door => Minidregg.Kernel.NockDoor.dryPoke program door view wire cause
                             return ((135 : UInt8), (Minidregg.Host.Json.nockDoorPokeJson programId
                               verdict).compress.toUTF8.toList)
                         | 136 | 137 =>
@@ -5555,16 +5587,23 @@ def run (arguments : List String) : IO UInt32 := do
                             let (programId, view, path) ← IO.ofExcept
                               (Minidregg.Host.Json.nockDoorReadRequest source isPeek)
                             let directory ← nockDirectory pinnedConfig state
-                            let verdict : Except Minidregg.Kernel.NockRun.Refusal
-                                Minidregg.Kernel.NockRun.Ran :=
+                            let verdict : Except Minidregg.Kernel.Run.Refusal
+                                (Minidregg.Theory.Eval.Ran Minidregg.Theory.Noun) :=
                               match CanonicalCellRegistry.loadProgram
                                   pinnedConfig.deployment.domain directory programId with
                               | none => .error .programUnknown
-                              | some program => match program.abi.door with
-                                | none => .error .notDoor
-                                | some door =>
-                                  if isPeek then Minidregg.Kernel.NockDoor.peek program door view path
-                                  else Minidregg.Kernel.NockDoor.stateNow program view
+                              | some program =>
+                                -- The replies render Nock nouns: Nock's door only.
+                                match Minidregg.Kernel.Run.resolve pinnedConfig.disabledEvaluators
+                                    program.evaluator with
+                                | .error reason => .error reason
+                                | .ok E =>
+                                  if E.id ≠ Minidregg.Compiler.Evaluator.nock.id then .error .doorUnsupported
+                                  else match program.abi.door with
+                                  | none => .error .notDoor
+                                  | some door =>
+                                    if isPeek then Minidregg.Kernel.NockDoor.peek program door view path
+                                    else Minidregg.Kernel.NockDoor.stateNow program view
                             return (operation, (if isPeek then Minidregg.Host.Json.nockDoorPeekJson verdict
                               else Minidregg.Host.Json.nockDoorStateJson verdict).compress.toUTF8.toList)
                         | 91 =>

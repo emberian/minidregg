@@ -74,7 +74,7 @@ forge = open(os.path.join(TPL, "forge.jam"), "rb").read()
 noop = open(os.path.join(TPL, "noop.jam"), "rb").read()
 def slot(t, f, k): return {"target": str(t), "slot": f"resource/field/{f}/before", "key": k, "type": "nat"}
 def out(k, t, f): return {"key": k, "target": str(t), "field": str(f), "type": "nat"}
-FORGE_ABI = {"version": "2", "arm": "2", "fuel": "1000000",
+FORGE_ABI = {"evaluator": "nock", "version": "5", "context": "live", "arm": "2", "fuel": "1000000",
   "sample": [slot(0, 1, "inv/iron"), slot(0, 2, "inv/wood"), slot(1, 3, "inv/sword")],
   "outputs": [out("inv/iron", 0, 1), out("inv/wood", 0, 2), out("inv/sword", 1, 3)],
   "libraries": []}
@@ -95,11 +95,10 @@ def birth(name, verdict_name):
     retained = os.path.join(WS, "sources", f"create-{name}.current", "reply.frame")
     if "retained encoded Host outcome" in last and os.path.exists(retained):
         last = open(retained, "rb").read().decode("latin1").replace("\xff", " | ")
-    # On final, birth authoring runs in retained generations (create-NAME.auth/gNNNN);
-    # a refused authoring names the generation's reply frame.
-    authored = re.search(r"authoring refused.*retained (\S+reply\.frame)", last)
-    if authored and os.path.exists(authored.group(1)):
-        last = open(authored.group(1), "rb").read().decode("latin1").replace("\xff", " | ")
+    # The client now names the retained frame of a refused authoring generation.
+    named = re.search(r"retained (\S+/reply\.frame)", last)
+    if named and os.path.exists(named.group(1)):
+        last = open(named.group(1), "rb").read().decode("latin1").replace("\xff", " | ")
     m = re.search(r"([0-9a-f]{40,})", last)
     if m:
         last = bytes.fromhex(m.group(1)).decode("latin1").replace("\xff", " | ")
@@ -171,7 +170,7 @@ smp = op(133, json.dumps(req).encode())
 json.dump(smp, open(path("sample.json"), "w"))
 kernel_sample = bytes.fromhex(smp.get("sample", ""))
 open(path("kernel-sample.jam"), "wb").write(kernel_sample)
-sj = {"height": 212, "caller": 1103, "room": "tale",
+sj = {"context": "live", "height": 212, "caller": 1103, "room": "tale",
       "inputs": [["target/0", 10], ["target/1", 11], ["inv/iron", 3], ["inv/wood", 2], ["inv/sword", 0]]}
 json.dump(sj, open(path("runner-sample.json"), "w"))
 r = subprocess.run([NOCK_RUN, "--program", os.path.join(TPL, "forge.jam"), "--sample-json", path("runner-sample.json"),

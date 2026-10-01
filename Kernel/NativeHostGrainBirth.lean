@@ -49,11 +49,11 @@ def prepareLoaded (config : Config) (opened : Opened config)
   let profile := config.profile
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let draft ← (ResourceBirthController.Concrete.prepareGrainDraft profile.compilerProfile
-    config.deployment opened.pins opened.durable source.birth marker).mapError
+    profile.disabledEvaluators config.deployment opened.pins opened.durable source.birth marker).mapError
       (fun reason => s!"grain-backed birth draft: {repr reason}")
   let source := source.withAuxiliaryCreates draft.descriptor.auxiliaryCreates
   let birth ← (GrainResourceBirthController.prepareSourceBirth profile.compilerProfile
-    config.deployment opened.pins opened.durable profile.semantics tariff source).mapError
+    profile.disabledEvaluators config.deployment opened.pins opened.durable profile.semantics tariff source).mapError
       (fun reason => s!"grain-backed birth preparation: {repr reason}")
   let ambient : DeclaredResourceController.Ambient :=
     ⟨config.federation, logicalHeight config opened.durable⟩
