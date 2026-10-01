@@ -778,15 +778,25 @@ try:
     row("settling the pool hold while naming the user route", "refused by name at authoring: route-mismatch; hold unchanged",
         f"{r1.get('type')} exit={r1.get('exit')} | {[l for l in t1.splitlines() if 'route' in l][:1]} reserved={h1['reserved']} route={h1.get('route')}",
         r1.get("type") == "author-refused" and "route-mismatch" in t1 and same1)
+    def prepare_refusal(label, text):
+        # The kernel refuses at prepare: nothing is signed or submitted, and the
+        # client retains the Host's refusal frame.
+        try: frame = json.load(open(path(f"{label}-attempt/pre-submit-refusal.json")))
+        except (OSError, ValueError): frame = {}
+        reason = next((l.strip() for l in text.splitlines() if l.startswith("refused:")), "")
+        return frame.get("stage") == "prepare", reason
     r2, t2, h2, same2 = settle_as("settle-pool-claiming-user-before", "1", "user", USER_FEE)
-    row("settling the pool hold from a forged before.route = user", "refused by the receiver (recorded route differs); hold unchanged",
-        f"{show(r2)} reserved={h2['reserved']} route={h2.get('route')}",
-        r2.get("type") == "refused" and same2)
+    at2, why2 = prepare_refusal("settle-pool-claiming-user-before", t2)
+    row("settling the pool hold from a forged before.route = user",
+        "refused at prepare by the receiver's old-value guard on field 4 (the recorded route); hold unchanged",
+        f"{why2[:160]} reserved={h2['reserved']} route={h2.get('route')}",
+        at2 and "guardRejected 4" in why2 and same2)
     r3, t3, h3, same3 = settle_as("settle-pool-at-the-user-fee", "2", "pool", USER_FEE)
+    at3, why3 = prepare_refusal("settle-pool-at-the-user-fee", t3)
     row(f"settling the pool hold for the user fee ({USER_FEE} < pool fee {POOL_FEE})",
-        "refused by the purse's route law; hold unchanged",
-        f"{show(r3)} reserved={h3['reserved']} route={h3.get('route')}",
-        r3.get("type") == "refused" and same3)
+        "refused at prepare by the purse's route law (law-denied); hold unchanged",
+        f"{why3[:60]} ... pool clause: {'pair 2,3 delta <= -' + str(POOL_FEE) in why3} reserved={h3['reserved']} route={h3.get('route')}",
+        at3 and why3.startswith("refused: law-denied") and same3)
 finally:
     subprocess.run(["systemctl", "--user", "stop", UNIT + ".service"], capture_output=True)
     try: connector.stdin.close()
