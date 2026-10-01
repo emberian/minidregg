@@ -16,6 +16,7 @@ This is a snapshot read, not a timing-noninterference or malicious-host claim.
 import Compiler.NativeObservationCodec
 import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceObservationAdmission
+import Kernel.StreamWrite
 
 namespace Minidregg.Kernel.NativeObservationController
 
@@ -514,8 +515,9 @@ def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF
 def resourceViewCodec : IndexedProgram.LawfulCodec ResourceView :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
 
-/-- A stream window: the cell root, its next sequence position, and the
-recorded entries in the window. -/
+/-- A stream window: the head cell's root, its next sequence position, and the
+recorded entries in the window, each read back from its own entry cell
+(`StreamWrite.window`). -/
 def tailViewStream : StreamCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord)) :=
   StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
     (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCell.recordStream)))
@@ -837,8 +839,11 @@ def AuthorizedIntent.queryResult
           | none => throw .malformed
     | .tail start count =>
         match checked.selected.packed with
-        | ⟨.stream, payload⟩ => pure (tailViewCodec.encode (payload.root,
-            StreamCell.nextSeq payload.logical, StreamCell.tail payload.logical start count))
+        | ⟨.stream, payload⟩ => do
+            let some head := StreamCell.headOf payload.logical | throw .malformed
+            pure (tailViewCodec.encode (payload.root, head.nextSeq,
+              (StreamWrite.window deployment context.directory.directory query.target head start count).map
+                fun (sequence, entry) => (sequence, entry.record)))
         | _ => throw .malformed
   else throw .malformed
 

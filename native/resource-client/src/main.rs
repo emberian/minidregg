@@ -269,6 +269,7 @@ usage:
   mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
   mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
+  mini fleet --action feed --dir WORKSPACE --accounts NAME[,NAME...] --topic TOPIC   (one topic, several authors: one feed ordered by admission height)
   mini well --action new --dir WORKSPACE --name NAME --in REALM --law LAW.json
   mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
   mini well --action ledger --dir WORKSPACE --output LEDGER.json

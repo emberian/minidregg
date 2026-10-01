@@ -66,8 +66,12 @@ inductive Kind where
   /-- The deployment's pay cell (`Kernel.PayCell`): tariff, deposit address
   book and assignment. Time is the clock cell's. -/
   | pay
-  /-- A dense append-only sequence log (`StreamCell`): a per-author stream. -/
+  /-- A stream's head (`StreamCell.Head`): its binding, entry count and last
+  entry key. A room stream or a fleet topic. -/
   | stream
+  /-- One stream entry (`StreamCell.Entry`), at the cell its head and position
+  derive. Born by an append, never written again. -/
+  | streamEntry
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
   /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
@@ -77,10 +81,10 @@ inductive Kind where
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock, .streamEntry]
 
-/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14 are deployment pins. The final table across
-lanes: 11 pay, 12 stream, 13 nockProgram, 14 clock.  Tag 3 is the one authority
+/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15 are deployment pins. The final table across
+lanes: 11 pay, 12 stream (head), 13 nockProgram, 14 clock, 15 streamEntry.  Tag 3 is the one authority
 cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
 retired and decodes to nothing; tag 4 was never assigned. -/
 def Kind.tag : Kind → UInt8
@@ -96,6 +100,7 @@ def Kind.tag : Kind → UInt8
   | .stream => 12
   | .nockProgram => NockProgramCodec.registryTag
   | .clock => 14
+  | .streamEntry => 15
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -110,6 +115,7 @@ def kindAtTag : UInt8 → Option Kind
   | 12 => some .stream
   | 13 => some .nockProgram
   | 14 => some .clock
+  | 15 => some .streamEntry
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -133,9 +139,10 @@ def schemaRef : Kind → SchemaRef
   | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
   | .pay => ⟨⟨91010⟩, 1⟩
-  | .stream => ⟨⟨91012⟩, 1⟩
+  | .stream => ⟨⟨91012⟩, 2⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
   | .clock => ⟨⟨91013⟩, 1⟩
+  | .streamEntry => ⟨⟨91014⟩, 1⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -153,9 +160,10 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .declaredProgram => EffectDeclaration.effectLayout
   | .policySource => PolicySourceCell.layout
   | .pay => Kernel.PayCell.layout
-  | .stream => StreamCell.layout
+  | .stream => StreamCell.headLayout
   | .nockProgram => NockProgramCodec.layout
   | .clock => Kernel.ClockCell.layout
+  | .streamEntry => StreamCell.entryLayout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -167,9 +175,10 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .declaredProgram => DeclaredEffectCell.materializer
   | .policySource => PolicySourceCell.materializer
   | .pay => Kernel.PayCell.materializer
-  | .stream => StreamCell.materializer
+  | .stream => StreamCell.headMaterializer
   | .nockProgram => NockProgramCodec.materializer
   | .clock => Kernel.ClockCell.materializer
+  | .streamEntry => StreamCell.entryMaterializer
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -214,7 +223,7 @@ def sourceEncoding : ResourceBirth.SourceEncoding registry :=
 @[simp] theorem registry_pay_materializer :
     registry.materializer .pay = Kernel.PayCell.materializer := rfl
 @[simp] theorem registry_stream_materializer :
-    registry.materializer .stream = StreamCell.materializer := rfl
+    registry.materializer .stream = StreamCell.headMaterializer := rfl
 @[simp] theorem registry_nock_program_materializer :
     registry.materializer .nockProgram = NockProgramCodec.materializer := rfl
 @[simp] theorem registry_program_materializer :
@@ -393,7 +402,7 @@ theorem empty_event_history_lawful (deployment : Deployment) :
 
 /-- Semantic identity of the source-owned loaded/final law. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v6".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v7".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -411,7 +420,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
   | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
       (PolicySourceCell.recordAt state)
   | .pay, state => cellId = Kernel.PayCell.physicalId deployment.domain ∧ Kernel.PayCell.Law state
-  | .stream, state => StreamCell.StreamLaw state
+  | .stream, state => StreamCell.HeadLaw cellId state
+  | .streamEntry, state => StreamCell.EntryLaw cellId state
   | .nockProgram, state => PresentLaw (NockProgramCodec.CellValid deployment.domain cellId)
       (NockProgramCodec.programAt state)
   | .clock, state => cellId = Kernel.ClockCell.physicalId deployment.domain ∧
@@ -468,9 +478,10 @@ injected as raw user initial payloads. -/
 def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
   | .content, state => state.support = ∅
-  | .stream, state => state.support = ∅
+  | .stream, state => StreamCell.headOf state = some StreamCell.emptyRoomHead
   | .nockProgram, state => PresentLaw NockProgramCodec.Admissible (NockProgramCodec.programAt state)
-  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _ => False
+  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _
+  | .streamEntry, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by

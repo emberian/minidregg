@@ -202,7 +202,7 @@ these; everything else is `254 operation unavailable`:
 | 94, 95 | factory-observation provisioning submit / lookup | ingress | `OUTCOME/v4` |
 | 96, 97 | fleet turn plan (behind a signed account observation) / assembly (M8) | pair: signed observation, draft / pair: plan, signature | plan / ingress |
 | 98, 99 | fleet turn submit / lookup | ingress | `OUTCOME/v4` |
-| 100 | fleet topic poll since a cursor (behind a signed account observation) | pair: signed observation, JSON request | JSON |
+| 100 | fleet topic poll since a cursor (behind a signed account observation): the stream head and its entry cells, `minidregg-fleet-topic-poll-v2` (each event carries `height`, `parent`, `author`) | pair: signed observation, JSON request | JSON |
 | 101 | agent fleet head (behind a signed account observation) | signed observation | JSON |
 | 102 | exact receipt by transaction id | canonical decimal | JSON |
 | 103, 104 | pay command signing plan / assembly (P2) | command / pair: plan, 64-byte signature | `DREGG/PAY/PLAN/v1` / ingress |

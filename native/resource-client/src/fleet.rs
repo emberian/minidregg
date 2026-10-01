@@ -599,9 +599,69 @@ fn head(agent: &Agent, reference: &Value) -> Result<()> {
 }
 
 /// Events of one account topic after `since`. Each event's payload is present
-/// only when the accepted ingress reproduces the digest its page committed; an
+/// only when the accepted ingress reproduces the digest its entry committed; an
 /// event without one is reported and fails the poll rather than being skipped.
 fn poll(agent: &Agent, reference: &Value, topic: &str, since: &str, limit: &str) -> Result<()> {
+    let (value, unreadable) = poll_value(agent, reference, topic, since, limit)?;
+    print_json(&value)?;
+    if unreadable > 0 {
+        return Err(format!("{unreadable} topic event(s) lack a payload matching their committed digest"));
+    }
+    Ok(())
+}
+
+/// One topic, several authors, ONE ordered feed. Each account's topic is its
+/// own stream (its writers never contend with another account's); the Host
+/// stamps every event with its admission height, unique per accepted record, so
+/// the streams merge into one total order by `(height, sequence)`. Every stream
+/// is read from its start, page by page, behind this agent's own signed
+/// observation of that account.
+fn feed(agent: &Agent, names: &[String], topic: &str) -> Result<()> {
+    let mut events = Vec::new();
+    let mut streams = Vec::new();
+    let mut unreadable = 0usize;
+    for name in names {
+        let reference = account(agent, name)?;
+        let mut since = "0".to_owned();
+        loop {
+            let (page, missing) = poll_value(agent, &reference, topic, &since, "64")?;
+            unreadable += missing;
+            let next = field(&page, "nextCursor")?.to_owned();
+            let batch = page["events"].as_array().cloned().unwrap_or_default();
+            for mut event in batch {
+                event["account"] = json!(name);
+                event["payer"] = page["payer"].clone();
+                events.push(event);
+            }
+            if next == since {
+                streams.push(json!({"account":name,"payer":page["payer"],"stream":page["stream"],
+                    "head":page["head"],"tail":page["tail"]}));
+                break;
+            }
+            since = next;
+        }
+    }
+    let key = |event: &Value| -> Result<(u128, u128)> {
+        Ok((
+            field(event, "height")?.parse::<u128>().map_err(|error| error.to_string())?,
+            field(event, "sequence")?.parse::<u128>().map_err(|error| error.to_string())?,
+        ))
+    };
+    let mut keyed = events.into_iter().map(|event| key(&event).map(|k| (k, event))).collect::<Result<Vec<_>>>()?;
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    if keyed.windows(2).any(|pair| pair[0].0 .0 == pair[1].0 .0) {
+        return Err("two topic events claim one admission height".into());
+    }
+    print_json(&json!({"type":"minidregg-fleet-topic-feed-v1","topic":hex(&topic_bytes(topic)?),
+        "topicText":topic,"streams":streams,
+        "events":keyed.into_iter().map(|(_, event)| event).collect::<Vec<_>>()}))?;
+    if unreadable > 0 {
+        return Err(format!("{unreadable} topic event(s) lack a payload matching their committed digest"));
+    }
+    Ok(())
+}
+
+fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit: &str) -> Result<(Value, usize)> {
     canonical_decimal(since, "--since")?;
     canonical_decimal(limit, "--limit")?;
     let topic = topic_bytes(topic)?;
@@ -643,11 +703,7 @@ fn poll(agent: &Agent, reference: &Value, topic: &str, since: &str, limit: &str)
     value["events"] = Value::Array(rendered);
     value["nextCursor"] = json!(next);
     value["topicText"] = json!(String::from_utf8_lossy(&topic));
-    print_json(&value)?;
-    if unreadable > 0 {
-        return Err(format!("{unreadable} topic event(s) lack a payload matching their committed digest"));
-    }
-    Ok(())
+    Ok((value, unreadable))
 }
 
 /// Sponsor-backed join: admit the new key, open its workspace, and have the
@@ -865,7 +921,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             poll(&agent, &account(&agent, &name)?, &topic, &since, &limit)
         }
-        _ => Err("fleet action must be join, send, publish, transfer, lookup, receipt or poll".into()),
+        "feed" => {
+            let names = text(args.required("accounts")?, "account references")?;
+            let topic = text(args.required("topic")?, "topic")?;
+            args.finish()?;
+            let names: Vec<String> = names.split(',').map(str::to_owned).collect();
+            if names.iter().any(String::is_empty) {
+                return Err("--accounts is a comma-separated list of account references".into());
+            }
+            feed(&agent, &names, &topic)
+        }
+        _ => Err("fleet action must be join, send, publish, transfer, lookup, receipt, poll or feed".into()),
     }
 }
 

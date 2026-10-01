@@ -627,7 +627,7 @@ def fleetFinalize (config : Config) (opened : Opened config) (draft : FleetTurn.
     if publication.sequence = 0 then
       let head := FleetTurn.streamHead config.deployment opened.directory.directory
         (FleetTurn.streamDigest config.deployment.domain draft.payer publication.topic)
-      { publication with sequence := head + 1 }
+      { publication with sequence := head.nextSeq }
     else publication
   { draft with fee := config.tariff.base, publication := publication }
 
@@ -643,7 +643,7 @@ def fleetPlanLoaded (config : Config) (opened : Opened config) (command : FleetT
   pure ⟨config.deployment.domain, config.profile.semantics, FleetTurn.commandCodec.encode command,
     CredentialSignedEnvelopeController.headerCodec.encode selected⟩
 
-/-- Planning reads the paying account's balance and topic pages, so it is
+/-- Planning reads the paying account's balance and topic head, so it is
 released only behind a current signed observation of that account by the
 turn's own signer. -/
 def fleetObservedAccount (config : Config) (opened : Opened config)
@@ -745,18 +745,20 @@ def receiptByTransactionLoaded (config : Config) (opened : Opened config)
   let record ← opened.durable.image.accepted.find? (fun record => record.transactionId == transactionId)
   historicalReceipt config opened.durable transactionId record.event.eventId
 
+/-- One topic event as a reader sees it. `height` is the admission height,
+unique per accepted record on one Host: K authors' streams of one topic merge
+into one ordered feed by `(height, sequence)`. -/
 structure FleetPolledEvent where
   sequence : Nat
   eventKey : Digest
+  parent : Option Digest
   transactionId : Digest
-  effectId : Digest
+  height : Nat
+  author : SubjectId
   payloadDigest : Digest
   /-- The exact payload from the accepted signed ingress, present only when
-  its digest equals the one the page committed. -/
+  its digest equals the one the entry committed. -/
   payload : Option (List UInt8)
-  author : Hyperdocument.PrincipalRef
-  bookPreRoot : Digest
-  bookPostRoot : Digest
   receipt : Option Receipt
 
 structure FleetPollView where
@@ -766,6 +768,7 @@ structure FleetPollView where
   stream : Digest
   cursor : Nat
   head : Nat
+  tail : Option Digest
   events : List FleetPolledEvent
 
 def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId : Digest) :
@@ -774,16 +777,16 @@ def fleetJournalTurn {config : Config} (opened : Opened config) (transactionId :
   FleetTurn.decodeIngress record.event.canonicalBytes
 
 def fleetPolledEvent (config : Config) (opened : Opened config)
-    (entry : FleetTurn.EventEntry) : FleetPolledEvent :=
+    (item : Nat × StreamCell.Entry) : FleetPolledEvent :=
+  let (sequence, entry) := item
   let record := entry.record
-  let payload := (fleetJournalTurn opened record.requestId).bind fun ingress =>
+  let payload := (fleetJournalTurn opened record.transaction).bind fun ingress =>
     ingress.command.publication.bind fun publication =>
-      if FleetTurn.payloadDigest config.deployment.domain publication.payload = record.operation.digest
+      if StreamCell.payloadDigest publication.payload = record.entry.payloadDigest
       then some publication.payload else none
-  let receipt := receiptByTransactionLoaded config opened record.requestId
-  ⟨record.semanticVersion, entry.key.digest, record.requestId, record.effectId,
-    record.operation.digest, payload, record.author, record.preStateRoot, record.postStateRoot,
-    receipt⟩
+  let receipt := receiptByTransactionLoaded config opened record.transaction
+  ⟨sequence, StreamCell.entryKey entry, entry.parent, record.transaction, record.height,
+    record.author, record.entry.payloadDigest, payload, receipt⟩
 
 def fleetPollMax : Nat := 64
 
@@ -802,8 +805,8 @@ def fleetPollAuthorizedLoaded (config : Config) (opened : Opened config)
       let directory := opened.directory.directory
       let entries := FleetTurn.eventsSince config.deployment directory stream cursor
         (min limit fleetPollMax)
-      return .ok ⟨subject, payer, topic, stream, cursor,
-        FleetTurn.streamHead config.deployment directory stream,
+      let head := FleetTurn.streamHead config.deployment directory stream
+      return .ok ⟨subject, payer, topic, stream, cursor, head.count, head.tail,
         entries.map (fleetPolledEvent config opened)⟩
 
 structure FleetHeadView where

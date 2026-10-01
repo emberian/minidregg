@@ -8,6 +8,10 @@
 # After the last turn one send goes to a fresh topic, as the control for the
 # stream's share of a send.
 #
+# turns.tsv records, per turn: the wall seconds, the submit phase (from the
+# attempt's submit marker to the Host's answer frame), the one-minute box load
+# when the turn ended, and the Store's bytes on disk.
+#
 # usage: fleet-sign-growth.sh HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY [TURNS] [LEVELS]
 set -eu
 umask 077
@@ -52,7 +56,7 @@ export MINI_FLEET_HOME="$ROOT/fleet-home" MINI_FLEET_SPONSOR="$FIX/sponsor"
 B=$(jq -er .cell "$OUT/join-bravo.json")
 
 T="$OUT/turns.tsv"; R="$OUT/reopen.tsv"
-printf 'n\tverb\tseconds\treplans\tchain_index\n' >"$T"
+printf 'n\tverb\tseconds\treplans\tchain_index\tsubmit_s\tload1\tstore_bytes\n' >"$T"
 printf 'level\tchain_index\tserve_ready_s\tfirst_receipt_s\tstore_bytes\n' >"$R"
 n=1
 while [ "$n" -le "$TURNS" ]; do
@@ -63,8 +67,15 @@ while [ "$n" -le "$TURNS" ]; do
   else verb=transfer
     "$MINI" fleet-sign transfer --profile alpha --to "$B" --amount 1 >"$f" 2>"$f.stderr"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\n' "$n" "$verb" "$(elapsed "$t0" "$(now)")" \
-    "$(jq -r .replans "$f")" "$(jq -r .chain_index "$f")" >>"$T"
+  t1=$(now)
+  attempt=$(jq -r .attempt "$f")
+  submit_s=NA
+  if [ -f "$attempt/submit-marker.json" ] && [ -f "$attempt/submit.frame" ]; then
+    submit_s=$(elapsed "$(date -r "$attempt/submit-marker.json" +%s.%N)" "$(date -r "$attempt/submit.frame" +%s.%N)")
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$verb" "$(elapsed "$t0" "$t1")" \
+    "$(jq -r .replans "$f")" "$(jq -r .chain_index "$f")" "$submit_s" \
+    "$(cut -d' ' -f1 /proc/loadavg)" "$(du -sb "$FIX/store" | cut -f1)" >>"$T"
   for level in $LEVELS; do
     if [ "$n" -eq "$level" ]; then
       TX=$(jq -er .turn_hash "$f")
