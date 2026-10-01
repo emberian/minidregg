@@ -1,0 +1,165 @@
+-- kind: job
+-- The job law (COMPUTE.md §2.3): the whole lifecycle of one job cell as one law. A job is a cell
+-- with this law; the kernel has no job object. Clause numbers are the indices in the installed law
+-- (an `all` of the clauses below, clause 0 first). Do not re-sort: the order is the order refusals
+-- are reported in. Every clause but 0 is guarded to writes (`not (verb == 2)`): a signed read is
+-- judged without clock or field slots (braid-mud: reads see no clock), so an unguarded clause would
+-- refuse every read.
+--
+-- Idioms (all fail closed on a missing slot):
+--   present X          eqSlots field X field X         (a slot-pair atom is false on an absent slot)
+--   absent X before    not (eqSlots field X before field X before)
+--   born               eqSlots field state before field state before   (the cell has had its order)
+--   edge a b           all [ field state before == a, field state == b ]
+--   truth written      all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]
+--   "now > D"          leSlotsOff field D clock now -1    (positive: a missing clock refuses it;
+--                      `not (leSlots clock now field D)` would PASS without a clock)
+-- States: 0 open · 1 claimed · 2 answered · 3 upheld · 4 slashed · 5 void · 6 closed.
+-- The money columns of §2.3 are K-JOB-MONEY's (C3); this law constrains only the cell's fields.
+
+-- 0 management: reads and writes pass here (the clauses below and the grants decide); only the
+--   caller may delegate; NOBODY may install or revoke, so the law of a live job cannot be replaced
+--   and a provider's grant cannot be pulled after it has bonded (a revoke after claim would force a stall).
+any [ verb == 1, verb == 2, all [ verb == 3, subject == {CALLER} ] ];
+-- 1 state-range
+any [ not (verb == 2), field state in {0,1,2,3,4,5,6} ];
+-- 2 edges: the transition table's (before, after) pairs; a write that keeps the state is judged by
+--   the field clauses below. Birth is the first write (no state before) and enters 0.
+any [ not (verb == 2), field state delta == 0,
+      all [ not (eqSlots field state before field state before), field state == 0 ],
+      all [ field state before == 0, field state in {1,5} ],
+      all [ field state before == 1, field state in {2,3,4} ],
+      all [ field state before == 2, field state in {3,4} ],
+      all [ field state before in {3,4,5}, field state == 6 ] ];
+
+-- order (birth) ----------------------------------------------------------------------------------
+-- 3 order-by-caller
+any [ not (verb == 2), eqSlots field state before field state before, subject == {CALLER} ];
+-- 4 order-caller
+any [ not (verb == 2), eqSlots field state before field state before, field caller == {CALLER} ];
+-- 5 order-program
+any [ not (verb == 2), eqSlots field state before field state before, field program == {PROGRAM} ];
+-- 6 order-input
+any [ not (verb == 2), eqSlots field state before field state before, eqSlots field input field input ];
+-- 7 order-caller-acct
+any [ not (verb == 2), eqSlots field state before field state before, eqSlots field callerAcct field callerAcct ];
+-- 8 order-price-positive
+any [ not (verb == 2), eqSlots field state before field state before,
+      all [ eqSlots field price field price, not (field price <= 0) ] ];
+-- 9 order-claim-by-ahead: the claim deadline is not already past
+any [ not (verb == 2), eqSlots field state before field state before, leSlots clock now field claimBy ];
+-- 10 order-answer-by-after-claim-by
+any [ not (verb == 2), eqSlots field state before field state before, leSlots field claimBy field answerBy ];
+-- 11 order-escrow-is-price
+any [ not (verb == 2), eqSlots field state before field state before, eqSlots field escrow field price ];
+-- 12 order-bond-zero
+any [ not (verb == 2), eqSlots field state before field state before, field bond == 0 ];
+
+-- frames: which edge may change which field --------------------------------------------------------
+-- 13 order-fields-frozen: after birth the order's fields never change (and are never deleted)
+any [ not (verb == 2), not (eqSlots field state before field state before),
+      all [ field program delta == 0, field input delta == 0, field caller delta == 0,
+            field callerAcct delta == 0, field price delta == 0, field claimBy delta == 0,
+            field answerBy delta == 0 ] ];
+-- 14 escrow-frame: escrow moves only on close
+any [ not (verb == 2), not (eqSlots field state before field state before), field escrow delta == 0,
+      all [ field state before in {3,4,5}, field state == 6 ] ];
+-- 15 bond-frame: bond moves only on claim and on close
+any [ not (verb == 2), not (eqSlots field state before field state before), field bond delta == 0,
+      all [ field state before == 0, field state == 1 ],
+      all [ field state before in {3,4,5}, field state == 6 ] ];
+-- 16 provider-frame: absent until claim, written by claim, then fixed
+any [ not (verb == 2), field provider delta == 0,
+      all [ not (eqSlots field provider before field provider before), not (eqSlots field provider field provider) ],
+      all [ field state before == 0, field state == 1 ] ];
+-- 17 provider-acct-frame
+any [ not (verb == 2), field providerAcct delta == 0,
+      all [ not (eqSlots field providerAcct before field providerAcct before), not (eqSlots field providerAcct field providerAcct) ],
+      all [ field state before == 0, field state == 1 ] ];
+-- 18 output-frame: absent until answer, written by answer, then fixed (no second answer)
+any [ not (verb == 2), field output delta == 0,
+      all [ not (eqSlots field output before field output before), not (eqSlots field output field output) ],
+      all [ field state before == 1, field state == 2 ] ];
+-- 19 steps-frame
+any [ not (verb == 2), field steps delta == 0,
+      all [ not (eqSlots field steps before field steps before), not (eqSlots field steps field steps) ],
+      all [ field state before == 1, field state == 2 ] ];
+-- 20 final-at-frame
+any [ not (verb == 2), field finalAt delta == 0,
+      all [ not (eqSlots field finalAt before field finalAt before), not (eqSlots field finalAt field finalAt) ],
+      all [ field state before == 1, field state == 2 ] ];
+-- 21 truth-write-once: once present, the truth never changes and is never deleted
+any [ not (verb == 2), field truth delta == 0, not (eqSlots field truth before field truth before) ];
+
+-- truth (state unchanged): the kernel's own output, admitted only with the run fact ----------------
+-- 22 truth-needs-ran: a write that introduces the truth carries the kernel's run verdict for PROGRAM
+any [ not (verb == 2),
+      not (all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]),
+      slot {RAN_SLOT} == 1 ];
+-- 23 truth-in-1-or-2: the truth is written in state 1 or 2, and that write moves no state
+any [ not (verb == 2),
+      not (all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]),
+      all [ field state before in {1,2}, field state delta == 0 ] ];
+-- 24 truth-1-by-provider: in state 1 only the provider runs it (the synchronous path)
+any [ not (verb == 2),
+      not (all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]),
+      not (field state before == 1), eqSlots subject field provider ];
+-- 25 truth-1-by-answer-by
+any [ not (verb == 2),
+      not (all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]),
+      not (field state before == 1), leSlots clock now field answerBy ];
+-- 26 truth-2-by-final-at: in state 2 anyone, within the challenge window
+any [ not (verb == 2),
+      not (all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]),
+      not (field state before == 2), leSlots clock now field finalAt ];
+
+-- claim 0 -> 1 ------------------------------------------------------------------------------------
+-- 27 claim-by-claim-by
+any [ not (verb == 2), not (all [ field state before == 0, field state == 1 ]), leSlots clock now field claimBy ];
+-- 28 claim-provider-is-subject
+any [ not (verb == 2), not (all [ field state before == 0, field state == 1 ]), eqSlots subject field provider ];
+-- 29 claim-provider-acct
+any [ not (verb == 2), not (all [ field state before == 0, field state == 1 ]), eqSlots field providerAcct field providerAcct ];
+-- 30 claim-bond-covers-price
+any [ not (verb == 2), not (all [ field state before == 0, field state == 1 ]), leSlots field price field bond ];
+
+-- answer 1 -> 2 -----------------------------------------------------------------------------------
+-- 31 answer-by-provider
+any [ not (verb == 2), not (all [ field state before == 1, field state == 2 ]), eqSlots subject field provider ];
+-- 32 answer-by-answer-by
+any [ not (verb == 2), not (all [ field state before == 1, field state == 2 ]), leSlots clock now field answerBy ];
+-- 33 answer-posts-output-and-steps
+any [ not (verb == 2), not (all [ field state before == 1, field state == 2 ]),
+      all [ eqSlots field output field output, eqSlots field steps field steps ] ];
+-- 34 answer-final-at-le: finalAt <= now + WINDOW
+any [ not (verb == 2), not (all [ field state before == 1, field state == 2 ]), leSlotsOff field finalAt clock now {WINDOW} ];
+-- 35 answer-final-at-ge: now <= finalAt - WINDOW
+any [ not (verb == 2), not (all [ field state before == 1, field state == 2 ]), leSlotsOff clock now field finalAt {NEG_WINDOW} ];
+-- 36 answer-not-after-truth: a job the provider already settled by its own run takes decide -> 3, not answer
+any [ not (verb == 2), not (all [ field state before == 1, field state == 2 ]),
+      not (eqSlots field truth before field truth before) ];
+
+-- decide ------------------------------------------------------------------------------------------
+-- 37 upheld-from-1: the provider's own run is on the cell
+any [ not (verb == 2), not (all [ field state before == 1, field state == 3 ]),
+      eqSlots field truth before field truth before ];
+-- 38 upheld-from-2: the kernel's truth matches the posted output, or no truth and the window is over
+any [ not (verb == 2), not (all [ field state before == 2, field state == 3 ]),
+      eqSlots field truth field output,
+      all [ not (eqSlots field truth field truth), leSlotsOff field finalAt clock now -1 ] ];
+-- 39 slashed-from-2: the kernel's truth disagrees with the posted output
+any [ not (verb == 2), not (all [ field state before == 2, field state == 4 ]),
+      all [ eqSlots field truth field truth, eqSlots field output field output,
+            not (eqSlots field truth field output) ] ];
+-- 40 slashed-from-1: the stall: no truth and answerBy is past
+any [ not (verb == 2), not (all [ field state before == 1, field state == 4 ]),
+      all [ not (eqSlots field truth field truth), leSlotsOff field answerBy clock now -1 ] ];
+-- 41 void: the caller any time in state 0; anyone once claimBy is past
+any [ not (verb == 2), not (all [ field state before == 0, field state == 5 ]),
+      subject == {CALLER}, leSlotsOff field claimBy clock now -1 ];
+
+-- close {3,4,5} -> 6 ------------------------------------------------------------------------------
+-- 42 close-escrow-zero
+any [ not (verb == 2), not (all [ field state before in {3,4,5}, field state == 6 ]), field escrow == 0 ];
+-- 43 close-bond-zero
+any [ not (verb == 2), not (all [ field state before in {3,4,5}, field state == 6 ]), field bond == 0 ]
