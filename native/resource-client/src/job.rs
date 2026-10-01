@@ -182,9 +182,18 @@ fn client(command: &str, flags: &[(&str, OsString)]) -> Result<()> {
         values: flags.iter().map(|(name, value)| (OsString::from(format!("--{name}")), value.clone())).collect(),
     };
     let _ = take_host_decision();
-    let result = run(args);
+    let result = crate::run(args);
     let _ = io::stdout().flush();
-    result
+    // A Host refusal is reported as the Host decoded it (the law's clause, by name).
+    result.map_err(|error| {
+        let decided = match take_host_decision() {
+            Some(HostDecision::RefusedFrame { decoded: Some(outcome), .. }) | Some(HostDecision::Outcome(outcome)) => {
+                refusal_line(&outcome)
+            }
+            _ => None,
+        };
+        decided.unwrap_or(error)
+    })
 }
 
 fn jobs_dir(ws: &Ws) -> Result<PathBuf> {
@@ -197,10 +206,30 @@ fn record_path(ws: &Ws, name: &str) -> Result<PathBuf> {
     Ok(jobs_dir(ws)?.join(format!("{name}.json")))
 }
 
+/// The job's local record; a job this workspace holds only a reference to
+/// (created or imported outside `post`/`claim`) is known by that reference.
 fn record(ws: &Ws, name: &str) -> Result<Value> {
     let path = record_path(ws, name)?;
-    let bytes = fs::read(&path).map_err(|_| format!("job: no job {name} in this workspace (post, or claim it)"))?;
-    serde_json::from_slice(&bytes).map_err(|error| format!("job: {}: {error}", path.display()))
+    match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| format!("job: {}: {error}", path.display())),
+        Err(_) => {
+            let reference = workspace::reference(&ws.root, name)
+                .map_err(|_| format!("job: no job {name} in this workspace (post, or claim it)"))?;
+            Ok(json!({"type":"minidregg-job-v1","name":name,"job":field(&reference, "target")?}))
+        }
+    }
+}
+
+/// WINDOW: the record's, else the job law's own (clause 34's offset).
+fn window_of(ws: &Ws, name: &str, rec: &Value) -> Result<i128> {
+    if let Some(window) = rec.get("window").and_then(Value::as_str) {
+        return int(&json!(window), "window");
+    }
+    let reference = workspace::reference(&ws.root, name)?;
+    let policy = workspace::signed_view(&ws.root, &ws.pin, &reference, "policy")?.0;
+    find_window(&policy)
+        .ok_or_else(|| "job: the job law names no window".to_string())
+        .and_then(|w| int(&json!(w), "window"))
 }
 
 fn save(ws: &Ws, name: &str, value: &Value) -> Result<()> {
@@ -302,11 +331,22 @@ fn update(field: u32, expected: impl ToString, value: impl ToString) -> Value {
 /// One job-money turn (op 160 plan, sign, 161 assembly, 162 submit). The plan
 /// names a refusal (`jobRefused [k]` is the law's clause k); the submission is
 /// blind. Everything is retained under `dir`.
-fn money(ws: &Ws, dir: &Path, job: &str, action: u8, account: &str, amount: &str, capability: &str) -> Result<Value> {
+#[allow(clippy::too_many_arguments)]
+fn money(
+    ws: &Ws,
+    dir: &Path,
+    job: &str,
+    action: u8,
+    account: &str,
+    amount: &str,
+    capability: &str,
+    job_capability: &str,
+) -> Result<Value> {
     fs::create_dir_all(dir).map_err(|error| format!("job: {}: {error}", dir.display()))?;
     let view = inspect(ws, "pay-view", &invoke(ws, 107, &[])?)?;
     let authority = view.get("authorityRoot").and_then(Value::as_str).ok_or("job: pay view lacks authorityRoot")?;
-    let command = json!({"subject":ws.subject,"capability":capability,"job":job,"action":action.to_string(),
+    let command = json!({"subject":ws.subject,"capability":capability,"jobCapability":job_capability,
+        "job":job,"action":action.to_string(),
         "account":account,"amount":amount,"nonce":nonce()?,"expectedAuthorityRoot":authority});
     fs::write(dir.join("command.json"), command.to_string()).map_err(|e| e.to_string())?;
     let command_bytes = author(ws, "job-money", &command)?;
@@ -480,7 +520,7 @@ fn post(ws: &Ws, mut args: Args) -> Result<Value> {
     ];
     let (_, ordered) = timed("post (order)", || write(ws, &format!("{name}-order"), &name, order, None))?;
     let dir = jobs_dir(ws)?.join(format!("{name}.fund"));
-    let (_, funded) = timed("post (fund)", || money(ws, &dir, &target, FUND, &account_id, &price, &account_cap))?;
+    let (_, funded) = timed("post (fund)", || money(ws, &dir, &target, FUND, &account_id, &price, &account_cap, "0"))?;
     rec["latency"] = json!({"birth":birth,"order":ordered,"fund":funded});
     save(ws, &name, &rec)?;
     Ok(json!({"type":"job-posted","job":target,"name":name,"room":room,"program":program,"input":input,
@@ -491,16 +531,24 @@ fn post(ws: &Ws, mut args: Args) -> Result<Value> {
 fn claim(ws: &Ws, mut args: Args) -> Result<Value> {
     let job = decimal(&arg(&mut args, "job")?, "--job")?;
     let name = opt(&mut args, "name")?.unwrap_or_else(|| format!("job-{job}"));
-    let room = arg(&mut args, "room")?;
+    let room = opt(&mut args, "room")?;
     let bond = decimal(&arg(&mut args, "bond")?, "--bond")?;
     let account_ref = arg(&mut args, "account")?;
     args.finish()?;
     name_ok(&name)?;
-    name_ok(&room)?;
-    // A room member's one `under ROOM` capability covers the job born in it.
-    let room_ref = workspace::reference(&ws.root, &room)?;
-    let cap = operation_capability(&room_ref)?;
-    if workspace::reference(&ws.root, &name).is_err() {
+    // The claimer's capability on the job: the job reference it already holds (a
+    // delegation), or else its room grant -- a member's `under ROOM` covers the jobs
+    // born in the room.
+    let held = workspace::reference(&ws.root, &name).ok();
+    let cap = match (&held, &room) {
+        (Some(reference), _) => operation_capability(reference)?,
+        (None, Some(room)) => {
+            name_ok(room)?;
+            operation_capability(&workspace::reference(&ws.root, room)?)?
+        }
+        (None, None) => return Err("job: claim needs --room ROOM (the room the job was posted in)".into()),
+    };
+    if held.is_none() {
         client(
             "workspace",
             &[
@@ -527,8 +575,8 @@ fn claim(ws: &Ws, mut args: Args) -> Result<Value> {
     let account = workspace::reference(&ws.root, &account_ref)?;
     let account_id = field(&account, "target")?.to_owned();
     let account_cap = operation_capability(&account)?;
-    let dir = jobs_dir(ws)?.join(format!("{name}.claim"));
-    let (_, latency) = timed("claim", || money(ws, &dir, &job, CLAIM, &account_id, &bond, &account_cap))?;
+    let dir = jobs_dir(ws)?.join(format!("{name}.claim-{}", nonce()?));
+    let (_, latency) = timed("claim", || money(ws, &dir, &job, CLAIM, &account_id, &bond, &account_cap, &cap))?;
     let rec = json!({"type":"minidregg-job-v1","name":name,"job":job,"room":room,"role":"provider",
         "program":f.get(&1),"input":f.get(&2),"price":f.get(&5),"claimBy":f.get(&6),"answerBy":f.get(&7),
         "window":window,"providerAcct":account_id,"bond":bond});
@@ -555,6 +603,47 @@ fn find_window(policy: &Value) -> Option<String> {
     walk(policy)
 }
 
+/// The caller funds an ordered job (the money turn `post` ends with), for a job
+/// ordered outside `post`.
+fn fund(ws: &Ws, mut args: Args) -> Result<Value> {
+    let name = arg(&mut args, "name")?;
+    let account_ref = arg(&mut args, "account")?;
+    // The deposit is the price; `--amount` names another (the money decision refuses it).
+    let amount = opt(&mut args, "amount")?.map(|a| decimal(&a, "--amount")).transpose()?;
+    args.finish()?;
+    let rec = record(ws, &name)?;
+    let job = field(&rec, "job")?.to_owned();
+    let f = fields(ws, &name)?;
+    let price = match amount {
+        Some(amount) => amount,
+        None => f.get(&5).cloned().ok_or("job: the job has no price")?,
+    };
+    let account = workspace::reference(&ws.root, &account_ref)?;
+    let dir = jobs_dir(ws)?.join(format!("{name}.fund-{}", nonce()?));
+    let (_, latency) = timed("fund", || {
+        money(ws, &dir, &job, FUND, field(&account, "target")?, &price, &operation_capability(&account)?, "0")
+    })?;
+    Ok(json!({"type":"job-funded","job":job,"name":name,"escrow":price,"latency":{"fund":latency}}))
+}
+
+/// The truth turn alone: the job's program re-executed by the kernel on the job's
+/// sample, its output written to the truth field under the run claim. In state 2
+/// anyone in the window; in state 1 the provider (the synchronous path).
+fn truth(ws: &Ws, mut args: Args) -> Result<Value> {
+    let name = arg(&mut args, "name")?;
+    args.finish()?;
+    let rec = record(ws, &name)?;
+    let job = field(&rec, "job")?.to_owned();
+    let f = fields(ws, &name)?;
+    let ((claim, dry), ran) = timed("truth (run)", || dry_run(ws, &job, &f))?;
+    let value = truth_of(&dry)?;
+    let (_, latency) = timed("truth", || {
+        write(ws, &format!("{name}-truth-{}", nonce()?), &name, vec![create(TRUTH, &value)], Some(claim.clone()))
+    })?;
+    Ok(json!({"type":"job-truth","job":job,"truth":value,"kernelSteps":claim.get("steps"),
+        "latency":{"run":ran,"truth":latency}}))
+}
+
 fn answer(ws: &Ws, mut args: Args) -> Result<Value> {
     let name = arg(&mut args, "name")?;
     let output = opt(&mut args, "output")?;
@@ -562,7 +651,7 @@ fn answer(ws: &Ws, mut args: Args) -> Result<Value> {
     args.finish()?;
     let rec = record(ws, &name)?;
     let job = field(&rec, "job")?.to_owned();
-    let window: i128 = int(rec.get("window").unwrap_or(&json!("60")), "window")?;
+    let window = window_of(ws, &name, &rec)?;
     let f = fields(ws, &name)?;
     if get(&f, STATE)? != 1 {
         return Err(format!("job: {name} is {}, not claimed", STATES[get(&f, STATE)? as usize]));
@@ -603,6 +692,12 @@ fn check(ws: &Ws, mut args: Args) -> Result<Value> {
             Ok(json!({"type":"job-checked","job":job,"verdict":"slashed","why":"stall: no answer by answerBy",
                 "answerBy":f.get(&7),"now":clock.to_string(),"latency":{"decide":decide}}))
         }
+        // The synchronous path: the provider's own run is on the cell.
+        1 if f.get(&TRUTH).is_some() => {
+            let (_, decide) = timed("check (decide)", || write(ws, &id("decide")?, &name, vec![update(STATE, 1, 3)], None))?;
+            Ok(json!({"type":"job-checked","job":job,"verdict":"upheld","why":"the provider's own run",
+                "truth":f.get(&TRUTH),"latency":{"decide":decide}}))
+        }
         2 if f.get(&TRUTH).is_none() && clock > get(&f, FINAL_AT)? => {
             let (_, decide) = timed("check (timeout)", || write(ws, &id("timeout")?, &name, vec![update(STATE, 2, 3)], None))?;
             Ok(json!({"type":"job-checked","job":job,"verdict":"upheld","why":"timeout: no truth by finalAt",
@@ -612,6 +707,7 @@ fn check(ws: &Ws, mut args: Args) -> Result<Value> {
             // The truth turn: the kernel re-executes the job's program on its own sample and
             // admits the write only if it is the program's product; the law needs `ran PROGRAM`.
             let ((claim, dry), ran) = timed("check (run)", || dry_run(ws, &job, &f))?;
+            let truth_started = Instant::now();
             let truth = match f.get(&TRUTH) {
                 Some(t) => t.clone(),
                 None => {
@@ -632,12 +728,13 @@ fn check(ws: &Ws, mut args: Args) -> Result<Value> {
                 }
             };
             let truth_secs = ran;
+            let truth_write = truth_started.elapsed().as_secs_f64();
             let output = f.get(&OUTPUT).cloned().ok_or("job: answered without output")?;
             let verdict = if truth == output { 3 } else { 4 };
             let (_, decide) = timed("check (decide)", || write(ws, &id("decide")?, &name, vec![update(STATE, 2, verdict)], None))?;
             Ok(json!({"type":"job-checked","job":job,"truth":truth,"output":output,
                 "verdict":STATES[verdict as usize],"kernelSteps":claim.get("steps"),
-                "latency":{"run":truth_secs,"decide":decide}}))
+                "latency":{"run":truth_secs,"truth":truth_write,"decide":decide}}))
         }
         _ => Err(format!(
             "job: {name} is {}; check decides an answered job (or a claimed one past answerBy)",
@@ -651,17 +748,34 @@ fn settle(ws: &Ws, mut args: Args) -> Result<Value> {
     args.finish()?;
     let rec = record(ws, &name)?;
     let job = field(&rec, "job")?.to_owned();
-    let dir = jobs_dir(ws)?.join(format!("{name}.settle"));
-    // Settling again is the same turn: the retained ingress, resubmitted, answers the
-    // original receipt (replay), never a second payout.
-    if let Ok(ingress) = fs::read(dir.join("ingress.bin")) {
-        let (outcome, latency) = timed("settle (resubmit)", || submit_ingress(ws, &dir, &ingress))?;
-        return Ok(json!({"type":"job-settled","job":job,"resubmitted":true,"outcome":outcome,"latency":{"settle":latency}}));
+    // Settling again is the same turn: the retained ingress of the confirmed settle,
+    // resubmitted, answers the original receipt (replay), never a second payout. A
+    // refused attempt is kept for the record and a fresh one is made.
+    let jobs = jobs_dir(ws)?;
+    let mut tried: Vec<PathBuf> = fs::read_dir(&jobs)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(&format!("{name}.settle-"))))
+        .collect();
+    tried.sort();
+    for previous in &tried {
+        let confirmed = fs::read_dir(previous).map_err(|e| e.to_string())?.filter_map(|e| e.ok()).any(|e| {
+            fs::read(e.path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                .is_some_and(|v| v.get("type").and_then(Value::as_str) == Some("confirmed"))
+        });
+        if confirmed {
+            let ingress = fs::read(previous.join("ingress.bin")).map_err(|e| e.to_string())?;
+            let (outcome, latency) = timed("settle (resubmit)", || submit_ingress(ws, previous, &ingress))?;
+            return Ok(json!({"type":"job-settled","job":job,"resubmitted":true,"outcome":outcome,"latency":{"settle":latency}}));
+        }
     }
+    let dir = jobs.join(format!("{name}.settle-{}", nonce()?));
     let reference = workspace::reference(&ws.root, &name)?;
     let cap = operation_capability(&reference)?;
     let before = fields(ws, &name)?;
-    let (outcome, latency) = timed("settle", || money(ws, &dir, &job, SETTLE, "0", "0", &cap))?;
+    let (outcome, latency) = timed("settle", || money(ws, &dir, &job, SETTLE, "0", "0", &cap, "0"))?;
     let after = fields(ws, &name)?;
     Ok(json!({"type":"job-settled","job":job,"from":before.get(&STATE).and_then(|s| s.parse::<usize>().ok()).and_then(|s| STATES.get(s)),
         "fields":named(&after),"outcome":outcome,"latency":{"settle":latency}}))
@@ -711,12 +825,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let value = match action.as_str() {
         "post" => post(&ws, args)?,
         "claim" => claim(&ws, args)?,
+        "fund" => fund(&ws, args)?,
+        "truth" => truth(&ws, args)?,
         "answer" => answer(&ws, args)?,
         "check" => check(&ws, args)?,
         "settle" => settle(&ws, args)?,
         "show" => show(&ws, args)?,
         "list" => list(&ws, args)?,
-        _ => return Err("job --action must be post, claim, answer, check, settle, show or list".into()),
+        _ => return Err("job --action must be post, fund, claim, answer, truth, check, settle, show or list".into()),
     };
     println!("{}", serde_json::to_string(&value).map_err(|e| e.to_string())?);
     Ok(())

@@ -77,10 +77,15 @@ abbrev BookCell (deployment : Deployment) (directory : Directory Nat Registry) :
 
 /-- `action`: 1 fund · 2 claim · 3 settle (`JobMoney.fundAction` …).  For a
 settle, `account` and `amount` must be 0 and `capability` is a capability on
-the job; otherwise `capability` is the signer's capability on `account`. -/
+the job; otherwise `capability` is the signer's capability on `account`.
+`jobCapability` is the claimer's capability on the job (a room member's
+`under ROOM` grant covers a job born in the room): a claim is admitted only if
+it admits a mutation of the job by the signer (`memberCheck`); every other
+action carries 0. -/
 structure Command where
   subject : SubjectId
   capability : CapabilityId
+  jobCapability : CapabilityId
   job : Nat
   action : Nat
   account : Nat
@@ -93,18 +98,20 @@ def commandStream : StreamCodec Command :=
   StreamCodec.xmap
     (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
       (StreamCodec.product capabilityIdStream
-        (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product capabilityIdStream
           (StreamCodec.product StreamCodec.nat
             (StreamCodec.product StreamCodec.nat
               (StreamCodec.product StreamCodec.nat
-                (StreamCodec.product StreamCodec.nat digestStream)))))))
-    (fun c => (c.subject, c.capability, c.job, c.action, c.account, c.amount, c.nonce,
-      c.expectedAuthorityRoot))
-    (fun (subject, capability, job, action, account, amount, nonce, authorityRoot) =>
-      ⟨subject, capability, job, action, account, amount, nonce, authorityRoot⟩)
+                (StreamCodec.product StreamCodec.nat
+                  (StreamCodec.product StreamCodec.nat digestStream))))))))
+    (fun c => (c.subject, c.capability, c.jobCapability, c.job, c.action, c.account, c.amount,
+      c.nonce, c.expectedAuthorityRoot))
+    (fun (subject, capability, jobCapability, job, action, account, amount, nonce, authorityRoot) =>
+      ⟨subject, capability, jobCapability, job, action, account, amount, nonce, authorityRoot⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/JOB/MONEY/v1".toUTF8.toList
+/-- v2: the command carries the claimer's `jobCapability` (room membership). -/
+def commandFrame : List UInt8 := "DREGG/JOB/MONEY/v2".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -286,6 +293,71 @@ def request (snapshot : Snapshot) (job : JobCell) (semantics : Digest) (ambient 
     (marker snapshot.domain semantics command)
     (declaration snapshot.domain semantics command job.root plan)).2
 
+/-! ## Membership: who may claim
+
+A claim spends the claimer's account (authorized under the account's law), and
+it also takes part in the job: the claimer must hold a capability that admits
+a mutation of the job, the request the claim's own context makes with the job
+as target (a room member's `under ROOM` grant covers every job born in the
+room). The check is the authority layer's own `capabilityAdmissibleCheck`
+(holder, scope through the parent chain, validity window, the job's law and
+epoch, issuer, revocation), on the capability the command names. -/
+
+/-- The claim's context with the job as the target of a mutation. -/
+def memberContext (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient) (command : Command) :
+    RequestContext where
+  authority :=
+    { kind := .object
+      domain := snapshot.domain
+      semantics := semantics
+      federation := ambient.federation
+      subject := command.subject
+      subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
+      target := ⟨command.job⟩
+      verb := Verb.mutateObject
+      nonce := marker snapshot.domain semantics command
+      height := ambient.height
+      policyId := ⟨command.job⟩
+      policyEpoch := snapshot.authState.policyEpoch ⟨command.job⟩
+      policyRevision := snapshot.authState.policyRevision ⟨command.job⟩
+      cost := (commandCodec.encode command).length }
+  argsDigestBytes := (context snapshot semantics ambient command).argsDigestBytes
+
+def memberRequest (snapshot : Snapshot) (job : JobCell) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (plan : Plan) : Request .object :=
+  ((memberContext snapshot semantics ambient command).request declarationCodec
+    (effectDigest snapshot.domain semantics command) job.root
+    (marker snapshot.domain semantics command)
+    (declaration snapshot.domain semantics command job.root plan)).2
+
+/-- A claim names a capability that admits mutating the job; any other action names none. -/
+def memberCheck (snapshot : Snapshot) (job : JobCell) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (plan : Plan) : Bool :=
+  if command.action = claimAction then
+    match readCapability snapshot.cell .object command.jobCapability with
+    | none => false
+    | some stored =>
+        AuthorizationDeclaration.capabilityAdmissibleCheck stored.head snapshot.authState
+          (memberRequest snapshot job semantics ambient command plan)
+  else command.jobCapability.value == 0
+
+/-- **Only a member claims.** A claim that passes `memberCheck` names a stored
+capability that is admissible for a mutation of the job by the claimer. -/
+theorem memberCheck_claim {snapshot : Snapshot} {job : JobCell} {semantics : Digest}
+    {ambient : Ambient} {command : Command} {plan : Plan}
+    (checked : memberCheck snapshot job semantics ambient command plan = true)
+    (claim : command.action = claimAction) :
+    ∃ stored, readCapability snapshot.cell .object command.jobCapability = some stored ∧
+      stored.head.Admissible snapshot.authState
+        (memberRequest snapshot job semantics ambient command plan) := by
+  unfold memberCheck at checked
+  rw [if_pos claim] at checked
+  split at checked
+  · cases checked
+  · rename_i stored found
+    exact ⟨stored, found,
+      (AuthorizationDeclaration.capabilityAdmissibleCheck_eq_true_iff _ _ _).mp checked⟩
+
 def family (snapshot : Snapshot) (job : JobCell) (semantics : Digest) (ambient : Ambient)
     (command : Command) :
     SemanticEffectFamily effectLayout DeclaredEffectCell.materializer Nat where
@@ -372,6 +444,7 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   jobLaw : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨command.job⟩
       (authority.snapshot.authState.policyRevision ⟨command.job⟩))
+  member : memberCheck authority.snapshot job profile.semantics ambient command plan = true
   jobLawPinned : JobMoney.isJobLaw jobLaw.record.predicate = true
   jobAccepted : Minidregg.Pred.eval jobLaw.record.predicate ⟨[]⟩
     (jobState command clock.clock job.logical candidate.validated.apply.logical) = true
@@ -427,6 +500,7 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                 (CanonicalCellRegistry.loadPolicySource snapshot.domain directory.directory
                   (snapshot.authState.policyAddress ⟨command.job⟩
                     (snapshot.authState.policyRevision ⟨command.job⟩)))
+              if member : memberCheck snapshot job profile.semantics ambient command plan = true then
               if pinned : JobMoney.isJobLaw jobLaw.record.predicate = true then
               if jobAccepted : Minidregg.Pred.eval jobLaw.record.predicate ⟨[]⟩
                   (jobState command clock.clock job.logical candidate.validated.apply.logical) = true then
@@ -438,10 +512,11 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
                   decided,
                   CanonicalResourceKernel.AcceptedBatch.ofAdmission
                     (decideMoney_plan decided).1,
-                  candidate, jobLaw, pinned, jobAccepted, source⟩
+                  candidate, jobLaw, member, pinned, jobAccepted, source⟩
               else throw (.jobRefused ((Minidregg.Pred.firstFailingLeaf jobLaw.record.predicate ⟨[]⟩
                   (jobState command clock.clock job.logical candidate.validated.apply.logical)).getD []))
               else throw .notJobLaw
+              else throw .notMember
         else throw .replayedMarker
   else throw .staleAuthority
 
@@ -483,6 +558,16 @@ theorem Prepared.conserves (prepared : Prepared deployment profile ambient durab
   rw [prepared.bookPost_exact]
   exact ⟨(escrow_conserved prepared.decided).1, (escrow_conserved prepared.decided).2.1,
     held_agrees prepared.decided⟩
+
+/-- An accepted claim's claimer holds a capability admissible for mutating the job. -/
+theorem Prepared.claim_by_member (prepared : Prepared deployment profile ambient durable command)
+    (claim : command.action = claimAction) :
+    ∃ stored, readCapability prepared.authority.snapshot.cell .object command.jobCapability =
+        some stored ∧
+      stored.head.Admissible prepared.authority.snapshot.authState
+        (memberRequest prepared.authority.snapshot prepared.job profile.semantics ambient command
+          prepared.plan) :=
+  memberCheck_claim prepared.member claim
 
 /-- The money leg starts from the job the Store holds. -/
 theorem Prepared.job_before (prepared : Prepared deployment profile ambient durable command) :
@@ -795,6 +880,8 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 #assert_axioms Prepared.balanced
 #assert_axioms Prepared.conserves
 #assert_axioms Prepared.job_before
+#assert_axioms memberCheck_claim
+#assert_axioms Prepared.claim_by_member
 #assert_axioms readGuards_readonly
 #assert_axioms intent_writes
 #assert_axioms accepted_balanced

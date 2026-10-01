@@ -248,6 +248,7 @@ inductive Reject where
   | notFunded | alreadyClaimed | noProvider | bondBelowPrice | insufficientBalance | heldMismatch
   | notTerminal | alreadySettled | badPayee | bookRefused | unbalanced
   | jobRefused (clause : List Nat)
+  | notMember
   | clockUnavailable
   | jobCell (reason : DeclaredResourceScalar.Reject)
   | replayedMarker | validation | physicalPreparation

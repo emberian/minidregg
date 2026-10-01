@@ -2467,11 +2467,12 @@ private def payRefill (json : Lean.Json) : Result (List UInt8) := do
 /-- A job-money command (lane C3): `action` 1 fund · 2 claim · 3 settle.
 The bytes claim nothing: the receiver decides every amount a settle pays. -/
 private def jobMoney (json : Lean.Json) : Result (List UInt8) := do
-  let obj ← exactObject "$" ["subject", "capability", "job", "action", "account", "amount",
-    "nonce", "expectedAuthorityRoot"] json
+  let obj ← exactObject "$" ["subject", "capability", "jobCapability", "job", "action",
+    "account", "amount", "nonce", "expectedAuthorityRoot"] json
   let command : JobMoneyReceiver.Command :=
     { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
       capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      jobCapability := ⟨← nat "$.jobCapability" (← field "$" "jobCapability" obj)⟩
       job := ← nat "$.job" (← field "$" "job" obj)
       action := ← nat "$.action" (← field "$" "action" obj)
       account := ← nat "$.account" (← field "$" "account" obj)
@@ -2848,9 +2849,10 @@ private def payRefillCommandJson (command : PurseRefillReceiver.Command) : Lean.
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value)]
 
 private def jobMoneyCommandJson (command : JobMoneyReceiver.Command) : Lean.Json := .mkObj
-  [("type", "job-money-v1"),
+  [("type", "job-money-v2"),
    ("canonical", hexJson (JobMoneyReceiver.commandCodec.encode command)),
    ("subject", decimal command.subject.value), ("capability", decimal command.capability.value),
+   ("jobCapability", decimal command.jobCapability.value),
    ("job", decimal command.job), ("action", decimal command.action),
    ("account", decimal command.account), ("amount", decimal command.amount),
    ("nonce", decimal command.nonce),
