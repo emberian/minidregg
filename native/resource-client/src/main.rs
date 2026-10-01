@@ -56,6 +56,8 @@ mod transport;
 #[cfg(unix)]
 mod worker;
 #[cfg(unix)]
+mod web;
+#[cfg(unix)]
 mod workspace;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
@@ -148,6 +150,7 @@ const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-hos
 usage:
   mini keygen --secret KEY --public PUBLIC
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini web --dir WORKSPACE --listen 127.0.0.1:PORT   (read-only loopback hypertext over this workspace's signed reads)
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
@@ -1983,6 +1986,8 @@ fn run(mut args: Args) -> Result<()> {
     match args.command.to_string_lossy().as_ref() {
         #[cfg(unix)]
         "workspace" => workspace::run(args),
+        #[cfg(unix)]
+        "web" => web::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         #[cfg(unix)]

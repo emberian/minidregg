@@ -105,7 +105,7 @@ fn make_private_dir(path: &Path) -> Result<()> {
     private_dir(path)
 }
 
-fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -123,7 +123,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn bounded_json(path: &Path) -> Result<Value> {
+pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD {
@@ -142,14 +142,14 @@ fn bounded_json(path: &Path) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
 }
 
-fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
+pub(crate) fn member<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     value
         .get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("workspace record lacks {key}"))
 }
 
-fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
+pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     let path = PathBuf::from(member(value, key)?);
     if !path.is_absolute() {
         return Err(format!("workspace {key} is not absolute"));
@@ -190,7 +190,7 @@ fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     Err("could not allocate a distinct workspace attempt name".into())
 }
 
-fn load(root: &Path) -> Result<Value> {
+pub(crate) fn load(root: &Path) -> Result<Value> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -334,7 +334,7 @@ fn init(
     Ok(())
 }
 
-fn reference(root: &Path, name: &str) -> Result<Value> {
+pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
     validate_name(name)?;
     let value = bounded_json(&root.join("refs").join(format!("{name}.json")))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
@@ -559,7 +559,7 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
     Ok(())
 }
 
-fn signed_view(
+pub(crate) fn signed_view(
     root: &Path,
     workspace: &Value,
     reference: &Value,

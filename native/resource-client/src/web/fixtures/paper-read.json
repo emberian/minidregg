@@ -1,0 +1,84 @@
+{
+  "balances": [],
+  "cell": {
+    "entries": [
+      {
+        "canonical": "0019c173b3164b69dbff01ffff07ff01ffd390aba76d52fa9bff25b94f9d5a4cca70a563fd4a2fdc1d629f02086e5ec516b1323d0403b0c6661701ff",
+        "id": "15383085687320778865",
+        "type": "document"
+      },
+      {
+        "canonical": "01ec03ff19c173b3164b69dbffff0eff746865206669727374206c696e6507ff01ffd390aba76d52fa9bff25b94f9d5a4cca70a563fd4a2fdc1d629f02086e5ec516b1323d0403b0c6661701ff25b94f9d5a4cca70a563fd4a2fdc1d629f02086e5ec516b1323d0403b0c6661701ff00",
+        "createdAt": "111537162275904361020355155738974961173473605881500346502776342230128856910062",
+        "createdBy": {
+          "capability": "10935906802704742081",
+          "capabilityKind": "object",
+          "subject": "7"
+        },
+        "document": "15383085687320778865",
+        "id": "1001",
+        "kind": {
+          "type": "text"
+        },
+        "payload": "746865206669727374206c696e65",
+        "revision": "111537162275904361020355155738974961173473605881500346502776342230128856910062",
+        "tombstonedAt": null,
+        "type": "atom"
+      },
+      {
+        "canonical": "01ed03ff19c173b3164b69dbffff18ff746865207365636f6e64206c696e652c207265766973656407ff01ffd390aba76d52fa9bff25b94f9d5a4cca70a563fd4a2fdc1d629f02086e5ec516b1323d0403b0c6661701fface19cbecb9051db7d8f235f4310637ad9079daf2a321a18ee390cb3a92bb8bcff00",
+        "createdAt": "111537162275904361020355155738974961173473605881500346502776342230128856910062",
+        "createdBy": {
+          "capability": "10935906802704742081",
+          "capabilityKind": "object",
+          "subject": "7"
+        },
+        "document": "15383085687320778865",
+        "id": "1002",
+        "kind": {
+          "type": "text"
+        },
+        "payload": "746865207365636f6e64206c696e652c2072657669736564",
+        "revision": "75608161264795635450568153077390084790153955599406130858924037196896369833322",
+        "tombstonedAt": null,
+        "type": "atom"
+      },
+      {
+        "body": {
+          "runs": [],
+          "type": "runs"
+        },
+        "canonical": "0301ff19c173b3164b69dbff0001ffff07ff01ffd390aba76d52fa9bff25b94f9d5a4cca70a563fd4a2fdc1d629f02086e5ec516b1323d0403b0c6661701ff00",
+        "createdBy": {
+          "capability": "10935906802704742081",
+          "capabilityKind": "object",
+          "subject": "7"
+        },
+        "id": "1",
+        "type": "element"
+      },
+      {
+        "anchor": {
+          "atom": "1002",
+          "revision": "111537162275904361020355155738974961173473605881500346502776342230128856910062",
+          "type": "atom"
+        },
+        "author": {
+          "capability": "18034850066633095571",
+          "capabilityKind": "object",
+          "subject": "12298954527610120699"
+        },
+        "body": {
+          "bytes": "636974652074686973",
+          "type": "inline"
+        },
+        "canonical": "09741bff19c173b3164b69dbff0101ed03ff25b94f9d5a4cca70a563fd4a2fdc1d629f02086e5ec516b1323d0403b0c6661701ff0009ff636974652074686973f4bf829e0de76bafff01ffdd82b73d9e1b3c0201ff8dadb2df89bf7abb636adca4837c39a0f85083b62a2fe5940070054975fdc1d7ffff00",
+        "fresh": false,
+        "id": "7001",
+        "type": "annotation"
+      }
+    ],
+    "root": "6624816874512760776652785584141873115136467019553467751871314302466697194705"
+  },
+  "type": "resource"
+}
