@@ -34,6 +34,8 @@ mod historical_call_receipt;
 #[cfg(unix)]
 mod meter;
 #[cfg(unix)]
+mod market;
+#[cfg(unix)]
 mod clock;
 mod participant_enrollment;
 mod pay_refill;

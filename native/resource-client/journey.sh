@@ -27,6 +27,7 @@
 #   JJOB   COMPUTE floor: post / claim / answer / check (the ran truth turn) / settle between two friends (journey.d/jjob.sh; own Store)
 #   JJOBM  COMPUTE C3: a job's money as conservation-checked Book turns (journey.d/jjob-money.sh; own Store)
 #   KCL    K-FIELD-CLOSURE: a declared cell holds only the fields it declares (journey.d/jclosure.sh)
+#   JMKT   SEALED-MARKET: a sealed-bid market through mini shell (journey.d/jmarket.sh)
 #   JPAY1  PAY P1: the pay watcher over fixtures (journey.d/jpay1.sh)
 #   JPAY2  PAY P2: the pay cell (journey.d/jpay2.sh, its own Store)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
@@ -40,7 +41,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jjob1 jjob jjob-money jclosure m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jjob1 jjob jjob-money jclosure jmarket m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -123,7 +124,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN3P JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C JMKT KW JN2 JN3 JN3P JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -136,7 +137,7 @@ TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
 TITLE[KIX]="the index the world keeps: who, since, and a read at a past height"
 TITLE[KF]="a scope names fields and bounds each field change per write"
 TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
-TITLE[KHQ]="commit-reveal at the kernel: a sealed bid opens only to its commitment"
+TITLE[JMKT]="the sealed market: bids commit, reveals open, the runner settles on revealed bids"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
 TITLE[JN3]="the kernel checks a Nock run by re-executing it (own Store)"
@@ -772,7 +773,7 @@ step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, 
 step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last visible write, since lists only later writes, at differs across a write above and below the checkpoint and equals the read now, a height above now is refused, a cold reopen prints the same index (lane k-index)"; }
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
 step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
-step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHAKE256 digest, the right opening installs, a wrong opening or a reveal before the deadline is refused, the plaintext is on the Store only after the reveal (lane k-hasheq)"; }
+step_JMKT() { hook jmarket "SEALED-MARKET rows: friends bid sealed (price, qty) tuples through mini shell; nothing sealed is on the Store or in a signed read before the close, a public price is; the right opening installs, a wrong, partial, replayed or repeated opening and every out-of-phase write are refused by name; the runner settles on revealed bids only (lane sealed-market; supersedes KHQ)" shell; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
@@ -817,7 +818,7 @@ run_step K11 J5
 run_step KIX K10
 run_step KF J5
 run_step K12C J5
-run_step KHQ J4
+run_step JMKT J4
 run_step KW J5
 run_step JN2 J0
 run_step JN3 J0

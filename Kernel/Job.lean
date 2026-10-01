@@ -1377,6 +1377,9 @@ end Poles
 
 /-! ## §7. Axiom pins -/
 
+-- Pins re-read on merging into the K-HASHEQ line (sealed-market): `Pred.eval` reaches the Keccak-f[1600]
+-- sponge since K-HASHEQ (`[propext, Quot.sound]`), so statements that mention `eval` gain `Quot.sound`.
+-- It is the closure of a definition, not a step of any proof here; `Classical.choice` stays out.
 /-- info: 'Minidregg.Kernel.Job.job_clause' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.job_clause
 /-- info: 'Minidregg.Kernel.Job.present_iff' depends on axioms: [propext, Quot.sound] -/

@@ -890,7 +890,7 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
     Ok(())
 }
 
-fn propose(
+pub(crate) fn propose(
     root: &Path,
     workspace: &Value,
     request_path: &Path,
@@ -1323,7 +1323,7 @@ fn propose(
     Ok(())
 }
 
-fn submit_intent(
+pub(crate) fn submit_intent(
     root: &Path,
     workspace: &Value,
     source: &Path,
@@ -2931,8 +2931,51 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             doc_backlinks(&root, &workspace, &name)
         }
+        "law-show" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            crate::market::law_show(&root, &workspace, &name)
+        }
+        "market-open" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            let close = os_string(args.required("close")?, "close height")?;
+            let reveal_end = os_string(args.required("reveal-end")?, "reveal end height")?;
+            let supply = os_string(args.required("supply")?, "supply")?;
+            let deposit = args
+                .optional("deposit")
+                .map(|value| os_string(value, "deposit"))
+                .transpose()?
+                .unwrap_or_else(|| "0".into());
+            args.finish()?;
+            crate::market::open(&root, &workspace, &name, &close, &reveal_end, &supply, &deposit)
+        }
+        "market-bid" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            let price = os_string(args.required("price")?, "price")?;
+            let qty = os_string(args.required("qty")?, "quantity")?;
+            let id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            args.finish()?;
+            validate_name(&id)?;
+            crate::market::bid(&root, &workspace, &name, &price, &qty, &id)
+        }
+        "market-reveal" | "market-settle" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            let id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            args.finish()?;
+            validate_name(&id)?;
+            if action == "market-reveal" {
+                crate::market::reveal(&root, &workspace, &name, &id)
+            } else {
+                crate::market::settle(&root, &workspace, &name, &id)
+            }
+        }
+        "market-bids" => {
+            let name = os_string(args.required("name")?, "market name")?;
+            args.finish()?;
+            crate::market::show(&root, &workspace, &name)
+        }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show or doc-backlinks".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-backlinks, law-show, market-open, market-bid, market-reveal, market-bids or market-settle".into(),
         ),
     }
 }

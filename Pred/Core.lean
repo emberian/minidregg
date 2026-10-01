@@ -88,19 +88,34 @@ names it was given are the field half of the context. -/
 /-- The slot carrying the id of the cell a step is about. -/
 def hashEqCellSlot : Slot := "request/target"
 
-/-- The opening of `hashEq value blinder commit` on a state: `none` if the cell, the value or the
+/-- Fail-closed read of several slots, in order: `none` if any one is absent. -/
+def State.getAll (s : State) : List Slot → Option (List Int)
+  | [] => some []
+  | v :: vs => match s.get v, s.getAll vs with
+    | some x, some xs => some (x :: xs)
+    | _, _ => none
+
+/-- Two states that read alike read every list of slots alike. -/
+theorem State.getAll_congr {s s' : State} (h : ∀ k, s.get k = s'.get k) :
+    ∀ vs : List Slot, s.getAll vs = s'.getAll vs
+  | [] => rfl
+  | v :: vs => by simp only [State.getAll, h v, State.getAll_congr h vs]
+
+/-- The opening of `hashEq values blinder commit` on a state: `none` if the cell, any value or the
 blinder is absent, or the encoding's domain is exceeded. -/
-def hashEqOpening (s : State) (value blinder commit : Slot) : Option HashEqDigest.Opening :=
-  match s.get hashEqCellSlot, s.get value, s.get blinder with
-  | some cell, some x, some r =>
-      let o : HashEqDigest.Opening := ⟨cell, value, blinder, commit, x, r⟩
+def hashEqOpening (s : State) (values : List Slot) (blinder commit : Slot) :
+    Option HashEqDigest.Opening :=
+  match s.get hashEqCellSlot, s.getAll values, s.get blinder with
+  | some cell, some xs, some r =>
+      let o : HashEqDigest.Opening := ⟨cell, values, blinder, commit, xs, r⟩
       if o.Admissible then some o else none
   | _, _, _ => none
 
 /-- The `hashEq` decision under a hash `H`: the opening exists, the commit slot is present, and it
 holds the opening's digest. The deployed atom is this at `HashEqDigest.deployed`. -/
-def hashEqHolds (H : HashEqDigest.Hash) (s : State) (value blinder commit : Slot) : Bool :=
-  match hashEqOpening s value blinder commit, s.get commit with
+def hashEqHolds (H : HashEqDigest.Hash) (s : State) (values : List Slot) (blinder commit : Slot) :
+    Bool :=
+  match hashEqOpening s values blinder commit, s.get commit with
   | some o, some c => decide (HashEqDigest.digestWith H o = c)
   | _, _ => false
 
@@ -161,10 +176,11 @@ inductive Pred where
   /-- **The escape hatch** — a third-party-discharged claim named by the opaque code `vk`.
   First-party `eval` FAILS CLOSED; admission requires an explicit oracle via `evalWith`. -/
   | witnessed (vk : Vk)
-  /-- **Commit–reveal**: `new[commit]` is the cSHAKE256 digest of the opening
-  (`request/target`, the three slot names, `new[value]`, `new[blinder]`); see
-  `Pred.HashEqDigest`. Fails closed on any absent slot or out-of-domain value. -/
-  | hashEq    (value blinder commit : Slot)
+  /-- **Commit–reveal of a tuple**: `new[commit]` is the cSHAKE256 digest of the opening
+  (`request/target`, the slot names, `new[v]` for each value slot `v` in order, `new[blinder]`);
+  see `Pred.HashEqDigest`. One commitment opens every value slot at once. Fails closed on any
+  absent slot or out-of-domain value. -/
+  | hashEq    (values : List Slot) (blinder commit : Slot)
   /-- **`ran program`** — this step's writes ARE the product of the Nock program
   `program` (its `programId` value), re-executed by the kernel on its own sample
   (NOCK §2.4). A first-party read of the controller-projected `ranSlot program`
@@ -271,7 +287,7 @@ mutual
                         | some x, some y => decide (x ≤ y + k)
                         | _,      _      => false
     | .witnessed vk  => O vk old new
-    | .hashEq v b c  => hashEqHolds HashEqDigest.deployed new v b c
+    | .hashEq vs b c => hashEqHolds HashEqDigest.deployed new vs b c
     | .ran program   => decide (new.get (ranSlot program) = some 1)
     | .not q         => !(evalWith O q old new)
     | .allL ps       => evalWithAll O ps old new

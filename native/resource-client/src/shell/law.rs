@@ -12,6 +12,9 @@
 //!         | slot ('==' value | '<=' value | 'in' '{' value (',' value)* '}')
 //!         | slot '==' slot                    eqSlots: both present and equal
 //!         | slot '<=' slot ['+' integer]      leSlots / leSlotsOff: new[a] <= new[b] (+ k)
+//!         | slot 'opens' '(' slot (',' slot)* ')' 'with' slot
+//!                                             hashEq: the first slot holds the cSHAKE256
+//!                                             commitment to the tuple, under the blinder slot
 //! field  := 'field' N                         resource/field/N/after
 //! slot   := field ['before' | 'after' | 'delta']
 //!         | 'pair' A ',' B 'delta'            resource/pair/A/B/delta
@@ -42,6 +45,14 @@
 //! `field 7 before <= slot "clock/now"`, `field 14 <= slot "clock/now" + -1`.
 //! A slot-pair atom is false when either slot is absent, so `field 15 == field 15`
 //! is "field 15 is present" (the job law, `deploy/shell/templates/job/law.job.shell`).
+//!
+//! `field 17 opens (field 18, field 19) with field 20` is commit–reveal of a tuple
+//! (`Pred.hashEq`, `Pred/HashEq.lean`): field 17 must hold
+//! `cSHAKE256("DREGG.PRED.HASHEQ/v2"; cell ‖ n ‖ names ‖ values ‖ blinder)` of the
+//! new values of fields 18 and 19 under the blinder in field 20. Every field of the
+//! tuple is opened at once; a reveal missing one is refused. It is spelled the way
+//! the Host renders it in a refusal, and `law show` prints an installed law back in
+//! this grammar from the Host's own rendering.
 
 use serde_json::{json, Value};
 
@@ -50,8 +61,8 @@ const VERBS: [(&str, i64); 5] = [("read", 1), ("write", 2), ("delegate", 3), ("i
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
     Word(String),
-    /// A canonical decimal integer (no leading zeros, no `-0`), any width: a
-    /// field value or a program id is a Lean `Int`/`Nat`, not an `i64`.
+    /// A canonical signed decimal of any width (`-0` and leading zeros refused): the
+    /// Host's `int` reader takes any width, and subjects and commitments exceed `i64`.
     Int(String),
     Str(String),
     Punct(&'static str),
@@ -109,7 +120,11 @@ fn tokens(text: &str) -> Result<Vec<Tok>, String> {
                 i += 1;
             }
             let digits: String = chars[start..i].iter().collect();
-            out.push(Tok::Int(canonical_integer(&digits).ok_or_else(|| format!("`{digits}` is not an integer"))?));
+            let magnitude = digits.strip_prefix('-').unwrap_or(&digits);
+            if magnitude.is_empty() || (magnitude.len() > 1 && magnitude.starts_with('0')) || digits == "-0" {
+                return Err(format!("`{digits}` is not a canonical integer"));
+            }
+            out.push(Tok::Int(digits));
             continue;
         }
         if c.is_ascii_alphabetic() {
@@ -123,23 +138,6 @@ fn tokens(text: &str) -> Result<Vec<Tok>, String> {
         return Err(format!("unexpected `{c}`"));
     }
     Ok(out)
-}
-
-/// `-?[0-9]+` as its canonical decimal: leading zeros dropped, `-0` is `0`.
-fn canonical_integer(text: &str) -> Option<String> {
-    let (negative, digits) = match text.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, text),
-    };
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let trimmed = digits.trim_start_matches('0');
-    Some(match (negative, trimmed.is_empty()) {
-        (_, true) => "0".into(),
-        (true, false) => format!("-{trimmed}"),
-        (false, false) => trimmed.into(),
-    })
 }
 
 struct Parser {
@@ -311,14 +309,50 @@ impl Parser {
         }
     }
 
+    /// `C opens (V1, …, Vn) with B`, after the commit slot `C` and the word `opens`.
+    fn opens(&mut self, commit: String) -> Result<Value, String> {
+        if !self.is("(") {
+            return Err(format!(
+                "`opens` takes the opened slots in parentheses, `opens (field 3, field 4) with field 5`; found {}",
+                show(self.peek())
+            ));
+        }
+        self.at += 1;
+        if self.is(")") {
+            return Err("`opens ()` opens nothing: name at least one slot".into());
+        }
+        let mut values = vec![self.slot()?.0];
+        while self.is(",") {
+            self.at += 1;
+            values.push(self.slot()?.0);
+        }
+        self.expect(")")?;
+        if !self.is_word("with") {
+            return Err(format!("after the opened slots expected `with` and the blinder slot, found {}", show(self.peek())));
+        }
+        self.at += 1;
+        let blinder = self.slot()?.0;
+        let mut named = values.clone();
+        named.push(blinder.clone());
+        named.push(commit.clone());
+        let mut sorted = named.clone();
+        sorted.sort();
+        sorted.dedup();
+        if sorted.len() != named.len() {
+            return Err("`opens` names one slot twice: the commit, the blinder and each opened slot must differ".into());
+        }
+        Ok(json!({"type":"hashEq","values":values,"blinder":blinder,"commit":commit}))
+    }
+
     fn atom(&mut self) -> Result<Value, String> {
         let (slot, after) = self.slot()?;
         let op = match self.next() {
+            Some(Tok::Word(w)) if w == "opens" => return self.opens(slot),
             Some(Tok::Word(w)) if w == "monotone" || w == "writeOnce" || w == "in" => w,
             Some(Tok::Punct(p)) if p == "==" || p == "<=" => p.to_string(),
             other => {
                 return Err(format!(
-                    "after a slot expected ==, <=, in, monotone or writeOnce, found {}",
+                    "after a slot expected ==, <=, in, monotone, writeOnce or opens, found {}",
                     show(other.as_ref())
                 ))
             }
@@ -409,6 +443,12 @@ mod tests {
             json!({"type":"le","slot":"resource/pair/2/3/delta","value":"0"})
         );
         assert_eq!(parse("subject == 7").unwrap(), eq("request/subject", "7"));
+        // subjects and commitments are wider than i64
+        assert_eq!(parse("subject == 18424463879702066335").unwrap(), eq("request/subject", "18424463879702066335"));
+        assert_eq!(
+            parse("field 2 == 115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap(),
+            eq(f, "115792089237316195423570985008687907853269984665640564039457584007913129639935")
+        );
         assert_eq!(parse("cost <= 1000").unwrap(), json!({"type":"le","slot":"request/cost","value":"1000"}));
         assert_eq!(parse(r#"slot "account/balance/3" <= 9"#).unwrap(), json!({"type":"le","slot":"account/balance/3","value":"9"}));
         assert!(parse(r#"witnessed "vk-1""#).unwrap_err().contains("no proof system"));
@@ -454,6 +494,9 @@ mod tests {
         assert!(parse("field 2 == 1 field 3 == 1").unwrap_err().contains("expected `;`"));
         assert!(parse("owner == 3").unwrap_err().contains("unknown word"));
         assert!(parse("subject == {GM}").is_err());
+        assert!(parse("field 2 == 007").unwrap_err().contains("canonical"));
+        assert!(parse("field 2 == -0").unwrap_err().contains("canonical"));
+        assert!(parse("field -2 == 1").unwrap_err().contains("field number"));
     }
 
     /// The Host renders a refused clause in this grammar
@@ -523,8 +566,41 @@ mod tests {
             parse(&format!("field 1 == {id}")).unwrap(),
             json!({"type":"eq","slot":"resource/field/1/after","value":id})
         );
-        assert_eq!(parse("field 2 == 007").unwrap(), json!({"type":"eq","slot":"resource/field/2/after","value":"7"}));
         assert!(parse("ran -3").unwrap_err().contains("a program id"));
+    /// Commit–reveal of a tuple: the Host's rendering of `Pred.hashEq`
+    /// (`Compiler/RefusalReason.lean` `renderClause`) parses to its JSON.
+    #[test]
+    fn opens_is_the_tuple_hash_atom() {
+        let f = |n: u32| format!("resource/field/{n}/after");
+        assert_eq!(
+            parse("field 17 opens (field 18, field 19) with field 20").unwrap(),
+            json!({"type":"hashEq","values":[f(18),f(19)],"blinder":f(20),"commit":f(17)})
+        );
+        assert_eq!(
+            parse("field 2 opens (field 3) with field 4").unwrap(),
+            json!({"type":"hashEq","values":[f(3)],"blinder":f(4),"commit":f(2)})
+        );
+        assert_eq!(
+            parse(r#"slot "x/commit" opens (slot "x/a", field 5, slot "x/b") with slot "x/r""#).unwrap(),
+            json!({"type":"hashEq","values":["x/a",f(5),"x/b"],"blinder":"x/r","commit":"x/commit"})
+        );
+        assert_eq!(
+            parse("any [ field 17 delta == 0, all [ verb == write, field 17 opens (field 18, field 19) with field 20 ] ]").unwrap(),
+            any(vec![
+                eq("resource/field/17/delta", "0"),
+                all(vec![
+                    eq("request/verb", "2"),
+                    json!({"type":"hashEq","values":[f(18),f(19)],"blinder":f(20),"commit":f(17)}),
+                ]),
+            ])
+        );
+        assert!(parse("field 17 opens field 18 with field 20").unwrap_err().contains("parentheses"));
+        assert!(parse("field 17 opens () with field 20").unwrap_err().contains("opens nothing"));
+        assert!(parse("field 17 opens (field 18, field 19) field 20").unwrap_err().contains("`with`"));
+        assert!(parse("field 17 opens (field 18) with").unwrap_err().contains("expected a clause"));
+        assert!(parse("field 17 opens (field 18, field 18) with field 20").unwrap_err().contains("twice"));
+        assert!(parse("field 17 opens (field 18) with field 17").unwrap_err().contains("twice"));
+        assert!(parse("field 17 opens (field 18) with field 20 + 1").unwrap_err().contains("expected `;`"));
     }
 
     /// The job law (COMPUTE §2.3, `Kernel/Job.lean`): the shell grammar text
