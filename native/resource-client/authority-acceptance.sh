@@ -124,6 +124,7 @@ cat >"$EVIDENCE/genesis.json" <<EOF
     "accountPredicate":{"type":"all","predicates":[]}}
  ],
  "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
+ "tailBound":"256",
  "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
    "memoryTouches":"10000000","witnessBytes":"10000000",
    "proofWork":"10000000","storageBytes":"10000000",

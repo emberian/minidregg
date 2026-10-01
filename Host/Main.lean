@@ -57,6 +57,8 @@ behind a signed account observation, 102=exact receipt by transaction id,
 128=clock tick submit, 129=public clock view.
 160=job money (fund/claim/settle) signing plan, 161=job money detached assembly,
 162=job money submit (blind, as 115), 163=job money receipt-only lookup.
+170=certify signing plan, 171=certify detached assembly, 172=certify submit,
+173=public system view (certified head, tail bound, current head and chain).
 
 131=Nock program check (pair: minimal jam bytes, ABI JSON) -> JSON verdict and the
 canonical DREGG/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
@@ -5457,6 +5459,29 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payRefillLookupLoaded pinnedConfig opened payload
                             return ((116 : UInt8), outcomeCodec.encode outcome)
+                        | 170 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.certifyPlanLoaded pinnedConfig opened payload)
+                            let bytes := CertifyReceiver.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "certify plan exceeds host frame bound")
+                            return ((170 : UInt8), bytes)
+                        | 171 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := CertifyReceiver.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical certify plan")
+                            let ingress ← IO.ofExcept (NativeHost.certifyAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "certify ingress exceeds host frame bound")
+                            return ((171 : UInt8), ingress)
+                        | 172 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig opened payload
+                            return ((172 : UInt8), outcomeCodec.encode outcome)
+                        | 173 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let view ← IO.ofExcept (NativeHost.certifyViewLoaded pinnedConfig opened)
+                            return ((173 : UInt8), CertifyReceiver.viewCodec.encode view)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload

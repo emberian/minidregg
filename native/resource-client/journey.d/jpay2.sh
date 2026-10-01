@@ -77,6 +77,7 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "factoryControllerSubject": str(EMBER),
            "factoryControllerCapability": str(FACTORY_CONTROL),
            "clockTickers": [],
+           "tailBound":"256",
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")}}

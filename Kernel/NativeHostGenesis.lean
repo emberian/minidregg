@@ -99,6 +99,10 @@ structure Config where
   /-- Every subject that may tick the clock.  Empty means the clock stays at
   genesis for the life of the deployment: the clock law admits no one. -/
   clockTickers : List ClockTicker
+  /-- `L`: how many heights the node may run past its last certified head
+  (`Kernel.SystemCell`, `Kernel.TailBound`).  The operator's tariff line;
+  written once into the genesis system cell. -/
+  tailBound : Nat
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -157,7 +161,7 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
-    config.factoryController.capabilityId.value] ++
+    config.factoryController.capabilityId.value, config.tailBound] ++
     (match config.payObserver with
      | none => []
      | some observer => [observer.subject.value, observer.capabilityId.value,
@@ -169,21 +173,21 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
   let (coordinates, payObserver) ← match wire.1 with
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability] =>
+        controlCapability, tailBound] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability), none)
+          controlCapability, tailBound), none)
     | [domain, factory, book, authority, federation, base, perBirth, perGrant,
         perByte, collector, asset, semantics, issuerEpoch, height, controller,
-        controlCapability, observer, observerCapability, payControl, enrolCapability] =>
+        controlCapability, tailBound, observer, observerCapability, payControl, enrolCapability] =>
         some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
           perByte, collector, asset, semantics, issuerEpoch, height, controller,
-          controlCapability),
+          controlCapability, tailBound),
           some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨payControl⟩, ⟨enrolCapability⟩⟩ : PayObserver))
     | _ => none
   let (domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability) := coordinates
+      controlCapability, tailBound) := coordinates
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -197,18 +201,21 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       factoryController := ⟨⟨controller⟩, ⟨controlCapability⟩⟩
       meterAllowance := wire.2.2.2.1
       payObserver := payObserver
-      clockTickers := wire.2.2.2.2.map tickerOfWire }
+      clockTickers := wire.2.2.2.2.map tickerOfWire
+      tailBound := tailBound }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
-  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _⟩
+  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer, _, _⟩
   cases observer <;> simp [Config.ofWire, Config.toWire]
 
-/-- Version 3: the source names the clock tickers (the clock cell's law and
-each ticker's `C_tick` are derived from them) beside the optional payment
-observer.  Version 2 named the authority cell as the fourth deployment
-coordinate and had no tickers. -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v3".toUTF8.toList
+/-- Version 4 (BRAID-COMPUTE): ONE source for the two version-3 shapes that met at
+the merge: CLOCK-SUBJECT's (the clock tickers, from which the clock cell's law and
+each ticker's `C_tick` are derived, beside the optional payment observer) and C14's
+(the scalar list carries the tail bound `L` after the factory controller).  Every
+version-3 source refuses (`v3_config_refused`); version 2 named the authority cell
+as the fourth deployment coordinate. -/
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v4".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -235,10 +242,10 @@ theorem config_canonical {bytes : List UInt8} {config : Config}
     configCodec.encode config = bytes :=
   ResourceBirthCodec.strictCodec_canonical configRawCodec accepted
 
-def retiredConfigFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v2".toUTF8.toList
+def retiredConfigFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v3".toUTF8.toList
 
-/-- A version-2 genesis source (no clock tickers) refuses. -/
-theorem v2_config_refused (payload : List UInt8) :
+/-- A version-3 genesis source (either v3 shape: no tail bound, or no tickers) refuses. -/
+theorem v3_config_refused (payload : List UInt8) :
     configCodec.decode (retiredConfigFrame ++ payload) = none := by
   have lengthExact : configFrame.length = retiredConfigFrame.length := by decide +kernel
   have different : retiredConfigFrame ≠ configFrame := by decide +kernel
@@ -608,6 +615,11 @@ def payCell : PackedCell CanonicalCellRegistry.registry :=
 def clockCell : PackedCell CanonicalCellRegistry.registry :=
   ⟨.clock, materialize Kernel.ClockCell.materializer Kernel.ClockCell.genesisStore⟩
 
+/-- The genesis system cell: nothing certified beyond the seed, under the
+operator's tail bound (`SystemCell.genesisStore`). -/
+def systemCell (config : Config) : PackedCell CanonicalCellRegistry.registry :=
+  ⟨.system, materialize Kernel.SystemCell.materializer (Kernel.SystemCell.genesisStore config.tailBound)⟩
+
 def baseCells {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     List (Nat × PackedCell CanonicalCellRegistry.registry) :=
@@ -622,7 +634,8 @@ def baseCells {F : Type} [Field F]
     (PolicySourceCell.physicalId config.deployment.domain (PolicyRecordCodec.digest record),
       CanonicalCellRegistry.policySourceCell record)) ++
   [(Kernel.PayCell.physicalId config.deployment.domain, payCell),
-   (Kernel.ClockCell.physicalId config.deployment.domain, clockCell)]
+   (Kernel.ClockCell.physicalId config.deployment.domain, clockCell),
+   (Kernel.SystemCell.physicalId config.deployment.domain, systemCell config)]
 
 def physicalCells (cells : List (Nat × PackedCell CanonicalCellRegistry.registry)) :
     List (Digest × List UInt8) :=
@@ -933,8 +946,8 @@ theorem sponsor_factory_admitted :
 
 /-- info: 'Minidregg.Kernel.NativeHostGenesis.genesis_revision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms genesis_revision
-/-- info: 'Minidregg.Kernel.NativeHostGenesis.v2_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v2_config_refused
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.v3_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v3_config_refused
 
 /-! ## The pay cell's control (PAY §11.4, observer replacement) -/
 

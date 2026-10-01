@@ -39,6 +39,7 @@ import Compiler.NockProgramCodec
 import Compiler.Evaluator
 import Kernel.ClockCell
 import Kernel.FieldClosure
+import Kernel.SystemCell
 import Theory.CanonicalResourceBookInvariant
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
@@ -75,14 +76,19 @@ inductive Kind where
   /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
   last observed chain slot, advanced only by `ClockTickReceiver`. -/
   | clock
+  /-- The deployment's system cell (`Kernel.SystemCell`): the certified head
+  and the tail bound `L`, written only by a certify record. -/
+  | system
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock,
+    .system]
 
-/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14 are deployment pins. The final table across
-lanes: 11 pay, 12 stream, 13 nockProgram, 14 clock.  Tag 3 is the one authority
+/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14/15 are deployment pins. The final table across
+lanes: 11 pay, 12 stream, 13 nockProgram, 14 clock, 15 system (C14's genesis cell; its
+lane called it 13, which is the Nock program cell's).  Tag 3 is the one authority
 cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
 retired and decodes to nothing; tag 4 was never assigned. -/
 def Kind.tag : Kind → UInt8
@@ -98,6 +104,7 @@ def Kind.tag : Kind → UInt8
   | .stream => 12
   | .nockProgram => NockProgramCodec.registryTag
   | .clock => 14
+  | .system => 15
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -112,6 +119,7 @@ def kindAtTag : UInt8 → Option Kind
   | 12 => some .stream
   | 13 => some .nockProgram
   | 14 => some .clock
+  | 15 => some .system
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -139,6 +147,7 @@ def schemaRef : Kind → SchemaRef
   | .stream => ⟨⟨91012⟩, 1⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
   | .clock => ⟨⟨91013⟩, 1⟩
+  | .system => ⟨⟨91014⟩, 1⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -159,6 +168,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .stream => StreamCell.layout
   | .nockProgram => NockProgramCodec.layout
   | .clock => Kernel.ClockCell.layout
+  | .system => Kernel.SystemCell.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -173,6 +183,7 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .stream => StreamCell.materializer
   | .nockProgram => NockProgramCodec.materializer
   | .clock => Kernel.ClockCell.materializer
+  | .system => Kernel.SystemCell.materializer
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -451,6 +462,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
       (NockProgramCodec.programAt state)
   | .clock, state => cellId = Kernel.ClockCell.physicalId deployment.domain ∧
       Kernel.ClockCell.Law state
+  | .system, state => cellId = Kernel.SystemCell.physicalId deployment.domain ∧
+      Kernel.SystemCell.Law state
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -505,7 +518,8 @@ def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .content, state => state.support = ∅
   | .stream, state => state.support = ∅
   | .nockProgram, state => PresentLaw Evaluator.RecordAdmissible (NockProgramCodec.programAt state)
-  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _ => False
+  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _
+  | .system, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by

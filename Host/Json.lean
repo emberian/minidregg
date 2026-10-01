@@ -38,6 +38,7 @@ import Kernel.ClockTickReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
 import Compiler.PayEnrolSignatureIO
+import Kernel.CertifyReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -855,7 +856,7 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance", "clockTickers"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers", "tailBound"]
   let observed := (json.getObjVal? "payObserver").toOption.isSome
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
@@ -871,6 +872,9 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
           (← field observerPath "enrolCapability" observer)⟩⟩ :
           NativeHostGenesis.PayObserver))
     else pure none
+  let tailBound ← nat (path ++ ".tailBound") (← field path "tailBound" obj)
+  unless 0 < tailBound do
+    throw s!"{path}.tailBound must be positive: with L = 0 no record but a certify is ever admitted"
   pure {
     deployment := ⟨⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
       ← nat (path ++ ".factoryId") (← field path "factoryId" obj),
@@ -894,7 +898,8 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
       (← field path "factoryControllerCapability" obj)⟩⟩
     meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj)
     payObserver := payObserver
-    clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj) }
+    clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj)
+    tailBound := tailBound }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json
@@ -2288,6 +2293,24 @@ private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt
     failAt "$" "signed SPK descriptor or fixed bridge mapping refused"
   return descriptor.canonicalBytes
 
+/-- A certify: the certifier names the current head and its chain value,
+pinning the current factory, authority and system roots (all from the
+certify view). -/
+private def certify (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["sponsor", "control", "nonce", "expectedFactoryRoot",
+    "expectedAuthorityRoot", "expectedSystemRoot", "height", "digest"] json
+  let command : CertifyReceiver.Command :=
+    { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
+      control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot" (← field "$" "expectedFactoryRoot" obj)⟩
+      expectedAuthorityRoot :=
+        ⟨← nat "$.expectedAuthorityRoot" (← field "$" "expectedAuthorityRoot" obj)⟩
+      expectedSystemRoot := ⟨← nat "$.expectedSystemRoot" (← field "$" "expectedSystemRoot" obj)⟩
+      height := ← nat "$.height" (← field "$" "height" obj)
+      digest := ⟨← nat "$.digest" (← field "$" "digest" obj)⟩ }
+  return CertifyReceiver.commandCodec.encode command
+
 /-- A clock tick: a ticker asserts `now` (unix seconds) and `slot` under its
 `C_tick` (`capability`), pinning the current authority and clock roots (from
 the clock view). -/
@@ -2614,6 +2637,7 @@ def author (kind : String) (json : Lean.Json)
   | "pay-enrol" => payEnrolCommand json
   | "pay-refill" => payRefill json
   | "job-money" => jobMoney json
+  | "certify" => certify json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -3483,6 +3507,9 @@ private def outcomeJson : Outcome → Lean.Json
       .mkObj [("type", "confirmed"), ("confirmation", confirmation),
       ("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),
       ("acceptedCount", decimal receipt.acceptedCount), ("worldRoot", decimal receipt.worldRoot.value)]
+  | .refused .tailBound phase detail none => .mkObj [("type", "refused"),
+      ("reason", RefusalReason.tailBound.name), ("phase", hexJson phase), ("detail", hexJson detail),
+      ("explain", .str s!"head/height <= certified/height + L fails: {(String.fromUTF8? (ByteArray.mk detail.toArray)).getD "?"}; certify (mini checkpoint) to resume")]
   | .refused reason phase detail none => .mkObj [("type", "refused"), ("reason", reason.name),
       ("phase", hexJson phase), ("detail", hexJson detail)]
   | .refused reason phase detail (some leaf) => .mkObj [("type", "refused"), ("reason", reason.name),
@@ -3923,6 +3950,34 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       applicationSpkPackageIdentityJson descriptor
   | "application-spk-launch-descriptor" =>
       ApplicationSpkLaunchDescriptorAuthoring.inspect bytes
+  | "certify" => do
+      let c ← decoded "certify" CertifyReceiver.commandCodec bytes
+      pure <| .mkObj
+        [("type", "certify-v1"), ("sponsor", decimal c.sponsor.value),
+         ("control", decimal c.control.value), ("nonce", decimal c.nonce),
+         ("expectedFactoryRoot", decimal c.expectedFactoryRoot.value),
+         ("expectedAuthorityRoot", decimal c.expectedAuthorityRoot.value),
+         ("expectedSystemRoot", decimal c.expectedSystemRoot.value),
+         ("height", decimal c.height), ("digest", decimal c.digest.value)]
+  | "certify-plan" => do
+      let plan ← decoded "certify-plan" CertifyReceiver.signingPlanCodec bytes
+      pure <| .mkObj
+        [("type", "certify-plan-v1"), ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("header", signedHeaderJson plan.header)]
+  | "certify-view" => do
+      let view ← decoded "certify-view" CertifyReceiver.viewCodec bytes
+      pure <| .mkObj
+        [("type", "certify-view-v1"), ("systemRoot", decimal view.systemRoot.value),
+         ("authorityRoot", decimal view.authorityRoot.value),
+         ("factoryRoot", decimal view.factoryRoot.value),
+         ("certifiedHeight", decimal view.system.certifiedHeight),
+         ("certifiedDigest", decimal view.system.certifiedDigest.value),
+         ("tailBound", decimal view.system.tailBound),
+         ("head", decimal view.head), ("chain", decimal view.chain.value),
+         ("tail", decimal (view.head - view.system.certifiedHeight)),
+         ("remaining", decimal (view.system.certifiedHeight + view.system.tailBound - view.head))]
   | "clock-tick" => do
       let c ← decoded "clock-tick" ClockTickReceiver.commandCodec bytes
       pure <| .mkObj

@@ -41,6 +41,7 @@
     "factoryObserveCapabilityId": 74,
     "tickCapabilityId": 71
   },
+  "tailBound": 256,
   "meterAllowance": {
     "incidences": 10000000,
     "turnBytes": 10000000,

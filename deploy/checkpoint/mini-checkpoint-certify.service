@@ -1,0 +1,24 @@
+# The checkpoint path of a Mini deployment's tail bound (C14 TAIL-BOUND).
+#
+# A node admits no write more than L heights past its last certified head
+# (Kernel.TailBound; L is the genesis `tailBound`, default 256 = 4 x 64). Today
+# the certifier is the operator: this unit signs a certify of the current head
+# through the operator's workspace under the factory control capability, but
+# only when the uncertified tail is at least MINI_CHECKPOINT_MIN_TAIL (default
+# 64, one storage-checkpoint interval), so an idle node does not accrue a
+# certify record per run. If this unit stops, the node refuses writes
+# (`tail-bound`) after at most L more records: that is the backpressure, by
+# design. After SURPASS N1 the certificate is a witness quorum's, not this unit.
+#
+# Install (user units): copy both files to ~/.config/systemd/user/, set the
+# Environment lines, then `systemctl --user enable --now mini-checkpoint-certify.timer`.
+[Unit]
+Description=Mini certify the head (operator checkpoint, tail bound)
+
+[Service]
+Type=oneshot
+Environment=MINI=/usr/local/bin/mini
+Environment=MINI_CHECKPOINT_WORKSPACE=%h/mini/operator-workspace
+Environment=MINI_CHECKPOINT_CONTROL=53
+Environment=MINI_CHECKPOINT_MIN_TAIL=64
+ExecStart=/bin/sh -c 'exec "$MINI" checkpoint --action certify --workspace "$MINI_CHECKPOINT_WORKSPACE" --control "$MINI_CHECKPOINT_CONTROL" --min-tail "$MINI_CHECKPOINT_MIN_TAIL"'

@@ -1,0 +1,13 @@
+# Every 15 seconds: the timer only polls; the service certifies when the tail
+# reaches MINI_CHECKPOINT_MIN_TAIL. The worst-case refusal window for writers is
+# the time to fill L - MIN_TAIL heights between two runs plus one certify write.
+[Unit]
+Description=Mini certify the head when the tail is due
+
+[Timer]
+OnCalendar=*-*-* *:*:00/15
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

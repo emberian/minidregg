@@ -15,6 +15,7 @@
 #          <= 5 s and cold reopen <= 60 s at 1000 (list item 1)
 #   K4     one resource holds 32 fields and reads them back (list item 2)
 #   KC     K-CLOCK: journey.d/jclock.sh (ticks move the one clock; a law reads clock/now)
+#   KT     C14 TAIL-BOUND: journey.d/jtail.sh (a fresh L=8 Store: writes past certified+L refused; certify resumes)
 #   JJ     K-JOINT-INDEX: journey.d/jjoint.sh (a law reads a participant by position)
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
@@ -41,7 +42,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jjob1 jjob jjob-money jclosure jmarket m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jjob1 jjob jjob-money jclosure jmarket jtail m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -124,7 +125,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C JMKT KW JN2 JN3 JN3P JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC KT JJ K10 K11 KIX KF K12C JMKT KW JN2 JN3 JN3P JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOB JJOBM KCL JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -174,6 +175,7 @@ TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
 TITLE[JP2]="a friend's key never touches the box: enroll, use and delegate over the proxy"
+TITLE[KT]="C14 TAIL-BOUND: no write past certified + L; a checkpoint restores progress"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
 # rule; keeps NAME.{cmd,out,err,rc,wall} in the current step dir; returns rc.
@@ -261,9 +263,31 @@ frontier() {
 }
 
 # run_step ID DEP... : a step whose dependency did not pass is FAIL (blocked).
+# The operator's checkpoint timer (deploy/checkpoint), run between steps: certify
+# the head when the uncertified tail is at least JOURNEY_CERTIFY_MIN_TAIL (64), so
+# the journey's Store (L = 256) never reaches its tail bound between certifies.
+# Every certify, and every skip, is logged to $S/certify.log; a confirmed
+# certify advances LAST_COUNT (the exact-count bookkeeping of the steps).
+journey_certify() {
+  [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ] && [ -f "$W/genesis.json" ] || return 0
+  local out=$S/certify-before-$1.json
+  printf '== before %s: ' "$1" >>"$S/certify.log"
+  "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" \
+    --control "$(jq -r .factoryControllerCapability "$W/genesis.json")" \
+    --min-tail "${JOURNEY_CERTIFY_MIN_TAIL:-64}" >"$out" 2>>"$S/certify.log" \
+    || echo "certify failed (rc $?)" >>"$S/certify.log"
+  cat "$out" >>"$S/certify.log" 2>/dev/null
+  # A confirmed certify is a record the operator added: the steps' exact
+  # acceptedCount bookkeeping (LAST_COUNT) moves past it.
+  if jq -e '.type == "confirmed"' "$out" >/dev/null 2>&1; then
+    LAST_COUNT=$(jq -r .acceptedCount "$out")
+  fi
+}
+
 run_step() {
   local id=$1; shift
   local dep t0 t1 rc
+  journey_certify "$id"
   SD=$S/$id; mkdir -p -m 700 "$SD"
   DETAIL=""; ARTIFACT=""
   # JOURNEY_ONLY="ID ..." runs only those steps; the rest are SKIPPED (never
@@ -761,6 +785,7 @@ hook() {
   ours "$(server_pid)" || fail "hook left the journey service stopped" || return
 }
 step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
+step_KT() { hook jtail "a fresh Store with L=8 admits writes up to certified+L, refuses the next naming tail-bound, resumes after the operator certifies, holds the bound across a restart, and audits clean (C14)"; }
 step_KC() { hook jclock "the one clock ticks forward only, under the clock subject's C_tick (the sponsor's is refused), a law over clock/now admits after the tick and refuses before on writes and signed reads, and 200 ephemeral ticks leave no attempt behind (MUD item 3, K-CLOCK; CLOCK-SUBJECT)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
@@ -812,6 +837,7 @@ run_step J7 J4
 run_step J8 J7
 run_step K4 J2
 run_step KC J2
+run_step KT J0
 run_step JJ J2
 run_step K10 J5
 run_step K11 J5

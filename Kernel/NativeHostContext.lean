@@ -117,9 +117,17 @@ slot are this one chain. -/
 def Config.logStart (config : Config) (seed : DurableReceiver.Seed) : Digest :=
   NativeHostCodec.logRoot0 config.deployment.domain config.profile.semantics seed
 
-/-- The Store transport for this deployment. -/
+/-- The deployment's system cell (`Kernel.SystemCell.physicalId`). -/
+def Config.systemCell (config : Config) : Minidregg.Kernel.DurableDataIntent.CellId :=
+  ⟨Minidregg.Kernel.SystemCell.physicalId config.deployment.domain⟩
+
+/-- The Store transport for this deployment: every new commit is judged by the
+tail law over this deployment's system cell. -/
 def Config.transport (config : Config) : DurableReceiverIO.Transport :=
-  config.storage.transport config.logStart
+  config.storage.transport config.logStart config.systemCell
+
+theorem Config.transport_systemCell (config : Config) :
+    config.transport.systemCell = some config.systemCell := rfl
 
 def logicalHeight (config : Config) (durable : Durable) : Height :=
   config.genesisHeight + durable.image.accepted.length

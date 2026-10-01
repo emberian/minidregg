@@ -52,7 +52,8 @@ check_params() {
     and ([.domain, .federation, .factoryId, .resourceBookId, .authorityCellId, .issuer,
           .ownerBudget, .lifetime, .tariffBase, .tariffPerBirth, .tariffPerGrant,
           .tariffPerInitialPayloadByte, .collector, .asset, .genesisHeight, .issuerEpoch,
-          .factoryControllerCapability] | all(int))
+          .factoryControllerCapability, .tailBound] | all(int))
+    and .tailBound > 0
     and (.sponsor | [.subject, .keyId, .keyEpoch, .activeFrom, .activeUntil, .accountId,
           .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId,
           .initialBalance] | all(int))
@@ -138,6 +139,7 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
    factoryControllerSubject: ($p.sponsor.subject|s),
    factoryControllerCapability: ($p.factoryControllerCapability|s),
    meterAllowance: ($p.meterAllowance | map_values(s)),
+   tailBound: ($p.tailBound|s),
    clockTickers: [{subject: ($p.clock.subject|s), capability: ($p.clock.tickCapabilityId|s)}]}' \
   >"$dir/genesis.json"
 

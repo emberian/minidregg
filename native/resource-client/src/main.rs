@@ -35,6 +35,7 @@ mod historical_call_receipt;
 mod meter;
 #[cfg(unix)]
 mod market;
+mod checkpoint;
 #[cfg(unix)]
 mod clock;
 mod participant_enrollment;
@@ -2302,6 +2303,7 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
+        "checkpoint" => checkpoint::run(args),
         #[cfg(unix)]
         "job" => job::run(args),
         #[cfg(unix)]

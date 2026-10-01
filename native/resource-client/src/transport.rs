@@ -313,6 +313,11 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [161, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
             exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
         }
+        // C14 TAIL-BOUND: certify plan, detached assembly (ops 170-173; the lane shipped 130-133, which the dry run and the Nock block hold) (plan + one signature), submit, view.
+        [170 | 172, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [171, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [173] => true,
         _ => false,
     }
 }
@@ -379,6 +384,11 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
         [127, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
         [129] => true,
+        // C14 TAIL-BOUND: certify plan, detached assembly (plan + one signature), submit, view.
+        [130 | 132, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [131, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
+            .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
+        [133] => true,
         [32, payload @ ..] => !payload.is_empty() && payload.len() <= 256 * 1024,
         [33, pair @ ..] if pair.len() >= 6 && pair.len() < HOST_MAX_FRAME => {
             let plan_length = u32::from_le_bytes(pair[..4].try_into().unwrap()) as usize;

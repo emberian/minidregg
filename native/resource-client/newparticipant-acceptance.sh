@@ -105,10 +105,11 @@ cat >"$ROOT/pay/genesis-observer.json" <<EOF
 {"subject":"30","capability":"4030","controlCapability":"4031","enrolCapability":"4032"}
 EOF
 # The one genesis template (genesis.sh) from the example params, with this
-# Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS.
+# Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS and
+# MINI_TAIL_BOUND (the tail bound L, default the example's 256 = 4 x 64).
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" \
-  --arg disabled "$DISABLED_EVALUATORS" \
-  '.domain = $domain | .sponsor.subject = $subject | .ownerBudget = $budget
+  --arg disabled "$DISABLED_EVALUATORS" --argjson tail "${MINI_TAIL_BOUND:-256}" \
+  '.domain = $domain | .sponsor.subject = $subject | .ownerBudget = $budget | .tailBound = $tail
    | ($disabled | split(" ") | map(select(length > 0))) as $off
    | if ($off | length) > 0 then .disabledEvaluators = $off else . end' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
