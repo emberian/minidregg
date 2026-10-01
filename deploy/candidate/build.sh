@@ -4,6 +4,9 @@
 #   bin/mini                                    participant/operator client
 #   bin/minidregg-link-sqlite-store             durable Store helper
 #   bin/minidregg-credential-signature-verifier Ed25519 verifier helper
+#   bin/grain-runtime                           agent grain controller (Hermes host)
+#   bin/mini-discord                            Discord entrance
+#   bin/pay-watcher                             Solana pay watcher
 # plus provenance.json (source commit, toolchains, hashes), SHA256SUMS, and
 # manifest.json: the journey-format manifest (absolute paths + SHA-256 pins).
 #
@@ -134,6 +137,11 @@ build_rust() {
 build_rust resource-client mini
 build_rust hyperdocument-link-sqlite-store minidregg-link-sqlite-store
 build_rust credential-signature-verifier minidregg-credential-signature-verifier
+# The deployed box runs these too (DEPLOY-3-PREP): each is entered in
+# provenance.json .binaries and SHA256SUMS like the four above.
+build_rust grain-runtime grain-runtime
+build_rust discord-entrance mini-discord
+build_rust pay-watcher pay-watcher
 t_rust=$(date +%s)
 stamp "Rust binaries: $((t_rust - t_host))s"
 
@@ -173,6 +181,8 @@ jq -n \
   --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
   --arg store "$(sha_of bin/minidregg-link-sqlite-store)" \
   --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
+  --arg grain "$(sha_of bin/grain-runtime)" --arg discord "$(sha_of bin/mini-discord)" \
+  --arg payWatcher "$(sha_of bin/pay-watcher)" \
   --arg hostManifest "$host_build_manifest_sha" \
   --argjson tCache "$((t_cache - t_lean))" --argjson tHost "$((t_host - t_cache))" \
   --argjson tRust "$((t_rust - t_host))" --argjson tTotal "$(( $(date +%s) - t_start ))" \
@@ -187,12 +197,16 @@ jq -n \
     binaries: {host: {path: "bin/minidregg-host", sha256: $host},
                mini: {path: "bin/mini", sha256: $mini},
                store: {path: "bin/minidregg-link-sqlite-store", sha256: $store},
-               verifier: {path: "bin/minidregg-credential-signature-verifier", sha256: $verifier}},
+               verifier: {path: "bin/minidregg-credential-signature-verifier", sha256: $verifier},
+               grainRuntime: {path: "bin/grain-runtime", sha256: $grain},
+               discord: {path: "bin/mini-discord", sha256: $discord},
+               payWatcher: {path: "bin/pay-watcher", sha256: $payWatcher}},
     hostBuildManifest: {path: "work/host-build/manifest.txt", sha256: $hostManifest},
     seconds: {leanPackagesAndMathlibCache: $tCache, nativeHost: $tHost, rust: $tRust, total: $tTotal},
     builtUtc: $built}' > "$out/provenance.json"
 (cd "$out" && sha256sum bin/minidregg-host bin/mini bin/minidregg-link-sqlite-store \
-  bin/minidregg-credential-signature-verifier provenance.json run.sh lib.sh genesis.sh INTERFACES.md \
+  bin/minidregg-credential-signature-verifier bin/grain-runtime bin/mini-discord bin/pay-watcher \
+  provenance.json run.sh lib.sh genesis.sh INTERFACES.md \
   genesis-params.example.json source.tar logs/source-files.sha256) > "$out/SHA256SUMS"
 jq -n --arg dir "$out" \
   --arg host "$(sha_of bin/minidregg-host)" --arg mini "$(sha_of bin/mini)" \
@@ -202,6 +216,7 @@ jq -n --arg dir "$out" \
   '{host: ($dir + "/bin/minidregg-host"), mini: ($dir + "/bin/mini"), shell: ($dir + "/bin/mini"),
     store: ($dir + "/bin/minidregg-link-sqlite-store"),
     verifier: ($dir + "/bin/minidregg-credential-signature-verifier"),
+    hermes: ($dir + "/bin/grain-runtime"),
     candidate: ($dir + "/provenance.json"),
     sha256: {host: $host, mini: $mini, store: $store, verifier: $verifier, candidate: $candidate}}' \
   > "$out/manifest.json"
