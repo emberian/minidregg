@@ -21,7 +21,7 @@ private def meter : Json := object <| ["incidences", "turnBytes", "memoryTouches
 private def operator : NativeHost.Config := {
   deployment := ⟨⟨8501⟩, 10, 11, 12⟩
   federation := ⟨9⟩
-  template := ⟨⟨5⟩, 100000, 10000⟩
+  template := ⟨⟨5⟩, 100000, 10000, 64⟩
   tariff := ⟨3, 2, 1, 0, 99, 0⟩
   genesisHeight := 10
   expectedSeed := ⟨0⟩
@@ -216,7 +216,7 @@ private def configuredChecks : IO Unit := do
   for changed in [
       { custodyOperator with federation := ⟨10⟩ },
       { custodyOperator with genesisHeight := 11 },
-      { custodyOperator with template := ⟨⟨6⟩, 100000, 10000⟩ },
+      { custodyOperator with template := ⟨⟨6⟩, 100000, 10000, 64⟩ },
       { custodyOperator with tariff := ⟨4, 2, 1, 0, 99, 0⟩ },
       { custodyOperator with deployment := ⟨⟨8502⟩, 10, 11, 12⟩ },
       { custodyOperator with completionCustodianKey := some (List.replicate 32 8) }] do

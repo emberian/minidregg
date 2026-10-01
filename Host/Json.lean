@@ -1311,6 +1311,22 @@ private def grainWorkerFields (obj : Std.TreeMap.Raw String Lean.Json compare) :
   else if (obj.get? "workerSubjects").isSome then ["workerSubjects", "workerGeneration"]
   else []
 
+/-- The factory template an authoring request names. `birthSlack` is optional
+and defaults to the runtime default; the receiver's own template decides it
+either way, because the template is inside the semantics digest the request
+is pinned to. -/
+private def factoryTemplate (path : String) (json : Lean.Json) :
+    Result CanonicalRuntimeProfile.FactoryTemplate := do
+  let raw ← object path json
+  let slackField := if (raw.get? "birthSlack").isSome then ["birthSlack"] else []
+  let templateObj ← exactObject path (["issuer", "ownerBudget", "lifetime"] ++ slackField) json
+  let birthSlack ← match templateObj.get? "birthSlack" with
+    | none => pure CanonicalRuntimeProfile.defaultBirthSlack
+    | some encoded => nat (path ++ ".birthSlack") encoded
+  pure ⟨⟨← nat (path ++ ".issuer") (← field path "issuer" templateObj)⟩,
+    ← nat (path ++ ".ownerBudget") (← field path "ownerBudget" templateObj),
+    ← nat (path ++ ".lifetime") (← field path "lifetime" templateObj), birthSlack⟩
+
 private def birthRootCapability {kind : ResourceKind}
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat)
@@ -1459,14 +1475,7 @@ private def birth (path : String) (json : Lean.Json)
   if let some expected := currentHeight then
     unless height == expected do
       throw s!"{path}.height: differs from the verified current image"
-  let templateObj ← exactObject (path ++ ".template") ["issuer", "ownerBudget", "lifetime"]
-    (← field path "template" obj)
-  let template : CanonicalRuntimeProfile.FactoryTemplate :=
-    ⟨⟨← nat (path ++ ".template.issuer") (← field (path ++ ".template") "issuer" templateObj)⟩,
-      ← nat (path ++ ".template.ownerBudget")
-        (← field (path ++ ".template") "ownerBudget" templateObj),
-      ← nat (path ++ ".template.lifetime")
-        (← field (path ++ ".template") "lifetime" templateObj)⟩
+  let template ← factoryTemplate (path ++ ".template") (← field path "template" obj)
   let nativeConfig : NativeHost.Config := {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,
@@ -1562,14 +1571,7 @@ def applicationBirthContext (path specField : String) (json : Lean.Json)
           unless supplied == current do
             throw s!"{path}.height: differs from verifier-loaded current height"
         pure supplied
-  let templateObj ← exactObject (path ++ ".template") ["issuer", "ownerBudget", "lifetime"]
-    (← field path "template" obj)
-  let template : CanonicalRuntimeProfile.FactoryTemplate :=
-    ⟨⟨← nat (path ++ ".template.issuer") (← field (path ++ ".template") "issuer" templateObj)⟩,
-      ← nat (path ++ ".template.ownerBudget")
-        (← field (path ++ ".template") "ownerBudget" templateObj),
-      ← nat (path ++ ".template.lifetime")
-        (← field (path ++ ".template") "lifetime" templateObj)⟩
+  let template ← factoryTemplate (path ++ ".template") (← field path "template" obj)
   let nativeConfig : NativeHost.Config := {
     deployment := source.deployment, federation := source.federation, template := template,
     tariff := source.tariff, genesisHeight := source.genesisHeight, expectedSeed := ⟨0⟩,

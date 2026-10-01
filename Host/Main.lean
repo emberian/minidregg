@@ -505,6 +505,9 @@ structure Settings where
   issuer : Nat
   ownerBudget : Nat
   lifetime : Nat
+  /-- Heights a birth may land after its authored `notBefore`; default
+  `CanonicalRuntimeProfile.defaultBirthSlack`. Part of the semantics digest. -/
+  birthSlack : Option Nat := none
   tariffBase : Nat
   tariffPerBirth : Nat
   tariffPerGrant : Nat
@@ -539,7 +542,8 @@ structure Settings where
 def Settings.config (settings : Settings) : NativeHost.Config where
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
-  template := ⟨⟨settings.issuer⟩, settings.ownerBudget, settings.lifetime⟩
+  template := ⟨⟨settings.issuer⟩, settings.ownerBudget, settings.lifetime,
+    settings.birthSlack.getD CanonicalRuntimeProfile.defaultBirthSlack⟩
   tariff := ⟨settings.tariffBase, settings.tariffPerBirth, settings.tariffPerGrant,
     settings.tariffPerInitialPayloadByte, settings.collector, settings.asset⟩
   genesisHeight := settings.genesisHeight

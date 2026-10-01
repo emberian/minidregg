@@ -1567,14 +1567,109 @@ fn authoring_refused(generation: &Path) -> Result<bool> {
     Ok(bytes.first() == Some(&255))
 }
 
+/// A generation whose intent belonged to an attempt that was definitely
+/// unadmitted and released (`release_unadmitted_attempt`). Like a refusal, it
+/// is superseded by a fresh generation; unlike a refusal, it holds an intent.
+fn authoring_released(generation: &Path) -> bool {
+    generation.join("released.json").exists()
+}
+
+/// Whether a retained exact-custody attempt is DEFINITELY unadmitted: it never
+/// assembled an exact call (so nothing was ever submitted), or the newest Host
+/// outcome for its exact call is a final `refused`. A confirmed, uncertain,
+/// unavailable, contended or absent outcome is not definite and keeps custody.
+fn attempt_definitely_unadmitted(attempt: &Path) -> Result<bool> {
+    if !attempt.join("call.bin").is_file() {
+        return Ok(true);
+    }
+    if accepted_outcome(attempt)?.is_some() {
+        return Ok(false);
+    }
+    let mut names = Vec::new();
+    for entry in fs::read_dir(attempt).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file = entry.file_name();
+        let Some(file) = file.to_str() else { continue };
+        if file == "outcome.json" || (file.starts_with("retry-") && file.ends_with(".json")) {
+            names.push(file.to_owned());
+        }
+    }
+    names.sort();
+    let Some(newest) = names.last() else {
+        return Ok(false);
+    };
+    let value = bounded_json(&attempt.join(newest))?;
+    Ok(value.get("type").and_then(Value::as_str) == Some("refused"))
+}
+
+/// Release a definitely unadmitted birth attempt so the same name can be
+/// authored again: mark the generation that authored its intent released,
+/// release the namespace binding, and retire the attempt directory (kept as
+/// `NAME.released-N` with all its evidence). Each step is idempotent and the
+/// retirement, which removes the trigger, is last.
+fn release_unadmitted_attempt(
+    authoring: &Path,
+    attempt: &Path,
+    reservation: &participant_namespace::Reservation,
+) -> Result<PathBuf> {
+    if authoring.exists() {
+        if let Some(generation) = authoring_generations(authoring)?.last() {
+            if !authoring_released(generation) && !authoring_refused(generation)? {
+                let marker = json!({"type":"minidregg-birth-generation-released-v1",
+                    "attempt":attempt});
+                private_file(
+                    &generation.join("released.json"),
+                    &serde_json::to_vec(&marker).map_err(|error| error.to_string())?,
+                )?;
+            }
+        }
+    }
+    participant_namespace::release_attempt(reservation, attempt)?;
+    retire_attempt_dir(attempt)
+}
+
+/// Move an attempt directory aside as `NAME.released-N`, keeping every byte of
+/// its evidence, so the attempt path can hold a new attempt.
+fn retire_attempt_dir(attempt: &Path) -> Result<PathBuf> {
+    let name = attempt
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("birth attempt lacks a UTF-8 filename")?;
+    let mut index = 1u32;
+    let retired = loop {
+        let candidate = attempt.with_file_name(format!("{name}.released-{index:04}"));
+        if !candidate.exists() {
+            break candidate;
+        }
+        index += 1;
+        if index >= 10_000 {
+            return Err("released birth attempts exhausted for this name".into());
+        }
+    };
+    fs::rename(attempt, &retired).map_err(|error| error.to_string())?;
+    File::open(attempt.parent().ok_or("birth attempt lacks parent")?)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| error.to_string())?;
+    Ok(retired)
+}
+
+/// Fresh factory observations one call may take. A signed observation binds the
+/// world root and height it was issued at, so any admission between observing
+/// and authoring refuses the authoring (pre-submit, nothing was sent); under a
+/// clock ticker and friends' traffic that is routine, and a bounded number of
+/// fresh observations rides it out without looping on a real refusal.
+const FRESH_OBSERVATIONS_PER_CALL: u32 = 3;
+
 /// Author the reserved source through op91 in versioned generations.
 ///
 /// A generation retains exactly one signed factory observation and at most one
 /// Host reply; it is never rewritten. When the latest generation's retained
-/// reply is a refusal, and no custody attempt is bound for this request, a new
-/// generation authors the SAME source with a fresh observation. At most one
-/// generation is superseded per call, and never one whose observation was
-/// taken in this same call. Once a generation holds an intent, it is final.
+/// reply is a refusal (or its attempt was released as definitely unadmitted),
+/// and no custody attempt is bound for this request, a new generation authors
+/// the SAME source with a fresh observation. A generation retained from an
+/// earlier call is superseded at most once; one observed in this call is
+/// superseded while fewer than `FRESH_OBSERVATIONS_PER_CALL` observations have
+/// been taken. Once a generation holds an intent, it is final.
 fn author_generations(
     base: &Path,
     reservation: &participant_namespace::Reservation,
@@ -1585,8 +1680,8 @@ fn author_generations(
         make_private_dir(base)?;
     }
     private_dir(base)?;
-    let mut superseded = false;
-    let mut observed_now = false;
+    let mut superseded_prior = false;
+    let mut fresh = 0u32;
     loop {
         let generations = authoring_generations(base)?;
         let current = match generations.last() {
@@ -1598,10 +1693,11 @@ fn author_generations(
             }
         };
         private_dir(&current)?;
-        if authoring_refused(&current)? {
-            if observed_now || superseded {
+        if authoring_refused(&current)? || authoring_released(&current) {
+            // `current` was observed in this call exactly when `fresh > 0`.
+            if fresh >= FRESH_OBSERVATIONS_PER_CALL || (fresh == 0 && superseded_prior) {
                 return Err(format!(
-                    "current birth authoring refused with a fresh factory observation; retained {}",
+                    "current birth authoring refused with {fresh} fresh factory observation(s); retained {}",
                     current.join("reply.frame").display()
                 ));
             }
@@ -1611,7 +1707,9 @@ fn author_generations(
                 );
             }
             make_private_dir(&base.join(format!("g{:04}", generations.len() + 1)))?;
-            superseded = true;
+            if fresh == 0 {
+                superseded_prior = true;
+            }
             continue;
         }
         if current.join("reply.frame").exists() {
@@ -1620,7 +1718,7 @@ fn author_generations(
         let observation = if current.join("factory-observation.bin").exists() {
             None
         } else {
-            observed_now = true;
+            fresh += 1;
             Some(observe()?)
         };
         match author_one(&current, observation.as_deref()) {
@@ -1829,6 +1927,16 @@ fn birth(
     let attempt = root.join("attempts").join(format!("create-{name_value}"));
     let host = workspace_host(workspace)?;
     let config = member_path(workspace, "config")?;
+    // A definitely unadmitted attempt (no exact call, or a final refusal)
+    // holds nothing that can install: release it, and this call authors the
+    // same name afresh. An uncertain attempt keeps exact custody below.
+    if attempt.exists() && attempt_definitely_unadmitted(&attempt)? {
+        let retired = release_unadmitted_attempt(&authoring, &attempt, &reservation)?;
+        eprintln!(
+            "workspace birth attempt definitely unadmitted; retained as {}",
+            retired.display()
+        );
+    }
     let author_dir = if attempt.exists() {
         authoring_generations(&authoring)?
             .last()
@@ -1905,15 +2013,48 @@ fn birth(
         return Ok((source, receipt, reservation));
     }
     eprintln!("workspace birth attempt: {}", attempt.display());
-    submit(
-        &host,
-        &config,
-        &intent_path,
-        OsStr::new("binary"),
-        &member_path(workspace, "key")?,
-        &attempt,
-        false,
-    )?;
+    let key = member_path(workspace, "key")?;
+    let mut observations = 0u32;
+    loop {
+        observations += 1;
+        match submit(
+            &host,
+            &config,
+            &intent_path,
+            OsStr::new("binary"),
+            &key,
+            &attempt,
+            false,
+        ) {
+            Ok(()) => break,
+            Err(error)
+                if observations < FRESH_OBSERVATIONS_PER_CALL
+                    && !attempt.join("call.bin").is_file() =>
+            {
+                // No exact call exists, so nothing was sent. Only a Host
+                // `stale-root` (another admission moved the state between the
+                // signed observation and prepare) is retried: the authored
+                // window is still open, so the SAME intent is submitted again
+                // under the same binding with a fresh observation.
+                let decision = crate::take_host_decision();
+                let stale = matches!(&decision,
+                    Some(crate::HostDecision::RefusedFrame { decoded: Some(value), .. })
+                        if value.get("reason").and_then(Value::as_str) == Some("stale-root"));
+                if !stale {
+                    if let Some(decision) = decision {
+                        crate::note_host_decision(decision);
+                    }
+                    return Err(error);
+                }
+                let retired = retire_attempt_dir(&attempt)?;
+                eprintln!(
+                    "workspace birth observation raced before any exact call; retained {}; observing again",
+                    retired.display()
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
     let receipt = accepted_outcome(&attempt)?.ok_or("birth returned without installed receipt")?;
     Ok((source, receipt, reservation))
 }
@@ -3058,8 +3199,11 @@ mod tests {
             },
         );
         assert!(refused.is_err());
-        assert_eq!(observed.get(), 1);
-        assert_eq!(authoring_generations(&base).unwrap().len(), 1);
+        assert_eq!(observed.get(), FRESH_OBSERVATIONS_PER_CALL);
+        assert_eq!(
+            authoring_generations(&base).unwrap().len() as u32,
+            FRESH_OBSERVATIONS_PER_CALL
+        );
         // The next call supersedes that refusal exactly once.
         let chosen = author_generations(
             &base,
@@ -3068,7 +3212,88 @@ mod tests {
             |generation, observation| fake_author(generation, observation, b"never"),
         )
         .unwrap();
+        assert_eq!(
+            chosen,
+            base.join(format!("g{:04}", FRESH_OBSERVATIONS_PER_CALL + 1))
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn released_generation_is_superseded_with_a_fresh_observation() {
+        let (root, base, reservation) = generation_fixture("released");
+        make_private_dir(&base).unwrap();
+        make_private_dir(&base.join("g0001")).unwrap();
+        fs::write(base.join("g0001/factory-observation.bin"), b"old").unwrap();
+        fs::write(base.join("g0001/reply.frame"), [91, 7]).unwrap();
+        // An intent is final until its attempt is released.
+        let kept = author_generations(
+            &base,
+            &reservation,
+            || panic!("no observation for a final intent"),
+            |_, _| panic!("no authoring for a final intent"),
+        )
+        .unwrap();
+        assert_eq!(kept, base.join("g0001"));
+        fs::write(base.join("g0001/released.json"), b"{}").unwrap();
+        let observed = std::cell::Cell::new(0);
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"never"),
+        )
+        .unwrap();
         assert_eq!(chosen, base.join("g0002"));
+        assert_eq!(observed.get(), 1);
+        assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [91, 7]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn only_a_definite_refusal_or_a_missing_call_is_unadmitted() {
+        let (root, _, _) = generation_fixture("definite");
+        let attempt = root.join("create-x");
+        make_private_dir(&attempt).unwrap();
+        // No exact call: nothing was submitted.
+        assert!(attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::write(attempt.join("call.bin"), b"call").unwrap();
+        // A call with no outcome is uncertain.
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::write(
+            attempt.join("outcome.json"),
+            br#"{"type":"refused","reason":"undisclosed"}"#,
+        )
+        .unwrap();
+        assert!(attempt_definitely_unadmitted(&attempt).unwrap());
+        // A newer uncertain retry outranks the older refusal.
+        fs::write(attempt.join("retry-0001.json"), br#"{"type":"uncertain"}"#).unwrap();
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        // An installed confirmation is never unadmitted.
+        fs::write(
+            attempt.join("retry-0002.json"),
+            br#"{"type":"confirmed","confirmation":"installed"}"#,
+        )
+        .unwrap();
+        assert!(!attempt_definitely_unadmitted(&attempt).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_raced_fresh_observation_is_reobserved_within_the_call() {
+        let (root, base, reservation) = generation_fixture("raced");
+        let observed = std::cell::Cell::new(0);
+        // The first fresh observation is raced by another admission; the second is not.
+        let chosen = author_generations(
+            &base,
+            &reservation,
+            || observation_file(&root, &observed),
+            |generation, observation| fake_author(generation, observation, b"signed observation 1"),
+        )
+        .unwrap();
+        assert_eq!(chosen, base.join("g0002"));
+        assert_eq!(observed.get(), 2);
+        assert_eq!(fs::read(base.join("g0001/reply.frame")).unwrap(), [255, 1]);
         fs::remove_dir_all(root).unwrap();
     }
 
