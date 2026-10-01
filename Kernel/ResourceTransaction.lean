@@ -310,6 +310,8 @@ inductive Reject where
   | wrongEnvelopeCount
   | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
+  /-- CH-EPOCH: a channel record's append refused by the channel law, the clause named. -/
+  | channel (reason : DomainEpoch.Refusal)
   /-- K-FIELDS: the leg changed a field its capability's scope does not name. -/
   | fieldNotNamed
   /-- K-FIELDS: a named field moved past a per-field bound (`maxDelta`). -/
@@ -413,6 +415,9 @@ def computeTarget (snapshot : AuthoritySnapshot)
         if root != pre.root then throw .staleTarget
         if !decide (request.topic.length ≤ StreamCell.maxTopicBytes) then throw .streamTopic
         if !decide (request.payload.length ≤ StreamCell.maxPayloadBytes) then throw .streamPayload
+        match DomainEpoch.admitAppend pre.logical command.subject request with
+        | .error reason => throw (.channel reason)
+        | .ok () => pure ()
         pure ((StreamCell.appendOp pre.logical
           (streamRecord snapshot semantics ambient command request)).apply pre.logical)
 
