@@ -30,7 +30,7 @@ private def observationRequest (config : Config) (opened : Opened config)
     (resource : Nat) (capability : CapabilityId) (root : Digest) : Request .object :=
   let target : DeclaredResourceController.Target :=
     { kind := .object, target := resource, capability := capability,
-      observeCapability := none, schemaVersion := 1, expectedTargetRoot := root,
+      observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
   { DeclaredResourceController.requestFor prepared.authority.snapshot
       config.profile.semantics

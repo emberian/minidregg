@@ -94,7 +94,7 @@ private def observationSlot (config : Config) (opened : Opened config)
     Except String SigningSlot := do
   let probe : DeclaredResourceController.Target :=
     { kind := .object, target := resource, capability := capability,
-      observeCapability := none, schemaVersion := 1, expectedTargetRoot := root,
+      observeCapability := none, schemaVersion := ContentResource.commandVersion, expectedTargetRoot := root,
       payload := .content ⟨[]⟩ }
   let wanted : Request .object :=
     { DeclaredResourceController.requestFor prepared.authority.snapshot
@@ -210,7 +210,7 @@ def prepareVerified (config : Config) {target : Durable}
     { kind := .object, target := descriptor,
       capability := request.descriptorCapability,
       observeCapability := some request.descriptorObserveCapability,
-      schemaVersion := 1, expectedTargetRoot := descriptorCell.payload.root,
+      schemaVersion := ContentResource.commandVersion, expectedTargetRoot := descriptorCell.payload.root,
       payload := .content ⟨[action]⟩ }
   let command := ApplicationGrainSession.Operation.command
     (.enroll appState.generation) ticket.participant.subject
