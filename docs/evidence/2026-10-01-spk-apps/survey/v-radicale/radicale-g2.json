@@ -1,0 +1,12 @@
+{
+  "tag": "g2",
+  "unit": "mini-spk-a2701-g4.service",
+  "slice": "mini-spk-apps-grains-sb25fca843f1546dda2701.slice",
+  "memoryPeak": "512729088",
+  "memoryCurrent": "148967424",
+  "pidsPeak": "17",
+  "procs": "11",
+  "threads": "13",
+  "sliceMemoryMax": "536870912",
+  "processNames": " 2 bwrap, 1 launcher.sh, 5 nginx, 1 sandstorm-http-, 1 spk-host, 1 uwsgi"
+}

@@ -10,3 +10,7 @@ floor-a                      exit=0 .345994182s
 enroll-a                     exit=0 84.467716199s
 get-a                        exit=0 39.521584774s
 stop-a                       exit=0 1183.650056482s
+start-a2                     exit=0 1121.118154599s
+floor-a2                     exit=0 .393597555s
+enroll-a2                    exit=0 96.975208904s
+get-a2                       exit=0 45.330236183s
