@@ -516,11 +516,30 @@ structure TransclusionRecord where
   tombstonedAt : Option OperationId
   deriving DecidableEq
 
+/-- What a mark is laid on: a stable range, or one atom (a line) or one element
+at the revision its author read.  A revision anchor is stale once its target
+moves; it is never re-anchored. -/
+inductive MarkAnchor where
+  | range (range : StableRange)
+  | atom (atom : AtomId) (revision : OperationId)
+  | element (element : ElementId) (revision : OperationId)
+  deriving DecidableEq, Repr
+
+/-- What a mark says.  A `link` mark names the ordinary `LinkRecord` that
+carries its target: the link record is primary (backlinks and the link index
+read it), the mark is the inline overlay that places it on a line. -/
+inductive MarkKind where
+  | bold
+  | italic
+  | code
+  | heading
+  | link (link : LinkId)
+  deriving DecidableEq, Repr
+
 structure MarkRecord where
   document : DocumentId
-  range : StableRange
-  kind : Digest
-  payload : List UInt8
+  anchor : MarkAnchor
+  kind : MarkKind
   author : PrincipalRef
   operation : OperationId
   visibilityPolicy : Digest

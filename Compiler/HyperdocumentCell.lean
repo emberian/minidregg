@@ -247,17 +247,16 @@ def transclusionRecordStream : StreamCodec TransclusionRecord :=
 def markRecordStream : StreamCodec MarkRecord :=
   StreamCodec.xmap
     (StreamCodec.product (identifierStream .v1 .document)
-      (StreamCodec.product storedStableRangeStream
-        (StreamCodec.product digestStream
-          (StreamCodec.product bytesStream
-            (StreamCodec.product principalRefStream
-              (StreamCodec.product (identifierStream .v1 .operationIntent)
-                (StreamCodec.product digestStream
-                  (StreamCodec.option (identifierStream .v1 .operationIntent)))))))))
-    (fun record => (record.document, record.range, record.kind, record.payload,
+      (StreamCodec.product markAnchorStream
+        (StreamCodec.product markKindStream
+          (StreamCodec.product principalRefStream
+            (StreamCodec.product (identifierStream .v1 .operationIntent)
+              (StreamCodec.product digestStream
+                (StreamCodec.option (identifierStream .v1 .operationIntent))))))))
+    (fun record => (record.document, record.anchor, record.kind,
       record.author, record.operation, record.visibilityPolicy, record.tombstonedAt))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1,
-      wire.2.2.2.2.2.1, wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
+      wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
     (by intro record; rfl)
 
 def annotationAnchorStream : StreamCodec AnnotationAnchor :=
@@ -360,15 +359,19 @@ def contentNamespaces : List Hyperdocument.Namespace :=
 annotation carries an anchor and an inline-or-reference body.  v3 (elements,
 K-TRANSCLUDE): an element's embed names a `TransclusionRecord`, never an atom.
 v4 (elements, K-ELEMENT-TREE): an element carries a `revision`, and an `atom`
-leaf places a line in the tree.  The layout digest in every cell frame covers
-these ids, so a v1, v2 or v3 content cell refuses to load. -/
+leaf places a line in the tree.  v5 (marks, K-MARKS): a mark carries a
+`MarkAnchor` (a range, or an atom or element at a revision) and a typed
+`MarkKind` (a `link` mark names its `LinkRecord`) in place of a range, a kind
+digest and payload bytes.  The layout digest in every cell frame covers these
+ids, so a v1–v4 content cell refuses to load. -/
 def contentRecordVersion : Hyperdocument.Namespace → String
   | .elements => "v4"
+  | .marks => "v2"
   | .atoms | .annotations => "v2"
   | _ => "v1"
 
 def contentWire : Wire Hyperdocument.layout where
-  name := "minidregg/hyperdocument-content/v4"
+  name := "minidregg/hyperdocument-content/v5"
   namespaces := contentNamespaces
   namespaces_complete := by intro space; cases space <;> simp [contentNamespaces]
   namespaceStream := namespaceStream

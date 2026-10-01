@@ -17,22 +17,31 @@ the registry's `ContentLaw`, which every final cell runs.  Authorization and
 current installed Pred evaluation belong to the enclosing ResourceTransaction
 receiver.
 
-Command grammar v6 (`DREGG/CONTENT/MUTATE` ++ [6]) gives a document an element
-tree and retires links (`unlink`).  `createDocument` makes the root, an empty container; `createAtom` and
+Command grammar v7 (`DREGG/CONTENT/MUTATE` ++ [7]) adds `mark` and `unmark` to
+v6, which added `unlink` to v5, which gave a document an element tree.  `createDocument` makes the root, an empty container; `createAtom` and
 `transclude` append their new leaf (an `atom` or `embed` element carrying the
 record's own identifier) to the root; and `editElement` splices a detached
 element into a container, moves a child within one, or removes (detaches) one,
 each against the revision of the container its author read.  A line placed at
 position N is a `createAtom` and a `move` to N in one command, all or nothing.  Document order is the pre-order walk of the
-tree (`documentOrder`), never an identifier sort.  Versions 1–5 refuse to decode
-(`retired_command_refused`): v5 had no `unlink` (the K-DOC-INDEX line
-had a v4 with `unlink` at tag 7 and no tree; it refuses too), v4 had no tree (a document's lines were ordered by
+tree (`documentOrder`), never an identifier sort.  Versions 1–6 refuse to decode
+(`retired_command_refused`): v6 had no marks and v5 no `unlink` (each tail sum
+was shorter), v4 had no tree (a document's lines were ordered by
 atom identifier), v3 had the atom `quote`, v2 no annotate and no atom revision,
 v1 the retired `ForwardTarget`.
 
 `unlink` retires one live link of the document: the record stays, with
 `tombstonedAt` set to the retiring operation, and the backlink index
 (`Kernel.LinkIndex`) drops it.
+
+`mark` lays a `MarkRecord` on one line (atom) or element at the revision its
+author read — `bold`, `italic`, `code`, `heading`, or `link`.  A link mark
+also writes an ordinary `LinkRecord` (relation `markRelation`): the link record
+is primary, read by backlinks and the link index; the mark names it and places
+it on the line.  A mark is stale once its target moves (`markFresh`), never
+re-anchored.  `unmark` retires a live mark — only its author or the document's
+owner may — and a link mark's link with it.  Marks and their links are the
+`annotations` field (K-FIELDS): they never touch the body.
 
 `annotate` attaches an annotation record to one atom at the revision the
 annotator read and writes nothing else.  `transclude` writes a
@@ -165,6 +174,77 @@ def editElementStream : StreamCodec EditElement :=
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
     (by intro edit; cases edit; rfl)
 
+/-- What a `mark` is laid on: one line (its atom) or one element. -/
+inductive MarkTarget where
+  | atom (atom : AtomId)
+  | element (element : ElementId)
+  deriving DecidableEq
+
+def markTargetStream : StreamCodec MarkTarget :=
+  StreamCodec.xmap (StreamCodec.sum (identifierStream .v1 .atom) (identifierStream .v1 .element))
+    (fun | .atom atom => .inl atom | .element element => .inr element)
+    (fun | .inl atom => .atom atom | .inr element => .element element)
+    (by intro target; cases target <;> rfl)
+
+/-- The kind a `mark` asks for.  A `link` names the fresh `LinkRecord` the
+action also writes, and that link's target. -/
+inductive MarkSpec where
+  | bold
+  | italic
+  | code
+  | heading
+  | link (link : LinkId) (target : LinkTarget)
+  deriving DecidableEq
+
+/-- The stored kind: a link mark keeps only its link's identifier. -/
+def MarkSpec.kind : MarkSpec → MarkKind
+  | .bold => .bold
+  | .italic => .italic
+  | .code => .code
+  | .heading => .heading
+  | .link linkId _ => .link linkId
+
+/-- A kind's tag (as `markKindTag`), then a link mark's link and target.  A tag
+past `4` names no kind and refuses to decode. -/
+def markSpecStream : StreamCodec MarkSpec where
+  encode value :=
+    StreamCodec.nat.encode (markKindTag value.kind) ++
+      match value with
+      | .link linkId target => (identifierStream .v1 .link).encode linkId ++ linkTargetStream.encode target
+      | _ => []
+  decodePrefix bytes := do
+    let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
+    match tag with
+    | 0 => some (.bold, afterTag)
+    | 1 => some (.italic, afterTag)
+    | 2 => some (.code, afterTag)
+    | 3 => some (.heading, afterTag)
+    | 4 => do
+        let (linkId, afterLink) ← (identifierStream .v1 .link).decodePrefix afterTag
+        let (target, suffix) ← linkTargetStream.decodePrefix afterLink
+        some (.link linkId target, suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro value suffix
+    cases value <;>
+      simp [MarkSpec.kind, markKindTag, List.append_assoc, StreamCodec.nat.decodePrefix_encode,
+        (identifierStream .v1 .link).decodePrefix_encode, linkTargetStream.decodePrefix_encode]
+
+/-- A mark of `target` as its author read it at `revision`. -/
+structure MarkRequest where
+  target : MarkTarget
+  revision : OperationId
+  spec : MarkSpec
+  deriving DecidableEq
+
+def markRequestStream : StreamCodec MarkRequest :=
+  StreamCodec.xmap
+    (StreamCodec.product markTargetStream
+      (StreamCodec.product (identifierStream .v1 .operationIntent) markSpecStream))
+    (fun request => (request.target, request.revision, request.spec))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
+    (by intro request; rfl)
+
 inductive Action where
   /-- The document record and its root element, an empty container. -/
   | createDocument (rootElement : ElementId) (schema : Digest)
@@ -187,6 +267,12 @@ inductive Action where
   | createContainer (element : ElementId)
   /-- Retire a live link of this document (`tombstonedAt := operation`). -/
   | unlink (link : LinkId)
+  /-- Mark a line or element as its author read it at `revision`; a `link`
+  mark also writes an ordinary link record. -/
+  | mark (mark : MarkId) (request : MarkRequest)
+  /-- Retire a live mark, and a link mark's link; its author or the document's
+  owner only. -/
+  | unmark (mark : MarkId)
   deriving DecidableEq
 
 abbrev ActionWire := Sum (ElementId × Digest)
@@ -196,7 +282,8 @@ abbrev ActionWire := Sum (ElementId × Digest)
         (Sum (RunId × List AtomId)
           (Sum (AnnotationId × AtomId × OperationId × List UInt8)
             (Sum (TransclusionId × LinkId × TranscludeRequest)
-              (Sum EditElement (Sum ElementId LinkId))))))))
+              (Sum EditElement (Sum ElementId (Sum LinkId
+                (Sum (MarkId × MarkRequest) MarkId))))))))))
 
 def actionWireStream : StreamCodec ActionWire :=
   StreamCodec.sum
@@ -220,7 +307,11 @@ def actionWireStream : StreamCodec ActionWire :=
                 (StreamCodec.product (identifierStream .v1 .transclusion)
                   (StreamCodec.product (identifierStream .v1 .link) transcludeRequestStream))
                 (StreamCodec.sum editElementStream
-                  (StreamCodec.sum (identifierStream .v1 .element) (identifierStream .v1 .link)))))))))
+                  (StreamCodec.sum (identifierStream .v1 .element)
+                    (StreamCodec.sum (identifierStream .v1 .link)
+                      (StreamCodec.sum
+                        (StreamCodec.product (identifierStream .v1 .mark) markRequestStream)
+                        (identifierStream .v1 .mark)))))))))))
 
 def Action.toWire : Action → ActionWire
   | .createDocument root schema => .inl (root, schema)
@@ -235,7 +326,10 @@ def Action.toWire : Action → ActionWire
       .inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request)))))))
   | .editElement edit => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit)))))))
   | .createContainer element => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element))))))))
-  | .unlink linkId => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr linkId))))))))
+  | .unlink linkId => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId)))))))))
+  | .mark markId request =>
+      .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request)))))))))))
+  | .unmark markId => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId)))))))))))
 
 def Action.ofWire : ActionWire → Action
   | .inl (root, schema) => .createDocument root schema
@@ -250,7 +344,10 @@ def Action.ofWire : ActionWire → Action
       .transclude transclusion linkId request
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit))))))) => .editElement edit
   | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl element)))))))) => .createContainer element
-  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr linkId)))))))) => .unlink linkId
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl linkId))))))))) => .unlink linkId
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl (markId, request))))))))))) =>
+      .mark markId request
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr (markId))))))))))) => .unmark markId
 
 @[simp] theorem Action.ofWire_toWire (action : Action) :
     Action.ofWire action.toWire = action := by cases action <;> rfl
@@ -267,7 +364,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 6
+def commandVersion : Nat := 7
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -295,16 +392,16 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- Version-1 through version-5 command frames refuse to decode. -/
+/-- Version-1 through version-6 command frames refuse to decode. -/
 theorem retired_command_refused (version : UInt8)
-    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5)
+    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4 ∨ version = 5 ∨ version = 6)
     (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
-    rcases retired with rfl | rfl | rfl | rfl | rfl <;> decide +kernel
+    rcases retired with rfl | rfl | rfl | rfl | rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -337,6 +434,16 @@ inductive Reject where
   | attached
   /-- `unlink` named no live link of this document. -/
   | unknownLink
+  /-- A mark names no atom or element of this document. -/
+  | noSuchTarget
+  /-- The mark's target moved since the revision its author read (or the
+  revision names an unread write of this same command). -/
+  | staleMark
+  /-- `unmark` by a principal that is neither the mark's author nor the
+  document's owner. -/
+  | notMarkOwner
+  /-- `unmark` named no live mark of this document. -/
+  | markNotFound
   deriving DecidableEq, Repr
 
 /-! ## Lowering actions to guarded operations -/
@@ -617,8 +724,14 @@ def clearOf : Nat → ContentStore → ElementId → ElementId → Bool
         | none => true
         | some parent => clearOf fuel store parent child
 
-/-- Fuel for a walk over the tree: one more than the number of stored records. -/
-def treeFuel (store : ContentStore) : Nat := store.support.card + 1
+/-- How many element records the store holds.  The tree walk's fuel is counted
+in elements only, so a write outside the elements namespace (a mark, a link,
+an annotation) never changes how the order is computed. -/
+def elementCount (store : ContentStore) : Nat :=
+  (store.support.filter fun address => address.1 = .elements).card
+
+/-- Fuel for a walk over the tree: one more than the number of stored elements. -/
+def treeFuel (store : ContentStore) : Nat := elementCount store + 1
 
 def editElementStep (operation : OperationId) (document : DocumentId) (progress : Progress)
     (edit : EditElement) : Except Reject Progress := do
@@ -664,6 +777,101 @@ def documentOrder (store : ContentStore) (document : DocumentId) : List ElementI
   | none => []
   | some root => (walk (treeFuel store) store root).tail
 
+/-! ## Marks: laid on a line or element at a read revision, in the annotations field -/
+
+/-- The revision `target` stands at, when it is an atom or element of `document`. -/
+def markTargetRevision (store : ContentStore) (document : DocumentId) :
+    MarkTarget → Option OperationId
+  | .atom atom =>
+      match Hyperdocument.lookup store .atoms atom with
+      | some record => if record.document = document then some record.revision else none
+      | none => none
+  | .element element =>
+      match elementAt store element with
+      | some record => if record.document = document then some record.revision else none
+      | none => none
+
+def MarkTarget.anchor : MarkTarget → OperationId → MarkAnchor
+  | .atom line, revision => .atom line revision
+  | .element target, revision => .element target revision
+
+/-- The link relation of a link mark's link record. -/
+def markRelation : Digest := contentDigest "DREGG/CONTENT/RELATION" "mark".toUTF8.toList
+
+def markRecordOf (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (request : MarkRequest) : MarkRecord :=
+  ⟨document, request.target.anchor request.revision, request.spec.kind, author, operation,
+    cellReaders, none⟩
+
+/-- A link mark's link: an ordinary forward link of the document, with no
+source range (its place on the line is the mark's anchor). -/
+def markLinkRecord (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (target : LinkTarget) : LinkRecord :=
+  ⟨document, none, target, markRelation, author, operation, none⟩
+
+def markLinkStep (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (progress : Progress) : MarkSpec → Except Reject Progress
+  | .link link target => allocate progress .links link (markLinkRecord author operation document target)
+  | _ => .ok progress
+
+/-- The target is an atom or element of this document, still at the revision
+the marker read; a revision equal to this operation names an unread write of
+this same command and is stale too. -/
+def markStep (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (progress : Progress) (mark : MarkId) (request : MarkRequest) : Except Reject Progress :=
+  match markTargetRevision progress.1 document request.target with
+  | none => .error .noSuchTarget
+  | some current =>
+      if current = request.revision ∧ request.revision ≠ operation then do
+        let next ← allocate progress .marks mark (markRecordOf author operation document request)
+        markLinkStep author operation document next request.spec
+      else .error .staleMark
+
+/-- The principal that created `document`. -/
+def documentOwner (store : ContentStore) (document : DocumentId) : Option PrincipalRef :=
+  (Hyperdocument.lookup store .documents document).map DocumentRecord.createdBy
+
+/-- Is the link already retired (by an `unlink` of it)? -/
+def linkRetired (store : ContentStore) (link : LinkId) : Bool :=
+  match Hyperdocument.lookup store .links link with
+  | some record => record.tombstonedAt.isSome
+  | none => false
+
+/-- A link mark's link leaves with the mark (unless an `unlink` already retired it). -/
+def retireMarkLink (document : DocumentId) (operation : OperationId) (progress : Progress) :
+    MarkKind → Except Reject Progress
+  | .link link =>
+      if linkRetired progress.1 link then .ok progress
+      else retireLink document operation progress link
+  | _ => .ok progress
+
+/-- Retire a live mark of `document`: the exact stored record guards the
+write and only `tombstonedAt` changes.  Only the mark's author or the
+document's owner may. -/
+def unmarkStep (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (progress : Progress) (mark : MarkId) : Except Reject Progress :=
+  match (show Option MarkRecord from progress.1 ⟨.marks, mark⟩) with
+  | none => .error .markNotFound
+  | some before =>
+      if before.document = document ∧ before.tombstonedAt = none then
+        if author = before.author ∨ documentOwner progress.1 document = some author then
+          retireMarkLink document operation
+            (progress.1.set ⟨.marks, mark⟩ (some { before with tombstonedAt := some operation }),
+              progress.2 ++ [.write .marks mark before { before with tombstonedAt := some operation }])
+            before.kind
+        else .error .notMarkOwner
+      else .error .markNotFound
+
+/-- A mark is fresh while its target still stands at the anchored revision (a
+range mark: while its endpoints are stored in its document).  A stale mark is
+shown struck, never re-anchored. -/
+def markFresh (store : ContentStore) (record : MarkRecord) : Bool :=
+  match record.anchor with
+  | .atom atom revision => decide (markTargetRevision store record.document (.atom atom) = some revision)
+  | .element element revision =>
+      decide (markTargetRevision store record.document (.element element) = some revision)
+  | .range range => rangeCheck store record.document range
+
 def step (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) (progress : Progress) : Action → Except Reject Progress
   | .createDocument root schema => do
@@ -703,6 +911,8 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
       | none => .error .noSuchElement
       | some _ => appendLeaf author operation document progress element (.container [])
   | .unlink link => retireLink document operation progress link
+  | .mark mark request => markStep author operation document progress mark request
+  | .unmark mark => unmarkStep author operation document progress mark
 
 def run (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (command : Command) : Except Reject Progress :=
@@ -903,6 +1113,147 @@ theorem editElementStep_step (operation : OperationId) (document : DocumentId)
         exact (rewriteElement_step first).trans (reparent_step last)
       · cases rest
 
+/-! ### Mark steps: they write only marks and links -/
+
+/-- A step whose writes are confined to the marks and links namespaces and
+which executes as emitted. -/
+def MarkStep (progress next : Progress) : Prop :=
+  (∀ pre, Executes pre progress → Executes pre next) ∧
+    ∀ address : Hyperdocument.Address, address.1 ≠ .marks → address.1 ≠ .links →
+      next.1 address = progress.1 address
+
+theorem MarkStep.refl (progress : Progress) : MarkStep progress progress :=
+  ⟨fun _ holds => holds, fun _ _ _ => rfl⟩
+
+theorem MarkStep.trans {first second third : Progress}
+    (left : MarkStep first second) (right : MarkStep second third) : MarkStep first third :=
+  ⟨fun pre holds => right.1 pre (left.1 pre holds),
+    fun address notMarks notLinks =>
+      (right.2 address notMarks notLinks).trans (left.2 address notMarks notLinks)⟩
+
+theorem allocate_markStep {progress next : Progress} {space : Namespace} {key : Key space}
+    {value : Value space} (inside : space = .marks ∨ space = .links)
+    (accepted : allocate progress space key value = .ok next) : MarkStep progress next := by
+  refine ⟨fun pre holds => allocate_executes pre progress next _ _ _ holds accepted, ?_⟩
+  obtain ⟨_, rfl⟩ := allocate_ok accepted
+  intro address notMarks notLinks
+  refine Store.Store.set_ne _ _ _ address (fun same => ?_)
+  have first := congrArg Sigma.fst same
+  rcases inside with rfl | rfl
+  · exact notMarks first
+  · exact notLinks first
+
+theorem retireLink_ok {document : DocumentId} {operation : OperationId} {progress next : Progress}
+    {link : LinkId} (accepted : retireLink document operation progress link = .ok next) :
+    ∃ before, (show Option LinkRecord from progress.1 ⟨.links, link⟩) = some before ∧
+      before.sourceDocument = document ∧ before.tombstonedAt = none ∧
+      next = (progress.1.set ⟨.links, link⟩ (some { before with tombstonedAt := some operation }),
+        progress.2 ++ [.write .links link before { before with tombstonedAt := some operation }]) := by
+  unfold retireLink at accepted
+  split at accepted
+  · cases accepted
+  · rename_i before present
+    split at accepted
+    · rename_i live
+      cases accepted
+      exact ⟨before, present, live.1, live.2, rfl⟩
+    · cases accepted
+
+theorem retireLink_markStep {document : DocumentId} {operation : OperationId}
+    {progress next : Progress} {link : LinkId}
+    (accepted : retireLink document operation progress link = .ok next) : MarkStep progress next := by
+  obtain ⟨before, present, _, _, rfl⟩ := retireLink_ok accepted
+  refine ⟨fun pre holds => executes_append pre progress _ holds ⟨rfl, present⟩, ?_⟩
+  intro address _ notLinks
+  exact Store.Store.set_ne _ _ _ address (fun same => notLinks (congrArg Sigma.fst same))
+
+theorem markLinkStep_markStep {author : PrincipalRef} {operation : OperationId}
+    {document : DocumentId} {progress next : Progress} {spec : MarkSpec}
+    (accepted : markLinkStep author operation document progress spec = .ok next) :
+    MarkStep progress next := by
+  cases spec with
+  | link link target => exact allocate_markStep (Or.inr rfl) accepted
+  | bold | italic | code | heading =>
+      simp only [markLinkStep, Except.ok.injEq] at accepted
+      subst accepted
+      exact MarkStep.refl _
+
+theorem markStep_ok {author : PrincipalRef} {operation : OperationId} {document : DocumentId}
+    {progress next : Progress} {mark : MarkId} {request : MarkRequest}
+    (accepted : markStep author operation document progress mark request = .ok next) :
+    markTargetRevision progress.1 document request.target = some request.revision ∧
+      request.revision ≠ operation ∧
+      ∃ middle, allocate progress .marks mark (markRecordOf author operation document request) =
+          .ok middle ∧ markLinkStep author operation document middle request.spec = .ok next := by
+  unfold markStep at accepted
+  split at accepted
+  · cases accepted
+  · rename_i current found
+    split at accepted
+    · rename_i fresh
+      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+      exact ⟨fresh.1 ▸ found, fresh.2, middle, first, rest⟩
+    · cases accepted
+
+theorem markStep_markStep {author : PrincipalRef} {operation : OperationId} {document : DocumentId}
+    {progress next : Progress} {mark : MarkId} {request : MarkRequest}
+    (accepted : markStep author operation document progress mark request = .ok next) :
+    MarkStep progress next := by
+  obtain ⟨_, _, middle, first, rest⟩ := markStep_ok accepted
+  exact (allocate_markStep (Or.inl rfl) first).trans (markLinkStep_markStep rest)
+
+theorem retireMarkLink_markStep {document : DocumentId} {operation : OperationId}
+    {progress next : Progress} {kind : MarkKind}
+    (accepted : retireMarkLink document operation progress kind = .ok next) :
+    MarkStep progress next := by
+  cases kind with
+  | link link =>
+      simp only [retireMarkLink] at accepted
+      split at accepted
+      · cases accepted
+        exact MarkStep.refl _
+      · exact retireLink_markStep accepted
+  | bold | italic | code | heading =>
+      simp only [retireMarkLink, Except.ok.injEq] at accepted
+      subst accepted
+      exact MarkStep.refl _
+
+theorem unmarkStep_ok {author : PrincipalRef} {operation : OperationId} {document : DocumentId}
+    {progress next : Progress} {mark : MarkId}
+    (accepted : unmarkStep author operation document progress mark = .ok next) :
+    ∃ before, (show Option MarkRecord from progress.1 ⟨.marks, mark⟩) = some before ∧
+      before.document = document ∧ before.tombstonedAt = none ∧
+      (author = before.author ∨ documentOwner progress.1 document = some author) ∧
+      retireMarkLink document operation
+        (progress.1.set ⟨.marks, mark⟩ (some { before with tombstonedAt := some operation }),
+          progress.2 ++ [.write .marks mark before { before with tombstonedAt := some operation }])
+        before.kind = .ok next := by
+  unfold unmarkStep at accepted
+  split at accepted
+  · cases accepted
+  · rename_i before present
+    split at accepted
+    · rename_i live
+      split at accepted
+      · rename_i may
+        exact ⟨before, present, live.1, live.2, may, accepted⟩
+      · cases accepted
+    · cases accepted
+
+theorem unmarkStep_markStep {author : PrincipalRef} {operation : OperationId}
+    {document : DocumentId} {progress next : Progress} {mark : MarkId}
+    (accepted : unmarkStep author operation document progress mark = .ok next) :
+    MarkStep progress next := by
+  obtain ⟨before, present, _, _, _, rest⟩ := unmarkStep_ok accepted
+  have first : MarkStep progress
+      (progress.1.set ⟨.marks, mark⟩ (some { before with tombstonedAt := some operation }),
+        progress.2 ++ [.write .marks mark before { before with tombstonedAt := some operation }]) := by
+    refine ⟨fun pre holds => executes_append pre progress _ holds ⟨rfl, present⟩, ?_⟩
+    intro address notMarks _
+    exact Store.Store.set_ne _ _ _ address (fun same => notMarks (congrArg Sigma.fst same))
+  exact first.trans (retireMarkLink_markStep rest)
+
+
 theorem step_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (progress next : Progress) (action : Action)
     (holds : Executes pre progress)
@@ -962,6 +1313,12 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
         · cases accepted
           exact executes_append pre progress _ holds ⟨rfl, present⟩
         · cases accepted
+  | mark mark request =>
+      simp only [step] at accepted
+      exact (markStep_markStep accepted).1 pre holds
+  | unmark mark =>
+      simp only [step] at accepted
+      exact (unmarkStep_markStep accepted).1 pre holds
 
 theorem foldlM_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (actions : List Action) (progress next : Progress)
@@ -1128,6 +1485,8 @@ def Action.tag : Action → Nat
   | .editElement .. => 7
   | .createContainer .. => 8
   | .unlink .. => 9
+  | .mark .. => 10
+  | .unmark .. => 11
 
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
@@ -1153,6 +1512,8 @@ def project (before after : ContentStore) (command : Command) : List (String × 
    ("content/element-edits", actionCount command 7),
    ("content/container-creates", actionCount command 8),
    ("content/unlinks", actionCount command 9),
+   ("content/marks", actionCount command 10),
+   ("content/unmarks", actionCount command 11),
    ("content/writes/body", bodyWrites before after),
    ("content/writes/annotations", annotationWrites before after),
    ("content/tombstones", (command.actions.filter fun action => match action with
@@ -1591,6 +1952,12 @@ private theorem keepsAt_allocate_other (revision : OperationId) (progress next :
   rw [allocate_post progress next space key value accepted]
   exact keepsAt_set_other revision progress.1 space key value other
 
+private theorem keepsAt_of_markStep (revision : OperationId) {progress next : Progress}
+    (stepped : MarkStep progress next) : KeepsAt revision progress.1 next.1 := by
+  intro atom record found _
+  unfold Hyperdocument.lookup at found ⊢
+  rwa [stepped.2 ⟨.atoms, atom⟩ (by simp) (by simp)] at found
+
 /-- A step by an operation other than `revision` changes no atom that stands at
 `revision` afterwards: every atom it creates or edits is stamped with the
 operation itself. -/
@@ -1671,6 +2038,12 @@ theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document
         · cases accepted
           exact keepsAt_set_other revision progress.1 .links link _ (by decide)
         · cases accepted
+  | mark mark request =>
+      simp only [step] at accepted
+      exact keepsAt_of_markStep revision (markStep_markStep accepted)
+  | unmark mark =>
+      simp only [step] at accepted
+      exact keepsAt_of_markStep revision (unmarkStep_markStep accepted)
 
 theorem run_keepsAt (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) (pre : ContentStore) (command : Command) (next : Progress)

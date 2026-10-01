@@ -2,9 +2,9 @@
 K-DOC-HISTORY: the difference between two renderings of one page.
 
 A page is rendered as its lines in the kernel's document order: `lines store
-document` pairs each element of `ContentResource.documentOrder` (the pre-order
+document marks` pairs each element of `ContentResource.documentOrder` (the pre-order
 walk of the element tree, `view-document`'s `order`) with what stands there — an
-atom record, a transclusion's embed, a section.  `diff left right` names, by key,
+atom record, a transclusion's embed, a section — and the live marks laid on it.  `diff left right` names, by key,
 every row added, removed or changed between the two renderings, and every row
 whose predecessor among the rows on both sides changed (`moved`), and nothing
 else: the four `_iff` theorems say each change is exactly what a reader
@@ -190,41 +190,56 @@ theorem swap_is_two_moves :
 
 /-! ## A page's lines are the kernel's document order -/
 
-/-- What stands at one element of the document order. A section carries the
-revision of its children's positions, so a reorder inside it is a change of it. -/
+/-- The live (unretired) marks laid on one row of the order: on its element,
+or, for a line, on its atom. The Host's `view-document` rows carry exactly these. -/
+def rowMarks (marks : List (MarkId × MarkRecord)) (element : ElementId) (atom : Option AtomId) :
+    List (MarkId × MarkRecord) :=
+  marks.filter fun pair => pair.2.tombstonedAt.isNone && match pair.2.anchor with
+    | .element target _ => target == element
+    | .atom line _ => atom == some line
+    | .range _ => false
+
+/-- What stands at one element of the document order, with the live marks laid
+on it. A section carries the revision of its children's positions, so a reorder
+inside it is a change of it; a mark laid or retired on a row is a change of
+that row. -/
 inductive Line where
-  | atom (atom : AtomId) (record : Option AtomRecord)
-  | embed (transclusion : TransclusionId)
-  | section (revision : OperationId)
+  | atom (atom : AtomId) (record : Option AtomRecord) (marks : List (MarkId × MarkRecord))
+  | embed (transclusion : TransclusionId) (marks : List (MarkId × MarkRecord))
+  | section (revision : OperationId) (marks : List (MarkId × MarkRecord))
   | runs
   | opaque
   | missing
   deriving DecidableEq, Repr
 
-def lineOf (store : ContentStore) (element : ElementId) : Line :=
+/-- The line at `element`, given the cell's marks (`marks`: every mark record
+of the cell, as its store lists them). -/
+def lineOf (store : ContentStore) (marks : List (MarkId × MarkRecord)) (element : ElementId) : Line :=
   match elementAt store element with
   | none => .missing
   | some record =>
       match record.body with
-      | .atom atom => .atom atom (lookup store .atoms atom)
-      | .embed transclusion => .embed transclusion
-      | .container _ => .section record.revision
+      | .atom atom => .atom atom (lookup store .atoms atom) (rowMarks marks element (some atom))
+      | .embed transclusion => .embed transclusion (rowMarks marks element none)
+      | .container _ => .section record.revision (rowMarks marks element none)
       | .runs _ => .runs
       | .opaque _ _ => .opaque
 
 /-- The page's lines: `view-document`'s order, each element with its line. -/
-def lines (store : ContentStore) (document : DocumentId) : List (ElementId × Line) :=
-  (documentOrder store document).map fun element => (element, lineOf store element)
+def lines (store : ContentStore) (document : DocumentId) (marks : List (MarkId × MarkRecord)) :
+    List (ElementId × Line) :=
+  (documentOrder store document).map fun element => (element, lineOf store marks element)
 
 /-- The keys of a page's lines are exactly the document order. -/
-theorem lines_keys (store : ContentStore) (document : DocumentId) :
-    (lines store document).map Prod.fst = documentOrder store document := by
+theorem lines_keys (store : ContentStore) (document : DocumentId) (marks : List (MarkId × MarkRecord)) :
+    (lines store document marks).map Prod.fst = documentOrder store document := by
   simp [lines, List.map_map, Function.comp_def]
 
 /-- On an admitted tree each line's key appears once (`order_total`). -/
 theorem lines_nodup {store : ContentStore} {document : DocumentId} {root : ElementId}
+    (marks : List (MarkId × MarkRecord))
     (tree : DocumentTree store document) (rooted : rootOf store document = some root) :
-    ((lines store document).map Prod.fst).Nodup := by
+    ((lines store document marks).map Prod.fst).Nodup := by
   rw [lines_keys]
   exact (order_total tree rooted).1
 
@@ -239,44 +254,49 @@ private theorem lookup_graph (order : List ElementId) (f : ElementId → Line) (
       · have differ : (key == head) = false := by simpa using same
         simp [List.lookup, differ, induction, same]
 
-theorem mem_lines {store : ContentStore} {document : DocumentId} {element : ElementId} {line : Line} :
-    (element, line) ∈ lines store document ↔
-      element ∈ documentOrder store document ∧ line = lineOf store element := by
+theorem mem_lines {store : ContentStore} {document : DocumentId} {marks : List (MarkId × MarkRecord)}
+    {element : ElementId} {line : Line} :
+    (element, line) ∈ lines store document marks ↔
+      element ∈ documentOrder store document ∧ line = lineOf store marks element := by
   simp only [lines, List.mem_map, Prod.mk.injEq]
   constructor
   · rintro ⟨e, member, rfl, rfl⟩; exact ⟨member, rfl⟩
   · rintro ⟨member, rfl⟩; exact ⟨element, member, rfl, rfl⟩
 
-theorem lookup_lines (store : ContentStore) (document : DocumentId) (element : ElementId) :
-    (lines store document).lookup element =
-      if element ∈ documentOrder store document then some (lineOf store element) else none :=
+theorem lookup_lines (store : ContentStore) (document : DocumentId) (marks : List (MarkId × MarkRecord))
+    (element : ElementId) :
+    (lines store document marks).lookup element =
+      if element ∈ documentOrder store document then some (lineOf store marks element) else none :=
   lookup_graph _ _ _
 
 /-- `added_iff` over two pages: an element added between `doc show --at H1`
 and `--at H2` is in the order at H2, not in the order at H1, with its line. -/
-theorem line_added_iff {before after : ContentStore} {document : DocumentId} {element : ElementId}
-    {line : Line} :
-    Change.added element line ∈ diff (lines before document) (lines after document) ↔
-      element ∈ documentOrder after document ∧ line = lineOf after element ∧
+theorem line_added_iff {before after : ContentStore} {document : DocumentId}
+    {marksBefore marksAfter : List (MarkId × MarkRecord)} {element : ElementId} {line : Line} :
+    Change.added element line ∈
+        diff (lines before document marksBefore) (lines after document marksAfter) ↔
+      element ∈ documentOrder after document ∧ line = lineOf after marksAfter element ∧
         element ∉ documentOrder before document := by
   rw [added_iff, mem_lines, lookup_lines]
   by_cases present : element ∈ documentOrder before document <;> simp [present]
 
 /-- `removed_iff` over two pages. -/
-theorem line_removed_iff {before after : ContentStore} {document : DocumentId} {element : ElementId}
-    {line : Line} :
-    Change.removed element line ∈ diff (lines before document) (lines after document) ↔
-      element ∈ documentOrder before document ∧ line = lineOf before element ∧
+theorem line_removed_iff {before after : ContentStore} {document : DocumentId}
+    {marksBefore marksAfter : List (MarkId × MarkRecord)} {element : ElementId} {line : Line} :
+    Change.removed element line ∈
+        diff (lines before document marksBefore) (lines after document marksAfter) ↔
+      element ∈ documentOrder before document ∧ line = lineOf before marksBefore element ∧
         element ∉ documentOrder after document := by
   rw [removed_iff, mem_lines, lookup_lines]
   by_cases present : element ∈ documentOrder after document <;> simp [present]
 
 /-- `changed_iff` over two pages: an element in both orders whose line differs. -/
-theorem line_changed_iff {before after : ContentStore} {document : DocumentId} {element : ElementId}
-    {old new : Line} :
-    Change.changed element old new ∈ diff (lines before document) (lines after document) ↔
-      element ∈ documentOrder before document ∧ old = lineOf before element ∧
-        element ∈ documentOrder after document ∧ new = lineOf after element ∧ old ≠ new := by
+theorem line_changed_iff {before after : ContentStore} {document : DocumentId}
+    {marksBefore marksAfter : List (MarkId × MarkRecord)} {element : ElementId} {old new : Line} :
+    Change.changed element old new ∈
+        diff (lines before document marksBefore) (lines after document marksAfter) ↔
+      element ∈ documentOrder before document ∧ old = lineOf before marksBefore element ∧
+        element ∈ documentOrder after document ∧ new = lineOf after marksAfter element ∧ old ≠ new := by
   rw [changed_iff, mem_lines, lookup_lines]
   by_cases present : element ∈ documentOrder after document
   · rw [if_pos present, Option.some.injEq]

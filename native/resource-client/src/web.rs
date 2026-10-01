@@ -417,6 +417,30 @@ fn doc_link(base: &str, names: &dyn Fn(&str) -> Option<String>, document: &str) 
     }
 }
 
+/// The live marks of a row as one attribute: each kind, `~` before a stale one.
+fn marks_attr(marks: &Value) -> String {
+    let kinds: Vec<String> = marks
+        .as_array()
+        .map(|marks| {
+            marks
+                .iter()
+                .map(|mark| {
+                    format!(
+                        "{}{}",
+                        if mark["fresh"] == false { "~" } else { "" },
+                        mark["kind"].as_str().unwrap_or("?")
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if kinds.is_empty() {
+        String::new()
+    } else {
+        format!(" data-marks=\"{}\"", escape(&kinds.join(",")))
+    }
+}
+
 fn annotations_of(annotations: &[&Value], atom: &str) -> String {
     let mut notes = String::new();
     for annotation in annotations.iter().filter(|annotation| {
@@ -517,7 +541,13 @@ pub(crate) fn render_document(input: &DocInput<'_>, shown: &[Value]) -> String {
         let (attrs, cell, creator, revision) = match kind {
             "atom" => {
                 let atom = line["atom"].as_str().unwrap_or("?");
-                let text = bytes_text(line["payload"].as_str().unwrap_or(""));
+                // `rendered` is the client's one marks renderer (workspace::render_marks:
+                // **bold**, _italic_, `code`, [link](-> NAME), # heading; ~~struck~~ when
+                // every mark of a kind is stale), until P-DOC-RENDER's module lands.
+                let text = line["rendered"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| bytes_text(line["payload"].as_str().unwrap_or("")));
                 let struck = line["struck"] == true;
                 let shown_text = if struck {
                     format!("<del>{}</del>", escape(&text))
@@ -526,10 +556,11 @@ pub(crate) fn render_document(input: &DocInput<'_>, shown: &[Value]) -> String {
                 };
                 (
                     format!(
-                        " data-atom=\"{}\" data-creator=\"{}\" data-revision=\"{}\" data-struck=\"{struck}\"",
+                        " data-atom=\"{}\" data-creator=\"{}\" data-revision=\"{}\" data-struck=\"{struck}\"{}",
                         escape(atom),
                         escape(subject_of(&line["createdBy"])),
-                        escape(line["revision"].as_str().unwrap_or("?"))
+                        escape(line["revision"].as_str().unwrap_or("?")),
+                        marks_attr(&line["marks"])
                     ),
                     format!("{shown_text}{}", annotations_of(&annotations, atom)),
                     escape(subject_of(&line["createdBy"])),
@@ -954,7 +985,7 @@ impl Site {
                 ),
             };
         }
-        let lines = match workspace::document_lines(&rendered) {
+        let lines = match workspace::document_lines(&self.root, &rendered) {
             Ok((lines, _)) => lines,
             Err(error) => return failure_page(&title, &error),
         };
@@ -1224,7 +1255,9 @@ mod tests {
     fn page_lines() -> Vec<Value> {
         vec![
             json!({"element":"1002","parent":"1","kind":"atom","atom":"1002","payload":hex(b"second, placed first"),
-                "revision":"71","createdBy":{"subject":"7"},"struck":false,"line":1,"depth":1}),
+                "revision":"71","createdBy":{"subject":"7"},"struck":false,"line":1,"depth":1,
+                "marks":[{"kind":"bold","fresh":true},{"kind":"italic","fresh":false}],
+                "rendered":"**~~_second, placed first_~~**"}),
             json!({"element":"1001","parent":"1","kind":"atom","atom":"1001","payload":hex(b"the first line"),
                 "revision":"70","createdBy":{"subject":"7"},"struck":true,"line":null,"depth":1}),
             json!({"element":"5","parent":"1","kind":"container","revision":"72","children":"1","line":null,"depth":1}),
@@ -1265,6 +1298,8 @@ mod tests {
         let embed = html.find("data-transclusion=\"8001\"").unwrap();
         assert!(first < struck && struck < section && section < embed);
         assert!(html.contains("data-lines=\"3\""));
+        assert!(html.contains("data-marks=\"bold,~italic\""));
+        assert!(html.contains("**~~_second, placed first_~~**"));
         assert!(html.contains("<del>the first line</del>"));
         assert!(html.contains("data-transclusion=\"8001\" data-mode=\"snapshot\" data-render=\"snapshot\""));
         assert!(html.contains("[snapshot at height 27 of <a href=\"/t/doc/wall\">wall</a>]"));

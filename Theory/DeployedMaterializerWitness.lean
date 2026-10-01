@@ -95,6 +95,8 @@ deriving instance Countable for StoredTransclusionRef
 deriving instance Countable for LinkTarget
 deriving instance Countable for LinkRecord
 deriving instance Countable for TransclusionRecord
+deriving instance Countable for MarkAnchor
+deriving instance Countable for MarkKind
 deriving instance Countable for MarkRecord
 deriving instance Countable for AnnotationAnchor
 deriving instance Countable for AnnotationBody

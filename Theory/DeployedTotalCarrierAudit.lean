@@ -129,7 +129,7 @@ def baseAnnotationRecord : AnnotationRecord :=
 /-- Two visibly distinct mark values, with every non-discriminating field held
 fixed. -/
 def markValue (marked : Bool) : MarkRecord :=
-  ⟨baseIdentifier, baseRange, ⟨if marked then 1 else 0⟩, [],
+  ⟨baseIdentifier, .range baseRange, if marked then .bold else .italic,
     basePrincipal, baseIdentifier, baseDigest, none⟩
 
 theorem markValue_injective : Function.Injective markValue := by

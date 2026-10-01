@@ -469,17 +469,62 @@ def transcludePayloadStream : StreamCodec TranscludePayload :=
       tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; rfl)
 
+/-! ## Marks -/
+
+def markAnchorStream : StreamCodec MarkAnchor :=
+  StreamCodec.xmap
+    (StreamCodec.sum storedStableRangeStream
+      (StreamCodec.sum
+        (StreamCodec.product (identifierStream .v1 .atom) (identifierStream .v1 .operationIntent))
+        (StreamCodec.product (identifierStream .v1 .element) (identifierStream .v1 .operationIntent))))
+    (fun | .range range => .inl range | .atom atom revision => .inr (.inl (atom, revision))
+         | .element element revision => .inr (.inr (element, revision)))
+    (fun | .inl range => .range range | .inr (.inl (atom, revision)) => .atom atom revision
+         | .inr (.inr (element, revision)) => .element element revision)
+    (by intro anchor; cases anchor <;> rfl)
+
+def markKindTag : MarkKind -> Nat
+  | .bold => 0
+  | .italic => 1
+  | .code => 2
+  | .heading => 3
+  | .link _ => 4
+
+/-- A mark kind: its tag, then the link identifier of a `link` mark.  A tag
+past `4` names no kind and refuses to decode. -/
+def markKindStream : StreamCodec MarkKind where
+  encode value :=
+    StreamCodec.nat.encode (markKindTag value) ++
+      match value with
+      | .link link => (identifierStream .v1 .link).encode link
+      | _ => []
+  decodePrefix bytes := do
+    let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
+    match tag with
+    | 0 => some (.bold, afterTag)
+    | 1 => some (.italic, afterTag)
+    | 2 => some (.code, afterTag)
+    | 3 => some (.heading, afterTag)
+    | 4 => do
+        let (link, suffix) ← (identifierStream .v1 .link).decodePrefix afterTag
+        some (.link link, suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro value suffix
+    cases value <;>
+      simp [markKindTag, List.append_assoc, StreamCodec.nat.decodePrefix_encode,
+        (identifierStream .v1 .link).decodePrefix_encode]
+
 def markPayloadStream : StreamCodec MarkPayload :=
   StreamCodec.xmap
     (StreamCodec.product (identifierStream .v1 .mark)
       (StreamCodec.product (identifierStream .v1 .document)
-        (StreamCodec.product storedStableRangeStream
-          (StreamCodec.product digestStream
-            (StreamCodec.product bytesStream digestStream)))))
-    (fun value => (value.id, value.document, value.range, value.kind,
-      value.payload, value.visibilityPolicy))
+        (StreamCodec.product markAnchorStream
+          (StreamCodec.product markKindStream digestStream))))
+    (fun value => (value.id, value.document, value.anchor, value.kind,
+      value.visibilityPolicy))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+      tuple.2.2.2.2⟩)
     (by intro value; rfl)
 
 def annotatePayloadStream : StreamCodec AnnotatePayload :=
