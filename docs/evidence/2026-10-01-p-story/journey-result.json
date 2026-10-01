@@ -1,22 +1,22 @@
 {
   "type": "mini-journey-result-v1",
-  "runRoot": "/home/ember/build/j15/r4",
+  "runRoot": "/home/ember/build/j15/r5",
   "script": "/home/ember/build/mini-datamodel-20260930/p-story/src/native/resource-client/journey.sh",
   "inputsSha256": [
     "bee2ffa3fdce053c1e42d3c40357ad3ab2736532b40aab9e43eb9a23ec7336bb  /home/ember/build/mini-datamodel-20260930/p-story/src/native/resource-client/journey.sh",
     "d183bec10d165024659517ff4edd3f11b9c2ed4a78e5e503afc2558451cbdc6b  /home/ember/build/mini-datamodel-20260930/p-story/run/bin/minidregg-host-ps1",
-    "d27c97c597d2f44fc2874cdb363dc50836568aa8efa36d3584951fee0c0afedc  /home/ember/build/mini-datamodel-20260930/p-story/run/bin/mini-ps2",
+    "47f46b62632fb9e581abc30b945114305363211c473d4fade22267a534445849  /home/ember/build/mini-datamodel-20260930/p-story/run/bin/mini-ps3",
     "884b594bd71203b8e785839cc44be104227d16918a168998619321497b73033a  /home/ember/build/mini-datamodel-20260930/c-c2/frun/bin/store-c2a",
     "71b8d73424920d18aa26f76b8594cc802de640da38c58ef79e3cc9ae1940b753  /home/ember/build/mini-datamodel-20260930/c-c2/frun/bin/verifier",
-    "d27c97c597d2f44fc2874cdb363dc50836568aa8efa36d3584951fee0c0afedc  /home/ember/build/mini-datamodel-20260930/p-story/run/bin/mini-ps2"
+    "47f46b62632fb9e581abc30b945114305363211c473d4fade22267a534445849  /home/ember/build/mini-datamodel-20260930/p-story/run/bin/mini-ps3"
   ],
   "acceptedRecords": 5,
-  "wallSeconds": "525.905",
+  "wallSeconds": "822.593",
   "machine": {
     "host": "persvati",
     "cpus": "24",
-    "loadAverageAtStart": "8.73 8.48 11.24",
-    "loadAverageNow": "16.66 13.39 12.11"
+    "loadAverageAtStart": "27.64 18.09 13.97",
+    "loadAverageNow": "26.54 29.40 24.28"
   },
   "frontier": "J6",
   "reachedEnd": false,
@@ -25,48 +25,48 @@
       "id": "J0",
       "title": "clean start: private single-authority service, one sponsor",
       "status": "PASS",
-      "wallSeconds": "21.261",
-      "artifact": "/home/ember/build/j15/r4/world/handoff.json",
-      "detail": "service up and a signed read answered in 21.221s"
+      "wallSeconds": "69.501",
+      "artifact": "/home/ember/build/j15/r5/world/handoff.json",
+      "detail": "service up and a signed read answered in 69.427s"
     },
     {
       "id": "J1",
       "title": "enroll an independently generated newcomer key",
       "status": "PASS",
-      "wallSeconds": "4.465",
-      "artifact": "/home/ember/build/j15/r4/world/attempts/newcomer/submit.json",
-      "detail": "subject 10186348204465487172, record 1; key absent from genesis/config; lookup = same receipt"
+      "wallSeconds": "7.070",
+      "artifact": "/home/ember/build/j15/r5/world/attempts/newcomer/submit.json",
+      "detail": "subject 15885106192862671949, record 1; key absent from genesis/config; lookup = same receipt"
     },
     {
       "id": "J2",
       "title": "sponsor creates a resource under a permissive law",
       "status": "PASS",
-      "wallSeconds": "3.321",
-      "artifact": "/home/ember/build/j15/r4/world/sponsor/attempts/create-shared/outcome.json",
-      "detail": "object 12127094866883994082 under all[], record 2"
+      "wallSeconds": "5.887",
+      "artifact": "/home/ember/build/j15/r5/world/sponsor/attempts/create-shared/outcome.json",
+      "detail": "object 10502655576801220888 under all[], record 2"
     },
     {
       "id": "J3",
       "title": "sponsor delegates observe+mutate (no control) to newcomer",
       "status": "PASS",
-      "wallSeconds": "5.052",
-      "artifact": "/home/ember/build/j15/r4/world/sponsor/attempts/grant-newcomer/outcome.json",
-      "detail": "child 10557953611792356569 verbs observe,mutate, record 3"
+      "wallSeconds": "9.748",
+      "artifact": "/home/ember/build/j15/r5/world/sponsor/attempts/grant-newcomer/outcome.json",
+      "detail": "child 12221619573495854393 verbs observe,mutate, record 3"
     },
     {
       "id": "J4",
       "title": "newcomer signed read, writes field to 1, reads back 1",
       "status": "PASS",
-      "wallSeconds": "5.088",
-      "artifact": "/home/ember/build/j15/r4/world/newcomer-workspace/attempts/first-action/outcome.json",
-      "detail": "read 0.907s, write 3.013s, readback field 2 = 1, record 4"
+      "wallSeconds": "7.093",
+      "artifact": "/home/ember/build/j15/r5/world/newcomer-workspace/attempts/first-action/outcome.json",
+      "detail": "read 1.316s, write 4.084s, readback field 2 = 1, record 4"
     },
     {
       "id": "J5",
       "title": "a key with no grant: read and write refused",
       "status": "PASS",
-      "wallSeconds": "12.095",
-      "artifact": "/home/ember/build/j15/r4/steps/J5/refusals.tsv",
+      "wallSeconds": "20.611",
+      "artifact": "/home/ember/build/j15/r5/steps/J5/refusals.tsv",
       "detail": "6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5"
     },
     {
@@ -201,9 +201,9 @@
       "id": "J15",
       "title": "a story: the author seals a table; two players play it under the law it generates, a GM narrates",
       "status": "PASS",
-      "wallSeconds": "468.119",
-      "artifact": "/home/ember/build/j15/r4/steps/J15/j15.tsv",
-      "detail": "J15: 121 rows as expected (/home/ember/build/j15/r4/steps/J15/j15.tsv)"
+      "wallSeconds": "688.248",
+      "artifact": "/home/ember/build/j15/r5/steps/J15/j15.tsv",
+      "detail": "J15: 121 rows as expected (/home/ember/build/j15/r5/steps/J15/j15.tsv)"
     },
     {
       "id": "J17",

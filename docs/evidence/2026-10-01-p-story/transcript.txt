@@ -51,11 +51,11 @@ refused: law-denied: field 1 delta == 1 (value -2) (Host refused prepare, reply 
   outcome (decoded by the Host): {"detail":"746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e","explain":"field 1 delta == 1 (value -2)","leaf":{"after":"-2","before":"0","clause":{"predicates":[{"slot":"resource/field/1/delta","type":"eq","value":"1"},{"predicate":{"slot":"request/verb","type":"eq","value":"2"},"type":"not"}],"type":"any"},"path":["2"],"text":"any [ field 1 delta == 1, not (verb == write) ]"},"phase":"70726570617265","reason":"law-denied","type":"refused"}
 
 ### row 096 (bob) > submit x1
-refused: law-denied: subject == 14445094260430961023 (value 15179856757932539789) (Host refused prepare, reply byte 255)
-  outcome (decoded by the Host): {"detail":"746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e","explain":"subject == 14445094260430961023 (value 15179856757932539789)","leaf":{"after":"15179856757932539789","before":"15179856757932539789","clause":{"predicates":[{"slot":"request/subject","type":"eq","value":"14445094260430961023"},{"predicate":{"slot":"request/verb","type":"eq","value":"2"},"type":"not"}],"type":"any"},"path":["1"],"text":"any [ subject == 14445094260430961023, not (verb == write) ]"},"phase":"70726570617265","reason":"law-denied","type":"refused"}
+refused: law-denied: subject == 15530373006067706111 (value 11761894439883150201) (Host refused prepare, reply byte 255)
+  outcome (decoded by the Host): {"detail":"746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e","explain":"subject == 15530373006067706111 (value 11761894439883150201)","leaf":{"after":"11761894439883150201","before":"11761894439883150201","clause":{"predicates":[{"slot":"request/subject","type":"eq","value":"15530373006067706111"},{"predicate":{"slot":"request/verb","type":"eq","value":"2"},"type":"not"}],"type":"any"},"path":["1"],"text":"any [ subject == 15530373006067706111, not (verb == write) ]"},"phase":"70726570617265","reason":"law-denied","type":"refused"}
 
 ### row 102 (bob) > narrate 'I am the GM now'
-refused: law-denied: any [ not (verb in {write,7}), subject == 15178349363870247997 ]
+refused: law-denied: any [ not (verb in {write,7}), subject == 18012384069138434823 ]
 
 ### row 104 (bob) > look
 The Lamplighter's House — The anteroom (scene 1, turn 2)
