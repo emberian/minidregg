@@ -132,6 +132,7 @@ theorem get_mergeState_cases (s t : State) (k : Slot) :
 /-- The slot a predicate reads, when it reads exactly one (atoms and their negations). -/
 def singleSlot : Pred → Option Slot
   | .eq k _ => some k
+  | .ran program => some (ranSlot program)
   | .le k _ => some k
   | .memberOf k _ => some k
   | .not q => singleSlot q
@@ -143,6 +144,9 @@ theorem eval_congr_slot : ∀ (p : Pred) {k : Slot}, singleSlot p = some k →
     ∀ {old old' s s' : State}, s.get k = s'.get k → eval p old s = eval p old' s'
   | .eq k' v, k, hk, _, _, s, s', h => by
       obtain rfl : k' = k := by simpa [singleSlot] using hk
+      simp only [eval, evalWith, h]
+  | .ran program, k, hk, _, _, s, s', h => by
+      obtain rfl : ranSlot program = k := by simpa [singleSlot] using hk
       simp only [eval, evalWith, h]
   | .le k' v, k, hk, _, _, s, s', h => by
       obtain rfl : k' = k := by simpa [singleSlot] using hk
@@ -177,6 +181,7 @@ def NewOnly : Pred → Bool
   | .leSlotsOff _ _ _ => true
   | .witnessed _ => false
   | .hashEq _ _ _ => true
+  | .ran _ => true
   | .not q => NewOnly q
   | .allL ps => NewOnlyList ps
   | .anyL ps => NewOnlyList ps
@@ -193,6 +198,9 @@ theorem eval_congr_toFun : ∀ (p : Pred), NewOnly p = true →
     ∀ {old old' s s' : State}, toFun s = toFun s' → eval p old s = eval p old' s'
   | .eq k v, _, old, old', _, _, h =>
       eval_congr_slot (.eq k v) rfl (old := old) (old' := old') (ofRead_injective (congrFun h k))
+  | .ran program, _, old, old', _, _, h =>
+      eval_congr_slot (.ran program) rfl (old := old) (old' := old')
+        (ofRead_injective (congrFun h (ranSlot program)))
   | .le k v, _, old, old', _, _, h =>
       eval_congr_slot (.le k v) rfl (old := old) (old' := old') (ofRead_injective (congrFun h k))
   | .memberOf k xs, _, old, old', _, _, h =>
@@ -316,6 +324,7 @@ def dial : Pred → Verdict
   | .leSlotsOff _ _ _ => .free
   | .witnessed _ => .thirdParty
   | .hashEq _ _ _ => .ordering
+  | .ran _ => .free
   | .not q => if (singleSlot q).isSome then .free else Verdict.combine .ordering (dial q)
   | .allL ps => dialList ps
   | .anyL ps => Verdict.combine .ordering (dialList ps)
@@ -334,6 +343,8 @@ def MergeClosed (p : Pred) : Prop :=
 mutual
 theorem dial_free_closed : ∀ (p : Pred), dial p = .free → MergeClosed p
   | .eq k v, _ => fun old s t hs ht => single_slot_closed (.eq k v) rfl old old old s t hs ht
+  | .ran program, _ => fun old s t hs ht =>
+      single_slot_closed (.ran program) rfl old old old s t hs ht
   | .le k v, _ => fun old s t hs ht => single_slot_closed (.le k v) rfl old old old s t hs ht
   | .memberOf k xs, _ => fun old s t hs ht =>
       single_slot_closed (.memberOf k xs) rfl old old old s t hs ht

@@ -47,6 +47,7 @@ inductive Token where
   | writeOnce (slot : String)
   | monotone (slot : String)
   | witnessed (identifier : String)
+  | ran (program : Nat)
   | not
   | all
   | any
@@ -83,6 +84,7 @@ def encodeToken : Token → List UInt8
   | .leSlots left right => 12 :: slotPairStream.encode (left, right)
   | .leSlotsOff left right offset => 13 :: slotPairIntStream.encode ((left, right), offset)
   | .hashEq value blinder commit => 15 :: slotTripleStream.encode (value, (blinder, commit))
+  | .ran program => 14 :: StreamCodec.nat.encode program
 
 def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 0 :: bytes => do
@@ -120,6 +122,9 @@ def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 15 :: bytes => do
       let ((value, (blinder, commit)), suffix) ← slotTripleStream.decodePrefix bytes
       some (.hashEq value blinder commit, suffix)
+  | 14 :: bytes => do
+      let (program, suffix) ← StreamCodec.nat.decodePrefix bytes
+      some (.ran program, suffix)
   | _ => none
 
 theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
@@ -145,6 +150,7 @@ def step : Token → Stack → Option Stack
   | .leSlots left right, stack => some (.inl (.leSlots left right) :: stack)
   | .leSlotsOff left right offset, stack => some (.inl (.leSlotsOff left right offset) :: stack)
   | .hashEq value blinder commit, stack => some (.inl (.hashEq value blinder commit) :: stack)
+  | .ran program, stack => some (.inl (.ran program) :: stack)
   | .not, .inl predicate :: stack => some (.inl (.not predicate) :: stack)
   | .all, .inr predicates :: stack => some (.inl (.allL predicates) :: stack)
   | .any, .inr predicates :: stack => some (.inl (.anyL predicates) :: stack)
@@ -172,6 +178,7 @@ def tokensInto : Pred → List Token → List Token
   | .leSlotsOff left right offset, suffix => .leSlotsOff left right offset :: suffix
   | .witnessed vk, suffix => .witnessed vk.id :: suffix
   | .hashEq value blinder commit, suffix => .hashEq value blinder commit :: suffix
+  | .ran program, suffix => .ran program :: suffix
   | .not predicate, suffix => tokensInto predicate (.not :: suffix)
   | .allL predicates, suffix => listTokensInto predicates (.all :: suffix)
   | .anyL predicates, suffix => listTokensInto predicates (.any :: suffix)
@@ -197,6 +204,7 @@ theorem runTokens_tokensInto (predicate : Pred) (suffix : List Token) (stack : S
   | leSlotsOff left right offset => rfl
   | witnessed vk => cases vk; rfl
   | hashEq value blinder commit => rfl
+  | ran program => rfl
   | not predicate =>
       rw [tokensInto, runTokens_tokensInto]
       rfl
@@ -343,10 +351,10 @@ theorem hashEq_token_round_trip (value blinder commit : String) (suffix : List U
       some (.hashEq value blinder commit, suffix) :=
   decodeToken_encode _ _
 
-/-- On `final` tags 11-13 are eqSlots/leSlots/leSlotsOff and 15 is hashEq;
-14 (reserved for `ran`) and 16 are unassigned and refuse. -/
+/-- On `final` tags 11-13 are eqSlots/leSlots/leSlotsOff, 14 is `ran` and 15
+is hashEq; 16 is the first unassigned tag and refuses. -/
 theorem unassigned_tags_rejected (suffix : List UInt8) :
-    decodeToken (14 :: suffix) = none ∧ decodeToken (16 :: suffix) = none := ⟨rfl, rfl⟩
+    decodeToken (16 :: suffix) = none := rfl
 
 theorem wrong_stack_sort_rejected : decodePred [.nil, .not] = none := rfl
 
@@ -434,7 +442,7 @@ theorem leSlotsOff_tag (left right : String) (offset : Int) :
 
 /-- The v4 vocabulary is exactly tags 0..13: a token byte of 14 or more refuses to decode, so a
 record from any later vocabulary is refused rather than read. -/
-theorem decodeToken_unknown_tag (tag : UInt8) (htag : tag.toNat = 14 ∨ 16 ≤ tag.toNat)
+theorem decodeToken_unknown_tag (tag : UInt8) (htag : 16 ≤ tag.toNat)
     (rest : List UInt8) :
     decodeToken (tag :: rest) = none := by
   unfold decodeToken

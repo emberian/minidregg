@@ -16,6 +16,8 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 const MAX_RECORD: u64 = 256 * 1024;
+/// A Nock program birth carries the program (jam + ABI) as hex in its source.
+const MAX_PROGRAM_SOURCE: u64 = 4 * 1024 * 1024;
 
 /// Client-side private-cell codec (`PrivateEnvelope/v1`); hooked into `propose`
 /// and `read` by `--private ROOM`. See `docs/PRIVATE-CELL.md`.
@@ -143,9 +145,13 @@ pub(crate) fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
+    bounded_json_limit(path, MAX_RECORD)
+}
+
+fn bounded_json_limit(path: &Path, limit: u64) -> Result<Value> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-    if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD {
+    if !metadata.file_type().is_file() || metadata.len() > limit {
         return Err(format!(
             "{} must be a bounded regular JSON file",
             path.display()
@@ -153,9 +159,9 @@ pub(crate) fn bounded_json(path: &Path) -> Result<Value> {
     }
     let mut bytes = Vec::new();
     File::open(path)
-        .and_then(|file| file.take(MAX_RECORD + 1).read_to_end(&mut bytes))
+        .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes))
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    if bytes.len() as u64 > MAX_RECORD {
+    if bytes.len() as u64 > limit {
         return Err(format!("{} exceeds workspace JSON bound", path.display()));
     }
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
@@ -798,9 +804,30 @@ fn propose(
     let intent = match member(&request, "action")? {
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
-            if obj.len() != 3 || !obj.contains_key("targets") {
-                return Err("invoke proposal may contain only type, action, targets".into());
+            let claimed = obj.contains_key("run");
+            if obj.len() != 3 + usize::from(claimed) || !obj.contains_key("targets") {
+                return Err("invoke proposal may contain only type, action, targets, run".into());
             }
+            // K-RAN: a Nock run claim rides inside the signed command; the Host
+            // parses it exactly (programId, sample, output, steps) and re-executes.
+            let run = match request.get("run") {
+                None => None,
+                Some(claim) => {
+                    let fields = claim.as_object().ok_or("run claim must be an object")?;
+                    if fields.len() != 4 {
+                        return Err("run claim may contain only programId, sample, output, steps".into());
+                    }
+                    field_decimal(member(claim, "programId")?, "run programId")?;
+                    field_decimal(member(claim, "steps")?, "run steps")?;
+                    for key in ["sample", "output"] {
+                        let hex = member(claim, key)?;
+                        if hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+                            return Err("run claim jams must be hex".into());
+                        }
+                    }
+                    Some(claim.clone())
+                }
+            };
             let selected = request
                 .get("targets")
                 .and_then(Value::as_array)
@@ -890,10 +917,14 @@ fn propose(
                     "expectedTargetRoot":root_value,"payload":lowered}));
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
+            let mut command = json!({"subject":member(workspace,"subject")?,
+                "nonce":random_nonce()?,"targets":target_rows});
+            if let Some(claim) = run {
+                command["run"] = claim;
+            }
             json!({"subject":member(workspace,"subject")?,"nonce":nonce,
-                "purpose":{"type":"prepare","draft":{"type":"invoke",
-                    "command":{"subject":member(workspace,"subject")?,
-                    "nonce":random_nonce()?,"targets":target_rows}}},"grants":grants})
+                "purpose":{"type":"prepare","draft":{"type":"invoke","command":command}},
+                "grants":grants})
         }
         "install-policy" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
@@ -1395,6 +1426,7 @@ fn complete_birth(
     source: &Value,
     receipt: &Value,
     reservation: &participant_namespace::Reservation,
+    program_cell: Option<&str>,
 ) -> Result<Value> {
     let birth = source.get("birth").ok_or("retained birth source absent")?;
     let parts = birth
@@ -1402,11 +1434,16 @@ fn complete_birth(
         .and_then(Value::as_array)
         .and_then(|values| values.first())
         .ok_or("retained birth source lacks resource")?;
-    let target = member(parts, "target")?;
+    // A Nock program is born at its content address: the Host derives its
+    // target, so the reservation holds only the two capability identifiers.
+    let target = match program_cell {
+        Some(cell) => cell,
+        None => member(parts, "target")?,
+    };
     let kind = member(parts, "kind")?;
     let owner = member(parts, "ownerCapability")?;
     let control = member(parts, "controlCapability")?;
-    if reservation.ids.get("target").map(String::as_str) != Some(target)
+    if (program_cell.is_none() && reservation.ids.get("target").map(String::as_str) != Some(target))
         || reservation.ids.get("ownerCapability").map(String::as_str) != Some(owner)
         || reservation.ids.get("controlCapability").map(String::as_str) != Some(control)
     {
@@ -1448,6 +1485,10 @@ struct BirthShape<'a> {
     /// `--in ROOM`: the workspace reference name of the room the resource is
     /// born in (its parent cell); `None` births at the root.
     room: Option<&'a str>,
+    /// `storage: "nock"`: the program's canonical DREGG/NOCK/PROGRAM bytes (hex)
+    /// from the Host's own nock-check verdict and, when admissible, its cell id.
+    /// A program is born at its content address, so no target is reserved.
+    program: Option<(String, Option<String>)>,
 }
 
 /// Immutable authoring generations of one reserved birth request, in order.
@@ -1571,13 +1612,21 @@ fn birth(
         Some(room_name) => Some(member(&reference(root, room_name)?, "target")?.to_string()),
         None => None,
     };
-    if !matches!(shape.storage, "content" | "declared" | "stream") {
-        return Err("supported resource storage is content, declared or stream".into());
+    if !matches!(shape.storage, "content" | "declared" | "stream" | "nock") {
+        return Err("supported resource storage is content, declared, stream or nock".into());
     }
     decimal(shape.owner, "birth owner")?;
     // An account (a realm well, or a holder's purse) is declared storage only.
     if !matches!((shape.kind, shape.storage), ("object", _) | ("account", "declared")) {
         return Err("resource kind is object, or account with declared storage".into());
+    }
+    let program = shape.program.clone();
+    match (shape.storage, &program) {
+        ("nock", None) => return Err("nock storage requires --program".into()),
+        (storage, Some(_)) if storage != "nock" => {
+            return Err("--program is only for nock storage".into())
+        }
+        _ => {}
     }
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = member_path(workspace, "namespaceRoot")?;
@@ -1594,6 +1643,9 @@ fn birth(
         "subject":member(workspace,"subject")?});
     if let Some(room) = &room {
         requested_core["room"] = json!(room);
+    }
+    if let Some((hex, _)) = &program {
+        requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
     }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
@@ -1613,7 +1665,7 @@ fn birth(
         requested
     };
     let stable_request = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
-    let roles = [
+    let mut roles = vec![
         Role {
             label: "target".into(),
             kind: IdKind::Resource,
@@ -1627,6 +1679,9 @@ fn birth(
             kind: IdKind::Capability,
         },
     ];
+    if program.is_some() {
+        roles.remove(0);
+    }
     let reservation = participant_namespace::reserve(
         &namespace_root,
         member(&context["genesis"], "domain")?,
@@ -1678,14 +1733,22 @@ fn birth(
         .join("sources")
         .join(format!("create-{name_value}.json"));
     let nonce = member(&request, "nonce")?;
+    let resource = match &program {
+        Some((hex, _)) => json!({"kind":shape.kind,"storage":shape.storage,"program":hex,
+            "owner":shape.owner,
+            "ownerCapability":reservation.ids["ownerCapability"],
+            "controlCapability":reservation.ids["controlCapability"],
+            "predicate":shape.predicate}),
+        None => json!({"kind":shape.kind,"storage":shape.storage,
+            "target":reservation.ids["target"],"owner":shape.owner,
+            "ownerCapability":reservation.ids["ownerCapability"],
+            "controlCapability":reservation.ids["controlCapability"],
+            "predicate":shape.predicate}),
+    };
     let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
-                "resources":[{"kind":shape.kind,"storage":shape.storage,
-                    "target":reservation.ids["target"],"owner":shape.owner,
-                    "ownerCapability":reservation.ids["ownerCapability"],
-                    "controlCapability":reservation.ids["controlCapability"],
-                    "predicate":shape.predicate}],
+                "resources":[resource],
                 "sourceCapabilities":source_capabilities,
                 "funding":funding,"feePayer":context["feePayer"]},
             "grants":context["grants"]});
@@ -1693,7 +1756,7 @@ fn birth(
         expected_source["birth"]["resources"][0]["room"] = json!(room);
     }
     let source = if source_path.exists() {
-        let saved = bounded_json(&source_path)?;
+        let saved = bounded_json_limit(&source_path, MAX_PROGRAM_SOURCE)?;
         if saved != expected_source {
             return Err("retained birth source differs from reservation request".into());
         }
@@ -1710,6 +1773,9 @@ fn birth(
         .and_then(|values| values.first())
         .ok_or("retained birth source lacks resource")?;
     for role in ["target", "ownerCapability", "controlCapability"] {
+        if role == "target" && program.is_some() {
+            continue;
+        }
         if parts.get(role).and_then(Value::as_str) != reservation.ids.get(role).map(String::as_str)
         {
             return Err("retained birth source differs from namespace reservation".into());
@@ -1822,8 +1888,24 @@ pub(crate) fn create(
     room: Option<&str>,
     kind: &str,
     owner: Option<&str>,
+    program_path: Option<&Path>,
 ) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
+    // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
+    // canonical DREGG/NOCK/PROGRAM/v1 bytes and, when admissible, its cell id.
+    let program = match program_path {
+        Some(path) => {
+            let verdict = bounded_json_limit(path, MAX_PROGRAM_SOURCE)?;
+            if verdict.get("type").and_then(Value::as_str) != Some("nock-check") {
+                return Err("--program must be a Host nock-check verdict".into());
+            }
+            Some((
+                member(&verdict, "program")?.to_owned(),
+                verdict.get("cellId").and_then(Value::as_str).map(str::to_owned),
+            ))
+        }
+        None => None,
+    };
     // `--owner SUBJECT`: the creator pays for and births a resource owned by
     // another subject (a room founder birthing a member's stream); the owner
     // and control grants are issued to that subject, not to the creator.
@@ -1842,9 +1924,11 @@ pub(crate) fn create(
             predicate: &predicate,
             funding: None,
             room,
+            program: program.clone(),
         },
     )?;
-    complete_birth(root, name_value, &source, &receipt, &reservation).map(|_| ())
+    let program_cell = program.as_ref().and_then(|(_, cell)| cell.as_deref());
+    complete_birth(root, name_value, &source, &receipt, &reservation, program_cell).map(|_| ())
 }
 
 /// A declared account the sponsor births for another admitted subject, funded
@@ -1870,6 +1954,7 @@ pub(crate) fn create_funded_account(
             predicate,
             funding: Some(amount),
             room: None,
+            program: None,
         },
     )?;
     let resource = &source["birth"]["resources"][0];
@@ -1972,6 +2057,7 @@ fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<
             predicate: &predicate,
             funding: Some(request.funding),
             room: None,
+            program: None,
         },
     )?;
     let account = &source["birth"]["resources"][0];
@@ -2607,6 +2693,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = os_string(args.required("name")?, "resource name")?;
             let storage = os_string(args.required("storage")?, "storage")?;
             let predicate = path(args.required("predicate")?);
+            let program = args.optional("program").map(path);
             let room = match args.optional("in") {
                 Some(value) => Some(os_string(value, "room name")?),
                 None => None,
@@ -2629,6 +2716,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 room.as_deref(),
                 &kind,
                 owner.as_deref(),
+                program.as_deref(),
             )
         }
         "provision" => {

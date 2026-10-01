@@ -19,6 +19,11 @@ SUBJECT=${NEWPARTICIPANT_SPONSOR_SUBJECT:-7}
 for value in "$DOMAIN" "$SUBJECT"; do
   case $value in ""|0?*|*[!0-9]*) echo "domain and sponsor subject must be canonical decimal" >&2; exit 2;; esac
 done
+# The template owner budget (every owner capability's maxCost). A birth intent's
+# observation costs its byte length, so a fixture that births a Nock program
+# (J-NOCK-2b, ~566 KB) raises it; the default is unchanged.
+OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-100000}
+case "$OWNER_BUDGET" in ''|*[!0-9]*) echo 'NEWPARTICIPANT_OWNER_BUDGET must be decimal' >&2; exit 2;; esac
 for executable in "$HOST" "$MINI" "$STORE" "$VERIFIER"; do
   case "$executable" in /*) ;; *) echo "binary path must be absolute: $executable" >&2; exit 2;; esac
   [ -x "$executable" ] || { echo "not executable: $executable" >&2; exit 2; }
@@ -42,8 +47,8 @@ NEWCOMER_PUBLIC=$(od -An -tx1 -v "$ROOT/newcomer.pub" | tr -d ' \n')
 
 # The one genesis template (genesis.sh) from the example params, with this
 # Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS.
-jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" \
-  '.domain = $domain | .sponsor.subject = $subject' \
+jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" \
+  '.domain = $domain | .sponsor.subject = $subject | .ownerBudget = $budget' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
 sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" \
   "$HOST" "$STORE" "$VERIFIER" "$ROOT"

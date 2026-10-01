@@ -27,7 +27,8 @@ def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
   | .content | .declaredObject | .stream => some .object
   | .accountMetadata => some .account
   | .declaredProgram => some .program
-  | .eventHistory | .authority | .resourceBook | .policySource | .pay => none
+  -- A Nock program cell is read through ops 131-133 (public), not observed.
+  | .eventHistory | .authority | .resourceBook | .policySource | .pay | .nockProgram => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (kind : ResourceKind) (target : Nat) (expectedRoot : Digest) where

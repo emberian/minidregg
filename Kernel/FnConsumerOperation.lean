@@ -436,7 +436,7 @@ theorem operationAtom_ne_replyAtom (domain semantics : Digest)
 choice depends on the local consumer subject and stable operation nonce. -/
 def marker (domain semantics : Digest) (subject : SubjectId) (nonce : Nat) : Digest :=
   DeclaredResourceController.transactionId domain semantics
-    ⟨subject, nonce, []⟩
+    ⟨subject, nonce, [], none⟩
 
 def bindingCommand (domain semantics : Digest) (report : Report)
     (receipt : Receipt) : Except String DeclaredResourceController.Command := do
@@ -464,7 +464,7 @@ def bindingCommand (domain semantics : Digest) (report : Report)
   pure ⟨report.subject,
     operationNonce domain semantics report.application report.operation,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-      .content ⟨actions⟩, none⟩]⟩
+      .content ⟨actions⟩, none⟩], none⟩
 
 def conflictCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
@@ -485,7 +485,7 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
   ⟨report.subject,
    conflictNonce domain semantics report,
    [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
-     .content ⟨actions⟩, none⟩]⟩
+     .content ⟨actions⟩, none⟩], none⟩
 
 inductive Decision where
   | fresh (command : DeclaredResourceController.Command) (reply : Reply)

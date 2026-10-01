@@ -112,3 +112,4 @@ import Compiler.PredCompileOrderWitness
 import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
+import Compiler.NockProgramCodec -- NOCK K-NOCK-CELL: program cell (jam + ABI), DREGG/NOCK/PROGRAM/v1 + ABI/v1, programId, birth admissibility

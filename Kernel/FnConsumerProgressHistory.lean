@@ -102,7 +102,7 @@ def progressAtom (domain semantics : Digest) (evidence : Evidence) : AtomId :=
 def marker (domain semantics : Digest) (subject : SubjectId)
     (evidence : Evidence) : Digest :=
   DeclaredResourceController.transactionId domain semantics
-    ⟨subject, progressNonce domain semantics evidence, []⟩
+    ⟨subject, progressNonce domain semantics evidence, [], none⟩
 
 def progressCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
@@ -110,7 +110,7 @@ def progressCommand (domain semantics : Digest) (report : Report) :
     progressNonce domain semantics report.evidence,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (progressAtom domain semantics report.evidence)
-        (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩]⟩
+        (.inlineObject ⟨9⟩) (evidenceCodec.encode report.evidence)]⟩, none⟩], none⟩
 
 /-- Exactly the prior operation helper's byte-array command comparison.
     It avoids recursive equality on a potentially large signed command. -/

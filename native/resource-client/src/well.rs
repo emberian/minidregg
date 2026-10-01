@@ -253,6 +253,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(&realm),
                 "account",
                 None,
+                None,
             )
         }
         "mint" | "burn" => command(&root, args, &action),

@@ -116,6 +116,12 @@ structure Vk where
   id : String
 deriving Repr, DecidableEq
 
+/-- The slot the resource controller projects when a command's writes were checked by
+re-executing the Nock program whose `programId` value is `program` (`Kernel.NockRun`):
+`run/program/<decimal id>` holds `1`. No cell field, request or content projection is
+named under `run/`; only the controller writes this namespace. -/
+def ranSlot (program : Nat) : Slot := "run/program/" ++ toString program
+
 /-! ## §3. The AST — the ONE predicate algebra.
 
 Decidable atoms over named slots + the Boolean closure (`not`/`all`/`any`) + the `witnessed`
@@ -152,6 +158,11 @@ inductive Pred where
   (`request/target`, the three slot names, `new[value]`, `new[blinder]`); see
   `Pred.HashEqDigest`. Fails closed on any absent slot or out-of-domain value. -/
   | hashEq    (value blinder commit : Slot)
+  /-- **`ran program`** — this step's writes ARE the product of the Nock program
+  `program` (its `programId` value), re-executed by the kernel on its own sample
+  (NOCK §2.4). A first-party read of the controller-projected `ranSlot program`
+  (`= 1`), not an oracle: re-execution is a controller fact the policy consumes. -/
+  | ran       (program : Nat)
   /-- Boolean negation. -/
   | not       (p : Pred)
   /-- Conjunction over the inlined child list (raw constructor; prefer `Pred.all`). -/
@@ -254,6 +265,7 @@ mutual
                         | _,      _      => false
     | .witnessed vk  => O vk old new
     | .hashEq v b c  => hashEqHolds HashEqDigest.deployed new v b c
+    | .ran program   => decide (new.get (ranSlot program) = some 1)
     | .not q         => !(evalWith O q old new)
     | .allL ps       => evalWithAll O ps old new
     | .anyL ps       => evalWithAny O ps old new
@@ -363,6 +375,15 @@ the tree — exactly the escape hatch's design. -/
 theorem witnessed_discharged_fires :
     evalWith (fun _ _ _ => true) (.witnessed ⟨"vk-1"⟩) sX3 sX5 = true := by decide
 
+/-- **`ran` tooth — fires** on a step whose projection names the checked run. -/
+theorem ran_tooth_fires : eval (.ran 7) sX3 ⟨[(ranSlot 7, 1)]⟩ = true := by decide +kernel
+
+/-- **`ran` tooth — refuses** the same step without the projection, and a run of a
+different program. -/
+theorem ran_tooth_refuses :
+    eval (.ran 7) sX3 sX5 = false ∧ eval (.ran 8) sX3 ⟨[(ranSlot 7, 1)]⟩ = false := by
+  decide +kernel
+
 /-- **The keystone** (ATLAS design-law 2): the algebra is non-vacuous (a concrete step is
 accepted) AND a single atom exhibits BOTH poles (fires on one step, refuses on the hostile one)
 AND the witnessed escape hatch genuinely toggles (fail-closed vs. discharged). All fields are
@@ -404,3 +425,8 @@ example : (demoPred = demoPred) := by decide
 example : (Pred.eq "x" 5 ≠ Pred.eq "x" 6) := by decide
 
 end Minidregg.Pred
+
+/-- info: 'Minidregg.Pred.ran_tooth_fires' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Pred.ran_tooth_fires
+/-- info: 'Minidregg.Pred.ran_tooth_refuses' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Pred.ran_tooth_refuses

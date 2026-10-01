@@ -87,6 +87,11 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [0..=11, ..] => true,
         // Realm wells (K-WELL): plan, detached assembly, submit.
         [123..=125, _, ..] => true,
+        // NOCK K-NOCK-CELL / K-RAN: read-only program check / show / sample /
+        // run dry run (134 reads no target cell: values are the caller's);
+        // N11: NockApp door poke dry run / peek / state (135-137, same rule).
+        // Renumbered from 117-123 at the final merge (pay holds 117-120).
+        [131..=137, ..] => true,
         [12 | 14] => true,
         [13 | 15, digits @ ..] => {
             !digits.is_empty()
@@ -132,11 +137,13 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 && serde_json::from_slice::<serde_json::Value>(payload)
                     .is_ok_and(|value| value.is_object())
         }
+        // The source bound is 4 MiB, the client's current-birth source bound: a
+        // Nock program birth (NOCK K-NOCK-CELL) carries its jam as hex.
         [91, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
             exact_pair(pair).is_some_and(|(observation, source)| {
                 !observation.is_empty()
                     && !source.is_empty()
-                    && source.len() <= 256 * 1024
+                    && source.len() <= 4 * 1024 * 1024
                     && serde_json::from_slice::<serde_json::Value>(source)
                         .is_ok_and(|value| value.is_object())
             })
@@ -1082,6 +1089,27 @@ mod tests {
         oversized[1] = b'{';
         *oversized.last_mut().unwrap() = b'}';
         assert!(!allowed_operation(&oversized, false));
+        let mut oversized_birth = vec![91];
+        oversized_birth.extend_from_slice(&1u32.to_le_bytes());
+        oversized_birth.push(b'O');
+        let mut source = vec![b' '; 4 * 1024 * 1024 + 1];
+        source[0] = b'{';
+        *source.last_mut().unwrap() = b'}';
+        oversized_birth.extend_from_slice(&source);
+        assert!(!allowed_operation(&oversized_birth, false));
+    }
+
+    #[test]
+    fn nock_program_reads_are_public() {
+        // Renumbered at the final merge: 117-123 -> 131-137.
+        assert!(allowed_operation(&[131, 0, 0, 0, 0], false));
+        assert!(allowed_operation(&[132, b'7'], false));
+        assert!(allowed_operation(&[133, b'{', b'}'], false));
+        assert!(allowed_operation(&[134, b'{', b'}'], false));
+        assert!(allowed_operation(&[135, b'{', b'}'], false));
+        assert!(allowed_operation(&[136, b'{', b'}'], false));
+        assert!(allowed_operation(&[137, b'{', b'}'], false));
+        assert!(!allowed_operation(&[138, b'{', b'}'], false));
     }
 
     #[test]

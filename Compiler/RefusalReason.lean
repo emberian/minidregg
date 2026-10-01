@@ -476,6 +476,7 @@ def renderClause : Pred → String
   | .leSlots a b => s!"{renderSlot a} <= {renderSlot b}"
   | .leSlotsOff a b k => s!"{renderSlot a} <= {renderSlot b} + {k}"
   | .hashEq v b c => s!"hash({renderSlot v}, {renderSlot b}) == {renderSlot c}"
+  | .ran program => s!"ran {program}"
   | .not q => s!"not ({renderClause q})"
   | .allL .nil => "open"
   | .anyL .nil => "sealed"

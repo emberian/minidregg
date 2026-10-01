@@ -37,6 +37,8 @@ import Kernel.PayAssignmentReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
+import Kernel.NockProgramCell
+import Kernel.NockDoor
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -242,6 +244,9 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
       pure (.hashEq (← string (path ++ ".value") (← field path "value" obj))
         (← string (path ++ ".blinder") (← field path "blinder" obj))
         (← string (path ++ ".commit") (← field path "commit" obj)))
+  | "ran" =>
+      let obj ← exactObject path ["type", "program"] json
+      pure (.ran (← nat (path ++ ".program") (← field path "program" obj)))
   | "not" =>
       let obj ← exactObject path ["type", "predicate"] json
       pure (.not (← predicate (path ++ ".predicate") (← field path "predicate" obj)))
@@ -270,6 +275,7 @@ private partial def predicateJson : Pred → Lean.Json
       ("identifier", .str identifier.id)]
   | .hashEq value blinder commit => .mkObj [("type", "hashEq"), ("value", .str value),
       ("blinder", .str blinder), ("commit", .str commit)]
+  | .ran program => .mkObj [("type", "ran"), ("program", .str (toString program))]
   | .not child => .mkObj [("type", "not"), ("predicate", predicateJson child)]
   | .allL children => .mkObj [("type", "all"),
       ("predicates", .arr (children.toList.toArray.map predicateJson))]
@@ -675,12 +681,25 @@ private def commandTarget (path : String) (json : Lean.Json) :
     expectedTargetRoot := ⟨← nat (path ++ ".expectedTargetRoot") (← field path "expectedTargetRoot" obj)⟩
     payload := ← targetPayload (path ++ ".payload") (← field path "payload" obj) }
 
+/-- `DREGG/NOCK/RUN/v1` as JSON: decimal program id and steps, hex jams. -/
+def runClaim (path : String) (json : Lean.Json) : Result Kernel.NockRun.RunClaim := do
+  let obj ← exactObject path ["programId", "sample", "output", "steps"] json
+  pure ⟨⟨← nat (path ++ ".programId") (← field path "programId" obj)⟩,
+    ← decodeHex (path ++ ".sample") (← field path "sample" obj),
+    ← decodeHex (path ++ ".output") (← field path "output" obj),
+    ← nat (path ++ ".steps") (← field path "steps" obj)⟩
+
 private def command (path : String) (json : Lean.Json) : Result DeclaredResourceController.Command := do
-  let obj ← exactObject path ["subject", "nonce", "targets"] json
+  let claimed := ((← object path json).get? "run").isSome
+  let obj ← exactObject path
+    (if claimed then ["subject", "nonce", "targets", "run"] else ["subject", "nonce", "targets"]) json
+  let run ← if claimed then do pure (some (← runClaim (path ++ ".run") (← field path "run" obj)))
+    else pure none
   pure {
     subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
     nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
-    targets := ← list (path ++ ".targets") commandTarget (← field path "targets" obj) }
+    targets := ← list (path ++ ".targets") commandTarget (← field path "targets" obj)
+    run := run }
 
 private def canonicalSource {α : Type} (path : String) (codec : IndexedProgram.LawfulCodec α)
     (json : Lean.Json) : Result (List UInt8) := do
@@ -1302,6 +1321,8 @@ private def birthParts (path : String)
     ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
         (if worker.isSome then grainWorkerFields raw else [])
+    else if storage = "nock" then
+      ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
       roomField) json
@@ -1309,12 +1330,24 @@ private def birthParts (path : String)
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
-  unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" do
-    throw s!"{path}.storage: expected declared, content, grain or stream"
+  unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨
+      storage = "nock" do
+    throw s!"{path}.storage: expected declared, content, grain, stream or nock"
   unless (storage = "declared" ∧ (kind = .object ∨ kind = .account)) ∨
-      ((storage = "content" ∨ storage = "grain" ∨ storage = "stream") ∧ kind = .object) do
-    throw s!"{path}: declared storage is object/account; content, grain and stream storage are object"
-  let target ← nat (path ++ ".target") (← field path "target" obj)
+      ((storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨ storage = "nock") ∧
+        kind = .object) do
+    throw s!"{path}: declared storage is object/account; content, grain, stream and nock storage are object"
+  -- A Nock program cell has no chosen identifier: it is born at its content
+  -- address, so the request names the program and the source derives the target.
+  let program : Option NockProgramCodec.Program ← if storage = "nock" then do
+      let bytes ← decodeHex (path ++ ".program") (← field path "program" obj)
+      match NockProgramCodec.programCodec.decode bytes with
+      | some program => pure (some program)
+      | none => failAt (path ++ ".program") "noncanonical DREGG/NOCK/PROGRAM/v1 bytes"
+    else pure none
+  let target ← match program with
+    | some program => pure (CanonicalCellRegistry.programCellId source.deployment.domain program)
+    | none => nat (path ++ ".target") (← field path "target" obj)
   let owner := SubjectId.mk (← nat (path ++ ".owner") (← field path "owner" obj))
   let ownerId := CapabilityId.mk
     (← nat (path ++ ".ownerCapability") (← field path "ownerCapability" obj))
@@ -1325,7 +1358,9 @@ private def birthParts (path : String)
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
-    if storage = "content" then
+    if let some program := program then
+      pure (CanonicalCellRegistry.programCell program)
+    else if storage = "content" then
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "stream" then
       pure ⟨.stream, CellState.materialize StreamCell.materializer 0⟩
@@ -3619,5 +3654,277 @@ def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := d
   let obj ← exactObject "$" ["topic", "cursor", "limit"] json
   pure (← decodeHex "$.topic" (← field "$" "topic" obj),
     ← nat "$.cursor" (← field "$" "cursor" obj), ← nat "$.limit" (← field "$" "limit" obj))
+
+/-! ## Nock program cells (host ops 117–119)
+
+Op 117 takes the minimal jam bytes and this ABI JSON and answers what a birth
+of that program would meet, with the canonical `DREGG/NOCK/PROGRAM/v1` bytes the
+birth's `"program"` field carries. Op 118 shows a stored program by id. Op 119
+builds the kernel's sample jam for a stored program. -/
+
+private def nockSlotType (path : String) (json : Lean.Json) :
+    Result NockProgramCodec.SlotType := do
+  match ← string path json with
+  | "nat" => pure .nat
+  | "int" => pure .int
+  | _ => failAt path "expected nat or int"
+
+private def nockSlotTypeName : NockProgramCodec.SlotType → String
+  | .nat => "nat"
+  | .int => "int"
+
+private def nockSampleSlot (path : String) (json : Lean.Json) :
+    Result NockProgramCodec.SampleSlot := do
+  let obj ← exactObject path ["target", "slot", "key", "type"] json
+  pure ⟨← nat (path ++ ".target") (← field path "target" obj),
+    ← string (path ++ ".slot") (← field path "slot" obj),
+    ← string (path ++ ".key") (← field path "key" obj),
+    ← nockSlotType (path ++ ".type") (← field path "type" obj)⟩
+
+private def nockOutputSlot (path : String) (json : Lean.Json) :
+    Result NockProgramCodec.OutputSlot := do
+  let obj ← exactObject path ["key", "target", "field", "type"] json
+  pure ⟨← string (path ++ ".key") (← field path "key" obj),
+    ← nat (path ++ ".target") (← field path "target" obj),
+    ← nat (path ++ ".field") (← field path "field" obj),
+    ← nockSlotType (path ++ ".type") (← field path "type" obj)⟩
+
+/-- `{"peek", "state", "event"}`: a NockApp kernel door's peek axis and the
+object fields of target 0 holding its state jam atom and event number. -/
+private def nockDoor (path : String) (json : Lean.Json) : Result NockProgramCodec.Door := do
+  let obj ← exactObject path ["peek", "state", "event"] json
+  pure ⟨← nat (path ++ ".peek") (← field path "peek" obj),
+    ← nat (path ++ ".state") (← field path "state" obj),
+    ← nat (path ++ ".event") (← field path "event" obj)⟩
+
+def nockAbi (path : String) (json : Lean.Json) : Result NockProgramCodec.Abi := do
+  let isDoor := ((← object path json).get? "door").isSome
+  let obj ← exactObject path
+    (["version", "arm", "sample", "outputs", "libraries", "fuel"] ++ if isDoor then ["door"] else [])
+    json
+  let door ← if isDoor then some <$> nockDoor (path ++ ".door") (← field path "door" obj)
+    else pure none
+  pure {
+    door := door
+    version := ← nat (path ++ ".version") (← field path "version" obj)
+    arm := ← nat (path ++ ".arm") (← field path "arm" obj)
+    sample := ← list (path ++ ".sample") nockSampleSlot (← field path "sample" obj)
+    outputs := ← list (path ++ ".outputs") nockOutputSlot (← field path "outputs" obj)
+    libraries := ← list (path ++ ".libraries") (fun p j => Digest.mk <$> nat p j)
+      (← field path "libraries" obj)
+    fuel := ← nat (path ++ ".fuel") (← field path "fuel" obj) }
+
+def nockAbiJson (abi : NockProgramCodec.Abi) : Lean.Json :=
+  Lean.Json.mkObj [("version", toString abi.version), ("arm", toString abi.arm),
+    ("sample", .arr (abi.sample.map fun slot => .mkObj [("target", toString slot.target),
+      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)]).toArray),
+    ("outputs", .arr (abi.outputs.map fun slot => .mkObj [("key", slot.key),
+      ("target", toString slot.target), ("field", toString slot.field),
+      ("type", nockSlotTypeName slot.type)]).toArray),
+    ("libraries", .arr (abi.libraries.map fun d => Lean.Json.str (toString d.value)).toArray),
+    ("fuel", toString abi.fuel)] |>.mergeObj (match abi.door with
+      | none => Lean.Json.mkObj []
+      | some d => Lean.Json.mkObj [("door", Lean.Json.mkObj [("peek", toString d.peek),
+          ("state", toString d.state), ("event", toString d.event)])])
+
+/-- Op 117 request: the jam bytes and the ABI source. -/
+def nockProgramOf (jam : List UInt8) (abiSource : String) : Result NockProgramCodec.Program := do
+  let json ← parse abiSource
+  pure ⟨jam, ← nockAbi "abi" json⟩
+
+/-- The verdict, and the canonical record bytes in every case: a refused record
+is still the exact bytes a birth would carry, so the kernel's own refusal of it
+can be exercised end to end. -/
+def nockCheckJson (submitted : NockProgramCodec.Program) :
+    Kernel.NockProgramCell.CheckVerdict → Lean.Json
+  | .malformed => .mkObj [("type", "nock-check"), ("verdict", "malformed")]
+  | .refused reason => .mkObj [("type", "nock-check"), ("verdict", "refused"),
+      ("reason", reason.name),
+      ("program", hexJson (NockProgramCodec.programCodec.encode submitted))]
+  | .admissible program pid code cellId present => .mkObj [("type", "nock-check"),
+      ("verdict", "admissible"), ("programId", toString pid.value),
+      ("codeDigest", toString code.value), ("cellId", toString cellId),
+      ("present", Lean.Json.bool present), ("jamBytes", toString program.jam.length),
+      ("program", hexJson (NockProgramCodec.programCodec.encode program))]
+
+/-- Op 118: a stored program, or its absence. -/
+def nockShowJson (domain : Digest) (id : Digest) :
+    Option NockProgramCodec.Program → Lean.Json
+  | none => .mkObj [("type", "nock-program"), ("programId", toString id.value),
+      ("present", Lean.Json.bool false)]
+  | some program => .mkObj [("type", "nock-program"), ("programId", toString id.value),
+      ("present", Lean.Json.bool true),
+      ("cellId", toString (CanonicalCellRegistry.programCellId domain program)),
+      ("codeDigest", toString (NockProgramCodec.codeDigest program.jam).value),
+      ("jamBytes", toString program.jam.length), ("abi", nockAbiJson program.abi),
+      ("jam", hexJson program.jam)]
+
+/-- Op 119 request: `{"programId", "context": {height, caller, room}, "targets",
+"values": [[index, slot, value], …]}`. -/
+def nockSampleRequest (source : String) :
+    Result (Digest × Kernel.NockProgramCell.Context × List Nat × List (Nat × String × Int)) := do
+  let json ← parse source
+  let obj ← exactObject "sample" ["programId", "context", "targets", "values"] json
+  let ctxObj ← exactObject "sample.context" ["height", "caller", "room"]
+    (← field "sample" "context" obj)
+  let ctx : Kernel.NockProgramCell.Context := ⟨
+    ← nat "sample.context.height" (← field "sample.context" "height" ctxObj),
+    ← nat "sample.context.caller" (← field "sample.context" "caller" ctxObj),
+    ← nat "sample.context.room" (← field "sample.context" "room" ctxObj)⟩
+  let value (path : String) (json : Lean.Json) : Result (Nat × String × Int) := do
+    let parts ← array path json
+    unless parts.size = 3 do failAt path "expected [index, slot, value]"
+    pure (← nat (path ++ "[0]") parts[0]!, ← string (path ++ "[1]") parts[1]!,
+      ← int (path ++ "[2]") parts[2]!)
+  pure (Digest.mk (← nat "sample.programId" (← field "sample" "programId" obj)), ctx,
+    ← list "sample.targets" nat (← field "sample" "targets" obj),
+    ← list "sample.values" value (← field "sample" "values" obj))
+
+/-- Op 120 request: `{"programId", "caller", "room", "targets", "values"}`; the
+height is the Host's own logical height. -/
+def nockRunRequest (source : String) :
+    Result (Digest × Nat × Nat × List Nat × List (Nat × String × Int)) := do
+  let json ← parse source
+  let obj ← exactObject "run" ["programId", "caller", "room", "targets", "values"] json
+  let value (path : String) (json : Lean.Json) : Result (Nat × String × Int) := do
+    let parts ← array path json
+    unless parts.size = 3 do failAt path "expected [index, slot, value]"
+    pure (← nat (path ++ "[0]") parts[0]!, ← string (path ++ "[1]") parts[1]!,
+      ← int (path ++ "[2]") parts[2]!)
+  pure (Digest.mk (← nat "run.programId" (← field "run" "programId" obj)),
+    ← nat "run.caller" (← field "run" "caller" obj),
+    ← nat "run.room" (← field "run" "room" obj),
+    ← list "run.targets" nat (← field "run" "targets" obj),
+    ← list "run.values" value (← field "run" "values" obj))
+
+private def fieldWritesJson (writes : List Kernel.NockRun.FieldWrite) : Lean.Json :=
+  .arr (writes.map fun w => Lean.Json.arr #[toString w.target, toString w.field,
+    toString w.value]).toArray
+
+/-- Op 120 reply: the kernel's sample, the oracle's verdict and Lean steps at the
+ABI fuel, the product and its decoded writes; `claim` is what a runner signs. -/
+def nockRunJson (programId : Digest) (height : Nat) :
+    Kernel.NockRun.DryRun → Lean.Json
+  | .missingProgram => .mkObj [("type", "nock-run"), ("verdict", "refused"),
+      ("reason", "programUnknown")]
+  | .ambiguousValues => .mkObj [("type", "nock-run"), ("verdict", "refused"),
+      ("reason", "ambiguousValues")]
+  | .refused reason => .mkObj [("type", "nock-run"), ("verdict", "refused"),
+      ("reason", reason.name)]
+  | .ran sample result writes =>
+      let base : List (String × Lean.Json) := [("type", "nock-run"), ("height", toString height),
+        ("sample", hexJson sample)]
+      match result with
+      | .ok out steps =>
+        let output := Noun.jam out
+        .mkObj (base ++ ([("verdict", "ok"), ("steps", toString steps), ("output", hexJson output),
+          ("writes", match writes with | some ws => fieldWritesJson ws | none => Lean.Json.null),
+          ("claim", .mkObj [("programId", toString programId.value), ("sample", hexJson sample),
+            ("output", hexJson output), ("steps", toString steps)])] : List (String × Lean.Json)))
+      | .crash steps => .mkObj (base ++ ([("verdict", "crash"), ("steps", toString steps)] :
+          List (String × Lean.Json)))
+      | .exhausted steps => .mkObj (base ++ ([("verdict", "exhausted"), ("steps", toString steps)] :
+          List (String × Lean.Json)))
+
+/-! ## NockApp kernel doors (host ops 121–123, N11)
+
+Each request names a stored door program and the instance's view as the caller
+read it (`"state"`: the decimal jam atom of field `door.state`, or null for an
+instance never poked; `"event"`: field `door.event`, `"0"` when unloaded). The
+ops read no target cell: values are the caller's own signed views, as op 120. -/
+
+/-- A canonical jam (hex) as a noun. -/
+private def nounHex (path : String) (json : Lean.Json) : Result Noun := do
+  let bytes ← decodeHex path json
+  match Noun.cue bytes with
+  | some n => if Noun.jam n = bytes then pure n else failAt path "non-canonical jam"
+  | none => failAt path "not a jam"
+
+private def doorView (path : String) (obj : Std.TreeMap.Raw String Lean.Json compare) :
+    Result Kernel.NockDoor.View := do
+  pure ⟨← optional (path ++ ".state") nat (← field path "state" obj),
+    ← nat (path ++ ".event") (← field path "event" obj)⟩
+
+/-- Op 121: `{"programId", "state", "event", "wire": <jam hex>, "cause": <jam hex>}`. -/
+def nockDoorPokeRequest (source : String) :
+    Result (Digest × Kernel.NockDoor.View × Noun × Noun) := do
+  let json ← parse source
+  let obj ← exactObject "poke" ["programId", "state", "event", "wire", "cause"] json
+  pure (Digest.mk (← nat "poke.programId" (← field "poke" "programId" obj)), ← doorView "poke" obj,
+    ← nounHex "poke.wire" (← field "poke" "wire" obj), ← nounHex "poke.cause" (← field "poke" "cause" obj))
+
+/-- Op 122: `{"programId", "state", "event", "path": <jam hex>}`; op 123 without `path`. -/
+def nockDoorReadRequest (source : String) (withPath : Bool) :
+    Result (Digest × Kernel.NockDoor.View × Noun) := do
+  let json ← parse source
+  let obj ← exactObject "door" (["programId", "state", "event"] ++ if withPath then ["path"] else [])
+    json
+  let path ← if withPath then do nounHex "door.path" (← field "door" "path" obj)
+    else pure (.atom 0)
+  pure (Digest.mk (← nat "door.programId" (← field "door" "programId" obj)), ← doorView "door" obj,
+    path)
+
+/-- `[~ ~ x]` with an atom `x`: the atom, for display. -/
+private def peekAtom : Noun → Option Nat
+  | .cell (.atom 0) (.cell (.atom 0) (.atom x)) => some x
+  | _ => none
+
+private def ranJson (type : String) (extra : Noun → Nat → List (String × Lean.Json)) :
+    Except Kernel.NockRun.Refusal Kernel.NockRun.Ran → Lean.Json
+  | .error reason => .mkObj [("type", type), ("verdict", "refused"), ("reason", reason.name)]
+  | .ok (.crash k) => .mkObj [("type", type), ("verdict", "crash"), ("steps", toString k)]
+  | .ok (.exhausted k) => .mkObj [("type", type), ("verdict", "exhausted"), ("steps", toString k)]
+  | .ok (.ok out k) => .mkObj (([("type", type), ("verdict", "ok"), ("steps", toString k)] :
+      List (String × Lean.Json)) ++ extra out k)
+
+/-- Op 122 reply: the peek arm's answer (a `(unit (unit *))` jam). -/
+def nockDoorPeekJson : Except Kernel.NockRun.Refusal Kernel.NockRun.Ran → Lean.Json :=
+  ranJson "nock-door-peek" fun out _ =>
+    [("answer", hexJson (Noun.jam out)),
+     ("value", match peekAtom out with | some x => Lean.Json.str (toString x) | none => Lean.Json.null)]
+
+/-- Op 123 reply: the instance's state now (stored, or the booted trap's). -/
+def nockDoorStateJson : Except Kernel.NockRun.Refusal Kernel.NockRun.Ran → Lean.Json :=
+  ranJson "nock-door-state" fun out _ =>
+    [("state", hexJson (Noun.jam out)), ("stateAtom", toString (Kernel.NockDoor.jamAtom out)),
+     ("value", match out with | .atom x => Lean.Json.str (toString x) | _ => Lean.Json.null)]
+
+/-- Op 121 reply: what a runner claims for one poke. `claim` appears when the
+run finished; `writes` when every effect is a write (else `writesRefusal`). -/
+def nockDoorPokeJson (programId : Digest) : Kernel.NockDoor.DryPoke → Lean.Json
+  | .refused reason => .mkObj [("type", "nock-door-poke"), ("verdict", "refused"),
+      ("reason", reason.name)]
+  | .ran sample s f result decoded =>
+    let base : List (String × Lean.Json) := [("type", "nock-door-poke"),
+      ("sample", hexJson (Noun.jam sample)), ("subjectFormula", hexJson (Noun.jam (.cell s f)))]
+    match result with
+    | .crash k => .mkObj (base ++ ([("verdict", "crash"), ("steps", toString k)] :
+        List (String × Lean.Json)))
+    | .exhausted k => .mkObj (base ++ ([("verdict", "exhausted"), ("steps", toString k)] :
+        List (String × Lean.Json)))
+    | .ok product k =>
+      let ran := base ++ ([("verdict", "ok"), ("steps", toString k),
+        ("product", hexJson (Noun.jam product))] : List (String × Lean.Json))
+      match decoded with
+      | none => .mkObj (ran ++ ([("reason", "doorShape")] : List (String × Lean.Json)))
+      | some (effects, state, writes) =>
+        let output := Noun.jam (.cell effects state)
+        .mkObj (ran ++ ([("output", hexJson output), ("stateJam", hexJson (Noun.jam state)),
+          ("stateOut", toString (Kernel.NockDoor.jamAtom state)),
+          ("value", match state with | .atom x => Lean.Json.str (toString x) | _ => Lean.Json.null),
+          ("writes", match writes with | .ok ws => fieldWritesJson ws | .error _ => Lean.Json.null),
+          ("writesRefusal", match writes with | .ok _ => Lean.Json.null | .error r => Lean.Json.str r.name),
+          ("claim", .mkObj [("programId", toString programId.value), ("sample", hexJson (Noun.jam sample)),
+            ("output", hexJson output), ("steps", toString k)])] : List (String × Lean.Json)))
+
+def nockSampleJson : Kernel.NockProgramCell.SampleVerdict → Lean.Json
+  | .missingProgram => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
+      ("reason", "missingProgram")]
+  | .ambiguousValues => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
+      ("reason", "ambiguousValues")]
+  | .refused => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
+      ("reason", "sampleUnavailable")]
+  | .sample jam => .mkObj [("type", "nock-sample"), ("verdict", "sample"),
+      ("sample", hexJson jam)]
 
 end Minidregg.Host.Json

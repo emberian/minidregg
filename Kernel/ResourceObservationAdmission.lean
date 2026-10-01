@@ -490,7 +490,8 @@ def fieldOf : (kind : CanonicalCellRegistry.Kind) →
   -- stream only when it names `body`.
   | .stream, _ => some .body
   -- Exhaustive on purpose: a new registry kind must say whether it has fields.
-  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ => none
+  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _
+  | .nockProgram, _ => none
 
 /-- A read under `fields` keeps an address exactly when its field is named;
 an address with no field is kept only by a scope naming every field. -/

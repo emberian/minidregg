@@ -182,7 +182,7 @@ def resultCommand (domain semantics : Digest) (report : Report) (result : Result
         (resultAtom domain semantics report.application report.operation)
         (.inlineObject ⟨6⟩) (resultCodec.encode result),
         .createAtom (inboxAtom domain semantics report.application report.operation)
-        (.inlineObject ⟨7⟩) (reportCodec.encode report)]⟩, none⟩]⟩
+        (.inlineObject ⟨7⟩) (reportCodec.encode report)]⟩, none⟩], none⟩
 
 def conflictCommand (domain semantics : Digest) (report : Report) :
     DeclaredResourceController.Command :=
@@ -190,7 +190,7 @@ def conflictCommand (domain semantics : Digest) (report : Report) :
     conflictNonce domain semantics report,
     [⟨.object, report.target, report.capability, 1, report.expectedTargetRoot,
       .content ⟨[.createAtom (conflictAtom domain semantics report)
-        (.inlineObject ⟨8⟩) (reportCodec.encode report)]⟩, none⟩]⟩
+        (.inlineObject ⟨8⟩) (reportCodec.encode report)]⟩, none⟩], none⟩
 
 def originalConflict (pin : FnGatewayPolicy.Pin) (domain semantics : Digest)
     (record : DurableReceiver.IntentRecord) : Option Report := do
