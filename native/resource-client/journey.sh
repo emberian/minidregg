@@ -117,7 +117,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN3P JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -134,6 +134,7 @@ TITLE[KHQ]="commit-reveal at the kernel: a sealed bid opens only to its commitme
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
 TITLE[JN3]="the kernel checks a Nock run by re-executing it (own Store)"
+TITLE[JN3P]="a pinned program: one run claim admitted at two heights (own Store)"
 TITLE[JN5]="a NockApp kernel door refereed by re-execution (own Store)"
 TITLE[J6]="stop/reopen: receipts recovered, exact retry replays"
 TITLE[G]="growth 10/100/500/1000: write<=5s, reopen<=60s at 1000"
@@ -754,6 +755,7 @@ step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHA
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
+step_JN3P() { hook jnock3p "J-NOCK-3P: a pinned program (ABI v3) is admitted at two heights with one claim, refused sampleStale naming the field once a read field moves; a noun output round-trips (lane c2-run-pin; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN5() { hook jnock5 "J-NOCK-5: the hoonc counter kernel is born as a door, pokes are refereed by re-execution, a stale state and a non-write effect refused (lane n11; needs NOCK_DOOR_JAM, NOCK_DOOR_FUEL)"; }
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
@@ -786,6 +788,7 @@ run_step KHQ J4
 run_step KW J5
 run_step JN2 J0
 run_step JN3 J0
+run_step JN3P J0
 run_step JN5 J0
 run_step M3 J0
 run_step M4 J0

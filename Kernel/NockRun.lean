@@ -5,7 +5,9 @@ A runner submits field writes together with a `RunClaim`: the program it ran,
 the sample it ran on (jam bytes), the output it got (jam bytes) and the Lean
 step count. The kernel admits the writes only when its own run agrees:
 
-1. the claimed sample is byte-equal to the kernel's `sampleOf` (else `sampleStale`);
+1. the claimed sample is byte-equal to the kernel's `sampleOf` (else `sampleStale`;
+   under a `pinned` context the refusal names the first ABI slot whose value the
+   claim's sample does not hold, `staleField`);
 2. the claimed steps fit the program's ABI fuel (else `fuelExceeded`);
 3. `Theory.Nock`'s evaluator, given exactly the claimed steps as fuel, answers
    (else `crash k` / `exhausted k`, naming the count) in exactly that many steps
@@ -70,7 +72,9 @@ inductive Refusal where
   | libraryNested
   | programMalformed
   | sampleUnavailable
-  | sampleStale
+  /-- The claimed sample is not the kernel's. Under a `pinned` context (K-RUN-PIN)
+  it names the key of the first ABI slot whose value moved (`staleField`). -/
+  | sampleStale (field : Option String)
   | fuelExceeded
   | crash (steps : Nat)
   | exhausted (steps : Nat)
@@ -94,7 +98,7 @@ def Refusal.name : Refusal → String
   | .libraryNested => "libraryNested"
   | .programMalformed => "programMalformed"
   | .sampleUnavailable => "sampleUnavailable"
-  | .sampleStale => "sampleStale"
+  | .sampleStale _ => "sampleStale"
   | .fuelExceeded => "fuelExceeded"
   | .crash _ => "crash"
   | .exhausted _ => "exhausted"
@@ -130,6 +134,26 @@ def decodeValue : SlotType → Noun → Option Int
   | .nat, .atom n => some (.ofNat n)
   | .nat, .cell _ _ => none
   | .int, n => n.toInt?
+  | .noun, n => if (Noun.jam n).length ≤ nounMaxBytes then some (.ofNat (jamAtom n)) else none
+
+/-- **`noun_output_roundtrip`** (K-RUN-PIN): a `noun` output is written as the
+jam atom of the product's noun, within the birth-source bound, and a `noun`
+sample slot reading that field gets the same noun back — so one program's noun
+output is the next program's (or the next segment's) noun input, unaltered. -/
+theorem noun_output_roundtrip {n : Noun} {value : Int} (written : decodeValue .noun n = some value) :
+    value = .ofNat (jamAtom n) ∧ (Noun.jam n).length ≤ nounMaxBytes ∧
+      encodeValue .noun value = some n := by
+  simp only [decodeValue] at written
+  split at written
+  · rename_i bound
+    cases written
+    exact ⟨rfl, bound, ofJamAtom_jamAtom n⟩
+  · cases written
+
+/-- A `noun` output above the bound writes nothing. -/
+theorem noun_output_bounded {n : Noun} (big : nounMaxBytes < (Noun.jam n).length) :
+    decodeValue .noun n = none := by
+  simp [decodeValue]; omega
 
 def decodeEntry (outputs : List OutputSlot) (entry : Nat × Noun) : Option FieldWrite :=
   match outputs.find? (fun o => cordValue o.key.toUTF8.toList == entry.1) with
@@ -160,6 +184,40 @@ def subjectFormula (arm : Nat) (program : Noun) (libraries : List Noun) (sample 
   match libraries with
   | [] => (.cell program sample, Nock.slam arm)
   | _ => (.cell (libraryNoun libraries) (.cell program sample), libraryFormula arm)
+
+/-! ## Which field a stale pinned claim missed -/
+
+/-- The items of a null-terminated Nock list. -/
+def listItems : Noun → Option (List Noun)
+  | .atom 0 => some []
+  | .cell x rest => (listItems rest).map (x :: ·)
+  | _ => none
+
+theorem listItems_nockList : ∀ (items : List Noun), listItems (nockList items) = some items
+  | [] => rfl
+  | x :: rest => by simp [nockList, listItems, listItems_nockList rest]
+
+/-- The key of the first slot whose kernel entry is not the claimed entry. -/
+def firstStale : List SampleSlot → List Noun → List Noun → Option String
+  | slot :: rest, k :: ks, c :: cs => if k = c then firstStale rest ks cs else some slot.key
+  | slot :: _, _ :: _, [] => some slot.key
+  | _, _, _ => none
+
+/-- Under `pinned`, the key of the first ABI slot whose entry in the claimed
+sample differs from the kernel's `sample`, when the two agree on everything
+before the slots (the context and the target entries). `none` under `live`,
+where the height alone moves the sample, and when the claim differs elsewhere. -/
+def staleField (abi : Abi) (sample : Noun) (claimed : List UInt8) : Option String :=
+  match abi.context, sample, Noun.cue claimed with
+  | .pinned, .cell kc kernelList, some (.cell cc claimedList) =>
+    match listItems kernelList, listItems claimedList with
+    | some ks, some cs =>
+      let offset := ks.length - abi.sample.length
+      if kc = cc ∧ ks.take offset = cs.take offset then
+        firstStale abi.sample (ks.drop offset) (cs.drop offset)
+      else none
+    | _, _ => none
+  | _, _, _ => none
 
 /-! ## The oracle -/
 
@@ -227,8 +285,11 @@ def libraryNouns (libraries : List Program) : Except Refusal (List Noun) :=
 kernel's `sample` and decide `claim` against the command's `writes`. -/
 def checkRun (program : Program) (libraries : List Program) (sample : Noun)
     (claim : RunClaim) (writes : List FieldWrite) : Except Refusal Verdict := do
-  if claim.sampleJam ≠ Noun.jam sample then throw .sampleStale
+  if claim.sampleJam ≠ Noun.jam sample then
+    throw (.sampleStale (staleField program.abi sample claim.sampleJam))
   if program.abi.fuel < claim.steps then throw .fuelExceeded
+  -- C5: hold check here (K-RUN-HOLD: a claim above the free threshold needs a hold;
+  -- the steps are fixed and bounded by the ABI fuel from this line on).
   let core ← require .programMalformed (Noun.cue program.jam)
   let libs ← libraryNouns libraries
   let sf := subjectFormula program.abi.arm core libs sample
@@ -280,6 +341,8 @@ def dryRun (domain : Digest) (directory : CellRegistry.Directory Nat CanonicalCe
         | some sample =>
           match Noun.cue program.jam, libraryNouns libraries with
           | some core, .ok nouns =>
+            -- C5: hold check here (K-RUN-HOLD: a dry run above the free threshold
+            -- needs a hold before the oracle runs at the ABI fuel).
             let sf := subjectFormula program.abi.arm core nouns sample
             let result := oracle program.abi.fuel sf.1 sf.2
             .ran (Noun.jam sample) result
@@ -413,6 +476,94 @@ theorem steps_equal_oracle {program : Program} {libraries : List Program} {sampl
   obtain ⟨s, f, run, -, -, -, -, -, hs, fuel, ran, steps⟩ := checkRun_sound accepted
   exact ⟨s, f, run, by rw [steps_of_run ran fuel, steps], hs.symm⟩
 
+/-! ## A stale pinned claim names its field (K-RUN-PIN) -/
+
+theorem firstStale_only {read read' : Nat → String → Option Int} {slot : SampleSlot} :
+    ∀ {slots : List SampleSlot} {ns ns' : List Noun},
+      sampleSlots read slots = some ns → sampleSlots read' slots = some ns' →
+      slot ∈ slots → read slot.target slot.slot ≠ read' slot.target slot.slot →
+      (∀ s ∈ slots, s ≠ slot → read s.target s.slot = read' s.target s.slot) →
+      firstStale slots ns' ns = some slot.key
+  | [], _, _, _, _, member, _, _ => by cases member
+  | s :: rest, ns, ns', h, h', member, changed, only => by
+    obtain ⟨v, n, tail, hv, he, hr, rfl⟩ := sampleSlots_cons h
+    obtain ⟨v', n', tail', hv', he', hr', rfl⟩ := sampleSlots_cons h'
+    by_cases same : s = slot
+    · subst same
+      have differ : ¬ (Noun.cell (cord s.key) n' = Noun.cell (cord s.key) n) := by
+        intro e
+        simp only [Noun.cell.injEq, true_and] at e
+        subst e
+        exact changed (by rw [hv, hv', encodeValue_injective he he'])
+      simp only [firstStale, if_neg differ]
+    · obtain rfl : v = v' := Option.some.inj ((hv.symm.trans (only s (List.mem_cons_self ..) same)).trans hv')
+      obtain rfl : n' = n := Option.some.inj (he'.symm.trans he)
+      have m : slot ∈ rest := by
+        rcases List.mem_cons.mp member with e | m
+        · exact absurd e.symm same
+        · exact m
+      simp only [firstStale, if_pos rfl]
+      exact firstStale_only hr hr' m changed (fun t mt nt => only t (List.mem_cons_of_mem _ mt) nt)
+
+/-- **`pinned_claim_stale_on_field_change`** (K-RUN-PIN, at the run): a claim
+computed on a pinned program's sample, re-checked after exactly one named slot
+changed value, refuses `sampleStale` naming THAT slot's key — at whatever
+context the kernel now runs. -/
+theorem pinned_claim_stale_on_field_change {program : Program} {libraries : List Program}
+    {ctx ctx' : Context} {targets : List Nat} {read read' : Nat → String → Option Int}
+    {sample sample' : Noun} {claim : RunClaim} {writes : List FieldWrite} {slot : SampleSlot}
+    (pinned : program.abi.context = .pinned)
+    (claimed : sampleOf program.abi ctx targets read = some sample)
+    (current : sampleOf program.abi ctx' targets read' = some sample')
+    (computed : claim.sampleJam = Noun.jam sample)
+    (named : slot ∈ program.abi.sample)
+    (changed : read slot.target slot.slot ≠ read' slot.target slot.slot)
+    (only : ∀ s ∈ program.abi.sample, s ≠ slot → read s.target s.slot = read' s.target s.slot) :
+    checkRun program libraries sample' claim writes = .error (.sampleStale (some slot.key)) := by
+  have hne : claim.sampleJam ≠ Noun.jam sample' := by
+    rw [computed]
+    intro e
+    have same := Noun.jam_injective e
+    subst same
+    exact changed ((sampleOf_injective claimed current).2.2 slot named)
+  have hstale : staleField program.abi sample' claim.sampleJam = some slot.key := by
+    unfold sampleOf at claimed current
+    split at claimed
+    · rename_i inRange
+      rw [if_pos inRange] at current
+      cases hs : sampleSlots read program.abi.sample with
+      | none => rw [hs] at claimed; cases claimed
+      | some ns =>
+        cases hs' : sampleSlots read' program.abi.sample with
+        | none => rw [hs'] at current; cases current
+        | some ns' =>
+          rw [hs] at claimed
+          rw [hs'] at current
+          simp only [Option.map_some, Option.some.injEq] at claimed current
+          subst claimed
+          subst current
+          have len := sampleSlots_length hs
+          have len' := sampleSlots_length hs'
+          have off : (targetEntries 0 targets ++ ns').length - program.abi.sample.length =
+              (targetEntries 0 targets).length := by
+            simp only [List.length_append, len']; omega
+          have takeK : (targetEntries 0 targets ++ ns').take (targetEntries 0 targets).length =
+              targetEntries 0 targets := List.take_left' rfl
+          have takeC : (targetEntries 0 targets ++ ns).take (targetEntries 0 targets).length =
+              targetEntries 0 targets := List.take_left' rfl
+          have dropK : (targetEntries 0 targets ++ ns').drop (targetEntries 0 targets).length =
+              ns' := List.drop_left' rfl
+          have dropC : (targetEntries 0 targets ++ ns).drop (targetEntries 0 targets).length =
+              ns := List.drop_left' rfl
+          unfold staleField
+          rw [computed, Noun.cue_jam, pinned]
+          simp only [listItems_nockList, contextOf]
+          rw [off, takeK, takeC, dropK, dropC, if_pos (by simp)]
+          exact firstStale_only hs hs' named changed only
+    · cases claimed
+  unfold checkRun
+  simp only [bind, Except.bind]
+  rw [if_pos hne, hstale]
 
 /-! ## Poles: small programs from NOCK-THEORY's corpus, decided by the kernel
 
@@ -481,7 +632,7 @@ theorem pole_outputMismatch :
       some .outputMismatch := by decide +kernel
 theorem pole_sampleStale :
     refusalOf (checkRun (prog incCore 100) [] (.atom 41) (claimOf (.atom 40) (outK 42) 14) [W 42]) =
-      some .sampleStale := by decide +kernel
+      some (.sampleStale none) := by decide +kernel
 theorem pole_fuelExceeded :
     refusalOf (checkRun (prog incCore 10) [] (.atom 41) (claimOf (.atom 41) (outK 42) 14) [W 42]) =
       some .fuelExceeded := by decide +kernel
@@ -500,6 +651,40 @@ theorem pole_writeNotInOutput :
 theorem pole_outputNotWritten :
     refusalOf (checkRun (prog incCore 100) [] (.atom 41) (claimOf (.atom 41) (outK 42) 14) []) =
       some .outputNotWritten := by decide +kernel
+
+/-! ### Pinned against live (K-RUN-PIN)
+
+`slotCore`'s gate writes `k := +(n)`, where `n` is the sample's first ABI slot
+(axis 109 of the gate with one target). The claim is computed once, at height 16
+by signer 7 on `stateA`; it is re-checked at height 23 by signer 9 on `stateB`
+(same `f/2`, different unnamed field). -/
+
+def slotCore : Noun := coreOf (writeK (Nock.op 4 (Nock.op 0 (.atom 109))))
+def slotN : SampleSlot := { target := 0, slot := "f/2", key := "n", type := .nat }
+def slotAbi (mode : ContextMode) : Abi := { kAbi 100 with context := mode, sample := [slotN] }
+def slotProgram (context : ContextMode) : Program := ⟨Noun.jam slotCore, slotAbi context⟩
+def sampleAt (context : ContextMode) (ctx : Context) (read : Nat → String → Option Int) : Noun :=
+  (sampleOf (slotAbi context) ctx [11] read).getD (.atom 0)
+def stateC : Nat → String → Option Int := fun _ s => if s = "f/2" then some 40 else some 1
+def claimAt16 (context : ContextMode) : RunClaim :=
+  claimOf (sampleAt context ⟨16, 7, 0⟩ stateA) (outK 42) 14
+
+/-- Pinned: the height-16 claim is accepted at height 23. -/
+theorem pole_pinned_other_height :
+    writesOf (checkRun (slotProgram .pinned) [] (sampleAt .pinned ⟨23, 9, 0⟩ stateB)
+      (claimAt16 .pinned) [W 42]) = some [W 42] := by decide +kernel
+/-- Live: the same claim at height 23 is stale, and names no field. -/
+theorem pole_live_other_height :
+    refusalOf (checkRun (slotProgram .live) [] (sampleAt .live ⟨23, 9, 0⟩ stateB)
+      (claimAt16 .live) [W 42]) = some (.sampleStale none) := by decide +kernel
+/-- Pinned, with the named field moved (41 → 40): stale, naming `n`. -/
+theorem pole_pinned_field_stale :
+    refusalOf (checkRun (slotProgram .pinned) [] (sampleAt .pinned ⟨23, 9, 0⟩ stateC)
+      (claimAt16 .pinned) [W 41]) = some (.sampleStale (some "n")) := by decide +kernel
+/-- A `noun` output writes the jam atom of `[3 7]`, which a `noun` sample reads back. -/
+theorem pole_noun_output :
+    (decodeValue .noun (.cell (.atom 3) (.atom 7))).bind (encodeValue .noun) =
+      some (.cell (.atom 3) (.atom 7)) := by decide +kernel
 
 end Minidregg.Kernel.NockRun
 
@@ -541,3 +726,21 @@ end Minidregg.Kernel.NockRun
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.pole_writeNotInOutput
 /-- info: 'Minidregg.Kernel.NockRun.pole_outputNotWritten' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.pole_outputNotWritten
+/-- info: 'Minidregg.Kernel.NockRun.noun_output_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.noun_output_roundtrip
+/-- info: 'Minidregg.Kernel.NockRun.noun_output_bounded' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.noun_output_bounded
+/-- info: 'Minidregg.Kernel.NockRun.listItems_nockList' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.listItems_nockList
+/-- info: 'Minidregg.Kernel.NockRun.firstStale_only' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.firstStale_only
+/-- info: 'Minidregg.Kernel.NockRun.pinned_claim_stale_on_field_change' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.pinned_claim_stale_on_field_change
+/-- info: 'Minidregg.Kernel.NockRun.pole_pinned_other_height' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.pole_pinned_other_height
+/-- info: 'Minidregg.Kernel.NockRun.pole_live_other_height' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.pole_live_other_height
+/-- info: 'Minidregg.Kernel.NockRun.pole_pinned_field_stale' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.pole_pinned_field_stale
+/-- info: 'Minidregg.Kernel.NockRun.pole_noun_output' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.pole_noun_output

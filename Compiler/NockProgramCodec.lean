@@ -19,6 +19,18 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
 * **Libraries.** `Abi.libraries` names other program cells by `programId`
   (NOCK N16: the hoon stdlib context rides once, not in every program). Their
   presence is checked against the store at birth (`CanonicalCellRegistry`).
+* **Context (ABI v3, K-RUN-PIN).** `Abi.context` says what the sample's context
+  triple `[height caller room]` holds. `live`: the Host's height at admission, the
+  signer and the room, so a claim is good for one height. `pinned`: the constants
+  `[0 0 0]` (N11's choice for doors, `eny = our = now = 0`), so the sample is a
+  function of the ABI's named slots and the target ids alone and one claim is
+  admissible at every height where those slots hold the same values
+  (`Kernel.NockProgramCell.sampleOf_pinned_of_fields`). A door is `live` only: its
+  sample is its own state and event number, which every poke advances.
+* **Noun slots.** `SlotType.noun`: the slot value is the atom of a noun's jam
+  (N11's state encoding). In a sample the kernel cues it (refusing a value that is
+  not the jam atom of the noun it cues to); in an output the kernel writes the jam
+  atom of the product's noun, bounded by `nounMaxBytes`.
 * **Immutability.** The single address is ROM: after birth no patch changes it
   (`program_immutable`), and the registry's final-post law pins its bytes.
 -/
@@ -39,21 +51,38 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 def wireVersion : Nat := 1
-/-- v2: the ABI may name a NockApp kernel `door` (N11). -/
-def abiVersion : Nat := 2
+/-- v3: `Abi.context` (live | pinned) and the `noun` slot type (K-RUN-PIN).
+v2 added the optional `door` (N11). A v1 or v2 record does not decode (frame). -/
+def abiVersion : Nat := 3
 /-- Registry tag 13 (final: 11 pay, 12 stream, 13 nockProgram, 14 clock); schema 91011. -/
 def registryTag : UInt8 := 13
 def schemaId : Nat := 91011
 
 /-! ## The ABI -/
 
-/-- How a projected slot value (an `Int`) becomes a sample atom. `nat` is the
-atom itself and refuses negatives (what every Hoon `@` sample expects); `int` is
-`Theory.Noun`'s zigzag `Int.toNoun`. -/
+/-- How a projected slot value (an `Int`) becomes a sample noun, and an output
+noun becomes a field value. `nat` is the atom itself and refuses negatives (what
+every Hoon `@` sample expects); `int` is `Theory.Noun`'s zigzag `Int.toNoun`;
+`noun` is the atom of the noun's jam (N11's state encoding), cued on the way in
+and jammed on the way out. -/
 inductive SlotType where
   | nat
   | int
+  | noun
   deriving DecidableEq, Repr
+
+/-- What the sample's context triple holds (K-RUN-PIN). `live`: the admission
+height, the signer and the room. `pinned`: `[0 0 0]`, so the sample is a function
+of the named slots and the targets only. -/
+inductive ContextMode where
+  | live
+  | pinned
+  deriving DecidableEq, Repr
+
+/-- The largest jam (bytes) a `noun` output slot writes: the birth-source bound
+(`native/resource-client/src/current_birth.rs` `MAX_SOURCE`, 4 MiB), the bound a
+program's own jam already meets to be born. -/
+def nounMaxBytes : Nat := 4194304
 
 /-- One sample entry: the program sees `[key value]`, where `value` is the
 participant slot `slot` of the command's `target`-th target (0-based, the
@@ -97,6 +126,8 @@ structure Abi where
   fuel : Nat
   /-- A NockApp kernel door, or `none` for a gate. -/
   door : Option Door := none
+  /-- What the sample's context triple holds (v3). -/
+  context : ContextMode := .live
   deriving DecidableEq, Repr
 
 structure Program where
@@ -104,11 +135,16 @@ structure Program where
   abi : Abi
   deriving DecidableEq, Repr
 
-/-! ## Codecs `DREGG/NOCK/ABI/v1`, `DREGG/NOCK/PROGRAM/v1` -/
+/-! ## Codecs `DREGG/NOCK/ABI/v3`, `DREGG/NOCK/PROGRAM/v1` -/
 
 def slotTypeStream : StreamCodec SlotType :=
-  StreamCodec.xmap StreamCodec.nat (fun | .nat => 0 | .int => 1)
-    (fun n => if n = 1 then .int else .nat) (by intro value; cases value <;> rfl)
+  StreamCodec.xmap StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
+    (fun n => if n = 1 then .int else if n = 2 then .noun else .nat)
+    (by intro value; cases value <;> rfl)
+
+def contextStream : StreamCodec ContextMode :=
+  StreamCodec.xmap StreamCodec.nat (fun | .live => 0 | .pinned => 1)
+    (fun n => if n = 1 then .pinned else .live) (by intro value; cases value <;> rfl)
 
 def sampleSlotStream : StreamCodec SampleSlot :=
   StreamCodec.xmap
@@ -137,9 +173,11 @@ def abiStream : StreamCodec Abi :=
         (StreamCodec.product (StreamCodec.list sampleSlotStream)
           (StreamCodec.product (StreamCodec.list outputSlotStream)
             (StreamCodec.product (StreamCodec.list digestStream)
-              (StreamCodec.product StreamCodec.nat (StreamCodec.option doorStream)))))))
-    (fun a => (a.version, a.arm, a.sample, a.outputs, a.libraries, a.fuel, a.door))
-    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2.1, v.2.2.2.2.2.1, v.2.2.2.2.2.2⟩)
+              (StreamCodec.product StreamCodec.nat
+                (StreamCodec.product (StreamCodec.option doorStream) contextStream)))))))
+    (fun a => (a.version, a.arm, a.sample, a.outputs, a.libraries, a.fuel, a.door, a.context))
+    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2.1, v.2.2.2.2.2.1, v.2.2.2.2.2.2.1,
+      v.2.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def programStream : StreamCodec Program :=
@@ -178,9 +216,9 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
   decode := framedDecode frame stream
   decode_encode := framedDecode_encode frame stream
 
-/-- `DREGG/NOCK/ABI/v2` -/
+/-- `DREGG/NOCK/ABI/v3` -/
 def abiFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 50]
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 51]
 /-- `DREGG/NOCK/PROGRAM/v1` -/
 def programFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
@@ -190,6 +228,24 @@ def programCodec : LawfulCodec Program := framed programFrame programStream
 
 theorem abi_roundtrip (abi : Abi) : abiCodec.decode (abiCodec.encode abi) = some abi :=
   abiCodec.decode_encode abi
+
+/-- The frames of ABI v1 (K-NOCK) and v2 (N11). -/
+def abiFrameV1 : List UInt8 :=
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 49]
+def abiFrameV2 : List UInt8 :=
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 50]
+
+/-- A record under an older ABI frame does not decode: v1 and v2 refuse to load
+rather than being read as v3 (whatever bytes follow the frame). -/
+theorem abi_old_frame_refused (rest : List UInt8) :
+    abiCodec.decode (abiFrameV1 ++ rest) = none ∧ abiCodec.decode (abiFrameV2 ++ rest) = none := by
+  have h1 : (abiFrameV1 ++ rest).take abiFrame.length = abiFrameV1 := List.take_left' rfl
+  have h2 : (abiFrameV2 ++ rest).take abiFrame.length = abiFrameV2 := List.take_left' rfl
+  refine ⟨?_, ?_⟩
+  · show framedDecode abiFrame abiStream (abiFrameV1 ++ rest) = none
+    unfold framedDecode; rw [h1, if_neg (by decide)]
+  · show framedDecode abiFrame abiStream (abiFrameV2 ++ rest) = none
+    unfold framedDecode; rw [h2, if_neg (by decide)]
 
 theorem abi_canonical {bytes : List UInt8} {abi : Abi}
     (accepted : abiCodec.decode bytes = some abi) : abiCodec.encode abi = bytes :=
@@ -267,9 +323,16 @@ def Refusal.name : Refusal → String
 
 /-- A door reads no sample slots and no libraries (its subject is the kernel's
 own `[[trap state] job]`), names a peek arm, and keeps its state and event
-fields apart from each other and from every output write on target 0. -/
+fields apart from each other and from every output write on target 0.
+
+A door is `live`, never `pinned`: its sample holds no height (the job's
+`eny our now` are already the constants 0), and what it does hold, the stored
+state and the event number, is advanced by every poke, so no poke claim can be
+admitted twice. `pinned` on a door would be a field that changes nothing and
+reads as a promise of reuse, so it is refused at birth. -/
 def DoorShape (abi : Abi) (door : Door) : Prop :=
   0 < door.peek ∧ door.state ≠ door.event ∧ abi.sample = [] ∧ abi.libraries = [] ∧
+    abi.context = .live ∧
     ∀ o ∈ abi.outputs, o.target = 0 → o.field ≠ door.state ∧ o.field ≠ door.event
 
 instance doorShapeDecidable (abi : Abi) (door : Door) : Decidable (DoorShape abi door) := by
@@ -482,6 +545,8 @@ instance cellValidDecidable (domain : Digest) (cellId : Nat) (program : Program)
 end Minidregg.Compiler.NockProgramCodec
 /-- info: 'Minidregg.Compiler.NockProgramCodec.abi_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.abi_roundtrip
+/-- info: 'Minidregg.Compiler.NockProgramCodec.abi_old_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.abi_old_frame_refused
 /-- info: 'Minidregg.Compiler.NockProgramCodec.abi_canonical' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.abi_canonical
 /-- info: 'Minidregg.Compiler.NockProgramCodec.program_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/

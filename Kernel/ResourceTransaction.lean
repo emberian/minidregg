@@ -634,7 +634,8 @@ structure CheckedRun where
   fuel : Nat
   verdict : NockRun.Verdict
 
-/-- The kernel's own context for a run: its height, the signer, no room. -/
+/-- The kernel's own context for a run: its height, the signer, no room. A
+`pinned` program's sample does not read it (`NockProgramCell.contextOf`). -/
 def runContext (ambient : Ambient) (command : Command) : NockProgramCell.Context :=
   ⟨ambient.height, command.subject.value, 0⟩
 
@@ -889,8 +890,78 @@ theorem PreparedInvocation.run_unclaimed {F : Type} [Field F] {deployment : Depl
   rw [checkCommandRun_none unclaimed] at h
   exact (Except.ok.inj h).symm
 
+/-! ## Pinned programs: one claim, any height (K-RUN-PIN) -/
+
+/-- **`pinned_claim_admissible_across_heights`**: a pinned gate's claim that the
+kernel accepted at one admission is accepted, with the same verdict, at any
+other — another height, another signer, another command — over the same
+targets, whenever the ABI's named slots hold the values they held. A job whose
+sample reads only its order's write-once fields therefore has one truth at
+every height (COMPUTE §2.2). -/
+theorem pinned_claim_admissible_across_heights {program : NockProgramCodec.Program}
+    {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}
+    {command command' : Command}
+    {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {pre' : (i : Fin command'.targets.length) → Store command'.targets[i].layout}
+    {claim : NockRun.RunClaim} {writes : List NockRun.FieldWrite} {verdict : NockRun.Verdict}
+    (gate : program.abi.door = none) (pinned : program.abi.context = .pinned)
+    (sameTargets : command'.targets.map Target.target = command.targets.map Target.target)
+    (unchanged : ∀ slot ∈ program.abi.sample,
+      sampleRead command' pre' slot.target slot.slot = sampleRead command pre slot.target slot.slot)
+    (accepted : checkProgram program libraries ambient command pre claim writes = .ok verdict) :
+    checkProgram program libraries ambient' command' pre' claim writes = .ok verdict := by
+  have same : NockProgramCell.sampleOf program.abi (runContext ambient' command')
+      (command'.targets.map Target.target) (sampleRead command' pre') =
+      NockProgramCell.sampleOf program.abi (runContext ambient command)
+      (command.targets.map Target.target) (sampleRead command pre) := by
+    rw [sameTargets]
+    exact NockProgramCell.sampleOf_pinned_of_fields pinned _ _ _ unchanged
+  unfold checkProgram at accepted ⊢
+  rw [gate] at accepted ⊢
+  simp only at accepted ⊢
+  rw [same]
+  exact accepted
+
+/-- **`pinned_claim_stale_on_field_change`** (at the controller): once exactly
+one named slot of a pinned gate moved, the claim the kernel accepted before
+refuses `sampleStale` naming that slot's key, at any height. -/
+theorem pinned_claim_stale_on_field_change {program : NockProgramCodec.Program}
+    {libraries : List NockProgramCodec.Program} {ambient ambient' : Ambient}
+    {command command' : Command}
+    {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {pre' : (i : Fin command'.targets.length) → Store command'.targets[i].layout}
+    {claim : NockRun.RunClaim} {writes writes' : List NockRun.FieldWrite}
+    {verdict : NockRun.Verdict} {slot : NockProgramCodec.SampleSlot} {sample' : Noun}
+    (gate : program.abi.door = none) (pinned : program.abi.context = .pinned)
+    (sameTargets : command'.targets.map Target.target = command.targets.map Target.target)
+    (accepted : checkProgram program libraries ambient command pre claim writes = .ok verdict)
+    (current : NockProgramCell.sampleOf program.abi (runContext ambient' command')
+      (command'.targets.map Target.target) (sampleRead command' pre') = some sample')
+    (named : slot ∈ program.abi.sample)
+    (changed : sampleRead command pre slot.target slot.slot ≠
+      sampleRead command' pre' slot.target slot.slot)
+    (only : ∀ s ∈ program.abi.sample, s ≠ slot →
+      sampleRead command pre s.target s.slot = sampleRead command' pre' s.target s.slot) :
+    checkProgram program libraries ambient' command' pre' claim writes' =
+      .error (.sampleStale (some slot.key)) := by
+  have sound := checkProgram_sound accepted
+  unfold ProgramAccepted at sound
+  rw [gate] at sound
+  obtain ⟨sample, hsample, ran⟩ := sound
+  obtain ⟨-, -, -, -, -, -, computed, -⟩ := NockRun.checkRun_sound ran
+  unfold checkProgram
+  rw [gate]
+  simp only
+  rw [current]
+  rw [sameTargets] at current
+  exact NockRun.pinned_claim_stale_on_field_change pinned hsample current computed named changed only
+
 end Minidregg.Kernel.DeclaredResourceController
 
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.pinned_claim_admissible_across_heights' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.pinned_claim_admissible_across_heights
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.pinned_claim_stale_on_field_change' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.pinned_claim_stale_on_field_change
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkCommandRun_none' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkCommandRun_none
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkProgram_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/

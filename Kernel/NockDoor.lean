@@ -52,29 +52,8 @@ set_option autoImplicit false
 
 /-! ## The state as an atom -/
 
-def natBytesAux : Nat → Nat → List UInt8
-  | 0, _ => []
-  | fuel + 1, n => if n = 0 then [] else (n % 256).toUInt8 :: natBytesAux fuel (n / 256)
-
-/-- Little-endian minimal bytes of an atom. -/
-def natBytes (n : Nat) : List UInt8 := natBytesAux n n
-
-/-- The jam of a noun as an atom (Urbit's `jam` is an atom). -/
-def jamAtom (n : Noun) : Nat := cordValue (Noun.jam n)
-
-/-- The noun whose jam is the atom `a`, refused unless re-jamming gives `a` back. -/
-def ofJamAtom (a : Nat) : Option Noun :=
-  match Noun.cue (natBytes a) with
-  | some n => if jamAtom n = a then some n else none
-  | none => none
-
-theorem ofJamAtom_sound {a : Nat} {n : Noun} (h : ofJamAtom a = some n) : jamAtom n = a := by
-  unfold ofJamAtom at h
-  split at h
-  · split at h
-    · cases h; assumption
-    · cases h
-  · cases h
+-- `natBytes`, `jamAtom`, `ofJamAtom` (+ `ofJamAtom_sound`, `ofJamAtom_jamAtom`) live in
+-- `Kernel.NockProgramCell`: the `noun` slot type (K-RUN-PIN) shares this encoding.
 
 /-! ## What the kernel reads off the instance -/
 
@@ -257,7 +236,7 @@ def checkPoke (program : Program) (door : Door) (view : View) (claim : RunClaim)
   | none => .error .eventMalformed
   | some (wire, cause) =>
   if claim.sampleJam ≠ Noun.jam (.cell ustate (job (view.event + 1) wire cause)) then
-    .error .sampleStale
+    .error (.sampleStale none)
   else if program.abi.fuel < claim.steps then .error .fuelExceeded
   else
   match oracle claim.steps (subjectOf trap ustate (job (view.event + 1) wire cause))
@@ -434,7 +413,7 @@ theorem door_state_stale_refused {program : Program} {door : Door} {view : View}
     {event : Nat} (cued : Noun.cue program.jam = some trap) (loaded : ustateOf view = .ok ustate)
     (claimed : claim.sampleJam = Noun.jam (.cell ustate' (job event wire cause)))
     (stale : ustate' ≠ ustate ∨ event ≠ view.event + 1) :
-    checkPoke program door view claim writes = .error .sampleStale := by
+    checkPoke program door view claim writes = .error (.sampleStale none) := by
   have hc : Noun.cue claim.sampleJam = some (.cell ustate' (job event wire cause)) := by
     rw [claimed, Noun.cue_jam]
   have hne : claim.sampleJam ≠ Noun.jam (.cell ustate (job (view.event + 1) wire cause)) := by
@@ -651,7 +630,7 @@ theorem pole_door_poke_second :
 theorem pole_door_stale :
     refusalOf (checkPoke counter counterDoorAbi (loadedAt 2 2)
       (pokeClaim (.atom 0) 1 (.atom 1) (countEffects 1) (.atom 1) 42) (counterWrites 1 1)) =
-      some .sampleStale := by decide +kernel
+      some (.sampleStale none) := by decide +kernel
 /-- A claim on the stored state `1` whose stateOut is `1` (the door's is `2`). -/
 theorem pole_door_outputMismatch :
     refusalOf (checkPoke counter counterDoorAbi (loadedAt 1 1)
@@ -672,11 +651,7 @@ theorem pole_door_outputNotWritten :
 theorem pole_door_peek :
     ranOf (peek counter counterDoorAbi (loadedAt 2 2) (.atom 0)) =
       some (.ok (.cell (.atom 0) (.cell (.atom 0) (.atom 2))) 30) := by decide +kernel
-/-- The stored state round-trips through its jam atom. -/
-theorem pole_state_roundtrip : ofJamAtom (jamAtom (.atom 2)) = some (.atom 2) := by decide +kernel
 
-/-- info: 'Minidregg.Kernel.NockDoor.ofJamAtom_sound' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms ofJamAtom_sound
 /-- info: 'Minidregg.Kernel.NockDoor.pokeProduct_sound' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms pokeProduct_sound
 /-- info: 'Minidregg.Kernel.NockDoor.effectWrites_sound' depends on axioms: [propext] -/
@@ -717,7 +692,5 @@ theorem pole_state_roundtrip : ofJamAtom (jamAtom (.atom 2)) = some (.atom 2) :=
 #guard_msgs (whitespace := lax) in #print axioms pole_door_outputNotWritten
 /-- info: 'Minidregg.Kernel.NockDoor.pole_door_peek' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms pole_door_peek
-/-- info: 'Minidregg.Kernel.NockDoor.pole_state_roundtrip' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms pole_state_roundtrip
 
 end Minidregg.Kernel.NockDoor
