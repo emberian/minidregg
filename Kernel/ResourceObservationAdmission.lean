@@ -196,7 +196,9 @@ failures carry the reason of the component that decided them
 `lawDenied`, and a failing law names its failing clause (`LawLeaf.of`) on the
 very witness states the law was admitted against. A law refused because one of
 its order clauses compares two values outside the native order range is
-`lawInputRange`, naming that clause and its two values (`LawLeaf.ofRange`). -/
+`lawInputRange`, naming that clause and its two values (`LawLeaf.ofRange`), and
+one refused because two integers of the step share a field image is
+`lawInputRange` naming the two integers (`castAlias`). -/
 def authorizeChecked (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Except Refusal (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
@@ -217,8 +219,12 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
               match LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
                   witness.oldState witness.newState with
               | some leaf => .error (Refusal.lawInputRange leaf)
-              | none => .error (Refusal.lawDenied
-                  (LawLeaf.of committed.record.predicate witness.oldState witness.newState))
+              | none =>
+                  match castAlias F (intsOf committed.record.predicate
+                      witness.oldState witness.newState) with
+                  | some (x, y) => .error (Refusal.castAlias x y)
+                  | none => .error (Refusal.lawDenied
+                      (LawLeaf.of committed.record.predicate witness.oldState witness.newState))
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -238,7 +244,7 @@ theorem authorizeChecked_capability_reason
   simp only [authorizeChecked, refused]
 
 /-- With admissible capability evidence and a resolved committed law whose order
-clauses are all in range, a law that does not accept is reported as `lawDenied`,
+clauses are all in range and whose step's integers have distinct field images, a law that does not accept is reported as `lawDenied`,
 naming the failing clause of that law on the same witness states the admission
 was decided on. -/
 theorem authorizeChecked_lawDenied
@@ -257,13 +263,45 @@ theorem authorizeChecked_lawDenied
       (.policy wanted.policyId wanted.policyRevision)
       prepared.epochExact prepared.revisionExact = none)
     (inRange : inputsInRange profile.compilerProfile.compiler committed.record.predicate
-      (step prepared).oldState (step prepared).newState = true) :
+      (step prepared).oldState (step prepared).newState = true)
+    (castExact : castInjOn F (intsOf committed.record.predicate
+      (step prepared).oldState (step prepared).newState)) :
     authorizeChecked prepared signature = .error (Refusal.lawDenied
       (LawLeaf.of committed.record.predicate (step prepared).oldState (step prepared).newState)) := by
   have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
     committed.record.predicate (step prepared).oldState (step prepared).newState).mpr inRange
+  have noAlias := (castAlias_none_iff F (intsOf committed.record.predicate
+    (step prepared).oldState (step prepared).newState)).mpr castExact
   simp only [authorizeChecked, supplied, resolved, denied]
-  simp only [canonicalWitness, none_]
+  simp only [canonicalWitness, none_, noAlias]
+
+/-- With every order clause in range, a law refused because two integers of its
+step share a field image is reported as `lawInputRange` naming the two integers,
+never a bare `lawDenied`. -/
+theorem authorizeChecked_castAlias
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (committed : CommittedPolicy) (x y : Int)
+    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
+    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+      some committed)
+    (denied : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
+      wanted evidence
+      (canonicalWitness profile.compilerProfile.compiler committed
+        (step prepared).oldState (step prepared).newState)
+      (.policy wanted.policyId wanted.policyRevision)
+      prepared.epochExact prepared.revisionExact = none)
+    (inRange : inputsInRange profile.compilerProfile.compiler committed.record.predicate
+      (step prepared).oldState (step prepared).newState = true)
+    (alias_ : castAlias F (intsOf committed.record.predicate
+      (step prepared).oldState (step prepared).newState) = some (x, y)) :
+    authorizeChecked prepared signature = .error (Refusal.castAlias x y) := by
+  have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
+    committed.record.predicate (step prepared).oldState (step prepared).newState).mpr inRange
+  simp only [authorizeChecked, supplied, resolved, denied]
+  simp only [canonicalWitness, none_, alias_]
 
 /-- A law refused while one of its order clauses compares two values outside the
 native order range is reported as `lawInputRange`, naming that clause and the two
@@ -307,9 +345,11 @@ theorem authorizeChecked_leaf_fails
   split at refused
   · split at refused
     · simp [Refusal.lawInputRange, Refusal.lawDenied] at refused
-    · simp only [Except.error.injEq, Refusal.lawDenied, Refusal.mk.injEq, true_and] at refused
-      obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf refused
-      exact ⟨at_, fails⟩
+    · split at refused
+      · simp [Refusal.castAlias, Refusal.lawDenied] at refused
+      · simp only [Except.error.injEq, Refusal.lawDenied, Refusal.mk.injEq, true_and] at refused
+        obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf refused
+        exact ⟨at_, fails⟩
   · cases refused
 
 /-- The admitted pole: the law's acceptance is returned unchanged. -/
@@ -454,5 +494,6 @@ theorem read_after_tick_admitted :
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorizeChecked_leaf_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_leaf_fails
 #assert_axioms authorizeChecked_lawInputRange
+#assert_axioms authorizeChecked_castAlias
 
 end Minidregg.Kernel.ResourceObservationAdmission

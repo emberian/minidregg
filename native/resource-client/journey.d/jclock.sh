@@ -32,7 +32,9 @@
 # about 1.79e9): 20 signed reads of the same positive clock law answered; a write
 # at or below the clock admitted and one ahead of it refused naming the clock
 # clause; a write of 2^126 (outside R = [-2^123, 2^123)) refused as
-# law-input-range naming the clause and both values, and the same on a read; a
+# law-input-range naming the clause and both values; 2^126 under the open law refused as
+# law-input-range naming the two integers whose field images collide (its pair delta
+# 2^127 reads as 1); 2^125 + 2^40 read under the clock law refused naming the clause; a
 # fresh MUD sheet (law.management ; law.sheet, every timestamp field 0) takes an
 # owner strike, the referee (the newcomer) charges its balance to now + 100, the
 # next strike is refused by clause 10 (bal <= now) and admitted once the clock
@@ -281,17 +283,27 @@ row "write field 5 := 2^126 (outside R)" "refused law-input-range naming the cla
   "admitted=$([ $r = 0 ] && echo yes || echo no) [$why]" \
   "$([ $r != 0 ] && [[ "$why" == 'refused: law-input-range: '*'field 5 <= slot "clock/now" + 0'*"left $FAR"*"right $NOW"* ]]; echo $?)"
 
-# The read side: a value outside R written under the open law, then the clock law installed.
+# Under the open law, 2^126 in field 1 makes the pair delta 2 * 2^126 = 2^127, whose image in
+# ZMod (2^127 - 1) is that of 1: the cast check refuses, and prepare names the two integers.
 run fcreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name far --storage declared --predicate "$REQ/permit.json"
-writes far 1:0:$FAR >"$REQ/far-stamp.json"
+P127=170141183460469231731687303715884105728
+writes far 1:0:$FAR >"$REQ/far-alias.json"
+turn "$SPONSOR_WS" far-alias "$REQ/far-alias.json"; r=$?; why=$(refused_line far-alias)
+row "write field 1 := 2^126 under the open law (pair delta 2^127, image of 1)" "refused law-input-range naming the two integers" \
+  "create rc=$(rc fcreate) admitted=$([ $r = 0 ] && echo yes || echo no) [$why]" \
+  "$([ "$(rc fcreate)" = 0 ] && [ $r != 0 ] && [[ "$why" == 'refused: law-input-range: values '*"$P127"*'same image in the native field'* ]]; echo $?)"
+# The read side: 2^125 + 2^40 (past the order width from now, still its own field image) written
+# under the open law, then the clock law installed.
+FARR=42535295865117307932921827028482654208
+writes far 1:0:$FARR >"$REQ/far-stamp.json"
 turn "$SPONSOR_WS" far-stamp "$REQ/far-stamp.json"; fs=$?
 jq -n --slurpfile p "$REQ/opens-at.json" '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:"far",predicate:$p[0]}' >"$REQ/far-law.json"
 turn "$SPONSOR_WS" far-law "$REQ/far-law.json"; fl=$?
 run rfar "$MINI" workspace --action read --dir "$SPONSOR_WS" --name far --ephemeral true
 why=$(grep -m1 '^refused:' "$D/rfar.err" 2>/dev/null | cut -c1-400)
-row "signed read of field 1 = 2^126 under any[verb 2, field 1 <= clock/now]" "refused law-input-range naming the clause and both values" \
-  "create rc=$(rc fcreate) stamp=$fs law=$fl read rc=$(rc rfar) [$why]" \
-  "$([ "$(rc fcreate)" = 0 ] && [ $fs = 0 ] && [ $fl = 0 ] && [ "$(rc rfar)" != 0 ] && [[ "$why" == 'refused: law-input-range: '*'clock/now'*"left $FAR"* ]]; echo $?)"
+row "signed read of field 1 = 2^125 + 2^40 under any[verb 2, field 1 <= clock/now]" "refused law-input-range naming the clause and both values" \
+  "stamp=$fs law=$fl read rc=$(rc rfar) [$why]" \
+  "$([ $fs = 0 ] && [ $fl = 0 ] && [ "$(rc rfar)" != 0 ] && [[ "$why" == 'refused: law-input-range: '*'clock/now'*"left $FARR"*"right $NOW"* ]]; echo $?)"
 
 # A MUD sheet (deploy/shell/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
 # founder; the newcomer is the referee {REF}. Every timestamp field (bal 3, eq 4, respawn 9) starts at 0.

@@ -88,3 +88,4 @@ import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
+import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every projected slot (fields, deltas, pair deltas) in the native order range R

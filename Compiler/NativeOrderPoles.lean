@@ -14,6 +14,7 @@ premises). The clock value is the one CLOCK-SUBJECT's run r1 refused at:
 * Two balances `10^12` apart, both orders.
 * The edges: the two extremes of `R`, decided; a difference of `2^125 - 1`, in
   range; a difference of `2^125`, refused, naming the clause and its two values.
+* A pair delta of `2^127` has the field image of `1` and is named; `R` never aliases.
 -/
 import Compiler.NativeHostProfile
 import Compiler.PredRangeLeaf
@@ -178,6 +179,20 @@ theorem width_lower_edge_named :
         (balances 1 (-(2 ^ 125))) = some ⟨[1], balanceLaw, some 1, some (-(2 ^ 125))⟩ := by
   decide
 
+/-! ## Two integers with one field image
+
+A pair delta of `2 * 2^126 = 2^127` reads as `1` in `ZMod (2^127 - 1)`: the cast
+check refuses such a step, and `castAlias` names the pair. Inside `R` it never does. -/
+
+theorem pair_delta_aliases_one : castAlias Field [1, 2 ^ 127] ≠ none := by decide
+
+theorem pair_delta_alias_named : castAlias Field [1, 2 ^ 127] = some (1, 2 ^ 127) := by decide
+
+theorem R_never_aliases : castAlias Field [-rangeBound, rangeBound - 1, 0, 1, wallNow] = none := by
+  decide
+
+#assert_axioms pair_delta_alias_named
+#assert_axioms R_never_aliases
 #assert_axioms read200_admitted
 #assert_axioms read200_named_at_29
 #assert_axioms read0_admitted

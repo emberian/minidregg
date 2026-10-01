@@ -214,6 +214,74 @@ theorem ofRange_out_of_range {width : Nat} (law : Pred) (old new : State) (leaf 
 
 end LawLeaf
 
+/-! ## Two integers with one field image
+
+The compiled law reads every integer of the step as a field element, so the
+compiler also requires `castInjOn` over every integer the step carries (`intsOf`),
+including slots the law does not mention. Over `ZMod (2^127 - 1)` two integers of
+`R` never share an image; beyond it they can (a pair delta of `2^127` reads as
+`1`). `castAlias` names such a pair; it decides nothing, and is computed only once
+the cast check has already refused. -/
+
+section CastAlias
+variable (F : Type) [Field F] [DecidableEq F]
+
+/-- The first pair of distinct integers of `I` with the same image in `F`. -/
+def castAliasPair (I : List Int) : Option (Int × Int) :=
+  (I.dedup.flatMap fun x => I.dedup.map fun y => (x, y)).find?
+    fun pr => pr.1 != pr.2 && decide ((pr.1 : F) = (pr.2 : F))
+
+/-- `none` when the cast check passes; otherwise the colliding pair. -/
+def castAlias (I : List Int) : Option (Int × Int) :=
+  if castInjOn F I then none else castAliasPair F I
+
+theorem castAliasPair_sound (I : List Int) (x y : Int) (h : castAliasPair F I = some (x, y)) :
+    x ∈ I ∧ y ∈ I ∧ x ≠ y ∧ (x : F) = (y : F) := by
+  unfold castAliasPair at h
+  have hmem := List.mem_of_find?_eq_some h
+  have hsat := List.find?_some h
+  simp only [List.mem_flatMap, List.mem_map, List.mem_dedup] at hmem
+  obtain ⟨a, ha, b, hb, hab⟩ := hmem
+  simp only [Prod.mk.injEq] at hab
+  obtain ⟨rfl, rfl⟩ := hab
+  simp only [Bool.and_eq_true, bne_iff_ne, ne_eq, decide_eq_true_eq] at hsat
+  exact ⟨ha, hb, hsat.1, hsat.2⟩
+
+theorem castAliasPair_complete (I : List Int) (h : ¬ castInjOn F I) :
+    castAliasPair F I ≠ none := by
+  intro none_
+  apply h
+  intro a ha b hb same
+  by_contra differ
+  unfold castAliasPair at none_
+  have := List.find?_eq_none.mp none_ (a, b)
+    (by simp only [List.mem_flatMap, List.mem_map, List.mem_dedup]; exact ⟨a, ha, b, hb, rfl⟩)
+  simp [differ, same] at this
+
+theorem castAlias_none_iff (I : List Int) : castAlias F I = none ↔ castInjOn F I := by
+  unfold castAlias
+  by_cases h : castInjOn F I
+  · simp [h]
+  · simp only [h, if_false, iff_false]
+    exact castAliasPair_complete F I h
+
+theorem castAlias_sound (I : List Int) (x y : Int) (h : castAlias F I = some (x, y)) :
+    x ∈ I ∧ y ∈ I ∧ x ≠ y ∧ (x : F) = (y : F) := by
+  unfold castAlias at h
+  split at h
+  · cases h
+  · exact castAliasPair_sound F I x y h
+
+end CastAlias
+
+/-- Two integers of the step with one field image, named. -/
+def Refusal.castAlias (x y : Int) : Refusal :=
+  ⟨.lawInputRange,
+    s!"values {x} and {y} have the same image in the native field (outside the band the compiled law decides)",
+    none⟩
+
+#assert_axioms castAlias_none_iff
+#assert_axioms castAlias_sound
 #assert_axioms rangeLeaf_none_iff
 #assert_axioms rangeLeaf_sound
 #assert_axioms LawLeaf.ofRange_none_iff
