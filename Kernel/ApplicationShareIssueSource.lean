@@ -143,7 +143,7 @@ ticket resource's own document. -/
 def ticketPage (domain : Digest) (spec : Spec) (operation : Nat) :
     Except ContentResource.Reject ContentResource.ContentStore :=
   (ContentResource.run ⟨spec.issuer, .object, spec.ticketOwnerCapability⟩ ⟨⟨operation⟩⟩
-    (ContentResource.documentOf spec.ticket.resource) ContentResource.initialStore
+    (ContentResource.documentOf spec.ticket.resource) .closed ContentResource.initialStore
     ⟨[ApplicationDispatchAuthority.initialAction domain spec.ticket]⟩).map (·.1)
 
 private def bornCell (page : ContentResource.ContentStore) :

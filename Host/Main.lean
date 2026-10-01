@@ -847,6 +847,15 @@ def presenceIndexJson (index : PresenceIndex.Index) : Lean.Json :=
     ("touched", .arr <| index.touched.toArray.map fun entry =>
       .arr #[.str (toString entry.1.value), .str (toString entry.2)])]
 
+/-- The whole link index, log heights (operator output only): per source
+cell, its live links with revision, height, target kind and target id. -/
+def linkIndexJson (index : LinkIndex.Index) : Lean.Json :=
+  .arr <| index.sources.toArray.map fun (cell, entries) =>
+    .mkObj [("cell", .str (toString cell.value)), ("links", .arr <| entries.toArray.map fun entry =>
+      .arr #[.str (toString entry.link.digest.value), .str (toString entry.record.operation.digest.value),
+        .str (toString entry.height), .str (toString (LinkIndex.targetKind entry.record.target)),
+        .str (toString (LinkIndex.targetId entry.record.target))])]
+
 def failure (reason : RefusalReason) (phase detail : String) : List UInt8 :=
   outcomeCodec.encode (.refused reason phase.toUTF8.toList detail.toUTF8.toList)
 
@@ -5967,10 +5976,16 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "audit", [] =>
           withPinnedSignature config fun pinnedConfig => do
-            let (count, index) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
+            let (count, index, links) ← IO.ofExcept (← NativeHost.audit pinnedConfig)
             IO.println s!"audited {count} accepted records: every signed ingress re-admitted at its original prefix"
             IO.println s!"index {(presenceIndexJson index).compress}"
+            IO.println s!"links {(linkIndexJson links).compress}"
             pure 0
+      | "link-index", [] =>
+          let (base, height, links) ← IO.ofExcept (← NativeHost.linkIndex config)
+          IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"
+          IO.println s!"links {(linkIndexJson links).compress}"
+          pure 0
       | "presence-index", [] =>
           let (base, height, index) ← IO.ofExcept (← NativeHost.presenceIndex config)
           IO.println s!"opened log height {height} from the checkpoint at {base} plus {height - base} replayed records"

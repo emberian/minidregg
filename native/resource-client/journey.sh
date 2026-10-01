@@ -119,7 +119,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C K12I K12T K12E K12M K12H WEB KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -131,7 +131,13 @@ TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refuse
 TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
 TITLE[KIX]="the index the world keeps: who, since, and a read at a past height"
 TITLE[KF]="a scope names fields and bounds each field change per write"
-TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
+TITLE[K12C]="content actions: annotate (stale after edit; reviewer law refuses edit)"
+TITLE[K12I]="link index: backlinks cut to the reader's standing grants; unlink; a transclusion is a backlink"
+TITLE[K12T]="range transclusion: disclosure at transclusion time, snapshot pinned, live follows, a late joiner sees the placeholder"
+TITLE[K12E]="element tree: order is the tree walk, a transclusion at line 3, 100 nested inserts, cycle and stale refused"
+TITLE[K12M]="marks on lines: bold/italic/code/heading/link, pinned by revision, stale after edit, unmark by author or owner"
+TITLE[K12H]="document history: history / show --at / diff over the element-tree order, coverage at the asked height"
+TITLE[WEB]="mini web: loopback-only, read-only; view-document pages, index backlinks, history / at / diff pages"
 TITLE[KHQ]="commit-reveal at the kernel: a sealed bid opens only to its commitment"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
@@ -758,7 +764,13 @@ step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read throu
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
 step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last visible write, since lists only later writes, at differs across a write above and below the checkpoint and equals the read now, a height above now is refused, a cold reopen prints the same index (lane k-index)"; }
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
-step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
+step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit (lane k-content; its quote rows moved to K12T with k-transclude)"; }
+step_K12I() { hook j12i-links "K-DOC-INDEX rows: backlinks cut to the reader's standing grants, unlink retires a link, a transclusion is a backlink of its source (lane k-doc-index)"; }
+step_K12T() { hook j12t-kernel "K-TRANSCLUDE rows: disclosure checked at transclusion time, a snapshot pinned by revision, a live transclusion follows, a late joiner sees the moved placeholder (lane k-transclude)"; }
+step_K12E() { hook j12e "K-ELEMENT-TREE rows: the order is the tree walk, a transclusion placed at line 3, 100 nested inserts, a cycle and a stale container refused (lane k-element-tree)"; }
+step_K12M() { hook j12m "K-MARKS rows: bold/italic/code/heading/link marks pinned by revision, stale after an edit, unmark by author or owner, a reviewer under fields={annotations} marks and cannot edit (lane k-marks)"; }
+step_K12H() { hook j12h-history "K-DOC-HISTORY rows: history, show --at and diff over the element-tree order, moves named, coverage at the asked height (lane k-doc-history)"; }
+step_WEB() { hook jweb "WEB rows: loopback-only, read-only mini web; view-document pages, index backlinks, history / at / diff pages; refused requests make no read (lanes web-entrance, docuverse-braid)"; }
 step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHAKE256 digest, the right opening installs, a wrong opening or a reveal before the deadline is refused, the plaintext is on the Store only after the reveal (lane k-hasheq)"; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
@@ -798,6 +810,12 @@ run_step K11 J5
 run_step KIX K10
 run_step KF J5
 run_step K12C J5
+run_step K12I J5
+run_step K12T J5
+run_step K12E J5
+run_step K12M J5
+run_step K12H J5
+run_step WEB K12C K12T K12M K12H
 run_step KHQ J4
 run_step KW J5
 run_step JN2 J0

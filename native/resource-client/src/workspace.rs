@@ -5,7 +5,8 @@
 use crate::current_birth;
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
-    absolute, author, hex, path, query, query_retained, retry, submit, Args, Result, SOCKET,
+    absolute, author, hex, inspect, path, print_json, query, query_retained, retry, submit, Args,
+    Result, SOCKET,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -203,10 +204,19 @@ fn os_string(value: OsString, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} must be UTF-8"))
 }
 
-/// `Kernel/ContentResource.commandVersion`: the content command grammar v3
-/// (K-CONTENT: editAtom by revision, annotate, quote); v1 and v2 frames are
-/// refused (`retired_command_refused`).
-const CONTENT_COMMAND_VERSION: &str = "3";
+fn line_number(value: OsString, flag: &str) -> Result<usize> {
+    os_string(value, flag)?
+        .parse::<usize>()
+        .ok()
+        .filter(|line| *line > 0)
+        .ok_or_else(|| format!("{flag} must be a line number, 1 or more"))
+}
+
+/// `Kernel/ContentResource.commandVersion`: the content command grammar v7
+/// (createDocument … transclude 6, editElement 7, createContainer 8, unlink 9,
+/// mark 10, unmark 11); v1–v6 frames are refused (`retired_command_refused`).
+/// An observe-only `read` target is checked under it too.
+const CONTENT_COMMAND_VERSION: &str = "7";
 /// The declared scalar command version (`Kernel/DeclaredResourceScalar`).
 const SCALAR_COMMAND_VERSION: &str = "1";
 
@@ -562,6 +572,79 @@ fn read(
     )
 }
 
+/// The workspace's own reference names for a cell, else the cell id.
+fn cell_label(root: &Path, cell: &str) -> String {
+    let mut names: Vec<String> = fs::read_dir(root.join("refs"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            let stem = file.strip_suffix(".json")?.to_owned();
+            let value = reference(root, &stem).ok()?;
+            (value.get("target").and_then(Value::as_str) == Some(cell)).then_some(stem)
+        })
+        .collect();
+    names.sort();
+    if names.is_empty() {
+        cell.to_owned()
+    } else {
+        names.join(",")
+    }
+}
+
+/// `doc backlinks NAME` / `doc links NAME`: one signed query of the Host's link
+/// index (K-DOC-INDEX). Backlinks name only source documents a standing grant
+/// of this workspace's subject covers; the Host decides that, not the client.
+fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Result<()> {
+    let own = reference(root, name)?;
+    let (result, challenge, _) = signed_view(root, workspace, &own, view)?;
+    let rows = result
+        .get("rows")
+        .and_then(Value::as_array)
+        .ok_or("link view lacks rows")?;
+    let document = member(&own, "target")?;
+    let height = member(&challenge, "height")?;
+    let backlinks = view == "backlinks";
+    if backlinks {
+        println!(
+            "# backlinks to {name} (document {document}) from the documents this workspace can read at height {height}"
+        );
+    } else {
+        println!("# links from {name} (document {document}) at height {height}");
+    }
+    for row in rows {
+        if backlinks {
+            println!(
+                "{} link {} relation {} revision {} since {} target {} {}",
+                cell_label(root, member(row, "source")?),
+                member(row, "link")?,
+                member(row, "relation")?,
+                member(row, "revision")?,
+                member(row, "height")?,
+                member(row, "kind")?,
+                member(row, "target")?
+            );
+        } else {
+            println!(
+                "link {} -> {} {} relation {} revision {} since {}",
+                member(row, "link")?,
+                member(row, "kind")?,
+                cell_label(root, member(row, "target")?),
+                member(row, "relation")?,
+                member(row, "revision")?,
+                member(row, "height")?
+            );
+        }
+    }
+    println!(
+        "# {} {}",
+        rows.len(),
+        if backlinks { "backlink(s)" } else { "link(s)" }
+    );
+    Ok(())
+}
+
 pub(crate) fn signed_view(
     root: &Path,
     workspace: &Value,
@@ -595,6 +678,987 @@ pub(crate) fn signed_view(
     )?;
     let challenge = bounded_json(&attempt.join("challenge.json"))?;
     Ok((result, challenge, attempt.join("signed-observation.bin")))
+}
+
+/// A signed query of a referenced resource with `view` (and `height` for
+/// `since`/`at`), retained in a fresh attempt. The Host renders `view.bin`
+/// with `inspection`; returns that rendering and the attempt directory.
+fn doc_query(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    view: &str,
+    height: Option<&str>,
+    inspection: &str,
+) -> Result<(Value, PathBuf)> {
+    let (attempt, nonce) = new_attempt(root)?;
+    let mut purpose = json!({"type":"query","kind":member(reference,"kind")?,
+        "target":member(reference,"target")?,"view":view});
+    if let Some(height) = height {
+        decimal(height, "height")?;
+        purpose["height"] = json!(height);
+    }
+    let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,"purpose":purpose,
+        "grants":[{"kind":member(reference,"kind")?,"target":member(reference,"target")?,
+            "capability":member(reference,"observeCapability")?}]});
+    let source = root.join("sources").join(format!("q-{nonce}.json"));
+    private_file(
+        &source,
+        &serde_json::to_vec(&intent).map_err(|error| error.to_string())?,
+    )?;
+    eprintln!("workspace read attempt: {}", attempt.display());
+    let value = query_retained(
+        &member_path(workspace, "host")?,
+        &member_path(workspace, "config")?,
+        &source,
+        OsStr::new("intent"),
+        &member_path(workspace, "key")?,
+        inspection,
+        &attempt,
+    )?;
+    Ok((value, attempt))
+}
+
+/// A signed read of one reference `at` a past height (K-HISTORY-READ), under
+/// the grant as it stood at that height: the retained `view.bin` (an
+/// `atViewCodec` binary) and its presentation.
+fn signed_at(
+    root: &Path,
+    workspace: &Value,
+    reference: &Value,
+    height: &str,
+) -> Result<(Value, PathBuf)> {
+    let (value, attempt) = doc_query(root, workspace, reference, "at", Some(height), "view-at")?;
+    Ok((value, attempt.join("view.bin")))
+}
+
+fn entries(view: &Value) -> Result<&Vec<Value>> {
+    view.get("cell")
+        .and_then(|cell| cell.get("entries"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| "signed view is not a content cell".to_owned())
+}
+
+/// The workspace reference naming cell `target`, if this workspace holds one.
+fn reference_for_target(root: &Path, target: &str) -> Result<Option<Value>> {
+    let dir = root.join("refs");
+    let Ok(listing) = fs::read_dir(&dir) else {
+        return Ok(None);
+    };
+    let mut names: Vec<String> = listing
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter_map(|name| name.strip_suffix(".json").map(str::to_owned))
+        .collect();
+    names.sort();
+    for name in names {
+        if let Ok(value) = reference(root, &name) {
+            if member(&value, "target")? == target {
+                return Ok(Some(value));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// `transclude`: one transaction that transcludes the atoms FROM..TO of one
+/// run of SOURCE into HOST.  HOST's target carries the content action; SOURCE's
+/// carries an observe-only `read`, so the admission checks this workspace's
+/// own observe grant on SOURCE, and the source's policy, at this height.  The
+/// opening (the range's live atoms at their revisions) is what this signed read
+/// of SOURCE shows; the Host refuses it `staleOpening` if SOURCE moved since.
+fn transclude(
+    root: &Path,
+    workspace: &Value,
+    host: &str,
+    source: &str,
+    from: &str,
+    to: &str,
+    live: bool,
+    death: &str,
+    at: Option<usize>,
+) -> Result<()> {
+    decimal(from, "first atom")?;
+    decimal(to, "last atom")?;
+    if !matches!(
+        death,
+        "invalidate"
+            | "keepTombstone"
+            | "preferPrevious"
+            | "preferNext"
+            | "preferPreviousThenNext"
+            | "preferNextThenPrevious"
+    ) {
+        return Err("--death must name an endpoint death policy".into());
+    }
+    let source_ref = reference(root, source)?;
+    let (view, _, _) = signed_view(root, workspace, &source_ref, "resource")?;
+    let cell = entries(&view)?;
+    let has = |run: &Value, atom: &str| {
+        run.get("atoms")
+            .and_then(Value::as_array)
+            .is_some_and(|atoms| atoms.iter().any(|value| value.as_str() == Some(atom)))
+    };
+    let run = cell
+        .iter()
+        .find(|entry| {
+            entry.get("type").and_then(Value::as_str) == Some("run") && has(entry, from) && has(entry, to)
+        })
+        .ok_or("no run of the source holds both endpoints")?;
+    let atoms: Vec<&str> = run["atoms"]
+        .as_array()
+        .ok_or("run lacks atoms")?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let first = atoms.iter().position(|atom| *atom == from).ok_or("first atom not in run")?;
+    let last = atoms.iter().position(|atom| *atom == to).ok_or("last atom not in run")?;
+    if first > last {
+        return Err("the range's first atom follows its last".into());
+    }
+    let target = member(&source_ref, "target")?;
+    let mut pins = Vec::new();
+    for atom in &atoms[first..=last] {
+        let record = cell.iter().find(|entry| {
+            entry.get("type").and_then(Value::as_str) == Some("atom")
+                && entry.get("id").and_then(Value::as_str) == Some(atom)
+        });
+        if let Some(record) = record {
+            if record.get("tombstonedAt").is_some_and(Value::is_null)
+                && member(record, "document")? == target
+            {
+                pins.push(json!({"atom":atom,"revision":member(record,"revision")?}));
+            }
+        }
+    }
+    let point = |atom: &str, bias: &str| {
+        json!({"run":run["id"],"neighbor":atom,"bias":bias,"death":death})
+    };
+    let id = random_nonce()?;
+    let mut actions = vec![json!({"type":"transclude",
+        "transclusion":id,"link":random_nonce()?,
+        "request":{"source":target,"range":{"start":point(from,"before"),"finish":point(to,"after")},
+            "mode":if live {"live"} else {"snapshot"},"pins":pins}})];
+    if let Some(at) = at {
+        let host_ref = reference(root, host)?;
+        actions.extend(place_new_leaf(&host_document(root, workspace, &host_ref)?, &id, at)?);
+    }
+    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
+        {"name":host,"payload":{"type":"content","actions":actions}},
+        {"name":source,"payload":{"type":"read"}}]});
+    let proposal_id = format!("transclude-{id}");
+    let request_path = root.join("sources").join(format!("{proposal_id}.json"));
+    private_file(
+        &request_path,
+        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+    )?;
+    propose(root, workspace, &request_path, &proposal_id, None)?;
+    eprintln!("workspace transclusion: {id}");
+    let attempt = root.join("attempts").join(&proposal_id);
+    submit_intent(
+        root,
+        workspace,
+        &root.join("proposals").join(&proposal_id).join("intent.json"),
+        "intent",
+        false,
+        Some(attempt.as_path()),
+    )
+}
+
+/// HOST's document as the kernel orders it (`inspect view-document`: the
+/// pre-order walk of its element tree), with its transclusions rendered over
+/// this workspace's own source reads: a current read of each source this
+/// workspace can read (a refused read contributes nothing, so the transclusion
+/// renders `unavailable` with its shape only), and, for a snapshot whose pins
+/// moved, a read of the source `at` the opening's height.  With `only`, that one
+/// transclusion, and its source read must succeed (`follow`: re-resolve at the
+/// current height).  Returns HOST's target, the kernel's document view, and the
+/// rendered transclusions, each with its `text`.
+/// One rendered page of a document: HOST's cell, the host page's presentation
+/// (a resource view; at a past height the `at` view's `resource`, null when
+/// the cell was not live then), the attempt directory of the host read (its
+/// `challenge.json`), the kernel's document view, and the rendered
+/// transclusions, each with its `text`.
+pub(crate) struct Rendered {
+    pub host: String,
+    pub view: Value,
+    pub attempt: PathBuf,
+    pub document: Value,
+    pub shown: Vec<Value>,
+}
+
+pub(crate) fn rendered_document(
+    root: &Path,
+    workspace: &Value,
+    host_name: &str,
+    only: Option<&str>,
+    at: Option<&str>,
+) -> Result<Rendered> {
+    let host_ref = reference(root, host_name)?;
+    // The host page: current, or `at` a past height under the grant as it stood
+    // then (the Host refuses the read otherwise; that refusal is the answer).
+    let (host_view, host_bin) = match at {
+        None => {
+            let (view, _, signed) = signed_view(root, workspace, &host_ref, "resource")?;
+            (view, signed.with_file_name("view.bin"))
+        }
+        Some(height) => {
+            let (view, bin) = signed_at(root, workspace, &host_ref, height)?;
+            (view["resource"].clone(), bin)
+        }
+    };
+    let host_attempt = host_bin
+        .parent()
+        .ok_or("host read lacks its attempt directory")?
+        .to_path_buf();
+    let host_bin = fs::read(host_bin).map_err(|error| error.to_string())?;
+    let no_entries = Vec::new();
+    let host_entries = if at.is_some() && host_view.is_null() {
+        &no_entries
+    } else {
+        entries(&host_view)?
+    };
+    let records: Vec<&Value> = host_entries
+        .iter()
+        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("transclusion"))
+        .filter(|entry| only.is_none_or(|id| entry.get("id").and_then(Value::as_str) == Some(id)))
+        .collect();
+    if let Some(id) = only {
+        if records.is_empty() {
+            return Err(format!("{host_name} holds no transclusion {id}"));
+        }
+    }
+    let mut sources = Vec::new();
+    let mut readable = std::collections::BTreeMap::new();
+    for record in &records {
+        let source = member(&record["opening"], "source")?.to_owned();
+        if readable.contains_key(&source) {
+            continue;
+        }
+        // A page at height H reads each source `at` H too: what the reader
+        // could see then, under its grants as they stood then.
+        let attempt = |reference: &Value| -> Result<Value> {
+            match at {
+                None => {
+                    let (_, _, signed) = signed_view(root, workspace, reference, "resource")?;
+                    let bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
+                    Ok(json!({"target":source,"view":hex(&bin)}))
+                }
+                Some(height) => {
+                    let (view, bin) = signed_at(root, workspace, reference, height)?;
+                    if view["state"] != "live" {
+                        return Err(format!("source {source} is not live at height {height}"));
+                    }
+                    let bin = fs::read(bin).map_err(|error| error.to_string())?;
+                    Ok(json!({"target":source,"at":hex(&bin)}))
+                }
+            }
+        };
+        let read = match reference_for_target(root, &source)? {
+            Some(reference) => match attempt(&reference) {
+                Ok(read) => {
+                    sources.push(read);
+                    Some(reference)
+                }
+                Err(error) if only.is_some() => {
+                    return Err(format!("follow refused: no read of source {source}: {error}"))
+                }
+                Err(_) => None,
+            },
+            None if only.is_some() => {
+                return Err(format!("follow refused: no reference to source {source}"))
+            }
+            None => None,
+        };
+        readable.insert(source, read);
+    }
+    let render = |sources: &Vec<Value>| -> Result<Value> {
+        let (attempt, _) = new_attempt(root)?;
+        make_private_dir(&attempt)?;
+        let input = attempt.join("transclusions-in.json");
+        private_file(
+            &input,
+            &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":sources}))
+                .map_err(|error| error.to_string())?,
+        )?;
+        inspect(
+            &member_path(workspace, "host")?,
+            &member_path(workspace, "config")?,
+            "view-document",
+            &input,
+            &attempt.join("transclusions.json"),
+        )
+    };
+    let current = render(&sources)?;
+    let mut shown = Vec::new();
+    for item in current["transclusions"].as_array().ok_or("Host rendered no transclusions")? {
+        if only.is_some_and(|id| item.get("id").and_then(Value::as_str) != Some(id)) {
+            continue;
+        }
+        let mut item = item.clone();
+        let source = member(&item["opening"], "source")?.to_owned();
+        if member(&item["render"], "view")? == "moved" {
+            if let Some(Some(reference)) = readable.get(&source) {
+                let height = member(&item["opening"], "height")?.to_owned();
+                // The snapshot is rendered by a read of the source `at` its
+                // opening height, which the Host answers only when this
+                // reader's grant stood then. A reader granted later keeps the
+                // `moved` placeholder: it is told the lines moved, not shown them.
+                match signed_at(root, workspace, reference, &height) {
+                    Ok((_, bin)) => {
+                        let at = fs::read(&bin).map_err(|error| error.to_string())?;
+                        let again = render(&vec![json!({"target":source,"at":hex(&at)})])?;
+                        if let Some(found) = again["transclusions"].as_array().and_then(|all| {
+                            all.iter().find(|other| other.get("id") == item.get("id"))
+                        }) {
+                            item["render"] = found["render"].clone();
+                            item["at"] = json!(height);
+                        }
+                    }
+                    Err(_) if history_refused() => item["atRefused"] = json!(height),
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        let atoms = member(&item["opening"], "atoms")?.to_owned();
+        let text = match member(&item["render"], "view")? {
+            "unavailable" => format!("[transclusion: {atoms} atoms of {source}, not readable by you]"),
+            "snapshot" | "live" => {
+                let lines: Vec<String> = item["render"]["lines"]
+                    .as_array()
+                    .map(|lines| {
+                        lines
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(|line| {
+                                String::from_utf8_lossy(&crate::decode_hex(line).unwrap_or_default()).into_owned()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let mark = if item["render"]["view"] == "snapshot" {
+                    match item.get("at") {
+                        Some(height) => format!("snapshot at {}", height.as_str().unwrap_or("?")),
+                        None => "snapshot".to_owned(),
+                    }
+                } else if item["render"]["revised"] == true {
+                    "live, revised".to_owned()
+                } else {
+                    "live".to_owned()
+                };
+                format!("[{mark} of {source}]\n{}", lines.join("\n"))
+            }
+            "moved" if item.get("atRefused").is_some() => format!(
+                "[snapshot of {source}: its lines moved since height {}, and your grant did not cover {source} then]",
+                item["atRefused"].as_str().unwrap_or("?")
+            ),
+            other => format!("[transclusion of {source}: {other}]"),
+        };
+        item["text"] = json!(text);
+        shown.push(item);
+    }
+    Ok(Rendered {
+        host: member(&host_ref, "target")?.to_owned(),
+        view: host_view,
+        attempt: host_attempt,
+        document: current,
+        shown,
+    })
+}
+
+/// `transclusions` / `follow`: HOST's rendered transclusions.
+fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<()> {
+    let Rendered { host, shown, .. } = rendered_document(root, workspace, host_name, only, None)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({"type":"transclusions","host":host,
+            "transclusions":shown}))
+        .map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// The kernel's document view of one reference, without rendering any
+/// transclusion: what placement needs (the order, each element's parent, each
+/// container's revision).
+fn host_document(root: &Path, workspace: &Value, host_ref: &Value) -> Result<Value> {
+    let (_, _, signed) = signed_view(root, workspace, host_ref, "resource")?;
+    let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
+    let (attempt, _) = new_attempt(root)?;
+    make_private_dir(&attempt)?;
+    let input = attempt.join("document-in.json");
+    private_file(
+        &input,
+        &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":[]}))
+            .map_err(|error| error.to_string())?,
+    )?;
+    inspect(
+        &member_path(workspace, "host")?,
+        &member_path(workspace, "config")?,
+        "view-document",
+        &input,
+        &attempt.join("document.json"),
+    )
+}
+
+/// The document's lines: the leaves of the kernel's order that a reader reads
+/// as a line — a live atom or a transclusion.  A struck atom stands in the order
+/// but is no line, so line numbers, `doc show`'s and a refusal's, agree.
+fn live_lines(document: &Value) -> Result<Vec<&Value>> {
+    Ok(document["order"]
+        .as_array()
+        .ok_or("document view has no order")?
+        .iter()
+        .filter(|entry| match entry["kind"].as_str() {
+            Some("atom") => entry["struck"] != true,
+            Some("embed") => true,
+            _ => false,
+        })
+        .collect())
+}
+
+/// Where element ELEMENT stands: its container, that container's revision as
+/// this view read it, and its index among the container's children (struck
+/// lines and sections included: they are children too).
+fn place_of(document: &Value, element: &str) -> Result<(String, String, usize)> {
+    let order = document["order"].as_array().ok_or("document view has no order")?;
+    let entry = order
+        .iter()
+        .find(|entry| entry["element"].as_str() == Some(element))
+        .ok_or("element is not in the document's order")?;
+    let parent = member(entry, "parent")?.to_owned();
+    let index = order
+        .iter()
+        .filter(|other| other["parent"].as_str() == Some(parent.as_str()))
+        .position(|other| other["element"].as_str() == Some(element))
+        .ok_or("element is not among its parent's children")?;
+    Ok((parent.clone(), container_revision(document, &parent)?, index))
+}
+
+fn container_revision(document: &Value, container: &str) -> Result<String> {
+    if document["root"].as_str() == Some(container) {
+        return Ok(member(document, "rootRevision")?.to_owned());
+    }
+    let order = document["order"].as_array().ok_or("document view has no order")?;
+    order
+        .iter()
+        .find(|entry| entry["element"].as_str() == Some(container) && entry["kind"] == "container")
+        .map(|entry| member(entry, "revision").map(str::to_owned))
+        .ok_or_else(|| "no such section".to_owned())?
+}
+
+/// The element of line N (1-based).
+fn line_element(document: &Value, line: usize) -> Result<String> {
+    let lines = live_lines(document)?;
+    if line == 0 || line > lines.len() {
+        return Err(format!("the document has {} lines; there is no line {line}", lines.len()));
+    }
+    Ok(member(lines[line - 1], "element")?.to_owned())
+}
+
+fn edit_element(container: &str, revision: &str, op: Value) -> Value {
+    json!({"type":"editElement","element":container,"revision":revision,"op":op})
+}
+
+/// The edits that place LEAF — appended to the root by the action that creates
+/// it, in the same command — at line AT: where the line now numbered AT stands,
+/// in that line's container, which shifts it and every later line down by one.
+/// AT one past the last line is the append itself: no edit.  Each edit names
+/// the revision of its container this view read, so a container whose children
+/// moved since is refused `staleElement` and nothing lands.  This replaces
+/// minting an identifier between two neighbours (K-DOC-ORDER): an insert costs
+/// one edit however many inserts went to the same spot before it.
+fn place_new_leaf(document: &Value, leaf: &str, at: usize) -> Result<Vec<Value>> {
+    let lines = live_lines(document)?;
+    if at == lines.len() + 1 {
+        return Ok(Vec::new());
+    }
+    let root = member(document, "root")?;
+    let (parent, revision, index) = place_of(document, &line_element(document, at)?)?;
+    if parent == root {
+        Ok(vec![edit_element(&parent, &revision, json!({"type":"move","child":leaf,"index":index.to_string()}))])
+    } else {
+        Ok(vec![
+            edit_element(root, member(document, "rootRevision")?, json!({"type":"remove","child":leaf})),
+            edit_element(&parent, &revision, json!({"type":"splice","index":index.to_string(),"child":leaf})),
+        ])
+    }
+}
+
+/// The edits that move line FROM to stand where line TO stands now.
+fn move_line(document: &Value, from: usize, to: usize) -> Result<Vec<Value>> {
+    let element = line_element(document, from)?;
+    let (source, source_revision, _) = place_of(document, &element)?;
+    let (target, target_revision, index) = place_of(document, &line_element(document, to)?)?;
+    if from == to {
+        return Err("a line moved to where it stands is no edit".into());
+    }
+    if source == target {
+        Ok(vec![edit_element(&source, &source_revision, json!({"type":"move","child":element,"index":index.to_string()}))])
+    } else {
+        Ok(vec![
+            edit_element(&source, &source_revision, json!({"type":"remove","child":element})),
+            edit_element(&target, &target_revision, json!({"type":"splice","index":index.to_string(),"child":element})),
+        ])
+    }
+}
+
+/// One content command on NAME, proposed and submitted.
+fn submit_content(root: &Path, workspace: &Value, name: &str, actions: Vec<Value>, label: &str) -> Result<()> {
+    let id = random_nonce()?;
+    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
+        {"name":name,"payload":{"type":"content","actions":actions}}]});
+    let proposal_id = format!("{label}-{id}");
+    let request_path = root.join("sources").join(format!("{proposal_id}.json"));
+    private_file(
+        &request_path,
+        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+    )?;
+    propose(root, workspace, &request_path, &proposal_id, None)?;
+    let attempt = root.join("attempts").join(&proposal_id);
+    submit_intent(
+        root,
+        workspace,
+        &root.join("proposals").join(&proposal_id).join("intent.json"),
+        "intent",
+        false,
+        Some(attempt.as_path()),
+    )
+}
+
+/// `doc-insert`: a new text line, at line AT or (absent) after the last line.
+fn doc_insert(root: &Path, workspace: &Value, name: &str, text: &str, at: Option<usize>) -> Result<()> {
+    if text.contains('\n') {
+        return Err("a line holds no newline".into());
+    }
+    let atom = random_nonce()?;
+    let mut actions = vec![json!({"type":"createAtom","atom":atom,"kind":{"type":"text"},
+        "payload":hex(text.as_bytes())})];
+    if let Some(at) = at {
+        let reference = reference(root, name)?;
+        actions.extend(place_new_leaf(&host_document(root, workspace, &reference)?, &atom, at)?);
+    }
+    eprintln!("workspace line: {atom}");
+    submit_content(root, workspace, name, actions, "insert")
+}
+
+/// `doc-move`: line FROM moves to stand where line TO stands.
+fn doc_move(root: &Path, workspace: &Value, name: &str, from: usize, to: usize) -> Result<()> {
+    let reference = reference(root, name)?;
+    let actions = move_line(&host_document(root, workspace, &reference)?, from, to)?;
+    submit_content(root, workspace, name, actions, "move")
+}
+
+/// `doc-remove`: line N leaves the document's order; its atom record stays.
+fn doc_remove(root: &Path, workspace: &Value, name: &str, line: usize) -> Result<()> {
+    let reference = reference(root, name)?;
+    let document = host_document(root, workspace, &reference)?;
+    let element = line_element(&document, line)?;
+    let (parent, revision, _) = place_of(&document, &element)?;
+    submit_content(root, workspace, name,
+        vec![edit_element(&parent, &revision, json!({"type":"remove","child":element}))], "remove")
+}
+
+/// The mark kind `--kind` names, as the Host's `kind` object.  A link mark
+/// carries a fresh link identifier and the document reference NAME (`--to`)
+/// names; the kernel writes that link as an ordinary link record.
+fn mark_kind(root: &Path, kind: &str, to: Option<&str>) -> Result<(Value, Option<String>)> {
+    match kind {
+        "bold" | "italic" | "code" | "heading" => {
+            if to.is_some() {
+                return Err("--to is only for a link mark".into());
+            }
+            Ok((json!({"type": kind}), None))
+        }
+        "link" => {
+            let to = to.ok_or("a link mark needs --to NAME")?;
+            let target = reference(root, to)?;
+            let link = random_nonce()?;
+            Ok((
+                json!({"type":"link","link":link,
+                    "target":{"type":"document","id":member(&target, "target")?}}),
+                Some(link),
+            ))
+        }
+        other => Err(format!(
+            "unknownKind: {other} (expected bold, italic, code, heading or link)"
+        )),
+    }
+}
+
+/// What line N is to a mark: its atom, or (a transclusion) its element, at the
+/// revision this view read.  A later edit of the line makes the mark stale.
+fn mark_target(document: &Value, line: usize) -> Result<(Value, String)> {
+    let lines = live_lines(document)?;
+    if line == 0 || line > lines.len() {
+        return Err(format!(
+            "noSuchTarget: the document has {} lines; there is no line {line}",
+            lines.len()
+        ));
+    }
+    let entry = lines[line - 1];
+    let target = match entry["kind"].as_str() {
+        Some("atom") => json!({"type":"atom","atom":member(entry, "atom")?}),
+        _ => json!({"type":"element","element":member(entry, "element")?}),
+    };
+    Ok((target, member(entry, "revision")?.to_owned()))
+}
+
+/// `mark`: lay a KIND mark on line N as this workspace reads the document now.
+fn doc_mark(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    line: usize,
+    kind: &str,
+    to: Option<&str>,
+) -> Result<()> {
+    let reference = reference(root, name)?;
+    let document = host_document(root, workspace, &reference)?;
+    let (target, revision) = mark_target(&document, line)?;
+    let (kind, link) = mark_kind(root, kind, to)?;
+    let mark = random_nonce()?;
+    eprintln!("workspace mark: {mark}");
+    if let Some(link) = link {
+        eprintln!("workspace mark link: {link}");
+    }
+    submit_content(
+        root,
+        workspace,
+        name,
+        vec![json!({"type":"mark","mark":mark,"target":target,"revision":revision,"kind":kind})],
+        "mark",
+    )
+}
+
+/// `unmark`: retire mark ID, or the one live mark (of KIND) on line N.  The
+/// kernel admits it only from the mark's author or the document's owner.
+fn doc_unmark(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    mark: Option<&str>,
+    line: Option<usize>,
+    kind: Option<&str>,
+) -> Result<()> {
+    let mark = match (mark, line) {
+        (Some(mark), None) if kind.is_none() => {
+            decimal(mark, "mark")?;
+            mark.to_owned()
+        }
+        (None, Some(line)) => {
+            let reference = reference(root, name)?;
+            let document = host_document(root, workspace, &reference)?;
+            let lines = live_lines(&document)?;
+            if line == 0 || line > lines.len() {
+                return Err(format!(
+                    "the document has {} lines; there is no line {line}",
+                    lines.len()
+                ));
+            }
+            let found: Vec<&Value> = lines[line - 1]["marks"]
+                .as_array()
+                .map(|marks| {
+                    marks
+                        .iter()
+                        .filter(|mark| kind.is_none_or(|kind| mark["kind"] == kind))
+                        .collect()
+                })
+                .unwrap_or_default();
+            match found.as_slice() {
+                [one] => member(one, "mark")?.to_owned(),
+                [] => {
+                    return Err(format!(
+                        "markNotFound: no {} mark on line {line}",
+                        kind.unwrap_or("live")
+                    ))
+                }
+                many => {
+                    let ids: Vec<&str> = many.iter().filter_map(|mark| mark["mark"].as_str()).collect();
+                    return Err(format!(
+                        "line {line} has {} such marks; name one with --mark ({})",
+                        many.len(),
+                        ids.join(", ")
+                    ));
+                }
+            }
+        }
+        _ => return Err("unmark needs --mark ID, or --line N [--kind K]".into()),
+    };
+    submit_content(root, workspace, name, vec![json!({"type":"unmark","mark":mark})], "unmark")
+}
+
+/// This workspace's names for reference targets: what a link mark points at is
+/// shown by the name the reader knows it by.
+fn reference_names(root: &Path) -> std::collections::BTreeMap<String, String> {
+    let mut names = std::collections::BTreeMap::new();
+    if let Ok(entries) = fs::read_dir(root.join("refs")) {
+        for entry in entries.flatten() {
+            let file = entry.file_name();
+            let Some(stem) = file.to_str().and_then(|file| file.strip_suffix(".json")) else {
+                continue;
+            };
+            if let Ok(value) = reference(root, stem) {
+                if let Some(target) = value["target"].as_str() {
+                    names.entry(target.to_owned()).or_insert_with(|| stem.to_owned());
+                }
+            }
+        }
+    }
+    names
+}
+
+fn link_target_text(names: &std::collections::BTreeMap<String, String>, target: &Value) -> String {
+    let id = target["id"].as_str().or_else(|| target["document"].as_str()).unwrap_or("?");
+    match target["type"].as_str() {
+        Some("document") | Some("range") => {
+            names.get(id).cloned().unwrap_or_else(|| format!("doc:{id}"))
+        }
+        Some(other) => format!("{other}:{id}"),
+        None => "?".to_owned(),
+    }
+}
+
+/// A row's text with its marks in a plain notation: `# ` heading, `**bold**`,
+/// `_italic_`, `` `code` ``, `[text](→ name)` for a link.  A stale mark (its line
+/// moved since the mark was laid) is shown struck, `~~…~~`, and never applied as
+/// if current.  Each kind (a link: each target) renders once: struck only when
+/// every mark of it is stale, since a fresh mark of it says the line is so now.
+fn render_marks(
+    names: &std::collections::BTreeMap<String, String>,
+    body: &str,
+    marks: &Value,
+) -> String {
+    let Some(marks) = marks.as_array() else {
+        return body.to_owned();
+    };
+    let mut text = body.to_owned();
+    for kind in ["code", "italic", "bold", "link", "heading"] {
+        let mut targets = std::collections::BTreeMap::<String, bool>::new();
+        for mark in marks.iter().filter(|mark| mark["kind"] == kind) {
+            let target = if kind == "link" {
+                link_target_text(names, &mark["target"])
+            } else {
+                String::new()
+            };
+            *targets.entry(target).or_insert(false) |= mark["fresh"] == true;
+        }
+        for (target, fresh) in targets {
+            let strike = |decorated: String| {
+                if fresh {
+                    decorated
+                } else {
+                    format!("~~{decorated}~~")
+                }
+            };
+            text = match kind {
+                "code" => strike(format!("`{text}`")),
+                "italic" => strike(format!("_{text}_")),
+                "bold" => strike(format!("**{text}**")),
+                "link" => strike(format!("[{text}](→ {target})")),
+                _ => format!("{} {text}", strike("#".to_owned())),
+            };
+        }
+    }
+    text
+}
+
+/// `doc-show`: the document in the kernel's order.  Each live line is numbered;
+/// a struck line shows as `-`; a transclusion is one line, shown as this
+/// workspace's own read of its source renders it; a section is a heading.
+/// Nothing is sorted here: the order is the kernel's.
+pub(crate) fn document_lines(root: &Path, page: &Rendered) -> Result<(Vec<Value>, Vec<String>)> {
+    let (document, shown) = (&page.document, &page.shown);
+    let order = document["order"].as_array().ok_or("document view has no order")?;
+    let mut depth = std::collections::BTreeMap::<String, usize>::new();
+    if let Some(root_element) = document["root"].as_str() {
+        depth.insert(root_element.to_owned(), 0);
+    }
+    let names = reference_names(root);
+    let mut lines = Vec::new();
+    let mut text = Vec::new();
+    let mut number = 0usize;
+    for entry in order {
+        let element = member(entry, "element")?.to_owned();
+        let level = entry["parent"].as_str().and_then(|parent| depth.get(parent)).map_or(1, |d| d + 1);
+        depth.insert(element.clone(), level);
+        let indent = "  ".repeat(level.saturating_sub(1));
+        let (n, body) = match entry["kind"].as_str() {
+            Some("atom") => {
+                let bytes = crate::decode_hex(entry["payload"].as_str().unwrap_or("")).unwrap_or_default();
+                let body = String::from_utf8_lossy(&bytes).into_owned();
+                if entry["struck"] == true {
+                    (None, body)
+                } else {
+                    number += 1;
+                    (Some(number), body)
+                }
+            }
+            Some("embed") => {
+                number += 1;
+                let id = member(entry, "transclusion")?;
+                let body = shown
+                    .iter()
+                    .find(|item| item["id"].as_str() == Some(id))
+                    .and_then(|item| item["text"].as_str())
+                    .unwrap_or("[transclusion]")
+                    .to_owned();
+                (Some(number), body)
+            }
+            Some("container") => (None, format!("[section {element}]")),
+            Some(other) => (None, format!("[{other}]")),
+            None => (None, String::new()),
+        };
+        let rendered = render_marks(&names, &body, &entry["marks"]);
+        text.push(match n {
+            Some(n) => format!("{indent}{n:>3}  {rendered}"),
+            None if entry["kind"] == "atom" => format!("{indent}  -  {rendered} (struck)"),
+            None => format!("{indent}     {rendered}"),
+        });
+        let mut line = entry.clone();
+        line["line"] = n.map_or(Value::Null, |n| json!(n));
+        line["depth"] = json!(level);
+        line["text"] = json!(body);
+        line["rendered"] = json!(rendered);
+        lines.push(line);
+    }
+    Ok((lines, text))
+}
+
+fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>) -> Result<()> {
+    let rendered = rendered_document(root, workspace, name, None, at)?;
+    let (lines, text) = document_lines(root, &rendered)?;
+    if at.is_none() {
+        // What `doc edit` and `doc push` name a line against: this read, in the
+        // kernel's order.
+        let challenge = bounded_json(&rendered.attempt.join("challenge.json")).unwrap_or(Value::Null);
+        retain_seen(root, name, &rendered.view, &rendered.document, &challenge)?;
+    }
+    let (host, document) = (&rendered.host, &rendered.document);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({"type":"document","host":host,
+            "height":document["height"],"state":document["state"],
+            "root":document["root"],"rootRevision":document["rootRevision"],
+            "lines":lines,"text":text.join("\n")}))
+        .map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+fn view_hex(attempt: &Path) -> Result<String> {
+    let path = attempt.join("view.bin");
+    fs::read(&path)
+        .map(|bytes| hex(&bytes))
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))
+}
+
+/// Render `input` with the Host's `kind` inspection, retained beside `attempt`.
+fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> Result<Value> {
+    let input_path = attempt.join(format!("{kind}-input.json"));
+    private_file(
+        &input_path,
+        &serde_json::to_vec(input).map_err(|error| error.to_string())?,
+    )?;
+    let rendered = inspect(
+        &member_path(workspace, "host")?,
+        &member_path(workspace, "config")?,
+        kind,
+        &input_path,
+        &attempt.join(format!("{kind}.json")),
+    )?;
+    Ok(rendered)
+}
+
+/// Whether the `at` read that just failed was refused `no-grant`: the grant did
+/// not stand over the cell at that height (`NativeObservationController.atCovered`).
+/// Read from the Host's own decoding of its refusal frame (`HostDecision`),
+/// never from text. Every other failure (a height above the head, a malformed
+/// read, a transport error) stays an error, not a placeholder.
+fn history_refused() -> bool {
+    match crate::take_host_decision() {
+        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+        | Some(crate::HostDecision::Outcome(outcome)) => reason_is_no_grant(&outcome),
+        _ => false,
+    }
+}
+
+fn reason_is_no_grant(outcome: &Value) -> bool {
+    outcome.get("type").and_then(Value::as_str) == Some("refused")
+        && outcome.get("reason").and_then(Value::as_str) == Some("no-grant")
+}
+
+/// The heights whose `at` reads render a document's history: for each `since`
+/// entry that wrote `target`, its height and the height below it, ascending.
+fn history_heights(since: &Value, target: &str) -> Result<Vec<u64>> {
+    let entries = since
+        .get("entries")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "since view lacks entries".to_owned())?;
+    let mut heights = Vec::new();
+    for entry in entries {
+        let wrote = entry
+            .get("cells")
+            .and_then(Value::as_array)
+            .is_some_and(|cells| cells.iter().any(|cell| cell.as_str() == Some(target)));
+        if !wrote {
+            continue;
+        }
+        let height: u64 = member(entry, "height")?
+            .parse()
+            .map_err(|_| "since entry height is not a decimal".to_owned())?;
+        if height > 0 {
+            heights.push(height - 1);
+        }
+        heights.push(height);
+    }
+    heights.sort_unstable();
+    heights.dedup();
+    Ok(heights)
+}
+
+/// `doc history NAME`: `since 0` cut to the document, and the `at` reads at
+/// each row's height and the one below it; a height the grant did not cover
+/// contributes no read. The Host renders the rows and their atom changes.
+pub(crate) fn doc_history(root: &Path, workspace: &Value, name: &str) -> Result<Value> {
+    let reference = reference(root, name)?;
+    let target = member(&reference, "target")?;
+    let (since, attempt) = doc_query(
+        root,
+        workspace,
+        &reference,
+        "since",
+        Some("0"),
+        "view-since",
+    )?;
+    let mut reads = Vec::new();
+    for height in history_heights(&since, target)? {
+        match doc_query(
+            root,
+            workspace,
+            &reference,
+            "at",
+            Some(&height.to_string()),
+            "view-at",
+        ) {
+            Ok((_, read)) => reads.push(view_hex(&read)?),
+            Err(error) if history_refused() => {
+                eprintln!("doc history: no read at height {height}: {error}");
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let input = json!({"target": target, "since": view_hex(&attempt)?, "at": reads});
+    doc_render(workspace, &attempt, "view-history", &input)
+}
+
+/// `doc diff NAME H1 H2`: the atom changes between the two `at` reads.
+pub(crate) fn doc_diff(root: &Path, workspace: &Value, name: &str, from: &str, to: &str) -> Result<Value> {
+    let reference = reference(root, name)?;
+    let (_, left) = doc_query(root, workspace, &reference, "at", Some(from), "view-at")?;
+    let (_, right) = doc_query(root, workspace, &reference, "at", Some(to), "view-at")?;
+    let input = json!({"left": view_hex(&left)?, "right": view_hex(&right)?});
+    doc_render(workspace, &right, "view-diff", &input)
 }
 
 fn signed_authority_root(challenge: &Value) -> Result<&str> {
@@ -722,7 +1786,9 @@ fn content_actions(actions: &Value, sealed: bool) -> Result<Value> {
             .ok_or("content action must be an object")?;
         let (tag, fields): (&str, &[&str]) = match member(action, "type")? {
             "createAtom" => ("createAtom", &["type", "atom", "kind", "payload"]),
-            "createDocument" => ("createDocument", &["type", "rootElement", "schema", "body"]),
+            "createDocument" => ("createDocument", &["type", "rootElement", "schema"]),
+            "createContainer" => ("createContainer", &["type", "element"]),
+            "editElement" => ("editElement", &["type", "element", "revision", "op"]),
             "createRun" => ("createRun", &["type", "run", "atoms"]),
             "editAtom" => (
                 "editAtom",
@@ -734,7 +1800,10 @@ fn content_actions(actions: &Value, sealed: bool) -> Result<Value> {
                 "annotate",
                 &["type", "annotation", "atom", "revision", "body"],
             ),
-            "quote" => ("quote", &["type", "element", "link", "reference"]),
+            "transclude" => ("transclude", &["type", "transclusion", "link", "request"]),
+            "unlink" => ("unlink", &["type", "link"]),
+            "mark" => ("mark", &["type", "mark", "target", "revision", "kind"]),
+            "unmark" => ("unmark", &["type", "mark"]),
             _ => return Err("unknown workspace content action".into()),
         };
         if sealed && !matches!(tag, "createAtom" | "createDocument" | "createRun") {
@@ -910,11 +1979,22 @@ fn propose(
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
+                let read_only = payload.get("type").and_then(Value::as_str) == Some("read");
                 let lowered = if member(payload, "type")? == "append" {
                     if sealing.is_some() {
                         return Err("--private seals content payloads only".into());
                     }
                     stream_append(payload)?
+                } else if read_only {
+                    // An observe-only read of a content cell (K-TRANSCLUDE): the
+                    // source a `transclude` of another target names.
+                    if payload_obj.len() != 1 {
+                        return Err("a read payload may contain only type".into());
+                    }
+                    if sealing.is_some() {
+                        return Err("--private seals content payloads only".into());
+                    }
+                    json!({"type":"read"})
                 } else {
                     if payload_obj.len() != 2
                         || !payload_obj.contains_key("type")
@@ -933,7 +2013,7 @@ fn propose(
                         )?,
                         ("document", None) => content_actions(
                             &document_actions(root, workspace, local_name, &view,
-                                member(&challenge, "height")?, &payload["actions"])?,
+                                &payload["actions"])?,
                             false,
                         )?,
                         ("scalar" | "document", Some(_)) => {
@@ -942,13 +2022,19 @@ fn propose(
                         _ => return Err("unsupported workspace payload type".into()),
                     }
                 };
-                let capability = member(&reference, "operationCapability")?;
+                // A read target's authorization leg is checked under the observe
+                // verb, so it carries the observe capability.
+                let capability = if read_only {
+                    member(&reference, "observeCapability")?
+                } else {
+                    member(&reference, "operationCapability")?
+                };
                 let observe = member(&reference, "observeCapability")?;
                 // The command version the Host checks per payload: a content
-                // command is `ContentResource.commandVersion` (3, the store
-                // cell); a scalar command is 1.
+                // command and an observe-only read are `ContentResource.commandVersion`
+                // (7); a scalar command is 1.
                 let schema_version = match lowered.get("type").and_then(Value::as_str) {
-                    Some("content") => CONTENT_COMMAND_VERSION,
+                    Some("content") | Some("read") => CONTENT_COMMAND_VERSION,
                     _ => SCALAR_COMMAND_VERSION,
                 };
                 target_rows.push(json!({"kind":kind,"target":target,"capability":capability,
@@ -2207,59 +3293,6 @@ fn page_entries(page: &Value) -> Result<&Vec<Value>> {
         .ok_or_else(|| "content cell lacks entries".to_owned())
 }
 
-/// Atom entries in line order: the document's lines, 1-based. A content cell
-/// is a store (entries in canonical address-byte order, not creation order), so
-/// line order is the numeric order of atom ids; `doc append` mints ids that
-/// grow with the signed read height they were authored against
-/// (`ordered_atom_id`).
-fn page_lines(page: &Value) -> Result<Vec<&Value>> {
-    let mut lines: Vec<&Value> = page_entries(page)?
-        .iter()
-        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("atom"))
-        .collect();
-    lines.sort_by(|left, right| {
-        let key = |entry: &&Value| {
-            let id = entry.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
-            (id.len(), id)
-        };
-        key(left).cmp(&key(right))
-    });
-    Ok(lines)
-}
-
-/// An atom id that sorts after every id minted at a lower signed read height:
-/// `height * 2^64 + index * 2^48 + 48 random bits`, in decimal. Two appenders
-/// reading the same height are ordered by their random bits.
-fn ordered_atom_id(height: &str, index: usize) -> Result<String> {
-    let height: u128 = height
-        .parse()
-        .map_err(|_| format!("signed read height {height} is not a decimal"))?;
-    let random: u128 = random_nonce()?
-        .parse::<u128>()
-        .map_err(|_| "workspace nonce is not a decimal".to_owned())?;
-    let value = (height << 64) | (((index as u128) & 0xffff) << 48) | (random & ((1u128 << 48) - 1));
-    Ok(value.to_string())
-}
-fn unhex(text: &str) -> Result<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return Err("odd hex length".into());
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|index| {
-            u8::from_str_radix(&text[index..index + 2], 16).map_err(|_| "invalid hex".to_owned())
-        })
-        .collect()
-}
-
-fn atom_text(atom: &Value) -> String {
-    let payload = atom.get("payload").and_then(Value::as_str).unwrap_or("");
-    match unhex(payload) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        Err(_) => format!("<payload {payload}>"),
-    }
-}
-
 /// The exact `AtomRecord` an `editAtom` names as `before`: the Host's atom
 /// entry without its address and canonical bytes.
 /// The atom record an `editAtom.before` names, exactly as the signed view spelled
@@ -2284,7 +3317,7 @@ fn seen_path(root: &Path, name: &str) -> Result<PathBuf> {
 }
 
 /// Replace the retained "as I last read it" view of one document.
-fn retain_seen(root: &Path, name: &str, view: &Value, challenge: &Value) -> Result<()> {
+fn retain_seen(root: &Path, name: &str, view: &Value, document: &Value, challenge: &Value) -> Result<()> {
     let dir = root.join("seen");
     if !dir.exists() {
         make_private_dir(&dir)?;
@@ -2294,7 +3327,7 @@ fn retain_seen(root: &Path, name: &str, view: &Value, challenge: &Value) -> Resu
     let staged = dir.join(format!(".{name}.{}", random_nonce()?));
     let value = json!({"type":"minidregg-workspace-seen-document-v1","name":name,
         "height":challenge.get("height"),"worldRoot":challenge.get("worldRoot"),
-        "view":view});
+        "view":view,"document":document});
     private_file(
         &staged,
         &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
@@ -2326,7 +3359,6 @@ fn document_actions(
     workspace: &Value,
     name: &str,
     view: &Value,
-    height: &str,
     actions: &Value,
 ) -> Result<Value> {
     let actions = actions
@@ -2337,7 +3369,7 @@ fn document_actions(
     }
     content_page(view, name)?;
     let mut lowered = Vec::new();
-    for (index, action) in actions.iter().enumerate() {
+    for action in actions {
         let obj = action
             .as_object()
             .ok_or("document action must be an object")?;
@@ -2351,7 +3383,8 @@ fn document_actions(
             return Err(format!("document action {} has unexpected fields", member(action, "type")?));
         }
         lowered.push(match member(action, "type")? {
-            "append" => json!({"type":"createAtom","atom":ordered_atom_id(height, index)?,
+            // A created atom joins the end of the document's root (K-ELEMENT-TREE).
+            "append" => json!({"type":"createAtom","atom":random_nonce()?,
                 "kind":{"type":"text"},"payload":text_argument(action)?}),
             "edit" => {
                 let line = line_argument(action)?;
@@ -2359,10 +3392,22 @@ fn document_actions(
                     format!("doc show {name} first: an edit names a line as you last read it")
                 })?;
                 let seen_page = content_page(&seen["view"], name)?;
-                let lines = page_lines(seen_page)?;
-                let atom = lines.get(line - 1).ok_or_else(|| {
+                // Line N is the Nth line of the kernel's order as `doc show`
+                // numbered it (`live_lines`), never an order of atom ids.
+                let lines = live_lines(&seen["document"]).map_err(|_| {
+                    format!("doc show {name} first: an edit names a line as you last read it")
+                })?;
+                let line_entry = lines.get(line - 1).ok_or_else(|| {
                     format!("{name} had {} line(s) when you last read it", lines.len())
                 })?;
+                if line_entry["kind"] != "atom" {
+                    return Err(format!("line {line} of {name} is a transclusion; edit its source"));
+                }
+                let element = member(line_entry, "element")?;
+                let atom = page_entries(seen_page)?
+                    .iter()
+                    .find(|entry| entry["type"] == "atom" && entry["id"].as_str() == Some(element))
+                    .ok_or_else(|| format!("line {line} of {name} names no atom of the page you read"))?;
                 let before = atom_record(atom)?;
                 json!({"type":"editAtom","atom":member(atom,"id")?,"before":before,
                     "kind":before["kind"],"payload":text_argument(action)?,"tombstone":false})
@@ -2382,189 +3427,6 @@ fn document_actions(
         });
     }
     Ok(Value::Array(lowered))
-}
-
-/// The local reference names whose target is `document`, for rendering.
-fn names_for_target(root: &Path, document: &str) -> Vec<String> {
-    let mut names = Vec::new();
-    if let Ok(entries) = fs::read_dir(root.join("refs")) {
-        for entry in entries.flatten() {
-            let file = entry.file_name().to_string_lossy().into_owned();
-            if let Some(stem) = file.strip_suffix(".json") {
-                if let Ok(value) = reference(root, stem) {
-                    if value.get("target").and_then(Value::as_str) == Some(document) {
-                        names.push(stem.to_owned());
-                    }
-                }
-            }
-        }
-    }
-    names.sort();
-    names
-}
-
-fn principal_subject(value: &Value) -> String {
-    value
-        .get("subject")
-        .and_then(Value::as_str)
-        .unwrap_or("?")
-        .to_owned()
-}
-
-fn link_target_text(root: &Path, target: &Value) -> String {
-    let kind = target.get("type").and_then(Value::as_str).unwrap_or("?");
-    let document = match kind {
-        "document" => target.get("id"),
-        "range" => target.get("document"),
-        _ => None,
-    }
-    .and_then(Value::as_str);
-    match (kind, document) {
-        (_, Some(document)) => {
-            let names = names_for_target(root, document);
-            if names.is_empty() {
-                format!("{kind} {document}")
-            } else {
-                format!("{} ({kind} {document})", names.join(","))
-            }
-        }
-        ("element", _) => format!(
-            "element {}",
-            target.get("id").and_then(Value::as_str).unwrap_or("?")
-        ),
-        _ => kind.to_owned(),
-    }
-}
-
-/// Render one signed content page as numbered lines with their authors.
-fn render_document(
-    root: &Path,
-    name: &str,
-    document: &str,
-    page: &Value,
-    height: &str,
-) -> Result<String> {
-    let mut out = format!(
-        "# doc {name}: document {document} cell root {} at height {height} (signed read; lines are what `doc edit` takes)\n",
-        member(page, "root")?
-    );
-    let lines = page_lines(page)?;
-    if lines.is_empty() {
-        out.push_str("  (no lines)\n");
-    }
-    for (index, atom) in lines.iter().enumerate() {
-        let by = principal_subject(&atom["createdBy"]);
-        let struck = if atom.get("tombstonedAt").is_some_and(|value| !value.is_null()) {
-            " (struck)"
-        } else {
-            ""
-        };
-        let text = atom_text(atom);
-        let mut rows = text.split('\n');
-        out.push_str(&format!(
-            "{:>3}  created-by {:<20}{struck}  {}\n",
-            index + 1,
-            by,
-            rows.next().unwrap_or("")
-        ));
-        for row in rows {
-            out.push_str(&format!("{:>3}  {:<31}  {row}\n", "", ""));
-        }
-    }
-    for entry in page_entries(page)? {
-        if entry.get("type").and_then(Value::as_str) == Some("link") {
-            out.push_str(&format!(
-                "link {} -> {} relation {} created-by {}\n",
-                member(entry, "id")?,
-                link_target_text(root, &entry["target"]),
-                entry.get("relation").and_then(Value::as_str).unwrap_or("?"),
-                principal_subject(&entry["createdBy"])
-            ));
-        }
-    }
-    out.push_str(&format!(
-        "# {} cell entries; created-by is the atom's creator (an edit keeps it)\n",
-        page_entries(page)?.len()
-    ));
-    Ok(out)
-}
-
-fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
-    let reference = reference(root, name)?;
-    let (view, challenge, _) = signed_view(root, workspace, &reference, "resource")?;
-    let page = content_page(&view, name)?;
-    retain_seen(root, name, &view, &challenge)?;
-    print!(
-        "{}",
-        render_document(root, name, member(&reference, "target")?, page, member(&challenge, "height")?)?
-    );
-    Ok(())
-}
-
-/// Backlinks as a fold over the content pages this workspace can read now:
-/// every link entry, in any readable page, whose target is this document.
-/// A page the Host refuses to show contributes nothing and is named.
-fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
-    let own = reference(root, name)?;
-    let (view, challenge, _) = signed_view(root, workspace, &own, "resource")?;
-    content_page(&view, name)?;
-    let document = member(&own, "target")?.to_owned();
-    let mut names: Vec<String> = fs::read_dir(root.join("refs"))
-        .map_err(|error| error.to_string())?
-        .flatten()
-        .filter_map(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .strip_suffix(".json")
-                .map(str::to_owned)
-        })
-        .collect();
-    names.sort();
-    println!(
-        "# backlinks to {name} (document {document}) from the documents this workspace can read at height {}",
-        member(&challenge, "height")?
-    );
-    let mut found = 0usize;
-    for source in names {
-        let reference = reference(root, &source)?;
-        let seen = if source == name {
-            Ok(view.clone())
-        } else {
-            signed_view(root, workspace, &reference, "resource").map(|value| value.0)
-        };
-        let page_view = match seen {
-            Ok(value) => value,
-            Err(error) => {
-                let _ = crate::take_host_decision();
-                println!("# {source}: not read ({error})");
-                continue;
-            }
-        };
-        let Ok(page) = content_page(&page_view, &source) else {
-            continue;
-        };
-        for entry in page_entries(page)? {
-            let target = &entry["target"];
-            let hit = entry.get("type").and_then(Value::as_str) == Some("link")
-                && match target.get("type").and_then(Value::as_str) {
-                    Some("document") => target.get("id").and_then(Value::as_str),
-                    Some("range") => target.get("document").and_then(Value::as_str),
-                    _ => None,
-                } == Some(document.as_str());
-            if hit {
-                found += 1;
-                println!(
-                    "{source} link {} relation {} created-by {}",
-                    member(entry, "id")?,
-                    entry.get("relation").and_then(Value::as_str).unwrap_or("?"),
-                    principal_subject(&entry["createdBy"])
-                );
-            }
-        }
-    }
-    println!("# {found} backlink(s)");
-    Ok(())
 }
 
 /// The child capability this workspace delegated on `name` to `recipient`,
@@ -2662,6 +3524,20 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             list(&root)
         }
+        "doc-backlinks" | "doc-links" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            doc_link_view(
+                &root,
+                &workspace,
+                &name,
+                if action == "doc-backlinks" {
+                    "backlinks"
+                } else {
+                    "links"
+                },
+            )
+        }
         "describe" | "read" => {
             let name = os_string(args.required("name")?, "reference name")?;
             let room = args
@@ -2717,6 +3593,71 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 prepare_only,
                 attempt.as_deref(),
             )
+        }
+        "transclude" => {
+            let host = os_string(args.required("name")?, "host name")?;
+            let source = os_string(args.required("source")?, "source name")?;
+            let from = os_string(args.required("from")?, "first atom")?;
+            let to = os_string(args.required("to")?, "last atom")?;
+            let live = match args.optional("mode").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("snapshot") => false,
+                Some(value) if value == OsStr::new("live") => true,
+                _ => return Err("--mode must be snapshot or live".into()),
+            };
+            let death = match args.optional("death") {
+                Some(value) => os_string(value, "death policy")?,
+                None => "keepTombstone".to_owned(),
+            };
+            let at = args.optional("at").map(|value| line_number(value, "--at")).transpose()?;
+            args.finish()?;
+            transclude(&root, &workspace, &host, &source, &from, &to, live, &death, at)
+        }
+        "doc-insert" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let text = os_string(args.required("text")?, "line text")?;
+            let at = args.optional("at").map(|value| line_number(value, "--at")).transpose()?;
+            args.finish()?;
+            doc_insert(&root, &workspace, &name, &text, at)
+        }
+        "doc-move" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let from = line_number(args.required("from")?, "--from")?;
+            let to = line_number(args.required("to")?, "--to")?;
+            args.finish()?;
+            doc_move(&root, &workspace, &name, from, to)
+        }
+        "mark" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let line = line_number(args.required("line")?, "--line")?;
+            let kind = os_string(args.required("kind")?, "mark kind")?;
+            let to = args.optional("to").map(|value| os_string(value, "link target name")).transpose()?;
+            args.finish()?;
+            doc_mark(&root, &workspace, &name, line, &kind, to.as_deref())
+        }
+        "unmark" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let mark = args.optional("mark").map(|value| os_string(value, "mark")).transpose()?;
+            let line = args.optional("line").map(|value| line_number(value, "--line")).transpose()?;
+            let kind = args.optional("kind").map(|value| os_string(value, "mark kind")).transpose()?;
+            args.finish()?;
+            doc_unmark(&root, &workspace, &name, mark.as_deref(), line, kind.as_deref())
+        }
+        "doc-remove" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let line = line_number(args.required("line")?, "--line")?;
+            args.finish()?;
+            doc_remove(&root, &workspace, &name, line)
+        }
+        "transclusions" | "follow" => {
+            let host = os_string(args.required("name")?, "host name")?;
+            let only = if action == "follow" {
+                Some(os_string(args.required("transclusion")?, "transclusion")?)
+            } else {
+                None
+            };
+            args.finish()?;
+            transclusions(&root, &workspace, &host, only.as_deref())
         }
         "propose" => {
             let request = path(args.required("request")?);
@@ -2796,16 +3737,27 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "doc-show" => {
             let name = os_string(args.required("name")?, "reference name")?;
+            let at = args
+                .optional("at")
+                .map(|value| os_string(value, "height"))
+                .transpose()?;
             args.finish()?;
-            doc_show(&root, &workspace, &name)
+            doc_show(&root, &workspace, &name, at.as_deref())
         }
-        "doc-backlinks" => {
+        "doc-history" => {
             let name = os_string(args.required("name")?, "reference name")?;
             args.finish()?;
-            doc_backlinks(&root, &workspace, &name)
+            print_json(&doc_history(&root, &workspace, &name)?)
+        }
+        "doc-diff" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            let from = os_string(args.required("from")?, "height")?;
+            let to = os_string(args.required("to")?, "height")?;
+            args.finish()?;
+            print_json(&doc_diff(&root, &workspace, &name, &from, &to)?)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show or doc-backlinks".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-backlinks, doc-links, doc-show, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-mark, doc-unmark, transclude, transclusions or follow".into(),
         ),
     }
 }
@@ -2864,7 +3816,7 @@ mod tests {
         let workspace = json!({"subject":"7"});
         let current = page(vec![atom("401", "first", "7"), atom("402", "second", "1103")]);
         let lowered =
-            document_actions(&root, &workspace, "paper", &current, "9", &json!([{"type":"append","text":"hi"}]))
+            document_actions(&root, &workspace, "paper", &current, &json!([{"type":"append","text":"hi"}]))
                 .unwrap();
         assert_eq!(lowered[0]["type"], "createAtom");
         assert_eq!(lowered[0]["payload"], "6869");
@@ -2872,12 +3824,13 @@ mod tests {
         assert!(content_actions(&lowered, false).is_ok());
         // An edit names the line as this workspace last read it.
         let edit = json!([{"type":"edit","line":"2","text":"better"}]);
-        assert!(document_actions(&root, &workspace, "paper", &current, "9", &edit)
+        assert!(document_actions(&root, &workspace, "paper", &current, &edit)
             .unwrap_err()
             .contains("doc show paper first"));
         let seen = page(vec![atom("401", "first", "7"), atom("402", "old second", "1103")]);
-        retain_seen(&root, "paper", &seen, &json!({"height":"3","worldRoot":"4"})).unwrap();
-        let lowered = document_actions(&root, &workspace, "paper", &current, "9", &edit).unwrap();
+        let order = json!({"order":[{"kind":"atom","element":"401"},{"kind":"atom","element":"402"}]});
+        retain_seen(&root, "paper", &seen, &order, &json!({"height":"3","worldRoot":"4"})).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, &edit).unwrap();
         assert_eq!(lowered[0]["type"], "editAtom");
         assert_eq!(lowered[0]["atom"], "402");
         assert_eq!(lowered[0]["payload"], hex(b"better"));
@@ -2886,29 +3839,25 @@ mod tests {
         assert!(lowered[0]["before"].get("id").is_none() && lowered[0]["before"].get("canonical").is_none());
         assert!(content_actions(&lowered, false).is_ok());
         let past = json!([{"type":"edit","line":"3","text":"x"}]);
-        assert!(document_actions(&root, &workspace, "paper", &current, "9", &past)
+        assert!(document_actions(&root, &workspace, "paper", &current, &past)
             .unwrap_err()
             .contains("had 2 line(s)"));
         // Rereading replaces what an edit names.
-        retain_seen(&root, "paper", &current, &json!({"height":"5","worldRoot":"6"})).unwrap();
-        let lowered = document_actions(&root, &workspace, "paper", &current, "9", &edit).unwrap();
+        retain_seen(&root, "paper", &current, &order, &json!({"height":"5","worldRoot":"6"})).unwrap();
+        let lowered = document_actions(&root, &workspace, "paper", &current, &edit).unwrap();
         assert_eq!(lowered[0]["before"]["payload"], hex(b"second"));
         let declared = json!({"type":"resource","cell":{"root":"1",
             "entries":[{"key":{"type":"object","field":"0"},"value":"1"}]}});
-        assert!(document_actions(&root, &workspace, "shared", &declared, "9", &edit)
+        assert!(document_actions(&root, &workspace, "shared", &declared, &edit)
             .unwrap_err()
             .contains("not a document"));
-        let text = render_document(&root, "paper", "900", &current["cell"], "9").unwrap();
-        assert!(text.contains("  1  created-by 7                     first\n"), "{text}");
-        assert!(text.contains("  2  created-by 1103                  second\n"), "{text}");
-        assert!(text.contains("# 2 cell entries"));
-        // Line order is atom-id order, not store order.
-        let shuffled = page(vec![atom("402", "second", "1103"), atom("401", "first", "7")]);
-        let lines = page_lines(&shuffled["cell"]).unwrap();
-        assert_eq!(lines[0]["id"], "401");
-        let low = ordered_atom_id("3", 0).unwrap().parse::<u128>().unwrap();
-        let high = ordered_atom_id("4", 0).unwrap().parse::<u128>().unwrap();
-        assert!(low < high);
+        // Line N is the kernel's order, not atom-id order: a reorder of the
+        // retained order renames the line an edit names.
+        let swapped = json!({"order":[{"kind":"atom","element":"402"},{"kind":"atom","element":"401"}]});
+        retain_seen(&root, "paper", &current, &swapped, &json!({"height":"7","worldRoot":"8"})).unwrap();
+        let first = json!([{"type":"edit","line":"1","text":"x"}]);
+        let lowered = document_actions(&root, &workspace, "paper", &current, &first).unwrap();
+        assert_eq!(lowered[0]["atom"], "402");
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3112,6 +4061,26 @@ mod tests {
     }
 
     #[test]
+    fn doc_history_reads_each_row_and_the_height_below() {
+        let since = json!({"entries":[
+            {"height":"12","cells":["7","9"]},
+            {"height":"13","cells":["9"]},
+            {"height":"15","cells":["7"]},
+            {"height":"16","cells":["7"]}]});
+        assert_eq!(
+            history_heights(&since, "7").unwrap(),
+            vec![11, 12, 14, 15, 16]
+        );
+        assert_eq!(history_heights(&since, "8").unwrap(), Vec::<u64>::new());
+        assert!(history_heights(&json!({}), "7").is_err());
+        // The placeholder keys on the Host's named reason, never its text.
+        assert!(reason_is_no_grant(&json!({"type":"refused","reason":"no-grant"})));
+        assert!(!reason_is_no_grant(&json!({"type":"refused","reason":"operation-rejected",
+            "detail":hex(b"history read refused")})));
+        assert!(!reason_is_no_grant(&json!({"type":"confirmed"})));
+    }
+
+    #[test]
     fn untrusted_reference_cannot_escape_scoped_workspace_or_replace_existing_name() {
         let root = std::env::temp_dir().join(format!(
             "mini-workspace-{}-{}",
@@ -3187,6 +4156,37 @@ mod tests {
         };
         assert!(write(commit).is_ok());
         assert!(write("01").is_err());
+
+    }
+
+    #[test]
+    fn docuverse_content_grammar() {
+        assert!(content_actions(&json!([{"type":"createAtom","atom":"1","kind":{"type":"text"},"payload":"00"}]), false).is_ok());
+        assert!(content_actions(&json!([{"type":"quote","element":"1","link":"2",
+            "reference":{}}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"transclude","transclusion":"1","link":"2",
+            "request":{}}]), false).is_ok());
+        assert!(content_actions(&json!([{"type":"unlink","link":"9"}]), false).is_ok());
+        assert!(content_actions(&json!([{"type":"unlink","link":"9","before":"1"}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"mark","mark":"1","target":{"type":"atom","atom":"2"},
+            "revision":"3","kind":{"type":"bold"}}]), false).is_ok());
+        assert!(content_actions(&json!([{"type":"mark","mark":"1","target":{"type":"atom","atom":"2"},
+            "revision":"3","kind":{"type":"bold"},"payload":"00"}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"unmark","mark":"1"}]), false).is_ok());
+    }
+
+    #[test]
+    fn marks_render_inline() {
+        let names = std::collections::BTreeMap::from([("77".to_owned(), "target".to_owned())]);
+        let marks = json!([{"kind":"bold","fresh":false},{"kind":"bold","fresh":true},
+            {"kind":"link","fresh":true,"target":{"type":"document","id":"77"}},
+            {"kind":"italic","fresh":false}]);
+        assert_eq!(render_marks(&names, "two", &marks), "[**~~_two_~~**](→ target)");
+        let heading = json!([{"kind":"heading","fresh":true},{"kind":"code","fresh":true}]);
+        assert_eq!(render_marks(&names, "x", &heading), "# `x`");
+        let unknown = json!([{"kind":"link","fresh":false,"target":{"type":"document","id":"5"}}]);
+        assert_eq!(render_marks(&names, "y", &unknown), "~~[y](→ doc:5)~~");
+        assert_eq!(render_marks(&names, "z", &Value::Null), "z");
     }
 
     #[test]
@@ -3325,4 +4325,65 @@ mod tests {
         );
         fs::remove_dir_all(root).unwrap();
     }
+
+    fn document_fixture() -> Value {
+        // root 1: line a, struck b, section s (line c inside), transclusion t, line d
+        json!({"type":"document","root":"1","rootRevision":"70","order":[
+            {"element":"10","parent":"1","kind":"atom","atom":"10","payload":"61","struck":false},
+            {"element":"11","parent":"1","kind":"atom","atom":"11","payload":"62","struck":true},
+            {"element":"5","parent":"1","kind":"container","revision":"71","children":"1"},
+            {"element":"12","parent":"5","kind":"atom","atom":"12","payload":"63","struck":false},
+            {"element":"13","parent":"1","kind":"embed","transclusion":"13"},
+            {"element":"14","parent":"1","kind":"atom","atom":"14","payload":"64","struck":false}]})
+    }
+
+    #[test]
+    fn element_tree_lines_are_the_kernel_order_without_struck_lines() {
+        let document = document_fixture();
+        let lines: Vec<&str> = live_lines(&document)
+            .unwrap()
+            .iter()
+            .map(|line| line["element"].as_str().unwrap())
+            .collect();
+        assert_eq!(lines, ["10", "12", "13", "14"]);
+        assert_eq!(place_of(&document, "13").unwrap(), ("1".to_owned(), "70".to_owned(), 3));
+        assert_eq!(place_of(&document, "12").unwrap(), ("5".to_owned(), "71".to_owned(), 0));
+    }
+
+    #[test]
+    fn element_tree_insert_is_one_edit_at_the_lines_place() {
+        let document = document_fixture();
+        // line 3 is the transclusion, index 3 among the root's children (the struck line counts)
+        assert_eq!(
+            place_new_leaf(&document, "99", 3).unwrap(),
+            vec![json!({"type":"editElement","element":"1","revision":"70",
+                "op":{"type":"move","child":"99","index":"3"}})]
+        );
+        // one past the last line: the append is the place
+        assert!(place_new_leaf(&document, "99", 5).unwrap().is_empty());
+        // line 2 stands in a section: out of the root, into the section
+        assert_eq!(
+            place_new_leaf(&document, "99", 2).unwrap(),
+            vec![
+                json!({"type":"editElement","element":"1","revision":"70",
+                    "op":{"type":"remove","child":"99"}}),
+                json!({"type":"editElement","element":"5","revision":"71",
+                    "op":{"type":"splice","index":"0","child":"99"}}),
+            ]
+        );
+        assert!(place_new_leaf(&document, "99", 6).is_err());
+    }
+
+    #[test]
+    fn element_tree_move_names_both_places() {
+        let document = document_fixture();
+        assert_eq!(
+            move_line(&document, 4, 1).unwrap(),
+            vec![json!({"type":"editElement","element":"1","revision":"70",
+                "op":{"type":"move","child":"14","index":"0"}})]
+        );
+        assert_eq!(move_line(&document, 1, 2).unwrap().len(), 2);
+        assert!(move_line(&document, 2, 2).is_err());
+    }
+
 }

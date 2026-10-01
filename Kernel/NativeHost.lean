@@ -41,17 +41,19 @@ def openExisting (config : Config) : IO (Except String (Opened config)) := do
 /-- Operator audit: the genesis re-admission of every retained signed ingress
 by its real native receiver at its original prefix height, compared with the
 stored history record for record (formerly the request path's `verifyLoaded`).
-Returns the number of accepted records audited and the presence index of the
-re-admitted history (`NativeHostReplay.Verified.index_from_replay`: it is the
-stored log's index). -/
-def audit (config : Config) : IO (Except String (Nat × PresenceIndex.Index)) := do
+Returns the number of accepted records audited and the presence and link
+indexes of the re-admitted history (`NativeHostReplay.Verified.index_from_replay`
+and `Verified.linkIndex_from_replay`: they are the stored log's indexes). -/
+def audit (config : Config) :
+    IO (Except String (Nat × PresenceIndex.Index × LinkIndex.Index)) := do
   match ← DurableReceiverIO.load config.transport ResourceBirthCodec.rootBytes with
   | .error detail => return .error detail
   | .ok durable =>
       match ← NativeHostReplay.verifyLoaded config durable with
       | .error failure =>
           return .error s!"audit refused history at entry {failure.index}: {failure.detail}"
-      | .ok verified => return .ok (verified.receipts.length, verified.opened.durable.index)
+      | .ok verified => return .ok (verified.receipts.length, verified.opened.durable.index,
+          verified.opened.durable.links)
 
 /-- Operator read of the whole presence index after an ordinary (checkpoint +
 suffix) open. Local administration only: the operator holds the Store. -/
@@ -60,6 +62,14 @@ def presenceIndex (config : Config) : IO (Except String (Nat × Nat × PresenceI
   | .error detail => return .error detail
   | .ok opened =>
       return .ok (opened.durable.baseHeight, opened.durable.height, opened.durable.index)
+
+/-- Operator read of the whole link index after an ordinary (checkpoint +
+suffix) open. Local administration only: the operator holds the Store. -/
+def linkIndex (config : Config) : IO (Except String (Nat × Nat × LinkIndex.Index)) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened =>
+      return .ok (opened.durable.baseHeight, opened.durable.height, opened.durable.links)
 
 /-- Explicit local administration, separate from the signed network protocol.
 The exact operator-pinned source genesis must have no accepted transactions. -/

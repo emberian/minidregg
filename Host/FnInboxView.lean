@@ -116,6 +116,7 @@ private def targetJson (target : DeclaredResourceController.Target) : Json :=
     | .append request => .mkObj
         [("type", toJson "append"), ("topicBytes", number request.topic.length),
          ("payloadBytes", number request.payload.length)]
+    | .read => .mkObj [("type", toJson "read")]
   .mkObj [("kind", toJson kind), ("target", number target.target),
     ("payload", payload)]
 

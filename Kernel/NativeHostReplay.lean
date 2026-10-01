@@ -2736,6 +2736,17 @@ theorem Verified.index_from_replay {config : Config} {target : Durable}
 /-- info: 'Minidregg.Kernel.NativeHostReplay.Verified.index_from_replay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.Verified.index_from_replay
 
+/-- **The audit walk rebuilds the stored link index**: the genesis
+re-admission reaches exactly the stored image, so its link index is the
+loaded one's. -/
+theorem Verified.linkIndex_from_replay {config : Config} {target : Durable}
+    (verified : Verified config target) :
+    verified.opened.durable.links = target.links := by
+  rw [verified.opened.durable.linksExact, target.linksExact, verified.exactImage]
+
+/-- info: 'Minidregg.Kernel.NativeHostReplay.Verified.linkIndex_from_replay' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHostReplay.Verified.linkIndex_from_replay
+
 /-- A single verified replay pass retains exactly one executable historical
 checkpoint. Its `before` is the actual admitted prefix consumed by `derive`,
 not an independently reconstructed physically valid image. The selected

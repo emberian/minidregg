@@ -70,6 +70,8 @@ mod transport;
 #[cfg(unix)]
 mod worker;
 #[cfg(unix)]
+mod web;
+#[cfg(unix)]
 mod workspace;
 #[cfg(unix)]
 mod well;
@@ -296,6 +298,7 @@ usage:
   mini pay audit --dir OBSERVER-WORKSPACE [--offline true]
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
   mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
+  mini web --dir WORKSPACE --listen 127.0.0.1:PORT   (read-only loopback hypertext over this workspace's signed reads)
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
   mini enroll --action offer|welcome --dir ATTEMPT [--birth-context CONTEXT.json]
@@ -1391,9 +1394,12 @@ fn submit(
 fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {
     if !matches!(
         view,
-        "resource" | "policy" | "capability" | "who" | "since" | "at"
+        "resource" | "policy" | "capability" | "who" | "since" | "at" | "backlinks" | "links"
     ) {
-        return Err("--view must be resource, policy, capability, who, since, or at".to_owned());
+        return Err(
+            "--view must be resource, policy, capability, who, since, at, backlinks, or links"
+                .to_owned(),
+        );
     }
     match presentation {
         None => Ok(format!("view-{view}")),
@@ -2291,6 +2297,8 @@ fn run(mut args: Args) -> Result<()> {
         }
         #[cfg(unix)]
         "workspace" => workspace::run(args),
+        #[cfg(unix)]
+        "web" => web::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),

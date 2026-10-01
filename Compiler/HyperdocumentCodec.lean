@@ -231,15 +231,6 @@ def atomRecordStream : StreamCodec AtomRecord :=
       tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; rfl)
 
-def embedRefStream : StreamCodec EmbedRef :=
-  StreamCodec.xmap
-    (StreamCodec.product (identifierStream .v1 .document)
-      (StreamCodec.product (identifierStream .v1 .atom)
-        (StreamCodec.product (identifierStream .v1 .operationIntent) transclusionModeStream)))
-    (fun value => (value.document, value.atom, value.revision, value.mode))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
-    (by intro value; rfl)
-
 /-! ## Stored stable ranges
 
 `Hyperdocument.StableRange` is the canonical stored/wire shape; the operational
@@ -283,7 +274,8 @@ def elementBodyTag : ElementBody -> Nat
   | .container _ => 0
   | .runs _ => 1
   | .embed _ => 2
-  | .opaque _ _ => 3
+  | .atom _ => 3
+  | .opaque _ _ => 4
 
 def elementBodyStream : StreamCodec ElementBody where
   encode value :=
@@ -292,7 +284,8 @@ def elementBodyStream : StreamCodec ElementBody where
       | .container children =>
           (StreamCodec.list (identifierStream .v1 .element)).encode children
       | .runs runs => (StreamCodec.list (identifierStream .v1 .run)).encode runs
-      | .embed reference => embedRefStream.encode reference
+      | .embed transclusion => (identifierStream .v1 .transclusion).encode transclusion
+      | .atom atom => (identifierStream .v1 .atom).encode atom
       | .opaque schema payload =>
           digestStream.encode schema ++ bytesStream.encode payload
   decodePrefix bytes := do
@@ -307,8 +300,12 @@ def elementBodyStream : StreamCodec ElementBody where
           (StreamCodec.list (identifierStream .v1 .run)).decodePrefix afterTag
         some (.runs runs, suffix)
     | 2 => do
-        let (reference, suffix) ← embedRefStream.decodePrefix afterTag
-        some (.embed reference, suffix)
+        let (transclusion, suffix) ←
+          (identifierStream .v1 .transclusion).decodePrefix afterTag
+        some (.embed transclusion, suffix)
+    | 3 => do
+        let (atom, suffix) ← (identifierStream .v1 .atom).decodePrefix afterTag
+        some (.atom atom, suffix)
     | _ => do
         let (schema, afterSchema) ← digestStream.decodePrefix afterTag
         let (payload, suffix) ← bytesStream.decodePrefix afterSchema
@@ -320,7 +317,8 @@ def elementBodyStream : StreamCodec ElementBody where
         StreamCodec.nat.decodePrefix_encode,
         (StreamCodec.list (identifierStream .v1 .element)).decodePrefix_encode,
         (StreamCodec.list (identifierStream .v1 .run)).decodePrefix_encode,
-        embedRefStream.decodePrefix_encode, digestStream.decodePrefix_encode,
+        (identifierStream .v1 .transclusion).decodePrefix_encode,
+        (identifierStream .v1 .atom).decodePrefix_encode, digestStream.decodePrefix_encode,
         bytesStream.decodePrefix_encode]
 
 def linkTargetTag : LinkTarget -> Nat
@@ -471,17 +469,62 @@ def transcludePayloadStream : StreamCodec TranscludePayload :=
       tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; rfl)
 
+/-! ## Marks -/
+
+def markAnchorStream : StreamCodec MarkAnchor :=
+  StreamCodec.xmap
+    (StreamCodec.sum storedStableRangeStream
+      (StreamCodec.sum
+        (StreamCodec.product (identifierStream .v1 .atom) (identifierStream .v1 .operationIntent))
+        (StreamCodec.product (identifierStream .v1 .element) (identifierStream .v1 .operationIntent))))
+    (fun | .range range => .inl range | .atom atom revision => .inr (.inl (atom, revision))
+         | .element element revision => .inr (.inr (element, revision)))
+    (fun | .inl range => .range range | .inr (.inl (atom, revision)) => .atom atom revision
+         | .inr (.inr (element, revision)) => .element element revision)
+    (by intro anchor; cases anchor <;> rfl)
+
+def markKindTag : MarkKind -> Nat
+  | .bold => 0
+  | .italic => 1
+  | .code => 2
+  | .heading => 3
+  | .link _ => 4
+
+/-- A mark kind: its tag, then the link identifier of a `link` mark.  A tag
+past `4` names no kind and refuses to decode. -/
+def markKindStream : StreamCodec MarkKind where
+  encode value :=
+    StreamCodec.nat.encode (markKindTag value) ++
+      match value with
+      | .link link => (identifierStream .v1 .link).encode link
+      | _ => []
+  decodePrefix bytes := do
+    let (tag, afterTag) ← StreamCodec.nat.decodePrefix bytes
+    match tag with
+    | 0 => some (.bold, afterTag)
+    | 1 => some (.italic, afterTag)
+    | 2 => some (.code, afterTag)
+    | 3 => some (.heading, afterTag)
+    | 4 => do
+        let (link, suffix) ← (identifierStream .v1 .link).decodePrefix afterTag
+        some (.link link, suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro value suffix
+    cases value <;>
+      simp [markKindTag, List.append_assoc, StreamCodec.nat.decodePrefix_encode,
+        (identifierStream .v1 .link).decodePrefix_encode]
+
 def markPayloadStream : StreamCodec MarkPayload :=
   StreamCodec.xmap
     (StreamCodec.product (identifierStream .v1 .mark)
       (StreamCodec.product (identifierStream .v1 .document)
-        (StreamCodec.product storedStableRangeStream
-          (StreamCodec.product digestStream
-            (StreamCodec.product bytesStream digestStream)))))
-    (fun value => (value.id, value.document, value.range, value.kind,
-      value.payload, value.visibilityPolicy))
+        (StreamCodec.product markAnchorStream
+          (StreamCodec.product markKindStream digestStream))))
+    (fun value => (value.id, value.document, value.anchor, value.kind,
+      value.visibilityPolicy))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+      tuple.2.2.2.2⟩)
     (by intro value; rfl)
 
 def annotatePayloadStream : StreamCodec AnnotatePayload :=
