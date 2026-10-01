@@ -853,21 +853,10 @@ theorem holderNames_covers {subject : SubjectId} {holder : Holder}
   | bearer => trivial
   | subject bound => simpa [holderNames, Holder.Covers] using names
 
-/-- The grant as the authority cell of `snapshot` holds it: present, naming
+/-- The grant as the authority cell of `snapshot` holds it — present, naming
 `subject`, and `standing` over `target` at `height` (window, epochs,
-revocations and parentage all read from that same snapshot). -/
-def grantStandingIn (snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot)
-    (subject : SubjectId) (grant : GrantRef) (height target : Nat) : Bool :=
-  match CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot with
-  | none => false
-  | some authority =>
-      match CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind grant.capability with
-      | none => false
-      | some stored => holderNames subject stored.head.holder &&
-          standing authority.snapshot.authState height target stored.head
-
-/-- `grantStandingIn`, returning the standing grant's field scope (what an
-`at` answer to it is narrowed to). -/
+revocations and parentage all read from that same snapshot) — as its field
+scope (what an `at` answer to it is narrowed to); `none` when it did not stand. -/
 def grantStanding (snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot)
     (subject : SubjectId) (grant : GrantRef) (height target : Nat) : Option (Option (Finset CellField)) :=
   match CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot with
@@ -878,20 +867,6 @@ def grantStanding (snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot
       | some stored => if holderNames subject stored.head.holder &&
           standing authority.snapshot.authState height target stored.head then
             some stored.head.scope.fields else none
-
-theorem grantStanding_isSome (snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot)
-    (subject : SubjectId) (grant : GrantRef) (height target : Nat) :
-    (grantStanding (deployment := deployment) snapshot subject grant height target).isSome =
-      grantStandingIn (deployment := deployment) snapshot subject grant height target := by
-  unfold grantStanding grantStandingIn
-  cases CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot with
-  | none => rfl
-  | some authority =>
-    cases CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind grant.capability with
-    | none => rfl
-    | some stored =>
-      dsimp only
-      split <;> simp_all
 
 /-- `at height`, answered against the grants as they stood at `height`, and
 narrowed to that grant's `Scope.fields` exactly as a current read is
@@ -986,21 +961,16 @@ theorem atCovered_refused_before_grant {genesisHeight height : Nat} {subject : S
 /-- Satisfiable pole: a grant standing at that height is answered, with the
 prefix's bytes narrowed to the grant's fields. -/
 theorem atCovered_answers_standing {genesisHeight height : Nat} {subject : SubjectId}
-    {grant : GrantRef} {target : Nat}
+    {grant : GrantRef} {target : Nat} {fields : Option (Finset CellField)}
     {snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot}
     (floor : genesisHeight ≤ height) (within : height ≤ genesisHeight + durable.height)
     (found : durable.atPrefix (height - genesisHeight) = some snapshot)
-    (stands : grantStandingIn (deployment := deployment) snapshot subject grant height target = true) :
-    ∃ fields, grantStanding (deployment := deployment) snapshot subject grant height target = some fields ∧
-      atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
-        .ok (atViewCodec.encode (height, atView fields (snapshot.canonicalBytes ⟨target⟩))) := by
-  have isSome := grantStanding_isSome (deployment := deployment) snapshot subject grant height target
-  rw [stands] at isSome
-  obtain ⟨fields, standing⟩ := Option.isSome_iff_exists.mp isSome
-  refine ⟨fields, standing, ?_⟩
+    (stands : grantStanding (deployment := deployment) snapshot subject grant height target = some fields) :
+    atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
+      .ok (atViewCodec.encode (height, atView fields (snapshot.canonicalBytes ⟨target⟩))) := by
   unfold atCovered
   rw [if_neg (by omega), if_neg (by omega)]
-  simp only [found, standing]
+  simp only [found, stands]
 
 /-- Every query view, `who`/`since`/`at` included, has the same one-target
 footprint as a current read of that target: the same grant, the same check. -/
@@ -1290,8 +1260,6 @@ theorem at_respects_coverage_at_height
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.history_complete
 /-- info: 'Minidregg.Kernel.NativeObservationController.atCovered_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atCovered_sound
-/-- info: 'Minidregg.Kernel.NativeObservationController.grantStanding_isSome' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.grantStanding_isSome
 /-- info: 'Minidregg.Kernel.NativeObservationController.atCovered_refused_before_grant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atCovered_refused_before_grant
 /-- info: 'Minidregg.Kernel.NativeObservationController.atCovered_answers_standing' depends on axioms: [propext, Classical.choice, Quot.sound] -/

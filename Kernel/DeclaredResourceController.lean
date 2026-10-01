@@ -228,6 +228,7 @@ theorem targetProjection_unjoint (target : Target) (before after : Store target.
     | scalar _ => exact scalarSlots_unjoint _ _
     | content content => exact contentProject_unjoint _ _ _
     | append request => exact streamSlots_unjoint _ _
+    | read => exact contentProject_unjoint _ _ _
 
 /-- A checked run's slots (`run/program/{id}`, `run/steps`, `run/fuel`) are not
 joint keys. -/
@@ -650,6 +651,8 @@ def targetField (target : Target) : Address target.layout → CellField := by
     | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
     | content _ => exact fun address => ResourceObservationAdmission.contentField address.1
     | append _ => exact fun _ => .body
+    -- An observe-only read writes nothing; its addresses are content addresses.
+    | read => exact fun address => ResourceObservationAdmission.contentField address.1
 
 def targetAmount (target : Target) :
     (address : Address target.layout) → target.layout.Value address.1 → Int := by
@@ -659,6 +662,7 @@ def targetAmount (target : Target) :
     | scalar _ => exact fun _ value => value
     | content _ => exact fun _ _ => 0
     | append _ => exact fun _ _ => 0
+    | read => exact fun _ _ => 0
 
 /-- A target's footprint, scanning only the patch's write footprint. -/
 def targetFootprint (target : Target) (patch : Patch target.layout)
