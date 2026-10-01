@@ -69,6 +69,8 @@ inductive Refusal where
   | libraryEvaluator
   | libraryNested
   | programMalformed
+  /-- The record's params do not decode on its evaluator (E3, `Machine.decodeParams`). -/
+  | paramsMalformed
   | sampleUnavailable
   /-- NC-2: a sample value above its slot's declared maximum (`SampleSlot.max`). -/
   | fieldOverMax
@@ -90,7 +92,7 @@ inductive Refusal where
   | eventMalformed
   | doorShape
   | effectNotWrite
-  /-- A door ABI under an evaluator without doors (only Nock's are refereed, N11; E4). -/
+  /-- A door ABI under an evaluator that has no doors (`Machine.door = none`, E4). -/
   | doorUnsupported
   deriving DecidableEq, Repr
 
@@ -102,6 +104,7 @@ def Refusal.name : Refusal → String
   | .libraryEvaluator => "libraryEvaluator"
   | .libraryNested => "libraryNested"
   | .programMalformed => "programMalformed"
+  | .paramsMalformed => "paramsMalformed"
   | .sampleUnavailable => "sampleUnavailable"
   | .fieldOverMax => "fieldOverMax"
   | .sampleStale _ => "sampleStale"
@@ -154,10 +157,14 @@ The registry is compiled in (`Evaluator.registry`); an operator may disable an
 entry (`disabled`, a profile parameter the runtime semantics commits); nothing
 adds one. A program naming any id outside the registry is refused by name. -/
 
+def Refusal.ofUnresolved : Evaluator.Unresolved → Refusal
+  | .unknownEvaluator => .unknownEvaluator
+  | .evaluatorDisabled => .evaluatorDisabled
+
+/-- The run's resolution is the registry's (`Compiler.Evaluator.resolve`, which a record's
+birth also meets), its refusals named in the run's vocabulary. -/
 def resolve (disabled : List Digest) (id : Digest) : Except Refusal Evaluator :=
-  match Evaluator.registry.find? (fun E => decide (E.id = id)) with
-  | none => .error .unknownEvaluator
-  | some E => if E.id ∈ disabled then .error .evaluatorDisabled else .ok E
+  (Evaluator.resolve disabled id).mapError Refusal.ofUnresolved
 
 /-- **`resolve_registered`**: what `resolve` admits is a compiled-in entry with
 exactly the named id, not disabled. Never friend-extensible. -/
@@ -165,54 +172,40 @@ theorem resolve_registered {disabled : List Digest} {id : Digest} {E : Evaluator
     (h : resolve disabled id = .ok E) :
     E ∈ Evaluator.registry ∧ E.id = id ∧ E.id ∉ disabled := by
   unfold resolve at h
-  split at h
-  · cases h
-  · rename_i found hf
-    split at h
-    · cases h
-    · rename_i enabled
-      cases h
-      exact ⟨List.mem_of_find?_eq_some hf, by simpa using List.find?_some hf, enabled⟩
+  cases hr : Evaluator.resolve disabled id with
+  | error e => rw [hr] at h; simp [Except.mapError] at h
+  | ok E' => rw [hr] at h; cases h; exact Evaluator.resolve_registered hr
 
 theorem resolve_unknown {disabled : List Digest} {id : Digest}
     (absent : ∀ E ∈ Evaluator.registry, E.id ≠ id) :
     resolve disabled id = .error .unknownEvaluator := by
-  unfold resolve
-  rw [List.find?_eq_none.mpr (by intro E m; simpa using absent E m)]
+  unfold resolve; rw [Evaluator.resolve_unknown absent]; rfl
 
 /-- Pole: an id that is not Nock's is refused `unknownEvaluator`, whatever is disabled. -/
 theorem pole_unknownEvaluator (disabled : List Digest) (id : Digest)
-    (other : id ≠ Evaluator.nock.id) : resolve disabled id = .error .unknownEvaluator :=
-  resolve_unknown (by
-    intro E m
-    simp only [Evaluator.registry, List.mem_singleton] at m
-    subst m
-    exact fun same => other same.symm)
+    (other : id ≠ Evaluator.nock.id) : resolve disabled id = .error .unknownEvaluator := by
+  unfold resolve; rw [Evaluator.pole_unknownEvaluator disabled id other]; rfl
 
 /-- The refusal pole is inhabited: of the ids 0 and 1, at least one is not Nock's. -/
 theorem unknownEvaluator_inhabited (disabled : List Digest) :
     ∃ id, resolve disabled id = .error .unknownEvaluator := by
-  by_cases zero : Evaluator.nock.id = ⟨0⟩
-  · exact ⟨⟨1⟩, pole_unknownEvaluator disabled _ (by rw [zero]; simp)⟩
-  · exact ⟨⟨0⟩, pole_unknownEvaluator disabled _ (Ne.symm zero)⟩
+  obtain ⟨id, h⟩ := Evaluator.unknownEvaluator_inhabited disabled
+  exact ⟨id, by unfold resolve; rw [h]; rfl⟩
 
 /-- Pole: Nock's id resolves to Nock unless the operator disabled it. -/
 theorem nock_found :
     Evaluator.registry.find? (fun E => decide (E.id = Evaluator.nock.id)) = some Evaluator.nock :=
-  List.find?_cons_of_pos (decide_eq_true rfl)
+  Evaluator.nock_found
 
 theorem pole_nock_resolves (disabled : List Digest) (enabled : Evaluator.nock.id ∉ disabled) :
     resolve disabled Evaluator.nock.id = .ok Evaluator.nock := by
-  unfold resolve
-  rw [nock_found]
-  exact if_neg enabled
+  unfold resolve; rw [Evaluator.pole_nock_resolves disabled enabled]; rfl
 
 /-- Pole: disabled by the operator, Nock is refused `evaluatorDisabled`. -/
 theorem pole_evaluatorDisabled :
     resolve [Evaluator.nock.id] Evaluator.nock.id = .error .evaluatorDisabled := by
   unfold resolve
-  rw [nock_found]
-  exact if_pos (List.mem_singleton_self _)
+  rw [Evaluator.pole_evaluatorDisabled _ (List.mem_singleton_self _)]; rfl
 
 /-- Every library cell names the program's own evaluator. -/
 def librariesAgree (program : Program) (libraries : List Program) : Bool :=
@@ -236,8 +229,9 @@ def checkRun (M : Machine) (program : Program) (libraries : List Program) (sampl
   -- C5: hold check here (K-RUN-HOLD: a claim above the free threshold needs a hold;
   -- the steps are fixed and bounded by the ABI fuel from this line on).
   let code ← require .programMalformed (M.decode program.jam)
+  let params ← require .paramsMalformed (M.decodeParams program.params)
   let libs ← libraryCodes M libraries
-  match M.oracle claim.steps (M.entry program.abi code libs sample) with
+  match M.oracle claim.steps (M.entry params code libs sample) with
   | .crash k => throw (.crash k)
   | .exhausted k => throw (.exhausted k)
   | .ok out k =>
@@ -249,12 +243,12 @@ def checkRun (M : Machine) (program : Program) (libraries : List Program) (sampl
     pure ⟨out, k, decoded⟩
 
 /-- The run of `program` on `sample` that the kernel would perform: its term, when
-the program and its libraries decode. -/
+the program, its params and its libraries decode. -/
 def runOf (M : Machine) (program : Program) (libraries : List Program) (sample : M.Input) :
     Option M.Term :=
-  match M.decode program.jam, libraryCodes M libraries with
-  | some code, .ok libs => some (M.entry program.abi code libs sample)
-  | _, _ => none
+  match M.decode program.jam, M.decodeParams program.params, libraryCodes M libraries with
+  | some code, some params, .ok libs => some (M.entry params code libs sample)
+  | _, _, _ => none
 
 /-! ## Op 134: the runner's dry run
 
@@ -275,11 +269,11 @@ def dryRunOn (M : Machine) (program : Program) (libraries : List Program) (ctx :
   match M.sampleOf program.abi ctx targets read with
   | none => .refused .sampleUnavailable
   | some sample =>
-    match M.decode program.jam, libraryCodes M libraries with
-    | some code, .ok libs =>
+    match M.decode program.jam, M.decodeParams program.params, libraryCodes M libraries with
+    | some code, some params, .ok libs =>
       -- C5: hold check here (K-RUN-HOLD: a dry run above the free threshold
       -- needs a hold before the oracle runs at the ABI fuel).
-      let result := M.oracle program.abi.fuel (M.entry program.abi code libs sample)
+      let result := M.oracle program.abi.fuel (M.entry params code libs sample)
       .ran (M.encodeInput sample)
         (match result with
          | .ok out k => .ok (M.encodeOutput out) k
@@ -288,8 +282,9 @@ def dryRunOn (M : Machine) (program : Program) (libraries : List Program) (ctx :
         (match result with
          | .ok out _ => M.writesOf program.abi out
          | _ => none)
-    | none, _ => .refused .programMalformed
-    | _, .error reason => .refused reason
+    | none, _, _ => .refused .programMalformed
+    | _, none, _ => .refused .paramsMalformed
+    | _, _, .error reason => .refused reason
 
 def dryRun (disabled : List Digest) (domain : Digest)
     (directory : CellRegistry.Directory Nat CanonicalCellRegistry.registry)
@@ -342,40 +337,44 @@ theorem checkRun_sound {E : Evaluator} {program : Program} {libraries : List Pro
   | none => simp [hcore, require] at accepted
   | some core =>
     simp only [hcore, require] at accepted
-    cases hlibs : libraryCodes E.toMachine libraries with
-    | error e => simp [hlibs] at accepted
-    | ok libs =>
-      simp only [hlibs] at accepted
-      split at accepted
-      · cases accepted
-      · cases accepted
-      · rename_i out k horacle
+    cases hparams : E.decodeParams program.params with
+    | none => simp [hparams] at accepted
+    | some params =>
+      simp only [hparams] at accepted
+      cases hlibs : libraryCodes E.toMachine libraries with
+      | error e => simp [hlibs] at accepted
+      | ok libs =>
+        simp only [hlibs] at accepted
         split at accepted
         · cases accepted
-        rename_i hk
-        split at accepted
         · cases accepted
-        rename_i hout
-        cases hdec : E.writesOf program.abi out with
-        | none => simp [hdec] at accepted
-        | some decoded =>
-          simp only [hdec] at accepted
+        · rename_i out k horacle
           split at accepted
           · cases accepted
-          rename_i hwr
+          rename_i hk
           split at accepted
           · cases accepted
-          rename_i hdw
-          cases accepted
-          obtain ⟨hrun, hsteps⟩ := E.oracle_ok horacle
-          have hk' : k = claim.steps := Classical.byContradiction hk
-          refine ⟨_, ?_, E.run_sound hrun, hdec, ?_, Classical.byContradiction hsample,
-            (Classical.byContradiction hout).symm, hk', by omega, hrun, hsteps⟩
-          · simp [runOf, hcore, hlibs]
-          · intro w
-            simp only [Bool.not_eq_true', Bool.not_eq_false] at hwr hdw
-            rw [List.all_eq_true] at hwr hdw
-            exact ⟨fun m => by simpa using hwr w m, fun m => by simpa using hdw w m⟩
+          rename_i hout
+          cases hdec : E.writesOf program.abi out with
+          | none => simp [hdec] at accepted
+          | some decoded =>
+            simp only [hdec] at accepted
+            split at accepted
+            · cases accepted
+            rename_i hwr
+            split at accepted
+            · cases accepted
+            rename_i hdw
+            cases accepted
+            obtain ⟨hrun, hsteps⟩ := E.oracle_ok horacle
+            have hk' : k = claim.steps := Classical.byContradiction hk
+            refine ⟨_, ?_, E.run_sound hrun, hdec, ?_, Classical.byContradiction hsample,
+              (Classical.byContradiction hout).symm, hk', by omega, hrun, hsteps⟩
+            · simp [runOf, hcore, hparams, hlibs]
+            · intro w
+              simp only [Bool.not_eq_true', Bool.not_eq_false] at hwr hdw
+              rw [List.all_eq_true] at hwr hdw
+              exact ⟨fun m => by simpa using hwr w m, fun m => by simpa using hdw w m⟩
 
 /-- **`no_accepted_of_output_mismatch`** (NOCK §3.3, the T8 statement, over any
 evaluator): a successful evaluation authorizes nothing by itself. If the command's
@@ -561,10 +560,13 @@ def decCore : Noun :=
 def crashCore : Noun := coreOf (Nock.op 0 (.atom 0))
 
 def kAbi (fuel : Nat) : Abi :=
-  { version := 1, arm := 2, fuel := fuel, sample := [],
+  { version := 1, fuel := fuel, sample := [],
     outputs := [{ key := "k", target := 0, field := 1, type := .nat }], libraries := [] }
 
-def prog (core : Noun) (fuel : Nat) : Program := ⟨fixtureEvaluator, Noun.jam core, kAbi fuel⟩
+/-- Nock's params: arm 2 (the bare gate). -/
+def gateParams : List UInt8 := NockEntry.encodeParams ⟨2⟩
+
+def prog (core : Noun) (fuel : Nat) : Program := ⟨fixtureEvaluator, Noun.jam core, kAbi fuel, gateParams⟩
 
 def claimOf (sample out : Noun) (steps : Nat) : RunClaim :=
   ⟨⟨0⟩, Noun.jam sample, Noun.jam out, steps⟩
@@ -580,7 +582,7 @@ def writesOf {Output : Type} : Except Refusal (Verdict Output) → Option (List 
   | .ok v => some v.writes
 
 def libProgram : Program :=
-  ⟨fixtureEvaluator, Noun.jam (Nock.op 0 (.atom 1)), { kAbi 100 with libraries := [⟨0⟩] }⟩
+  ⟨fixtureEvaluator, Noun.jam (Nock.op 0 (.atom 1)), { kAbi 100 with libraries := [⟨0⟩] }, gateParams⟩
 
 def W (value : Int) : FieldWrite := ⟨0, 1, value⟩
 
@@ -623,6 +625,10 @@ theorem pole_stepsMismatch :
 theorem pole_writeNotInOutput :
     refusalOf (checkRun Machine.nock (prog incCore 100) [] (.atom 41) (claimOf (.atom 41) (outK 42) 14)
       [W 42, ⟨0, 2, 7⟩]) = some .writeNotInOutput := by decide +kernel
+/-- The record's params bytes are not Nock's: refused by name before anything runs. -/
+theorem pole_paramsMalformed :
+    refusalOf (checkRun Machine.nock { prog incCore 100 with params := [7] } [] (.atom 41)
+      (claimOf (.atom 41) (outK 42) 14) [W 42]) = some .paramsMalformed := by decide +kernel
 theorem pole_outputNotWritten :
     refusalOf (checkRun Machine.nock (prog incCore 100) [] (.atom 41) (claimOf (.atom 41) (outK 42) 14) []) =
       some .outputNotWritten := by decide +kernel
@@ -637,7 +643,8 @@ by signer 7 on `stateA`; it is re-checked at height 23 by signer 9 on `stateB`
 def slotCore : Noun := coreOf (writeK (Nock.op 4 (Nock.op 0 (.atom 109))))
 def slotN : SampleSlot := { target := 0, slot := "f/2", key := "n", type := .nat }
 def slotAbi (mode : ContextMode) : Abi := { kAbi 100 with context := mode, sample := [slotN] }
-def slotProgram (context : ContextMode) : Program := ⟨fixtureEvaluator, Noun.jam slotCore, slotAbi context⟩
+def slotProgram (context : ContextMode) : Program :=
+  ⟨fixtureEvaluator, Noun.jam slotCore, slotAbi context, gateParams⟩
 def sampleAt (context : ContextMode) (ctx : Context) (read : Nat → String → Option Int) : Noun :=
   (sampleOf (slotAbi context) ctx [11] read).getD (.atom 0)
 def stateC : Nat → String → Option Int := fun _ s => if s = "f/2" then some 40 else some 1
@@ -733,3 +740,5 @@ end Minidregg.Kernel.Run
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Run.pole_pinned_field_stale
 /-- info: 'Minidregg.Kernel.Run.pole_noun_output' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Run.pole_noun_output
+/-- info: 'Minidregg.Kernel.Run.pole_paramsMalformed' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Run.pole_paramsMalformed

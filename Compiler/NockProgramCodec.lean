@@ -11,8 +11,8 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
   bytes) is refused `nonCanonical`. Compiled, `canonical` runs N-MUG's
   `@[csimp]` jam/cue (mug-keyed tables), each proved equal to its specification.
 * **Identity.** `codeDigest` is cSHAKE256 over the jam. `programId` is
-  cSHAKE256 over the whole `DREGG/NOCK/PROGRAM/v3` record (evaluator id, jam and
-  ABI), and the
+  cSHAKE256 over the whole `DREGG/PROGRAM/v1` record (evaluator id, code, ABI and the
+  evaluator's params), and the
   cell id is `physicalId domain programId`. The ABI is in the identity because it
   decides what the kernel feeds the program: with the id over the jam alone, the
   first writer's ABI would be the only one any friend could ever use for that
@@ -32,6 +32,14 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
   (N11's state encoding). In a sample the kernel cues it (refusing a value that is
   not the jam atom of the noun it cues to); in an output the kernel writes the jam
   atom of the product's noun, bounded by `nounMaxBytes`.
+* **Params (E3).** What only the evaluator reads — Nock's arm — is not an ABI field: it is
+  the record's `params` bytes, decoded by the evaluator (`Machine.decodeParams`; Nock's codec
+  `DREGG/NOCK/PARAMS/v1` is `Kernel.NockEntry.encodeParams`). The ABI keeps what the KERNEL
+  reads: the sample layout, the outputs, the libraries it loads, the fuel, the door, the context.
+* **Names (E3).** No ABI name may hold a NUL (`NamesNulFree`, refused `nulInName`): Nock writes a
+  key as a cord, and `cord "a" = cord "a\u0000"`.
+* **Admission.** The birth check is the evaluator's (`Compiler.Evaluator.Machine.admit`,
+  `admitRecord`): this file holds the record, its codec, its refusal names and the ABI's shape.
 * **Immutability.** The single address is ROM: after birth no patch changes it
   (`program_immutable`), and the registry's final-post law pins its bytes.
 -/
@@ -51,13 +59,14 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-/-- v3 (E2): the program record carries ABI v4. Program-cell v1 (K-NOCK-CELL … K-RUN-PIN),
-v2 (NC-2) refuse at the version gate (`wrong_version_refused`) rather than being re-read. -/
-def wireVersion : Nat := 3
-/-- v2 added the optional `door` (N11). v3 was spent twice on separate branches — K-RUN-PIN's
-`context` + `noun` slot type and NC-2's per-slot `max` — so the union is **v4**, carrying both;
-a v1, v2 or (either) v3 record does not decode (`abi_old_frame_refused`). -/
-def abiVersion : Nat := 4
+/-- v4 (E3): the record carries ABI v5 and the evaluator's params. Program-cell v1 (K-NOCK-CELL …
+K-RUN-PIN), v2 (NC-2), v3 (E2) refuse at the version gate (`wrong_version_refused`). -/
+def wireVersion : Nat := 4
+/-- v2 added the optional `door` (N11); v3 (twice) `context`/`noun` and `max`; v4 their union (E2).
+**v5** (E3): `arm` left the ABI for the evaluator's params, and the frame lost `NOCK`
+(`DREGG/ABI/v5`: the ABI is the kernel's, read the same under every evaluator). A v1–v4 record
+does not decode (`abi_old_frame_refused`). -/
+def abiVersion : Nat := 5
 /-- Registry tag 13 (final: 11 pay, 12 stream, 13 nockProgram, 14 clock); schema 91011. -/
 def registryTag : UInt8 := 13
 def schemaId : Nat := 91011
@@ -115,7 +124,7 @@ structure OutputSlot where
   deriving DecidableEq, Repr
 
 /-- A NockApp kernel door (NOCK §2.7, N11). The program's jam is the kernel
-trap (booted with `[9 2 0 1]`); `Abi.arm` is the poke axis (NockApp: 23) and
+trap (booted with `[9 2 0 1]`); the params' arm is the poke axis (NockApp: 23) and
 `peek` the peek axis (NockApp: 22). The door's state (core axis 6) lives as the
 atom of its jam in object field `state` of the command's target 0, its event
 number in field `event`. -/
@@ -127,8 +136,6 @@ structure Door where
 
 structure Abi where
   version : Nat
-  /-- The arm slammed: 2 for a bare gate (hoonc's trap kicked to its gate). -/
-  arm : Nat
   sample : List SampleSlot
   outputs : List OutputSlot
   /-- Program cells (by `programId`) this program is run against. -/
@@ -149,9 +156,12 @@ structure Program where
   evaluator : Digest
   jam : List UInt8
   abi : Abi
+  /-- The evaluator's own entry data, as bytes only it decodes (`Machine.decodeParams`;
+  Nock: `DREGG/NOCK/PARAMS/v1`, the arm). Covered by `programId`. -/
+  params : List UInt8
   deriving DecidableEq, Repr
 
-/-! ## Codecs `DREGG/NOCK/ABI/v4`, `DREGG/NOCK/PROGRAM/v3` -/
+/-! ## Codecs `DREGG/ABI/v5`, `DREGG/PROGRAM/v1` -/
 
 def slotTypeStream : StreamCodec SlotType :=
   StreamCodec.xmap StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
@@ -187,20 +197,19 @@ def doorStream : StreamCodec Door :=
 def abiStream : StreamCodec Abi :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product StreamCodec.nat
-        (StreamCodec.product (StreamCodec.list sampleSlotStream)
-          (StreamCodec.product (StreamCodec.list outputSlotStream)
-            (StreamCodec.product (StreamCodec.list digestStream)
-              (StreamCodec.product StreamCodec.nat
-                (StreamCodec.product (StreamCodec.option doorStream) contextStream)))))))
-    (fun a => (a.version, a.arm, a.sample, a.outputs, a.libraries, a.fuel, a.door, a.context))
-    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2.1, v.2.2.2.2.2.1, v.2.2.2.2.2.2.1,
-      v.2.2.2.2.2.2.2⟩)
+      (StreamCodec.product (StreamCodec.list sampleSlotStream)
+        (StreamCodec.product (StreamCodec.list outputSlotStream)
+          (StreamCodec.product (StreamCodec.list digestStream)
+            (StreamCodec.product StreamCodec.nat
+              (StreamCodec.product (StreamCodec.option doorStream) contextStream))))))
+    (fun a => (a.version, a.sample, a.outputs, a.libraries, a.fuel, a.door, a.context))
+    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2.1, v.2.2.2.2.2.1, v.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def programStream : StreamCodec Program :=
-  StreamCodec.xmap (StreamCodec.product digestStream (StreamCodec.product bytesStream abiStream))
-    (fun p => (p.evaluator, p.jam, p.abi)) (fun v => ⟨v.1, v.2.1, v.2.2⟩)
+  StreamCodec.xmap (StreamCodec.product digestStream
+      (StreamCodec.product bytesStream (StreamCodec.product abiStream bytesStream)))
+    (fun p => (p.evaluator, p.jam, p.abi, p.params)) (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 /-- A frame-tagged stream codec that accepts only its own re-encoding. -/
@@ -235,13 +244,16 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
   decode := framedDecode frame stream
   decode_encode := framedDecode_encode frame stream
 
-/-- `DREGG/NOCK/ABI/v4` -/
+/-- `DREGG/ABI/v5` -/
 def abiFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 52]
-/-- `DREGG/NOCK/PROGRAM/v3` (E2: the record names its evaluator and carries ABI v4; v1 and
-NC-2's v2 do not decode, and every `programId` changes). -/
+  [68, 82, 69, 71, 71, 47, 65, 66, 73, 47, 118, 53]
+/-- `DREGG/PROGRAM/v1` (E3, EVAL §1.4: the evaluator-generic record — evaluator id, code, ABI,
+params; the `DREGG/NOCK/PROGRAM/v1..v3` frames do not decode, and every `programId` changes). -/
 def programFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 51]
+  [68, 82, 69, 71, 71, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
+
+theorem abiFrame_spells : abiFrame = "DREGG/ABI/v5".toUTF8.toList := by decide +kernel
+theorem programFrame_spells : programFrame = "DREGG/PROGRAM/v1".toUTF8.toList := by decide +kernel
 
 def abiCodec : LawfulCodec Abi := framed abiFrame abiStream
 def programCodec : LawfulCodec Program := framed programFrame programStream
@@ -249,29 +261,46 @@ def programCodec : LawfulCodec Program := framed programFrame programStream
 theorem abi_roundtrip (abi : Abi) : abiCodec.decode (abiCodec.encode abi) = some abi :=
   abiCodec.decode_encode abi
 
-/-- The frames of ABI v1 (K-NOCK), v2 (N11) and v3 (K-RUN-PIN's and NC-2's, two shapes). -/
+/-- The frames of ABI v1 (K-NOCK), v2 (N11), v3 (K-RUN-PIN's and NC-2's, two shapes), v4 (E2). -/
 def abiFrameV1 : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 49]
 def abiFrameV2 : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 50]
 def abiFrameV3 : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 51]
+def abiFrameV4 : List UInt8 :=
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 52]
 
-/-- A record under an older ABI frame does not decode: v1, v2 and v3 refuse to load
-rather than being read as v4 (whatever bytes follow the frame). -/
+theorem framedDecode_other_frame {α : Type} {frame old : List UInt8} (stream : StreamCodec α)
+    (rest : List UInt8) (long : frame.length ≤ old.length) (differ : old.take frame.length ≠ frame) :
+    framedDecode frame stream (old ++ rest) = none := by
+  unfold framedDecode
+  rw [List.take_append_of_le_length long, if_neg differ]
+
+/-- A record under an older ABI frame does not decode: v1–v4 refuse to load rather than
+being read as v5 (whatever bytes follow the frame). -/
 theorem abi_old_frame_refused (rest : List UInt8) :
     abiCodec.decode (abiFrameV1 ++ rest) = none ∧ abiCodec.decode (abiFrameV2 ++ rest) = none ∧
-      abiCodec.decode (abiFrameV3 ++ rest) = none := by
-  have h1 : (abiFrameV1 ++ rest).take abiFrame.length = abiFrameV1 := List.take_left' rfl
-  have h2 : (abiFrameV2 ++ rest).take abiFrame.length = abiFrameV2 := List.take_left' rfl
-  have h3 : (abiFrameV3 ++ rest).take abiFrame.length = abiFrameV3 := List.take_left' rfl
-  refine ⟨?_, ?_, ?_⟩
+      abiCodec.decode (abiFrameV3 ++ rest) = none ∧ abiCodec.decode (abiFrameV4 ++ rest) = none := by
+  refine ⟨?_, ?_, ?_, ?_⟩
   · show framedDecode abiFrame abiStream (abiFrameV1 ++ rest) = none
-    unfold framedDecode; rw [h1, if_neg (by decide)]
+    exact framedDecode_other_frame abiStream rest (by decide) (by decide)
   · show framedDecode abiFrame abiStream (abiFrameV2 ++ rest) = none
-    unfold framedDecode; rw [h2, if_neg (by decide)]
+    exact framedDecode_other_frame abiStream rest (by decide) (by decide)
   · show framedDecode abiFrame abiStream (abiFrameV3 ++ rest) = none
-    unfold framedDecode; rw [h3, if_neg (by decide)]
+    exact framedDecode_other_frame abiStream rest (by decide) (by decide)
+  · show framedDecode abiFrame abiStream (abiFrameV4 ++ rest) = none
+    exact framedDecode_other_frame abiStream rest (by decide) (by decide)
+
+/-- `DREGG/NOCK/PROGRAM/v3`: E2's record frame. -/
+def programFrameNockV3 : List UInt8 :=
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 51]
+
+/-- E2's `DREGG/NOCK/PROGRAM/v3` record does not decode as `DREGG/PROGRAM/v1`. -/
+theorem program_old_frame_refused (rest : List UInt8) :
+    programCodec.decode (programFrameNockV3 ++ rest) = none := by
+  show framedDecode programFrame programStream (programFrameNockV3 ++ rest) = none
+  exact framedDecode_other_frame programStream rest (by decide) (by decide)
 
 theorem abi_canonical {bytes : List UInt8} {abi : Abi}
     (accepted : abiCodec.decode bytes = some abi) : abiCodec.encode abi = bytes :=
@@ -329,23 +358,42 @@ def physicalId (domain id : Digest) : Nat :=
 
 /-- Why a program is not admitted. Order is the check order. -/
 inductive Refusal where
+  /-- The record names an evaluator id no compiled-in entry has (K-EVAL; E3: at birth). -/
+  | unknownEvaluator
+  /-- The record's evaluator is compiled in and this deployment's operator disabled it. -/
+  | evaluatorDisabled
   | noCue
   | nonCanonical
   | abiVersion
+  /-- An ABI name (a sample slot, a sample key, an output key) holds a NUL (E3). -/
+  | nulInName
   | fuelZero
+  /-- The evaluator's params bytes do not decode (`Machine.decodeParams`). -/
+  | paramsMalformed
   | armZero
   | abiShape
   | missingLibrary
   deriving DecidableEq, Repr
 
 def Refusal.name : Refusal → String
+  | .unknownEvaluator => "unknownEvaluator"
+  | .evaluatorDisabled => "evaluatorDisabled"
   | .noCue => "noCue"
   | .nonCanonical => "nonCanonical"
   | .abiVersion => "abiVersion"
+  | .nulInName => "nulInName"
   | .fuelZero => "fuelZero"
+  | .paramsMalformed => "paramsMalformed"
   | .armZero => "armZero"
   | .abiShape => "abiShape"
   | .missingLibrary => "missingLibrary"
+
+/-- Why a door's effects are not writes (N11's two refusals, evaluator-generic: `Kernel.Door`
+reports them as `outputMalformed` and `effectNotWrite`). -/
+inductive EffectRefusal where
+  | effectsMalformed
+  | effectNotWrite
+  deriving DecidableEq, Repr
 
 /-- A door reads no sample slots and no libraries (its subject is the kernel's
 own `[[trap state] job]`), names a peek arm, and keeps its state and event
@@ -381,63 +429,32 @@ def AbiShape (abi : Abi) : Prop :=
 instance abiShapeDecidable (abi : Abi) : Decidable (AbiShape abi) := by
   unfold AbiShape; infer_instance
 
-def Admissible (program : Program) : Prop :=
-  Noun.canonical program.jam = true ∧ program.abi.version = abiVersion ∧
-    0 < program.abi.fuel ∧ 0 < program.abi.arm ∧ AbiShape program.abi
+/-! ## Names: no NUL (E3)
 
-instance admissibleDecidable (program : Program) : Decidable (Admissible program) := by
-  unfold Admissible; infer_instance
+Nock writes a sample key as a cord, which drops trailing zero bytes, so `"a"` and
+`"a\u0000"` are one key on the wire (E1, `scratch/CordKeyCollision.lean`). A name with a
+NUL is therefore refused where the ABI is read (`Machine.admit`, refusal `nulInName`), for
+every name the ABI carries. -/
 
-/-- The store-free birth check, in refusal order. -/
-def check (program : Program) : Except Refusal Unit :=
-  if (Noun.cue program.jam).isNone then .error .noCue
-  else if Noun.canonical program.jam = false then .error .nonCanonical
-  else if program.abi.version ≠ abiVersion then .error .abiVersion
-  else if program.abi.fuel = 0 then .error .fuelZero
-  else if program.abi.arm = 0 then .error .armZero
-  else if ¬ AbiShape program.abi then .error .abiShape
-  else .ok ()
+/-- No zero byte in the name's UTF-8 bytes. In UTF-8 the only zero byte is U+0000's, so
+this is exactly "the name holds no NUL". -/
+def NulFree (name : String) : Prop := (0 : UInt8) ∉ name.toUTF8.toList
 
-theorem check_ok_iff (program : Program) : check program = .ok () ↔ Admissible program := by
-  unfold check Admissible
-  constructor
-  · intro accepted
-    split at accepted; · cases accepted
-    split at accepted; · cases accepted
-    split at accepted; · cases accepted
-    split at accepted; · cases accepted
-    split at accepted; · cases accepted
-    split at accepted; · cases accepted
-    rename_i _ canonical version fuel arm shape
-    refine ⟨?_, ?_, ?_, ?_, ?_⟩
-    · simpa using canonical
-    · simpa using version
-    · omega
-    · omega
-    · simpa using shape
-  · rintro ⟨canonical, version, fuel, arm, shape⟩
-    have cues : (Noun.cue program.jam).isNone = false := by
-      obtain ⟨n, hn⟩ := Noun.canonical_iff.mp canonical
-      rw [← hn, Noun.cue_jam]; rfl
-    simp [cues, canonical, version, Nat.pos_iff_ne_zero.mp fuel, Nat.pos_iff_ne_zero.mp arm, shape]
+instance nulFreeDecidable (name : String) : Decidable (NulFree name) := by
+  unfold NulFree; infer_instance
 
-theorem noCue_refused (program : Program) (bad : Noun.cue program.jam = none) :
-    check program = .error .noCue := by
-  simp [check, bad]
+/-- Every name an ABI carries: each sample slot's participant slot and key, each output key. -/
+def abiNames (abi : Abi) : List String :=
+  abi.sample.flatMap (fun slot => [slot.slot, slot.key]) ++ abi.outputs.map OutputSlot.key
 
-theorem nonCanonical_refused (program : Program) (cues : (Noun.cue program.jam).isSome)
-    (bad : Noun.canonical program.jam = false) : check program = .error .nonCanonical := by
-  have : (Noun.cue program.jam).isNone = false := by
-    cases h : Noun.cue program.jam <;> simp_all
-  simp [check, this, bad]
+def NamesNulFree (abi : Abi) : Prop := ∀ name ∈ abiNames abi, NulFree name
 
-theorem fuelZero_refused (program : Program) (canonical : Noun.canonical program.jam = true)
-    (version : program.abi.version = abiVersion) (zero : program.abi.fuel = 0) :
-    check program = .error .fuelZero := by
-  have cues : (Noun.cue program.jam).isNone = false := by
-    obtain ⟨n, hn⟩ := Noun.canonical_iff.mp canonical
-    rw [← hn, Noun.cue_jam]; rfl
-  simp [check, cues, canonical, version, zero]
+instance namesNulFreeDecidable (abi : Abi) : Decidable (NamesNulFree abi) := by
+  unfold NamesNulFree; infer_instance
+
+theorem NamesNulFree.keys {abi : Abi} (h : NamesNulFree abi) :
+    ∀ slot ∈ abi.sample, NulFree slot.key := fun slot member =>
+  h _ (List.mem_append_left _ (List.mem_flatMap.mpr ⟨slot, member, by simp⟩))
 
 /-- A trailing zero byte (hoonc's word padding) is never admitted: the padded
 bytes cue to the same noun as the minimal ones, so at most one of them is
@@ -454,14 +471,14 @@ theorem padded_refused (jam : List UInt8) (canonical : Noun.canonical jam = true
 /-- An admitted program's bytes are a function of its noun: `programId` and
 `codeDigest` are functions of the program (NOCK §2.10), never of an encoding
 choice. -/
-theorem admissible_jam_unique {left right : Program} (hl : Admissible left)
-    (hr : Admissible right) (same : Noun.cue left.jam = Noun.cue right.jam) :
+theorem admissible_jam_unique {left right : Program} (hl : Noun.canonical left.jam = true)
+    (hr : Noun.canonical right.jam = true) (same : Noun.cue left.jam = Noun.cue right.jam) :
     left.jam = right.jam :=
-  Noun.canonical_unique hl.1 hr.1 same
+  Noun.canonical_unique hl hr same
 
-theorem admissible_jam_eq {program : Program} (admitted : Admissible program) {n : Noun}
-    (cued : Noun.cue program.jam = some n) : program.jam = Noun.jam n := by
-  obtain ⟨m, hm⟩ := Noun.canonical_iff.mp admitted.1
+theorem admissible_jam_eq {program : Program} (admitted : Noun.canonical program.jam = true)
+    {n : Noun} (cued : Noun.cue program.jam = some n) : program.jam = Noun.jam n := by
+  obtain ⟨m, hm⟩ := Noun.canonical_iff.mp admitted
   rw [← hm, Noun.cue_jam] at cued
   cases cued
   exact hm.symm
@@ -587,17 +604,9 @@ end Minidregg.Compiler.NockProgramCodec
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.programCodec_injective
 /-- info: 'Minidregg.Compiler.NockProgramCodec.customizations_distinct' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.customizations_distinct
-/-- info: 'Minidregg.Compiler.NockProgramCodec.check_ok_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.check_ok_iff
-/-- info: 'Minidregg.Compiler.NockProgramCodec.noCue_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.noCue_refused
-/-- info: 'Minidregg.Compiler.NockProgramCodec.nonCanonical_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.nonCanonical_refused
-/-- info: 'Minidregg.Compiler.NockProgramCodec.fuelZero_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.fuelZero_refused
 /-- info: 'Minidregg.Compiler.NockProgramCodec.padded_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.padded_refused
-/-- info: 'Minidregg.Compiler.NockProgramCodec.admissible_jam_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.NockProgramCodec.admissible_jam_unique' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.admissible_jam_unique
 /-- info: 'Minidregg.Compiler.NockProgramCodec.admissible_jam_eq' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.admissible_jam_eq
@@ -607,3 +616,7 @@ end Minidregg.Compiler.NockProgramCodec
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.decode_canonical
 /-- info: 'Minidregg.Compiler.NockProgramCodec.wrong_version_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.wrong_version_refused
+/-- info: 'Minidregg.Compiler.NockProgramCodec.program_old_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.program_old_frame_refused
+/-- info: 'Minidregg.Compiler.NockProgramCodec.abiFrame_spells' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.NockProgramCodec.abiFrame_spells

@@ -108,7 +108,7 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
           let descriptor ← need "noncanonical birth draft"
             (CanonicalCellRegistry.sourceEncoding.codec.decode bytes)
           let prepared ← (ResourceBirthController.Concrete.prepareDraft profile.compilerProfile
-            config.deployment opened.pins opened.durable descriptor).mapError
+            profile.disabledEvaluators config.deployment opened.pins opened.durable descriptor).mapError
               (fun reason => s!"birth preparation: {repr reason}")
           check (capabilities.length == prepared.descriptor.resourceBatch.operations.length)
             "birth source capability count mismatch"

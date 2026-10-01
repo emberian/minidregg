@@ -23,6 +23,9 @@ done
 # observation costs its byte length, so a fixture that births a Nock program
 # (J-NOCK-2b, ~566 KB) raises it; the default is unchanged.
 OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-100000}
+# Compiled-in evaluators this Store's operator disables (space-separated registry
+# names, e.g. "nock"; K-EVAL). Written into the genesis params; default none.
+DISABLED_EVALUATORS=${NEWPARTICIPANT_DISABLED_EVALUATORS:-}
 case "$OWNER_BUDGET" in ''|*[!0-9]*) echo 'NEWPARTICIPANT_OWNER_BUDGET must be decimal' >&2; exit 2;; esac
 for executable in "$HOST" "$MINI" "$STORE" "$VERIFIER"; do
   case "$executable" in /*) ;; *) echo "binary path must be absolute: $executable" >&2; exit 2;; esac
@@ -76,7 +79,10 @@ EOF
 # The one genesis template (genesis.sh) from the example params, with this
 # Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS.
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" --argjson budget "$OWNER_BUDGET" \
-  '.domain = $domain | .sponsor.subject = $subject | .ownerBudget = $budget' \
+  --arg disabled "$DISABLED_EVALUATORS" \
+  '.domain = $domain | .sponsor.subject = $subject | .ownerBudget = $budget
+   | ($disabled | split(" ") | map(select(length > 0))) as $off
+   | if ($off | length) > 0 then .disabledEvaluators = $off else . end' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
 EXTRA_GENESIS_ENROLLMENTS="$ROOT/pay/genesis-enrollments-all.json" \
 GENESIS_PAY_OBSERVER="$ROOT/pay/genesis-observer.json" \

@@ -1378,7 +1378,7 @@ private def birthParts (path : String)
       let bytes ← decodeHex (path ++ ".program") (← field path "program" obj)
       match NockProgramCodec.programCodec.decode bytes with
       | some program => pure (some program)
-      | none => failAt (path ++ ".program") "noncanonical DREGG/NOCK/PROGRAM/v3 bytes"
+      | none => failAt (path ++ ".program") "noncanonical DREGG/PROGRAM/v1 bytes"
     else pure none
   let target ← match program with
     | some program => pure (CanonicalCellRegistry.programCellId source.deployment.domain program)
@@ -4106,8 +4106,9 @@ def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := d
 /-! ## Nock program cells (host ops 117–119)
 
 Op 117 takes the minimal jam bytes and this ABI JSON and answers what a birth
-of that program would meet, with the canonical `DREGG/NOCK/PROGRAM/v3` bytes the
-birth's `"program"` field carries. Op 118 shows a stored program by id. Op 119
+of that program would meet, with the canonical `DREGG/PROGRAM/v1` bytes the
+birth's `"program"` field carries. The ABI JSON is Nock's: its `"arm"` becomes the
+record's params (`Kernel.NockEntry.encodeParams`), not an ABI field. Op 118 shows a stored program by id. Op 119
 builds the kernel's sample jam for a stored program. -/
 
 private def nockSlotType (path : String) (json : Lean.Json) :
@@ -4166,7 +4167,7 @@ def nockAbi (path : String) (json : Lean.Json) (extra : List String := []) :
     Result NockProgramCodec.Abi := do
   let isDoor := ((← object path json).get? "door").isSome
   let obj ← exactObject path
-    (["version", "arm", "sample", "outputs", "libraries", "fuel", "context"] ++ extra ++
+    (["version", "sample", "outputs", "libraries", "fuel", "context"] ++ extra ++
       if isDoor then ["door"] else [])
     json
   let door ← if isDoor then some <$> nockDoor (path ++ ".door") (← field path "door" obj)
@@ -4175,7 +4176,6 @@ def nockAbi (path : String) (json : Lean.Json) (extra : List String := []) :
     door := door
     context := ← nockContext (path ++ ".context") (← field path "context" obj)
     version := ← nat (path ++ ".version") (← field path "version" obj)
-    arm := ← nat (path ++ ".arm") (← field path "arm" obj)
     sample := ← list (path ++ ".sample") nockSampleSlot (← field path "sample" obj)
     outputs := ← list (path ++ ".outputs") nockOutputSlot (← field path "outputs" obj)
     libraries := ← list (path ++ ".libraries") (fun p j => Digest.mk <$> nat p j)
@@ -4183,7 +4183,7 @@ def nockAbi (path : String) (json : Lean.Json) (extra : List String := []) :
     fuel := ← nat (path ++ ".fuel") (← field path "fuel" obj) }
 
 def nockAbiJson (abi : NockProgramCodec.Abi) : Lean.Json :=
-  Lean.Json.mkObj [("version", toString abi.version), ("arm", toString abi.arm),
+  Lean.Json.mkObj [("version", toString abi.version),
     ("sample", .arr (abi.sample.map fun slot => .mkObj (([("target", toString slot.target),
       ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)] :
         List (String × Lean.Json)) ++
@@ -4199,22 +4199,38 @@ def nockAbiJson (abi : NockProgramCodec.Abi) : Lean.Json :=
       | some d => Lean.Json.mkObj [("door", Lean.Json.mkObj [("peek", toString d.peek),
           ("state", toString d.state), ("event", toString d.event)])])
 
-/-- The compiled-in evaluator a record names, by its registry name (`"nock"`): the
-record carries the id (`Evaluator.id`), never the name. A name the registry does not
-have is refused here; a record naming an unregistered id is refused at run
-(`unknownEvaluator`). -/
+/-- The evaluator a record names: a compiled-in one by its registry name (`"nock"`; a name
+the registry lacks is refused here), or any `{"name", "semantics"}`, whose id is derived
+exactly as a registry entry's would be (`Evaluator.idOf`). The record carries the id, never
+the name. A record naming an id the registry lacks is the KERNEL's to refuse, by name:
+`unknownEvaluator`, at the check (op 131), at birth and at run (E3). -/
 def evaluatorNamed (path : String) (json : Lean.Json) : Result Digest := do
-  let name ← string path json
-  match Evaluator.registry.find? (fun E => E.name == name) with
-  | some E => pure E.id
-  | none => failAt path s!"no compiled-in evaluator named {name}"
+  match json with
+  | .str name =>
+    match Evaluator.registry.find? (fun E => E.name == name) with
+    | some E => pure E.id
+    | none => failAt path s!"no compiled-in evaluator named {name}"
+  | _ =>
+    let obj ← exactObject path ["name", "semantics"] json
+    pure (Evaluator.idOf (← string (path ++ ".name") (← field path "name" obj))
+      (← string (path ++ ".semantics") (← field path "semantics" obj)))
 
 /-- Op 131 request: the code bytes and the ABI source, which also names the
-record's evaluator (`"evaluator": "nock"`). -/
+record's evaluator (`"evaluator": "nock"`) and Nock's arm (`"arm"`, the record's params). -/
 def nockProgramOf (jam : List UInt8) (abiSource : String) : Result NockProgramCodec.Program := do
   let json ← parse abiSource
-  let evaluator ← evaluatorNamed "abi.evaluator" (← field "abi" "evaluator" (← object "abi" json))
-  pure ⟨evaluator, jam, ← nockAbi "abi" json ["evaluator"]⟩
+  let obj ← object "abi" json
+  let evaluator ← evaluatorNamed "abi.evaluator" (← field "abi" "evaluator" obj)
+  let arm ← nat "abi.arm" (← field "abi" "arm" obj)
+  pure ⟨evaluator, jam, ← nockAbi "abi" json ["evaluator", "arm"],
+    Kernel.NockEntry.encodeParams ⟨arm⟩⟩
+
+/-- The record's params, shown: their bytes, and Nock's arm when they are Nock's. -/
+private def paramsJson (params : List UInt8) : List (String × Lean.Json) :=
+  [("params", hexJson params),
+   ("arm", match Kernel.NockEntry.decodeParams params with
+     | some p => Lean.Json.str (toString p.arm)
+     | none => Lean.Json.null)]
 
 /-- The verdict, and the canonical record bytes in every case: a refused record
 is still the exact bytes a birth would carry, so the kernel's own refusal of it
@@ -4223,26 +4239,27 @@ def nockCheckJson (submitted : NockProgramCodec.Program) :
     Kernel.NockProgramCell.CheckVerdict → Lean.Json
   | .malformed => .mkObj [("type", "nock-check"), ("verdict", "malformed")]
   | .refused reason => .mkObj [("type", "nock-check"), ("verdict", "refused"),
-      ("reason", reason.name),
+      ("reason", reason.name), ("evaluator", toString submitted.evaluator.value),
       ("program", hexJson (NockProgramCodec.programCodec.encode submitted))]
-  | .admissible program pid code cellId present => .mkObj [("type", "nock-check"),
+  | .admissible program pid code cellId present => Lean.Json.mkObj [("type", "nock-check"),
       ("verdict", "admissible"), ("programId", toString pid.value),
       ("evaluator", toString program.evaluator.value),
       ("codeDigest", toString code.value), ("cellId", toString cellId),
       ("present", Lean.Json.bool present), ("jamBytes", toString program.jam.length),
-      ("program", hexJson (NockProgramCodec.programCodec.encode program))]
+      ("program", hexJson (NockProgramCodec.programCodec.encode program))] |>.mergeObj
+      (Lean.Json.mkObj (paramsJson program.params))
 
 /-- Op 118: a stored program, or its absence. -/
 def nockShowJson (domain : Digest) (id : Digest) :
     Option NockProgramCodec.Program → Lean.Json
   | none => .mkObj [("type", "nock-program"), ("programId", toString id.value),
       ("present", Lean.Json.bool false)]
-  | some program => .mkObj [("type", "nock-program"), ("programId", toString id.value),
+  | some program => Lean.Json.mkObj [("type", "nock-program"), ("programId", toString id.value),
       ("present", Lean.Json.bool true), ("evaluator", toString program.evaluator.value),
       ("cellId", toString (CanonicalCellRegistry.programCellId domain program)),
       ("codeDigest", toString (NockProgramCodec.codeDigest program.jam).value),
       ("jamBytes", toString program.jam.length), ("abi", nockAbiJson program.abi),
-      ("jam", hexJson program.jam)]
+      ("jam", hexJson program.jam)] |>.mergeObj (Lean.Json.mkObj (paramsJson program.params))
 
 /-- Op 119 request: `{"programId", "context": {height, caller, room}, "targets",
 "values": [[index, slot, value], …]}`. -/
@@ -4325,13 +4342,13 @@ private def nounHex (path : String) (json : Lean.Json) : Result Noun := do
   | none => failAt path "not a jam"
 
 private def doorView (path : String) (obj : Std.TreeMap.Raw String Lean.Json compare) :
-    Result Kernel.NockDoor.View := do
+    Result Kernel.Door.View := do
   pure ⟨← optional (path ++ ".state") nat (← field path "state" obj),
     ← nat (path ++ ".event") (← field path "event" obj)⟩
 
 /-- Op 121: `{"programId", "state", "event", "wire": <jam hex>, "cause": <jam hex>}`. -/
 def nockDoorPokeRequest (source : String) :
-    Result (Digest × Kernel.NockDoor.View × Noun × Noun) := do
+    Result (Digest × Kernel.Door.View × Noun × Noun) := do
   let json ← parse source
   let obj ← exactObject "poke" ["programId", "state", "event", "wire", "cause"] json
   pure (Digest.mk (← nat "poke.programId" (← field "poke" "programId" obj)), ← doorView "poke" obj,
@@ -4339,7 +4356,7 @@ def nockDoorPokeRequest (source : String) :
 
 /-- Op 122: `{"programId", "state", "event", "path": <jam hex>}`; op 123 without `path`. -/
 def nockDoorReadRequest (source : String) (withPath : Bool) :
-    Result (Digest × Kernel.NockDoor.View × Noun) := do
+    Result (Digest × Kernel.Door.View × Noun) := do
   let json ← parse source
   let obj ← exactObject "door" (["programId", "state", "event"] ++ if withPath then ["path"] else [])
     json
@@ -4404,6 +4421,10 @@ def nockDoorPokeJson (programId : Digest) : Kernel.NockDoor.DryPoke → Lean.Jso
 def nockSampleJson : Kernel.NockProgramCell.SampleVerdict → Lean.Json
   | .missingProgram => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
       ("reason", "missingProgram")]
+  | .unresolved reason => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
+      ("reason", match reason with
+        | .unknownEvaluator => "unknownEvaluator"
+        | .evaluatorDisabled => "evaluatorDisabled")]
   | .ambiguousValues => .mkObj [("type", "nock-sample"), ("verdict", "refused"),
       ("reason", "ambiguousValues")]
   | .refused => .mkObj [("type", "nock-sample"), ("verdict", "refused"),

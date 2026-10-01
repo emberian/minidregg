@@ -26,9 +26,12 @@ inductive CheckVerdict where
   | refused (reason : Refusal)
   | admissible (program : Program) (id : Digest) (code : Digest) (cellId : Nat) (present : Bool)
 
-def checkProgram (domain : Digest) (directory : Directory Nat CanonicalCellRegistry.registry)
-    (program : Program) : CheckVerdict :=
-  match check program with
+/-- Op 131 on this deployment (`disabled`: what its operator disabled): the record's
+evaluator resolves and admits it (`Evaluator.admitRecord`: `unknownEvaluator`,
+`evaluatorDisabled`, then the evaluator's own `admit`), then its libraries are present. -/
+def checkProgram (disabled : List Digest) (domain : Digest)
+    (directory : Directory Nat CanonicalCellRegistry.registry) (program : Program) : CheckVerdict :=
+  match Evaluator.admitRecord disabled program with
   | .error reason => .refused reason
   | .ok () =>
     if CanonicalCellRegistry.librariesPresent domain directory program then
@@ -38,10 +41,12 @@ def checkProgram (domain : Digest) (directory : Directory Nat CanonicalCellRegis
         (CanonicalCellRegistry.loadProgram domain directory id).isSome
     else .refused .missingLibrary
 
-/-- Op 133: the canonical sample jam for a stored program. `values` are
+/-- Op 133: the canonical sample bytes for a stored program, on its evaluator. `values` are
 `(target index, slot, value)` triples; a duplicate `(index, slot)` refuses. -/
 inductive SampleVerdict where
   | missingProgram
+  /-- The program's evaluator does not resolve here (unknown, or disabled). -/
+  | unresolved (reason : Evaluator.Unresolved)
   | ambiguousValues
   | refused
   | sample (jam : List UInt8)
@@ -49,16 +54,20 @@ inductive SampleVerdict where
 def readOf (values : List (Nat × String × Int)) (i : Nat) (slot : String) : Option Int :=
   (values.find? fun v => v.1 = i ∧ v.2.1 = slot).map fun v => v.2.2
 
-def sampleFor (domain : Digest) (directory : Directory Nat CanonicalCellRegistry.registry)
+def sampleFor (disabled : List Digest) (domain : Digest)
+    (directory : Directory Nat CanonicalCellRegistry.registry)
     (id : Digest) (ctx : Context) (targets : List Nat) (values : List (Nat × String × Int)) :
     SampleVerdict :=
   match CanonicalCellRegistry.loadProgram domain directory id with
   | none => .missingProgram
   | some program =>
-    if (values.map fun v => (v.1, v.2.1)).Nodup then
-      match sampleOf program.abi ctx targets (readOf values) with
-      | none => .refused
-      | some noun => .sample (Noun.jam noun)
-    else .ambiguousValues
+    match Evaluator.resolve disabled program.evaluator with
+    | .error reason => .unresolved reason
+    | .ok E =>
+      if (values.map fun v => (v.1, v.2.1)).Nodup then
+        match E.sampleOf program.abi ctx targets (readOf values) with
+        | none => .refused
+        | some input => .sample (E.encodeInput input)
+      else .ambiguousValues
 
 end Minidregg.Kernel.NockProgramCell

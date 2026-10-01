@@ -25,7 +25,12 @@ def noPole : Evaluator where
   oracle_crash := Evaluator.nock.oracle_crash
   oracle_exhausted := Evaluator.nock.oracle_exhausted
   oracle_is_export := Evaluator.nock.oracle_is_export
+  decodeParams_encode := Evaluator.nock.decodeParams_encode
+  decodeParams_canonical := Evaluator.nock.decodeParams_canonical
+  encodeSample_injective := Evaluator.nock.encodeSample_injective
   sampleOf_overMax := Evaluator.nock.sampleOf_overMax
   overMax_congr := Evaluator.nock.overMax_congr
-  sampleOf_pinned_of_fields := Evaluator.nock.sampleOf_pinned_of_fields
   staleField_names := Evaluator.nock.staleField_names
+  door_decode_encode := Evaluator.nock.door_decode_encode
+  door_eventOf := Evaluator.nock.door_eventOf
+  door_pokeInput_injective := Evaluator.nock.door_pokeInput_injective

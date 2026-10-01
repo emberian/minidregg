@@ -33,14 +33,19 @@ core IS the core NockApp holds in memory after the poke.
 key of an ABI output slot; anything else (`%exit`, I/O) refuses
 `effectNotWrite`.
 
+**Generic since E4.** The referee is `Kernel.Door.checkPoke` on `Machine.nock` with N11's
+pieces as Nock's `EvalDoor` (`Compiler.Evaluator.nockDoor`, built from `Kernel.NockEntry`);
+the poke arm is the record's params (`Kernel.NockEntry.Params.arm`, E3), no longer an ABI
+field. This file keeps N11's names: `checkPoke`, `peek`, `stateNow`, `dryPoke`, and the seven
+theorems, each the generic one at Nock.
+
 The claim is K-RAN's `RunClaim` unchanged: `sampleJam` = jam of
 `[ustate job]` (`ustate` = `0` unloaded, `[0 state]` loaded); `outputJam` = jam
 of `[effects state']`; `steps` = the oracle's count of the whole run, boot
 included. A claim over another state or event number refuses `sampleStale`:
 concurrent pokes serialise.
 -/
-import Kernel.Run
-import Kernel.DeclaredResourceProjection
+import Kernel.Door
 
 namespace Minidregg.Kernel.NockDoor
 open Minidregg.Theory
@@ -49,240 +54,40 @@ open Minidregg.Compiler.NockProgramCodec
 open Minidregg.Kernel.NockProgramCell
 open Minidregg.Kernel.Run
 open Minidregg.Kernel.NockEntry
+open Minidregg.Kernel.Door (View loadedState)
 open Minidregg.Theory.Eval
 set_option autoImplicit false
 
-/-! ## The state as an atom -/
-
 -- `natBytes`, `jamAtom`, `ofJamAtom` (+ `ofJamAtom_sound`, `ofJamAtom_jamAtom`) live in
--- `Kernel.NockProgramCell`: the `noun` slot type (K-RUN-PIN) shares this encoding.
-
-/-! ## What the kernel reads off the instance -/
-
-/-- Target 0's stored state (a jam atom), when loaded, and its event number. -/
-structure View where
-  state : Option Nat
-  event : Nat
-  deriving DecidableEq, Repr
-
-def readField (read : Nat → String → Option Int) (field : Nat) : Except Run.Refusal (Option Nat) :=
-  match read 0 (DeclaredResourceProjection.fieldName field "before") with
-  | none => .ok none
-  | some (.ofNat n) => .ok (some n)
-  | some (.negSucc _) => .error .stateMalformed
-
-/-- The instance's view: both fields absent (never poked), or both present. -/
-def viewOf (door : Door) (read : Nat → String → Option Int) : Except Run.Refusal View :=
-  match readField read door.state, readField read door.event with
-  | .ok none, .ok none => .ok ⟨none, 0⟩
-  | .ok (some s), .ok (some e) => .ok ⟨some s, e⟩
-  | .error e, _ => .error e
-  | _, .error e => .error e
-  | _, _ => .error .stateMalformed
-
-/-- `0` for an unloaded instance (it runs on its boot state), `[0 state]` once loaded. -/
-def ustateOf (view : View) : Except Run.Refusal Noun :=
-  match view.state with
-  | none => .ok (.atom 0)
-  | some a =>
-    match ofJamAtom a with
-    | some n => .ok (.cell (.atom 0) n)
-    | none => .error .stateMalformed
-
-/-! ## Subject, job, formulas -/
-
-/-- `[9 2 0 1]`: NockApp's boot of the kernel trap (`form.rs:2040`). -/
-def bootFormula : Noun := Nock.op 9 (.cell (.atom 2) (Nock.op 0 (.atom 1)))
-
-/-- Over `[[trap ustate] x]`: the door — the booted trap, its axis 6 replaced
-by the stored state when the instance is loaded. -/
-def doorFormula : Noun :=
-  let boot := Nock.op 7 (.cell (Nock.op 0 (.atom 4)) bootFormula)
-  Nock.op 6 (.cell (Nock.op 3 (Nock.op 0 (.atom 5)))
-    (.cell (Nock.op 10 (.cell (.cell (.atom 6) (Nock.op 0 (.atom 11))) boot)) boot))
-
-/-- Over `[[trap ustate] job]`: `[door *[[door job] slam(poke)]]`. -/
-def pokeFormula (poke : Nat) : Noun :=
-  Nock.op 8 (.cell doorFormula (.cell (Nock.op 0 (.atom 2))
-    (Nock.op 7 (.cell (.cell (Nock.op 0 (.atom 2)) (Nock.op 0 (.atom 7))) (Nock.slam poke)))))
-
-/-- Over `[[trap ustate] path]`: `*[[door path] slam(peek)]`. -/
-def peekFormula (peek : Nat) : Noun :=
-  Nock.op 7 (.cell (.cell doorFormula (Nock.op 0 (.atom 3))) (Nock.slam peek))
-
-/-- Over `[[trap ustate] x]`: the door's state, axis 6. -/
-def stateFormula : Noun := Nock.op 7 (.cell doorFormula (Nock.op 0 (.atom 6)))
-
-def subjectOf (trap ustate x : Noun) : Noun := .cell (.cell trap ustate) x
-
-/-- `%poke`. -/
-def pokeTag : Nat := 1701539696
+-- `Kernel.NockProgramCell`; the formulas, the job, `pokeProduct` and the effects in
+-- `Kernel.NockEntry`; the view and the referee in `Kernel.Door`.
 
 theorem pokeTag_cord : pokeTag = cordValue "poke".toUTF8.toList := by decide +kernel
 
-/-- NockApp's poke job `[event_num [%poke wire] eny our now cause]`
-(`form.rs:2473-2493`), with `eny = our = now = 0`. -/
-def job (event : Nat) (wire cause : Noun) : Noun :=
-  .cell (.atom event) (.cell (.cell (.atom pokeTag) wire)
-    (.cell (.atom 0) (.cell (.atom 0) (.cell (.atom 0) cause))))
+/-- `0` for an unloaded instance (it runs on its boot state), `[0 state]` once loaded. -/
+def ustateOf (view : View) : Except Run.Refusal Noun :=
+  (loadedState nockDoor view).map ustateNoun
 
-/-- The claimed sample's event: its wire and cause. -/
-def eventOf : Noun → Option (Noun × Noun)
-  | .cell _ (.cell _ (.cell (.cell _ wire) (.cell _ (.cell _ (.cell _ cause))))) => some (wire, cause)
-  | _ => none
-
-@[simp] theorem eventOf_job (u : Noun) (event : Nat) (wire cause : Noun) :
-    eventOf (.cell u (job event wire cause)) = some (wire, cause) := rfl
-
-/-- `[door [effects core']]` with `core' = #[6 state' door]`: the door, its
-effects, and its next state. -/
-def pokeProduct : Noun → Option (Noun × Noun × Noun)
-  | .cell door (.cell effects core) =>
-    match Noun.axis 6 core with
-    | some state => if Noun.edit 6 state door = some core then some (door, effects, state) else none
-    | none => none
-  | _ => none
-
-theorem pokeProduct_sound {product door effects state : Noun}
-    (h : pokeProduct product = some (door, effects, state)) :
-    ∃ core, product = .cell door (.cell effects core) ∧ Noun.axis 6 core = some state ∧
-      Noun.edit 6 state door = some core := by
-  unfold pokeProduct at h
-  split at h
-  · rename_i door' effects' core
-    split at h
-    · rename_i state' hax
-      split at h
-      · rename_i hedit
-        cases h
-        exact ⟨core, rfl, hax, hedit⟩
-      · cases h
-    · cases h
-  · cases h
-
-/-! ## Effects -/
-
-/-- A Nock list. -/
-def itemsOf : Noun → Option (List Noun)
-  | .atom 0 => some []
-  | .cell e rest => (itemsOf rest).map (e :: ·)
-  | _ => none
-
-/-- An effect that is a write: `[key value]` with an ABI output key. -/
-def effectWrite (outputs : List OutputSlot) : Noun → Option FieldWrite
-  | .cell (.atom k) v => decodeEntry outputs (k, v)
-  | _ => none
-
-/-- Every effect a write, in order; the first that is not refuses. -/
-def effectWrites (outputs : List OutputSlot) : List Noun → Except Run.Refusal (List FieldWrite)
-  | [] => .ok []
-  | e :: rest =>
-    match effectWrite outputs e with
-    | none => .error .effectNotWrite
-    | some w => (effectWrites outputs rest).map (w :: ·)
-
-def decodeEffects (abi : Abi) (effects : Noun) : Except Run.Refusal (List FieldWrite) :=
-  match itemsOf effects with
-  | none => .error .outputMalformed
-  | some items => effectWrites abi.outputs items
-
-theorem effectWrites_sound {outputs : List OutputSlot} :
-    ∀ {xs : List Noun} {ys : List FieldWrite}, effectWrites outputs xs = .ok ys →
-      ∀ x ∈ xs, ∃ y ∈ ys, effectWrite outputs x = some y
-  | [], _, _, x, hx => by cases hx
-  | a :: rest, ys, h, x, hx => by
-    unfold effectWrites at h
-    cases ha : effectWrite outputs a with
-    | none => rw [ha] at h; cases h
-    | some b =>
-      rw [ha] at h
-      cases hr : effectWrites outputs rest with
-      | error e => rw [hr] at h; cases h
-      | ok bs =>
-        rw [hr] at h
-        simp only [Except.map, Except.ok.injEq] at h
-        subst h
-        rcases List.mem_cons.1 hx with rfl | hx
-        · exact ⟨b, List.mem_cons_self .., ha⟩
-        · obtain ⟨y, hy, hg⟩ := effectWrites_sound hr x hx
-          exact ⟨y, List.mem_cons_of_mem _ hy, hg⟩
-
-theorem effectWrites_refused {outputs : List OutputSlot} {xs : List Noun} {x : Noun}
-    (hx : x ∈ xs) (hg : effectWrite outputs x = none) (ys : List FieldWrite) :
-    effectWrites outputs xs ≠ .ok ys := by
-  intro h
-  obtain ⟨y, -, hy⟩ := effectWrites_sound h x hx
-  rw [hg] at hy; cases hy
-
-/-! ## The decision -/
-
-/-- The two writes every accepted poke makes on target 0: the new state's jam
-atom and the next event number. -/
+/-- The two writes every accepted poke makes on target 0: the new state's jam atom and the
+next event number. -/
 def stateWrites (door : Door) (view : View) (state : Noun) : List FieldWrite :=
-  [⟨0, door.state, jamAtom state⟩, ⟨0, door.event, view.event + 1⟩]
+  Kernel.Door.stateWrites door view (jamAtom state)
 
-/-- **`checkPoke`**: re-execute the door's poke on the instance's own state and
-event number and decide `claim` against the command's `writes`. -/
+/-! ## The decision and the reads: the generic referee on Nock -/
+
+/-- **`checkPoke`** (N11): `Kernel.Door.checkPoke` on Nock's machine and door. -/
 def checkPoke (program : Program) (door : Door) (view : View) (claim : RunClaim)
     (writes : List FieldWrite) : Except Run.Refusal (Verdict Noun) :=
-  match Noun.cue program.jam with
-  | none => .error .programMalformed
-  | some trap =>
-  match ustateOf view with
-  | .error e => .error e
-  | .ok ustate =>
-  match Noun.cue claim.sampleJam with
-  | none => .error .eventMalformed
-  | some claimed =>
-  match eventOf claimed with
-  | none => .error .eventMalformed
-  | some (wire, cause) =>
-  if claim.sampleJam ≠ Noun.jam (.cell ustate (job (view.event + 1) wire cause)) then
-    .error (.sampleStale none)
-  else if program.abi.fuel < claim.steps then .error .fuelExceeded
-  else
-  match oracle claim.steps (subjectOf trap ustate (job (view.event + 1) wire cause))
-      (pokeFormula program.abi.arm) with
-  | .crash k => .error (.crash k)
-  | .exhausted k => .error (.exhausted k)
-  | .ok product k =>
-  if k ≠ claim.steps then .error (.stepsMismatch k)
-  else
-  match pokeProduct product with
-  | none => .error .doorShape
-  | some (_, effects, state) =>
-  if Noun.jam (.cell effects state) ≠ claim.outputJam then .error .outputMismatch
-  else
-  match decodeEffects program.abi effects with
-  | .error e => .error e
-  | .ok decoded =>
-  if ¬ ((stateWrites door view state ++ decoded).map fun w => (w.target, w.field)).Nodup then
-    .error .outputMalformed
-  else if !writes.all (· ∈ stateWrites door view state ++ decoded) then .error .writeNotInOutput
-  else if !(stateWrites door view state ++ decoded).all (· ∈ writes) then .error .outputNotWritten
-  else .ok ⟨.cell effects state, k, stateWrites door view state ++ decoded⟩
+  Kernel.Door.checkPoke Machine.nock nockDoor program door view claim writes
 
-/-! ## Reads: peek, and the state now -/
+/-- **Peek** (N11): the peek arm slammed on `path` over the stored state, at the ABI fuel. -/
+def peek (program : Program) (door : Door) (view : View) (path : Noun) :
+    Except Run.Refusal (Ran Noun) :=
+  Kernel.Door.peek Machine.nock nockDoor program door view path
 
-/-- **Peek**: the peek arm slammed on `path` over the instance's stored state,
-at the ABI fuel. Takes no Store, returns no writes. -/
-def peek (program : Program) (door : Door) (view : View) (path : Noun) : Except Run.Refusal (Ran Noun) :=
-  match Noun.cue program.jam with
-  | none => .error .programMalformed
-  | some trap =>
-    match ustateOf view with
-    | .error e => .error e
-    | .ok ustate => .ok (oracle program.abi.fuel (subjectOf trap ustate path) (peekFormula door.peek))
-
-/-- **Load**: the instance's state — the stored one, or the booted trap's own
-axis 6 for an instance never poked. -/
+/-- **Load** (N11): the stored state, or the booted trap's own axis 6. -/
 def stateNow (program : Program) (view : View) : Except Run.Refusal (Ran Noun) :=
-  match Noun.cue program.jam with
-  | none => .error .programMalformed
-  | some trap =>
-    match ustateOf view with
-    | .error e => .error e
-    | .ok ustate => .ok (oracle program.abi.fuel (subjectOf trap ustate (.atom 0)) stateFormula)
+  Kernel.Door.stateNow Machine.nock nockDoor program view
 
 /-- Op 135, the runner's dry run of a poke: the sample to claim, the oracle at
 the ABI fuel, and (when it ran) the product's decomposition and the writes it
@@ -293,142 +98,103 @@ inductive DryPoke where
       (decoded : Option (Noun × Noun × Except Run.Refusal (List FieldWrite)))
 
 def dryPoke (program : Program) (door : Door) (view : View) (wire cause : Noun) : DryPoke :=
-  match Noun.cue program.jam, ustateOf view with
-  | none, _ => .refused .programMalformed
-  | _, .error e => .refused e
-  | some trap, .ok ustate =>
+  match Noun.cue program.jam, ustateOf view, decodeParams program.params with
+  | none, _, _ => .refused .programMalformed
+  | _, .error e, _ => .refused e
+  | _, _, none => .refused .paramsMalformed
+  | some trap, .ok ustate, some params =>
     let input := job (view.event + 1) wire cause
     let s := subjectOf trap ustate input
-    let f := pokeFormula program.abi.arm
+    let f := pokeFormula params.arm
     let result := oracle program.abi.fuel s f
     .ran (.cell ustate input) s f result
       (match result with
        | .ok product _ =>
          (pokeProduct product).map fun (_, effects, state) =>
-           (effects, state, (decodeEffects program.abi effects).map (stateWrites door view state ++ ·))
+           (effects, state, ((decodeEffects program.abi.outputs effects).mapError
+             Kernel.Door.effectRefusal).map (stateWrites door view state ++ ·))
        | _ => none)
 
-/-! ## Theorems -/
+/-! ## N11's theorems, at Nock -/
 
-theorem keys_unique {door : Door} {view : View} {state : Noun} {decoded : List FieldWrite}
-    (nodup : ((stateWrites door view state ++ decoded).map fun w => (w.target, w.field)).Nodup)
-    {w : FieldWrite} (mem : w ∈ stateWrites door view state ++ decoded)
-    (key : w.target = 0 ∧ w.field = door.state) : w.value = jamAtom state := by
-  simp only [stateWrites, List.cons_append, List.map_cons, List.nodup_cons] at nodup mem
-  obtain ⟨fresh, -⟩ := nodup
-  rcases List.mem_cons.1 mem with rfl | rest
-  · rfl
-  · exfalso
-    have hk : (w.target, w.field) = (0, door.state) := by rw [key.1, key.2]
-    exact fresh (hk ▸ List.mem_map_of_mem (f := fun w : FieldWrite => (w.target, w.field)) rest)
+theorem ustateOf_loaded {view : View} {ustate : Noun} (h : ustateOf view = .ok ustate) :
+    ∃ stored, loadedState nockDoor view = .ok stored ∧ ustate = ustateNoun stored := by
+  unfold ustateOf at h
+  cases hl : loadedState nockDoor view with
+  | error e => rw [hl] at h; cases h
+  | ok stored =>
+    rw [hl] at h
+    simp only [Except.map, Except.ok.injEq] at h
+    exact ⟨stored, rfl, h.symm⟩
 
-/-- **`door_poke_sound`**: an accepted poke ran the door's poke arm on the
-instance's OWN state and event number (`ustateOf view`, `view.event + 1`); the
-product is `[door [effects core']]` with `core' = #[6 state' door]`; the claim
-names exactly `[effects state']`; and the command writes exactly the jam atom
-of `state'` to the state field — no other state value — plus the next event
-number and the effects' writes. -/
+theorem ustateOf_of_loaded {view : View} {stored : Option Noun}
+    (h : loadedState nockDoor view = .ok stored) : ustateOf view = .ok (ustateNoun stored) := by
+  unfold ustateOf; rw [h]; rfl
+
+/-- **`door_poke_sound`** (N11; `Kernel.Door.door_poke_sound` at Nock): an accepted poke ran
+the door's poke arm — the record's params' arm — on the instance's OWN state and event
+number (`ustateOf view`, `view.event + 1`); the product is `[door [effects core']]` with
+`core' = #[6 state' door]`; the claim names exactly `[effects state']`; and the command
+writes exactly the jam atom of `state'` to the state field — no other state value — plus
+the next event number and the effects' writes. -/
 theorem door_poke_sound {program : Program} {door : Door} {view : View} {claim : RunClaim}
     {writes : List FieldWrite} {verdict : Verdict Noun}
     (accepted : checkPoke program door view claim writes = .ok verdict) :
-    ∃ trap ustate wire cause doorCore effects core state,
-      Noun.cue program.jam = some trap ∧ ustateOf view = .ok ustate ∧
+    ∃ trap params ustate wire cause doorCore effects core state,
+      Noun.cue program.jam = some trap ∧ decodeParams program.params = some params ∧
+      ustateOf view = .ok ustate ∧
       claim.sampleJam = Noun.jam (.cell ustate (job (view.event + 1) wire cause)) ∧
       Nock.Step (subjectOf trap ustate (job (view.event + 1) wire cause))
-        (pokeFormula program.abi.arm) (.cell doorCore (.cell effects core)) ∧
+        (pokeFormula params.arm) (.cell doorCore (.cell effects core)) ∧
       Noun.axis 6 core = some state ∧ Noun.edit 6 state doorCore = some core ∧
       verdict.output = .cell effects state ∧ claim.outputJam = Noun.jam verdict.output ∧
       (⟨0, door.state, jamAtom state⟩ : FieldWrite) ∈ writes ∧
       (⟨0, door.event, view.event + 1⟩ : FieldWrite) ∈ writes ∧
       (∀ w ∈ writes, w.target = 0 → w.field = door.state → w.value = jamAtom state) ∧
       (∀ w, w ∈ writes ↔ w ∈ verdict.writes) ∧
-      (∃ decoded, decodeEffects program.abi effects = .ok decoded ∧
+      (∃ decoded, decodeEffects program.abi.outputs effects = .ok decoded ∧
         verdict.writes = stateWrites door view state ++ decoded) ∧
       verdict.steps = claim.steps ∧ claim.steps ≤ program.abi.fuel := by
-  unfold checkPoke at accepted
-  split at accepted
-  · cases accepted
-  rename_i trap htrap
-  split at accepted
-  · cases accepted
-  rename_i ustate hu
-  split at accepted
-  · cases accepted
-  rename_i claimed hclaimed
-  split at accepted
-  · cases accepted
-  rename_i wire cause hev
-  split at accepted
-  · cases accepted
-  rename_i hsample
-  split at accepted
-  · cases accepted
-  rename_i hfuel
-  split at accepted
-  · cases accepted
-  · cases accepted
-  rename_i product k horacle
-  split at accepted
-  · cases accepted
-  rename_i hk
-  split at accepted
-  · cases accepted
-  rename_i doorCore effects state hprod
-  split at accepted
-  · cases accepted
-  rename_i hout
-  split at accepted
-  · cases accepted
-  rename_i decoded hdec
-  split at accepted
-  · cases accepted
-  rename_i hnodup
-  split at accepted
-  · cases accepted
-  rename_i hwr
-  split at accepted
-  · cases accepted
-  rename_i hdw
-  cases accepted
-  obtain ⟨hstep, -, -⟩ := oracle_ok_step horacle
-  obtain ⟨core, rfl, hax, hedit⟩ := pokeProduct_sound hprod
-  have hnodup' := Classical.not_not.1 hnodup
-  simp only [Bool.not_eq_true', Bool.not_eq_false, List.all_eq_true] at hwr hdw
-  have hk' : k = claim.steps := Classical.byContradiction hk
-  refine ⟨trap, ustate, wire, cause, doorCore, effects, core, state, htrap, hu,
-    Classical.byContradiction hsample, hstep, hax, hedit, rfl,
-    (Classical.byContradiction hout).symm, ?_, ?_, ?_, ?_, ?_, hk', by omega⟩
-  · exact by simpa using hdw ⟨0, door.state, jamAtom state⟩ (by simp [stateWrites])
-  · exact by simpa using hdw ⟨0, door.event, view.event + 1⟩ (by simp [stateWrites])
-  · intro w hw ht hf
-    exact keys_unique hnodup' (by simpa using hwr w hw) ⟨ht, hf⟩
-  · intro w
-    exact ⟨fun m => by simpa using hwr w m, fun m => by simpa using hdw w m⟩
-  · exact ⟨decoded, hdec, rfl⟩
+  obtain ⟨trap, stored, ev, params, product, effects, state, decoded, hc, hl, -, hs, hp, -,
+    hspec, hprod, hout, hjam, hdec, hw, hnodup, hiff, hsteps, hfuel⟩ :=
+    Kernel.Door.door_poke_sound (E := Evaluator.nock) (d := nockDoor) accepted
+  obtain ⟨⟨doorCore, effects', state'⟩, hpp, heq⟩ := Option.map_eq_some_iff.mp hprod
+  have h1 : effects' = effects := congrArg Prod.fst heq
+  have h2 : state' = state := congrArg Prod.snd heq
+  rw [h1, h2] at hpp
+  obtain ⟨core, rfl, hax, hedit⟩ := pokeProduct_sound hpp
+  have hu : ustateOf view = .ok (ustateNoun stored) := ustateOf_of_loaded hl
+  have mem : ∀ w, w ∈ stateWrites door view state ++ decoded → w ∈ writes := fun w m =>
+    (hiff w).2 (hw ▸ m)
+  refine ⟨trap, params, ustateNoun stored, ev.1, ev.2, doorCore, effects, core, state, hc, hp, hu,
+    hs, hspec, hax, hedit, hout, hjam, mem _ (by simp [stateWrites, Kernel.Door.stateWrites]),
+    mem _ (by simp [stateWrites, Kernel.Door.stateWrites]), ?_, hiff, ⟨decoded, hdec, hw⟩, hsteps,
+    hfuel⟩
+  intro w hw' ht hf
+  exact Kernel.Door.keys_unique hnodup (hw ▸ (hiff w).1 hw') ⟨ht, hf⟩
 
-/-- **`door_state_stale_refused`**: a claim computed over any other state or
-event number than the instance's own refuses `sampleStale` — whatever it
-claims as output, steps or writes. Two concurrent pokes of one instance
-therefore serialise: once one lands, the other's sample is stale. -/
+/-- **`door_state_stale_refused`** (N11; `Kernel.Door.door_state_stale_refused` at Nock): a
+claim computed over any other state or event number than the instance's own refuses
+`sampleStale` — whatever it claims as output, steps or writes. Two concurrent pokes of one
+instance therefore serialise: once one lands, the other's sample is stale. -/
 theorem door_state_stale_refused {program : Program} {door : Door} {view : View}
     {claim : RunClaim} {writes : List FieldWrite} {trap ustate ustate' wire cause : Noun}
     {event : Nat} (cued : Noun.cue program.jam = some trap) (loaded : ustateOf view = .ok ustate)
     (claimed : claim.sampleJam = Noun.jam (.cell ustate' (job event wire cause)))
     (stale : ustate' ≠ ustate ∨ event ≠ view.event + 1) :
     checkPoke program door view claim writes = .error (.sampleStale none) := by
-  have hc : Noun.cue claim.sampleJam = some (.cell ustate' (job event wire cause)) := by
-    rw [claimed, Noun.cue_jam]
-  have hne : claim.sampleJam ≠ Noun.jam (.cell ustate (job (view.event + 1) wire cause)) := by
-    rw [claimed]
+  obtain ⟨stored, hl, rfl⟩ := ustateOf_loaded loaded
+  apply Kernel.Door.door_state_stale_refused (M := Machine.nock) (d := nockDoor) (ev := (wire, cause))
+    cued hl
+  · show (Noun.cue claim.sampleJam).bind eventOf = some (wire, cause)
+    rw [claimed, Noun.cue_jam]; rfl
+  · rw [claimed]
     intro h
     have h' := Noun.jam_injective h
-    simp only [job, Noun.cell.injEq, Noun.atom.injEq] at h'
+    simp only [nockDoor, job, Noun.cell.injEq, Noun.atom.injEq] at h'
     rcases stale with s | s
     · exact s h'.1
     · exact s h'.2.1
-  unfold checkPoke
-  simp only [cued, loaded, hc, eventOf_job]
-  exact if_pos hne
 
 /-- **`door_effects_are_writes`**: in an accepted poke, the effects are a Nock
 list and EVERY effect is a write the command makes. -/
@@ -437,7 +203,7 @@ theorem door_effects_are_writes {program : Program} {door : Door} {view : View}
     (accepted : checkPoke program door view claim writes = .ok verdict) :
     ∃ effects state items, verdict.output = .cell effects state ∧ itemsOf effects = some items ∧
       ∀ e ∈ items, ∃ w, effectWrite program.abi.outputs e = some w ∧ w ∈ writes := by
-  obtain ⟨-, -, -, -, -, effects, -, state, -, -, -, -, -, -, hout, -, -, -, -, same,
+  obtain ⟨-, -, -, -, -, -, effects, -, state, -, -, -, -, -, -, -, hout, -, -, -, -, same,
     ⟨decoded, hdec, hwrites⟩, -⟩ := door_poke_sound accepted
   unfold decodeEffects at hdec
   split at hdec
@@ -450,19 +216,22 @@ theorem door_effects_are_writes {program : Program} {door : Door} {view : View}
 /-- **`door_effect_not_write_refused`**: if the door's actual product names an
 effect that is not a write, no claim is accepted — whatever it asserts. -/
 theorem door_effect_not_write_refused {program : Program} {door : Door} {view : View}
-    {trap ustate wire cause doorCore effects core : Noun} {items : List Noun} {e : Noun}
-    (cued : Noun.cue program.jam = some trap) (loaded : ustateOf view = .ok ustate)
+    {params : Params} {trap ustate wire cause doorCore effects core : Noun} {items : List Noun}
+    {e : Noun} (cued : Noun.cue program.jam = some trap)
+    (decodedParams : decodeParams program.params = some params) (loaded : ustateOf view = .ok ustate)
     (derives : Nock.Step (subjectOf trap ustate (job (view.event + 1) wire cause))
-      (pokeFormula program.abi.arm) (.cell doorCore (.cell effects core)))
+      (pokeFormula params.arm) (.cell doorCore (.cell effects core)))
     (listed : itemsOf effects = some items) (member : e ∈ items)
     (notWrite : effectWrite program.abi.outputs e = none)
     (claim : RunClaim) (writes : List FieldWrite) (verdict : Verdict Noun)
     (named : ∃ u event, claim.sampleJam = Noun.jam (.cell u (job event wire cause))) :
     checkPoke program door view claim writes ≠ .ok verdict := by
   intro accepted
-  obtain ⟨trap', ustate', wire', cause', doorCore', effects', core', state', cued', loaded',
-    sample', step', -, -, -, -, -, -, -, -, ⟨decoded, hdec, -⟩, -⟩ := door_poke_sound accepted
+  obtain ⟨trap', params', ustate', wire', cause', doorCore', effects', core', state', cued',
+    params'', loaded', sample', step', -, -, -, -, -, -, -, -, ⟨decoded, hdec, -⟩, -⟩ :=
+    door_poke_sound accepted
   rw [cued] at cued'; cases cued'
+  rw [decodedParams] at params''; cases params''
   rw [loaded] at loaded'; cases loaded'
   obtain ⟨u, event, hnamed⟩ := named
   rw [sample'] at hnamed
@@ -476,66 +245,42 @@ theorem door_effect_not_write_refused {program : Program} {door : Door} {view : 
   rw [listed] at hdec
   exact effectWrites_refused member notWrite _ hdec
 
-/-- **`door_poke_deterministic`**: two accepted pokes of one instance with one
-event agree on the product, the written state, the writes and the steps —
-whatever fuel each runner brought. `audit` replays pokes in order and gets the
-same states (with `door_poke_sound`). -/
+/-- **`door_poke_deterministic`** (N11; `Kernel.Door.door_poke_deterministic` at Nock): two
+accepted pokes of one instance with one event agree on the product and the writes —
+whatever fuel each runner brought. `audit` replays pokes in order and gets the same states. -/
 theorem door_poke_deterministic {program : Program} {door : Door} {view : View}
     {claim claim' : RunClaim} {writes writes' : List FieldWrite} {verdict verdict' : Verdict Noun}
     (accepted : checkPoke program door view claim writes = .ok verdict)
     (accepted' : checkPoke program door view claim' writes' = .ok verdict')
     (sameEvent : claim.sampleJam = claim'.sampleJam) :
-    verdict.output = verdict'.output ∧ verdict.writes = verdict'.writes := by
-  obtain ⟨trap, ustate, wire, cause, d, effects, core, state, cued, loaded, sample, step, hax,
-    -, hout, -, -, -, -, -, ⟨decoded, hdec, hw⟩, -⟩ := door_poke_sound accepted
-  obtain ⟨trap', ustate', wire', cause', d', effects', core', state', cued', loaded', sample',
-    step', hax', -, hout', -, -, -, -, -, ⟨decoded', hdec', hw'⟩, -⟩ := door_poke_sound accepted'
-  rw [cued] at cued'; cases cued'
-  rw [loaded] at loaded'; cases loaded'
-  rw [sameEvent, sample'] at sample
-  have hs := Noun.jam_injective sample
-  simp only [job, Noun.cell.injEq, true_and] at hs
-  obtain ⟨rfl, rfl⟩ := hs
-  have same := Nock.step_deterministic step step'
-  simp only [Noun.cell.injEq] at same
-  obtain ⟨rfl, rfl, rfl⟩ := same
-  rw [hax] at hax'; cases hax'
-  rw [hdec] at hdec'; cases hdec'
-  exact ⟨by rw [hout, hout'], by rw [hw, hw']⟩
+    verdict.output = verdict'.output ∧ verdict.writes = verdict'.writes :=
+  Kernel.Door.door_poke_deterministic (E := Evaluator.nock) (d := nockDoor) accepted accepted'
+    sameEvent
 
-/-- **`door_peek_pure`**: a peek is the peek arm slammed on the path over the
-instance's stored state — the core a poke would run on — at the ABI fuel. It is
-a function of the program, the stored view and the path: it takes no Store and
-names no write. -/
+/-- **`door_peek_pure`** (N11; `Kernel.Door.door_peek_pure` at Nock): a peek is the peek arm
+slammed on the path over the instance's stored state — the core a poke would run on — at
+the ABI fuel. It takes no Store and names no write. -/
 theorem door_peek_pure {program : Program} {door : Door} {view : View} {path out : Noun}
     {k : Nat} (answered : peek program door view path = .ok (.ok out k)) :
     ∃ trap ustate, Noun.cue program.jam = some trap ∧ ustateOf view = .ok ustate ∧
       Nock.Step (subjectOf trap ustate path) (peekFormula door.peek) out ∧
       Nock.steps program.abi.fuel (subjectOf trap ustate path) (peekFormula door.peek) = k := by
-  unfold peek at answered
-  cases hcue : Noun.cue program.jam with
-  | none => simp [hcue] at answered
-  | some trap =>
-    cases hu : ustateOf view with
-    | error e => simp [hcue, hu] at answered
-    | ok ustate =>
-      simp only [hcue, hu, Except.ok.injEq] at answered
-      obtain ⟨hstep, -, hsteps⟩ := oracle_ok_step answered
-      exact ⟨trap, ustate, rfl, rfl, hstep, hsteps⟩
+  obtain ⟨trap, stored, hc, hl, hspec, hsteps⟩ :=
+    Kernel.Door.door_peek_pure (E := Evaluator.nock) (d := nockDoor) answered
+  exact ⟨trap, ustateNoun stored, hc, ustateOf_of_loaded hl, hspec, hsteps⟩
 
-/-- **`door_load_deterministic`**: the state an instance holds — its stored
-state, or its booted trap's own axis 6 when never poked — is a Nock derivation
-from the program and the stored view alone, and unique. -/
+/-- **`door_load_deterministic`** (N11; `Kernel.Door.door_load_deterministic` at Nock): the
+state an instance holds — its stored state, or its booted trap's own axis 6 when never
+poked — is a Nock derivation from the program and the stored view alone, and unique. -/
 theorem door_load_deterministic {program : Program} {view : View} {state state' : Noun}
     {k : Nat} (loaded : stateNow program view = .ok (.ok state k))
     (other : ∃ trap ustate, Noun.cue program.jam = some trap ∧ ustateOf view = .ok ustate ∧
       Nock.Step (subjectOf trap ustate (.atom 0)) stateFormula state') :
     state' = state := by
   obtain ⟨trap, ustate, cued, u, step'⟩ := other
-  unfold stateNow at loaded
-  simp only [cued, u, Except.ok.injEq] at loaded
-  obtain ⟨step, -, -⟩ := oracle_ok_step loaded
-  exact Nock.step_deterministic step' step
+  obtain ⟨stored, hl, rfl⟩ := ustateOf_loaded u
+  exact Kernel.Door.door_load_deterministic (E := Evaluator.nock) (d := nockDoor) loaded
+    ⟨trap, stored, cued, hl, step'⟩
 
 /-! ## Poles: a counter kernel, decided by the kernel
 
@@ -588,11 +333,12 @@ def counterDoorAbi : Door := ⟨22, 2, 3⟩
 
 def counter : Program :=
   ⟨Run.fixtureEvaluator, Noun.jam counterTrap,
-    { version := abiVersion, arm := 23, sample := [], libraries := [], fuel := 10000,
+    { version := abiVersion, sample := [], libraries := [], fuel := 10000,
       outputs := [{ key := "count", target := 0, field := 4, type := .nat }],
-      door := some counterDoorAbi }⟩
+      door := some counterDoorAbi }, encodeParams ⟨23⟩⟩
 
-theorem counter_admissible : NockProgramCodec.check counter = .ok () := by decide +kernel
+/-- The counter is admitted at birth on Nock, with params arm 23 (NockApp's poke axis). -/
+theorem counter_admissible : (Machine.nock.admit counter).toOption = some ⟨23⟩ := by decide +kernel
 
 def wire0 : Noun := .atom 0
 def unloaded : View := ⟨none, 0⟩
@@ -654,12 +400,6 @@ theorem pole_door_peek :
     ranOf (peek counter counterDoorAbi (loadedAt 2 2) (.atom 0)) =
       some (.ok (.cell (.atom 0) (.cell (.atom 0) (.atom 2))) 30) := by decide +kernel
 
-/-- info: 'Minidregg.Kernel.NockDoor.pokeProduct_sound' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms pokeProduct_sound
-/-- info: 'Minidregg.Kernel.NockDoor.effectWrites_sound' depends on axioms: [propext] -/
-#guard_msgs (whitespace := lax) in #print axioms effectWrites_sound
-/-- info: 'Minidregg.Kernel.NockDoor.keys_unique' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms keys_unique
 /-- info: 'Minidregg.Kernel.NockDoor.door_poke_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms door_poke_sound
 /-- info: 'Minidregg.Kernel.NockDoor.door_state_stale_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/

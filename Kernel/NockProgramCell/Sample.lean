@@ -290,14 +290,125 @@ def contextOf : ContextMode → Context → Context
   | .live, ctx => ctx
   | .pinned, _ => ⟨0, 0, 0⟩
 
+/-! ## The sample record (evaluator-generic, EVAL §1.1) and Nock's encoding of it
+
+`Sample` is what the kernel hands ANY evaluator: the context the ABI lets the program
+see (`contextOf`: the kernel's own under `live`, `[0 0 0]` under `pinned`), the command's
+target ids, and `(key, value)` for each ABI slot in ABI order. It is built by
+`sampleRecord`, which reads the ABI and the projected slots and nothing an evaluator
+chooses. An evaluator encodes it under the ABI's layout (`encodeSample : List SampleSlot →
+Sample → Option Input`); Nock's is below. The layout fixes every name the encoding
+writes: a record whose keys are not the layout's keys does not encode, so two records
+that encode to one input under one layout are equal (`encodeSample_injective`) whatever
+their names hold — and `cord "a" = cord "a\u0000"` (E1, `pole_nul_keys_collide`) can only
+matter ACROSS layouts, which the ABI decoder closes by refusing a NUL in any name
+(`NockProgramCodec.NamesNulFree`, refusal `nulInName`; `encodeSample_keys_injective`). -/
+
+structure Sample where
+  ctx : Context
+  targets : List Nat
+  slots : List (String × Int)
+  deriving DecidableEq, Repr
+
+/-- `(key, value)` for each ABI sample slot, in ABI order; an absent slot refuses. -/
+def readSlots (read : Nat → String → Option Int) : List SampleSlot → Option (List (String × Int))
+  | [] => some []
+  | slot :: rest =>
+    match read slot.target slot.slot with
+    | none => none
+    | some value => (readSlots read rest).map ((slot.key, value) :: ·)
+
+/-- The sample record a command's run gets: refused (`none`) when an ABI slot names a
+target the command lacks, or reads an absent slot — absence is not zero. -/
+def sampleRecord (abi : Abi) (ctx : Context) (targets : List Nat)
+    (read : Nat → String → Option Int) : Option Sample :=
+  if abi.sample.all (fun slot => decide (slot.target < targets.length)) then
+    (readSlots read abi.sample).map fun slots => ⟨contextOf abi.context ctx, targets, slots⟩
+  else none
+
+/-- Nock's `[key value]` entries for a record's slots under a layout: each record key must
+be the layout slot's key (the entry is written with the LAYOUT's name), each value encodes
+under the slot's type within its declared maximum. -/
+def encodeSlots : List SampleSlot → List (String × Int) → Option (List Noun)
+  | [], [] => some []
+  | slot :: rest, (key, value) :: more =>
+    if key = slot.key then
+      match encodeValue slot.type value with
+      | none => none
+      | some noun =>
+        if withinMax slot noun then (encodeSlots rest more).map (.cell (cord slot.key) noun :: ·)
+        else none
+    else none
+  | _, _ => none
+
+/-- **Nock's `encodeSample`**: `[[height caller room] ~[['target/0' id0] … [key0 v0] …]]`. -/
+def encodeSample (layout : List SampleSlot) (sample : Sample) : Option Noun :=
+  (encodeSlots layout sample.slots).map fun slots =>
+    .cell (contextNoun sample.ctx) (nockList (targetEntries 0 sample.targets ++ slots))
+
 /-- The sample. `targets` are the command's target cell ids in command order;
-`read i slot` is the projected participant slot `slot` of target `i`. -/
+`read i slot` is the projected participant slot `slot` of target `i`. The generic record,
+encoded by Nock under the ABI's layout. -/
 def sampleOf (abi : Abi) (ctx : Context) (targets : List Nat)
     (read : Nat → String → Option Int) : Option Noun :=
-  if abi.sample.all (fun slot => decide (slot.target < targets.length)) then
-    (sampleSlots read abi.sample).map fun slots =>
-      .cell (contextNoun (contextOf abi.context ctx)) (nockList (targetEntries 0 targets ++ slots))
-  else none
+  (sampleRecord abi ctx targets read).bind (encodeSample abi.sample)
+
+theorem readSlots_congr {read read' : Nat → String → Option Int} :
+    ∀ (slots : List SampleSlot),
+      (∀ slot ∈ slots, read slot.target slot.slot = read' slot.target slot.slot) →
+        readSlots read slots = readSlots read' slots
+  | [], _ => rfl
+  | slot :: rest, same => by
+    simp only [readSlots, same slot (List.mem_cons_self ..),
+      readSlots_congr rest (fun s m => same s (List.mem_cons_of_mem _ m))]
+
+/-- **`sampleRecord_pinned_of_fields`** (K-RUN-PIN, generic): under `pinned` the record is a
+function of the named slots and the target ids — any context, any other slot. -/
+theorem sampleRecord_pinned_of_fields {abi : Abi} (pinned : abi.context = .pinned)
+    (ctx ctx' : Context) (targets : List Nat) {read read' : Nat → String → Option Int}
+    (agree : ∀ slot ∈ abi.sample, read slot.target slot.slot = read' slot.target slot.slot) :
+    sampleRecord abi ctx targets read = sampleRecord abi ctx' targets read' := by
+  unfold sampleRecord
+  rw [readSlots_congr abi.sample agree, pinned]
+  rfl
+
+theorem encodeSlots_readSlots (read : Nat → String → Option Int) :
+    ∀ (layout : List SampleSlot),
+      (readSlots read layout).bind (encodeSlots layout) = sampleSlots read layout
+  | [] => rfl
+  | slot :: rest => by
+    have ih := encodeSlots_readSlots read rest
+    simp only [readSlots, sampleSlots]
+    cases hr : read slot.target slot.slot with
+    | none => rfl
+    | some v =>
+      simp only
+      cases hrest : readSlots read rest with
+      | none =>
+        rw [hrest, Option.bind_none] at ih
+        cases he : encodeValue slot.type v with
+        | none => rfl
+        | some n => by_cases hw : withinMax slot n = true <;> simp [hw, ← ih]
+      | some tail =>
+        rw [hrest, Option.bind_some] at ih
+        cases he : encodeValue slot.type v with
+        | none => simp [encodeSlots, he]
+        | some n => by_cases hw : withinMax slot n = true <;> simp [encodeSlots, he, hw, ih]
+
+/-- The sample, unfolded: K-RAN's / K-RUN-PIN's noun, byte for byte, built from the ABI's
+slots in order. Every earlier proof about the sample reads it through this equation. -/
+theorem sampleOf_eq_slots (abi : Abi) (ctx : Context) (targets : List Nat)
+    (read : Nat → String → Option Int) :
+    sampleOf abi ctx targets read =
+      if abi.sample.all (fun slot => decide (slot.target < targets.length)) then
+        (sampleSlots read abi.sample).map fun slots =>
+          .cell (contextNoun (contextOf abi.context ctx)) (nockList (targetEntries 0 targets ++ slots))
+      else none := by
+  unfold sampleOf sampleRecord
+  split
+  · rw [← encodeSlots_readSlots]
+    cases readSlots read abi.sample <;> rfl
+  · rfl
 
 theorem encodeValue_injective {type : SlotType} {a b : Int} {n : Noun}
     (ha : encodeValue type a = some n) (hb : encodeValue type b = some n) : a = b := by
@@ -383,40 +494,273 @@ theorem targetEntries_injective : ∀ {i : Nat} {a b : List Nat},
     simp only [targetEntries, List.cons.injEq, Noun.cell.injEq, Noun.atom.injEq, true_and] at h
     rw [h.1, targetEntries_injective h.2]
 
-/-- **`sampleOf_injective`** (NOCK §3.3): one sample noun determines the
-context it carries, the target ids, and every value the ABI reads. Distinct
-targets or distinct slot values give distinct nouns. -/
+theorem readSlots_injective {read read' : Nat → String → Option Int} :
+    ∀ {slots : List SampleSlot} {xs : List (String × Int)},
+      readSlots read slots = some xs → readSlots read' slots = some xs →
+        ∀ slot ∈ slots, read slot.target slot.slot = read' slot.target slot.slot
+  | [], _, _, _ => by simp
+  | slot :: rest, xs, h, h' => by
+    simp only [readSlots] at h h'
+    cases hv : read slot.target slot.slot with
+    | none => rw [hv] at h; cases h
+    | some v =>
+      cases hv' : read' slot.target slot.slot with
+      | none => rw [hv'] at h'; cases h'
+      | some v' =>
+        rw [hv] at h; rw [hv'] at h'
+        cases hr : readSlots read rest with
+        | none => rw [hr] at h; cases h
+        | some tail =>
+          cases hr' : readSlots read' rest with
+          | none => rw [hr'] at h'; cases h'
+          | some tail' =>
+            rw [hr] at h; rw [hr'] at h'
+            simp only [Option.map_some, Option.some.injEq] at h h'
+            have same := h.trans h'.symm
+            simp only [List.cons.injEq, Prod.mk.injEq, true_and] at same
+            obtain ⟨rfl, rfl⟩ := same
+            intro s member
+            rcases List.mem_cons.mp member with head | tail
+            · subst head; rw [hv, hv']
+            · exact readSlots_injective hr hr' s tail
+
+/-- **`sampleRecord_injective`**: one sample record determines the context it carries,
+the target ids, and the value at every ABI slot. Generic: no evaluator is involved. -/
+theorem sampleRecord_injective {abi : Abi} {ctx ctx' : Context} {targets targets' : List Nat}
+    {read read' : Nat → String → Option Int} {s : Sample}
+    (h : sampleRecord abi ctx targets read = some s) (h' : sampleRecord abi ctx' targets' read' = some s) :
+    contextOf abi.context ctx = contextOf abi.context ctx' ∧ targets = targets' ∧
+      ∀ slot ∈ abi.sample, read slot.target slot.slot = read' slot.target slot.slot := by
+  unfold sampleRecord at h h'
+  split at h
+  · split at h'
+    · cases hs : readSlots read abi.sample with
+      | none => rw [hs] at h; cases h
+      | some xs =>
+        cases hs' : readSlots read' abi.sample with
+        | none => rw [hs'] at h'; cases h'
+        | some xs' =>
+          rw [hs] at h; rw [hs'] at h'
+          simp only [Option.map_some, Option.some.injEq] at h h'
+          have same := h.trans h'.symm
+          simp only [Sample.mk.injEq] at same
+          obtain ⟨hc, ht, hx⟩ := same
+          subst hx
+          exact ⟨hc, ht, readSlots_injective hs hs'⟩
+    · cases h'
+  · cases h
+
+theorem encodeSlots_nil {xs : List (String × Int)} {ns : List Noun}
+    (h : encodeSlots [] xs = some ns) : xs = [] ∧ ns = [] := by
+  cases xs with
+  | nil => simp [encodeSlots] at h; exact ⟨rfl, h⟩
+  | cons x rest => simp [encodeSlots] at h
+
+theorem encodeSlots_cons {slot : SampleSlot} {rest : List SampleSlot} {xs : List (String × Int)}
+    {ns : List Noun} (h : encodeSlots (slot :: rest) xs = some ns) :
+    ∃ v n tail ns', xs = (slot.key, v) :: tail ∧ encodeValue slot.type v = some n ∧
+      encodeSlots rest tail = some ns' ∧ ns = .cell (cord slot.key) n :: ns' := by
+  cases xs with
+  | nil => simp [encodeSlots] at h
+  | cons x tail =>
+    obtain ⟨key, v⟩ := x
+    simp only [encodeSlots] at h
+    split at h
+    · rename_i hk
+      subst hk
+      cases he : encodeValue slot.type v with
+      | none => rw [he] at h; cases h
+      | some n =>
+        rw [he] at h
+        simp only at h
+        split at h
+        · cases hr : encodeSlots rest tail with
+          | none => rw [hr] at h; cases h
+          | some ns' =>
+            rw [hr] at h
+            simp only [Option.map_some, Option.some.injEq] at h
+            exact ⟨v, n, tail, ns', rfl, he, hr, h.symm⟩
+        · cases h
+    · cases h
+
+theorem encodeSlots_length : ∀ {layout : List SampleSlot} {xs : List (String × Int)} {ns : List Noun},
+    encodeSlots layout xs = some ns → ns.length = layout.length
+  | [], _, _, h => by obtain ⟨-, rfl⟩ := encodeSlots_nil h; rfl
+  | _ :: _, _, _, h => by
+    obtain ⟨_, _, _, _, -, -, hr, rfl⟩ := encodeSlots_cons h
+    simp [encodeSlots_length hr]
+
+theorem encodeSlots_injective : ∀ {layout : List SampleSlot} {xs ys : List (String × Int)}
+    {ns : List Noun}, encodeSlots layout xs = some ns → encodeSlots layout ys = some ns → xs = ys
+  | [], xs, ys, _, h, h' => by
+    rw [(encodeSlots_nil h).1, (encodeSlots_nil h').1]
+  | _ :: _, _, _, _, h, h' => by
+    obtain ⟨v, n, tail, ns, rfl, he, hr, rfl⟩ := encodeSlots_cons h
+    obtain ⟨v', n', tail', ns', rfl, he', hr', same⟩ := encodeSlots_cons h'
+    simp only [List.cons.injEq, Noun.cell.injEq, true_and] at same
+    obtain ⟨rfl, rfl⟩ := same
+    rw [encodeValue_injective he he', encodeSlots_injective hr hr']
+
+theorem contextNoun_injective {c c' : Context} (h : contextNoun c = contextNoun c') : c = c' := by
+  cases c; cases c'
+  simp only [contextNoun, Noun.cell.injEq, Noun.atom.injEq] at h
+  obtain ⟨rfl, rfl, rfl⟩ := h
+  rfl
+
+/-- **`encodeSample_injective`** (E3, the evaluator field at Nock): under ONE layout, the
+sample noun determines the whole record — its context, its targets, and every
+`(key, value)`. No hypothesis on the names: the layout writes them (`encodeSlots` refuses
+a record key that is not the layout's), so E1's `cord "a" = cord "a\u0000"` cannot make two
+records collide here. -/
+theorem encodeSample_injective {layout : List SampleSlot} {s s' : Sample} {n : Noun}
+    (h : encodeSample layout s = some n) (h' : encodeSample layout s' = some n) : s = s' := by
+  unfold encodeSample at h h'
+  cases hs : encodeSlots layout s.slots with
+  | none => rw [hs] at h; cases h
+  | some ns =>
+    cases hs' : encodeSlots layout s'.slots with
+    | none => rw [hs'] at h'; cases h'
+    | some ns' =>
+      rw [hs] at h; rw [hs'] at h'
+      simp only [Option.map_some, Option.some.injEq] at h h'
+      have same := h.trans h'.symm
+      simp only [Noun.cell.injEq] at same
+      obtain ⟨hc, rest⟩ := same
+      have lists := nockList_injective rest
+      have lens : ns.length = ns'.length := by
+        rw [encodeSlots_length hs, encodeSlots_length hs']
+      obtain ⟨ht, hl⟩ := List.append_inj' lists lens
+      subst hl
+      cases s; cases s'
+      simp only [Sample.mk.injEq]
+      exact ⟨contextNoun_injective hc, targetEntries_injective ht, encodeSlots_injective hs hs'⟩
+
+/-! ### Names: a NUL is the only way two keys share a cord
+
+`cord` drops trailing zero bytes (`cordValue`), so `cord "a" = cord "a\u0000"`
+(`pole_nul_keys_collide`). On names with no zero byte — in UTF-8 the only zero byte is
+U+0000's — `cord` is injective (`cord_injective_of_nulFree`), so under the ABI decoder's
+rule (`NockProgramCodec.NamesNulFree`, refusal `nulInName`) the sample noun also names
+its layout's keys (`encodeSample_keys_injective`). -/
+
+theorem byteArray_toList_loop (bs : ByteArray) (i : Nat) (r : List UInt8) :
+    ByteArray.toList.loop bs i r = r.reverse ++ bs.data.toList.drop i := by
+  fun_induction ByteArray.toList.loop bs i r with
+  | case1 i r h ih =>
+    rw [ih]
+    simp only [List.reverse_cons, List.append_assoc, List.singleton_append]
+    congr 1
+    have hl : i < bs.data.toList.length := by simpa using h
+    rw [List.drop_eq_getElem_cons hl]
+    simp [ByteArray.get!, h]; rfl
+  | case2 i r h =>
+    simp [List.drop_eq_nil_of_le (by simpa using h)]
+
+theorem byteArray_toList_eq_data (bs : ByteArray) : bs.toList = bs.data.toList := by
+  simp [ByteArray.toList, byteArray_toList_loop]
+
+/-- A string is its UTF-8 bytes. -/
+theorem toUTF8_toList_injective {a b : String} (h : a.toUTF8.toList = b.toUTF8.toList) : a = b := by
+  apply String.toByteArray_inj.mp
+  apply ByteArray.ext
+  apply Array.toList_inj.mp
+  simpa [byteArray_toList_eq_data] using h
+
+theorem lastNonzero_of_nulFree {name : String} (h : NulFree name) :
+    LastNonzero name.toUTF8.toList := by
+  intro init b same zero
+  subst zero
+  exact h (same ▸ List.mem_append_right init (List.mem_singleton_self 0))
+
+/-- **`cord_injective_of_nulFree`**: two NUL-free names with one cord are one name. -/
+theorem cord_injective_of_nulFree {a b : String} (ha : NulFree a) (hb : NulFree b)
+    (h : cord a = cord b) : a = b := by
+  have hv : cordValue a.toUTF8.toList = cordValue b.toUTF8.toList := by
+    simpa [cord] using h
+  have back : ∀ {name : String}, NulFree name →
+      natBytes (cordValue name.toUTF8.toList) = name.toUTF8.toList := fun hn =>
+    natBytesAux_cordValue (lastNonzero_of_nulFree hn) _ (length_le_cordValue (lastNonzero_of_nulFree hn))
+  apply toUTF8_toList_injective
+  rw [← back ha, ← back hb, hv]
+
+/-- **The refutation pole** (E1's `cord "a" = cord "a\u0000"`, at the sample): two layouts
+whose only key differs by a trailing NUL encode two different records to ONE noun. What
+`nulInName` refuses at the ABI decoder. -/
+theorem pole_nul_keys_collide :
+    encodeSample [{ target := 0, slot := "f/2", key := "a", type := .nat }]
+        ⟨⟨0, 0, 0⟩, [11], [("a", 1)]⟩ =
+      encodeSample [{ target := 0, slot := "f/2", key := "a\u0000", type := .nat }]
+        ⟨⟨0, 0, 0⟩, [11], [("a\u0000", 1)]⟩ ∧
+    (encodeSample [{ target := 0, slot := "f/2", key := "a", type := .nat }]
+        ⟨⟨0, 0, 0⟩, [11], [("a", 1)]⟩).isSome ∧
+    ("a" : String) ≠ "a\u0000" := by decide +kernel
+
+theorem encodeSlots_keys {layout' : List SampleSlot} :
+    ∀ {layout : List SampleSlot} {xs ys : List (String × Int)} {ns : List Noun},
+      (∀ slot ∈ layout, NulFree slot.key) → (∀ slot ∈ layout', NulFree slot.key) →
+      encodeSlots layout xs = some ns → encodeSlots layout' ys = some ns →
+        layout.map SampleSlot.key = layout'.map SampleSlot.key
+  | [], _, _, _, _, _, h, h' => by
+    obtain ⟨-, rfl⟩ := encodeSlots_nil h
+    cases layout' with
+    | nil => rfl
+    | cons slot' rest' =>
+      obtain ⟨_, _, _, _, -, -, -, same⟩ := encodeSlots_cons h'
+      cases same
+  | slot :: rest, _, _, _, nf, nf', h, h' => by
+    obtain ⟨v, n, tail, ns, rfl, he, hr, rfl⟩ := encodeSlots_cons h
+    cases layout' with
+    | nil => obtain ⟨-, same⟩ := encodeSlots_nil h'; cases same
+    | cons slot' rest' =>
+      obtain ⟨v', n', tail', ns', rfl, he', hr', same⟩ := encodeSlots_cons h'
+      simp only [List.cons.injEq, Noun.cell.injEq] at same
+      obtain ⟨⟨hk, -⟩, rfl⟩ := same
+      have key := cord_injective_of_nulFree (nf slot (List.mem_cons_self ..))
+        (nf' slot' (List.mem_cons_self ..)) hk
+      simp only [List.map_cons, key, List.cons.injEq, true_and]
+      exact @encodeSlots_keys rest' rest tail tail' ns
+        (fun x m => nf x (List.mem_cons_of_mem _ m)) (fun x m => nf' x (List.mem_cons_of_mem _ m)) hr hr'
+
+/-- **`encodeSample_keys_injective`**: across two layouts whose names are NUL-free (what the
+ABI decoder admits), over the same number of targets, one sample noun names one context,
+one target list and one list of keys. Without the hypothesis it is false
+(`pole_nul_keys_collide`). -/
+theorem encodeSample_keys_injective {layout layout' : List SampleSlot} {s s' : Sample} {n : Noun}
+    (nulFree : ∀ slot ∈ layout, NulFree slot.key) (nulFree' : ∀ slot ∈ layout', NulFree slot.key)
+    (sameTargets : s.targets.length = s'.targets.length)
+    (h : encodeSample layout s = some n) (h' : encodeSample layout' s' = some n) :
+    s.ctx = s'.ctx ∧ s.targets = s'.targets ∧
+      layout.map SampleSlot.key = layout'.map SampleSlot.key := by
+  unfold encodeSample at h h'
+  cases hs : encodeSlots layout s.slots with
+  | none => rw [hs] at h; cases h
+  | some ns =>
+    cases hs' : encodeSlots layout' s'.slots with
+    | none => rw [hs'] at h'; cases h'
+    | some ns' =>
+      rw [hs] at h; rw [hs'] at h'
+      simp only [Option.map_some, Option.some.injEq] at h h'
+      have same := h.trans h'.symm
+      simp only [Noun.cell.injEq] at same
+      obtain ⟨hc, rest⟩ := same
+      have lists := nockList_injective rest
+      obtain ⟨ht, hl⟩ := List.append_inj lists (by
+        rw [targetEntries_length, targetEntries_length, sameTargets])
+      subst hl
+      exact ⟨contextNoun_injective hc, targetEntries_injective ht,
+        encodeSlots_keys nulFree nulFree' hs hs'⟩
+
+/-- **`sampleOf_injective`** (NOCK §3.3) — EVAL §1.1's corollary: the generic record is
+injective in what it reads (`sampleRecord_injective`) and Nock's encoding is injective
+under the layout (`encodeSample_injective`). -/
 theorem sampleOf_injective {abi : Abi} {ctx ctx' : Context} {targets targets' : List Nat}
     {read read' : Nat → String → Option Int} {n : Noun}
     (h : sampleOf abi ctx targets read = some n) (h' : sampleOf abi ctx' targets' read' = some n) :
     contextOf abi.context ctx = contextOf abi.context ctx' ∧ targets = targets' ∧
       ∀ slot ∈ abi.sample, read slot.target slot.slot = read' slot.target slot.slot := by
-  unfold sampleOf at h h'
-  split at h
-  · split at h'
-    · cases hs : sampleSlots read abi.sample with
-      | none => rw [hs] at h; cases h
-      | some slots =>
-        cases hs' : sampleSlots read' abi.sample with
-        | none => rw [hs'] at h'; cases h'
-        | some slots' =>
-          rw [hs] at h
-          rw [hs'] at h'
-          simp only [Option.map_some, Option.some.injEq] at h h'
-          have same := h.trans h'.symm
-          simp only [contextNoun, Noun.cell.injEq, Noun.atom.injEq] at same
-          obtain ⟨⟨hh, hc, hr⟩, rest⟩ := same
-          have lists := nockList_injective rest
-          have lens : slots.length = slots'.length := by
-            rw [sampleSlots_length hs, sampleSlots_length hs']
-          obtain ⟨ht, hl⟩ := List.append_inj' lists lens
-          subst hl
-          refine ⟨?_, targetEntries_injective ht, sampleSlots_injective hs hs'⟩
-          revert hh hc hr
-          cases contextOf abi.context ctx; cases contextOf abi.context ctx'
-          intro hh hc hr; simp_all
-    · cases h'
-  · cases h
+  obtain ⟨s, hs, he⟩ := Option.bind_eq_some_iff.mp h
+  obtain ⟨s', hs', he'⟩ := Option.bind_eq_some_iff.mp h'
+  exact sampleRecord_injective hs (encodeSample_injective he he' ▸ hs')
 
 /-- Under `live`, the sample determines the kernel's own context (height, signer,
 room): K-RAN's statement, unchanged. -/
@@ -452,8 +796,7 @@ theorem sampleOf_deterministic (abi : Abi) (ctx : Context) (targets : List Nat)
       intro same
       simp only [sampleSlots, same slot (List.mem_cons_self ..),
         ih (fun s m => same s (List.mem_cons_of_mem _ m))]
-  unfold sampleOf
-  rw [slots abi.sample agree]
+  rw [sampleOf_eq_slots, sampleOf_eq_slots, slots abi.sample agree]
 
 /-- **`sampleOf_pinned_of_fields`** (K-RUN-PIN): a pinned program's sample is
 a function of the values at the ABI's named slots (and the command's target ids):
@@ -463,9 +806,7 @@ theorem sampleOf_pinned_of_fields {abi : Abi} (pinned : abi.context = .pinned)
     (ctx ctx' : Context) (targets : List Nat) {read read' : Nat → String → Option Int}
     (agree : ∀ slot ∈ abi.sample, read slot.target slot.slot = read' slot.target slot.slot) :
     sampleOf abi ctx targets read = sampleOf abi ctx' targets read' := by
-  rw [sampleOf_deterministic abi ctx targets agree]
-  unfold sampleOf
-  rw [pinned]
+  rw [sampleOf_deterministic abi ctx targets agree, sampleOf_eq_slots, sampleOf_eq_slots, pinned]
   rfl
 
 /-- **`live_unchanged`** (K-RUN-PIN): a `live` program's sample is K-RAN's,
@@ -478,8 +819,7 @@ theorem live_unchanged {abi : Abi} (live : abi.context = .live) (ctx : Context)
           .cell (.cell (.atom ctx.height) (.cell (.atom ctx.caller) (.atom ctx.room)))
             (nockList (targetEntries 0 targets ++ slots))
       else none := by
-  unfold sampleOf
-  rw [live]
+  rw [sampleOf_eq_slots, live]
   rfl
 
 /-! ### Two states, decided
@@ -489,7 +829,7 @@ differ on field 3, which the ABI does not name; the two contexts differ in
 height and signer. Pinned: one sample. Live: two. -/
 
 def twoStateAbi (context : ContextMode) : Abi :=
-  { version := abiVersion, arm := 2, fuel := 100, libraries := [], context := context,
+  { version := abiVersion, fuel := 100, libraries := [], context := context,
     sample := [{ target := 0, slot := "f/2", key := "n", type := .nat }], outputs := [] }
 
 def stateA : Nat → String → Option Int := fun _ s => if s = "f/2" then some 41 else some 1
@@ -521,7 +861,7 @@ theorem sampleOf_absent_refused (abi : Abi) (ctx : Context) (targets : List Nat)
         · split
           · rfl
           · simp [ih later]
-  unfold sampleOf
+  rw [sampleOf_eq_slots]
   split
   · simp [none_of abi.sample named]
   · rfl
@@ -530,7 +870,7 @@ theorem sampleOf_foreign_target_refused (abi : Abi) (ctx : Context) (targets : L
     (read : Nat → String → Option Int) (slot : SampleSlot) (named : slot ∈ abi.sample)
     (beyond : targets.length ≤ slot.target) :
     sampleOf abi ctx targets read = none := by
-  unfold sampleOf
+  rw [sampleOf_eq_slots]
   have : abi.sample.all (fun slot => decide (slot.target < targets.length)) = false := by
     rw [List.all_eq_false]
     exact ⟨slot, named, by simp; omega⟩
@@ -589,7 +929,7 @@ theorem overMax_congr {read read' : Nat → String → Option Int} :
 theorem sampleOf_overMax_refused (abi : Abi) (ctx : Context) (targets : List Nat)
     (read : Nat → String → Option Int) {slot : SampleSlot}
     (above : overMax read abi.sample = some slot) : sampleOf abi ctx targets read = none := by
-  unfold sampleOf
+  rw [sampleOf_eq_slots]
   split
   · simp [sampleSlots_overMax above]
   · rfl
@@ -680,7 +1020,7 @@ theorem sampleSlots_fit {read : Nat → String → Option Int} :
 theorem declared_shape_sound {abi : Abi} {ctx : Context} {targets : List Nat}
     {read : Nat → String → Option Int} {n : Noun} (h : sampleOf abi ctx targets read = some n) :
     HasShape n (shapeOf abi targets.length) := by
-  unfold sampleOf at h
+  rw [sampleOf_eq_slots] at h
   split at h
   · cases hs : sampleSlots read abi.sample with
     | none => rw [hs] at h; cases h
@@ -696,7 +1036,7 @@ theorem declared_shape_sound {abi : Abi} {ctx : Context} {targets : List Nat}
 /-! Poles: forge's three inventory slots, declared `≤ 3`. -/
 
 def poleAbi : Abi :=
-  { version := abiVersion, arm := 2, fuel := 4096, libraries := [], outputs := [],
+  { version := abiVersion, fuel := 4096, libraries := [], outputs := [],
     sample := [{ target := 0, slot := "iron", key := "inv/iron", type := .nat, max := some 3 },
       { target := 0, slot := "wood", key := "inv/wood", type := .nat, max := some 3 },
       { target := 0, slot := "sword", key := "inv/sword", type := .nat, max := some 3 }] }
@@ -732,7 +1072,7 @@ end Minidregg.Kernel.NockProgramCell
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_injective_live
 /-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_pinned_of_fields' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_pinned_of_fields
-/-- info: 'Minidregg.Kernel.NockProgramCell.live_unchanged' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.NockProgramCell.live_unchanged' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.live_unchanged
 /-- info: 'Minidregg.Kernel.NockProgramCell.pole_pinned_two_states' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.pole_pinned_two_states
@@ -746,15 +1086,15 @@ end Minidregg.Kernel.NockProgramCell
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_targets_injective
 /-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_deterministic' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_deterministic
-/-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_absent_refused' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_absent_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_absent_refused
 /-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_foreign_target_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_foreign_target_refused
 /-- info: 'Minidregg.Kernel.NockProgramCell.sampleSlots_overMax' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleSlots_overMax
-/-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_overMax_refused' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_overMax_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_overMax_refused
-/-- info: 'Minidregg.Kernel.NockProgramCell.declared_shape_sound' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.NockProgramCell.declared_shape_sound' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.declared_shape_sound
 /-- info: 'Minidregg.Kernel.NockProgramCell.pole_at_max_accepted' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.pole_at_max_accepted
@@ -762,3 +1102,19 @@ end Minidregg.Kernel.NockProgramCell
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.pole_over_max_refused
 /-- info: 'Minidregg.Kernel.NockProgramCell.overMax_congr' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.overMax_congr
+/-- info: 'Minidregg.Kernel.NockProgramCell.sampleRecord_injective' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleRecord_injective
+/-- info: 'Minidregg.Kernel.NockProgramCell.encodeSample_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.encodeSample_injective
+/-- info: 'Minidregg.Kernel.NockProgramCell.encodeSlots_readSlots' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.encodeSlots_readSlots
+/-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_eq_slots' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_eq_slots
+/-- info: 'Minidregg.Kernel.NockProgramCell.cord_injective_of_nulFree' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.cord_injective_of_nulFree
+/-- info: 'Minidregg.Kernel.NockProgramCell.pole_nul_keys_collide' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.pole_nul_keys_collide
+/-- info: 'Minidregg.Kernel.NockProgramCell.encodeSample_keys_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.encodeSample_keys_injective
+/-- info: 'Minidregg.Kernel.NockProgramCell.sampleRecord_pinned_of_fields' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleRecord_pinned_of_fields

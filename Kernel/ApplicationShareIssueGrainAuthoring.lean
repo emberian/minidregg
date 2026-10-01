@@ -132,7 +132,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
   let specialPins := ready.effectivePins opened.pins
   let marker := GrainResourceBirthAdmission.useMarker profile config.deployment tariff source
   let .ok draft := ResourceBirthController.Concrete.prepareGrainDraft
-      profile.compilerProfile config.deployment specialPins opened.durable birthDraft marker
+      profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable birthDraft marker
     | throw "grain-backed share birth preparation refused"
   let source := source.withAuxiliaryCreates draft.descriptor.auxiliaryCreates
   let expected := { birthDraft with auxiliaryCreates := draft.descriptor.auxiliaryCreates }
@@ -140,7 +140,7 @@ def prepareLoaded (config : NativeHost.Config) (opened : NativeHost.Opened confi
       CanonicalCellRegistry.sourceEncoding.codec.encode expected do
     throw "grain-backed share finalized birth differs from source"
   let .ok birth := GrainResourceBirthController.prepareSourceBirth
-      profile.compilerProfile config.deployment specialPins opened.durable
+      profile.compilerProfile profile.disabledEvaluators config.deployment specialPins opened.durable
       profile.semantics tariff source
     | throw "grain-backed share birth preparation refused"
   let ambient : DeclaredResourceController.Ambient := ⟨config.federation, height⟩

@@ -14,8 +14,16 @@ evaluator file so that `Kernel.Run` (which imports the evaluator) does not cycle
   steps and the jam of its product on `jam [s f]`.
 * **`decodeWrites`**: the product as a Nock list of `[cord value]` against `abi.outputs`.
 * **`staleField`** (K-RUN-PIN): which named slot a stale pinned claim missed.
+* **`Params`** (E3): Nock's params are the arm, as `DREGG/NOCK/PARAMS/v1 ‖ jam arm`
+  (`encodeParams`; `decodeParams` accepts only its own re-encoding, `decodeParams_canonical`).
+  A plain function with no proof inside, so a decided pole that decodes params keeps
+  `[propext]`.
+* **The door's pieces** (N11, moved here for E4): NockApp's boot `[9 2 0 1]`, the poke/peek
+  slams, the job `[event [%poke wire] 0 0 0 cause]`, the product `[door [effects core']]`
+  with `core' = #[6 state' door]`, and the effects as writes. `Compiler.Evaluator.nockDoor`
+  assembles them into the generic door; `Kernel.NockDoor` keeps N11's names.
 
-Nothing here is generic; the generic referee is `Kernel.Run`.
+Nothing here is generic; the generic referee is `Kernel.Run` (`Kernel.Door` for doors).
 -/
 import Kernel.NockProgramCell.Sample
 import Theory.Nock
@@ -91,6 +99,197 @@ def subjectFormula (arm : Nat) (program : Noun) (libraries : List Noun) (sample 
   match libraries with
   | [] => (.cell program sample, Nock.slam arm)
   | _ => (.cell (libraryNoun libraries) (.cell program sample), libraryFormula arm)
+
+/-! ## Params (E3): the arm, as a jammed atom behind a frame -/
+
+/-- Nock's entry data: the arm the kernel slams (2 for a bare gate, hoonc's trap kicked to its
+gate; NockApp's poke axis 23 for a door). -/
+structure Params where
+  arm : Nat
+  deriving DecidableEq, Repr
+
+/-- `DREGG/NOCK/PARAMS/v1` -/
+def paramsFrame : List UInt8 :=
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 65, 82, 65, 77, 83, 47, 118, 49]
+
+theorem paramsFrame_spells : paramsFrame = "DREGG/NOCK/PARAMS/v1".toUTF8.toList := by
+  decide +kernel
+
+def encodeParams (params : Params) : List UInt8 := paramsFrame ++ Noun.jam (.atom params.arm)
+
+/-- The params, accepted only as their own re-encoding (the jam of an atom, minimal). -/
+def decodeParams (bytes : List UInt8) : Option Params :=
+  if bytes.take paramsFrame.length = paramsFrame then
+    match Noun.cue (bytes.drop paramsFrame.length) with
+    | some (.atom arm) =>
+      if Noun.jam (.atom arm) = bytes.drop paramsFrame.length then some ⟨arm⟩ else none
+    | _ => none
+  else none
+
+theorem decodeParams_encode (params : Params) : decodeParams (encodeParams params) = some params := by
+  have take : (paramsFrame ++ Noun.jam (.atom params.arm)).take paramsFrame.length = paramsFrame :=
+    List.take_left' rfl
+  have drop : (paramsFrame ++ Noun.jam (.atom params.arm)).drop paramsFrame.length =
+      Noun.jam (.atom params.arm) := List.drop_left' rfl
+  unfold decodeParams encodeParams
+  rw [if_pos take, drop, Noun.cue_jam]
+  simp
+
+/-- **`decodeParams_canonical`**: accepted params bytes are the encoding of what they decode to. -/
+theorem decodeParams_canonical {bytes : List UInt8} {params : Params}
+    (accepted : decodeParams bytes = some params) : encodeParams params = bytes := by
+  unfold decodeParams at accepted
+  split at accepted
+  · rename_i framed
+    split at accepted
+    · rename_i arm _
+      split at accepted
+      · rename_i minimal
+        cases accepted
+        unfold encodeParams
+        rw [minimal]
+        have whole := List.take_append_drop paramsFrame.length bytes
+        rw [framed] at whole
+        exact whole
+      · cases accepted
+    · cases accepted
+  · cases accepted
+
+/-- Nock's birth check of its params: arm 0 is the whole subject, never a gate. -/
+def checkParams (params : Params) : Option NockProgramCodec.Refusal :=
+  if params.arm = 0 then some .armZero else none
+
+/-! ## The door's pieces (N11; `Kernel.NockDoor` for the referee's names) -/
+
+/-- `[9 2 0 1]`: NockApp's boot of the kernel trap (`form.rs:2040`). -/
+def bootFormula : Noun := Nock.op 9 (.cell (.atom 2) (Nock.op 0 (.atom 1)))
+
+/-- Over `[[trap ustate] x]`: the door — the booted trap, its axis 6 replaced
+by the stored state when the instance is loaded. -/
+def doorFormula : Noun :=
+  let boot := Nock.op 7 (.cell (Nock.op 0 (.atom 4)) bootFormula)
+  Nock.op 6 (.cell (Nock.op 3 (Nock.op 0 (.atom 5)))
+    (.cell (Nock.op 10 (.cell (.cell (.atom 6) (Nock.op 0 (.atom 11))) boot)) boot))
+
+/-- Over `[[trap ustate] job]`: `[door *[[door job] slam(poke)]]`. -/
+def pokeFormula (poke : Nat) : Noun :=
+  Nock.op 8 (.cell doorFormula (.cell (Nock.op 0 (.atom 2))
+    (Nock.op 7 (.cell (.cell (Nock.op 0 (.atom 2)) (Nock.op 0 (.atom 7))) (Nock.slam poke)))))
+
+/-- Over `[[trap ustate] path]`: `*[[door path] slam(peek)]`. -/
+def peekFormula (peek : Nat) : Noun :=
+  Nock.op 7 (.cell (.cell doorFormula (Nock.op 0 (.atom 3))) (Nock.slam peek))
+
+/-- Over `[[trap ustate] x]`: the door's state, axis 6. -/
+def stateFormula : Noun := Nock.op 7 (.cell doorFormula (Nock.op 0 (.atom 6)))
+
+def subjectOf (trap ustate x : Noun) : Noun := .cell (.cell trap ustate) x
+
+/-- `0` for an instance never poked (it runs on its boot state), `[0 state]` once loaded. -/
+def ustateNoun : Option Noun → Noun
+  | none => .atom 0
+  | some state => .cell (.atom 0) state
+
+theorem ustateNoun_injective {a b : Option Noun} (h : ustateNoun a = ustateNoun b) : a = b := by
+  cases a <;> cases b <;> simp_all [ustateNoun]
+
+/-- `%poke`. -/
+def pokeTag : Nat := 1701539696
+
+/-- NockApp's poke job `[event_num [%poke wire] eny our now cause]`
+(`form.rs:2473-2493`), with `eny = our = now = 0`. -/
+def job (event : Nat) (wire cause : Noun) : Noun :=
+  .cell (.atom event) (.cell (.cell (.atom pokeTag) wire)
+    (.cell (.atom 0) (.cell (.atom 0) (.cell (.atom 0) cause))))
+
+/-- The claimed sample's event: its wire and cause. -/
+def eventOf : Noun → Option (Noun × Noun)
+  | .cell _ (.cell _ (.cell (.cell _ wire) (.cell _ (.cell _ (.cell _ cause))))) => some (wire, cause)
+  | _ => none
+
+@[simp] theorem eventOf_job (u : Noun) (event : Nat) (wire cause : Noun) :
+    eventOf (.cell u (job event wire cause)) = some (wire, cause) := rfl
+
+/-- `[door [effects core']]` with `core' = #[6 state' door]`: the door, its
+effects, and its next state. -/
+def pokeProduct : Noun → Option (Noun × Noun × Noun)
+  | .cell door (.cell effects core) =>
+    match Noun.axis 6 core with
+    | some state => if Noun.edit 6 state door = some core then some (door, effects, state) else none
+    | none => none
+  | _ => none
+
+theorem pokeProduct_sound {product door effects state : Noun}
+    (h : pokeProduct product = some (door, effects, state)) :
+    ∃ core, product = .cell door (.cell effects core) ∧ Noun.axis 6 core = some state ∧
+      Noun.edit 6 state door = some core := by
+  unfold pokeProduct at h
+  split at h
+  · rename_i door' effects' core
+    split at h
+    · rename_i state' hax
+      split at h
+      · rename_i hedit
+        cases h
+        exact ⟨core, rfl, hax, hedit⟩
+      · cases h
+    · cases h
+  · cases h
+
+/-- A Nock list. -/
+def itemsOf : Noun → Option (List Noun)
+  | .atom 0 => some []
+  | .cell e rest => (itemsOf rest).map (e :: ·)
+  | _ => none
+
+/-- An effect that is a write: `[key value]` with an ABI output key. -/
+def effectWrite (outputs : List OutputSlot) : Noun → Option FieldWrite
+  | .cell (.atom k) v => decodeEntry outputs (k, v)
+  | _ => none
+
+/-- Every effect a write, in order; the first that is not refuses. -/
+def effectWrites (outputs : List OutputSlot) : List Noun → Except EffectRefusal (List FieldWrite)
+  | [] => .ok []
+  | e :: rest =>
+    match effectWrite outputs e with
+    | none => .error .effectNotWrite
+    | some w => (effectWrites outputs rest).map (w :: ·)
+
+/-- The effects of a poke as writes: a Nock list (else `effectsMalformed`), every item a
+write (else `effectNotWrite`). -/
+def decodeEffects (outputs : List OutputSlot) (effects : Noun) :
+    Except EffectRefusal (List FieldWrite) :=
+  match itemsOf effects with
+  | none => .error .effectsMalformed
+  | some items => effectWrites outputs items
+
+theorem effectWrites_sound {outputs : List OutputSlot} :
+    ∀ {xs : List Noun} {ys : List FieldWrite}, effectWrites outputs xs = .ok ys →
+      ∀ x ∈ xs, ∃ y ∈ ys, effectWrite outputs x = some y
+  | [], _, _, x, hx => by cases hx
+  | a :: rest, ys, h, x, hx => by
+    unfold effectWrites at h
+    cases ha : effectWrite outputs a with
+    | none => rw [ha] at h; cases h
+    | some b =>
+      rw [ha] at h
+      cases hr : effectWrites outputs rest with
+      | error e => rw [hr] at h; cases h
+      | ok bs =>
+        rw [hr] at h
+        simp only [Except.map, Except.ok.injEq] at h
+        subst h
+        rcases List.mem_cons.1 hx with rfl | hx
+        · exact ⟨b, List.mem_cons_self .., ha⟩
+        · obtain ⟨y, hy, hg⟩ := effectWrites_sound hr x hx
+          exact ⟨y, List.mem_cons_of_mem _ hy, hg⟩
+
+theorem effectWrites_refused {outputs : List OutputSlot} {xs : List Noun} {x : Noun}
+    (hx : x ∈ xs) (hg : effectWrite outputs x = none) (ys : List FieldWrite) :
+    effectWrites outputs xs ≠ .ok ys := by
+  intro h
+  obtain ⟨y, -, hy⟩ := effectWrites_sound h x hx
+  rw [hg] at hy; cases hy
 
 /-! ## Which field a stale pinned claim missed -/
 
@@ -169,7 +368,7 @@ theorem staleField_names {abi : Abi} {ctx ctx' : Context} {targets : List Nat}
   refine ⟨fun same => ?_, ?_⟩
   · subst same
     exact changed ((sampleOf_injective claimed current).2.2 slot named)
-  unfold sampleOf at claimed current
+  rw [sampleOf_eq_slots] at claimed current
   split at claimed
   · rename_i inRange
     rw [if_pos inRange] at current
@@ -278,3 +477,11 @@ end Minidregg.Kernel.NockEntry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockEntry.oracle_crash
 /-- info: 'Minidregg.Kernel.NockEntry.oracle_exhausted' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockEntry.oracle_exhausted
+/-- info: 'Minidregg.Kernel.NockEntry.decodeParams_encode' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockEntry.decodeParams_encode
+/-- info: 'Minidregg.Kernel.NockEntry.decodeParams_canonical' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockEntry.decodeParams_canonical
+/-- info: 'Minidregg.Kernel.NockEntry.pokeProduct_sound' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockEntry.pokeProduct_sound
+/-- info: 'Minidregg.Kernel.NockEntry.effectWrites_sound' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockEntry.effectWrites_sound

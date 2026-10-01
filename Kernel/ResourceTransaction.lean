@@ -642,8 +642,9 @@ def runContext (ambient : Ambient) (command : Command) : NockProgramCell.Context
   ⟨ambient.height, command.subject.value, 0⟩
 
 /-- The program's own check on its evaluator `E`: a gate re-executes on the kernel's
-sample (`Run.checkRun E`); a NockApp door (N11) re-executes its poke on target 0's
-stored state and event number (`NockDoor.checkPoke`) — Nock's only, until E4. -/
+sample (`Run.checkRun E`); a door re-executes its poke on target 0's stored state and
+event number with the evaluator's door (`Door.checkPoke E d`, E4; Nock's is N11's). An
+evaluator without doors refuses a door ABI `doorUnsupported`. -/
 def checkProgram (E : Evaluator) (program : NockProgramCodec.Program)
     (libraries : List NockProgramCodec.Program)
     (ambient : Ambient) (command : Command)
@@ -662,12 +663,13 @@ def checkProgram (E : Evaluator) (program : NockProgramCodec.Program)
       (Run.checkRun E.toMachine program libraries sample claim writes).map
         (Run.Verdict.erase E.toMachine)
   | some door =>
-    if E.id = Evaluator.nock.id then
-      match NockDoor.viewOf door (sampleRead command pre) with
+    match E.door with
+    | none => .error .doorUnsupported
+    | some d =>
+      match Door.viewOf door (sampleRead command pre) with
       | .error e => .error e
       | .ok view =>
-        (NockDoor.checkPoke program door view claim writes).map (Run.Verdict.erase Machine.nock)
-    else .error .doorUnsupported
+        (Door.checkPoke E.toMachine d program door view claim writes).map (Run.Verdict.erase E.toMachine)
 
 /-- Load the claimed program, resolve its evaluator against the compiled-in registry
 (less what the operator disabled), load its libraries (on the same evaluator), and
@@ -764,7 +766,7 @@ theorem checkCommandRun_none {disabled : List Digest} {domain : Digest}
   unfold checkCommandRun; rw [unclaimed]
 
 /-- What an accepted `checkProgram` ran: a gate's `checkRun` on its evaluator and the
-kernel's sample, or (Nock only) a door's `checkPoke` on target 0's stored view. -/
+kernel's sample, or a door's `checkPoke` with the evaluator's door on target 0's stored view. -/
 def ProgramAccepted (E : Evaluator) (program : NockProgramCodec.Program)
     (libraries : List NockProgramCodec.Program)
     (ambient : Ambient) (command : Command)
@@ -775,10 +777,10 @@ def ProgramAccepted (E : Evaluator) (program : NockProgramCodec.Program)
       (command.targets.map Target.target) (sampleRead command pre) = some sample ∧
       Run.checkRun E.toMachine program libraries sample claim writes = .ok v ∧
       Run.Verdict.erase E.toMachine v = verdict
-  | some door => E.id = Evaluator.nock.id ∧
-      ∃ view v, NockDoor.viewOf door (sampleRead command pre) = .ok view ∧
-      NockDoor.checkPoke program door view claim writes = .ok v ∧
-      Run.Verdict.erase Machine.nock v = verdict
+  | some door => ∃ d view v, E.door = some d ∧
+      Door.viewOf door (sampleRead command pre) = .ok view ∧
+      Door.checkPoke E.toMachine d program door view claim writes = .ok v ∧
+      Run.Verdict.erase E.toMachine v = verdict
 
 theorem checkProgram_sound {E : Evaluator} {program : NockProgramCodec.Program}
     {libraries : List NockProgramCodec.Program} {ambient : Ambient} {command : Command}
@@ -802,17 +804,17 @@ theorem checkProgram_sound {E : Evaluator} {program : NockProgramCodec.Program}
         exact ⟨sample, v, hsample, hrun, rfl⟩
   · rename_i door _
     split at accepted
-    · rename_i nockId
+    · cases accepted
+    · rename_i d hd
       split at accepted
       · cases accepted
       · rename_i view hview
-        cases hpoke : NockDoor.checkPoke program door view claim writes with
+        cases hpoke : Door.checkPoke E.toMachine d program door view claim writes with
         | error e => rw [hpoke] at accepted; cases accepted
         | ok v =>
           rw [hpoke] at accepted
           cases accepted
-          exact ⟨nockId, view, v, hview, hpoke, rfl⟩
-    · cases accepted
+          exact ⟨d, view, v, hd, hview, hpoke, rfl⟩
 
 /-- **`checkProgram_fieldOverMax`** (NC-2): a gate whose sample slot value lies above the slot's
 declared maximum is refused by name, before any sample is built or any run. -/
@@ -831,7 +833,7 @@ theorem checkProgram_fieldOverMax {E : Evaluator} {program : NockProgramCodec.Pr
 its evaluator to a compiled-in, enabled entry, loaded its libraries (on that
 evaluator) from the directory, and re-executed it against the loaded pre-states: a
 gate on the kernel's own sample (`Run.checkRun`), a door on target 0's stored state
-(`NockDoor.checkPoke`), accepting the command's writes. -/
+(`Door.checkPoke` with the evaluator's door), accepting the command's writes. -/
 theorem checkClaim_sound {disabled : List Digest} {domain : Digest}
     {directory : Directory Nat Registry} {ambient : Ambient}
     {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
@@ -1042,7 +1044,11 @@ theorem pinned_claim_stale_on_field_change {E : Evaluator} {program : NockProgra
   have under : E.overMax (sampleRead command' pre') program.abi.sample = none := by
     cases hs : E.overMax (sampleRead command' pre') program.abi.sample with
     | none => rfl
-    | some s => rw [E.sampleOf_overMax hs] at current; cases current
+    | some s =>
+      have refused : E.sampleOf program.abi (runContext ambient' command')
+          (command'.targets.map Target.target) (sampleRead command' pre') = none :=
+        E.sampleOf_overMax hs
+      rw [refused] at current; cases current
   unfold checkProgram
   rw [gate]
   simp only [under]

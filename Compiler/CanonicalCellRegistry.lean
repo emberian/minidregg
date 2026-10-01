@@ -36,6 +36,7 @@ import Compiler.PolicySourceCell
 import Kernel.PayCell
 import Compiler.StreamCell
 import Compiler.NockProgramCodec
+import Compiler.Evaluator
 import Kernel.ClockCell
 import Theory.CanonicalResourceBookInvariant
 
@@ -469,7 +470,7 @@ def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
   | .content, state => state.support = ∅
   | .stream, state => state.support = ∅
-  | .nockProgram, state => PresentLaw NockProgramCodec.Admissible (NockProgramCodec.programAt state)
+  | .nockProgram, state => PresentLaw Evaluator.RecordAdmissible (NockProgramCodec.programAt state)
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
@@ -904,12 +905,13 @@ theorem birth_missing_library_refused (domain : Digest) (directory : Directory N
   rw [List.all_eq_false]
   exact ⟨item, member, by simp [holds, missing]⟩
 
-/-- A friend may birth exactly an admissible program at its content address. -/
+/-- A friend may birth exactly an admissible program at its content address: one naming a
+compiled-in evaluator, admitted by that evaluator (`Evaluator.RecordAdmissible`). -/
 theorem program_user_initial_iff (deployment : Deployment) (cellId : Nat)
     (program : NockProgramCodec.Program) :
     UserInitial deployment cellId (programCell program) ↔
       deployment.Valid ∧ cellId = programCellId deployment.domain program ∧
-        NockProgramCodec.Admissible program := by
+        Evaluator.RecordAdmissible program := by
   simp [UserInitial, CellLaw, LogicalLaw, UserShape, programCell, PresentLaw,
     NockProgramCodec.CellValid, programCellId, and_assoc]
 
@@ -918,9 +920,22 @@ theorem nonCanonical_birth_refused (deployment : Deployment) (cellId : Nat)
     (bad : Noun.canonical program.jam = false) :
     ¬ UserInitial deployment cellId (programCell program) := by
   rw [program_user_initial_iff]
-  rintro ⟨_, _, admitted, _⟩
-  rw [bad] at admitted
-  cases admitted
+  rintro ⟨_, _, admitted⟩
+  unfold Evaluator.RecordAdmissible Evaluator.admitRecord at admitted
+  cases hr : Evaluator.resolve [] program.evaluator with
+  | error e => rw [hr] at admitted; cases e <;> simp [Except.toBool] at admitted
+  | ok E =>
+    obtain rfl := Evaluator.resolve_nock hr
+    have refused : ∃ r, Evaluator.nock.admit program = .error r := by
+      cases hcue : Noun.cue program.jam with
+      | none => exact ⟨_, Machine.admit_noCue (M := Evaluator.nock.toMachine) hcue⟩
+      | some n =>
+        exact ⟨_, Machine.admit_nonCanonical (M := Evaluator.nock.toMachine)
+          (show (Noun.cue program.jam).isSome = true by rw [hcue]; rfl) bad⟩
+    obtain ⟨r, hr'⟩ := refused
+    rw [hr] at admitted
+    simp only [hr'] at admitted
+    simp [Except.toBool] at admitted
 
 theorem wrong_address_birth_refused (deployment : Deployment) (cellId : Nat)
     (program : NockProgramCodec.Program)
@@ -936,6 +951,97 @@ theorem program_occupied_refused (domain : Digest) (directory : Directory Nat re
     CellRegistry.create registry directory (programCreate domain program) =
       .error .duplicateCreate := by
   simp [CellRegistry.create, occupied]
+
+/-! ## A birth names an evaluator this deployment runs (E3)
+
+`Evaluator.RecordAdmissible` (the cell law) already refuses a record naming an id no
+compiled-in evaluator has; the birth path checks it first, by name, and also refuses an
+evaluator the operator disabled — a deployment parameter (`Profile.disabledEvaluators`,
+committed in the runtime semantics digest), the same list a run resolves against. -/
+
+/-- The evaluator ids of the program records a descriptor births. -/
+def birthProgramEvaluators (descriptor : ResourceBirth.Descriptor registry) : List Digest :=
+  descriptor.births.filterMap fun item => (cellProgram item.create.cell).map (·.evaluator)
+
+/-- Each id resolves (`Evaluator.resolve`), in order; the first that does not names the
+refusal. (`Except.bind`, not a `match`: a proof never has to compare two matchers over
+`resolve`, whose whnf would compute the registry's cSHAKE ids.) -/
+def resolveAll (disabled : List Digest) : List Digest → Except Evaluator.Unresolved Unit
+  | [] => .ok ()
+  | id :: rest => (Evaluator.resolve disabled id).bind fun _ => resolveAll disabled rest
+
+theorem resolveAll_cons (disabled : List Digest) (id : Digest) (rest : List Digest) :
+    resolveAll disabled (id :: rest) =
+      (Evaluator.resolve disabled id).bind fun _ => resolveAll disabled rest := rfl
+
+/-- **`birthEvaluators`**: every program record a birth carries names an evaluator this
+deployment runs (compiled in, not disabled) — or the birth is refused by name. The run's
+resolution (`Evaluator.resolve`), at birth. -/
+def birthEvaluators (disabled : List Digest) (descriptor : ResourceBirth.Descriptor registry) :
+    Except Evaluator.Unresolved Unit :=
+  resolveAll disabled (birthProgramEvaluators descriptor)
+
+theorem resolveAll_ok_iff (disabled : List Digest) : ∀ (ids : List Digest),
+    resolveAll disabled ids = .ok () ↔ ∀ id ∈ ids, ∃ E, Evaluator.resolve disabled id = .ok E
+  | [] => ⟨fun _ _ m => absurd m List.not_mem_nil, fun _ => rfl⟩
+  | id :: rest => by
+    rw [resolveAll_cons]
+    cases h : Evaluator.resolve disabled id with
+    | error e =>
+      constructor
+      · intro bad; cases bad
+      · intro all
+        obtain ⟨E, hE⟩ := all id (List.mem_cons_self ..)
+        rw [h] at hE; cases hE
+    | ok E =>
+      show resolveAll disabled rest = .ok () ↔ _
+      rw [resolveAll_ok_iff disabled rest]
+      constructor
+      · intro hr x hx
+        rcases List.mem_cons.mp hx with rfl | hx
+        · exact ⟨E, h⟩
+        · exact hr x hx
+      · intro all x hx
+        exact all x (List.mem_cons_of_mem _ hx)
+
+/-- **`birthEvaluators_ok_iff`** (both poles): a birth passes exactly when each program it
+carries names an evaluator that resolves. -/
+theorem birthEvaluators_ok_iff (disabled : List Digest) (descriptor : ResourceBirth.Descriptor registry) :
+    birthEvaluators disabled descriptor = .ok () ↔
+      ∀ id ∈ birthProgramEvaluators descriptor, ∃ E, Evaluator.resolve disabled id = .ok E :=
+  resolveAll_ok_iff disabled _
+
+theorem birthEvaluators_single {disabled : List Digest} {descriptor : ResourceBirth.Descriptor registry}
+    {id : Digest} (single : birthProgramEvaluators descriptor = [id]) :
+    birthEvaluators disabled descriptor = (Evaluator.resolve disabled id).map fun _ => () := by
+  unfold birthEvaluators
+  rw [single, resolveAll_cons]
+  cases Evaluator.resolve disabled id <;> rfl
+
+/-- **`birth_unknownEvaluator_refused`** (E3): a birth whose program record names an id no
+compiled-in evaluator has is refused `unknownEvaluator` — at birth, not at its first run. -/
+theorem birth_unknownEvaluator_refused {disabled : List Digest}
+    {descriptor : ResourceBirth.Descriptor registry} {id : Digest}
+    (single : birthProgramEvaluators descriptor = [id])
+    (absent : ∀ E ∈ Evaluator.registry, E.id ≠ id) :
+    birthEvaluators disabled descriptor = .error .unknownEvaluator := by
+  rw [birthEvaluators_single single, Evaluator.resolve_unknown absent]; rfl
+
+/-- **`birth_evaluatorDisabled_refused`** (E3): in a deployment whose operator disabled Nock,
+the birth of a Nock program is refused `evaluatorDisabled`. -/
+theorem birth_evaluatorDisabled_refused {disabled : List Digest}
+    {descriptor : ResourceBirth.Descriptor registry}
+    (single : birthProgramEvaluators descriptor = [Evaluator.nock.id])
+    (off : Evaluator.nock.id ∈ disabled) :
+    birthEvaluators disabled descriptor = .error .evaluatorDisabled := by
+  rw [birthEvaluators_single single, Evaluator.pole_evaluatorDisabled disabled off]; rfl
+
+/-- The admitting pole: where Nock is enabled, a Nock program's birth passes this check. -/
+theorem birth_nock_admitted {disabled : List Digest} {descriptor : ResourceBirth.Descriptor registry}
+    (single : birthProgramEvaluators descriptor = [Evaluator.nock.id])
+    (enabled : Evaluator.nock.id ∉ disabled) :
+    birthEvaluators disabled descriptor = .ok () := by
+  rw [birthEvaluators_single single, Evaluator.pole_nock_resolves disabled enabled]; rfl
 
 theorem nock_program_final_state_immutable (deployment : Deployment) (cellId : Nat)
     (before after : PackedCell registry) (program : before.kind = .nockProgram)
@@ -1009,3 +1115,11 @@ end Minidregg.Compiler.CanonicalCellRegistry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.program_occupied_refused
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.nock_program_final_state_immutable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.nock_program_final_state_immutable
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birthEvaluators_ok_iff' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birthEvaluators_ok_iff
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birth_unknownEvaluator_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birth_unknownEvaluator_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birth_evaluatorDisabled_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birth_evaluatorDisabled_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.birth_nock_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.birth_nock_admitted
