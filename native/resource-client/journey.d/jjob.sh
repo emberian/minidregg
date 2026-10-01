@@ -244,6 +244,25 @@ def restart():
         time.sleep(0.1)
     fail("service did not come back")
 
+def raw_op(code, payload):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
+    body = bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload
+    s.sendall(struct.pack("<I", len(body)) + body)
+    def exact(n):
+        out = b""
+        while len(out) < n:
+            chunk = s.recv(n - len(out))
+            if not chunk: raise RuntimeError("short reply")
+            out += chunk
+        return out
+    n = struct.unpack("<I", exact(4))[0]; reply = exact(n); s.close()
+    return reply[0], reply[1:]
+def authority_root():
+    code, view = raw_op(107, b"")
+    kind = b"pay-view"
+    code, inspected = raw_op(8, struct.pack("<H", len(kind)) + kind + view)
+    return json.loads(inspected)["authorityRoot"]
+
 def explain(ws, prefix):
     """The operator's explanation (minidregg-host job-money-explain, the receiver's own
     preparation on the Store as it is) of this workspace's newest money command for prefix.
@@ -251,7 +270,12 @@ def explain(ws, prefix):
     jobs = os.path.join(ws, "jobs")
     dirs = sorted((d for d in os.listdir(jobs) if d.startswith(prefix)), key=lambda d: os.path.getmtime(os.path.join(jobs, d)))
     if not dirs: return "no command retained"
-    src = os.path.join(jobs, dirs[-1], "command.json")
+    # the decision now: the command re-pinned to the current authority root (its own root may
+    # have moved since; a refused turn moved nothing of the job's or the Book's)
+    command = json.load(open(os.path.join(jobs, dirs[-1], "command.json")))
+    command["expectedAuthorityRoot"] = authority_root()
+    src = path(f"explain-{time.time_ns()}.json")
+    json.dump(command, open(src, "w"))
     out = path(f"explain-{time.time_ns()}.bin")
     r = run(HOST, CONFIG, "author", "job-money", src, out)
     if r.returncode: return "author failed: " + last_line(r)
@@ -373,7 +397,7 @@ law = [l.rstrip(";") for l in open(os.path.join(HERE, "..", "..", "deploy", "she
 rc, outcome, why, secs = truth_write("forge-bare", 9)
 say("A", "invoke j4 create 15 9   (a bare write of the truth field)", why)
 row("j4", "A writes truth 9 with no run claim (caller_cannot_forge_truth's pole)", "refused: clause 22 (ran PROGRAM)",
-    f"rc={rc} {why}", rc != 0 and "ran " in str(why) and outcome is not None and outcome.get("type") == "refused", secs)
+    f"rc={rc} {why}", rc != 0 and "law-denied" in str(why) and f"ran {PID['collatz']}" in str(why), secs)
 d = op(134, json.dumps({"programId": PID["liar"], "caller": "7", "room": "0", "targets": [str(J4)],
                          "values": [["0", "resource/field/2/before", "6"]]}).encode())
 liar_claim = {"programId": PID["liar"], "sample": d.get("sample"), "output": d.get("output"), "steps": d.get("steps")}
@@ -381,15 +405,15 @@ rc, outcome, why, secs = truth_write("forge-liar", 9, liar_claim)
 say("A", "invoke j4 create 15 9 --run liar   (a re-executed run, of the WRONG program)", why)
 row("j4", "A writes truth 9 carrying liar's run claim (re-executed and matching -- but not the job's program)",
     "refused: clause 22 (ran PROGRAM is the job's program)", f"rc={rc} dry={d.get('verdict')} {why}",
-    rc != 0 and "ran " in str(why) and outcome is not None and outcome.get("type") == "refused", secs)
+    rc != 0 and "law-denied" in str(why) and f"ran {PID['collatz']}" in str(why), secs)
 req = {"type": "minidregg-workspace-proposal-v1", "action": "invoke",
        "targets": [{"name": "j4", "payload": {"type": "scalar", "actions": [
            {"type": "write", "key": {"type": "object", "field": "8"}, "expected": "1000", "value": "0"}]}}]}
 t = time.time(); r, outcome = propose_submit(A, "forge-escrow", req)
 why = (outcome or {}).get("explain") or (outcome or {}).get("reason") or last_line(r)
-row("j4", "A zeroes the escrow by an ordinary write (money without the receiver)",
-    "refused: clause 44 (the job-money slot)", f"rc={r.returncode} {why}",
-    r.returncode != 0 and "job-money" in str(why), time.time() - t)
+row("j4", "A zeroes the escrow of a claimed job by an ordinary write (money without the receiver)",
+    "refused: clause 14 (escrow moves only on fund or close)", f"rc={r.returncode} {why}",
+    r.returncode != 0 and "law-denied" in str(why) and "field 8 delta == 0" in str(why), time.time() - t)
 rc, out, err, secs = job(A, "check", "--name", "j4")
 row("j4", "the honest check: truth 8 = output 8", "upheld", f"rc={rc} verdict={out.get('verdict')} {err}",
     rc == 0 and out.get("verdict") == "upheld", secs)
@@ -417,7 +441,8 @@ lab_target = json.load(open(os.path.join(A, "refs", "lab.json")))["target"]
 run(MINI, "workspace", "--action", "import", "--dir", S, "--name", "lab", "--kind", "object",
     "--target", str(lab_target), "--observe-capability", "3022", "--operation-capability", "3022")
 rc, out, err, secs = post("s1", 6, ws=S)
-row("j5", "S (not a member of lab) posts a job into lab", "refused", f"rc={rc} {out.get('type')} {err[:220]}", rc != 0, secs)
+row("j5", "S (not a member of lab) posts a job into lab", "refused (a birth into a room needs a grant on the room)",
+    f"rc={rc} {out.get('type')} {err[:200]}", rc != 0, secs)
 rc, out, err, secs = job(S, "claim", "--job", str(J5), "--room", "lab", "--bond", str(BOND), "--account", "purse", "--name", "j5")
 say("S", f"job claim {J5} --room lab   (S holds no grant under lab)", out or err)
 why = explain(S, "j5.claim-")

@@ -152,6 +152,25 @@ def clock(): return int(json.loads(run(MINI, "clock", "--action", "view", "--wor
 def tick(now): return run(MINI, "clock", "--action", "tick", "--workspace", A, "--control", "53", "--now", str(now)).returncode == 0
 def named(err, name): return "refused" in err and name in err
 
+def raw_op(code, payload):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect(SOCK)
+    body = bytes([1]) + struct.pack("<I", len(cfg)) + cfg + bytes([code]) + payload
+    s.sendall(struct.pack("<I", len(body)) + body)
+    def exact(n):
+        out = b""
+        while len(out) < n:
+            chunk = s.recv(n - len(out))
+            if not chunk: raise RuntimeError("short reply")
+            out += chunk
+        return out
+    n = struct.unpack("<I", exact(4))[0]; reply = exact(n); s.close()
+    return reply[0], reply[1:]
+def authority_root():
+    code, view = raw_op(107, b"")
+    kind = b"pay-view"
+    code, inspected = raw_op(8, struct.pack("<H", len(kind)) + kind + view)
+    return json.loads(inspected)["authorityRoot"]
+
 def explain(ws, prefix):
     """The operator's explanation (minidregg-host job-money-explain, the receiver's own
     preparation on the Store as it is) of this workspace's newest money command for prefix.
@@ -159,7 +178,12 @@ def explain(ws, prefix):
     jobs = os.path.join(ws, "jobs")
     dirs = sorted((d for d in os.listdir(jobs) if d.startswith(prefix)), key=lambda d: os.path.getmtime(os.path.join(jobs, d)))
     if not dirs: return "no command retained"
-    src = os.path.join(jobs, dirs[-1], "command.json")
+    # the decision now: the command re-pinned to the current authority root (its own root may
+    # have moved since; a refused turn moved nothing of the job's or the Book's)
+    command = json.load(open(os.path.join(jobs, dirs[-1], "command.json")))
+    command["expectedAuthorityRoot"] = authority_root()
+    src = path(f"explain-{time.time_ns()}.json")
+    json.dump(command, open(src, "w"))
     out = path(f"explain-{time.time_ns()}.bin")
     r = run(HOST, CONFIG, "author", "job-money", src, out)
     if r.returncode: return "author failed: " + last_line(r)
@@ -277,8 +301,8 @@ r1, r2, o = propose_submit(A, "write-escrow", {"type": "minidregg-workspace-prop
     "targets": [{"name": "j1", "payload": {"type": "scalar", "actions": [
         {"type": "write", "key": {"type": "object", "field": "8"}, "expected": str(PRICE), "value": "0"}]}}]})
 why = o.get("explain") or o.get("reason") or last_line(r2)
-row("A zeroes j1's escrow by an ordinary write (no money slot)", "refused: the job law's clause 44 (job-money)",
-    f"{o.get('type')} {why}", o.get("type") != "confirmed" and "job-money" in str(why))
+row("A zeroes claimed j1's escrow by an ordinary write (no money slot)", "refused: the job law's clause 14 (escrow moves only on fund or close)",
+    f"{o.get('type')} {why}", o.get("type") != "confirmed" and "law-denied" in str(why) and "field 8 delta == 0" in str(why))
 
 # ---- upheld by timeout: an answer, no truth, the window passes
 rc, out, err = job(P, "answer", "--name", "j1", "--output", "5", "--steps", "1")

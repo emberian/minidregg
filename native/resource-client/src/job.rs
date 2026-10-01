@@ -562,6 +562,12 @@ fn claim(ws: &Ws, mut args: Args) -> Result<Value> {
             ],
         )?;
     }
+    let account = workspace::reference(&ws.root, &account_ref)?;
+    let account_id = field(&account, "target")?.to_owned();
+    let account_cap = operation_capability(&account)?;
+    let dir = jobs_dir(ws)?.join(format!("{name}.claim-{}", nonce()?));
+    let (_, latency) = timed("claim", || money(ws, &dir, &job, CLAIM, &account_id, &bond, &account_cap, &cap))?;
+    // The job as the provider now holds it (a signed read under its grant).
     let f = fields(ws, &name)?;
     let policy = {
         let reference = workspace::reference(&ws.root, &name)?;
@@ -572,11 +578,6 @@ fn claim(ws: &Ws, mut args: Args) -> Result<Value> {
         .as_ref()
         .and_then(find_window)
         .unwrap_or_else(|| DEFAULT_WINDOW.to_string());
-    let account = workspace::reference(&ws.root, &account_ref)?;
-    let account_id = field(&account, "target")?.to_owned();
-    let account_cap = operation_capability(&account)?;
-    let dir = jobs_dir(ws)?.join(format!("{name}.claim-{}", nonce()?));
-    let (_, latency) = timed("claim", || money(ws, &dir, &job, CLAIM, &account_id, &bond, &account_cap, &cap))?;
     let rec = json!({"type":"minidregg-job-v1","name":name,"job":job,"room":room,"role":"provider",
         "program":f.get(&1),"input":f.get(&2),"price":f.get(&5),"claimBy":f.get(&6),"answerBy":f.get(&7),
         "window":window,"providerAcct":account_id,"bond":bond});
