@@ -19,6 +19,7 @@ semantics.
 
 import Compiler.BinaryTower256Profile
 import Compiler.Sp800185Cshake256
+import Compiler.NatDigits255Fast
 
 namespace Minidregg.Compiler.Tower256ConcreteBackend
 
@@ -149,6 +150,13 @@ logarithmic rather than unary. -/
 
 def natDigits (value : Nat) : List UInt8 :=
   (Nat.digits 255 value).map UInt8.ofNat
+
+/-- The compiled codec writes digits seven at a time on machine words
+(`NatDigits255Fast.digitsBytes_eq`, for every natural); `natDigits` stays the
+definition. -/
+@[csimp] theorem natDigits_eq_fast : natDigits = NatDigits255Fast.digitsBytes := by
+  funext value
+  exact (NatDigits255Fast.digitsBytes_eq value).symm
 
 def encodeNat (value : Nat) : List UInt8 := natDigits value ++ [255]
 
@@ -615,3 +623,6 @@ theorem cshakeOutputExact (customization input : List UInt8) :
 #guard_msgs (whitespace := lax) in #print axioms cshakeOutputExact
 
 end Minidregg.Compiler.Tower256ConcreteBackend
+
+/-- info: 'Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.natDigits_eq_fast' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Tower256ConcreteBackend.StreamCodec.natDigits_eq_fast
