@@ -6,7 +6,8 @@
 //! | op | purpose |
 //! |---|---|
 //! | 103 / 104 / 105 / 106 | book-or-assignment plan, detached assembly, submit, receipt-only lookup |
-//! | 107 | the public pay view (roots, tariff, clock, nextFree, book) |
+//! | 107 | the public pay view (roots, tariff, nextFree, book) |
+//! | 129 | the public clock view (the deployment clock: now, slot) |
 //! | 108 / 109 / 110 / 111 | observation plan, assembly, submit, receipt-only lookup |
 //!
 //! Mini owns every codec: the client authors and inspects through the Host (`author`/`inspect`,
@@ -39,6 +40,8 @@ const OBSERVE_OPS: Ops = Ops {
     lookup: 111,
 };
 const VIEW_OP: u8 = 107;
+/// The public clock view (K-CLOCK): the deployment clock's `{now, slot}`.
+const CLOCK_VIEW_OP: u8 = 129;
 
 /// The durable preflight's refusal of a spent nullifier, exactly as the Host renders it
 /// (phase `durable`). On a report whose tip is newer than the clock it can only be an
@@ -324,13 +327,27 @@ fn answer(outcome: Value) -> Answer {
 
 // ---------------------------------------------------------------- one signed call
 
-/// Read the public pay view (op 107) into `directory/view.{bin,json}`.
+/// Read the public pay view (op 107) and the deployment clock (op 129) into
+/// `directory/{view,clock}.{bin,json}`. The pay cell keeps no clock on final
+/// (the clock cell does), so the view this returns and retains carries the
+/// clock cell's `{slot, now}` as `clock`: the tick and status logic read it there.
 fn read_view(session: &Session, directory: &Path) -> Result<Value> {
     let frame = session.call(VIEW_OP, &[])?;
     let body = frame_body(&frame, VIEW_OP)?;
     let bin = directory.join("view.bin");
     create_private(&bin, body)?;
-    session.inspect("pay-view", &bin, &directory.join("view.json"))
+    let mut view = session.inspect("pay-view", &bin, &directory.join("pay-view.json"))?;
+    let frame = session.call(CLOCK_VIEW_OP, &[])?;
+    let body = frame_body(&frame, CLOCK_VIEW_OP)?;
+    let clock_bin = directory.join("clock.bin");
+    create_private(&clock_bin, body)?;
+    let clock = session.inspect("clock-view", &clock_bin, &directory.join("clock.json"))?;
+    view["clock"] = json!({"slot": text(&clock, "slot")?, "now": text(&clock, "now")?});
+    create_private(
+        &directory.join("view.json"),
+        &serde_json::to_vec_pretty(&view).map_err(|error| error.to_string())?,
+    )?;
+    Ok(view)
 }
 
 /// A view for a read-only verb: read into a scratch directory under `pay/`, then dropped.
@@ -655,9 +672,9 @@ fn status(session: &Session, account_name: Option<&str>) -> Result<()> {
     println!("credit {balance}  (asset {asset})");
     match view.get("clock").filter(|clock| !clock.is_null()) {
         Some(clock) => println!(
-            "clock slot {}  blockTime {}",
+            "clock slot {}  now {}",
             text(clock, "slot")?,
-            text(clock, "blockTime")?
+            text(clock, "now")?
         ),
         None => println!("clock unavailable"),
     }

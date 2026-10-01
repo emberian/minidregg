@@ -165,6 +165,10 @@ def stop_server():
     if server is not None and server.poll() is None:
         os.killpg(server.pid, signal.SIGTERM); server.wait(timeout=60)
     server = None
+# A failing row exits through fail(); the server must not outlive the hook (the
+# journey's next steps and the box's other runs share the machine).
+import atexit
+atexit.register(stop_server)
 start_server()
 
 WS = {}
