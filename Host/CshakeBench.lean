@@ -26,13 +26,21 @@ def hex (bytes : List UInt8) : String :=
     if s.length = 1 then "0" ++ s else s)
 
 def timeIt (label : String) (n : Nat) (f : Unit → List UInt8) : IO Unit := do
-  let t0 ← IO.monoNanosNow
-  let out := f ()
-  if out.length == 0 then IO.println "empty"
-  let t1 ← IO.monoNanosNow
-  let secs := (t1 - t0).toFloat / 1.0e9
+  -- best of five: the box is shared, and the minimum is the least-contended run
+  let mut best : Nat := 0
+  let mut out : List UInt8 := []
+  let mut times : List Float := []
+  for i in [0:5] do
+    let t0 ← IO.monoNanosNow
+    let o := f ()
+    if o.length == 0 then IO.println "empty"
+    let t1 ← IO.monoNanosNow
+    out := o
+    times := times ++ [(t1 - t0).toFloat / 1.0e9]
+    if i == 0 || t1 - t0 < best then best := t1 - t0
+  let secs := best.toFloat / 1.0e9
   let mbps := n.toFloat / 1.0e6 / secs
-  IO.println s!"{label} bytes={n} s={secs} MB/s={mbps} digest={hex out}"
+  IO.println s!"{label} bytes={n} best_s={secs} MB/s={mbps} runs={times} digest={hex out}"
 
 /-- Many small hashes: the Store pattern (cells of a few hundred bytes). -/
 def smallLoop (label : String) (count n : Nat) (f : List UInt8 → List UInt8) : IO Unit := do
