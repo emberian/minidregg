@@ -88,6 +88,11 @@ inductive Verb : ResourceKind → Type
   | installPolicy : Verb .program
   /-- Revoking a resource grant is independently scoped management authority. -/
   | revokeCapability : Verb .program
+  /-- Reporting a finalized external payment to the deployment's pay cell
+  (`Kernel.PayObservationReceiver`).  Distinct from every management verb: an
+  observer can credit observed transfers and advance the chain clock, nothing
+  else. -/
+  | observePayment : Verb .program
   deriving DecidableEq, Repr
 
 /-- The complete semantic authorization request.  Verifiers receive this value

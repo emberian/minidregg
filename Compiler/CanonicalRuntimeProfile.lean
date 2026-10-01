@@ -206,7 +206,8 @@ def sourceComponents : List (List UInt8) :=
        CredentialAuthorityEntryCodec.verbTag (.installProgram),
        CredentialAuthorityEntryCodec.verbTag (.delegateProgram),
        CredentialAuthorityEntryCodec.verbTag (.installPolicy),
-       CredentialAuthorityEntryCodec.verbTag (.revokeCapability)]]]
+       CredentialAuthorityEntryCodec.verbTag (.revokeCapability),
+       CredentialAuthorityEntryCodec.verbTag (.observePayment)]]]
 
 def runtimeStream : StreamCodec (List (List UInt8) × FactoryTemplate) :=
   StreamCodec.product (StreamCodec.list bytesStream) factoryTemplateStream

@@ -53,6 +53,14 @@ structure FactoryController where
   capabilityId : CapabilityId
   deriving DecidableEq, Repr
 
+/-- The enrolled subject that reports finalized payments to the pay cell
+(`PayObservationReceiver`), and the identifier of its `observePayment`
+capability. -/
+structure PayObserver where
+  subject : SubjectId
+  capabilityId : CapabilityId
+  deriving DecidableEq, Repr
+
 structure Config where
   deployment : CanonicalCellRegistry.Deployment
   federation : FederationId
@@ -64,6 +72,10 @@ structure Config where
   enrollments : List Enrollment
   factoryController : FactoryController
   meterAllowance : ResourceCost.Charge
+  /-- The payment observer.  When present, genesis installs the pay cell's law
+  (`payPredicate`) and the observer's capability on the pay cell; when absent,
+  no report is admissible (the pay law is not installed). -/
+  payObserver : Option PayObserver := none
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -111,14 +123,31 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
-    config.factoryController.capabilityId.value],
+    config.factoryController.capabilityId.value] ++
+    (match config.payObserver with
+     | none => []
+     | some observer => [observer.subject.value, observer.capabilityId.value]),
    PolicyRecordCodec.encodePred config.factoryPredicate,
    config.enrollments, config.meterAllowance)
 
 def Config.ofWire (wire : ConfigWire) : Option Config := do
-  let [domain, factory, book, authority, federation, base, perBirth, perGrant,
+  let (coordinates, payObserver) ← match wire.1 with
+    | [domain, factory, book, authority, federation, base, perBirth, perGrant,
+        perByte, collector, asset, semantics, issuerEpoch, height, controller,
+        controlCapability] =>
+        some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
+          perByte, collector, asset, semantics, issuerEpoch, height, controller,
+          controlCapability), none)
+    | [domain, factory, book, authority, federation, base, perBirth, perGrant,
+        perByte, collector, asset, semantics, issuerEpoch, height, controller,
+        controlCapability, observer, observerCapability] =>
+        some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
+          perByte, collector, asset, semantics, issuerEpoch, height, controller,
+          controlCapability), some (⟨⟨observer⟩, ⟨observerCapability⟩⟩ : PayObserver))
+    | _ => none
+  let (domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability] := wire.1 | none
+      controlCapability) := coordinates
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -130,12 +159,13 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       factoryPredicate := predicate
       enrollments := wire.2.2.1
       factoryController := ⟨⟨controller⟩, ⟨controlCapability⟩⟩
-      meterAllowance := wire.2.2.2 }
+      meterAllowance := wire.2.2.2
+      payObserver := payObserver }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
-  cases config
-  simp [Config.ofWire, Config.toWire]
+  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer⟩
+  cases observer <;> simp [Config.ofWire, Config.toWire]
 
 /-- Version 2: the fourth deployment coordinate is the one authority cell's
 identifier (it was the retired catalogue's). -/
@@ -197,8 +227,11 @@ def Config.Valid {F : Type} [Field F]
   (config.factoryController.capabilityId ::
     config.enrollments.flatMap (fun enrollment =>
       [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
-       enrollment.factoryObserveCapabilityId])).Nodup ∧
+       enrollment.factoryObserveCapabilityId]) ++
+    (config.payObserver.map (·.capabilityId)).toList).Nodup ∧
   config.factoryController.subject.value ∈ config.enrollments.map (·.key.subject) ∧
+  (∀ observer ∈ config.payObserver,
+    observer.subject.value ∈ config.enrollments.map (·.key.subject)) ∧
   profile.template.lifetime > 0 ∧
   (∀ enrollment ∈ config.enrollments,
     enrollment.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
@@ -315,9 +348,28 @@ def factoryObserveCapability {F : Type} [Field F]
   rootCapability profile config .object enrollment.factoryObserveCapabilityId
     ⟨enrollment.key.subject⟩ config.deployment.factoryId {.observeObject}
 
+/-- The pay cell's law: only the configured observer, only `observePayment`. -/
+def payPredicate (observer : PayObserver) : Minidregg.Pred.Pred :=
+  .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
+      (Verb.observePayment : Verb .program))),
+    .eq "request/subject" (Int.ofNat observer.subject.value)]
+
+def payPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) (observer : PayObserver) : PolicyRecord :=
+  policy profile config (Kernel.PayCell.physicalId config.deployment.domain) (payPredicate observer)
+
+/-- The observer's capability: target and policy the pay cell, verb
+`observePayment` only. -/
+def observerCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    Capability .program :=
+  rootCapability profile config .program observer.capabilityId observer.subject
+    (Kernel.PayCell.physicalId config.deployment.domain) {.observePayment}
+
 def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
-  factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config)
+  factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config) ++
+    (config.payObserver.map (payPolicy profile config)).toList
 
 def policyEntries (record : PolicyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
@@ -354,7 +406,9 @@ def entries {F : Type} [Field F]
     keyEntries enrollment.key ++
     capabilityEntries (accountCapability profile config enrollment) ++
     capabilityEntries (accountControlCapability profile config enrollment) ++
-    capabilityEntries (factoryObserveCapability profile config enrollment))
+    capabilityEntries (factoryObserveCapability profile config enrollment)) ++
+  config.payObserver.toList.flatMap (fun observer =>
+    capabilityEntries (observerCapability profile config observer))
 
 /-- The genesis authority store. -/
 def authorityStore {F : Type} [Field F]
