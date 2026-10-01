@@ -1,0 +1,832 @@
+{
+  "document": {
+    "order": [
+      {
+        "atom": "8101",
+        "element": "8101",
+        "kind": "atom",
+        "marks": [
+          {
+            "anchor": {
+              "atom": "8101",
+              "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+              "type": "atom"
+            },
+            "author": {
+              "capability": "16690067727009326596",
+              "capabilityKind": "object",
+              "subject": "7"
+            },
+            "fresh": true,
+            "kind": "heading",
+            "mark": "90571501411662028089794347593383287253",
+            "tombstonedAt": null
+          }
+        ],
+        "parent": "8100",
+        "payload": "446f63757665727365",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "struck": false
+      },
+      {
+        "atom": "8102",
+        "element": "8102",
+        "kind": "atom",
+        "marks": [
+          {
+            "anchor": {
+              "atom": "8102",
+              "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+              "type": "atom"
+            },
+            "author": {
+              "capability": "16690067727009326596",
+              "capabilityKind": "object",
+              "subject": "7"
+            },
+            "fresh": true,
+            "kind": "bold",
+            "mark": "266732874876579304443200009999640447415",
+            "tombstonedAt": null
+          }
+        ],
+        "parent": "8100",
+        "payload": "626f6c6420776f726473",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "struck": false
+      },
+      {
+        "atom": "8103",
+        "element": "8103",
+        "kind": "atom",
+        "marks": [
+          {
+            "anchor": {
+              "atom": "8103",
+              "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+              "type": "atom"
+            },
+            "author": {
+              "capability": "16690067727009326596",
+              "capabilityKind": "object",
+              "subject": "7"
+            },
+            "fresh": true,
+            "kind": "italic",
+            "mark": "207138731916064442663741873260565828704",
+            "tombstonedAt": null
+          }
+        ],
+        "parent": "8100",
+        "payload": "736c616e746564",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "struck": false
+      },
+      {
+        "atom": "8104",
+        "element": "8104",
+        "kind": "atom",
+        "marks": [
+          {
+            "anchor": {
+              "atom": "8104",
+              "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+              "type": "atom"
+            },
+            "author": {
+              "capability": "16690067727009326596",
+              "capabilityKind": "object",
+              "subject": "7"
+            },
+            "fresh": true,
+            "kind": "code",
+            "mark": "211907420400009900799169366923837836253",
+            "tombstonedAt": null
+          }
+        ],
+        "parent": "8100",
+        "payload": "6d696e69207365727665",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "struck": false
+      },
+      {
+        "atom": "8105",
+        "element": "8105",
+        "kind": "atom",
+        "marks": [
+          {
+            "anchor": {
+              "atom": "8105",
+              "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+              "type": "atom"
+            },
+            "author": {
+              "capability": "16690067727009326596",
+              "capabilityKind": "object",
+              "subject": "7"
+            },
+            "fresh": true,
+            "kind": "link",
+            "link": "61617533287319667992453033473186177700",
+            "linkLive": true,
+            "mark": "191054041803196546585787875461346368145",
+            "target": {
+              "id": "13977425081691845952",
+              "type": "document"
+            },
+            "tombstonedAt": null
+          }
+        ],
+        "parent": "8100",
+        "payload": "7365652074686520746172676574",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "struck": false
+      },
+      {
+        "atom": "8106",
+        "element": "8106",
+        "kind": "atom",
+        "marks": [],
+        "parent": "8100",
+        "payload": "676f6e6520736f6f6e",
+        "revision": "109682237105248597202720703356135489309921453769566287017206236863891551472000",
+        "struck": true
+      },
+      {
+        "element": "183289086795411503445498106897729667308",
+        "kind": "embed",
+        "marks": [],
+        "parent": "8100",
+        "revision": "73462498683070341025287512836573600564782722817615137910650898457871536461526",
+        "transclusion": "183289086795411503445498106897729667308"
+      },
+      {
+        "atom": "8107",
+        "element": "8107",
+        "kind": "atom",
+        "marks": [
+          {
+            "anchor": {
+              "atom": "8107",
+              "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+              "type": "atom"
+            },
+            "author": {
+              "capability": "16690067727009326596",
+              "capabilityKind": "object",
+              "subject": "7"
+            },
+            "fresh": false,
+            "kind": "bold",
+            "mark": "328995472397674240824094209059632306802",
+            "tombstonedAt": null
+          }
+        ],
+        "parent": "8100",
+        "payload": "6368616e676564",
+        "revision": "37738738320407184062269463900385984735884027680163158107645205118518863593404",
+        "struck": false
+      }
+    ],
+    "root": "8100",
+    "rootRevision": "73462498683070341025287512836573600564782722817615137910650898457871536461526",
+    "transclusions": [
+      {
+        "id": "183289086795411503445498106897729667308",
+        "mode": "snapshot",
+        "opening": {
+          "atoms": "2",
+          "height": "30",
+          "pins": [
+            {
+              "atom": "8202",
+              "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010"
+            },
+            {
+              "atom": "8203",
+              "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010"
+            }
+          ],
+          "range": {
+            "finish": {
+              "bias": "after",
+              "death": "keepTombstone",
+              "neighbor": "8203",
+              "run": "8250"
+            },
+            "start": {
+              "bias": "before",
+              "death": "keepTombstone",
+              "neighbor": "8202",
+              "run": "8250"
+            }
+          },
+          "source": "10967313299474251698"
+        },
+        "render": {
+          "lines": [
+            "736f757263652074776f",
+            "736f75726365207468726565"
+          ],
+          "view": "snapshot"
+        }
+      }
+    ],
+    "type": "document"
+  },
+  "sourceDocument": {
+    "order": [
+      {
+        "atom": "8201",
+        "element": "8201",
+        "kind": "atom",
+        "marks": [],
+        "parent": "8200",
+        "payload": "736f75726365206f6e65",
+        "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010",
+        "struck": false
+      },
+      {
+        "atom": "8202",
+        "element": "8202",
+        "kind": "atom",
+        "marks": [],
+        "parent": "8200",
+        "payload": "736f757263652074776f",
+        "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010",
+        "struck": false
+      },
+      {
+        "atom": "8203",
+        "element": "8203",
+        "kind": "atom",
+        "marks": [],
+        "parent": "8200",
+        "payload": "736f75726365207468726565",
+        "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010",
+        "struck": false
+      },
+      {
+        "atom": "8204",
+        "element": "8204",
+        "kind": "atom",
+        "marks": [],
+        "parent": "8200",
+        "payload": "736f7572636520666f7572",
+        "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010",
+        "struck": false
+      }
+    ],
+    "root": "8200",
+    "rootRevision": "101584924705304225488976128576828313060563069124708641168897130176502561863010",
+    "transclusions": [],
+    "type": "document"
+  },
+  "entries": [
+    {
+      "canonical": "00e2479f485680d683ffc31fffff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff",
+      "id": "9243413368400091931",
+      "type": "document"
+    },
+    {
+      "canonical": "01c41fffe2479f485680d683ffff09ff446f6375766572736507ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdAt": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8101",
+      "kind": {
+        "type": "text"
+      },
+      "payload": "446f63757665727365",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "tombstonedAt": null,
+      "type": "atom"
+    },
+    {
+      "canonical": "01c51fffe2479f485680d683ffff0aff626f6c6420776f72647307ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdAt": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8102",
+      "kind": {
+        "type": "text"
+      },
+      "payload": "626f6c6420776f726473",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "tombstonedAt": null,
+      "type": "atom"
+    },
+    {
+      "canonical": "01c61fffe2479f485680d683ffff07ff736c616e74656407ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdAt": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8103",
+      "kind": {
+        "type": "text"
+      },
+      "payload": "736c616e746564",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "tombstonedAt": null,
+      "type": "atom"
+    },
+    {
+      "canonical": "01c71fffe2479f485680d683ffff0aff6d696e6920736572766507ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdAt": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8104",
+      "kind": {
+        "type": "text"
+      },
+      "payload": "6d696e69207365727665",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "tombstonedAt": null,
+      "type": "atom"
+    },
+    {
+      "canonical": "01c81fffe2479f485680d683ffff0eff736565207468652074617267657407ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdAt": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8105",
+      "kind": {
+        "type": "text"
+      },
+      "payload": "7365652074686520746172676574",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "tombstonedAt": null,
+      "type": "atom"
+    },
+    {
+      "canonical": "01c91fffe2479f485680d683ffff09ff676f6e6520736f6f6e07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff2dc97bb5cdceb0f714d0079ffb5c9b157948c201eb9077646e03b5581221c51201ff012dc97bb5cdceb0f714d0079ffb5c9b157948c201eb9077646e03b5581221c51201ff",
+      "createdAt": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8106",
+      "kind": {
+        "type": "text"
+      },
+      "payload": "676f6e6520736f6f6e",
+      "revision": "109682237105248597202720703356135489309921453769566287017206236863891551472000",
+      "tombstonedAt": "109682237105248597202720703356135489309921453769566287017206236863891551472000",
+      "type": "atom"
+    },
+    {
+      "canonical": "01ca1fffe2479f485680d683ffff07ff6368616e67656407ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff4fd723ceefcf092b8247b37f5a2b62c9812b206c8e594ff0fd908d94607e325eff00",
+      "createdAt": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8107",
+      "kind": {
+        "type": "text"
+      },
+      "payload": "6368616e676564",
+      "revision": "37738738320407184062269463900385984735884027680163158107645205118518863593404",
+      "tombstonedAt": null,
+      "type": "atom"
+    },
+    {
+      "body": {
+        "children": [
+          "8101",
+          "8102",
+          "8103",
+          "8104",
+          "8105",
+          "8106",
+          "183289086795411503445498106897729667308",
+          "8107"
+        ],
+        "type": "container"
+      },
+      "canonical": "03c31fffe2479f485680d683ff00ff08ffc41fffc51fffc61fffc71fffc81fffc91fffdf2f9ff4f24534bcf68ea827486d3a92ffca1fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfffe296b118fc481e24da24cbd82fe0c4f8e323d0d02a3d9f7f57ca5f0299775db7ff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8100",
+      "parent": null,
+      "revision": "73462498683070341025287512836573600564782722817615137910650898457871536461526",
+      "type": "element"
+    },
+    {
+      "body": {
+        "atom": "8101",
+        "type": "atom"
+      },
+      "canonical": "03c41fffe2479f485680d683ff01c31fff03ffc41fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8101",
+      "parent": "8100",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "type": "element"
+    },
+    {
+      "body": {
+        "atom": "8102",
+        "type": "atom"
+      },
+      "canonical": "03c51fffe2479f485680d683ff01c31fff03ffc51fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8102",
+      "parent": "8100",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "type": "element"
+    },
+    {
+      "body": {
+        "atom": "8103",
+        "type": "atom"
+      },
+      "canonical": "03c61fffe2479f485680d683ff01c31fff03ffc61fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8103",
+      "parent": "8100",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "type": "element"
+    },
+    {
+      "body": {
+        "atom": "8104",
+        "type": "atom"
+      },
+      "canonical": "03c71fffe2479f485680d683ff01c31fff03ffc71fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8104",
+      "parent": "8100",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "type": "element"
+    },
+    {
+      "body": {
+        "atom": "8105",
+        "type": "atom"
+      },
+      "canonical": "03c81fffe2479f485680d683ff01c31fff03ffc81fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8105",
+      "parent": "8100",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "type": "element"
+    },
+    {
+      "body": {
+        "atom": "8106",
+        "type": "atom"
+      },
+      "canonical": "03c91fffe2479f485680d683ff01c31fff03ffc91fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8106",
+      "parent": "8100",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "type": "element"
+    },
+    {
+      "body": {
+        "atom": "8107",
+        "type": "atom"
+      },
+      "canonical": "03ca1fffe2479f485680d683ff01c31fff03ffca1fff07ff01ff01ccdfca8ff40deeff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "8107",
+      "parent": "8100",
+      "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+      "type": "element"
+    },
+    {
+      "body": {
+        "transclusion": "183289086795411503445498106897729667308",
+        "type": "embed"
+      },
+      "canonical": "03df2f9ff4f24534bcf68ea827486d3a92ffe2479f485680d683ff01c31fff02ffdf2f9ff4f24534bcf68ea827486d3a92ff07ff01ff01ccdfca8ff40deeffe296b118fc481e24da24cbd82fe0c4f8e323d0d02a3d9f7f57ca5f0299775db7ffe296b118fc481e24da24cbd82fe0c4f8e323d0d02a3d9f7f57ca5f0299775db7ff00",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "183289086795411503445498106897729667308",
+      "parent": "8100",
+      "revision": "73462498683070341025287512836573600564782722817615137910650898457871536461526",
+      "type": "element"
+    },
+    {
+      "canonical": "066cea449847c772a3ae8b1f8836453e29ffe2479f485680d683ff0003ffdf2f9ff4f24534bcf68ea827486d3a92ffe53c0578dc7a8bbe8013e18646c691238b8721e6ad763c2c5e303b63973f3644ffd7095002b38d0377408304df7bf3bf06cc757273f21f62de23595178cac54b04ff4e09713ef58c6d9cff1eff75333325eaedcdd280571bb4533a45b5fba621009243dfc796aa9ff98e6802fdff01ff3cc75517c218656e843d9354b7f98953aa2ec0aeb5d410f8322ff2d75adb2169ff6c614589a47d17e7a15a1b017d9a362c42f47c5e6c5e6a71fe47cb07ce4f48b0ff6aff4e09713ef58c6d9cff5a20ff012a20ffff01ff5a20ff012b20ff01ff01ff02ff2a20ff8c365ea4b0be6a63d56a99227de5027c887e270331ba207c6854b62a1a3c8ffdff2b20ff8c365ea4b0be6a63d56a99227de5027c887e270331ba207c6854b62a1a3c8ffdff1eff78760aef6c845dfbd1b966befacbad669c78ccf2122423fb88f14232b653783cffff02ff7ecdf16073e5e0f3224646067d29c15fc34f098c594a41411238747ed6604621ff03ff2a20ff7ecdf16073e5e0f3224646067d29c15fc34f098c594a41411238747ed6604621ff03ff2b20ff01ffb54447ba5994451720aaa7ef7425ab85eaaae7fe521bf279441e573780d014dfff09ff5cba50f07b13e489ff12f68e9c7fb9c1f8602906d1ddc25f81d1ac3fbde9f28900692ced161da74381ff07ff01ff01ccdfca8ff40deeffe296b118fc481e24da24cbd82fe0c4f8e323d0d02a3d9f7f57ca5f0299775db7ff00",
+      "createdAt": "73462498683070341025287512836573600564782722817615137910650898457871536461526",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "51697031755578953792626924712987969853",
+      "relation": "51787816751816537555214921987964750742473136099757212973043174359917154445173",
+      "source": null,
+      "target": {
+        "id": "183289086795411503445498106897729667308",
+        "type": "transclusion"
+      },
+      "tombstonedAt": null,
+      "type": "link"
+    },
+    {
+      "canonical": "06b985770aedf733b4114dadbd63802831ffe2479f485680d683ff00ffcffeeab55db85cc7ff1bf01025b8660a5b85289ce2fb0963e4bb93ac029377a4f18a8248d7af515a7dff07ff01ff01ccdfca8ff40deeff782ae37aae9cc900e2c96798dc54b4d427aa157ce7295b647f4e460b2f82cd4dff00",
+      "createdAt": "31171539809717270338292934780239481224723792977348733336017621182414858498630",
+      "createdBy": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "document": "9243413368400091931",
+      "id": "61617533287319667992453033473186177700",
+      "relation": "50220898020003066926502635329252910713576306206401436102427385936772576171252",
+      "source": null,
+      "target": {
+        "id": "13977425081691845952",
+        "type": "document"
+      },
+      "tombstonedAt": null,
+      "type": "link"
+    },
+    {
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "canonical": "07df2f9ff4f24534bcf68ea827486d3a92ffe2479f485680d683ffe53c0578dc7a8bbe8013e18646c691238b8721e6ad763c2c5e303b63973f3644ffd7095002b38d0377408304df7bf3bf06cc757273f21f62de23595178cac54b04ff4e09713ef58c6d9cff1eff75333325eaedcdd280571bb4533a45b5fba621009243dfc796aa9ff98e6802fdff01ff3cc75517c218656e843d9354b7f98953aa2ec0aeb5d410f8322ff2d75adb2169ff6c614589a47d17e7a15a1b017d9a362c42f47c5e6c5e6a71fe47cb07ce4f48b0ff6aff4e09713ef58c6d9cff5a20ff012a20ffff01ff5a20ff012b20ff01ff01ff02ff2a20ff8c365ea4b0be6a63d56a99227de5027c887e270331ba207c6854b62a1a3c8ffdff2b20ff8c365ea4b0be6a63d56a99227de5027c887e270331ba207c6854b62a1a3c8ffdff1eff78760aef6c845dfbd1b966befacbad669c78ccf2122423fb88f14232b653783cffff02ff7ecdf16073e5e0f3224646067d29c15fc34f098c594a41411238747ed6604621ff03ff2a20ff7ecdf16073e5e0f3224646067d29c15fc34f098c594a41411238747ed6604621ff03ff2b20ff01ffb54447ba5994451720aaa7ef7425ab85eaaae7fe521bf279441e573780d014dfff09ff5cba50f07b13e489ff07ff01ff01ccdfca8ff40deeffe296b118fc481e24da24cbd82fe0c4f8e323d0d02a3d9f7f57ca5f0299775db7ffe60c8072ed00e8a2539c9e875b75e8bf1d78a71a7cecc55118d4bdee1268beb3ff00",
+      "disclosurePolicy": "72012272435299760433614204021186131141584773602136329291097995534279747391990",
+      "host": "9243413368400091931",
+      "id": "183289086795411503445498106897729667308",
+      "mode": "snapshot",
+      "opening": {
+        "atoms": "2",
+        "height": "30",
+        "pins": [
+          {
+            "atom": "8202",
+            "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010"
+          },
+          {
+            "atom": "8203",
+            "revision": "101584924705304225488976128576828313060563069124708641168897130176502561863010"
+          }
+        ],
+        "range": {
+          "finish": {
+            "bias": "after",
+            "death": "keepTombstone",
+            "neighbor": "8203",
+            "run": "8250"
+          },
+          "start": {
+            "bias": "before",
+            "death": "keepTombstone",
+            "neighbor": "8202",
+            "run": "8250"
+          }
+        },
+        "source": "10967313299474251698"
+      },
+      "reference": "27328204910753683930750575213388694730484269301399279841920442131348105452529",
+      "type": "transclusion"
+    },
+    {
+      "anchor": {
+        "atom": "8107",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "canonical": "08116189183a80e1755263e74e3303790701ffe2479f485680d683ff0100ca1fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfffff07ff01ff01ccdfca8ff40deeff0d98d3fb13a0cafd9be241ca93c67c6b4d1ed4b964dec8f5a9e5d534f10cdd30ffff00",
+      "document": "9243413368400091931",
+      "fresh": false,
+      "id": "328995472397674240824094209059632306802",
+      "kind": "bold",
+      "mark": "328995472397674240824094209059632306802",
+      "tombstonedAt": null,
+      "type": "mark"
+    },
+    {
+      "anchor": {
+        "atom": "8103",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "canonical": "0831d8d039c4a65bfb998292374d6941a5ffe2479f485680d683ff0100c61fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff01ff07ff01ff01ccdfca8ff40deeff3d338c73b1e29ffdabb0460d5bf4157abf5e612b0889ecf41db27b7ebfd2430801ffff00",
+      "document": "9243413368400091931",
+      "fresh": true,
+      "id": "207138731916064442663741873260565828704",
+      "kind": "italic",
+      "mark": "207138731916064442663741873260565828704",
+      "tombstonedAt": null,
+      "type": "mark"
+    },
+    {
+      "anchor": {
+        "atom": "8105",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "canonical": "08af6d667e16bffe2fe1fb784273226c98ffe2479f485680d683ff0100c81fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff04ffb985770aedf733b4114dadbd63802831ff07ff01ff01ccdfca8ff40deeff782ae37aae9cc900e2c96798dc54b4d427aa157ce7295b647f4e460b2f82cd4dffff00",
+      "document": "9243413368400091931",
+      "fresh": true,
+      "id": "191054041803196546585787875461346368145",
+      "kind": "link",
+      "link": "61617533287319667992453033473186177700",
+      "linkLive": true,
+      "mark": "191054041803196546585787875461346368145",
+      "target": {
+        "id": "13977425081691845952",
+        "type": "document"
+      },
+      "tombstonedAt": null,
+      "type": "mark"
+    },
+    {
+      "anchor": {
+        "atom": "8104",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "canonical": "08d018de96baad2edfc4f42b78268e0fa9ffe2479f485680d683ff0100c71fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff02ff07ff01ff01ccdfca8ff40deeff11a7b9698787dfae3f7b81aee9e798b8581c173e237a2b624c1f2d241288c924ffff00",
+      "document": "9243413368400091931",
+      "fresh": true,
+      "id": "211907420400009900799169366923837836253",
+      "kind": "code",
+      "mark": "211907420400009900799169366923837836253",
+      "tombstonedAt": null,
+      "type": "mark"
+    },
+    {
+      "anchor": {
+        "atom": "8101",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "canonical": "08da07463fc959ea58e9f11c4015e94148ffe2479f485680d683ff0100c41fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff03ff07ff01ff01ccdfca8ff40deeff40c47e5e1abaafda4ea98a951c8055d7d8b4512ea6ad2b4acae12118ae6d6435ffff00",
+      "document": "9243413368400091931",
+      "fresh": true,
+      "id": "90571501411662028089794347593383287253",
+      "kind": "heading",
+      "mark": "90571501411662028089794347593383287253",
+      "tombstonedAt": null,
+      "type": "mark"
+    },
+    {
+      "anchor": {
+        "atom": "8102",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "canonical": "08dcf4b3f4597f09d897b4123a9846ccd4ffe2479f485680d683ff0100c51fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfffff07ff01ff01ccdfca8ff40deeff35fb0d9526b1cfaea3f39835e59a9b67f1232398bd133850d0d0ad369896170701ffff00",
+      "document": "9243413368400091931",
+      "fresh": true,
+      "id": "266732874876579304443200009999640447415",
+      "kind": "bold",
+      "mark": "266732874876579304443200009999640447415",
+      "tombstonedAt": null,
+      "type": "mark"
+    },
+    {
+      "anchor": {
+        "atom": "8102",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "16690067727009326596",
+        "capabilityKind": "object",
+        "subject": "7"
+      },
+      "body": {
+        "bytes": "636865636b2074686973",
+        "type": "inline"
+      },
+      "canonical": "09f120ffe2479f485680d683ff0101c51fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff000aff636865636b207468697307ff01ff01ccdfca8ff40deefffef34896819bf147f719615a3e6b99b7a6f7bb1c27edb8eee991aa7a7deb3eedffff00",
+      "fresh": true,
+      "id": "8401",
+      "type": "annotation"
+    },
+    {
+      "anchor": {
+        "atom": "8105",
+        "revision": "83095432472902708967766523715365479421508676142572627109864347164348799133190",
+        "type": "atom"
+      },
+      "author": {
+        "capability": "10960338878975740517",
+        "capabilityKind": "object",
+        "subject": "14100043549062199830"
+      },
+      "body": {
+        "bytes": "77686f2077726f746520746869733f",
+        "type": "inline"
+      },
+      "canonical": "09f220ffe2479f485680d683ff0101c81fff1431cf1816077d43be507487127e9e0d3a36fee2d1997ffa74733c883ec668cfff000fff77686f2077726f746520746869733f4b1f81541db31cc9ff01ffd4b53de7672f549cffc4bba2c4b326bfb4d91b6e128d3c71155850f93c0972e7f7d82c93fd521f8e2cffff00",
+      "fresh": true,
+      "id": "8402",
+      "type": "annotation"
+    }
+  ],
+  "me": "7",
+  "names": {
+    "10967313299474251698": "rsrc",
+    "13977425081691845952": "rtarget"
+  }
+}

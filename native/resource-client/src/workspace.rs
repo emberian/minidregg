@@ -526,6 +526,7 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
     } else {
         println!("# links from {name} (document {document}) at height {height}");
     }
+    let mut contexts = std::collections::BTreeMap::<String, Option<crate::render::Rendered>>::new();
     for row in rows {
         if backlinks {
             println!(
@@ -538,6 +539,9 @@ fn doc_link_view(root: &Path, workspace: &Value, name: &str, view: &str) -> Resu
                 member(row, "kind")?,
                 member(row, "target")?
             );
+            if let Some(context) = backlink_context(root, workspace, &mut contexts, row)? {
+                println!("    {context}");
+            }
         } else {
             println!(
                 "link {} -> {} {} relation {} revision {} since {}",
@@ -623,6 +627,53 @@ fn signed_at(
         &attempt,
     )?;
     Ok((result, attempt.join("view.bin")))
+}
+
+/// The referencing line of one backlink, rendered: the line of the source
+/// document that carries the link as a mark, read by this workspace's own
+/// signed read of the source.  `None` when this workspace holds no reference
+/// to the source, its read is refused, or the link is no line's mark (a
+/// transclusion's or a range's link).  One read per source document.
+fn backlink_context(
+    root: &Path,
+    workspace: &Value,
+    cache: &mut std::collections::BTreeMap<String, Option<crate::render::Rendered>>,
+    row: &Value,
+) -> Result<Option<String>> {
+    let source = member(row, "source")?.to_owned();
+    if !cache.contains_key(&source) {
+        let rendered = match reference_for_target(root, &source)? {
+            Some(reference) => host_document(root, workspace, &reference).ok().and_then(|document| {
+                let names = reference_names(root);
+                crate::render::render(&crate::render::View {
+                    document: &document,
+                    entries: &[],
+                    names: &names,
+                    sources: &std::collections::BTreeMap::new(),
+                    me: member(workspace, "subject").unwrap_or(""),
+                })
+                .ok()
+            }),
+            None => None,
+        };
+        cache.insert(source.clone(), rendered);
+    }
+    let link = member(row, "link")?;
+    let Some(Some(rendered)) = cache.get(&source) else {
+        return Ok(None);
+    };
+    Ok(rendered
+        .lines
+        .iter()
+        .find(|line| {
+            line.row["marks"]
+                .as_array()
+                .is_some_and(|marks| marks.iter().any(|mark| mark["link"].as_str() == Some(link)))
+        })
+        .map(|line| {
+            let number = line.line.map_or("-".to_owned(), |n| n.to_string());
+            format!("line {number}: {}", crate::render::text::line_notation(line))
+        }))
 }
 
 fn entries(view: &Value) -> Result<&Vec<Value>> {
@@ -767,16 +818,24 @@ fn transclude(
 /// transclusion, and its source read must succeed (`follow`: re-resolve at the
 /// current height).  Returns HOST's target, the kernel's document view, and the
 /// rendered transclusions, each with its `text`.
-fn rendered_document(
-    root: &Path,
-    workspace: &Value,
-    host_name: &str,
-    only: Option<&str>,
-) -> Result<(String, Value, Vec<Value>)> {
+/// What one `doc show` read: the host's reference target, its `view-document`
+/// (transclusions re-read `at` their opening height where they `moved`), the
+/// host cell's signed entries, and, per source this workspace could read, the
+/// source's own live line numbers.
+struct DocumentRead {
+    host: String,
+    document: Value,
+    entries: Vec<Value>,
+    shown: Vec<Value>,
+    sources: std::collections::BTreeMap<String, std::collections::BTreeMap<String, usize>>,
+}
+
+fn rendered_document(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<DocumentRead> {
     let host_ref = reference(root, host_name)?;
     let (host_view, _, signed) = signed_view(root, workspace, &host_ref, "resource")?;
     let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
-    let records: Vec<&Value> = entries(&host_view)?
+    let host_entries = entries(&host_view)?.clone();
+    let records: Vec<&Value> = host_entries
         .iter()
         .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("transclusion"))
         .filter(|entry| only.is_none_or(|id| entry.get("id").and_then(Value::as_str) == Some(id)))
@@ -787,6 +846,7 @@ fn rendered_document(
         }
     }
     let mut sources = Vec::new();
+    let mut source_bins = std::collections::BTreeMap::<String, Vec<u8>>::new();
     let mut readable = std::collections::BTreeMap::new();
     for record in &records {
         let source = member(&record["opening"], "source")?.to_owned();
@@ -798,6 +858,7 @@ fn rendered_document(
                 Ok((_, _, signed)) => {
                     let bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
                     sources.push(json!({"target":source,"view":hex(&bin)}));
+                    source_bins.insert(source.clone(), bin);
                     Some(reference)
                 }
                 Err(error) if only.is_some() => {
@@ -812,13 +873,13 @@ fn rendered_document(
         };
         readable.insert(source, read);
     }
-    let render = |sources: &Vec<Value>| -> Result<Value> {
+    let render = |host: &[u8], sources: &Vec<Value>| -> Result<Value> {
         let (attempt, _) = new_attempt(root)?;
         make_private_dir(&attempt)?;
         let input = attempt.join("transclusions-in.json");
         private_file(
             &input,
-            &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":sources}))
+            &serde_json::to_vec(&json!({"host":hex(host),"sources":sources}))
                 .map_err(|error| error.to_string())?,
         )?;
         inspect(
@@ -829,12 +890,21 @@ fn rendered_document(
             &attempt.join("transclusions.json"),
         )
     };
-    let current = render(&sources)?;
-    let mut shown = Vec::new();
-    for item in current["transclusions"].as_array().ok_or("Host rendered no transclusions")? {
-        if only.is_some_and(|id| item.get("id").and_then(Value::as_str) != Some(id)) {
-            continue;
+    let mut current = render(&host_bin, &sources)?;
+    // Each readable source placed in its own order, so a transclusion's header
+    // names the source lines it covers.  A source cell with no document has no
+    // lines to name; its header says `?`.
+    let mut source_lines = std::collections::BTreeMap::new();
+    for (source, bin) in &source_bins {
+        if let Ok(view) = render(bin, &Vec::new()) {
+            source_lines.insert(source.clone(), crate::render::line_numbers(&view));
         }
+    }
+    let names = reference_names(root);
+    let mut shown = Vec::new();
+    let items = current["transclusions"].as_array().ok_or("Host rendered no transclusions")?.clone();
+    let mut resolved = Vec::new();
+    for item in items {
         let mut item = item.clone();
         let source = member(&item["opening"], "source")?.to_owned();
         if member(&item["render"], "view")? == "moved" {
@@ -842,7 +912,7 @@ fn rendered_document(
                 let height = member(&item["opening"], "height")?.to_owned();
                 let (_, bin) = signed_at(root, workspace, reference, &height)?;
                 let at = fs::read(&bin).map_err(|error| error.to_string())?;
-                let again = render(&vec![json!({"target":source,"at":hex(&at)})])?;
+                let again = render(&host_bin, &vec![json!({"target":source,"at":hex(&at)})])?;
                 if let Some(found) = again["transclusions"].as_array().and_then(|all| {
                     all.iter().find(|other| other.get("id") == item.get("id"))
                 }) {
@@ -851,49 +921,36 @@ fn rendered_document(
                 }
             }
         }
-        let atoms = member(&item["opening"], "atoms")?.to_owned();
-        let text = match member(&item["render"], "view")? {
-            "unavailable" => format!("[transclusion: {atoms} atoms of {source}, not readable by you]"),
-            "snapshot" | "live" => {
-                let lines: Vec<String> = item["render"]["lines"]
-                    .as_array()
-                    .map(|lines| {
-                        lines
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .map(|line| {
-                                String::from_utf8_lossy(&crate::decode_hex(line).unwrap_or_default()).into_owned()
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let mark = if item["render"]["view"] == "snapshot" {
-                    match item.get("at") {
-                        Some(height) => format!("snapshot at {}", height.as_str().unwrap_or("?")),
-                        None => "snapshot".to_owned(),
-                    }
-                } else if item["render"]["revised"] == true {
-                    "live, revised".to_owned()
-                } else {
-                    "live".to_owned()
-                };
-                format!("[{mark} of {source}]\n{}", lines.join("\n"))
-            }
-            other => format!("[transclusion of {source}: {other}]"),
-        };
+        resolved.push(item.clone());
+        if only.is_some_and(|id| item.get("id").and_then(Value::as_str) != Some(id)) {
+            continue;
+        }
+        let t = crate::render::transcluded(&names, &source_lines, &item);
+        let mut text = t.header.clone();
+        for line in &t.lines {
+            text.push('\n');
+            text.push_str(line);
+        }
         item["text"] = json!(text);
         shown.push(item);
     }
-    Ok((member(&host_ref, "target")?.to_owned(), current, shown))
+    current["transclusions"] = Value::Array(resolved);
+    Ok(DocumentRead {
+        host: member(&host_ref, "target")?.to_owned(),
+        document: current,
+        entries: host_entries,
+        shown,
+        sources: source_lines,
+    })
 }
 
 /// `transclusions` / `follow`: HOST's rendered transclusions.
 fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<()> {
-    let (host, _, shown) = rendered_document(root, workspace, host_name, only)?;
+    let read = rendered_document(root, workspace, host_name, only)?;
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({"type":"transclusions","host":host,
-            "transclusions":shown}))
+        serde_json::to_string_pretty(&json!({"type":"transclusions","host":read.host,
+            "transclusions":read.shown}))
         .map_err(|error| error.to_string())?
     );
     Ok(())
@@ -1210,145 +1267,93 @@ fn doc_unmark(
 }
 
 /// This workspace's names for reference targets: what a link mark points at is
-/// shown by the name the reader knows it by.
+/// shown by the name the reader knows it by.  Two names for one target: the
+/// first in byte order, so a rendering does not depend on directory order.
 fn reference_names(root: &Path) -> std::collections::BTreeMap<String, String> {
+    let mut stems: Vec<String> = fs::read_dir(root.join("refs"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.strip_suffix(".json").map(str::to_owned))
+        .collect();
+    stems.sort();
     let mut names = std::collections::BTreeMap::new();
-    if let Ok(entries) = fs::read_dir(root.join("refs")) {
-        for entry in entries.flatten() {
-            let file = entry.file_name();
-            let Some(stem) = file.to_str().and_then(|file| file.strip_suffix(".json")) else {
-                continue;
-            };
-            if let Ok(value) = reference(root, stem) {
-                if let Some(target) = value["target"].as_str() {
-                    names.entry(target.to_owned()).or_insert_with(|| stem.to_owned());
-                }
+    for stem in stems {
+        if let Ok(value) = reference(root, &stem) {
+            if let Some(target) = value["target"].as_str() {
+                names.entry(target.to_owned()).or_insert(stem);
             }
         }
     }
     names
 }
 
-fn link_target_text(names: &std::collections::BTreeMap<String, String>, target: &Value) -> String {
-    let id = target["id"].as_str().or_else(|| target["document"].as_str()).unwrap_or("?");
-    match target["type"].as_str() {
-        Some("document") | Some("range") => {
-            names.get(id).cloned().unwrap_or_else(|| format!("doc:{id}"))
-        }
-        Some(other) => format!("{other}:{id}"),
-        None => "?".to_owned(),
+/// How `doc show` prints: the text notation (default), the document's own
+/// atoms byte-exact (`raw`), the `Rendered` struct (`json`), or `html`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShowFormat {
+    Text,
+    Raw,
+    Json,
+    Html,
+}
+
+fn show_format(value: Option<OsString>) -> Result<ShowFormat> {
+    match value.as_deref().map(OsStr::to_str) {
+        None | Some(Some("text")) => Ok(ShowFormat::Text),
+        Some(Some("raw")) => Ok(ShowFormat::Raw),
+        Some(Some("json")) => Ok(ShowFormat::Json),
+        Some(Some("html")) => Ok(ShowFormat::Html),
+        _ => Err("--format must be text, raw, json or html".into()),
     }
 }
 
-/// A row's text with its marks in a plain notation: `# ` heading, `**bold**`,
-/// `_italic_`, `` `code` ``, `[text](→ name)` for a link.  A stale mark (its line
-/// moved since the mark was laid) is shown struck, `~~…~~`, and never applied as
-/// if current.  Each kind (a link: each target) renders once: struck only when
-/// every mark of it is stale, since a fresh mark of it says the line is so now.
-fn render_marks(
-    names: &std::collections::BTreeMap<String, String>,
-    body: &str,
-    marks: &Value,
-) -> String {
-    let Some(marks) = marks.as_array() else {
-        return body.to_owned();
-    };
-    let mut text = body.to_owned();
-    for kind in ["code", "italic", "bold", "link", "heading"] {
-        let mut targets = std::collections::BTreeMap::<String, bool>::new();
-        for mark in marks.iter().filter(|mark| mark["kind"] == kind) {
-            let target = if kind == "link" {
-                link_target_text(names, &mark["target"])
-            } else {
-                String::new()
-            };
-            *targets.entry(target).or_insert(false) |= mark["fresh"] == true;
-        }
-        for (target, fresh) in targets {
-            let strike = |decorated: String| {
-                if fresh {
-                    decorated
-                } else {
-                    format!("~~{decorated}~~")
-                }
-            };
-            text = match kind {
-                "code" => strike(format!("`{text}`")),
-                "italic" => strike(format!("_{text}_")),
-                "bold" => strike(format!("**{text}**")),
-                "link" => strike(format!("[{text}](→ {target})")),
-                _ => format!("{} {text}", strike("#".to_owned())),
-            };
-        }
-    }
-    text
-}
-
-/// `doc-show`: the document in the kernel's order.  Each live line is numbered;
-/// a struck line shows as `-`; a transclusion is one line, shown as this
-/// workspace's own read of its source renders it; a section is a heading.
-/// Nothing is sorted here: the order is the kernel's.
-fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
-    let (host, document, shown) = rendered_document(root, workspace, name, None)?;
-    let order = document["order"].as_array().ok_or("document view has no order")?;
-    let mut depth = std::collections::BTreeMap::<String, usize>::new();
-    if let Some(root_element) = document["root"].as_str() {
-        depth.insert(root_element.to_owned(), 0);
-    }
+/// The document as this workspace reads it: one `view-document` over this
+/// workspace's own reads, rendered by `crate::render`.
+fn read_rendered(root: &Path, workspace: &Value, name: &str) -> Result<(String, crate::render::Rendered)> {
+    let read = rendered_document(root, workspace, name, None)?;
     let names = reference_names(root);
-    let mut lines = Vec::new();
-    let mut text = Vec::new();
-    let mut number = 0usize;
-    for entry in order {
-        let element = member(entry, "element")?.to_owned();
-        let level = entry["parent"].as_str().and_then(|parent| depth.get(parent)).map_or(1, |d| d + 1);
-        depth.insert(element.clone(), level);
-        let indent = "  ".repeat(level.saturating_sub(1));
-        let (n, body) = match entry["kind"].as_str() {
-            Some("atom") => {
-                let bytes = crate::decode_hex(entry["payload"].as_str().unwrap_or("")).unwrap_or_default();
-                let body = String::from_utf8_lossy(&bytes).into_owned();
-                if entry["struck"] == true {
-                    (None, body)
-                } else {
-                    number += 1;
-                    (Some(number), body)
-                }
-            }
-            Some("embed") => {
-                number += 1;
-                let id = member(entry, "transclusion")?;
-                let body = shown
-                    .iter()
-                    .find(|item| item["id"].as_str() == Some(id))
-                    .and_then(|item| item["text"].as_str())
-                    .unwrap_or("[transclusion]")
-                    .to_owned();
-                (Some(number), body)
-            }
-            Some("container") => (None, format!("[section {element}]")),
-            Some(other) => (None, format!("[{other}]")),
-            None => (None, String::new()),
-        };
-        let rendered = render_marks(&names, &body, &entry["marks"]);
-        text.push(match n {
-            Some(n) => format!("{indent}{n:>3}  {rendered}"),
-            None if entry["kind"] == "atom" => format!("{indent}  -  {rendered} (struck)"),
-            None => format!("{indent}     {rendered}"),
-        });
-        let mut line = entry.clone();
-        line["line"] = n.map_or(Value::Null, |n| json!(n));
-        line["text"] = json!(body);
-        line["rendered"] = json!(rendered);
-        lines.push(line);
+    let rendered = crate::render::render(&crate::render::View {
+        document: &read.document,
+        entries: &read.entries,
+        names: &names,
+        sources: &read.sources,
+        me: member(workspace, "subject")?,
+    })?;
+    Ok((read.host, rendered))
+}
+
+/// `doc-show`: the document in the kernel's order (nothing is sorted here).
+/// Live lines are numbered, a struck line is `-`, a section `§`; marks render
+/// in the notation of `render::text`; annotations sit under their line; a
+/// transclusion is rendered over this workspace's own read of its source.
+fn doc_show(root: &Path, workspace: &Value, name: &str, format: ShowFormat) -> Result<()> {
+    let (host, rendered) = read_rendered(root, workspace, name)?;
+    let mut out = std::io::stdout().lock();
+    let bytes = match format {
+        ShowFormat::Text => rendered.text().into_bytes(),
+        ShowFormat::Raw => rendered.raw(),
+        ShowFormat::Html => rendered.html(name).into_bytes(),
+        ShowFormat::Json => {
+            let mut text = serde_json::to_string_pretty(&rendered.json(&host)).map_err(|error| error.to_string())?;
+            text.push('\n');
+            text.into_bytes()
+        }
+    };
+    out.write_all(&bytes).and_then(|()| out.flush()).map_err(|error| error.to_string())
+}
+
+/// `doc-outline`: the heading lines (a fresh heading mark), nested by depth.
+fn doc_outline(root: &Path, workspace: &Value, name: &str, json_out: bool) -> Result<()> {
+    let (_, rendered) = read_rendered(root, workspace, name)?;
+    if json_out {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&rendered.json("")["outline"]).map_err(|error| error.to_string())?
+        );
+    } else {
+        print!("{}", crate::render::text::outline(&rendered));
     }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&json!({"type":"document","host":host,
-            "root":document["root"],"rootRevision":document["rootRevision"],
-            "lines":lines,"text":text.join("\n")}))
-        .map_err(|error| error.to_string())?
-    );
     Ok(())
 }
 
@@ -2377,8 +2382,18 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         }
         "doc-show" => {
             let name = os_string(args.required("name")?, "document name")?;
+            let format = show_format(args.optional("format"))?;
             args.finish()?;
-            doc_show(&root, &workspace, &name)
+            doc_show(&root, &workspace, &name, format)
+        }
+        "doc-outline" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let format = show_format(args.optional("format"))?;
+            if !matches!(format, ShowFormat::Text | ShowFormat::Json) {
+                return Err("doc-outline --format must be text or json".into());
+            }
+            args.finish()?;
+            doc_outline(&root, &workspace, &name, format == ShowFormat::Json)
         }
         "doc-insert" => {
             let name = os_string(args.required("name")?, "document name")?;
@@ -2455,7 +2470,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             publish_delegation(&root, &proposal_id, &attempt)
         }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, doc-backlinks, doc-links, submit or recover".into(),
+            "workspace action must be init, import, list, describe, read, doc-show, doc-outline, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, propose, create, submit, recover or publish-delegation".into(),
         ),
     }
 }
@@ -2528,16 +2543,17 @@ mod tests {
 
     #[test]
     fn marks_render_inline() {
+        use crate::render::{decos, text::decorate};
         let names = std::collections::BTreeMap::from([("77".to_owned(), "target".to_owned())]);
         let marks = json!([{"kind":"bold","fresh":false},{"kind":"bold","fresh":true},
             {"kind":"link","fresh":true,"target":{"type":"document","id":"77"}},
             {"kind":"italic","fresh":false}]);
-        assert_eq!(render_marks(&names, "two", &marks), "[**~~_two_~~**](→ target)");
+        assert_eq!(decorate("two", &decos(&names, &marks, 1)), "[**~~_two_~~**](→ target)");
         let heading = json!([{"kind":"heading","fresh":true},{"kind":"code","fresh":true}]);
-        assert_eq!(render_marks(&names, "x", &heading), "# `x`");
+        assert_eq!(decorate("x", &decos(&names, &heading, 1)), "# `x`");
         let unknown = json!([{"kind":"link","fresh":false,"target":{"type":"document","id":"5"}}]);
-        assert_eq!(render_marks(&names, "y", &unknown), "~~[y](→ doc:5)~~");
-        assert_eq!(render_marks(&names, "z", &Value::Null), "z");
+        assert_eq!(decorate("y", &decos(&names, &unknown, 1)), "~~[y](→ doc:5)~~");
+        assert_eq!(decorate("z", &decos(&names, &Value::Null, 1)), "z");
     }
 
     #[test]

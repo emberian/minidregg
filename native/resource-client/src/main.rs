@@ -48,6 +48,14 @@ mod selected_release;
 #[cfg(unix)]
 mod session_enrollment;
 #[cfg(unix)]
+mod render;
+// The shell's `doc` lines (deploy/shell/DOC-VERBS.md). No `mini shell` on this
+// tree: compiled and tested here, called by nothing until `shell.rs` declares it.
+#[cfg(unix)]
+#[allow(dead_code)]
+#[path = "shell/doc_render.rs"]
+mod shell_doc_render;
+#[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
@@ -148,6 +156,8 @@ const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-hos
 usage:
   mini keygen --secret KEY --public PUBLIC
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini workspace --action doc-show|doc-outline --dir WORKSPACE --name DOC [--format text|raw|json|html]
+  mini workspace --action doc-insert|doc-move|doc-remove|mark|unmark|transclude|transclusions|follow|doc-backlinks|doc-links --dir WORKSPACE --name DOC [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]

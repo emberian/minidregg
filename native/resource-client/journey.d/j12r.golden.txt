@@ -1,0 +1,12 @@
+  1  # Docuverse
+  2  **bold words**
+     ↳ you (fresh): check this
+  3  _slanted_
+  4  `mini serve`
+  5  [see the target](→ rtarget)
+     ↳ subject <R> (fresh): who wrote this?
+  -  ~~gone soon~~
+  6  ⟨from rsrc lines 2..3, snapshot@<H>⟩
+     │ source two
+     │ source three
+  7  ~~**changed**~~
