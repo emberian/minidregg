@@ -1,0 +1,10 @@
+{
+  "credentials": [
+    {
+      "grants": [],
+      "provider": "pool"
+    }
+  ],
+  "owner": "pool",
+  "type": "mini-provider-credentials-list-v1"
+}

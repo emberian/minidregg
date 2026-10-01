@@ -1,0 +1,89 @@
+{
+  "mini": "/home/ember/build/mini-product-20260930/hermes-keys/bin/mini",
+  "host": "/home/ember/build/mini-product-20260930/hermes-keys/bin/minidregg-host-p2",
+  "hostConfig": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/boot/deployment/continuity-config.json",
+  "hostSocket": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/session/host.sock",
+  "custodyKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/boot/controller.key",
+  "stateDir": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/state",
+  "controlSocket": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/state/control.sock",
+  "cwd": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a",
+  "task": "74601",
+  "subject": "7",
+  "capability": "71",
+  "queryCapability": "71",
+  "policyControlCapability": "72",
+  "toolTask": {
+    "task": "74602",
+    "subject": "8",
+    "capability": "81",
+    "queryCapability": "81",
+    "custodyKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/boot/tool.key",
+    "parentCapability": "73",
+    "parentObserveCapability": "73",
+    "reserve": "2",
+    "charge": "1",
+    "allowedPublications": [
+      {
+        "kind": "object",
+        "target": "74603",
+        "capability": "93",
+        "observeCapability": "93"
+      }
+    ],
+    "allowedReads": [
+      {
+        "name": "publication",
+        "kind": "object",
+        "target": "74603",
+        "observeCapability": "94",
+        "maxResultBytes": 65536
+      }
+    ]
+  },
+  "providerTask": {
+    "task": "74604",
+    "subject": "9",
+    "capability": "101",
+    "queryCapability": "101",
+    "custodyKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/boot/provider.key",
+    "parentCapability": "75",
+    "parentObserveCapability": "75",
+    "reserve": "3",
+    "charge": "1",
+    "model": "shared-model",
+    "providers": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/etc/providers.json",
+    "credentialsRoot": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/credentials",
+    "credentialsKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/etc/credentials.key",
+    "gatewayBind": "127.0.0.1:18941",
+    "maxRequestBytes": 1048576,
+    "maxResponseBytes": 8388608,
+    "timeoutSeconds": 120,
+    "localFixtureHostNetwork": true,
+    "onBehalfOf": {
+      "subject": "21",
+      "publicKey": "7a1cfd5b1013ac4c050877e16b36c13d3e8b6cec73ace9e1f3f03c52fe437ed1"
+    }
+  },
+  "commands": [
+    {
+      "name": "hermes-acp",
+      "program": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/launcher/bwrap",
+      "args": [
+        "--workspace",
+        "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/work",
+        "--runtime-root",
+        "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-a/runtime",
+        "--network",
+        "host",
+        "--",
+        "/agent/hermes-acp",
+        "/workspace/acp-ready",
+        "/workspace/acp-release"
+      ],
+      "systemdScope": true,
+      "wallTimeSeconds": 1500,
+      "reserve": "3",
+      "charge": "1"
+    }
+  ]
+}

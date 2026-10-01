@@ -5,6 +5,10 @@ mod application_tools;
 #[cfg(test)]
 mod birth_lifecycle_tests;
 mod control;
+// One source shared with `mini key` (resource-client includes it by path):
+// the write verbs are used there, the reserve-time lookups here.
+#[allow(dead_code)]
+mod credentials;
 mod custody_gate;
 mod dispatch_custody;
 #[cfg(test)]
@@ -228,8 +232,20 @@ struct ProviderTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u32>,
     model: String,
-    upstream_url: String,
-    provider_key_file: PathBuf,
+    /// The operator's provider table (`/etc/mini/providers.json`,
+    /// root-owned). Endpoints, credential kinds and tariffs live there.
+    providers: PathBuf,
+    /// Pin this task to one table row. Absent: the first row listing
+    /// `model`. The worker never chooses the row (or the payer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
+    /// The friend whose own credential this runner uses on a `user` row,
+    /// under that friend's grant naming `subject`. Absent: `user` rows are
+    /// refused `no-credential`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    on_behalf_of: Option<OnBehalfOf>,
+    credentials_root: PathBuf,
+    credentials_key: PathBuf,
     gateway_bind: String,
     max_request_bytes: usize,
     max_response_bytes: usize,
@@ -242,6 +258,39 @@ struct ProviderTask {
     /// network route. Real HTTPS provider prompts use a private Unix gateway.
     #[serde(default)]
     local_fixture_host_network: bool,
+}
+
+/// Operator pin of the friend this Hermes runner serves: their subject and
+/// the public key of the workspace key that stored their credential (read
+/// from their enrollment result).
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct OnBehalfOf {
+    subject: String,
+    public_key: String,
+}
+
+/// Audit record of where an attempt was sent. Never holds a secret.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProviderRouteRecord {
+    provider: String,
+    endpoint: String,
+    /// `user:SUBJECT`, `pool`, or `none`.
+    credential: String,
+}
+
+/// The task's provider table row. A `localFixtureHostNetwork` task may only
+/// reach a loopback HTTP row: the host network route exists for fixtures.
+fn provider_task_row<'a>(
+    task: &ProviderTask,
+    table: &'a credentials::ProviderTable,
+) -> Result<&'a credentials::ProviderRow> {
+    let row = table.select(&task.model, task.provider.as_deref())?;
+    if task.local_fixture_host_network && !credentials::is_loopback_http(&row.endpoint) {
+        return Err("localFixtureHostNetwork requires a loopback HTTP provider row".into());
+    }
+    Ok(row)
 }
 
 fn provider_max_iterations(configured: Option<u8>) -> Result<u8> {
@@ -283,16 +332,11 @@ fn select_provider_metering<'a>(profile: &'a Value, task: &str) -> Result<&'a Va
     }
 }
 
-fn provider_required_network(task: &ProviderTask) -> Result<&'static str> {
-    if !task.local_fixture_host_network {
-        return Ok("none");
-    }
-    if task.upstream_url.starts_with("http://127.0.0.1:")
-        || task.upstream_url.starts_with("http://[::1]:")
-    {
-        Ok("host")
+fn provider_required_network(task: &ProviderTask) -> &'static str {
+    if task.local_fixture_host_network {
+        "host"
     } else {
-        Err("localFixtureHostNetwork requires a loopback HTTP upstream".into())
+        "none"
     }
 }
 
@@ -1146,6 +1190,8 @@ struct ProviderAttempt {
     meter_report_sha256: Option<String>,
     #[serde(default)]
     metered_charge: Option<String>,
+    /// Table row and credential kind this attempt was permitted to use.
+    route: ProviderRouteRecord,
 }
 
 /// One exact app dispatch attempt under the separate AgentGrain purse. The
@@ -3002,17 +3048,24 @@ fn validate(c: &Config) -> Result<()> {
             || c.tool_task
                 .as_ref()
                 .is_some_and(|t| t.custody_key == p.custody_key)
-            || !p.provider_key_file.is_absolute()
-            || p.provider_key_file == p.custody_key
-            || p.provider_key_file == c.custody_key
-            || c.tool_task
-                .as_ref()
-                .is_some_and(|t| t.custody_key == p.provider_key_file)
+            || !p.credentials_key.is_absolute()
+            || !p.credentials_root.is_absolute()
+            || !p.providers.is_absolute()
+            || p.credentials_key.starts_with(&p.credentials_root)
+            || [&p.custody_key, &c.custody_key]
+                .into_iter()
+                .chain(c.tool_task.as_ref().map(|t| &t.custody_key))
+                .any(|key| key == &p.credentials_key || key.starts_with(&p.credentials_root))
+            || c.state_dir.starts_with(&p.credentials_root)
+            || p.credentials_root.starts_with(&c.state_dir)
         {
-            return Err("providerTask needs distinct absolute key paths".into());
+            return Err("providerTask needs distinct absolute key and credential paths".into());
         }
-        if p.provider_key_file.parent() != Some(c.state_dir.as_path()) {
-            return Err("provider key must be directly inside private stateDir".into());
+        if let Some(name) = &p.provider {
+            credentials::provider_name(name)?;
+        }
+        if let Some(owner) = &p.on_behalf_of {
+            credentials::Owner::new(&owner.subject, &owner.public_key)?;
         }
         if p.reserve
             .parse::<u64>()
@@ -3066,7 +3119,7 @@ fn validate(c: &Config) -> Result<()> {
         {
             return Err("providerTask model or bounds invalid".into());
         }
-        let required_network = provider_required_network(p)?;
+        let required_network = provider_required_network(p);
         if !c
             .commands
             .iter()
@@ -3306,7 +3359,8 @@ impl Runtime {
             }
             if let Some(provider) = &self.config.provider_task {
                 command.env("MINI_GRAIN_PROVIDER_CUSTODY_KEY", &provider.custody_key);
-                command.env("MINI_GRAIN_PROVIDER_KEY_FILE", &provider.provider_key_file);
+                command.env("MINI_GRAIN_CREDENTIALS_ROOT", &provider.credentials_root);
+                command.env("MINI_GRAIN_CREDENTIALS_KEY", &provider.credentials_key);
                 if spec.name == "hermes-acp" && !provider.local_fixture_host_network {
                     let port = provider
                         .gateway_bind
@@ -9071,6 +9125,18 @@ impl Runtime {
         match command {
             provider::ProviderCommand::Reserve { request, reply } => {
                 let result = self.provider_reserve(request);
+                // Audit line per decision. Neither side can carry a bearer:
+                // `Secret` has no Display and errors never format one.
+                match (&result, &self.journal.provider_attempt) {
+                    (Ok(provider::ForwardPermit::Fresh { attempt_id, .. }), Some(attempt)) => {
+                        eprintln!(
+                            "provider attempt {attempt_id}: permitted provider={} credential={} endpoint={}",
+                            attempt.route.provider, attempt.route.credential, attempt.route.endpoint
+                        )
+                    }
+                    (Ok(_), _) => eprintln!("provider request: replayed from this prompt's cache"),
+                    (Err(error), _) => eprintln!("provider request refused: {error}"),
+                }
                 let _ = reply.send(result);
             }
             provider::ProviderCommand::BeforeSend {
@@ -9243,6 +9309,21 @@ impl Runtime {
         {
             return Err("parent prompt generation is no longer reserved".into());
         }
+        // The credential is resolved against the signed height of this same
+        // parent read, before anything is journaled or reserved: a refused
+        // route leaves no attempt, no hold and no Mini transition.
+        let height = parent
+            .get("height")
+            .and_then(|h| {
+                h.as_str()
+                    .map(str::to_owned)
+                    .or_else(|| h.as_u64().map(|v| v.to_string()))
+            })
+            .ok_or("signed parent read has no height")?
+            .parse::<u64>()
+            .map_err(|_| "signed parent height exceeds u64")?;
+        let (route, route_record) =
+            self.provider_route(&task, &request.exact_body, height, metering_pin.as_ref())?;
         let mut witness = self
             .journal
             .prompt_witness
@@ -9288,6 +9369,7 @@ impl Runtime {
             meter_report_path: None,
             meter_report_sha256: None,
             metered_charge: None,
+            route: route_record,
         });
         self.save()?;
         let authority = self.provider()?;
@@ -9332,7 +9414,75 @@ impl Runtime {
             attempt_id: id,
             lease: request.lease,
             exact_body: request.exact_body,
+            route,
         })
+    }
+    /// Resolve this request's route: the task's table row, the row's tariff
+    /// against the Host pin, and the bearer the row's credential kind calls
+    /// for. A `user` row uses only the pinned friend's credential under a
+    /// grant naming this runner; a `pool` row uses the operator's key, and
+    /// the purse reserve that follows is what gates its spend.
+    fn provider_route(
+        &self,
+        task: &ProviderTask,
+        exact_body: &[u8],
+        height: u64,
+        pin: Option<&ProviderMeteringPin>,
+    ) -> Result<(provider::Route, ProviderRouteRecord)> {
+        let table = credentials::ProviderTable::load(&task.providers, 0)?;
+        let row = provider_task_row(task, &table)?;
+        let tariff_matches = match (&row.tariff, pin) {
+            (Some(tariff), Some(pin)) => {
+                tariff.version == pin.tariff_version
+                    && tariff.input_micro_per_million == pin.input_micro_per_million
+                    && tariff.output_micro_per_million == pin.output_micro_per_million
+            }
+            (None, None) => true,
+            _ => false,
+        };
+        if !tariff_matches {
+            return Err(credentials::refused("tariff-mismatch"));
+        }
+        let store = || {
+            credentials::CredentialStore::open(&task.credentials_root, &task.credentials_key)
+        };
+        let (bearer, credential) = match row.credential {
+            credentials::CredentialSource::None => (None, "none".to_owned()),
+            credentials::CredentialSource::Pool => {
+                (Some(store()?.pool(&row.name)?), "pool".to_owned())
+            }
+            credentials::CredentialSource::User => {
+                let pinned = task
+                    .on_behalf_of
+                    .as_ref()
+                    .ok_or_else(|| credentials::refused("no-credential"))?;
+                let owner = credentials::Owner::new(&pinned.subject, &pinned.public_key)?;
+                let max_tokens = serde_json::from_slice::<Value>(exact_body)
+                    .ok()
+                    .and_then(|body| body.get("max_tokens").and_then(Value::as_u64));
+                let bearer = store()?.authorize(
+                    &owner,
+                    &row.name,
+                    &task.subject,
+                    height,
+                    max_tokens,
+                    credentials::utc_day(),
+                )?;
+                (Some(bearer), format!("user:{}", owner.subject))
+            }
+        };
+        let record = ProviderRouteRecord {
+            provider: row.name.clone(),
+            endpoint: row.endpoint.clone(),
+            credential,
+        };
+        Ok((
+            provider::Route {
+                endpoint: row.endpoint.clone(),
+                bearer,
+            },
+            record,
+        ))
     }
     fn provider_metering_pin(&self, task: &ProviderTask) -> Result<Option<ProviderMeteringPin>> {
         if !task.metering {
@@ -14147,13 +14297,15 @@ impl Runtime {
                 }
             }
         }
-        // Provider credentials stay in controller memory and its private
-        // stateDir. Hermes receives only a fresh one-prompt gateway token.
-        // This setup runs before any Mini reservation, so a profile failure
-        // cannot strand a paid allowance.
+        // Provider credentials are resolved per request at reserve time and
+        // stay in controller memory. Hermes receives only a fresh one-prompt
+        // gateway token. The table row is checked here, before any Mini
+        // reservation, so a misconfigured route cannot strand an allowance.
         let provider_runtime = if let Some(task) = self.config.provider_task.clone() {
-            let key =
-                provider_profile::private_key(&task.provider_key_file, &self.config.state_dir)?;
+            provider_task_row(
+                &task,
+                &credentials::ProviderTable::load(&task.providers, 0)?,
+            )?;
             let bind = task
                 .gateway_bind
                 .parse()
@@ -14164,9 +14316,7 @@ impl Runtime {
                     bind,
                     unix_socket: (!task.local_fixture_host_network)
                         .then(|| self.config.state_dir.join("provider-gateway.sock")),
-                    upstream_url: task.upstream_url.clone(),
                     pinned_model: task.model.clone(),
-                    provider_key: key,
                     private_dir: self.config.state_dir.clone(),
                     max_request_bytes: task.max_request_bytes,
                     max_response_bytes: task.max_response_bytes,
@@ -18951,8 +19101,9 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "queryCapability":"101", "custodyKey":"/private/provider-task.key",
             "parentCapability":"75", "parentObserveCapability":"75",
             "reserve":"3", "charge":"0", "metering":true,
-            "model":"pinned-model", "upstreamUrl":"https://example.test/v1/chat/completions",
-            "providerKeyFile":"/private/provider.key", "gatewayBind":"127.0.0.1:18762",
+            "model":"pinned-model", "providers":"/etc/mini/providers.json",
+            "credentialsRoot":"/var/lib/mini/credentials",
+            "credentialsKey":"/etc/mini/credentials.key", "gatewayBind":"127.0.0.1:18762",
             "maxRequestBytes":1048576, "maxResponseBytes":8388608,
             "timeoutSeconds":30
         });
@@ -18965,12 +19116,21 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             provider_max_iterations(configured.max_iterations).unwrap(),
             2
         );
-        assert_eq!(provider_required_network(&configured).unwrap(), "none");
+        assert_eq!(provider_required_network(&configured), "none");
         let mut fixture = configured.clone();
         fixture.local_fixture_host_network = true;
-        assert!(provider_required_network(&fixture).is_err());
-        fixture.upstream_url = "http://127.0.0.1:18762/v1/chat/completions".into();
-        assert_eq!(provider_required_network(&fixture).unwrap(), "host");
+        assert_eq!(provider_required_network(&fixture), "host");
+        let table = credentials::ProviderTable::parse(br#"{"type":"mini-provider-table-v1","providers":[
+            {"name":"remote","endpoint":"https://example.test/v1/chat/completions",
+             "kind":"openai-compatible","models":["pinned-model"],"credential":"user"},
+            {"name":"homelab","endpoint":"http://127.0.0.1:18081/v1/chat/completions",
+             "kind":"openai-compatible","models":["pinned-model"],"credential":"none"}]}"#)
+        .unwrap();
+        // The host network route may reach only a loopback row.
+        assert!(provider_task_row(&fixture, &table).is_err());
+        fixture.provider = Some("homelab".into());
+        assert_eq!(provider_task_row(&fixture, &table).unwrap().name, "homelab");
+        assert_eq!(provider_task_row(&configured, &table).unwrap().name, "remote");
         for invalid in [json!(-1), json!(1.5), json!("2"), json!(256)] {
             explicit["maxIterations"] = invalid;
             assert!(serde_json::from_value::<ProviderTask>(explicit.clone()).is_err());

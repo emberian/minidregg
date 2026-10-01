@@ -103,7 +103,7 @@ existing_path "$host_config"
 while IFS= read -r key; do
   private_file "$key"
 done < <(jq -r '[.custodyKey,.toolTask.custodyKey?,.providerTask.custodyKey?,
-                  .providerTask.providerKeyFile?] | map(select(. != null)) | .[]' "$config")
+                  .providerTask.credentialsKey?] | map(select(. != null)) | .[]' "$config")
 if [[ -e $state_dir/journal.json ]]; then
   private_file "$state_dir/journal.json"
   journal_task=$(jq -er '.binding.config.task' "$state_dir/journal.json") ||
