@@ -31,7 +31,7 @@ REALM/AREA/rooms/*.md     one scene per room (MUD §2.0: R/scene, a content cell
 | `rooms[].leased` | "0"/"1" | field `leased` (pinned). `until` is created as 0, and the concierge mirrors each lease's `expiresAt` into it (MUD §2.9). |
 | `rooms[].scene` | path of the scene | written into the content cell `{REALM}-scene-{ID}` |
 | `items[]` | `slug`, `id`, `kind`, `placed: {room\|mob\|quest: …}` | an item cell (`item/init.item.json`). `placed.room` means owner REF with where = room. `placed.mob` and `placed.quest` mean owner REF with where = 0. A quest reward also gets `law.item-reward`. |
-| `spawns[]` | `mob`, `room` (= HOME), `hp`, `respawn`, `skill`, `wander`, `program` | a mob subject (key held by the referee), a mob sheet (`sheet/init.sheet.json` with S = the mob, HOME = room, HPMAX = hp, RESPAWN_M1 = respawn − 1), and its program document |
+| `spawns[]` | `mob`, `room` (= HOME), `hp`, `respawn`, `skill`, `wander`, `program` | a mob subject (key held by the referee), a mob sheet (`sheet/init.sheet.json` with S = the mob, HOME = room, HPMAX = hp, NEG_RESPAWN = −respawn), and its program document |
 | `shop` | room, market name, what it sells | a market cell under the area (`market/`) |
 
 Direction k (0-based, in `room/fields.json` order) sits at fields `8+3k`, `9+3k` and `10+3k`.

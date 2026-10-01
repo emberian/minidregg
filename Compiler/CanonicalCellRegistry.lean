@@ -36,6 +36,7 @@ import Compiler.PolicySourceCell
 import Kernel.PayCell
 import Compiler.StreamCell
 import Compiler.NockProgramCodec
+import Kernel.ClockCell
 import Theory.CanonicalResourceBookInvariant
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
@@ -63,19 +64,22 @@ inductive Kind where
   | declaredProgram
   | policySource
   /-- The deployment's pay cell (`Kernel.PayCell`): tariff, deposit address
-  book, assignment and imported chain clock. -/
+  book and assignment. Time is the clock cell's. -/
   | pay
   /-- A dense append-only sequence log (`StreamCell`): a per-author stream. -/
   | stream
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
+  /-- The deployment's one clock (`Kernel.ClockCell`): unix seconds and the
+  last observed chain slot, advanced only by `ClockTickReceiver`. -/
+  | clock
   deriving DecidableEq, Repr
 
 def Kind.all : List Kind :=
   [.content, .eventHistory, .authority, .declaredObject,
-    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram]
+    .resourceBook, .accountMetadata, .declaredProgram, .policySource, .pay, .stream, .nockProgram, .clock]
 
-/-- Tags 1/2/3/5/6/8/9/10/11/12/13 are deployment pins. The final table across
+/-- Tags 1/2/3/5/6/8/9/10/11/12/13/14 are deployment pins. The final table across
 lanes: 11 pay, 12 stream, 13 nockProgram, 14 clock.  Tag 3 is the one authority
 cell (it was the authority page shard).  Tag 7 (the authority catalogue) is
 retired and decodes to nothing; tag 4 was never assigned. -/
@@ -91,6 +95,7 @@ def Kind.tag : Kind → UInt8
   | .pay => 11
   | .stream => 12
   | .nockProgram => NockProgramCodec.registryTag
+  | .clock => 14
 
 def kindAtTag : UInt8 → Option Kind
   | 1 => some .content
@@ -104,6 +109,7 @@ def kindAtTag : UInt8 → Option Kind
   | 11 => some .pay
   | 12 => some .stream
   | 13 => some .nockProgram
+  | 14 => some .clock
   | _ => none
 
 @[simp] theorem kindAtTag_tag (kind : Kind) : kindAtTag kind.tag = some kind := by
@@ -129,6 +135,7 @@ def schemaRef : Kind → SchemaRef
   | .pay => ⟨⟨91010⟩, 1⟩
   | .stream => ⟨⟨91012⟩, 1⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
+  | .clock => ⟨⟨91013⟩, 1⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -148,6 +155,7 @@ abbrev layout : Kind → Store.Layout.{0, 0, 0}
   | .pay => Kernel.PayCell.layout
   | .stream => StreamCell.layout
   | .nockProgram => NockProgramCodec.layout
+  | .clock => Kernel.ClockCell.layout
 
 def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .content => HyperdocumentCell.contentMaterializer
@@ -161,6 +169,7 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .pay => Kernel.PayCell.materializer
   | .stream => StreamCell.materializer
   | .nockProgram => NockProgramCodec.materializer
+  | .clock => Kernel.ClockCell.materializer
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -384,7 +393,7 @@ theorem empty_event_history_lawful (deployment : Deployment) :
 
 /-- Semantic identity of the source-owned loaded/final law. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v5".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v6".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -405,6 +414,8 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
   | .stream, state => StreamCell.StreamLaw state
   | .nockProgram, state => PresentLaw (NockProgramCodec.CellValid deployment.domain cellId)
       (NockProgramCodec.programAt state)
+  | .clock, state => cellId = Kernel.ClockCell.physicalId deployment.domain ∧
+      Kernel.ClockCell.Law state
 
 instance logicalLawDecidable (deployment : Deployment) (cellId : Nat)
     (kind : Kind) (state : Store (layout kind)) :
@@ -459,7 +470,7 @@ def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .content, state => state.support = ∅
   | .stream, state => state.support = ∅
   | .nockProgram, state => PresentLaw NockProgramCodec.Admissible (NockProgramCodec.programAt state)
-  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ => False
+  | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _ => False
 
 instance userShapeDecidable (kind : Kind) (state : Store (layout kind)) :
     Decidable (UserShape kind state) := by

@@ -207,7 +207,10 @@ these; everything else is `254 operation unavailable`:
 | 102 | exact receipt by transaction id | canonical decimal | JSON |
 | 103, 104 | pay command signing plan / assembly (P2) | command / pair: plan, 64-byte signature | `DREGG/PAY/PLAN/v1` / ingress |
 | 105, 106 | pay submit (blind: every refusal is `undisclosed`) / lookup | ingress | `OUTCOME/v4` |
-| 107 | public pay-cell view (no assignment map) | empty | `DREGG/PAY/VIEW/v1` |
+| 107 | public pay-cell view (no assignment map, no clock) | empty | `DREGG/PAY/VIEW/v2` |
+| 126, 127 | clock tick signing plan / assembly (K-CLOCK) | command / pair: plan, 64-byte signature | `DREGG/CLOCK/PLAN/v1` / ingress |
+| 128 | clock tick submit (refusals name their reason: `clockNotAdvancing`, `capabilityRejected`, ...) | ingress | `OUTCOME/v4` |
+| 129 | public clock view: now, slot and the roots a tick pins | empty | `DREGG/CLOCK/VIEW/v1` |
 
 `mini serve-operator` serves a separate owner-private socket (same framing,
 peer UID must equal the server's) with the lifecycle, dispatch, share-issue,

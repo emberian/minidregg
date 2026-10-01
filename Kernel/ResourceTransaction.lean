@@ -8,6 +8,7 @@ import Compiler.StreamCell
 import Compiler.ResourceAuthorityProjection
 import Kernel.NockRun
 import Kernel.NockDoor
+import Kernel.ClockCellDomain
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -307,7 +308,7 @@ inductive Reject where
   | signature (reason : CredentialSignatureAdmission.Reject)
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
-  | observationRequired | observationRejected
+  | observationRequired | observationRejected | clockUnavailable
   | streamTopic | streamPayload
   /-- K-FIELDS: the leg changed a field its capability's scope does not name. -/
   | fieldNotNamed
@@ -685,6 +686,9 @@ structure PreparedInvocation {F : Type} [Field F]
   distinct : (command.targets.map Target.target).Nodup
   directory : LoadedDirectory durable
   authority : Loaded deployment durable.snapshot
+  /-- The deployment clock of the same physical snapshot; its slots enter
+  every target law and its root is a read guard of the record. -/
+  clock : ClockCellDomain.Loaded deployment durable.snapshot
   targets : (i : TargetIndex command) → PreparedTarget deployment directory.directory
     authority.snapshot profile.semantics ambient command command.targets[i]
   marker : MarkerMode authority.snapshot profile.semantics command
@@ -701,13 +705,14 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
     if distinct : (command.targets.map Target.target).Nodup then
       let directory ← requireSome .directoryUnavailable (loadDirectory durable)
       let authority ← requireSome .authorityUnavailable (loadDeployment deployment durable.snapshot)
+      let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
       let targets ← collect command.targets (prepareTarget deployment directory.directory
         authority.snapshot profile.semantics ambient command)
       let marker ← prepareMarker authority.snapshot profile.semantics command
       match checked : checkCommandRun deployment.domain directory.directory ambient command
           (fun i => (targets i).pre.logical) with
       | .error reason => .error reason
-      | .ok run => .ok ⟨nonempty, distinct, directory, authority, targets, marker, run, checked⟩
+      | .ok run => .ok ⟨nonempty, distinct, directory, authority, clock, targets, marker, run, checked⟩
     else .error .duplicateTargets
   else .error .emptyTargets
 

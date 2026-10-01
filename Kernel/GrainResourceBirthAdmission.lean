@@ -193,12 +193,11 @@ def project {F : Type} [Field F]
         (command.targets[index].materializer.codec.encode (logical (.inr index))) ++
         DeclaredResourceController.targetProjection command.targets[index]
           (grain.targets index).pre.logical (logical (.inr index))
-      let observed := (List.finRange command.targets.length).flatMap fun i =>
-        (ResourceBirthPolicyController.Concrete.bytesSlots "resource/bytes" 0
+      let observed := DeclaredResourceController.jointSlots command.targets fun i =>
+        ResourceBirthPolicyController.Concrete.bytesSlots "resource/bytes" 0
           (command.targets[i].materializer.codec.encode (logical (.inr i))) ++
          DeclaredResourceController.targetProjection command.targets[i]
-           (grain.targets i).pre.logical (logical (.inr i))).map fun slot =>
-            (s!"joint/target/{command.targets[i].target}/{slot.1}", slot.2)
+           (grain.targets i).pre.logical (logical (.inr i))
       ⟨common ++ ResourceBirthPolicyController.Concrete.bytesSlots "command/bytes" 0
         (DeclaredResourceController.commandCodec.encode command) ++ ownSlots ++ observed⟩
 

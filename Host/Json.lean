@@ -34,6 +34,7 @@ import Kernel.ParticipantFactoryProvisioning
 import Kernel.FleetTurn
 import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
+import Kernel.ClockTickReceiver
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -2235,6 +2236,23 @@ private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt
     failAt "$" "signed SPK descriptor or fixed bridge mapping refused"
   return descriptor.canonicalBytes
 
+/-- A clock tick: the observer asserts `now` (unix seconds) and `slot`,
+pinning the current factory, authority and clock roots (from the clock view). -/
+private def clockTick (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["sponsor", "control", "nonce", "expectedFactoryRoot",
+    "expectedAuthorityRoot", "expectedClockRoot", "now", "slot"] json
+  let command : ClockTickReceiver.Command :=
+    { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
+      control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot" (← field "$" "expectedFactoryRoot" obj)⟩
+      expectedAuthorityRoot :=
+        ⟨← nat "$.expectedAuthorityRoot" (← field "$" "expectedAuthorityRoot" obj)⟩
+      expectedClockRoot := ⟨← nat "$.expectedClockRoot" (← field "$" "expectedClockRoot" obj)⟩
+      now := ← nat "$.now" (← field "$" "now" obj)
+      slot := ← nat "$.slot" (← field "$" "slot" obj) }
+  return ClockTickReceiver.commandCodec.encode command
+
 /-- Source-owned authoring for a participant's proposed signing key. The
 sponsor capability and proof of possession are checked only by the receiving
 path; these bytes do not claim that the new key is admitted. -/
@@ -2417,6 +2435,7 @@ def author (kind : String) (json : Lean.Json)
   | "pay-book" => payBook json
   | "pay-assign" => payAssign json
   | "well-command" => wellCommand json
+  | "clock-tick" => clockTick json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2622,19 +2641,16 @@ private def payCommandJson (bytes : List UInt8) : Lean.Json :=
       | some command => payAssignCommandJson command
       | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
 
-/-- The public pay view: roots to pin, tariff, clock, next free index and the
+/-- The public pay view: roots to pin, tariff, next free index and the
 published deposit book (index order, lowercase hex). -/
 def payViewJson (view : PayCellDomain.View) : Lean.Json := .mkObj
-  [("type", "pay-view-v1"),
+  [("type", "pay-view-v2"),
    ("payRoot", decimal view.payRoot.value),
    ("authorityRoot", decimal view.authorityRoot.value),
    ("factoryRoot", decimal view.factoryRoot.value),
    ("tariff", match view.tariff with
      | none => .null
      | some tariff => payTariffJson tariff),
-   ("clock", match view.clock with
-     | none => .null
-     | some clock => .mkObj [("slot", decimal clock.slot), ("blockTime", decimal clock.blockTime)]),
    ("nextFree", decimal view.nextFree),
    ("bookSize", decimal view.book.length),
    ("book", .arr (view.book.map hexJson).toArray)]
@@ -3434,6 +3450,31 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       applicationSpkPackageIdentityJson descriptor
   | "application-spk-launch-descriptor" =>
       ApplicationSpkLaunchDescriptorAuthoring.inspect bytes
+  | "clock-tick" => do
+      let c ← decoded "clock-tick" ClockTickReceiver.commandCodec bytes
+      pure <| .mkObj
+        [("type", "clock-tick-v1"), ("sponsor", decimal c.sponsor.value),
+         ("control", decimal c.control.value), ("nonce", decimal c.nonce),
+         ("expectedFactoryRoot", decimal c.expectedFactoryRoot.value),
+         ("expectedAuthorityRoot", decimal c.expectedAuthorityRoot.value),
+         ("expectedClockRoot", decimal c.expectedClockRoot.value),
+         ("now", decimal c.now), ("slot", decimal c.slot)]
+  | "clock-plan" => do
+      let plan ← decoded "clock-plan" ClockTickReceiver.signingPlanCodec bytes
+      pure <| .mkObj
+        [("type", "clock-plan-v1"), ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value), ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("header", signedHeaderJson plan.header)]
+  | "clock-view" => do
+      let view ← decoded "clock-view" ClockTickReceiver.viewCodec bytes
+      pure <| .mkObj
+        [("type", "clock-view-v1"), ("clockRoot", decimal view.clockRoot.value),
+         ("authorityRoot", decimal view.authorityRoot.value),
+         ("factoryRoot", decimal view.factoryRoot.value),
+         ("now", decimal view.clock.now),
+         ("day", decimal (view.clock.now / Kernel.ClockCell.secondsPerDay)),
+         ("slot", decimal view.clock.slot)]
   | "participant-key-enrollment" => do
       let command ← decoded "participant-key-enrollment"
         ParticipantKeyEnrollment.commandCodec bytes

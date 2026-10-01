@@ -1,34 +1,27 @@
 /-
-# Kernel.PayBookReceiver — the operator installs deposit addresses and sets the tariff
+# Kernel.ClockTickReceiver — an authorised observer advances the one clock
 
-One receiver, two branches in one command: append a batch of deposit
-addresses to the pay cell's `book`, and/or replace the `tariff`.  One command
-because both are the same authority (the deployment's factory-management
-control capability, under the factory's current law — the authorization key
-enrollment and factory-observation provisioning use), write the same cell under
-the same pre-root, and share one operation marker; a sum of two commands would
-be two ingress families with identical plumbing and nothing to separate.
+A tick asserts a new clock value `{now, slot}`.  It is admitted exactly when:
+* the sponsor presents the deployment's factory control capability (verb
+  `installPolicy`), admitted in capability mode under the factory's current law
+  with the operation slot `authority/operation/clock-tick` — the same authority
+  shape as key enrollment and PAY's book receiver, so the factory law decides
+  WHICH observers may tick (the operator's wall-clock ticker, PAY's chain
+  observer);
+* the command pins the current factory, authority and clock roots;
+* the tick `advances` the loaded clock: `now` strictly increases and `slot`
+  does not decrease (`clock_monotone`; a tick behind or at the current time is
+  refused, `tick_behind_refused`);
+* its single-use marker (sponsor, nonce) is unspent; it is the intent's durable
+  nullifier.
 
-Authorization, exactly as enrollment/provisioning: the sponsor presents the
-control (program) capability on the factory, verb `installPolicy`, the request
-is admitted in capability mode (`sourceCapabilityOnlyEvidence`) under the
-factory's current law with the operation slot `authority/operation/pay-book`,
-and the single-use marker is the intent's durable nullifier.
-
-The decision proper is the pure `decideChange`:
-* an empty change is refused (`emptyChange`);
-* a tariff must be valid and strictly newer (`tariff_version_monotone`; a
-  version `≤` the current one is refused `tariffVersionNotIncreasing`);
-* addresses are 32 bytes, appended from the command's `bookStart`, which must
-  be the current book size: a present index is refused (`bookIndexPresent`),
-  a gap is refused (`bookGap`), and each allocation is enabled only at an
-  absent index (`book_write_once`).
-There is no clock in the pay cell; time is the clock cell's (`Kernel.ClockCell`).
+The patch is one guarded write of the clock value from the exact loaded value;
+the record writes only the clock cell (`intent_writes_clock_cell`).
 -/
 import Kernel.CapabilityRevocationController
-import Kernel.PayCellDomain
+import Kernel.ClockCellDomain
 
-namespace Minidregg.Kernel.PayBookReceiver
+namespace Minidregg.Kernel.ClockTickReceiver
 
 open Minidregg.Compiler
 open Minidregg.Compiler.CanonicalPolicyAdmission
@@ -39,8 +32,7 @@ open Minidregg.Compiler.ResourceBirthCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Kernel
 open Minidregg.Kernel.DurableDataIntent
-open Minidregg.Kernel.PayCell
-open Minidregg.Kernel.PayTariff
+open Minidregg.Kernel.ClockCell
 open Minidregg.Theory
 open Minidregg.Theory.CellState
 open Minidregg.Theory.CellRegistry
@@ -60,189 +52,61 @@ abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 
 /-! ## The pure decision -/
 
-/-- Allocate `addresses` at consecutive book indices from `start`. -/
-def bookPatch : Nat → List Address32 → Patch PayCell.layout
-  | _, [] => []
-  | index, address :: rest => .allocate .book index address :: bookPatch (index + 1) rest
-
-/-- A decided change: the book rows to append and the tariff replacement
-(current, next).  Its patch is a function of the plan alone. -/
+/-- A decided tick: the clock it replaces and the clock it installs. -/
 structure Plan where
-  bookStart : Nat
-  book : List Address32
-  tariff : Option (Tariff × Tariff)
+  current : Clock
+  next : Clock
   deriving DecidableEq, Repr
 
-def Plan.patch (plan : Plan) : Patch PayCell.layout :=
-  bookPatch plan.bookStart plan.book ++
-    match plan.tariff with
-    | none => []
-    | some (current, next) => [.write .tariff () current next]
+def Plan.patch (plan : Plan) : Patch ClockCell.layout := tickPatch plan.current plan.next
 
 inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable
-  | payUnavailable | staleAuthority | stalePay
-  | emptyChange | malformedAddress | bookIndexPresent | bookGap
-  | tariffInvalid | tariffVersionNotIncreasing
+  | clockUnavailable | staleAuthority | staleClock | clockNotAdvancing
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving DecidableEq, Repr
 
-def decideTariff (store : PayStore) : Option Tariff → Except Reject (Option (Tariff × Tariff))
-  | none => .ok none
-  | some next =>
-      match tariffOf store with
-      | none => .error .payUnavailable
-      | some current =>
-          if next.valid then
-            if current.version < next.version then .ok (some (current, next))
-            else .error .tariffVersionNotIncreasing
-          else .error .tariffInvalid
+/-- The whole rule of time, on the loaded clock. -/
+def decideTick (current next : Clock) : Except Reject Plan :=
+  if advances current next then .ok ⟨current, next⟩ else .error .clockNotAdvancing
 
-def decideBook (store : PayStore) (bookStart : Nat) (book : List Address32) : Except Reject Unit :=
-  if book = [] then .ok ()
-  else if book.all (fun address => address.length == 32) then
-    if (bookAt store bookStart).isSome then .error .bookIndexPresent
-    else if bookStart = bookSize store then .ok ()
-    else .error .bookGap
-  else .error .malformedAddress
+theorem decideTick_ok {current next : Clock} {plan : Plan}
+    (decided : decideTick current next = .ok plan) :
+    plan = ⟨current, next⟩ ∧ current.now < next.now ∧ current.slot ≤ next.slot := by
+  unfold decideTick at decided
+  split at decided
+  · rename_i advancing
+    cases decided
+    exact ⟨rfl, (advances_iff current next).mp advancing⟩
+  · cases decided
 
-def decideChange (store : PayStore) (bookStart : Nat) (book : List Address32)
-    (tariff : Option Tariff) : Except Reject Plan :=
-  if book = [] ∧ tariff = none then .error .emptyChange
-  else
-    match decideTariff store tariff, decideBook store bookStart book with
-    | .error reason, _ => .error reason
-    | .ok _, .error reason => .error reason
-    | .ok pair, .ok () => .ok ⟨bookStart, book, pair⟩
+/-- Refuting pole of time: a tick at or behind the current `now` is refused. -/
+theorem tick_behind_refused (current next : Clock) (behind : next.now ≤ current.now) :
+    decideTick current next = .error .clockNotAdvancing := by
+  unfold decideTick
+  have : advances current next = false := by
+    cases h : advances current next
+    · rfl
+    · exact absurd ((advances_iff current next).mp h).1 (Nat.not_lt.mpr behind)
+  simp [this]
 
-/-! ### Theorems of the decision -/
+/-- Refuting pole of the slot: a tick taking the chain slot back is refused. -/
+theorem slot_back_refused (current next : Clock) (back : next.slot < current.slot) :
+    decideTick current next = .error .clockNotAdvancing := by
+  unfold decideTick
+  have : advances current next = false := by
+    cases h : advances current next
+    · rfl
+    · exact absurd ((advances_iff current next).mp h).2 (Nat.not_le.mpr back)
+  simp [this]
 
-theorem decideTariff_some (store : PayStore) (next : Tariff)
-    (pair : Option (Tariff × Tariff)) (accepted : decideTariff store (some next) = .ok pair) :
-    ∃ current, tariffOf store = some current ∧ current.version < next.version ∧
-      next.valid ∧ pair = some (current, next) := by
-  unfold decideTariff at accepted
-  cases present : tariffOf store with
-  | none => simp [present] at accepted
-  | some current =>
-      simp only [present] at accepted
-      by_cases valid : next.valid
-      · by_cases newer : current.version < next.version
-        · simp only [valid, newer, if_true, Except.ok.injEq] at accepted
-          exact ⟨current, rfl, newer, valid, accepted.symm⟩
-        · simp [valid, newer] at accepted
-      · simp [valid] at accepted
-
-/-- An accepted change is exactly the command's rows at the command's start,
-with the tariff decision `decideTariff` made and the book decision passed. -/
-theorem decideChange_ok (store : PayStore) (bookStart : Nat) (book : List Address32)
-    (tariff : Option Tariff) (plan : Plan)
-    (accepted : decideChange store bookStart book tariff = .ok plan) :
-    decideTariff store tariff = .ok plan.tariff ∧ decideBook store bookStart book = .ok () ∧
-      plan.bookStart = bookStart ∧ plan.book = book := by
-  unfold decideChange at accepted
-  by_cases empty : book = [] ∧ tariff = none
-  · simp [empty] at accepted
-  · rw [if_neg empty] at accepted
-    cases tariffDecided : decideTariff store tariff with
-    | error reason => simp [tariffDecided] at accepted
-    | ok pair =>
-        cases bookDecided : decideBook store bookStart book with
-        | error reason => simp [tariffDecided, bookDecided] at accepted
-        | ok _ =>
-            simp only [tariffDecided, bookDecided, Except.ok.injEq] at accepted
-            subst accepted
-            exact ⟨rfl, rfl, rfl, rfl⟩
-
-/-- **Tariff versions are strictly monotone.**  An accepted tariff change
-replaces exactly the current tariff by a valid one with a larger version. -/
-theorem tariff_version_monotone (store : PayStore) (bookStart : Nat) (book : List Address32)
-    (next : Tariff) (plan : Plan)
-    (accepted : decideChange store bookStart book (some next) = .ok plan) :
-    ∃ current, tariffOf store = some current ∧ current.version < next.version ∧
-      next.valid ∧ plan.tariff = some (current, next) :=
-  decideTariff_some store next plan.tariff (decideChange_ok store bookStart book _ plan accepted).1
-
-/-- Refuting pole: a valid tariff whose version is not larger than the
-current one is refused. -/
-theorem tariff_version_not_increasing_refused (store : PayStore) (bookStart : Nat)
-    (book : List Address32) (current next : Tariff) (present : tariffOf store = some current)
-    (valid : next.valid) (stale : next.version ≤ current.version) :
-    decideChange store bookStart book (some next) = .error .tariffVersionNotIncreasing := by
-  have tariffRefused : decideTariff store (some next) = .error .tariffVersionNotIncreasing := by
-    simp [decideTariff, present, valid, Nat.not_lt.mpr stale]
-  simp [decideChange, tariffRefused]
-
-/-- An invalid tariff is refused whatever its version. -/
-theorem invalid_tariff_refused (store : PayStore) (bookStart : Nat) (book : List Address32)
-    (current next : Tariff) (present : tariffOf store = some current) (invalid : ¬ next.valid) :
-    decideChange store bookStart book (some next) = .error .tariffInvalid := by
-  have tariffRefused : decideTariff store (some next) = .error .tariffInvalid := by
-    simp [decideTariff, present, invalid]
-  simp [decideChange, tariffRefused]
-
-/-- A book append starting at an index that is already present is refused. -/
-theorem book_present_index_refused (store : PayStore) (bookStart : Nat) (book : List Address32)
-    (nonempty : book ≠ []) (shaped : book.all (fun address => address.length == 32) = true)
-    (present : (bookAt store bookStart).isSome = true) :
-    decideChange store bookStart book none = .error .bookIndexPresent := by
-  have bookRefused : decideBook store bookStart book = .error .bookIndexPresent := by
-    simp [decideBook, nonempty, shaped, present]
-  simp [decideChange, nonempty, decideTariff, bookRefused]
-
-/-- **Book rows are written once**: an allocation in the book is enabled only
-at an absent index (an instance of `Store.Op.allocate_enabled_fresh`). -/
-theorem book_write_once (store : PayStore) (index : Nat) (address : Address32)
-    (enabled : (Op.allocate (L := PayCell.layout) .book index address).Enabled store) :
-    bookAt store index = none :=
-  Minidregg.Theory.Store.Op.allocate_enabled_fresh store .book index address enabled
-
-theorem bookPatch_allocates (start : Nat) (addresses : List Address32) (op : Op PayCell.layout)
-    (member : op ∈ bookPatch start addresses) :
-    ∃ index address, op = .allocate .book index address := by
-  induction addresses generalizing start with
-  | nil => cases member
-  | cons head rest induction =>
-      rcases List.mem_cons.mp member with same | later
-      · exact ⟨start, head, same⟩
-      · exact induction (start + 1) later
-
-/-- Every operation of a plan writes the book or the tariff. -/
-theorem Plan.writes_book_or_tariff (plan : Plan) (op : Op PayCell.layout)
-    (member : op ∈ plan.patch) :
-    (∃ index address, op = .allocate .book index address) ∨
-      ∃ current next, op = .write .tariff () current next := by
-  unfold Plan.patch at member
-  rcases List.mem_append.mp member with book | tariff
-  · exact Or.inl (bookPatch_allocates _ _ op book)
-  · split at tariff
-    · cases tariff
-    · rename_i current next _
-      rcases List.mem_singleton.mp tariff with rfl
-      exact Or.inr ⟨current, next, rfl⟩
-
-/-! ### Concrete poles (kernel `decide` on real stores) -/
-
-/-- Satisfiable pole: on the genesis cell, setting a valid version-1 tariff and
-appending one row at index 0 is accepted. -/
-theorem genesis_change_accepted :
-    decideChange genesisStore 0 [List.replicate 32 1] (some exampleTariff) =
-      .ok ⟨0, [List.replicate 32 1], some (genesisDefault, exampleTariff)⟩ := by
-  decide +kernel
-
-/-- Refuting pole: re-setting the same version is refused. -/
-theorem same_version_refused :
-    decideChange (genesisStore.set tariffAddress (some exampleTariff)) 0 [] (some exampleTariff) =
-      .error .tariffVersionNotIncreasing := by
-  decide +kernel
-
-/-- Refuting pole: appending at index 0 when row 0 exists is refused. -/
-theorem occupied_row_refused :
-    decideChange (genesisStore.set (bookAddress 0) (some (List.replicate 32 1))) 0
-      [List.replicate 32 2] none = .error .bookIndexPresent := by
-  decide +kernel
+/-- The tick's patch installs exactly the next clock. -/
+theorem tick_installs (store : ClockStore) (plan : Plan) :
+    ClockCell.clockOf (Patch.run store plan.patch) = some plan.next := by
+  simp [Plan.patch, tickPatch, Patch.run, Op.apply, ClockCell.clockOf, ClockCell.clockAddress,
+    Store.set] <;> rfl
 
 /-! ## Command and ingress -/
 
@@ -252,11 +116,12 @@ structure Command where
   nonce : Nat
   expectedFactoryRoot : Digest
   expectedAuthorityRoot : Digest
-  expectedPayRoot : Digest
-  bookStart : Nat
-  book : List Address32
-  tariff : Option Tariff
+  expectedClockRoot : Digest
+  now : Nat
+  slot : Nat
   deriving DecidableEq, Repr
+
+def Command.tick (command : Command) : Clock := ⟨command.now, command.slot⟩
 
 def commandStream : StreamCodec Command :=
   StreamCodec.xmap
@@ -266,16 +131,33 @@ def commandStream : StreamCodec Command :=
           (StreamCodec.product digestStream
             (StreamCodec.product digestStream
               (StreamCodec.product digestStream
-                (StreamCodec.product StreamCodec.nat
-                  (StreamCodec.product (StreamCodec.list bytesStream)
-                    (StreamCodec.option tariffStream)))))))))
+                (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
     (fun c => (c.sponsor, c.control, c.nonce, c.expectedFactoryRoot, c.expectedAuthorityRoot,
-      c.expectedPayRoot, c.bookStart, c.book, c.tariff))
-    (fun (sponsor, control, nonce, factoryRoot, authorityRoot, payRoot, start, book, tariff) =>
-      ⟨sponsor, control, nonce, factoryRoot, authorityRoot, payRoot, start, book, tariff⟩)
+      c.expectedClockRoot, c.now, c.slot))
+    (fun (sponsor, control, nonce, factoryRoot, authorityRoot, clockRoot, now, slot) =>
+      ⟨sponsor, control, nonce, factoryRoot, authorityRoot, clockRoot, now, slot⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/BOOK/v1".toUTF8.toList
+def framedRaw {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
+    { encode value := frame ++ stream.encode value
+      decode bytes := if bytes.take frame.length = frame then
+        stream.toLawful.decode (bytes.drop frame.length) else none
+      decode_encode := by
+        intro value
+        have exact := stream.toLawful.decode_encode value
+        change stream.toLawful.decode (stream.encode value) = some value at exact
+        simp [exact] }
+
+def framed {A : Type} (frame : List UInt8) (stream : StreamCodec A) : LawfulCodec A :=
+  ResourceBirthCodec.strictCodec (framedRaw frame stream)
+
+theorem framed_canonical {A : Type} (frame : List UInt8) (stream : StreamCodec A)
+    {bytes : List UInt8} {value : A}
+    (decoded : (framed frame stream).decode bytes = some value) :
+    (framed frame stream).encode value = bytes :=
+  ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) decoded
+
+def commandFrame : List UInt8 := "DREGG/CLOCK/TICK/v1".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -295,7 +177,7 @@ def ingressStream : StreamCodec Ingress :=
     (by intro ingress; cases ingress; rfl)
 
 def ingressCodec : LawfulCodec Ingress :=
-  framed "DREGG/PAY/BOOK/SIGNED/v1".toUTF8.toList ingressStream
+  framed "DREGG/CLOCK/TICK/SIGNED/v1".toUTF8.toList ingressStream
 
 structure DecodedIngress where
   private mk ::
@@ -322,21 +204,18 @@ def DecodedIngress.bytes (ingress : DecodedIngress) : List UInt8 :=
   ingressCodec.encode ingress.ingress
 
 def marker (domain semantics : Digest) (command : Command) : Nat :=
-  (Sp800185Cshake256.hash "DREGG.PAY.BOOK.IDENTITY/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.IDENTITY/v1".toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product TypedAuthorizationRequestCodec.subjectIdStream
         StreamCodec.nat))).encode
       (domain, semantics, command.sponsor, command.nonce))).digest.value
 
-/-! ## The effect family over the pay cell -/
+/-! ## The effect family over the clock cell -/
 
 def planStream : StreamCodec Plan :=
-  StreamCodec.xmap
-    (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product (StreamCodec.list bytesStream)
-        (StreamCodec.option (StreamCodec.product tariffStream tariffStream))))
-    (fun plan => (plan.bookStart, plan.book, plan.tariff))
-    (fun (start, book, tariff) => ⟨start, book, tariff⟩)
+  StreamCodec.xmap (StreamCodec.product clockStream clockStream)
+    (fun plan => (plan.current, plan.next))
+    (fun (current, next) => ⟨current, next⟩)
     (by intro plan; cases plan; rfl)
 
 structure Declaration where
@@ -354,13 +233,13 @@ def declarationCodec : LawfulCodec Declaration :=
   ResourceBirthCodec.strictCodec declarationStream.toLawful
 
 def declaration (domain semantics : Digest) (command : Command) (plan : Plan) : Declaration :=
-  ⟨plan, command.expectedPayRoot, marker domain semantics command⟩
+  ⟨plan, command.expectedClockRoot, marker domain semantics command⟩
 
-structure Mode {M : Materializer PayCell.layout Digest} (pre : Materialized M) (d : Declaration) : Type where
+structure Mode {M : Materializer ClockCell.layout Digest} (pre : Materialized M) (d : Declaration) : Type where
   rootExact : d.expectedPreRoot = pre.root
 
 def effectDigest (domain semantics : Digest) (command : Command) (d : Declaration) : Digest :=
-  (Sp800185Cshake256.hash "DREGG.PAY.BOOK.EFFECT/v1".toUTF8.toList
+  (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.EFFECT/v1".toUTF8.toList
     ((StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product bytesStream bytesStream))).encode
       (domain, semantics, commandCodec.encode command, declarationCodec.encode d))).digest
@@ -387,29 +266,29 @@ def context (deployment : Deployment) (snapshot : Snapshot) (semantics : Digest)
       policyRevision := snapshot.authState.policyRevision ⟨deployment.factoryId⟩
       cost := (commandCodec.encode command).length }
   argsDigestBytes := fun bytes =>
-    (Sp800185Cshake256.hash "DREGG.PAY.BOOK.ARGS/v1".toUTF8.toList
+    (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.ARGS/v1".toUTF8.toList
       (commandCodec.encode command ++ bytes)).digest
 
-def request (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest)
+def request (deployment : Deployment) (snapshot : Snapshot) (clock : ClockCell.Cell) (semantics : Digest)
     (ambient : Ambient) (command : Command) (plan : Plan) : Request .program :=
   ((context deployment snapshot semantics ambient command).request declarationCodec
-    (effectDigest snapshot.domain semantics command) pay.root
+    (effectDigest snapshot.domain semantics command) clock.root
     (marker snapshot.domain semantics command)
     (declaration snapshot.domain semantics command plan)).2
 
-def family (deployment : Deployment) (snapshot : Snapshot) (pay : PayCell.Cell) (semantics : Digest)
+def family (deployment : Deployment) (snapshot : Snapshot) (clock : ClockCell.Cell) (semantics : Digest)
     (ambient : Ambient) (command : Command) :
-    SemanticEffectFamily PayCell.layout PayCell.materializer Nat where
+    SemanticEffectFamily ClockCell.layout ClockCell.materializer Nat where
   Declaration := Declaration
   declarationCodec := declarationCodec
-  pre := pay
+  pre := clock
   request := fun d => (context deployment snapshot semantics ambient command).request
-    declarationCodec (effectDigest snapshot.domain semantics command) pay.root
+    declarationCodec (effectDigest snapshot.domain semantics command) clock.root
     d.operationNullifier d
   Outcome := fun _ => Unit
   outcomeCodec := fun _ => unitCodec
-  ModeEvidence := fun d _ => Mode pay d
-  Postcondition := fun d _ post => d.plan.patch.ResultAt pay.logical post
+  ModeEvidence := fun d _ => Mode clock d
+  Postcondition := fun d _ post => d.plan.patch.ResultAt clock.logical post
   effectDigest := effectDigest snapshot.domain semantics command
   patch := fun d _ => d.plan.patch
   nullifier := fun d _ => some d.operationNullifier
@@ -432,11 +311,11 @@ structure Prepared {F : Type} [Field F] (deployment : Deployment)
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
   factory : ResourceTargetAdmission.Observed deployment directory.directory .object
     deployment.factoryId command.expectedFactoryRoot
-  pay : PayCellDomain.Loaded deployment durable.snapshot
+  clock : ClockCellDomain.Loaded deployment durable.snapshot
   plan : Plan
-  decided : decideChange pay.cell.logical command.bookStart command.book command.tariff = .ok plan
-  candidate : Candidate (family deployment authority.snapshot pay.cell profile.semantics ambient command)
-    pay.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
+  decided : decideTick clock.clock command.tick = .ok plan
+  candidate : Candidate (family deployment authority.snapshot clock.cell profile.semantics ambient command)
+    clock.cell (declaration authority.snapshot.domain profile.semantics command plan) ()
   source : CanonicalCellRegistry.LoadedPolicySource authority.snapshot.domain directory.directory
     (authority.snapshot.authState.policyAddress ⟨deployment.factoryId⟩
       (authority.snapshot.authState.policyRevision ⟨deployment.factoryId⟩))
@@ -449,49 +328,67 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
   let factory ← requireSome .factoryUnavailable
     (ResourceTargetAdmission.observe deployment directory.directory .object
       deployment.factoryId command.expectedFactoryRoot)
-  let pay ← requireSome .payUnavailable (PayCellDomain.load deployment durable.snapshot)
+  let clock ← requireSome .clockUnavailable (ClockCellDomain.load deployment durable.snapshot)
   let snapshot := authority.snapshot
   if command.expectedAuthorityRoot = snapshot.cell.root then
-    if rootExact : command.expectedPayRoot = pay.cell.root then
-      match decided : decideChange pay.cell.logical command.bookStart command.book command.tariff with
+    if rootExact : command.expectedClockRoot = clock.cell.root then
+      match decided : decideTick clock.clock command.tick with
       | .error reason => throw reason
       | .ok plan =>
         let d := declaration snapshot.domain profile.semantics command plan
         if snapshot.spent d.operationNullifier = false then
-          match validate PayCell.materializer pay.cell pay.cell.root d.plan.patch with
+          match validate ClockCell.materializer clock.cell clock.cell.root d.plan.patch with
           | .rejected _ => throw .validation
           | .accepted validated =>
               let source ← requireSome .policyUnavailable (CanonicalCellRegistry.loadPolicySource
                 snapshot.domain directory.directory
                 (snapshot.authState.policyAddress ⟨deployment.factoryId⟩
                   (snapshot.authState.policyRevision ⟨deployment.factoryId⟩)))
-              let candidate : Candidate (family deployment snapshot pay.cell profile.semantics ambient command)
-                  pay.cell d () :=
+              let candidate : Candidate (family deployment snapshot clock.cell profile.semantics ambient command)
+                  clock.cell d () :=
                 { preStateBound := rfl
                   modeEvidence := ⟨rootExact⟩
                   validated := validated
                   postcondition := validated.resultAt }
-              pure ⟨directory, authority, factory, pay, plan, decided, candidate, source⟩
+              pure ⟨directory, authority, factory, clock, plan, decided, candidate, source⟩
         else throw .replayedMarker
-    else throw .stalePay
+    else throw .staleClock
   else throw .staleAuthority
 
 variable {F : Type} [Field F] {deployment : Deployment}
   {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
   {command : Command}
 
-/-- The pay cell after the change: the validated patch applied to the loaded cell. -/
-def Prepared.payPost (prepared : Prepared deployment profile ambient durable command) : PayCell.Cell :=
+/-- The clock cell after the tick: the validated patch applied to the loaded cell. -/
+def Prepared.clockPost (prepared : Prepared deployment profile ambient durable command) : ClockCell.Cell :=
   prepared.candidate.validated.apply
 
+/-- **`clock_monotone`.**  A prepared tick installs exactly the command's clock,
+and that clock is strictly later than, and at no earlier slot than, the clock
+the snapshot holds. -/
+theorem clock_monotone (prepared : Prepared deployment profile ambient durable command) :
+    clockOf prepared.clockPost.logical = some command.tick ∧
+      prepared.clock.clock.now < command.now ∧ prepared.clock.clock.slot ≤ command.slot := by
+  obtain ⟨planExact, later, notBack⟩ := decideTick_ok prepared.decided
+  refine ⟨?_, later, notBack⟩
+  have installs := tick_installs prepared.clock.cell.logical prepared.plan
+  simp only [Prepared.clockPost, ValidatedPatch.apply_logical]
+  show ClockCell.clockOf (Patch.run prepared.clock.cell.logical prepared.plan.patch) = some command.tick
+  rw [installs, planExact]
+
+/-- Refuting pole at preparation: no tick at or behind the snapshot's clock
+prepares. -/
+theorem prepare_behind_refused (prepared : Prepared deployment profile ambient durable command)
+    (behind : command.now ≤ prepared.clock.clock.now) : False :=
+  absurd (clock_monotone prepared).2.1 (Nat.not_lt.mpr behind)
+
 def project (prepared : Prepared deployment profile ambient durable command)
-    (logical : PayStore) : Minidregg.Pred.State :=
+    (logical : ClockStore) : Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots
-      (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient command
+      (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient command
         prepared.plan) ++
-    [("authority/operation/pay-book", 1),
-     ("pay/book/size", Int.ofNat (bookSize logical)),
-     ("pay/tariff/version", Int.ofNat ((tariffOf logical).map Tariff.version |>.getD 0))] ++
+    [("authority/operation/clock-tick", 1)] ++
+    ClockCell.slots ((ClockCell.clockOf logical).getD prepared.clock.clock) ++
     DeclaredResourceController.bytesSlots "command/bytes" 0 (commandCodec.encode command) ++
     DeclaredResourceController.bytesSlots "resource/bytes" 0
       (PackedCell.bytes Registry prepared.factory.before) ++
@@ -518,24 +415,31 @@ abbrev Prepared.SemanticAccepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command) :=
   AcceptedCellEffect (portal := (policyConfig prepared).portal)
     (authState := prepared.authority.snapshot.authState)
-    (family deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient command)
-    (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient command
+    (family deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient command)
+    (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient command
       prepared.plan)
-    prepared.pay.cell
+    prepared.clock.cell
     (declaration prepared.authority.snapshot.domain profile.semantics command prepared.plan) ()
+
+/-- The capability evidence a tick needs: the sponsor's control capability on
+the factory, checked in capability mode against the checked signature. -/
+def capabilityEvidence [DecidableEq F]
+    (prepared : Prepared deployment profile ambient durable command)
+    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :=
+  sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
+    (sourceStore prepared)
+    (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
+    (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics
+      ambient command prepared.plan) command.control receipt
 
 def authorize [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot) :
     Except Reject prepared.SemanticAccepted := do
-  let wanted := request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics
+  let wanted := request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics
     ambient command prepared.plan
   let config := policyConfig prepared
-  let evidence ← requireSome .capabilityRejected
-    (sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
-      (sourceStore prepared)
-      (marker prepared.authority.snapshot.domain profile.semantics command) (step prepared)
-      wanted command.control receipt)
+  let evidence ← requireSome .capabilityRejected (capabilityEvidence prepared receipt)
   let committed ← requireSome .policyUnavailable
     (config.registry.resolve wanted.policyId wanted.policyRevision)
   let witness := canonicalWitness profile.compilerProfile.compiler committed
@@ -552,6 +456,17 @@ def authorize [DecidableEq F]
   | some authorization =>
       .ok (prepared.candidate.accept authorization rfl rfl rfl .sealed trivial)
 
+/-- **`tick_requires_capability`** (refuting pole).  A sponsor whose signed
+request carries no admissible control capability on the factory is refused,
+whatever clock it asserts. -/
+theorem tick_requires_capability [DecidableEq F]
+    (prepared : Prepared deployment profile ambient durable command)
+    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot)
+    (none_ : capabilityEvidence prepared receipt = none) :
+    authorize prepared receipt = .error .capabilityRejected := by
+  unfold authorize
+  simp [none_, requireSome, bind, Except.bind]
+
 structure Accepted [DecidableEq F]
     (prepared : Prepared deployment profile ambient durable command)
     (ingress : DecodedIngress) where
@@ -565,7 +480,7 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (ingress : DecodedIngress) : IO (Except Reject (Accepted prepared ingress)) := do
   match ← CredentialSignatureAdmission.verifyNative native prepared.authority.snapshot
       (marker prepared.authority.snapshot.domain profile.semantics command)
-      (request deployment prepared.authority.snapshot prepared.pay.cell profile.semantics ambient
+      (request deployment prepared.authority.snapshot prepared.clock.cell profile.semantics ambient
         command prepared.plan)
       ingress.ingress.sponsorEnvelope with
   | .error reason => return .error (.signature reason)
@@ -576,24 +491,20 @@ def admitNative [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
         | .ok semantic => return .ok ⟨receipt, same, semantic⟩
       else return .error .capabilityRejected
 
-/-- The exact header the sponsor signs, derived from the current pay cell and
-authority.  It discloses no decision: a plan exists for any decodable command
-whose sponsor has a current key. -/
+/-- The exact header the sponsor signs, derived from the current clock and
+authority.  It discloses no decision beyond the current clock value. -/
 def signingHeader (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (durable : Durable) (command : Command) :
     Except String CredentialSignedEnvelopeController.SignedHeader := do
   let some authority := loadDeployment deployment durable.snapshot
     | .error "authority unavailable"
-  let some pay := PayCellDomain.load deployment durable.snapshot
-    | .error "pay cell unavailable"
-  let plan : Plan := ⟨command.bookStart, command.book,
-    match command.tariff, tariffOf pay.cell.logical with
-    | some next, some current => some (current, next)
-    | _, _ => none⟩
+  let some clock := ClockCellDomain.load deployment durable.snapshot
+    | .error "clock cell unavailable"
   (CredentialSignatureAdmission.signingHeader authority.snapshot
     (marker deployment.domain profile.semantics command)
-    ⟨.program, request deployment authority.snapshot pay.cell profile.semantics ambient command plan⟩).mapError
-      (fun reason => s!"pay-book signer key: {repr reason}")
+    ⟨.program, request deployment authority.snapshot clock.cell profile.semantics ambient command
+      ⟨clock.clock, command.tick⟩⟩).mapError
+      (fun reason => s!"clock-tick signer key: {repr reason}")
 
 /-! ## The receiver -/
 
@@ -603,14 +514,14 @@ def transactionId (domain semantics : Digest) (ingress : DecodedIngress) : Diges
 def event (domain _semantics : Digest) (ingress : DecodedIngress) : StableEvent where
   codecVersion := 1
   domain := domain
-  eventId := (Sp800185Cshake256.hash "DREGG.PAY.BOOK.EVENT/v1".toUTF8.toList ingress.bytes).digest
+  eventId := (Sp800185Cshake256.hash "DREGG.CLOCK.TICK.EVENT/v1".toUTF8.toList ingress.bytes).digest
   canonicalBytes := ingress.bytes
 
 def nullifier (domain semantics : Digest) (ingress : DecodedIngress) : StableNullifier :=
   CredentialAuthorityReplay.nullifier domain (marker domain semantics ingress.command)
 
 def writes (prepared : Prepared deployment profile ambient durable command) : List DataWrite :=
-  [prepared.pay.write prepared.payPost]
+  [prepared.clock.write prepared.clockPost]
 
 def resourceGuard (prepared : Prepared deployment profile ambient durable command) : ReadGuard :=
   ⟨⟨deployment.factoryId⟩,
@@ -641,7 +552,7 @@ theorem writes_roots_bound (prepared : Prepared deployment profile ambient durab
     rootBytes write.canonicalPostBytes = write.exactPost := by
   simp only [writes, List.mem_singleton] at member
   subst write
-  exact prepared.pay.write_root_bound _
+  exact prepared.clock.write_root_bound _
 
 theorem readGuards_readonly (prepared : Prepared deployment profile ambient durable command)
     (shape : PhysicalShape prepared) (guard : ReadGuard) (member : guard ∈ readGuards prepared) :
@@ -652,18 +563,18 @@ theorem readGuards_readonly (prepared : Prepared deployment profile ambient dura
     · exact shape.2.2.2.2.1
     · simpa using (List.mem_filter.mp authority).2
 
-structure AcceptedChange [DecidableEq F] (deployment : Deployment)
+structure AcceptedTick [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (ingress : DecodedIngress) where
   private mk ::
   prepared : Prepared deployment profile ambient durable ingress.command
-  accepted : PayBookReceiver.Accepted prepared ingress
+  accepted : ClockTickReceiver.Accepted prepared ingress
   physical : PhysicalShape prepared
 
 def admitDecodedNative [DecidableEq F] (deployment : Deployment)
     (profile : CanonicalRuntimeProfile.Profile F) (ambient : Ambient) (durable : Durable)
     (native : CredentialSignatureIO.NativeConfig) (ingress : DecodedIngress) :
-    IO (Except Reject (AcceptedChange deployment profile ambient durable ingress)) := do
+    IO (Except Reject (AcceptedTick deployment profile ambient durable ingress)) := do
   match prepare deployment profile ambient durable ingress.command with
   | .error reason => return .error reason
   | .ok prepared =>
@@ -675,7 +586,7 @@ def admitDecodedNative [DecidableEq F] (deployment : Deployment)
 
 variable [DecidableEq F] {ingress : DecodedIngress}
 
-def charge (accepted : AcceptedChange deployment profile ambient durable ingress) :
+def charge (accepted : AcceptedTick deployment profile ambient durable ingress) :
     ResourceCost.Charge
   | .incidences => 1
   | .turnBytes => ingress.bytes.length
@@ -685,7 +596,7 @@ def charge (accepted : AcceptedChange deployment profile ambient durable ingress
   | .proofWork => 2
   | .feeDebit | .networkBytes | .sideEffectCount | .leaseByteBlocks => 0
 
-def intent (accepted : AcceptedChange deployment profile ambient durable ingress) :
+def intent (accepted : AcceptedTick deployment profile ambient durable ingress) :
     DataIntent rootBytes where
   transactionId := transactionId deployment.domain profile.semantics ingress
   subject := some ingress.command.sponsor
@@ -697,9 +608,9 @@ def intent (accepted : AcceptedChange deployment profile ambient durable ingress
   postRootsBound := writes_roots_bound accepted.prepared
   guardsReadOnly := readGuards_readonly accepted.prepared accepted.physical
 
-/-- The one cell an accepted change writes is the pay cell. -/
-theorem intent_writes_pay_cell (accepted : AcceptedChange deployment profile ambient durable ingress) :
-    (intent accepted).writes.map DataWrite.cellId = [PayCellDomain.cellIdOf deployment] := rfl
+/-- The one cell an accepted tick writes is the clock cell. -/
+theorem intent_writes_clock_cell (accepted : AcceptedTick deployment profile ambient durable ingress) :
+    (intent accepted).writes.map DataWrite.cellId = [ClockCellDomain.cellIdOf deployment] := rfl
 
 structure Receipt where
   transactionId : Digest
@@ -751,16 +662,51 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
       | .unavailable detail => return .unavailable detail
       | .uncertain detail => return .uncertain detail
 
-#assert_axioms decideTariff_some
-#assert_axioms decideChange_ok
-#assert_axioms tariff_version_monotone
-#assert_axioms tariff_version_not_increasing_refused
-#assert_axioms invalid_tariff_refused
-#assert_axioms book_present_index_refused
-#assert_axioms book_write_once
-#assert_axioms genesis_change_accepted
-#assert_axioms same_version_refused
-#assert_axioms occupied_row_refused
-#assert_axioms command_roundtrip
+/-! ## Signing plan and public view -/
 
-end Minidregg.Kernel.PayBookReceiver
+/-- What the signer signs: the exact source-derived header over the command. -/
+structure SigningPlan where
+  domain : Digest
+  semantics : Digest
+  commandBytes : List UInt8
+  header : List UInt8
+  deriving DecidableEq, Repr
+
+def signingPlanStream : StreamCodec SigningPlan :=
+  StreamCodec.xmap (StreamCodec.product digestStream
+    (StreamCodec.product digestStream (StreamCodec.product bytesStream bytesStream)))
+    (fun plan => (plan.domain, plan.semantics, plan.commandBytes, plan.header))
+    (fun (domain, semantics, command, header) => ⟨domain, semantics, command, header⟩)
+    (by intro plan; cases plan; rfl)
+
+def signingPlanCodec : LawfulCodec SigningPlan :=
+  framed "DREGG/CLOCK/PLAN/v1".toUTF8.toList signingPlanStream
+
+def viewStream : StreamCodec ClockCellDomain.View :=
+  StreamCodec.xmap
+    (StreamCodec.product digestStream (StreamCodec.product digestStream
+      (StreamCodec.product digestStream clockStream)))
+    (fun view => (view.clockRoot, view.authorityRoot, view.factoryRoot, view.clock))
+    (fun (clockRoot, authorityRoot, factoryRoot, clock) =>
+      ⟨clockRoot, authorityRoot, factoryRoot, clock⟩)
+    (by intro view; cases view; rfl)
+
+def viewCodec : LawfulCodec ClockCellDomain.View :=
+  framed "DREGG/CLOCK/VIEW/v1".toUTF8.toList viewStream
+
+/-- info: 'Minidregg.Kernel.ClockTickReceiver.clock_monotone' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms clock_monotone
+/-- info: 'Minidregg.Kernel.ClockTickReceiver.tick_behind_refused' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms tick_behind_refused
+/-- info: 'Minidregg.Kernel.ClockTickReceiver.slot_back_refused' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms slot_back_refused
+/-- info: 'Minidregg.Kernel.ClockTickReceiver.tick_installs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tick_installs
+/-- info: 'Minidregg.Kernel.ClockTickReceiver.prepare_behind_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms prepare_behind_refused
+/-- info: 'Minidregg.Kernel.ClockTickReceiver.tick_requires_capability' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms tick_requires_capability
+/-- info: 'Minidregg.Kernel.ClockTickReceiver.command_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms command_roundtrip
+
+end Minidregg.Kernel.ClockTickReceiver

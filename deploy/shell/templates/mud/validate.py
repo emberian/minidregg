@@ -93,8 +93,8 @@ rpath = os.path.join(realm_dir, "realm.json")
 c = realm["constants"]
 tab = json.load(open(os.path.normpath(os.path.join(realm_dir, realm["afflictionTable"]))))
 bal = min(int(a["cost"]) for a in tab["actions"].values() if a.get("balance") == "bal")
-want = {"MAXHIT_LT": -(int(c["MAXHIT"]) + 1), "COST_M1": bal - 1, "ECOST_M1": int(tab["actions"]["cast"]["cost"]) - 1,
-        "RESPAWN_M1": int(c["RESPAWN"]) - 1, "MAXPAY_LT": -(int(c["MAXPAY"]) + 1)}
+want = {"MAXHIT_LT": -(int(c["MAXHIT"]) + 1), "NEG_COST": -bal, "NEG_ECOST": -int(tab["actions"]["cast"]["cost"]),
+        "NEG_RESPAWN": -int(c["RESPAWN"]), "MAXPAY_LT": -(int(c["MAXPAY"]) + 1)}
 for k, v in want.items():
     if int(c[k]) != v:
         refuse(rpath, line_of(rpath, f'"{k}"'), f"constant {k} = {c[k]}, derived value is {v}")

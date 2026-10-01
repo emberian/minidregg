@@ -65,14 +65,27 @@ def installProjectionVersion : List UInt8 :=
 
 /-- The same source declaration produces request fields, old/post views and
 effects. Generic scalar views retain complete field identifiers and expose
-before/after/delta plus pair-total deltas only where the actual reads exist. -/
+before/after/delta plus pair-total deltas only where the actual reads exist.
+Every participant of a joint command is exposed twice, under
+`joint/target/{cell id}/…` and under `joint/index/{i}/…` with `i` its 0-based
+position in the command's target list (`DeclaredResourceController.jointSlots`,
+`joint_index_of_target`); a position the command lacks names no slot.
+The deployment clock's `clock/now`, `clock/day` and `clock/slot`
+(`ClockCell.slots`) come first among the common slots, on old and new alike.
+v7 (the final merge): a stream append projects `request/topic…`,
+`stream/sequence`, `request/to`, `request/ref/…` (K-STREAM) and a checked run
+`run/program/{id}`, `run/steps`, `run/fuel` (K-RAN); v6 named only the clock
+and joint slots, so the label moves with the slots. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS/v4".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS-RUN-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS.STREAM-APPEND-SLOTS/v7".toUTF8.toList
 
 /-- Typed content edits are source-derived canonical patches; atom payloads
-and exact old records belong to the command, not a host-side blob table. -/
+and exact old records belong to the command, not a host-side blob table.
+v3 (the final merge): the store cell (no page), atom revisions, annotate and
+quote with their `content/annotations|quotes|writes/…|tombstones` slots
+(K-CONTENT); v2 named the deleted 16-entry page. -/
 def contentProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.CONTENT.DOCUMENT-ATOM-RUN-ANCHORED-LINK.EXACT-BYTES-PAGE16/v2".toUTF8.toList
+  "DREGG.RUNTIME.CONTENT.DOCUMENT-ATOM-RUN-ANCHORED-LINK.REVISIONED-ATOMS-ANNOTATE-QUOTE.STORE-CELL/v3".toUTF8.toList
 
 /-- Factory, initial policy, authority grants and resource post-state share one tuple. -/
 def birthProjectionVersion : List UInt8 :=
@@ -186,6 +199,8 @@ def sourceComponents : List (List UInt8) :=
    StoreCodec.frame DeclaredEffectCell.wire,
    StoreCodec.frame Kernel.PayCell.wire,
    Kernel.PayCell.idCustomization,
+   StoreCodec.frame Kernel.ClockCell.wire,
+   Kernel.ClockCell.idCustomization,
    StoreCodec.rootCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,

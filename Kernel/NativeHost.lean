@@ -921,7 +921,7 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
     | .present before => pure before.payload.root
     | .absent => .error "factory unavailable"
   pure ⟨pay.cell.root, opened.authority.snapshot.cell.root, factoryRoot,
-    PayCell.tariffOf pay.cell.logical, PayCell.clockOf pay.cell.logical,
+    PayCell.tariffOf pay.cell.logical,
     PayCell.nextFree pay.cell.logical, PayCellDomain.bookRows pay.cell.logical⟩
 
 /-! ## Realm wells (lane K-WELL): session operations 123–125
@@ -1011,6 +1011,54 @@ def wellLedger (config : Config) : IO (Except String WellLedger) := do
   match ← openExisting config with
   | .error detail => return .error detail
   | .ok opened => return wellLedgerLoaded config opened
+
+/-! ## The clock (K-CLOCK): session operations 126-129
+
+126 = tick signing plan, 127 = detached assembly, 128 = submit, 129 = public
+clock view.  The command is authored by `author clock-tick`; the signer is any
+subject the factory law admits in capability mode for
+`authority/operation/clock-tick`. -/
+
+def clockPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String ClockTickReceiver.SigningPlan := do
+  let height := logicalHeight config opened.durable
+  let some command := ClockTickReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical clock tick command"
+  let header ← ClockTickReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, height⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def clockAssemble (plan : ClockTickReceiver.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "clock tick signature must be 64 bytes"
+  let header ← need "noncanonical clock tick header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  if (ClockTickReceiver.commandCodec.decode plan.commandBytes).isSome then
+    pure (ClockTickReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+  else .error "noncanonical clock plan command"
+
+def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  let ambient := logicalHeight config opened.durable
+  match ← ClockTickReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "clock-tick" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- The public view of the clock: its value and the three roots a tick pins. -/
+def clockViewLoaded (config : Config) (opened : Opened config) : Except String ClockCellDomain.View := do
+  let clock ← need "clock cell unavailable" (ClockCellDomain.load config.deployment opened.durable.snapshot)
+  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
+    | .present before => pure before.payload.root
+    | .absent => .error "factory unavailable"
+  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, factoryRoot, clock.clock⟩
 
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do

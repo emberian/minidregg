@@ -1,22 +1,20 @@
 /-
-# Kernel.PayCell — the pay cell: tariff, deposit address book, assignment, clock
+# Kernel.PayCell — the pay cell: tariff, deposit address book, assignment
 
 One store cell per deployment, at an identifier derived from the deployment
-domain (`physicalId`), with four namespaces on `Theory.Store`:
+domain (`physicalId`), with three namespaces on `Theory.Store`:
 
 | namespace    | key          | value                     | discipline  |
 |--------------|--------------|---------------------------|-------------|
 | `tariff`     | `Unit`       | `PayTariff.Tariff`        | RAM         |
 | `book`       | index `Nat`  | 32-byte deposit address   | append-only |
 | `assignment` | index `Nat`  | Book `AccountId`          | append-only |
-| `clock`      | `Unit`       | `Clock {slot, blockTime}` | RAM         |
 
 `book` is written by the operator's control capability (`PayBookReceiver`);
 `assignment` binds book index `i` to the account a subject owns
-(`PayAssignmentReceiver`); `tariff` is the operator's versioned rate; `clock`
-is the imported chain clock, written only by the observation receiver (lane
-P3) and by no receiver in this lane (`PayBookReceiver.clock_untouched`,
-`PayAssignmentReceiver.clock_untouched`).
+(`PayAssignmentReceiver`); `tariff` is the operator's versioned rate. Time is
+not here: the deployment's one clock is the clock cell (`Kernel.ClockCell`,
+written by `ClockTickReceiver`), and a payment's "paid at" is that clock's `now`.
 
 Both indexed namespaces are append-only, so an index is written once
 (`Store.Op.allocate_enabled_fresh`).  The index an observation names resolves
@@ -24,7 +22,7 @@ to both its address (`bookAt`) and its account (`assignmentAt`); a payment
 nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
 from `bookAt`.
 
-Wire: the store codec with layout name `DREGG/PAY/CELL/v1` (its frame commits
+Wire: the store codec with layout name `DREGG/PAY/CELL/v2` (its frame commits
 to the name and every namespace's codec identifier); the tariff value is
 `DREGG/PAY/TARIFF/v1`.
 -/
@@ -47,44 +45,32 @@ inductive Namespace
   | tariff
   | book
   | assignment
-  | clock
-  deriving DecidableEq, Repr
-
-/-- The imported chain clock: the finalized slot and its block time (unix s). -/
-structure Clock where
-  slot : Nat
-  blockTime : Nat
   deriving DecidableEq, Repr
 
 def Namespace.Key : Namespace → Type
   | .tariff => Unit
   | .book => Nat
   | .assignment => Nat
-  | .clock => Unit
 
 def Namespace.Value : Namespace → Type
   | .tariff => Tariff
   | .book => Address32
   | .assignment => Nat
-  | .clock => Clock
 
 instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key space)
   | .tariff => inferInstanceAs (DecidableEq Unit)
   | .book => inferInstanceAs (DecidableEq Nat)
   | .assignment => inferInstanceAs (DecidableEq Nat)
-  | .clock => inferInstanceAs (DecidableEq Unit)
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .tariff => inferInstanceAs (DecidableEq Tariff)
   | .book => inferInstanceAs (DecidableEq (List UInt8))
   | .assignment => inferInstanceAs (DecidableEq Nat)
-  | .clock => inferInstanceAs (DecidableEq Clock)
 
 def Namespace.discipline : Namespace → Discipline
   | .tariff => .ram
   | .book => .appendOnly
   | .assignment => .appendOnly
-  | .clock => .ram
 
 abbrev layout : Layout.{0, 0, 0} where
   Namespace := Namespace
@@ -97,12 +83,10 @@ abbrev PayStore := Store layout
 /-! ## Addresses and typed reads -/
 
 def tariffAddress : Address layout := ⟨.tariff, ()⟩
-def clockAddress : Address layout := ⟨.clock, ()⟩
 def bookAddress (index : Nat) : Address layout := ⟨.book, index⟩
 def assignmentAddress (index : Nat) : Address layout := ⟨.assignment, index⟩
 
 def tariffOf (store : PayStore) : Option Tariff := store tariffAddress
-def clockOf (store : PayStore) : Option Clock := store clockAddress
 /-- The deposit address at book index `index`. -/
 def bookAt (store : PayStore) (index : Nat) : Option Address32 := store (bookAddress index)
 /-- The account book index `index` is assigned to. -/
@@ -137,36 +121,28 @@ def rowShaped (store : PayStore) : Address layout → Bool
       | none => true
   | _ => true
 
-/-- A pay cell always holds a tariff and a clock, and every deposit address
+/-- A pay cell always holds a tariff, and every deposit address
 is 32 bytes.  The identity half of the law is the registry's
 (`CanonicalCellRegistry.LogicalLaw`). -/
 def Law (store : PayStore) : Prop :=
-  (tariffOf store).isSome = true ∧ (clockOf store).isSome = true ∧
+  (tariffOf store).isSome = true ∧
     ∀ address ∈ store.support, rowShaped store address = true
 
 instance (store : PayStore) : Decidable (Law store) := by
   unfold Law
   infer_instance
 
-/-! ## Wire `DREGG/PAY/CELL/v1` -/
-
-def clockStream : StreamCodec Clock :=
-  StreamCodec.xmap (StreamCodec.product StreamCodec.nat StreamCodec.nat)
-    (fun clock => (clock.slot, clock.blockTime))
-    (fun (slot, blockTime) => ⟨slot, blockTime⟩)
-    (by intro clock; cases clock; rfl)
+/-! ## Wire `DREGG/PAY/CELL/v2` -/
 
 def namespaceStream : StreamCodec Namespace where
   encode
     | .tariff => [0]
     | .book => [1]
     | .assignment => [2]
-    | .clock => [3]
   decodePrefix
     | 0 :: suffix => some (.tariff, suffix)
     | 1 :: suffix => some (.book, suffix)
     | 2 :: suffix => some (.assignment, suffix)
-    | 3 :: suffix => some (.clock, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
 
@@ -174,19 +150,17 @@ def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .tariff => unitStream
   | .book => StreamCodec.nat
   | .assignment => StreamCodec.nat
-  | .clock => unitStream
 
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .tariff => tariffStream
   | .book => bytesStream
   | .assignment => StreamCodec.nat
-  | .clock => clockStream
 
-def wireName : String := "DREGG/PAY/CELL/v1"
+def wireName : String := "DREGG/PAY/CELL/v2"
 
 def wire : Wire layout where
   name := wireName
-  namespaces := [.tariff, .book, .assignment, .clock]
+  namespaces := [.tariff, .book, .assignment]
   namespaces_complete := by intro space; cases space <;> simp
   namespaceStream := namespaceStream
   keyStream := keyStream
@@ -195,12 +169,10 @@ def wire : Wire layout where
     | .tariff => "unit"
     | .book => "book-index/nat"
     | .assignment => "book-index/nat"
-    | .clock => "unit"
   valueCodecId
     | .tariff => "DREGG/PAY/TARIFF/v1"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
-    | .clock => "DREGG/PAY/CLOCK/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 
@@ -222,21 +194,19 @@ def idCustomization : List UInt8 := "DREGG.PAY.CELL.ID/v1".toUTF8.toList
 def physicalId (domain : Digest) : Nat :=
   (Sp800185Cshake256.hash idCustomization (digestStream.encode domain)).digest.value
 
-/-- The genesis pay cell: the placeholder tariff, the zero clock, an empty book
-and no assignment. -/
+/-- The genesis pay cell: the placeholder tariff, an empty book and no
+assignment. -/
 def genesisStore : PayStore :=
-  ((0 : PayStore).set tariffAddress (some genesisDefault)).set clockAddress (some ⟨0, 0⟩)
+  (0 : PayStore).set tariffAddress (some genesisDefault)
 
 theorem genesis_law : Law genesisStore := by decide +kernel
 
 theorem genesis_tariff : tariffOf genesisStore = some genesisDefault := by decide +kernel
 
-theorem genesis_clock : clockOf genesisStore = some ⟨0, 0⟩ := by decide +kernel
-
 theorem genesis_nextFree : nextFree genesisStore = 0 := by decide +kernel
 
 /-- Refuting pole of the law: a pay cell without a tariff is not lawful. -/
-theorem tariffless_unlawful : ¬ Law ((0 : PayStore).set clockAddress (some ⟨0, 0⟩)) := by
+theorem tariffless_unlawful : ¬ Law (0 : PayStore) := by
   decide +kernel
 
 /-- Refuting pole of the row shape: a 31-byte deposit address is not lawful. -/
@@ -248,7 +218,6 @@ theorem short_address_unlawful :
 #assert_axioms cell_canonical
 #assert_axioms genesis_law
 #assert_axioms genesis_tariff
-#assert_axioms genesis_clock
 #assert_axioms genesis_nextFree
 #assert_axioms tariffless_unlawful
 #assert_axioms short_address_unlawful

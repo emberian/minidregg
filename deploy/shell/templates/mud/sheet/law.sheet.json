@@ -1448,13 +1448,10 @@
           }
         },
         {
-          "type": "not",
-          "predicate": {
-            "type": "leSlotsOff",
-            "left": "resource/field/9/after",
-            "right": "clock/now",
-            "offset": "{RESPAWN_M1}"
-          }
+          "type": "leSlotsOff",
+          "left": "clock/now",
+          "right": "resource/field/9/after",
+          "offset": "{NEG_RESPAWN}"
         }
       ]
     },
@@ -1585,13 +1582,10 @@
               "right": "clock/now"
             },
             {
-              "type": "not",
-              "predicate": {
-                "type": "leSlotsOff",
-                "left": "joint/index/0/resource/field/3/after",
-                "right": "clock/now",
-                "offset": "{COST_M1}"
-              }
+              "type": "leSlotsOff",
+              "left": "clock/now",
+              "right": "joint/index/0/resource/field/3/after",
+              "offset": "{NEG_COST}"
             }
           ]
         },
@@ -1609,13 +1603,10 @@
               "right": "clock/now"
             },
             {
-              "type": "not",
-              "predicate": {
-                "type": "leSlotsOff",
-                "left": "joint/index/0/resource/field/4/after",
-                "right": "clock/now",
-                "offset": "{ECOST_M1}"
-              }
+              "type": "leSlotsOff",
+              "left": "clock/now",
+              "right": "joint/index/0/resource/field/4/after",
+              "offset": "{NEG_ECOST}"
             }
           ]
         }
@@ -1666,13 +1657,10 @@
               }
             },
             {
-              "type": "not",
-              "predicate": {
-                "type": "leSlotsOff",
-                "left": "resource/field/3/after",
-                "right": "clock/now",
-                "offset": "{COST_M1}"
-              }
+              "type": "leSlotsOff",
+              "left": "clock/now",
+              "right": "resource/field/3/after",
+              "offset": "{NEG_COST}"
             }
           ]
         }
@@ -1719,13 +1707,10 @@
               }
             },
             {
-              "type": "not",
-              "predicate": {
-                "type": "leSlotsOff",
-                "left": "resource/field/4/after",
-                "right": "clock/now",
-                "offset": "{ECOST_M1}"
-              }
+              "type": "leSlotsOff",
+              "left": "clock/now",
+              "right": "resource/field/4/after",
+              "offset": "{NEG_ECOST}"
             }
           ]
         }
@@ -1835,6 +1820,42 @@
           "type": "eq",
           "slot": "resource/field/7/before",
           "value": "3"
+        }
+      ]
+    },
+    {
+      "type": "any",
+      "predicates": [
+        {
+          "type": "not",
+          "predicate": {
+            "type": "eq",
+            "slot": "request/verb",
+            "value": "2"
+          }
+        },
+        {
+          "type": "not",
+          "predicate": {
+            "type": "all",
+            "predicates": [
+              {
+                "type": "eq",
+                "slot": "resource/field/5/before",
+                "value": "1"
+              },
+              {
+                "type": "eq",
+                "slot": "resource/field/5/after",
+                "value": "0"
+              }
+            ]
+          }
+        },
+        {
+          "type": "le",
+          "slot": "resource/field/2/after",
+          "value": "0"
         }
       ]
     }

@@ -62,7 +62,7 @@
   :~  ['1/2' hp2]
       ['1/5' --0]
       ['1/6' (sum:si d-deaths --1)]
-      ['1/9' (sum:si (new:si & now.ctx) (respawn d-id))]  ::  must meet the sheet's {RESPAWN_M1} (death-timer)
+      ['1/9' (sum:si (new:si & now.ctx) (respawn d-id))]  ::  must meet the sheet's {NEG_RESPAWN} (death-timer)
   ==
 (weld attacker defender)
 ::
