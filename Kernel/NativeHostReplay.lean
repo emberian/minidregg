@@ -48,6 +48,7 @@ import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
 import Kernel.PurseRefillReceiver
 import Kernel.JobMoneyReceiver
+import Kernel.CapabilityRenounce
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -717,6 +718,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : CapabilityRevocationReceiver.AcceptedRevocation config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (CapabilityRevocationReceiver.intent accepted)
+  | renounce {ingress : CapabilityRenounce.DecodedIngress}
+      (accepted : CapabilityRenounce.AcceptedRenounce config.deployment config.profile.semantics
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (CapabilityRenounce.intent accepted)
   | participantKeyEnrollment {ingress : ParticipantKeyEnrollment.DecodedIngress}
       (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -1622,6 +1627,13 @@ private def derive (config : Config) (opened : Opened config)
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
     | .error reason => return .error s!"revocation refused: {repr reason}"
     | .ok accepted => return .ok ⟨CapabilityRevocationReceiver.intent accepted, .revoke accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := CapabilityRenounce.decodeIngress bytes then
+    match ← CapabilityRenounce.admitDecodedNative config.deployment config.profile.semantics
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .rejected reason => return .error s!"renounce refused: {repr reason}"
+    | .refusedToHolder refusal => return .error s!"renounce refused: {repr refusal.reason}"
+    | .accepted accepted =>
+        return .ok ⟨CapabilityRenounce.intent accepted, .renounce accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := FnSelectiveReleaseIngress.ingressCodec.decode bytes then
     match ← FnSelectiveReleaseAdmission.admit config opened ingress with
     | .error _ => return .error "historical selected release admission refused"

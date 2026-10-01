@@ -32,6 +32,7 @@ import Theory.TypedAuthorization  -- complete-request-indexed authority evidence
 import Theory.AuthorizationDeclaration  -- first-order authorization plans compiled to indexed programs; accepted plans construct the request-indexed Authorized proposition
 import Theory.Noun  -- NOCK: nouns, axis/edit, Hoon jam/cue with back-references; cue_jam, jam_injective, canonical_unique
 import Theory.Nock  -- NOCK: Nock 4K as Step/Crash relations + fueled exec/run; run_sound, run_complete, run_crash_iff, step_deterministic, run_fuel_monotone; runJammed @[export]
+import Theory.Renounce  -- K-RENOUNCE: the holder-revocation gate, RevokedOne, renounce_revokes_exactly_lineage, renounce_preserves_others, poles
 import Theory.RoomAuthorization  -- K-ROOM: `under R` target sets decided at the system cell's parent projection; room_confidentiality (refusal form) and room_admission_traces_to_root (lineage form), narrows_stable with its refused-before-birth tooth, all poles by `decide`
 import Theory.Noun  -- NOCK: nouns, axis/edit, Hoon jam/cue with back-references; cue_jam, jam_injective, canonical_unique
 import Theory.Nock  -- NOCK: Nock 4K as Step/Crash relations + fueled exec/run; run_sound, run_complete, run_crash_iff, step_deterministic, run_fuel_monotone; runJammed @[export]

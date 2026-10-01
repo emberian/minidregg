@@ -761,7 +761,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
      ("operations", toJson
-       ((["birth", "invoke", "install", "delegate", "revoke",
+       ((["birth", "invoke", "install", "delegate", "revoke", "renounce",
           "fn-selected-public-release", "application-lifecycle-begin",
           "selected-source-publication"] : List String) ++
          if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
@@ -1523,12 +1523,12 @@ def dispatchSession (config : NativeHost.Config)
       phaseTrace "op2 refresh" t0
       let result ← match callCodec.decode payload with
         | none => pure (NativeHostCodec.Outcome.refused .malformed "wire".toUTF8.toList
-            "noncanonical or unsupported native host call".toUTF8.toList)
+            "noncanonical or unsupported native host call".toUTF8.toList, NativeHost.Disclosure.uniform)
         | some call =>
-            NativeHost.submitLoadedWith config session.opened call
+            NativeHost.submitDisclosedWith config session.opened call
               (sessionConfirmed config state)
-      NativeHost.logOperatorRefusal result
-      return (2, outcomeCodec.encode (NativeHost.publicSubmissionOutcome result))
+      NativeHost.logOperatorRefusal result.1
+      return (2, outcomeCodec.encode (NativeHost.disclose result))
   | 3 =>
       let opened ← sessionOpened config state
       let result := match callCodec.decode payload with

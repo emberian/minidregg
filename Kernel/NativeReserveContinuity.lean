@@ -83,6 +83,7 @@ def ordinaryOther {config : Config} (session : NativeHostSession.Walked config)
     (providerCell : CellId) (record : DurableReceiver.IntentRecord) : Bool :=
   let bytes := record.event.canonicalBytes
   if (CapabilityRevocationReceiver.decodeIngress bytes).isSome ||
+      (CapabilityRenounce.decodeIngress bytes).isSome ||
       (ResourceBirthPolicyController.Concrete.decodeIngress bytes).isSome ||
       (PolicyInstallReceiver.decodeIngress bytes).isSome ||
       (CapabilityDelegationReceiver.decodeIngress bytes).isSome then false

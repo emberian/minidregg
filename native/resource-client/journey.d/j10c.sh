@@ -20,9 +20,16 @@
 #             herself: bob's placement is refused by name (`birthRefused`), his
 #             read still admitted — the law decides birth, revocation decides
 #             membership.
-#   kick      alice kicks bob: bob's read is refused, and dave's (attenuated from
-#             bob's) too (`ancestor_revocation_rejected`). `room leave` names its
-#             missing kernel half (K-RENOUNCE).
+#   leave     (K-RENOUNCE) carl, invited to observe, tries to renounce bob's
+#             grant: refused `notHolder`. bob leaves lab (`room leave`: a renounce
+#             of his room grant, signed by him, no management grant): his read is
+#             refused `revoked`, his births into lab `notRoomMember`, and dave's
+#             grant (delegated from bob's) is dead too; the leave says so. alice
+#             and carl are unaffected. A second leave is refused `alreadyRevoked`;
+#             the exact retry returns the original receipt. alice re-invites bob:
+#             a NEW grant, which reads and places.
+#   kick      alice kicks carl (the founder's revocation still works): carl's read
+#             is refused.
 #   realm     alice founds `tide` (--law realm): bob, invited with `place`, is refused
 #             bearing a well by the realm's law; carl is refused as a non-member;
 #             alice's well is admitted (`fake_realm_asset_refused`).
@@ -268,18 +275,61 @@ named J7 bob "doc new notes3 --in lab" birthRefused
 ok J7 bob "read lab"
 ok J7 alice "doc new anotes --in lab"
 
-# ------------------------------------------------ kick, and leave
-ok kick alice "room kick k-bob lab $B"
-ok kick alice "submit k-bob"
-refused kick bob "read lab" revoked
-refused kick dave "read lab" revoked
-named kick bob "doc new notes4 --in lab" notRoomMember
-ok kick alice "read lab"
-ok kick alice "room members lab"
-check kick "room members no longer lists bob or dave" \
-  jq -e --arg b "$B" --arg d "$D" '[.members[].subject] as $s
-    | (($s | index($b)) | not) and (($s | index($d)) | not)' "$OUT"
-fails kick bob "room leave lab" 1 "K-RENOUNCE"
+# ------------------------------------------------ leave (K-RENOUNCE)
+BOBCAP=$(jq -r .operationCapability "$WS/bob/refs/lab.json")
+DAVECAP=$(jq -r .operationCapability "$WS/dave/refs/lab.json")
+ok leave alice "room invite i-carl lab $C --verbs observe"
+handoff leave alice i-carl
+ok leave carl "import labc $REF"
+ok leave carl "read labc"
+ok leave carl "renounce c-bob $BOBCAP"
+named leave carl "submit c-bob" notHolder
+ok leave bob "read lab"
+ok leave bob "room leave l-bob lab"
+check leave "the leave is a renounce of bob's own room grant, signed by bob, naming no management grant" \
+  jq -e --arg cap "$BOBCAP" --arg b "$B" '.purpose.draft.type == "renounce-source"
+    and .purpose.draft.command.capability == $cap and .purpose.draft.command.subject == $b
+    and .grants == []' "$WS/bob/proposals/l-bob/intent.json"
+check leave "the proposal names dave's grant (delegated from bob's) as ending with it" \
+  jq -e --arg d "$DAVECAP" '[.renounce.alsoEnds[].capability] | index($d)' "$WS/bob/proposals/l-bob/proposal.json"
+ok leave bob "submit l-bob"
+check leave "the leave says what ended with it" grep -q "renounced capability $BOBCAP (object); ended with it: $DAVECAP" "$ERR"
+refused leave bob "read lab" revoked
+refused leave dave "read lab" revoked
+named leave bob "doc new notes4 --in lab" notRoomMember
+ok leave alice "read lab"
+ok leave alice "doc new anotes2 --in lab"
+ok leave carl "read labc"
+ok leave alice "room members lab"
+check leave "room members no longer lists bob or dave; still lists alice and carl" \
+  jq -e --arg a "$A" --arg b "$B" --arg c "$C" --arg d "$D" '[.members[].subject] as $s
+    | (($s | index($b)) | not) and (($s | index($d)) | not) and ($s | index($a)) and ($s | index($c))' "$OUT"
+ok leave bob "room leave l-bob2 lab"
+named leave bob "submit l-bob2" alreadyRevoked
+ok leave bob "retry l-bob"
+check leave "the exact retry returns the original receipt (replayed, same transaction)" \
+  jq -e -s '.[0].transactionId == .[1].transactionId and .[0].eventId == .[1].eventId
+    and .[1].confirmation == "replayed"' "$WS/bob/attempts/l-bob/outcome.json" "$WS/bob/attempts/l-bob/retry-0001.json"
+fails leave alice "room leave l-alice lab" 1 "not a room you joined"
+ok leave alice "room invite i-bob2 lab $B --verbs observe,place"
+handoff leave alice i-bob2
+ok leave bob "import lab2 $REF"
+check leave "the re-invite is a new capability, not the renounced one" \
+  test "$(jq -r .operationCapability "$WS/bob/refs/lab2.json")" != "$BOBCAP"
+ok leave bob "read lab2"
+# lab's placement law (J7's l2) still admits only alice: the new grant passes
+# the membership gate and the law refuses (birthRefused, not notRoomMember).
+named leave bob "doc new notes5 --in lab2" birthRefused
+ok leave alice "law l3 lab any [ not (verb == write), field 1 <= 100 ]"
+ok leave alice "submit l3"
+ok leave bob "doc new notes6 --in lab2"
+refused leave bob "read lab" revoked
+
+# ------------------------------------------------ kick (the founder's revocation)
+ok kick alice "room kick k-carl lab $C"
+ok kick alice "submit k-carl"
+refused kick carl "read labc" revoked
+ok kick bob "read lab2"
 
 # ------------------------------------------------ a realm
 ok realm alice "room new tide --law realm"
@@ -316,6 +366,8 @@ check restart "audit re-admitted the Store (exit 0)" test "$(cat "$SD/audit-r1.r
 ok restart alice "read lab"
 refused restart bob "read lab" revoked
 refused restart dave "read lab" revoked
+ok restart bob "read lab2"
+refused restart carl "read labc" revoked
 ok restart alice "doc show notes-via-lab"
 named restart carl "doc new spam3 --in lab" notRoomMember
 

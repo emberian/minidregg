@@ -70,8 +70,9 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
+    Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
     Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
-    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room leave NAME | room members NAME | room list | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true) | propose (action revoke) | not here (K-RENOUNCE) | who | local: references that are rooms | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
+    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room leave ID NAME | room members NAME | room list | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true) | propose (action revoke) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
@@ -363,9 +364,12 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
             proposal(session, &w[2], &request)
         }
         "leave" => {
-            arity(w, 2, 2, u)?;
-            ref_name(&w[2], "room name")?;
-            Plan::NotHere("leaving a room needs holder revocation, which this store does not have (task K-RENOUNCE): a grant is revoked only by a holder of the room's management capability; ask the founder to `room kick` you".into())
+            arity(w, 3, 3, u)?;
+            workspace_name(&w[2], "proposal ID")?;
+            workspace_name(&w[3], "room name")?;
+            let request = json!({"type":"minidregg-workspace-proposal-v1","action":"renounce",
+                "name":w[3],"leave":true});
+            proposal(session, &w[2], &request)
         }
         "members" | "law" => {
             arity(w, 2, 2, u)?;
@@ -917,6 +921,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             decimal(&w[3], "recipient")?;
             let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
                 "name":w[2],"recipient":w[3]});
+            proposal(session, &w[1], &request)
+        }
+        "renounce" => {
+            arity(&w, 2, 3, u)?;
+            workspace_name(&w[1], "proposal ID")?;
+            let request = if w[2].bytes().all(|b| b.is_ascii_digit()) {
+                decimal(&w[2], "capability")?;
+                let kind = w.get(3).map(String::as_str).unwrap_or("object");
+                if !matches!(kind, "object" | "account" | "program") {
+                    return Err(u.to_owned());
+                }
+                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce",
+                    "capability":w[2],"kind":kind})
+            } else {
+                if w.len() != 3 {
+                    return Err(u.to_owned());
+                }
+                workspace_name(&w[2], "reference name")?;
+                json!({"type":"minidregg-workspace-proposal-v1","action":"renounce","name":w[2]})
+            };
             proposal(session, &w[1], &request)
         }
         "room" => room_plan(session, &w, u)?,
@@ -1997,7 +2021,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("enroll", 3) if w[1] == "plan" => keys(),
         ("invoke" | "delegate" | "law", 2) => refs(),
         ("invoke", 3) => vec!["create".into(), "write".into()],
-        ("revoke", 2) => refs(),
+        ("revoke" | "renounce", 2) => refs(),
         ("doc", 1) => ["new", "show", "append", "edit", "link", "backlinks", "annotate", "quote"]
             .map(String::from)
             .to_vec(),
@@ -2646,7 +2670,7 @@ mod tests {
         fs::write(ws.join("refs").join("factory.json"), b"{}").unwrap();
         let s = Session { workspace: ws, home: root.join("h"), host: "/x".into(), config: "/y".into() };
         assert_eq!(complete(&s, "su"), ["submit"]);
-        assert_eq!(complete(&s, "re"), ["refs", "read", "retry", "revoke", "react"]);
+        assert_eq!(complete(&s, "re"), ["refs", "read", "retry", "revoke", "renounce", "react"]);
         assert_eq!(complete(&s, "doc show "), ["factory", "shared"]);
         assert_eq!(complete(&s, "doc link x shared f"), ["factory"]);
         assert_eq!(complete(&s, "board m"), ["move"]);
@@ -2856,7 +2880,18 @@ mod tests {
             "law l2 lab any [ not (verb == place), subject in {15893985203478182741} ]").unwrap());
         assert_eq!(request["predicate"]["predicates"][0]["predicate"]["value"], "10");
         assert_eq!(request["predicate"]["predicates"][1]["values"], json!(["15893985203478182741"]));
-        assert!(matches!(plan(&s, "room leave lab").unwrap(), Plan::NotHere(t) if t.contains("K-RENOUNCE")));
+        let (_, request) = request_of(plan(&s, "room leave l1 lab").unwrap());
+        assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"renounce",
+            "name":"lab","leave":true}));
+        assert_eq!(plan(&s, "room leave lab").unwrap_err(), usage_of("room"));
+        let (_, request) = request_of(plan(&s, "renounce r1 77 account").unwrap());
+        assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"renounce",
+            "capability":"77","kind":"account"}));
+        let (_, request) = request_of(plan(&s, "renounce r2 lab").unwrap());
+        assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"renounce",
+            "name":"lab"}));
+        assert_eq!(plan(&s, "renounce r3 77 cell").unwrap_err(), usage_of("renounce"));
+        assert_eq!(plan(&s, "renounce r3 lab object").unwrap_err(), usage_of("renounce"));
         for bad in ["room", "room new", "room new lab --template castle", "room new lab --referee 9",
             "room new lab --law workroom", "room new lab --template workroom --law open",
             "room new lab --bogus 1", "room invite i1 lab", "room invite i1 lab x",

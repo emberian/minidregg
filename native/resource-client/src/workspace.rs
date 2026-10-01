@@ -890,6 +890,7 @@ pub(crate) fn propose(
     };
     let nonce = random_nonce()?;
     let mut delegation = None::<Value>;
+    let mut renounce = None::<Value>;
     let intent = match member(&request, "action")? {
         "invoke" => {
             let obj = request.as_object().ok_or("proposal must be an object")?;
@@ -1284,9 +1285,56 @@ pub(crate) fn propose(
                 "grants":[{"kind":kind,"target":target,
                     "capability":member(&reference,"observeCapability")?}]})
         }
+        "renounce" => {
+            // K-RENOUNCE: the holder revokes a capability it holds. Named by a
+            // reference (its operation capability) or by number with its kind.
+            // `leave: true` (the shell's `room leave`) requires the reference
+            // to be a room this workspace joined, not one it founded.
+            let obj = request.as_object().ok_or("proposal must be an object")?;
+            let leave = obj.get("leave") == Some(&json!(true));
+            let extra = usize::from(obj.contains_key("leave"));
+            let (kind, capability) = if obj.len() == 3 + extra && obj.contains_key("name") {
+                let name = member(&request, "name")?;
+                let reference = reference(root, name)?;
+                if leave && reference.get("room").and_then(Value::as_str) != Some("member") {
+                    return Err(format!(
+                        "{name} is not a room you joined (leaving one you founded would renounce your owner grant; use renounce explicitly)"
+                    ));
+                }
+                (
+                    member(&reference, "kind")?.to_owned(),
+                    member(&reference, "operationCapability")?.to_owned(),
+                )
+            } else if !leave
+                && obj.len() == 4
+                && obj.contains_key("capability")
+                && obj.contains_key("kind")
+            {
+                let capability = member(&request, "capability")?;
+                decimal(capability, "renounced capability")?;
+                let kind = member(&request, "kind")?;
+                if !matches!(kind, "object" | "account" | "program") {
+                    return Err("renounce kind must be object, account or program".into());
+                }
+                (kind.to_owned(), capability.to_owned())
+            } else {
+                return Err(
+                    "renounce proposal may contain only type, action, and name [leave] or capability and kind"
+                        .into(),
+                );
+            };
+            renounce = Some(json!({"capability":capability,"kind":kind,
+                "alsoEnds":delegations_from(root, &capability)}));
+            json!({"subject":member(workspace,"subject")?,"nonce":nonce,
+                "purpose":{"type":"prepare","draft":{"type":"renounce-source",
+                    "command":{"subject":member(workspace,"subject")?,"nonce":random_nonce()?,
+                        "kind":kind,"capability":capability}}},
+                "grants":[]})
+        }
         _ => {
             return Err(
-                "proposal action must be invoke, install-policy, delegate, or revoke".into(),
+                "proposal action must be invoke, install-policy, delegate, revoke, or renounce"
+                    .into(),
             )
         }
     };
@@ -1309,7 +1357,7 @@ pub(crate) fn propose(
     let summary = json!({"type":"minidregg-workspace-proposal-result-v1",
         "proposalId":proposal_id,"intentPath":proposal_dir.join("intent.json"),
         "intentSha256":intent_sha,"effect":"none","authority":"requires-current-admission",
-        "delegation":delegation});
+        "delegation":delegation,"renounce":renounce});
     let bytes = serde_json::to_vec_pretty(&summary).map_err(|error| error.to_string())?;
     private_file(&proposal_dir.join("proposal.json"), &bytes)?;
     println!(
@@ -1355,7 +1403,83 @@ pub(crate) fn submit_intent(
         &member_path(workspace, "key")?,
         &attempt,
         prepare_only,
-    )
+    )?;
+    if !prepare_only {
+        renounce_note(&source);
+    }
+    Ok(())
+}
+
+/// The grants this workspace delegated from `capability`, transitively, as
+/// its retained proposals record them: `[{capability, recipient, proposal}]`.
+/// They end with it (the Host's lineage rule); this is discovery only.
+fn delegations_from(root: &Path, capability: &str) -> Vec<Value> {
+    let mut records = Vec::new();
+    if let Ok(entries) = fs::read_dir(root.join("proposals")) {
+        for entry in entries.flatten() {
+            let Ok(intent) = bounded_json(&entry.path().join("intent.json")) else {
+                continue;
+            };
+            let command = &intent["purpose"]["draft"]["command"];
+            if intent["purpose"]["draft"]["type"] != json!("delegate-source") {
+                continue;
+            }
+            if let (Some(parent), Some(child)) = (
+                command["parentId"].as_str(),
+                command["child"]["id"].as_str(),
+            ) {
+                let recipient = command["child"]["holder"]["subject"].clone();
+                let proposal = entry.file_name().to_string_lossy().into_owned();
+                records.push((parent.to_owned(), child.to_owned(), recipient, proposal));
+            }
+        }
+    }
+    let mut ended = Vec::new();
+    let mut frontier = vec![capability.to_owned()];
+    while let Some(parent) = frontier.pop() {
+        for (from, child, recipient, proposal) in &records {
+            if from == &parent && !ended.iter().any(|v: &Value| v["capability"] == json!(child)) {
+                ended.push(json!({"capability":child,"recipient":recipient,"proposal":proposal}));
+                frontier.push(child.clone());
+            }
+        }
+    }
+    ended
+}
+
+/// After an admitted renounce proposal: say what was renounced and what
+/// ended with it.
+fn renounce_note(source: &Path) {
+    let Some(dir) = source.parent() else { return };
+    if source.file_name() != Some(OsStr::new("intent.json")) {
+        return;
+    }
+    let Ok(summary) = bounded_json(&dir.join("proposal.json")) else {
+        return;
+    };
+    let Some(renounced) = summary.get("renounce").filter(|value| value.is_object()) else {
+        return;
+    };
+    let ended: Vec<String> = renounced["alsoEnds"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .map(|v| {
+                    format!(
+                        "{} (delegated to {})",
+                        v["capability"].as_str().unwrap_or("?"),
+                        v["recipient"].as_str().unwrap_or("?")
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    eprintln!(
+        "renounced capability {} ({}); ended with it: {}",
+        renounced["capability"].as_str().unwrap_or("?"),
+        renounced["kind"].as_str().unwrap_or("?"),
+        if ended.is_empty() { "nothing this workspace delegated".to_owned() } else { ended.join(", ") }
+    );
 }
 
 fn bind_delegation_attempt(
