@@ -65,9 +65,13 @@ def installProjectionVersion : List UInt8 :=
 
 /-- The same source declaration produces request fields, old/post views and
 effects. Generic scalar views retain complete field identifiers and expose
-before/after/delta plus pair-total deltas only where the actual reads exist. -/
+before/after/delta plus pair-total deltas only where the actual reads exist.
+Every participant of a joint command is exposed twice, under
+`joint/target/{cell id}/…` and under `joint/index/{i}/…` with `i` its 0-based
+position in the command's target list (`DeclaredResourceController.jointSlots`,
+`joint_index_of_target`); a position the command lacks names no slot. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS/v4".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS/v5".toUTF8.toList
 
 /-- Typed content edits are source-derived canonical patches; atom payloads
 and exact old records belong to the command, not a host-side blob table. -/

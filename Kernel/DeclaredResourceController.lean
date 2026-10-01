@@ -6,6 +6,7 @@ shared replay marker is the intent's durable nullifier. -/
 import Kernel.ResourceTransaction
 import Kernel.ResourceObservationAdmission
 import Compiler.ResourceAuthorityProjection
+import Kernel.JointSlots
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -166,19 +167,22 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val)
 
+/-- Participant `i`'s own slots: exactly what a law on `i` reads locally. -/
+def participantSlots (prepared : PreparedInvocation deployment profile ambient durable command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : TargetIndex command) : List (String × Int) :=
+  bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i))) ++
+    targetProjection command.targets[i] (prepared.targets i).pre.logical (logical (some i))
+
+/-- Local names for the primary participant, then every participant under
+`joint/target/{id}/…` and again under `joint/index/{i}/…` (`jointSlots`). -/
 def projectWithCommon (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (common : List (String × Int))
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     Minidregg.Pred.State :=
   let localIndex := primary.getD (firstIndex prepared)
-  let localSlots :=
-    bytesSlots "resource/bytes" 0 (command.targets[localIndex].materializer.codec.encode (logical (some localIndex))) ++
-    targetProjection command.targets[localIndex] (prepared.targets localIndex).pre.logical (logical (some localIndex))
-  let joint := (List.finRange command.targets.length).flatMap fun i =>
-    (bytesSlots "resource/bytes" 0 (command.targets[i].materializer.codec.encode (logical (some i))) ++
-      targetProjection command.targets[i] (prepared.targets i).pre.logical (logical (some i))).map fun slot =>
-        (s!"joint/target/{command.targets[i].target}/{slot.1}", slot.2)
-  ⟨common ++ localSlots ++ joint⟩
+  ⟨common ++ participantSlots prepared logical localIndex ++
+    jointSlots command.targets (participantSlots prepared logical)⟩
 
 def project (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command)
@@ -191,6 +195,99 @@ theorem projectWithCommon_exact (prepared : PreparedInvocation deployment profil
     (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
     projectWithCommon prepared primary (projectCommonSlots prepared primary source) logical =
       project prepared primary source logical := rfl
+
+section JointIndex
+open JointSlots
+
+theorem targetProjection_unjoint (target : Target) (before after : Store target.layout) :
+    Unjoint (targetProjection target before after) := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact scalarSlots_unjoint _ _
+    | content content => exact contentProject_unjoint _ _ _
+
+theorem participantSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : TargetIndex command) : Unjoint (participantSlots prepared logical i) :=
+  unjoint_append _ _ (bytesSlots_unjoint "resource/bytes" 'r' (by decide) (by decide) _ _)
+    (targetProjection_unjoint _ _ _)
+
+theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command) :
+    Unjoint (projectCommonSlots prepared primary source) :=
+  unjoint_append _ _ (requestSlots_unjoint _)
+    (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _)
+
+/-- Every joint key is read from the joint block: nothing local or common can shadow it. -/
+theorem project_joint_get (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (k : String) (hk : k.toList.head? = some 'j') :
+    (project prepared primary source logical).get k =
+      Minidregg.Pred.State.get ⟨jointSlots command.targets (participantSlots prepared logical)⟩ k := by
+  unfold project projectWithCommon
+  rw [get_append, get_unjoint _ (unjoint_append _ _ (projectCommonSlots_unjoint prepared primary source)
+    (participantSlots_unjoint prepared logical _)) k hk, Option.none_or]
+
+/-- Position `i` of the command reads participant `i`'s own slots. -/
+theorem joint_index_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : TargetIndex command) (slot : String) :
+    (project prepared primary source logical).get (jointIndexKey i.val slot) =
+      Minidregg.Pred.State.get ⟨participantSlots prepared logical i⟩ slot := by
+  rw [project_joint_get _ _ _ _ _ (jointIndexKey_head _ _), jointSlots_index]
+
+/-- The id key names the same participant, since a prepared command's target ids are distinct. -/
+theorem joint_target_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : TargetIndex command) (slot : String) :
+    (project prepared primary source logical).get (jointTargetKey command.targets[i].target slot) =
+      Minidregg.Pred.State.get ⟨participantSlots prepared logical i⟩ slot := by
+  rw [project_joint_get _ _ _ _ _ (jointTargetKey_head _ _), jointSlots_target _ _ prepared.distinct]
+
+/-- The two keyings agree: `joint/index/{i}/s` and `joint/target/{id of target i}/s`
+read the same value (or are both absent) for every slot name `s`. -/
+theorem joint_index_of_target (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (i : Nat) (t : Target) (h : command.targets[i]? = some t) (slot : String) :
+    (project prepared primary source logical).get (jointIndexKey i slot) =
+      (project prepared primary source logical).get (jointTargetKey t.target slot) := by
+  obtain ⟨lt, rfl⟩ := List.getElem?_eq_some_iff.mp h
+  exact (joint_index_exact prepared primary source logical ⟨i, lt⟩ slot).trans
+    (joint_target_exact prepared primary source logical ⟨i, lt⟩ slot).symm
+
+/-- A position the command does not have names nothing: every Pred atom is
+false on it (fail-closed), so a law asserting a fact about that position
+refuses the command. (A `not` around such an atom is true.) -/
+theorem joint_index_absent (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence))
+    (n : Nat) (h : command.targets.length ≤ n) (slot : String) :
+    (project prepared primary source logical).get (jointIndexKey n slot) = none := by
+  rw [project_joint_get _ _ _ _ _ (jointIndexKey_head _ _), jointSlots_index_absent _ _ n h]
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.targetProjection_unjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms targetProjection_unjoint
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.participantSlots_unjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms participantSlots_unjoint
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.projectCommonSlots_unjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms projectCommonSlots_unjoint
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.project_joint_get' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms project_joint_get
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.joint_index_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms joint_index_exact
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.joint_target_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms joint_target_exact
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.joint_index_of_target' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms joint_index_of_target
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.joint_index_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms joint_index_absent
+
+end JointIndex
 
 /- The tuple's generic `pre` selector constructs a complete raw leg, including
 the hash of the entire signed command's request. These projections select the
