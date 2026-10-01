@@ -12,7 +12,15 @@ not the payer (`creditFor_le_cap`).
 
 A tariff is `valid` only when it names a real token: a positive version, a
 32-byte mint and token program that are not the all-zero key (the Solana
-System Program, which is no mint), and positive rate and cap.  The genesis
+System Program, which is no mint), positive rate and cap, and a positive node
+membership rate.
+
+Version 2 (`DREGG/PAY/TARIFF/v2`, PAY §11) adds self-enrollment:
+`nodeHourRate` (Book credit per hour of node membership; a node week is
+`168 · nodeHourRate`), `enrolIndex` (the book index whose observations go to
+the enrollment receiver; `none` = self-enrollment off) and `journalFloor`
+(atomic units below which an enrollment-index transfer is not admitted at
+all, so dust cannot buy a journal row).  A v1 tariff's bytes refuse to decode.  The genesis
 default (`genesisDefault`) is deliberately invalid until the operator sets a
 tariff; while it is invalid, no deposit index is assigned
 (`PayAssignmentReceiver.assignment_requires_valid_tariff`).
@@ -58,12 +66,18 @@ structure Tariff where
   maxPerObservation : Nat
   /-- Heartbeat rate limit, in chain slots. -/
   minTickSlots : Nat
+  /-- Book credit per hour of node membership (PAY §11.8: 5 952 380). -/
+  nodeHourRate : Nat
+  /-- The self-enrollment book index; `none` turns self-enrollment off. -/
+  enrolIndex : Option Nat
+  /-- Enrollment-index transfers below this many atomic units are refused. -/
+  journalFloor : Nat
   deriving DecidableEq, Repr
 
 def Tariff.valid (t : Tariff) : Prop :=
   0 < t.version ∧ t.mint.length = 32 ∧ t.tokenProgram.length = 32 ∧
     t.mint ≠ zeroKey ∧ t.tokenProgram ≠ zeroKey ∧
-    0 < t.creditPerAtomic ∧ 0 < t.maxPerObservation
+    0 < t.creditPerAtomic ∧ 0 < t.maxPerObservation ∧ 0 < t.nodeHourRate
 
 instance (t : Tariff) : Decidable t.valid := by
   unfold Tariff.valid
@@ -82,7 +96,7 @@ theorem creditFor_le_cap (t : Tariff) (amount : Nat) :
 positive credit. -/
 theorem creditFor_pos (t : Tariff) (valid : t.valid) (amount : Nat) (positive : 0 < amount) :
     0 < t.creditFor amount :=
-  Nat.mul_pos (Nat.lt_min.mpr ⟨positive, valid.2.2.2.2.2.2⟩) valid.2.2.2.2.2.1
+  Nat.mul_pos (Nat.lt_min.mpr ⟨positive, valid.2.2.2.2.2.2.1⟩) valid.2.2.2.2.2.1
 
 /-- Refuting pole: an empty transfer mints nothing, whatever the tariff. -/
 theorem creditFor_zero (t : Tariff) : t.creditFor 0 = 0 := by
@@ -93,7 +107,10 @@ theorem creditFor_under_cap (t : Tariff) (amount : Nat) (under : amount ≤ t.ma
     t.creditFor amount = amount * t.creditPerAtomic := by
   simp [Tariff.creditFor, Nat.min_eq_left under]
 
-/-! ## Codec `DREGG/PAY/TARIFF/v1` -/
+/-- One node week, in credit: `168 · nodeHourRate`. -/
+def Tariff.weekCredit (t : Tariff) : Nat := 168 * t.nodeHourRate
+
+/-! ## Codec `DREGG/PAY/TARIFF/v2` -/
 
 def tariffStream : StreamCodec Tariff :=
   StreamCodec.xmap
@@ -103,11 +120,15 @@ def tariffStream : StreamCodec Tariff :=
           (StreamCodec.product bytesStream
             (StreamCodec.product StreamCodec.nat
               (StreamCodec.product StreamCodec.nat
-                (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))))
+                (StreamCodec.product StreamCodec.nat
+                  (StreamCodec.product StreamCodec.nat
+                    (StreamCodec.product StreamCodec.nat
+                      (StreamCodec.product (StreamCodec.option StreamCodec.nat)
+                        StreamCodec.nat))))))))))
     (fun t => (t.version, t.asset, t.mint, t.tokenProgram, t.decimals, t.creditPerAtomic,
-      t.maxPerObservation, t.minTickSlots))
-    (fun (version, asset, mint, program, decimals, rate, cap, tick) =>
-      ⟨version, asset, mint, program, decimals, rate, cap, tick⟩)
+      t.maxPerObservation, t.minTickSlots, t.nodeHourRate, t.enrolIndex, t.journalFloor))
+    (fun (version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor) =>
+      ⟨version, asset, mint, program, decimals, rate, cap, tick, node, enrol, floor⟩)
     (by intro t; cases t; rfl)
 
 /-- A frame-prefixed codec that refuses every non-canonical byte string. -/
@@ -129,7 +150,7 @@ theorem framed_canonical {α : Type} (frame : List UInt8) (stream : StreamCodec 
     (framed frame stream).encode value = bytes :=
   Minidregg.Compiler.ResourceBirthCodec.strictCodec_canonical (framedRaw frame stream) accepted
 
-def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v1".toUTF8.toList
+def tariffFrame : List UInt8 := "DREGG/PAY/TARIFF/v2".toUTF8.toList
 
 def tariffCodec : LawfulCodec Tariff := framed tariffFrame tariffStream
 
@@ -143,8 +164,9 @@ theorem tariff_canonical {bytes : List UInt8} {t : Tariff}
 /-! ## The genesis placeholder -/
 
 /-- Installed at genesis: asset 0, 6 decimals, rate 1, cap 10⁴ tokens,
-heartbeat 1500 slots, and a zeroed mint and program.  Invalid until the
-operator sets the real token (`genesisDefault_invalid`). -/
+heartbeat 1500 slots, node rate 5 952 380 credit/hour (PAY §11.8),
+self-enrollment off, journal floor 1 token, and a zeroed mint and program.
+Invalid until the operator sets the real token (`genesisDefault_invalid`). -/
 def genesisDefault : Tariff where
   version := 0
   asset := 0
@@ -154,13 +176,20 @@ def genesisDefault : Tariff where
   creditPerAtomic := 1
   maxPerObservation := 10000000000
   minTickSlots := 1500
+  nodeHourRate := 5952380
+  enrolIndex := none
+  journalFloor := 1000000
 
 theorem genesisDefault_invalid : ¬ genesisDefault.valid := by decide
 
 /-- A version-1 tariff naming a (fixture) mint and program: the tariff the
-probes and the concrete theorem poles set. -/
+probes and the concrete theorem poles set.  Self-enrollment is off. -/
 def exampleTariff : Tariff :=
-  ⟨1, 0, List.replicate 32 7, List.replicate 32 9, 6, 1, 10000000000, 1500⟩
+  ⟨1, 0, List.replicate 32 7, List.replicate 32 9, 6, 1, 10000000000, 1500, 5952380, none,
+    1000000⟩
+
+/-- Refuting pole of the node rate: a tariff with a zero node rate is invalid. -/
+theorem zero_node_rate_invalid : ¬ { exampleTariff with nodeHourRate := 0 }.valid := by decide
 
 /-- A tariff with a named (non-zero) mint and program is valid: the
 satisfiable pole of `Tariff.valid`. -/
@@ -174,5 +203,6 @@ theorem named_tariff_valid : exampleTariff.valid := by decide
 #assert_axioms tariff_canonical
 #assert_axioms genesisDefault_invalid
 #assert_axioms named_tariff_valid
+#assert_axioms zero_node_rate_invalid
 
 end Minidregg.Kernel.PayTariff

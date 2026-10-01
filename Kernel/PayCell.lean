@@ -2,14 +2,24 @@
 # Kernel.PayCell — the pay cell: tariff, deposit address book, assignment, clock
 
 One store cell per deployment, at an identifier derived from the deployment
-domain (`physicalId`), with four namespaces on `Theory.Store`:
+domain (`physicalId`), with seven namespaces on `Theory.Store`:
 
-| namespace    | key          | value                     | discipline  |
-|--------------|--------------|---------------------------|-------------|
-| `tariff`     | `Unit`       | `PayTariff.Tariff`        | RAM         |
-| `book`       | index `Nat`  | 32-byte deposit address   | append-only |
-| `assignment` | index `Nat`  | Book `AccountId`          | append-only |
-| `clock`      | `Unit`       | `Clock {slot, blockTime}` | RAM         |
+| namespace    | key              | value                     | discipline  |
+|--------------|------------------|---------------------------|-------------|
+| `tariff`     | `Unit`           | `PayTariff.Tariff`        | RAM         |
+| `book`       | index `Nat`      | 32-byte deposit address   | append-only |
+| `assignment` | index `Nat`      | Book `AccountId`          | append-only |
+| `clock`      | `Unit`           | `Clock {slot, blockTime}` | RAM         |
+| `enrolment`  | Mini key (32 B)  | `EnrolRecord`             | RAM         |
+| `sshIndex`   | ssh blob (51 B)  | Mini key                  | append-only |
+| `journal`    | nullifier bytes  | `Unattributed`            | append-only |
+
+The last three are PAY §11's self-enrollment state (layout v2).  An
+`enrolment` row is written once by an enrollment and rewritten only by a
+renewal of the same key (its lease grows, `PayEnrolDecision`); `sshIndex`
+makes an ssh key belong to at most one Mini key, and the law ties the two
+namespaces together in both directions; `journal` holds every
+enrollment-index payment that was not accepted, with its named reason.
 
 `book` is written by the operator's control capability (`PayBookReceiver`);
 `assignment` binds book index `i` to the account a subject owns
@@ -24,12 +34,13 @@ to both its address (`bookAt`) and its account (`assignmentAt`); a payment
 nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
 from `bookAt`.
 
-Wire: the store codec with layout name `DREGG/PAY/CELL/v1` (its frame commits
+Wire: the store codec with layout name `DREGG/PAY/CELL/v2` (its frame commits
 to the name and every namespace's codec identifier); the tariff value is
-`DREGG/PAY/TARIFF/v1`.
+`DREGG/PAY/TARIFF/v2`.  A v1 cell refuses to decode.
 -/
 import Compiler.StoreCodec
 import Kernel.PayTariff
+import Kernel.PayEnrolMemo
 
 namespace Minidregg.Kernel.PayCell
 
@@ -40,6 +51,7 @@ open Minidregg.Theory.Store
 open Minidregg.Theory.CellState (Materializer Materialized materialize)
 open Minidregg.Theory.TypedAuthorization (Digest)
 open Minidregg.Kernel.PayTariff
+open Minidregg.Kernel.PayEnrolMemo (JournalReason MemoField isEd25519Blob)
 
 set_option autoImplicit false
 
@@ -48,6 +60,9 @@ inductive Namespace
   | book
   | assignment
   | clock
+  | enrolment
+  | sshIndex
+  | journal
   deriving DecidableEq, Repr
 
 /-- The imported chain clock: the finalized slot and its block time (unix s). -/
@@ -56,35 +71,79 @@ structure Clock where
   blockTime : Nat
   deriving DecidableEq, Repr
 
+/-- The chain hour: the unit of enrollment leases and of the public
+enrollment view's `clock.hour`. -/
+def Clock.hour (clock : Clock) : Nat := clock.blockTime / 3600
+
+/-- A self-enrolled Mini key's record (PAY §11.4), keyed by the 32-byte Mini
+key.  `leaseUntil` is a chain hour (`blockTime / 3600`): the node membership
+the key has paid for runs while `clock hour < leaseUntil`. -/
+structure EnrolRecord where
+  /-- The 51-byte `ssh-ed25519` wire blob the enrollment bought a login for. -/
+  sshBlob : List UInt8
+  /-- The Book account born for the key. -/
+  account : Nat
+  /-- The book index assigned to that account, if one was free. -/
+  index : Option Nat
+  leaseUntil : Nat
+  /-- The chain slot of the enrolling payment. -/
+  enrolledSlot : Nat
+  deriving DecidableEq, Repr
+
+/-- An enrollment-index payment that was not accepted: consumed (its
+nullifier is spent), credited nowhere, and kept here with its reason. -/
+structure Unattributed where
+  index : Nat
+  amount : Nat
+  slot : Nat
+  reason : JournalReason
+  memo : MemoField
+  deriving DecidableEq, Repr
+
 def Namespace.Key : Namespace → Type
   | .tariff => Unit
   | .book => Nat
   | .assignment => Nat
   | .clock => Unit
+  | .enrolment => List UInt8
+  | .sshIndex => List UInt8
+  | .journal => List UInt8
 
 def Namespace.Value : Namespace → Type
   | .tariff => Tariff
   | .book => Address32
   | .assignment => Nat
   | .clock => Clock
+  | .enrolment => EnrolRecord
+  | .sshIndex => List UInt8
+  | .journal => Unattributed
 
 instance Namespace.keyDecEq : (space : Namespace) → DecidableEq (Namespace.Key space)
   | .tariff => inferInstanceAs (DecidableEq Unit)
   | .book => inferInstanceAs (DecidableEq Nat)
   | .assignment => inferInstanceAs (DecidableEq Nat)
   | .clock => inferInstanceAs (DecidableEq Unit)
+  | .enrolment => inferInstanceAs (DecidableEq (List UInt8))
+  | .sshIndex => inferInstanceAs (DecidableEq (List UInt8))
+  | .journal => inferInstanceAs (DecidableEq (List UInt8))
 
 instance Namespace.valueDecEq : (space : Namespace) → DecidableEq (Namespace.Value space)
   | .tariff => inferInstanceAs (DecidableEq Tariff)
   | .book => inferInstanceAs (DecidableEq (List UInt8))
   | .assignment => inferInstanceAs (DecidableEq Nat)
   | .clock => inferInstanceAs (DecidableEq Clock)
+  | .enrolment => inferInstanceAs (DecidableEq EnrolRecord)
+  | .sshIndex => inferInstanceAs (DecidableEq (List UInt8))
+  | .journal => inferInstanceAs (DecidableEq Unattributed)
 
 def Namespace.discipline : Namespace → Discipline
   | .tariff => .ram
   | .book => .appendOnly
   | .assignment => .appendOnly
   | .clock => .ram
+  | .enrolment => .ram
+  | .sshIndex => .appendOnly
+  | .journal => .appendOnly
 
 abbrev layout : Layout.{0, 0, 0} where
   Namespace := Namespace
@@ -100,6 +159,9 @@ def tariffAddress : Address layout := ⟨.tariff, ()⟩
 def clockAddress : Address layout := ⟨.clock, ()⟩
 def bookAddress (index : Nat) : Address layout := ⟨.book, index⟩
 def assignmentAddress (index : Nat) : Address layout := ⟨.assignment, index⟩
+def enrolmentAddress (miniKey : List UInt8) : Address layout := ⟨.enrolment, miniKey⟩
+def sshIndexAddress (sshBlob : List UInt8) : Address layout := ⟨.sshIndex, sshBlob⟩
+def journalAddress (nullifier : List UInt8) : Address layout := ⟨.journal, nullifier⟩
 
 def tariffOf (store : PayStore) : Option Tariff := store tariffAddress
 def clockOf (store : PayStore) : Option Clock := store clockAddress
@@ -107,6 +169,14 @@ def clockOf (store : PayStore) : Option Clock := store clockAddress
 def bookAt (store : PayStore) (index : Nat) : Option Address32 := store (bookAddress index)
 /-- The account book index `index` is assigned to. -/
 def assignmentAt (store : PayStore) (index : Nat) : Option Nat := store (assignmentAddress index)
+/-- The self-enrollment record of a Mini key. -/
+def enrolmentAt (store : PayStore) (miniKey : List UInt8) : Option EnrolRecord :=
+  store (enrolmentAddress miniKey)
+/-- The Mini key an ssh blob is enrolled under. -/
+def sshIndexAt (store : PayStore) (sshBlob : List UInt8) : Option (List UInt8) :=
+  store (sshIndexAddress sshBlob)
+def journalAt (store : PayStore) (nullifier : List UInt8) : Option Unattributed :=
+  store (journalAddress nullifier)
 
 /-- Present rows of one namespace. -/
 def countIn (store : PayStore) (space : Namespace) : Nat :=
@@ -129,16 +199,31 @@ where
 
 /-! ## The cell law -/
 
-/-- Every book entry is a 32-byte key; a scan of the support. -/
+/-- Every book entry is a 32-byte key; every enrolment row is a 32-byte Mini
+key holding one ssh-ed25519 blob that the ssh index maps back to it; every
+ssh index row points at an enrolment row holding that blob.  A scan of the
+support. -/
 def rowShaped (store : PayStore) : Address layout → Bool
   | ⟨.book, index⟩ =>
       match bookAt store index with
       | some address => address.length == 32
       | none => true
+  | ⟨.enrolment, miniKey⟩ =>
+      match enrolmentAt store miniKey with
+      | some record => miniKey.length == 32 && isEd25519Blob record.sshBlob &&
+          decide (sshIndexAt store record.sshBlob = some miniKey)
+      | none => true
+  | ⟨.sshIndex, blob⟩ =>
+      match sshIndexAt store blob with
+      | some miniKey =>
+          match enrolmentAt store miniKey with
+          | some record => decide (record.sshBlob = blob)
+          | none => false
+      | none => true
   | _ => true
 
-/-- A pay cell always holds a tariff and a clock, and every deposit address
-is 32 bytes.  The identity half of the law is the registry's
+/-- A pay cell always holds a tariff and a clock, every deposit address is
+32 bytes, and the enrolment and ssh index rows agree.  The identity half of the law is the registry's
 (`CanonicalCellRegistry.LogicalLaw`). -/
 def Law (store : PayStore) : Prop :=
   (tariffOf store).isSome = true ∧ (clockOf store).isSome = true ∧
@@ -148,7 +233,7 @@ instance (store : PayStore) : Decidable (Law store) := by
   unfold Law
   infer_instance
 
-/-! ## Wire `DREGG/PAY/CELL/v1` -/
+/-! ## Wire `DREGG/PAY/CELL/v2` -/
 
 def clockStream : StreamCodec Clock :=
   StreamCodec.xmap (StreamCodec.product StreamCodec.nat StreamCodec.nat)
@@ -162,31 +247,64 @@ def namespaceStream : StreamCodec Namespace where
     | .book => [1]
     | .assignment => [2]
     | .clock => [3]
+    | .enrolment => [4]
+    | .sshIndex => [5]
+    | .journal => [6]
   decodePrefix
     | 0 :: suffix => some (.tariff, suffix)
     | 1 :: suffix => some (.book, suffix)
     | 2 :: suffix => some (.assignment, suffix)
     | 3 :: suffix => some (.clock, suffix)
+    | 4 :: suffix => some (.enrolment, suffix)
+    | 5 :: suffix => some (.sshIndex, suffix)
+    | 6 :: suffix => some (.journal, suffix)
     | _ => none
   decodePrefix_encode := by intro space suffix; cases space <;> rfl
+
+def enrolRecordStream : StreamCodec EnrolRecord :=
+  StreamCodec.xmap
+    (StreamCodec.product bytesStream
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product (StreamCodec.option StreamCodec.nat)
+          (StreamCodec.product StreamCodec.nat StreamCodec.nat))))
+    (fun record => (record.sshBlob, record.account, record.index, record.leaseUntil,
+      record.enrolledSlot))
+    (fun (blob, account, index, lease, slot) => ⟨blob, account, index, lease, slot⟩)
+    (by intro record; cases record; rfl)
+
+def unattributedStream : StreamCodec Unattributed :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product StreamCodec.nat
+          (StreamCodec.product PayEnrolMemo.journalReasonStream PayEnrolMemo.memoFieldStream))))
+    (fun row => (row.index, row.amount, row.slot, row.reason, row.memo))
+    (fun (index, amount, slot, reason, memo) => ⟨index, amount, slot, reason, memo⟩)
+    (by intro row; cases row; rfl)
 
 def keyStream : (space : Namespace) → StreamCodec (Namespace.Key space)
   | .tariff => unitStream
   | .book => StreamCodec.nat
   | .assignment => StreamCodec.nat
   | .clock => unitStream
+  | .enrolment => bytesStream
+  | .sshIndex => bytesStream
+  | .journal => bytesStream
 
 def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .tariff => tariffStream
   | .book => bytesStream
   | .assignment => StreamCodec.nat
   | .clock => clockStream
+  | .enrolment => enrolRecordStream
+  | .sshIndex => bytesStream
+  | .journal => unattributedStream
 
-def wireName : String := "DREGG/PAY/CELL/v1"
+def wireName : String := "DREGG/PAY/CELL/v2"
 
 def wire : Wire layout where
   name := wireName
-  namespaces := [.tariff, .book, .assignment, .clock]
+  namespaces := [.tariff, .book, .assignment, .clock, .enrolment, .sshIndex, .journal]
   namespaces_complete := by intro space; cases space <;> simp
   namespaceStream := namespaceStream
   keyStream := keyStream
@@ -196,11 +314,17 @@ def wire : Wire layout where
     | .book => "book-index/nat"
     | .assignment => "book-index/nat"
     | .clock => "unit"
+    | .enrolment => "mini-key32/bytes"
+    | .sshIndex => "ssh-ed25519-blob/bytes"
+    | .journal => "soltx-nullifier/bytes"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v1"
+    | .tariff => "DREGG/PAY/TARIFF/v2"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
     | .clock => "DREGG/PAY/CLOCK/v1"
+    | .enrolment => "DREGG/PAY/ENROLMENT/v1"
+    | .sshIndex => "mini-key32/bytes"
+    | .journal => "DREGG/PAY/UNATTRIBUTED/v1"
 
 def materializer : Materializer layout Digest := StoreCodec.materializer wire
 
@@ -239,6 +363,25 @@ theorem genesis_nextFree : nextFree genesisStore = 0 := by decide +kernel
 theorem tariffless_unlawful : ¬ Law ((0 : PayStore).set clockAddress (some ⟨0, 0⟩)) := by
   decide +kernel
 
+/-- A lawful enrolled key: its record and its ssh index row. -/
+def enrolledFixture : PayStore :=
+  (genesisStore.set (enrolmentAddress PayEnrolMemo.fixtureMemo.miniKey)
+    (some ⟨PayEnrolMemo.fixtureMemo.sshBlob, 108, some 1, 500168, 900⟩)).set
+    (sshIndexAddress PayEnrolMemo.fixtureMemo.sshBlob) (some PayEnrolMemo.fixtureMemo.miniKey)
+
+/-- Satisfiable pole of the enrolment shape. -/
+theorem enrolled_fixture_law : Law enrolledFixture := by decide +kernel
+
+/-- Refuting pole: an enrolment row whose ssh key is not indexed is not lawful. -/
+theorem unindexed_enrolment_unlawful :
+    ¬ Law (genesisStore.set (enrolmentAddress PayEnrolMemo.fixtureMemo.miniKey)
+      (some ⟨PayEnrolMemo.fixtureMemo.sshBlob, 108, some 1, 500168, 900⟩)) := by decide +kernel
+
+/-- Refuting pole: an ssh index row naming a key with no enrolment is not lawful. -/
+theorem dangling_ssh_index_unlawful :
+    ¬ Law (genesisStore.set (sshIndexAddress PayEnrolMemo.fixtureMemo.sshBlob)
+      (some PayEnrolMemo.fixtureMemo.miniKey)) := by decide +kernel
+
 /-- Refuting pole of the row shape: a 31-byte deposit address is not lawful. -/
 theorem short_address_unlawful :
     ¬ Law (genesisStore.set (bookAddress 0) (some (List.replicate 31 1))) := by
@@ -252,5 +395,8 @@ theorem short_address_unlawful :
 #assert_axioms genesis_nextFree
 #assert_axioms tariffless_unlawful
 #assert_axioms short_address_unlawful
+#assert_axioms enrolled_fixture_law
+#assert_axioms unindexed_enrolment_unlawful
+#assert_axioms dangling_ssh_index_unlawful
 
 end Minidregg.Kernel.PayCell

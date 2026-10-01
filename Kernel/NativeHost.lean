@@ -578,11 +578,19 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
     PayCell.tariffOf pay.cell.logical, PayCell.clockOf pay.cell.logical,
     PayCell.nextFree pay.cell.logical, PayCellDomain.bookRows pay.cell.logical⟩
 
+/-- Session operation 112 (PAY P3b): the public enrollment view — the chain
+hour and every self-enrolled Mini key with its subject, ssh blob, lease and
+book index.  No key is needed; nothing private is in it. -/
+def payEnrolmentViewLoaded (config : Config) (opened : Opened config) :
+    Except String PayCellDomain.EnrolmentView := do
+  let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
+  pure (PayCellDomain.enrolmentView pay.cell.logical)
+
 /-! ## Payment observation (lane P3): session operations 108–111
 
-The observer's report (`DREGG/PAY/OBSERVATION/v1`) has its own
+The observer's report (`DREGG/PAY/OBSERVATION/v2`) has its own
 plan/assembly/submission/lookup quartet; its signed ingress is
-`DREGG/PAY/OBSERVATION/SIGNED/v1`. -/
+`DREGG/PAY/OBSERVATION/SIGNED/v2`. -/
 
 /-- The signing plan for a report on one opened image.  It discloses no
 decision (`PayObservationReceiver.signingHeader`); a signer key the authority

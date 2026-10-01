@@ -338,7 +338,8 @@ def fixtureTip : Clock := ⟨1000, 1759250000⟩
 
 def observed (index : Nat) (address : Address32) (signature : List UInt8) (amount : Nat) :
     Observation :=
-  ⟨index, address, signature, 900, 1759249950, amount, List.replicate 32 7, List.replicate 32 9⟩
+  ⟨index, address, signature, 900, 1759249950, amount, List.replicate 32 7, List.replicate 32 9,
+    .absent⟩
 
 /-- Satisfiable pole: an observation to row A credits account 8. -/
 theorem fixture_observation_credited :

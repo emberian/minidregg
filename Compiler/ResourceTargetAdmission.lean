@@ -18,11 +18,15 @@ set_option autoImplicit false
 
 abbrev Registry := CanonicalCellRegistry.registry
 
-/-- One shared role selection for ordinary resource observation and management. -/
+/-- One shared role selection for ordinary resource observation and management.
+The resource role a physical cell answers to.  The pay cell is a program
+resource so that its control grants (`NativeHostGenesis.payControlCapability`)
+can be exercised by the ordinary delegation and revocation receivers; its
+contents are written only by the pay receivers. -/
 def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
   | .content | .declaredObject => some .object
   | .accountMetadata => some .account
-  | .declaredProgram => some .program
+  | .declaredProgram | .pay => some .program
   | _ => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)

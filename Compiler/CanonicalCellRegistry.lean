@@ -114,7 +114,7 @@ def schemaRef : Kind → SchemaRef
   | .accountMetadata => ⟨⟨91007⟩, 2⟩
   | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
-  | .pay => ⟨⟨91010⟩, 1⟩
+  | .pay => ⟨⟨91010⟩, 2⟩
 
 theorem schemaRef_injective : Function.Injective schemaRef := by
   intro left right same
@@ -361,7 +361,7 @@ theorem empty_event_history_lawful (deployment : Deployment) :
 
 /-- Semantic identity of the source-owned loaded/final law. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v4".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v5".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/

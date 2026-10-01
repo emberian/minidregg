@@ -51,7 +51,7 @@ P1_PROGRAM = "06ddf6e1ee758fde18425dbce46ccddab61afc4d83b90d27febdf928d8a18bfc"
 P1_RECORD = {"address": P1_ADDRESS, "amount": 1000000000, "blockTime": 1759249950, "index": 0,
              "mint": P1_MINT,
              "signature": "e895db8f0638e377a2e3c110b1a7f6266170e27f135964a0aec2df1c5fec95359102463a545e6eac2104ed10ef18980a8a59c9224c8a46b64e571122734f586a",
-             "slot": 900, "tokenProgram": P1_PROGRAM}
+             "slot": 900, "tokenProgram": P1_PROGRAM, "memo": None, "memoError": None}
 CAP, RATE, MIN_TICK = 2000000000, 1, 1500
 
 def path(name): return os.path.join(DIR, name)
@@ -88,7 +88,8 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
            "meterAllowance": {k: "10000000" for k in ("incidences", "turnBytes", "memoryTouches",
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
-           "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP)}}
+           "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
+                           "controlCapability": str(OBSERVER_CAP + 1)}}
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
@@ -174,7 +175,8 @@ def show(result): return f"{result.get('type')} {result.get('detail', '')}".stri
 address = lambda i: hashlib.sha256(f"jpay3 fixture deposit address {i}".encode()).hexdigest()
 signature = lambda label: hashlib.sha512(f"jpay3 transfer {label}".encode()).hexdigest()
 tariff = {"version": "1", "asset": "0", "mint": P1_MINT, "tokenProgram": P1_PROGRAM, "decimals": "6",
-          "creditPerAtomic": str(RATE), "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK)}
+          "creditPerAtomic": str(RATE), "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK),
+          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000"}
 def credit_for(amount): return min(amount, CAP) * RATE
 nonce = [100]
 def book_command(v, book, start, t):
@@ -190,7 +192,8 @@ def assign_command(v, subject, index):
 def tip(slot): return {"slot": slot, "blockTime": 1759249000 + slot}
 def record(index, addr, sig, slot, amount, mint=P1_MINT):
     return {"index": index, "address": addr, "signature": sig, "slot": slot,
-            "blockTime": 1759249000 + slot, "amount": amount, "mint": mint, "tokenProgram": P1_PROGRAM}
+            "blockTime": 1759249000 + slot, "amount": amount, "mint": mint, "tokenProgram": P1_PROGRAM,
+            "memo": None, "memoError": None}
 def report(v, t, observations):
     nonce[0] += 1
     return {"observer": str(OBSERVER), "capability": str(OBSERVER_CAP), "nonce": str(nonce[0]),

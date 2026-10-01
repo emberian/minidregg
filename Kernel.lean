@@ -9,6 +9,7 @@ Verb = admission × footprint, fail-closed admit, gate soundness
 refinement and the AIR arithmetization (Compiler lane) are named residuals.
 -/
 import Kernel.PayObservationProofs  -- PAY P3: observed payments mint Book credit; the audit identity, the transfer nullifier, the clock
+import Kernel.PayEnrolDecision  -- PAY P3b-1: the self-enrollment memo, its refusals, and the enrol/renew/journal decision
 import Kernel.Camera  -- the four-substance product resource algebra (the camera tier)
 import Kernel.State   -- the minimal kernel state: accounts + bal + caps + one UKey map; Σ-conservation
 import Kernel.Turn    -- the turn as a wide pullback (hyperedge): cone + balance, legs_agree, the binding tooth

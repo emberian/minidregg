@@ -41,7 +41,8 @@ claim plan, 69=private launch claim detached assembly, 70=private launch complet
 103=pay command signing plan (either pay family), 104=pay detached assembly,
 105=pay submit, 106=pay receipt-only lookup, 107=public pay-cell view,
 108=payment observation signing plan, 109=observation detached assembly,
-110=observation submit, 111=observation receipt-only lookup.
+110=observation submit, 111=observation receipt-only lookup,
+112=public enrollment view (`DREGG/PAY/ENROLMENT-VIEW/v1`).
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -748,6 +749,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
     [("runtime", toJson "minidregg-native"),
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
+     ("payCell", n (Kernel.PayCell.physicalId config.deployment.domain)),
      ("fieldModulus", n Minidregg.Compiler.babyBearP),
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
@@ -4882,7 +4884,7 @@ def runFnReplyAckSession (config : NativeHost.Config)
 def usage : String :=
 "enroll-key-plan OBSERVED.bin COMMAND.bin PLAN.bin|enroll-key-assemble PLAN.bin SPONSOR-SIG.bin POSSESSION-SIG.bin INGRESS.bin|enroll-key-submit INGRESS.bin OUTCOME.bin|enroll-key-lookup INGRESS.bin OUTCOME.bin\n" ++
 "inspect-agent-lifetime-paid-ingress PAID-PLAN.bin INGRESS.bin RESULT.json\ninspect-stop-claim STOP-PLAN.bin FRESH-COMMITTED-CLAIM.bin RESULT.json\nfn-frontier-request selected MINI-TX REQUEST.bin|fn-frontier-request empty - REQUEST.bin|fn-frontier-plan selected MINI-TX PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-plan empty - PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-export PLAN.bin CURSOR.fncu REPORT.fn-e SOURCE.eml|fn-frontier-assemble PLAN.bin RAW64-SIGNATURE.bin INGRESS.bin|fn-selected-poll-submit INGRESS.bin OUTCOME.bin|fn-selected-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-poll-submit INGRESS.bin OUTCOME.bin|fn-empty-poll-lookup INGRESS.bin OUTCOME.bin|fn-empty-page-ack CURSOR.fncu REPORT.fn-e COVERAGE19.bin RESULT.json\n" ++
-"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|pay-ledger LEDGER.json|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
+"minidregg-host CONFIG.json profile|describe|stdio|author KIND INPUT.json OUTPUT.bin|inspect KIND INPUT.bin OUTPUT.json|derive grain INPUT.json OUTPUT.json|signatures INPUT.json OUTPUT.bin|genesis SOURCE-CONFIG.bin GENESIS.bin PINNED-CONFIG.json|bootstrap GENESIS.bin|pay-ledger LEDGER.json|pay-enrol-probe INPUT.json OUTPUT.json|challenge INTENT.bin CHALLENGE.bin|observe-assemble CHALLENGE.bin SIGNATURES.bin SIGNED.bin PLAN.bin|prepare SIGNED.bin PLAN.bin|query SIGNED.bin VIEW.bin|assemble PLAN.bin SIGNATURES.bin CALL.bin|submit CALL.bin OUTCOME.bin|lookup CALL.bin OUTCOME.bin|selected-release-submit INGRESS.bin OUTCOME.bin|selected-release-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-begin-submit INGRESS.bin OUTCOME.bin|application-lifecycle-begin-lookup INGRESS.bin OUTCOME.bin|application-lifecycle-completion-submit INGRESS.bin OUTCOME.bin|application-lifecycle-completion-lookup INGRESS.bin OUTCOME.bin|diagnose-completion INGRESS.bin RESULT.json|selected-source-publication-submit INGRESS.bin OUTCOME.bin|selected-source-publication-lookup INGRESS.bin OUTCOME.bin|selected-release-source-plan PACKET.bin DELEGATE-CAP-DEC SPEC.bin HEADER.bin ROOT.txt|selected-release-source-assemble SPEC.bin HEADER.bin SIGNATURE.bin INGRESS.bin|selected-release-prepare REQUEST.json PREIMAGE.bin|selected-release-check-preimage PREIMAGE.bin CANONICAL.bin|selected-release-assemble PREIMAGE.bin SIGNATURE.bin FROM_MAILBOX DATE SUBJECT PACKET.bin ARTICLE.eml|selected-release-ingress PACKET.bin CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC INGRESS.bin|selected-release-fn-poll FN-BINARY SCOPE.json CONTROL.sock CAPABILITY_DEC AUTHORITY_ROOT_DEC TARGET_ROOT_DEC CURSOR.fncu REPORT.fn-e SOURCE.eml PACKET.bin INGRESS.bin RESULT.json|selected-release-fn-ack CURSOR.fncu REPORT.fn-e MINI-TRANSACTION COVERAGE17.bin RESULT.json|export-evidence CALL.bin PACKAGE.bin|verify-evidence PACKAGE.bin RESULT.json|grain-origin-prepare REQUEST.json PACKAGE.bin OUTPUT_DIR|portable-verify-fn FN-PIN.json CLAIM.json CARRIER.eml SOURCE.bin PACKAGE.bin RESULT.json|consumer-verify-poll-files FN-PIN.json SCOPE-PIN.json CLAIM.json CURSOR.fncu REPORT.fn-e CARRIER.eml RESULT.json|portable-consumer-decide ORIGIN-PIN.json FN-PIN.json CLAIM.json POLICY.json CARRIER.eml INTENT.bin DECISION.json|poll-consumer-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-poll-decide ORIGIN-PIN.json FN-PIN.json SCOPE-PIN.json CLAIM.json POLICY.json CONTROL.sock CURSOR.fncu REPORT.fn-e CARRIER.eml INTENT.bin DECISION.json|consumer-export-inbox TRANSACTION-ID INBOX.bin CARRIER.eml RESULT.json|consumer-export-poll TRANSACTION-ID CURSOR.fncu REPORT.fn-e RESULT.json|consumer-ack-poll FN-PIN.json SCOPE-PIN.json CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|reply-consumer-poll-decide ORIGIN-PIN.json R-FN-PIN.json R-CLAIM.json R-CARRIER.eml Q-FN-PIN.json A-SCOPE.json Q-CLAIM.json POLICY.json A-CONTROL.sock CURSOR.fncu REPORT.fn-e Q-CARRIER.eml INTENT.bin DECISION.json|reply-consumer-export-result MINI-TRANSACTION RESULT.bin INBOX.bin CURSOR.fncu REPORT.fn-e|reply-consumer-ack-poll Q-FN-PIN.json A-SCOPE.json A-CONTROL.sock MINI-TRANSACTION CURSOR.fncu REPORT.fn-e RESULT.json|consumer-export-reply TRANSACTION-ID REPLY.bin|consumer-stage-reply-plan SIGNER.json MINI-TRANSACTION OUTBOX_ROOT CANDIDATE.bin READBACK.bin SOURCE.eml RESULT.json|consumer-stage-reply-sign FN-PIN.json PRINCIPAL.bin ED-PUBLIC.bin ED-SECRET ML-SECRET MINI-TRANSACTION PLAN_ROOT SIGNED_ROOT PLAN-READBACK.bin SOURCE.eml CARRIER.eml SIGNED-CANDIDATE.bin SIGNED-READBACK.bin ED-SIG.bin ML-SIG.bin RESULT.json|consumer-decide-test ORIGIN-PIN.json POLICY.json REPORT.json PACKAGE.bin INTENT.bin DECISION.json"
 
 def run (arguments : List String) : IO UInt32 := do
   match arguments with
@@ -5207,6 +5209,13 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payObservationLookupLoaded pinnedConfig opened payload
                             return ((111 : UInt8), outcomeCodec.encode outcome)
+                        | 112 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let view ← IO.ofExcept (NativeHost.payEnrolmentViewLoaded pinnedConfig opened)
+                            let bytes := PayCellDomain.enrolmentViewCodec.encode view
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "enrollment view exceeds host frame bound")
+                            return ((112 : UInt8), bytes)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload
@@ -5615,6 +5624,27 @@ def run (arguments : List String) : IO UInt32 := do
           let ledger ← IO.ofExcept (← NativeHost.payLedger config)
           writeJson output (Minidregg.Host.Json.payLedgerJson ledger)
           pure 0
+      | "pay-enrol-probe", [input, output] =>
+          -- PAY P3b: the whole self-enrollment decision on a JSON-described
+          -- pay cell, with both memo signatures checked by the pinned native
+          -- verifier (Ed25519 mini-sig, SSHSIG ssh-sig). Reads no Store.
+          withPinnedSignature config fun pinnedConfig => do
+            let probe ← IO.ofExcept (Minidregg.Host.Json.payEnrolProbe (← readJson input))
+            let mint := ((PayCell.tariffOf probe.store).map (·.mint)).getD []
+            let verified ← match probe.observation.memo with
+              | .present bytes =>
+                  match PayEnrolMemo.parse bytes with
+                  | .ok memo =>
+                      match ← PayEnrolSignatureIO.verifyNative pinnedConfig.signature mint
+                          probe.observation.address memo with
+                      | .ok checked => pure (some checked.verified)
+                      | .error error => throw (IO.userError s!"native verifier: {repr error}")
+                  | .error _ => pure none
+              | _ => pure none
+            let decision := PayEnrolDecision.decideEnrol probe.store probe.price probe.tip
+              probe.observation (verified.getD ⟨false, false⟩) probe.subjectTaken
+            writeJson output (Minidregg.Host.Json.payEnrolDecisionJson verified decision)
+            pure 0
       | "audit", [] =>
           withPinnedSignature config fun pinnedConfig => do
             let count ← IO.ofExcept (← NativeHost.audit pinnedConfig)
