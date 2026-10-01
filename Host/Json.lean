@@ -2491,19 +2491,16 @@ private def payCommandJson (bytes : List UInt8) : Lean.Json :=
       | some command => payAssignCommandJson command
       | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
 
-/-- The public pay view: roots to pin, tariff, clock, next free index and the
+/-- The public pay view: roots to pin, tariff, next free index and the
 published deposit book (index order, lowercase hex). -/
 def payViewJson (view : PayCellDomain.View) : Lean.Json := .mkObj
-  [("type", "pay-view-v1"),
+  [("type", "pay-view-v2"),
    ("payRoot", decimal view.payRoot.value),
    ("authorityRoot", decimal view.authorityRoot.value),
    ("factoryRoot", decimal view.factoryRoot.value),
    ("tariff", match view.tariff with
      | none => .null
      | some tariff => payTariffJson tariff),
-   ("clock", match view.clock with
-     | none => .null
-     | some clock => .mkObj [("slot", decimal clock.slot), ("blockTime", decimal clock.blockTime)]),
    ("nextFree", decimal view.nextFree),
    ("bookSize", decimal view.book.length),
    ("book", .arr (view.book.map hexJson).toArray)]

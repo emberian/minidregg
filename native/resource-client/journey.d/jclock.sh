@@ -10,9 +10,10 @@
 # The ticker is the real one (`mini clock --action tick`, the v1 time source);
 # the law is an ordinary resource law over `clock/now`, judged by the Host.
 #
-# Rows: the genesis clock is 0; a resource whose law is `not (le clock/now 99)`
-# ("writable from t=100") is created; a write before any tick is refused by the
-# law at admission; the sponsor ticks 100 and the view reads now=100; the same write is
+# Rows: the genesis clock is 0; a resource whose law is
+# `leSlotsOff field/5/after clock/now 0` (a timestamp may not be ahead of the clock)
+# is created; writing 100 before any tick is refused by the law at admission; the
+# sponsor ticks 100 and the view reads now=100; the byte-identical write is
 # admitted; a tick at 50 and a tick at 100 are refused clockNotAdvancing; the
 # newcomer (no factory control capability) is refused; a wall-clock tick is
 # confirmed and the view reads the asserted time.
@@ -55,7 +56,10 @@ tick() {  # tick NAME WS [--now N]
   run "$name" "$MINI" clock --action tick --workspace "$ws" --control "$CONTROL" "$@"
 }
 REQ=$D/requests; mkdir -p "$REQ"
-printf '%s\n' '{"type":"not","predicate":{"type":"le","slot":"clock/now","value":"99"}}' >"$REQ/from-100.json"
+# A timestamp field: the value written to field 5 may not be ahead of the clock
+# (field/5/after <= clock/now + 0). The positive slot-to-slot form MUD's laws use
+# (sheet clause 27: `leSlots ... clock/now`); a missing clock slot fails it closed.
+printf '%s\n' '{"type":"leSlotsOff","left":"resource/field/5/after","right":"clock/now","offset":"0"}' >"$REQ/stamp-le-now.json"
 write_req() {  # write_req VALUE : create field 5 of `timed`
   printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"timed","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"5"},"value":"%s"}]}}]}\n' "$1"
 }
@@ -73,11 +77,11 @@ view v0
 row "genesis clock" "now 0 slot 0" "rc=$(rc v0) now=$(now_of v0) slot=$(jq -r .slot "$D/v0.out" 2>/dev/null)" \
   "$([ "$(rc v0)" = 0 ] && [ "$(now_of v0)" = 0 ] && [ "$(jq -r .slot "$D/v0.out")" = 0 ]; echo $?)"
 
-run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name timed --storage declared --predicate "$REQ/from-100.json"
-row "create resource under law not(le clock/now 99)" "created" "rc=$(rc create)" "$([ "$(rc create)" = 0 ]; echo $?)"
+run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name timed --storage declared --predicate "$REQ/stamp-le-now.json"
+row "create resource under law leSlotsOff field/5/after clock/now 0" "created" "rc=$(rc create)" "$([ "$(rc create)" = 0 ]; echo $?)"
 
-attempt_write w-early 1; r=$?; why=$(refusal w-early)
-row "create field 5 at clock 0" "refused at admission (the Host names no reason; row 5 is the same create after the tick)" \
+attempt_write w-early 100; r=$?; why=$(refusal w-early)
+row "create field 5 = 100 at clock 0" "refused at admission (the Host names no reason; row 5 is the same create after the tick)" \
   "admitted=$([ $r = 0 ] && echo yes || echo no) outcome=[$why]" \
   "$([ $r != 0 ] && [ "$why" = "admission: request refused" ]; echo $?)"
 
@@ -86,7 +90,7 @@ view v1
 row "sponsor ticks now=100" "confirmed; view now=100 day=0" "rc=$(rc t100) $(jq -r .type "$D/t100.out" 2>/dev/null) now=$(now_of v1) day=$(jq -r .day "$D/v1.out" 2>/dev/null)" \
   "$([ "$(rc t100)" = 0 ] && [ "$(now_of v1)" = 100 ] && [ "$(jq -r .day "$D/v1.out")" = 0 ]; echo $?)"
 
-attempt_write w-after 2; r=$?
+attempt_write w-after 100; r=$?
 row "same create at clock 100" "admitted (confirmed)" "admitted=$([ $r = 0 ] && echo yes || echo no) $(refusal w-after | cut -c1-120)" "$([ $r = 0 ]; echo $?)"
 
 tick t50 "$SPONSOR_WS" --now 50

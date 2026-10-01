@@ -142,7 +142,7 @@ TITLE[J12]="two friends co-write a document through the shell, with refusals"
 TITLE[J12C]="a quote (transclusion) across rooms: four grants, four outcomes"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
-TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment, clock (own Store)"
+TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort

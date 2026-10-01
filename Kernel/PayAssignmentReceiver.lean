@@ -164,22 +164,6 @@ theorem assignment_write_once (store : PayStore) (index account : Nat)
     assignmentAt store index = none :=
   Minidregg.Theory.Store.Op.allocate_enabled_fresh store .assignment index account enabled
 
-/-- **The assignment receiver never writes the clock.** -/
-theorem clock_untouched (index account : Nat) (op : Op PayCell.layout)
-    (member : op ∈ assignmentPatch index account) : op.writeAddress? ≠ some clockAddress := by
-  simp only [assignmentPatch, List.mem_singleton] at member
-  subst member
-  simp [Op.writeAddress?, Op.address, clockAddress]
-
-theorem clock_preserved (store : PayStore) (index account : Nat) :
-    Patch.run store (assignmentPatch index account) clockAddress = store clockAddress := by
-  apply Minidregg.Theory.Store.Patch.run_frame
-  intro inFootprint
-  simp only [Minidregg.Theory.Store.Patch.writeFootprint, List.mem_toFinset,
-    List.mem_filterMap] at inFootprint
-  obtain ⟨op, member, writes⟩ := inFootprint
-  exact clock_untouched index account op member writes
-
 /-! ### Concrete poles (kernel `decide` on real stores and capabilities) -/
 
 /-- An owner capability of `holder` on `account`, as genesis issues it. -/
@@ -475,10 +459,6 @@ theorem Prepared.post_binds (prepared : Prepared deployment profile ambient dura
       some command.account
   exact Minidregg.Theory.Store.Store.set_eq _ _ _
 
-theorem Prepared.clock_preserved (prepared : Prepared deployment profile ambient durable command) :
-    clockOf prepared.payPost.logical = clockOf prepared.pay.cell.logical :=
-  PayAssignmentReceiver.clock_preserved prepared.pay.cell.logical command.index command.account
-
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : PayStore) : Minidregg.Pred.State :=
   ⟨CanonicalRuntimeProfile.requestSlots
@@ -730,8 +710,6 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 #assert_axioms assignment_requires_book
 #assert_axioms assignment_requires_valid_tariff
 #assert_axioms assignment_write_once
-#assert_axioms clock_untouched
-#assert_axioms clock_preserved
 #assert_axioms owner_assigned
 #assert_axioms non_owner_refused
 #assert_axioms other_account_refused
@@ -742,6 +720,5 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 #assert_axioms command_roundtrip
 #assert_axioms Prepared.owner
 #assert_axioms Prepared.post_binds
-#assert_axioms Prepared.clock_preserved
 
 end Minidregg.Kernel.PayAssignmentReceiver

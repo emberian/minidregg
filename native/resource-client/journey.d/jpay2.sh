@@ -174,10 +174,10 @@ def assign_command(v, subject, capability_holder, account, index):
 started = time.time()
 host = Host()
 v = view(host)
-row("genesis pay cell", "tariff invalid, empty book, clock 0/0",
-    f"tariff.valid={v['tariff']['valid']} bookSize={v['bookSize']} nextFree={v['nextFree']} clock={v['clock']['slot']}/{v['clock']['blockTime']}",
-    v["tariff"]["valid"] is False and v["bookSize"] == "0" and v["nextFree"] == "0"
-    and v["clock"] == {"slot": "0", "blockTime": "0"})
+row("genesis pay cell", "tariff invalid, empty book, no clock (time is the clock cell's)",
+    f"type={v['type']} tariff.valid={v['tariff']['valid']} bookSize={v['bookSize']} nextFree={v['nextFree']} clock={'clock' in v}",
+    v["type"] == "pay-view-v2" and v["tariff"]["valid"] is False and v["bookSize"] == "0"
+    and v["nextFree"] == "0" and "clock" not in v)
 
 r, _ = sign_and_submit(host, "pay-assign", assign_command(v, 8, 8, acct(8), 0), 8)
 row("assignment before a valid tariff", "refused undisclosed (built to hit tariffInvalid), pay root unchanged", f"{r.get('type')} {r.get('reason','')}",
@@ -187,11 +187,10 @@ r, _ = sign_and_submit(host, "pay-book", book_command(v, [address(i) for i in ra
 row("operator installs 64-row book + tariff v1", "confirmed", f"{r.get('type')} acceptedCount={r.get('acceptedCount')}",
     r.get("type") == "confirmed")
 v = view(host)
-row("view after install", "bookSize 64, tariff v1 valid, nextFree 0, clock 0/0",
-    f"bookSize={v['bookSize']} tariff.version={v['tariff']['version']} valid={v['tariff']['valid']} nextFree={v['nextFree']} clock={v['clock']['slot']}/{v['clock']['blockTime']}",
+row("view after install", "bookSize 64, tariff v1 valid, nextFree 0",
+    f"bookSize={v['bookSize']} tariff.version={v['tariff']['version']} valid={v['tariff']['valid']} nextFree={v['nextFree']}",
     v["bookSize"] == "64" and v["tariff"]["version"] == "1" and v["tariff"]["valid"] is True
-    and v["nextFree"] == "0" and v["book"][0] == address(0) and v["book"][63] == address(63)
-    and v["clock"] == {"slot": "0", "blockTime": "0"})
+    and v["nextFree"] == "0" and v["book"][0] == address(0) and v["book"][63] == address(63))
 
 r, friend_ingress = sign_and_submit(host, "pay-assign", assign_command(v, 8, 8, acct(8), 0), 8)
 row("friend (subject 8) takes index 0 for owned account 108", "confirmed", f"{r.get('type')} acceptedCount={r.get('acceptedCount')}",

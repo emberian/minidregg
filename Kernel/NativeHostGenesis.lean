@@ -386,8 +386,8 @@ def declaredCell (_config : Config) (identifier : Nat) (account : Bool) :
       [⟨(EffectDeclaration.StateKey.objectField ⟨identifier⟩ ⟨1⟩).address, (0 : Int)⟩])
   if account then ⟨.accountMetadata, payload⟩ else ⟨.declaredObject, payload⟩
 
-/-- The genesis pay cell: the invalid placeholder tariff, the zero clock, an
-empty deposit book and no assignment (`PayCell.genesisStore`). -/
+/-- The genesis pay cell: the invalid placeholder tariff, an empty deposit
+book and no assignment (`PayCell.genesisStore`). -/
 def payCell : PackedCell CanonicalCellRegistry.registry :=
   ⟨.pay, materialize Kernel.PayCell.materializer Kernel.PayCell.genesisStore⟩
 /-- The genesis clock cell: the clock at zero (`ClockCell.genesisStore`). -/

@@ -23,7 +23,7 @@ The decision proper is the pure `decideChange`:
   be the current book size: a present index is refused (`bookIndexPresent`),
   a gap is refused (`bookGap`), and each allocation is enabled only at an
   absent index (`book_write_once`).
-Neither branch writes the clock (`clock_untouched`).
+There is no clock in the pay cell; time is the clock cell's (`Kernel.ClockCell`).
 -/
 import Kernel.CapabilityRevocationController
 import Kernel.PayCellDomain
@@ -222,22 +222,6 @@ theorem Plan.writes_book_or_tariff (plan : Plan) (op : Op PayCell.layout)
     · rename_i current next _
       rcases List.mem_singleton.mp tariff with rfl
       exact Or.inr ⟨current, next, rfl⟩
-
-/-- **The book receiver never writes the clock.** -/
-theorem clock_untouched (plan : Plan) (op : Op PayCell.layout) (member : op ∈ plan.patch) :
-    op.writeAddress? ≠ some clockAddress := by
-  rcases plan.writes_book_or_tariff op member with ⟨index, address, rfl⟩ | ⟨current, next, rfl⟩ <;>
-    simp [Op.writeAddress?, Op.address, clockAddress]
-
-/-- The clock after any plan's patch is the clock before it. -/
-theorem clock_preserved (store : PayStore) (plan : Plan) :
-    Patch.run store plan.patch clockAddress = store clockAddress := by
-  apply Minidregg.Theory.Store.Patch.run_frame
-  intro inFootprint
-  simp only [Minidregg.Theory.Store.Patch.writeFootprint, List.mem_toFinset,
-    List.mem_filterMap] at inFootprint
-  obtain ⟨op, member, writes⟩ := inFootprint
-  exact clock_untouched plan op member writes
 
 /-! ### Concrete poles (kernel `decide` on real stores) -/
 
@@ -499,11 +483,6 @@ variable {F : Type} [Field F] {deployment : Deployment}
 /-- The pay cell after the change: the validated patch applied to the loaded cell. -/
 def Prepared.payPost (prepared : Prepared deployment profile ambient durable command) : PayCell.Cell :=
   prepared.candidate.validated.apply
-
-/-- The prepared post-cell's clock is the loaded cell's clock. -/
-theorem Prepared.clock_preserved (prepared : Prepared deployment profile ambient durable command) :
-    clockOf prepared.payPost.logical = clockOf prepared.pay.cell.logical :=
-  PayBookReceiver.clock_preserved prepared.pay.cell.logical prepared.plan
 
 def project (prepared : Prepared deployment profile ambient durable command)
     (logical : PayStore) : Minidregg.Pred.State :=
@@ -778,12 +757,9 @@ def receiveLoaded (deployment : Deployment) (profile : CanonicalRuntimeProfile.P
 #assert_axioms invalid_tariff_refused
 #assert_axioms book_present_index_refused
 #assert_axioms book_write_once
-#assert_axioms clock_untouched
-#assert_axioms clock_preserved
 #assert_axioms genesis_change_accepted
 #assert_axioms same_version_refused
 #assert_axioms occupied_row_refused
 #assert_axioms command_roundtrip
-#assert_axioms Prepared.clock_preserved
 
 end Minidregg.Kernel.PayBookReceiver

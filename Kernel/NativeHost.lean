@@ -911,7 +911,7 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
     | .present before => pure before.payload.root
     | .absent => .error "factory unavailable"
   pure ⟨pay.cell.root, opened.authority.snapshot.cell.root, factoryRoot,
-    PayCell.tariffOf pay.cell.logical, PayCell.clockOf pay.cell.logical,
+    PayCell.tariffOf pay.cell.logical,
     PayCell.nextFree pay.cell.logical, PayCellDomain.bookRows pay.cell.logical⟩
 
 /-! ## The clock (K-CLOCK): session operations 126-129

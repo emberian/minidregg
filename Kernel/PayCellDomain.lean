@@ -158,7 +158,7 @@ def signingPlanCodec : Minidregg.Theory.IndexedProgram.LawfulCodec SigningPlan :
 /-! ## The public view
 
 What any caller may read of the pay cell: the three roots a pay command pins,
-the tariff, the clock, and the published deposit address book with its
+the tariff, and the published deposit address book with its
 next-free index.  The assignment map (which account pays through which index)
 is not in the view; an assignee learns its index from its own signed
 command. -/
@@ -167,7 +167,6 @@ structure View where
   authorityRoot : Digest
   factoryRoot : Digest
   tariff : Option PayTariff.Tariff
-  clock : Option PayCell.Clock
   nextFree : Nat
   book : List PayTariff.Address32
   deriving DecidableEq, Repr
@@ -181,16 +180,15 @@ def viewStream : StreamCodec View :=
     (StreamCodec.product digestStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream
         (StreamCodec.product (StreamCodec.option PayTariff.tariffStream)
-          (StreamCodec.product (StreamCodec.option PayCell.clockStream)
-            (StreamCodec.product StreamCodec.nat (StreamCodec.list bytesStream)))))))
-    (fun view => (view.payRoot, view.authorityRoot, view.factoryRoot, view.tariff, view.clock,
+          (StreamCodec.product StreamCodec.nat (StreamCodec.list bytesStream))))))
+    (fun view => (view.payRoot, view.authorityRoot, view.factoryRoot, view.tariff,
       view.nextFree, view.book))
-    (fun (pay, authority, factory, tariff, clock, next, book) =>
-      ⟨pay, authority, factory, tariff, clock, next, book⟩)
+    (fun (pay, authority, factory, tariff, next, book) =>
+      ⟨pay, authority, factory, tariff, next, book⟩)
     (by intro view; cases view; rfl)
 
 def viewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec View :=
-  PayTariff.framed "DREGG/PAY/VIEW/v1".toUTF8.toList viewStream
+  PayTariff.framed "DREGG/PAY/VIEW/v2".toUTF8.toList viewStream
 
 #assert_axioms decodeCell_bytes
 #assert_axioms decodeCell_canonical
