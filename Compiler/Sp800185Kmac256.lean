@@ -72,11 +72,11 @@ theorem kmac256_key_separates :
 
 end Minidregg.Compiler.Sp800185Cshake256
 
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_length' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256Bytes_length
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged' depends on axioms: [propext, Classical.choice, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_tagged
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization' depends on axioms: [propext, Classical.choice, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_conforms_checkpoint_customization
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates' depends on axioms: [propext, Classical.choice, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates._native.native_decide.ax_1_1] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates._native.native_decide.ax_1_1] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.kmac256_key_separates

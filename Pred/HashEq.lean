@@ -43,9 +43,11 @@ theorem hashEqOpening_eq_some {s : State} {v b c : Slot} {o : Opening} :
     split at h
     next cell x r h1 h2 h3 =>
       dsimp only at h
-      split_ifs at h with hadm
-      cases h
-      exact ⟨h1, h2, h3, rfl, rfl, rfl, hadm⟩
+      split at h
+      next hadm =>
+        cases h
+        exact ⟨h1, h2, h3, rfl, rfl, rfl, hadm⟩
+      next => cases h
     next => cases h
   · rintro ⟨h1, h2, h3, rfl, rfl, rfl, hadm⟩
     cases o
@@ -221,7 +223,8 @@ def HashEqHiding (H : Hash) (Indistinguishable : (Int → Int) → (Int → Int)
 /-- Cell `0`, slots `v`/`b`/`c`, blinder `0`: admissible at every value in the domain. -/
 theorem opening_vbc_admissible (x : Int) (h0 : -2 ^ 255 ≤ x) (h1 : x < 2 ^ 255) :
     (⟨0, "v", "b", "c", x, 0⟩ : Opening).Admissible := by
-  refine ⟨le_refl _, by norm_num, ?_, ?_, ?_, h0, h1, le_refl _, by norm_num⟩
+  refine ⟨Int.le_refl _, show (0 : Int) < 2 ^ 64 by decide, ?_, ?_, ?_, h0, h1, Int.le_refl _,
+    show (0 : Int) < 2 ^ 256 by decide⟩
   · show (utf8 "v").length < 2 ^ 32; decide
   · show (utf8 "b").length < 2 ^ 32; decide
   · show (utf8 "c").length < 2 ^ 32; decide
@@ -229,8 +232,8 @@ theorem opening_vbc_admissible (x : Int) (h0 : -2 ^ 255 ≤ x) (h1 : x < 2 ^ 255
 /-- The assumption cannot be read as *equality*: hiding at `=` would make two different values
 commit identically, which is itself a collision of the same hash (at `deployed`, of cSHAKE256). -/
 theorem hiding_at_equality_is_a_collision (H : Hash) (h : HashEqHiding H (· = ·)) : Collision H := by
-  have a0 := opening_vbc_admissible 0 (by norm_num) (by norm_num)
-  have a1 := opening_vbc_admissible 1 (by norm_num) (by norm_num)
+  have a0 := opening_vbc_admissible 0 (by decide) (by decide)
+  have a1 := opening_vbc_admissible 1 (by decide) (by decide)
   rcases binds_or_collides H a0 a1 (congrFun (h 0 "v" "b" "c" 0 1 a0 a1) 0) with hab | hcol
   · simp at hab
   · exact hcol
@@ -247,8 +250,8 @@ theorem lengthHash_hashEqHiding : HashEqHiding lengthHash (· = ·) := by
 `0` and `1` commit differently at blinder `0`. -/
 theorem identity_not_hashEqHiding : ¬ HashEqHiding id (· = ·) := by
   intro h
-  have e := congrFun (h 0 "v" "b" "c" 0 1 (opening_vbc_admissible 0 (by norm_num) (by norm_num))
-    (opening_vbc_admissible 1 (by norm_num) (by norm_num))) 0
+  have e := congrFun (h 0 "v" "b" "c" 0 1 (opening_vbc_admissible 0 (by decide) (by decide))
+    (opening_vbc_admissible 1 (by decide) (by decide))) 0
   revert e
   decide +kernel
 
@@ -268,7 +271,7 @@ theorem identity_not_hashEqHiding : ¬ HashEqHiding id (· = ·) := by
 #guard_msgs in #print axioms lengthHash_admits_any_reveal
 /-- info: 'Minidregg.Pred.hashEq_wide_blinder_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_wide_blinder_refused
-/-- info: 'Minidregg.Pred.hiding_at_equality_is_a_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hiding_at_equality_is_a_collision' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms hiding_at_equality_is_a_collision
 /-- info: 'Minidregg.Pred.lengthHash_hashEqHiding' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms lengthHash_hashEqHiding

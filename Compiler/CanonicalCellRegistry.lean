@@ -35,6 +35,7 @@ import Compiler.ResourceBirthCodec
 import Compiler.PolicySourceCell
 import Kernel.PayCell
 import Compiler.StreamCell
+import Kernel.DomainEpochLaw
 import Compiler.NockProgramCodec
 import Kernel.ClockCell
 import Theory.CanonicalResourceBookInvariant
@@ -66,7 +67,8 @@ inductive Kind where
   /-- The deployment's pay cell (`Kernel.PayCell`): tariff, deposit address
   book and assignment. Time is the clock cell's. -/
   | pay
-  /-- A dense append-only sequence log (`StreamCell`): a per-author stream. -/
+  /-- A dense append-only sequence log (`StreamCell`): a per-author stream. A channel
+  domain's epoch records ride on one (`Kernel.DomainEpoch`): its law adds the channel chain. -/
   | stream
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
@@ -133,7 +135,7 @@ def schemaRef : Kind → SchemaRef
   | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
   | .pay => ⟨⟨91010⟩, 3⟩
-  | .stream => ⟨⟨91012⟩, 1⟩
+  | .stream => ⟨⟨91012⟩, 2⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
   | .clock => ⟨⟨91013⟩, 1⟩
 
@@ -426,9 +428,11 @@ theorem empty_event_history_lawful (deployment : Deployment) :
     EventHistoryLaw deployment 0 := by
   constructor <;> intro address member <;> simp at member
 
-/-- Semantic identity of the source-owned loaded/final law. -/
+/-- Semantic identity of the source-owned loaded/final law.  v9 (BRAID-PROOF): `final`'s v7,
+CH-EPOCH's stream law (CH-CLIENT's v8) and K-NARROW-HIDE's store encoding v2 / blinded cells meet
+here; every earlier label names a different law set, so a Store under any of them refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v7".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v9".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -446,7 +450,7 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
   | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
       (PolicySourceCell.recordAt state)
   | .pay, state => cellId = Kernel.PayCell.physicalId deployment.domain ∧ Kernel.PayCell.Law state
-  | .stream, state => StreamCell.StreamLaw state
+  | .stream, state => StreamCell.StreamLaw state ∧ Kernel.DomainEpoch.ChannelStoreLaw state
   | .nockProgram, state => PresentLaw (NockProgramCodec.CellValid deployment.domain cellId)
       (NockProgramCodec.programAt state)
   | .clock, state => cellId = Kernel.ClockCell.physicalId deployment.domain ∧

@@ -24,7 +24,6 @@ are far inside the standard bound.
 
 import Init.Data.BitVec
 import Init.Data.UInt.Bitwise
-import Mathlib.Data.Nat.Digits.Defs
 
 namespace Minidregg.Compiler.Sp800185Cshake256
 
@@ -32,11 +31,23 @@ set_option autoImplicit false
 
 /-! ## SP 800-185 byte framing -/
 
+/-- The base-256 digits of `value`, least significant first, with `fuel` bounding the recursion
+(structural, so `decide` evaluates it). `fuel ≥ value` always suffices: each step divides by 256. -/
+def natBytesLEAux : Nat → Nat → List UInt8
+  | 0, _ => []
+  | fuel + 1, value => if value = 0 then [] else UInt8.ofNat (value % 256) :: natBytesLEAux fuel (value / 256)
+
+/-- The base-256 digits of `value`, least significant first; `[]` for `0`. This is `Nat.digits 256`
+read as bytes (`natBytesLE_eq_digits`, in `Compiler.Sp800185Cshake256`, where Mathlib is in scope):
+the executable core stays on `Init`, so every runtime closure that hashes (the channel library a
+member's phone loads) carries no Mathlib initializers. -/
+def natBytesLE (value : Nat) : List UInt8 := natBytesLEAux value value
+
 /-- Minimal nonempty big-endian base-256 representation. -/
 def natBytesBE (value : Nat) : List UInt8 :=
-  let little := Nat.digits 256 value
+  let little := natBytesLE value
   let nonempty := if little = [] then [0] else little
-  nonempty.reverse.map UInt8.ofNat
+  nonempty.reverse
 
 /-- SP 800-185 `left_encode`, totalized beyond the standard's 255-byte-width
 domain by `UInt8.ofNat`. -/
@@ -197,7 +208,7 @@ private def uLane (state : UState) (x y : Nat) : UInt64 :=
 private theorem uLane_toBitVec (state : UState) (x y : Nat) :
     (uLane state x y).toBitVec = lane (toB state) x y := by
   simp only [uLane, lane, toB, Array.getD, Array.size_map]
-  split_ifs <;> simp [zeroLane]
+  by_cases h : x % 5 + 5 * (y % 5) < state.size <;> simp [h, zeroLane]
 
 private def uXorColumn (state : UState) (x : Nat) : UInt64 :=
   (List.range 5).foldl (fun acc y => acc ^^^ uLane state x y) 0
@@ -221,9 +232,9 @@ private def uRotl (x : UInt64) (r : Nat) : UInt64 :=
 private theorem uRotl_toBitVec (x : UInt64) (r : Nat) :
     (uRotl x r).toBitVec = x.toBitVec.rotateLeft r := by
   simp only [uRotl, BitVec.rotateLeft_def]
-  split_ifs with h
+  by_cases h : r % 64 = 0
   · simp [h, BitVec.ushiftRight_eq_zero]
-  · simp [UInt64.toBitVec_or, UInt64.toBitVec_shiftLeft,
+  · simp [h, UInt64.toBitVec_or, UInt64.toBitVec_shiftLeft,
       UInt64.toBitVec_shiftRight]
     have hlt : r % 64 < 64 := Nat.mod_lt _ (by decide)
     have hrange : 64 - r % 64 < 64 := by omega
@@ -523,5 +534,13 @@ theorem cshake256Bytes_eq_indexed (customization input : List UInt8) :
       let suffix : UInt8 := if shakeCompatible then 0x1f else 0x04
       squeeze32 (absorbPaddedIndexed (padForRate framed suffix)) := by
   simp only [cshake256Bytes, absorbPadded_eq_indexed]
+
+@[simp] theorem squeeze32_length (state : State) :
+    (squeeze32 state).length = 32 := by
+  simp [squeeze32, outputBytes]
+
+@[simp] theorem cshake256Bytes_length (customization input : List UInt8) :
+    (cshake256Bytes customization input).length = 32 := by
+  simp [cshake256Bytes]
 
 end Minidregg.Compiler.Sp800185Cshake256

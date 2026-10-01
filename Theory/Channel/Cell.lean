@@ -19,10 +19,9 @@ The sealed part is opaque ciphertext here. Its plaintext layout (`viewTag 1 | fr
 payload`) has its own fixed-size codec below (`Plaintext`), so the payload capacities 195 / 227 (P1)
 and 963 / 995 (P2) are theorems.
 
-Candidate-independent: imports only `Theory.AssertAxioms` (for the axiom audit at the end).
+Candidate-independent: imports only `Init`. The axiom pins are in `Theory.Channel.Audit`.
 -/
 
-import Theory.AssertAxioms
 
 namespace Minidregg.Theory.Channel
 
@@ -624,66 +623,5 @@ theorem p2_export_kind : (decodeCellBytesList 3 p2Cell.encode).head? = some 2 :=
 
 end Smoke
 
-
-/-! ## Axiom audit: every theorem above rests on at most `propext`, `Classical.choice`, `Quot.sound` -/
-
-#assert_axioms Blob.ext
-#assert_axioms fit_val_of_length
-#assert_axioms fit_val_of_le
-#assert_axioms Profile.C_ge
-#assert_axioms Profile.sealedLen_eq
-#assert_axioms Profile.dutySealedLen_eq
-#assert_axioms Profile.bodyLen_eq
-#assert_axioms tagLen_eq
-#assert_axioms headerLen_eq
-#assert_axioms P0_timed
-#assert_axioms P1_timed
-#assert_axioms P1phone_timed
-#assert_axioms P2_timed
-#assert_axioms P2phoneAtPhoneDelta_not_timed
-#assert_axioms P1phone_differs_only_in_delta
-#assert_axioms P1_layout
-#assert_axioms P0_layout
-#assert_axioms P2_layout
-#assert_axioms U16.ofNat_val_of_lt
-#assert_axioms rd16_be16
-#assert_axioms be16_rd16
-#assert_axioms Header.encode_length
-#assert_axioms Header.decode_encode_append
-#assert_axioms Header.decode_eq_some
-#assert_axioms Body.encode_length
-#assert_axioms Cell.ext
-#assert_axioms cell_size_exact
-#assert_axioms Cell.ofRaw_header
-#assert_axioms Cell.bodyBlob_ofRaw
-#assert_axioms Cell.ofRaw_bodyBlob
-#assert_axioms Cell.encode_eq_header_append
-#assert_axioms cell_decode_encode
-#assert_axioms cell_decode_canonical
-#assert_axioms cell_decode_eq_some_iff
-#assert_axioms cell_encode_injective
-#assert_axioms cell_decode_refuses_length
-#assert_axioms cell_decode_total_on_length
-#assert_axioms cell_header_bytes
-#assert_axioms SealMode.overhead_le
-#assert_axioms Plaintext.encode_length
-#assert_axioms Plaintext.decode_encode
-#assert_axioms Plaintext.decode_canonical
-#assert_axioms Plaintext.encode_injective
-#assert_axioms Plaintext.decode_refuses_length
-#assert_axioms payload_capacities
-#assert_axioms plaintext_fits
-#assert_axioms decodeCellBytesList_accepts
-#assert_axioms decodeCellBytesList_refuses
-#assert_axioms Smoke.p1Cell_size
-#assert_axioms Smoke.p2Cell_size
-#assert_axioms Smoke.p1Cell_roundtrip
-#assert_axioms Smoke.p2Cell_roundtrip
-#assert_axioms Smoke.p1Cell_header_bytes
-#assert_axioms Smoke.p1_short_refused
-#assert_axioms Smoke.p1_long_refused
-#assert_axioms Smoke.p1_bytes_refused_at_p2
-#assert_axioms Smoke.p1_export_kind
-#assert_axioms Smoke.p2_export_kind
 
 end Minidregg.Theory.Channel
