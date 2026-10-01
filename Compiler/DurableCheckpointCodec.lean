@@ -26,8 +26,8 @@ signed ingress remains available as the operator `audit` command.
 
 **What is checked on open** (`Compiler.DurableReceiverIO.load`): the chain is
 recomputed over every stored record; the latest checkpoint's MAC, key id, world
-root and chain value must all match; the head entry's tag must verify unless
-the head is the checkpoint. Any mismatch refuses to open — nothing reinterprets.
+root and chain value must all match; every entry's tag must verify
+(`Compiler.DurableLogTags`), refused by height. Any mismatch refuses to open — nothing reinterprets.
 
 The world root is the parameterised `Checkpoint.check` of DATAMODEL B2 over
 the current cell-root function (`rootBytes`), until C1 supplies the world-root

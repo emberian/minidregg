@@ -2,8 +2,8 @@
 One process-local resumed tip. `start` opens the Store the ordinary way — MAC'd
 checkpoint plus suffix replay (`DurableReceiverIO.load`) — and validates it.
 `refresh` asks the store for entries after the session's head: none means the
-tip is current; new entries must continue the log chain, carry a verifying
-head tag, and replay through the shared executor (`DurableReceiverIO.extendFrom`).
+tip is current; new entries must continue the log chain, each carry a
+verifying tag, and replay through the shared executor (`DurableReceiverIO.extendFrom`).
 A failed read, a shrunk log or a refused entry poisons the session.
 
 The walk-provenance families (application lifecycle, dispatch, grain session

@@ -8,9 +8,9 @@ resumes and executes; the native helper stores opaque bytes, appends entry
 
 * **Open** (`load`): recompute the log chain over every stored record, open
   the latest checkpoint (key id, recomputed world root, MAC, chain value),
-  verify the head entry's tag, then `DurableCheckpoint.resume` — materialize
-  the checkpoint and replay only the records after it. No signed ingress is
-  re-admitted here; that is the operator `audit` (`NativeHostReplay.verifyLoaded`).
+  verify every entry's tag (`DurableLogTags.verifyTags`), then
+  `DurableCheckpoint.resume` — materialize the checkpoint and replay only the
+  records after it. No signed ingress is re-admitted here; that is the operator `audit` (`NativeHostReplay.verifyLoaded`).
 * **Receive** (`receiveLoadedDetailed`): run the shared executor at the loaded
   snapshot (`DurableCheckpoint.prepare`), append one entry, read that one entry
   back. Every `checkpointEvery` records the receiver seals a checkpoint of the
@@ -23,6 +23,7 @@ transport and the OS durability floor; no Lean theorem proves those systems.
 The MAC key file's custody is the operator's (`DurableCheckpointCodec`).
 -/
 import Compiler.DurableCheckpointCodec
+import Compiler.DurableLogTags
 import Kernel.PresenceIndex
 
 namespace Minidregg.Compiler.DurableReceiverIO
@@ -34,6 +35,7 @@ open Minidregg.Kernel.DurableReceiver
 open Minidregg.Kernel.DurableCheckpoint
 open Minidregg.Compiler.DurableReceiverCodec
 open Minidregg.Compiler.DurableCheckpointCodec
+open Minidregg.Compiler.DurableLogTags (chainPrefixes verifyTags)
 
 set_option autoImplicit false
 
@@ -383,10 +385,6 @@ private def decodeRecords : List Entry → Except String (List IntentRecord)
         | throw "noncanonical durable log record"
       return record :: (← decodeRecords rest)
 
-/-- Chain values after each prefix: element `i` is the chain after `i` records. -/
-private def chainPrefixes (start : Digest) (records : List IntentRecord) : Array Digest :=
-  records.foldl (fun acc record => acc.push (chainStep (acc.back?.getD start) record)) #[start]
-
 /-- The single open path. Every check refuses; nothing reinterprets. -/
 def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
     IO (Except String (Loaded rootBytes)) := do
@@ -416,12 +414,10 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
                 if body.chain ≠ chains.getD body.height ⟨0⟩ then
                   return .error "checkpoint does not match the log chain"
                 pure (body.height, body.state)
-      if stored.head > baseHeight then
-        match stored.entries.getLast? with
-        | none => return .error "durable log head missing"
-        | some last =>
-            if last.tag ≠ entryTag key stored.head headChain then
-              return .error "durable log head tag refused"
+      if stored.entries.length ≠ stored.head then
+        return .error "durable log head does not match its entries"
+      if let .error message := verifyTags key 0 chains (stored.entries.map (·.tag)) then
+        return .error message
       let image : Image := ⟨seed, records⟩
       if within : baseHeight ≤ image.accepted.length then
         match resumed : resume rootBytes image baseHeight base with
@@ -711,7 +707,7 @@ def receive (transport : Transport) (rootBytes : List UInt8 → Digest)
           | result => return result
 
 /-- Extend a live loaded image by entries a concurrent writer appended after
-it: the chain must continue, the new head's tag must verify, and every new
+it: the chain must continue, every new entry's tag must verify, and every new
 record must be accepted by the shared executor in order. -/
 def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
     (loaded : Loaded rootBytes) : IO (Except String (Loaded rootBytes)) := do
@@ -729,9 +725,11 @@ def extendFrom (transport : Transport) (rootBytes : List UInt8 → Digest)
         | .error message => return .error message
         | .ok records => pure records
       let chain := chainAfter loaded.chain records
-      let some last := stored.entries.getLast? | return .error "durable log head missing"
-      if last.tag ≠ entryTag key stored.head chain then
-        return .error "durable log head tag refused"
+      if height + stored.entries.length ≠ stored.head then
+        return .error "durable log head does not match its entries"
+      if let .error message := verifyTags key height (chainPrefixes loaded.chain records)
+          (stored.entries.map (·.tag)) then
+        return .error message
       let mut current := loaded
       for record in records do
         let some intent := record.bind? rootBytes
