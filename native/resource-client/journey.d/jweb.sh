@@ -12,7 +12,7 @@
 # are K-DOC-HISTORY's `at`-height reads.
 # Rows (expect -> got):
 #   c-links-notes-to-paper   C adds a plain link notes -> paper             -> installed
-#   a-creates-room           A creates lab, and labnote --in lab            -> installed
+#   a-creates-room           A creates wlab, and wnote --in wlab            -> installed
 #   bind-any-refused         --listen 0.0.0.0:PORT                           -> refused (no listener)
 #   bind-lan-refused         --listen <a non-loopback address>               -> refused
 #   index-lists-refs         C's / lists C's references                      -> 2
@@ -45,9 +45,9 @@
 #   wrong-secret             /WRONG/doc/paper                                -> 404
 #   refused-requests-no-reads  signed reads made by the five refused requests -> 0
 #   stream-501               /stream/notes (k-stream is not on this braid)   -> 501
-#   board-fields             A's /board/shared                               -> fields >= 1
-#   room-children            A's /room/lab lists labnote                     -> labnote
-#   room-members             A's /room/lab members (the `who` view)          -> A present
+#   board-fields             A's /board/wide (K4's) or /board/shared         -> fields >= 1
+#   room-children            A's /room/wlab lists wnote                      -> wnote
+#   room-members             A's /room/wlab members (the `who` view)         -> A present
 #   lynx-dump                lynx -dump of C's /doc/paper (if lynx exists)   -> text
 # Exit 0 = every row as expected. Last stdout line = the rows file.
 set -uo pipefail
@@ -116,10 +116,11 @@ invoke c-links-notes-to-paper "$CW" notes "$(jq -n --arg p "$paper" \
   '[{type:"link",link:"9101",source:null,target:{type:"document",id:$p},relation:"1"}]')"
 row c-links-notes-to-paper installed "$(rc_word c-links-notes-to-paper)" "link 9101"
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
-run create-lab "$MINI" workspace --action create --dir "$SPONSOR_WS" --name lab --storage content --predicate "$D/req/permit-all.json"
-run create-labnote "$MINI" workspace --action create --dir "$SPONSOR_WS" --name labnote --storage content \
-  --predicate "$D/req/permit-all.json" --in lab
-row a-creates-room installed "$( [ "$(cat "$D/create-lab.rc")$(cat "$D/create-labnote.rc")" = 00 ] && echo installed || echo "lab rc=$(cat "$D/create-lab.rc") labnote rc=$(cat "$D/create-labnote.rc"): $(tail -1 "$D/create-labnote.err")")" "lab + labnote --in lab"
+# (K10 already names a `lab` and a `note`: this step's room is wlab.)
+run create-wlab "$MINI" workspace --action create --dir "$SPONSOR_WS" --name wlab --storage content --predicate "$D/req/permit-all.json"
+run create-wnote "$MINI" workspace --action create --dir "$SPONSOR_WS" --name wnote --storage content \
+  --predicate "$D/req/permit-all.json" --in wlab
+row a-creates-room installed "$( [ "$(cat "$D/create-wlab.rc")$(cat "$D/create-wnote.rc")" = 00 ] && echo installed || echo "wlab rc=$(cat "$D/create-wlab.rc") wnote rc=$(cat "$D/create-wnote.rc"): $(tail -1 "$D/create-wlab.err")")" "wlab + wnote --in wlab"
 [ -f "$DW/refs/paper.json" ] || { run d-import-paper "$MINI" workspace --action import --dir "$DW" --name paper --kind object \
   --target "$paper" --observe-capability "$(jq -r .observeCapability "$DW/refs/notes.json")"; ok d-import-paper; }
 
@@ -220,11 +221,13 @@ row wrong-secret 404 "$code" "path secret"
 row refused-requests-no-reads 0 "$(( $(attempts "$CW") - before ))" "signed reads made while answering the five refused requests"
 row stream-501 501 "$(get stream.html "${URL_C}stream/notes")" "$(grep -o 'streams are[^<]*' "$D/pages/stream.html" | cut -c1-100)"
 
-code=$(get a-board.html "${URL_A}board/shared")
+# J8 leaves `shared` under deny-all; K4's `wide` (32 fields) is the board when K4 ran.
+board=shared; [ -f "$SPONSOR_WS/refs/wide.json" ] && board=wide
+code=$(get a-board.html "${URL_A}board/$board")
 f=$(grep -o 'data-fields="[0-9]*"' "$D/pages/a-board.html" | grep -o '[0-9]*')
-row board-fields "200:yes" "$code:$([ "${f:-0}" -ge 1 ] && echo yes || echo no)" "${f:-0} field(s) in shared"
-code=$(get a-room.html "${URL_A}room/lab")
-row room-children "200:labnote" "$code:$(grep -o 'data-child="[a-z0-9-]*"' "$D/pages/a-room.html" | cut -d'"' -f2 | tr '\n' ' ' | sed 's/ $//')" "born --in lab"
+row board-fields "200:yes" "$code:$([ "${f:-0}" -ge 1 ] && echo yes || echo no)" "${f:-0} field(s) in $board"
+code=$(get a-room.html "${URL_A}room/wlab")
+row room-children "200:wnote" "$code:$(grep -o 'data-child="[a-z0-9-]*"' "$D/pages/a-room.html" | cut -d'"' -f2 | tr '\n' ' ' | sed 's/ $//')" "born --in wlab"
 row room-members present "$(grep -q "data-member=\"$A_SUBJECT\"" "$D/pages/a-room.html" && echo present || echo absent)" "$(grep -o 'data-members="[0-9]*"' "$D/pages/a-room.html") $(grep -o 'data-members-refused>[^<]*' "$D/pages/a-room.html")"
 
 if command -v lynx >/dev/null; then
