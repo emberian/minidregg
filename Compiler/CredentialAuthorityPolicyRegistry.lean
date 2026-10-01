@@ -894,6 +894,9 @@ def policyStore : Store.Store layout :=
 no focused encoding or second synthetic cell for its projection. -/
 def authorityMaterializer := CredentialAuthorityCell.materializer
 
+/-- The authority wire's byte-level root (the salted store root). -/
+abbrev authorityRootBytes : List UInt8 → Digest := StoreCodec.rootBytes CredentialAuthorityCell.wire
+
 def authorityCell : RegistryCell authorityMaterializer :=
   CellState.materialize authorityMaterializer policyStore
 
@@ -1126,8 +1129,8 @@ def dataPostBytes : List UInt8 := [1, 2, 3, 4]
 
 def dataWrite : DataWrite where
   cellId := dataCellId
-  expectedPre := StoreCodec.rootBytes dataPreBytes
-  exactPost := StoreCodec.rootBytes dataPostBytes
+  expectedPre := authorityRootBytes dataPreBytes
+  exactPost := authorityRootBytes dataPostBytes
   canonicalPostBytes := dataPostBytes
 
 def event : StableEvent where
@@ -1136,7 +1139,7 @@ def event : StableEvent where
   eventId := ⟨91021⟩
   canonicalBytes := [80, 79, 76, 73, 67, 89]
 
-def baseIntent : DataIntent StoreCodec.rootBytes where
+def baseIntent : DataIntent authorityRootBytes where
   transactionId := ⟨91030⟩
   writes := [dataWrite]
   readGuards := []
@@ -1155,10 +1158,10 @@ theorem registryCell_readOnly :
     registryCellId ∉ baseIntent.writes.map DataWrite.cellId := by
   decide
 
-def sharedDigest : SharedDigest authorityMaterializer StoreCodec.rootBytes :=
+def sharedDigest : SharedDigest authorityMaterializer authorityRootBytes :=
   ⟨rfl⟩
 
-noncomputable def guardedIntent : DataIntent StoreCodec.rootBytes :=
+noncomputable def guardedIntent : DataIntent authorityRootBytes :=
   guardPolicyRegistry authorityCell registryCellId sharedDigest baseIntent
     registryCell_readOnly
 
@@ -1167,9 +1170,9 @@ noncomputable def snapshotBytes (cellId : CellId) : List UInt8 :=
   else if cellId = registryCellId then authorityCell.bytes
   else []
 
-noncomputable def readySnapshot : DataSnapshot StoreCodec.rootBytes where
+noncomputable def readySnapshot : DataSnapshot authorityRootBytes where
   model :=
-    { roots := fun cellId => StoreCodec.rootBytes (snapshotBytes cellId)
+    { roots := fun cellId => authorityRootBytes (snapshotBytes cellId)
       consumed := fun _ => false
       available := 0
       history := []
@@ -1179,7 +1182,7 @@ noncomputable def readySnapshot : DataSnapshot StoreCodec.rootBytes where
 
 @[simp] theorem readySnapshot_registry_root :
     readySnapshot.model.roots registryCellId = authorityCell.root := by
-  change StoreCodec.rootBytes (snapshotBytes registryCellId) = authorityCell.root
+  change authorityRootBytes (snapshotBytes registryCellId) = authorityCell.root
   have bytesExact : snapshotBytes registryCellId = authorityCell.bytes := by
     simp [snapshotBytes, registryCellId, dataCellId]
   rw [bytesExact]
@@ -1194,7 +1197,7 @@ theorem baseIntent_ready : baseIntent.preflight readySnapshot = .ok () := by
     simp only [baseIntent, DataIntent.erase, List.map_singleton,
       List.mem_singleton] at member
     subst write
-    change StoreCodec.rootBytes (snapshotBytes dataCellId) = StoreCodec.rootBytes dataPreBytes
+    change authorityRootBytes (snapshotBytes dataCellId) = authorityRootBytes dataPreBytes
     have bytesExact : snapshotBytes dataCellId = dataPreBytes := by
       simp [snapshotBytes, dataCellId]
     rw [bytesExact]
@@ -1268,9 +1271,9 @@ noncomputable def rotatedSnapshotBytes (cellId : CellId) : List UInt8 :=
   if cellId = registryCellId then rotatedCell.bytes
   else snapshotBytes cellId
 
-noncomputable def rotatedSnapshot : DataSnapshot StoreCodec.rootBytes where
+noncomputable def rotatedSnapshot : DataSnapshot authorityRootBytes where
   model :=
-    { roots := fun cellId => StoreCodec.rootBytes (rotatedSnapshotBytes cellId)
+    { roots := fun cellId => authorityRootBytes (rotatedSnapshotBytes cellId)
       consumed := fun _ => false
       available := 0
       history := []
@@ -1282,7 +1285,7 @@ theorem rotatedSnapshot_moved (binding : RootPairBinding policyStore rotatedStor
     rotatedSnapshot.model.roots registryCellId ≠ authorityCell.root := by
   have bytesExact : rotatedSnapshotBytes registryCellId = rotatedCell.bytes := by
     simp [rotatedSnapshotBytes]
-  change StoreCodec.rootBytes (rotatedSnapshotBytes registryCellId) ≠ authorityCell.root
+  change authorityRootBytes (rotatedSnapshotBytes registryCellId) ≠ authorityCell.root
   rw [bytesExact]
   exact rotated_root_ne binding
 
@@ -1301,9 +1304,9 @@ theorem rotated_policy_rejects_old_intent (binding : RootPairBinding policyStore
 it must provide exactly this simulation premise. -/
 abbrev PhysicalAtomicityPremise
     (PhysicalState : Type) (PhysicalStep : PhysicalState ->
-      DataIntent StoreCodec.rootBytes -> PhysicalState -> Type)
-    (Represents : PhysicalState -> DataSnapshot StoreCodec.rootBytes -> Prop) :=
-  ImplementationRefinement StoreCodec.rootBytes PhysicalState PhysicalStep Represents
+      DataIntent authorityRootBytes -> PhysicalState -> Type)
+    (Represents : PhysicalState -> DataSnapshot authorityRootBytes -> Prop) :=
+  ImplementationRefinement authorityRootBytes PhysicalState PhysicalStep Represents
 
 end Example
 end Minidregg.Compiler.CredentialAuthorityPolicyRegistry

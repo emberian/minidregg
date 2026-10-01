@@ -74,6 +74,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
+    Verb { name: "channel", usage: "channel say ROOM @NAME TEXT... | channel tail ROOM | channel status ROOM", operation: "mini channel say|tail|status ROOM [@NAME TEXT] --home HOME/channels (the member loop, `mini channel join`, is its own long-running process)" },
     Verb { name: "pay", usage: "pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini pay --action address|status|audit --dir WS [--account REF]" },
     Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
@@ -768,6 +769,22 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 _ => return Err(u.to_owned()),
             }
+        }
+        "channel" => {
+            if w.len() < 3 {
+                return Err(u.to_owned());
+            }
+            workspace_name(&w[2], "room name")?;
+            let mut flags = vec![flag("action", w[1].clone()), flag("room", w[2].clone()), flag("home", session.home.join("channels"))];
+            match w[1].as_str() {
+                "say" if w.len() >= 5 && w[3].starts_with('@') => {
+                    flags.push(flag("to", w[3].clone()));
+                    flags.push(flag("text", w[4..].join(" ")));
+                }
+                "tail" | "status" if w.len() == 3 => {}
+                _ => return Err(u.to_owned()),
+            }
+            client("channel", flags)
         }
         "pay" => {
             arity(&w, 1, 2, u)?;

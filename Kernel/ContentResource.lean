@@ -568,9 +568,16 @@ def Action.tag : Action → Nat
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
 
+/-- The store a content law sees: the cell without its hiding key, so every
+count and byte measure is of content alone. -/
+def lawStore (store : ContentStore) : ContentStore :=
+  Minidregg.Theory.Store.Store.set store ⟨.blinding, ()⟩ none
+
 /-- Source-derived policy inputs count actual committed bytes; no content or
 identity is reduced to a scalar identifier. -/
-def project (before after : ContentStore) (command : Command) : List (String × Int) :=
+def project (before' after' : ContentStore) (command : Command) : List (String × Int) :=
+  let before := lawStore before'
+  let after := lawStore after'
   [("content/bytes/before", contentBytes before),
    ("content/bytes/after", contentBytes after),
    ("content/bytes/delta", (contentBytes after : Int) - contentBytes before),

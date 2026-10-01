@@ -35,6 +35,7 @@ import Compiler.ResourceBirthCodec
 import Compiler.PolicySourceCell
 import Kernel.PayCell
 import Compiler.StreamCell
+import Kernel.DomainEpochLaw
 import Compiler.NockProgramCodec
 import Kernel.ClockCell
 import Theory.CanonicalResourceBookInvariant
@@ -66,7 +67,8 @@ inductive Kind where
   /-- The deployment's pay cell (`Kernel.PayCell`): tariff, deposit address
   book and assignment. Time is the clock cell's. -/
   | pay
-  /-- A dense append-only sequence log (`StreamCell`): a per-author stream. -/
+  /-- A dense append-only sequence log (`StreamCell`): a per-author stream. A channel
+  domain's epoch records ride on one (`Kernel.DomainEpoch`): its law adds the channel chain. -/
   | stream
   /-- A Nock program cell (`NockProgramCodec`): jam + ABI, keyed by programId. -/
   | nockProgram
@@ -133,7 +135,7 @@ def schemaRef : Kind → SchemaRef
   | .declaredProgram => ⟨⟨91008⟩, 2⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
   | .pay => ⟨⟨91010⟩, 3⟩
-  | .stream => ⟨⟨91012⟩, 1⟩
+  | .stream => ⟨⟨91012⟩, 2⟩
   | .nockProgram => ⟨⟨NockProgramCodec.schemaId⟩, NockProgramCodec.wireVersion⟩
   | .clock => ⟨⟨91013⟩, 1⟩
 
@@ -170,6 +172,39 @@ def materializer : (kind : Kind) → Materializer (layout kind) Digest
   | .stream => StreamCell.materializer
   | .nockProgram => NockProgramCodec.materializer
   | .clock => Kernel.ClockCell.materializer
+
+/-- The store wire of every kind whose materializer is the generic
+`StoreCodec.materializer` (K-NARROW-HIDE): its salted root opens per entry. -/
+def wire? : (kind : Kind) → Option (StoreCodec.Wire (layout kind))
+  | .content => some HyperdocumentCell.contentWire
+  | .eventHistory => some HyperdocumentCell.eventWire
+  | .authority => some CredentialAuthorityCell.wire
+  | .declaredObject => some DeclaredEffectCell.wire
+  | .accountMetadata => some DeclaredEffectCell.wire
+  | .declaredProgram => some DeclaredEffectCell.wire
+  | .pay => some Kernel.PayCell.wire
+  | .stream => some StreamCell.wire
+  | .clock => some Kernel.ClockCell.wire
+  | .resourceBook | .policySource | .nockProgram => none
+
+/-- A kind with a store wire is materialized by it, so its cell root is that
+wire's salted root. -/
+theorem materializer_of_wire {kind : Kind} {wire : StoreCodec.Wire (layout kind)}
+    (selected : wire? kind = some wire) : materializer kind = StoreCodec.materializer wire := by
+  cases kind <;> simp [wire?] at selected <;> subst selected <;> rfl
+
+/-- Whether a cell holds its hiding key. -/
+def blinded : (kind : Kind) → Store (layout kind) → Bool
+  | kind, store =>
+      match wire? kind with
+      | some wire => (StoreCodec.blindingKey wire store).isSome
+      | none => false
+
+/-- Whether an address is a kind's blinding address. -/
+def isBlinding (kind : Kind) (address : Store.Address (layout kind)) : Bool :=
+  match wire? kind with
+  | some wire => decide (wire.blinding = some address)
+  | none => false
 
 def registry : TypeRegistry Digest where
   Kind := Kind
@@ -260,6 +295,7 @@ def KeyAllowed (kind : ResourceKind) (cellId : Nat) : StateKey → Prop
       (kind = .object ∨ kind = .account) ∧ object.value = cellId
   | .programCode program => kind = .program ∧ program.value = cellId
   | .accountBalance _ _ => False
+  | .blinding => True
 
 instance keyAllowedDecidable (kind : ResourceKind) (cellId : Nat) (key : StateKey) :
     Decidable (KeyAllowed kind cellId key) := by
@@ -317,6 +353,7 @@ def recordDocument? : (space : Hyperdocument.Namespace) → Hyperdocument.Key sp
   | .transclusions, _, record => some record.hostDocument
   | .marks, _, record => some record.document
   | .annotations, _, record => some record.document
+  | .blinding, _, _ => none
 
 /-- The document named by the record at `address`, if any. -/
 def documentAt (store : Store Hyperdocument.layout)
@@ -391,9 +428,11 @@ theorem empty_event_history_lawful (deployment : Deployment) :
     EventHistoryLaw deployment 0 := by
   constructor <;> intro address member <;> simp at member
 
-/-- Semantic identity of the source-owned loaded/final law. -/
+/-- Semantic identity of the source-owned loaded/final law.  v9 (BRAID-PROOF): `final`'s v7,
+CH-EPOCH's stream law (CH-CLIENT's v8) and K-NARROW-HIDE's store encoding v2 / blinded cells meet
+here; every earlier label names a different law set, so a Store under any of them refuses. -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v7".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v9".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
@@ -411,7 +450,7 @@ def LogicalLaw (deployment : Deployment) (cellId : Nat) :
   | .policySource, state => PresentLaw (PolicySourceCell.SourceValid deployment.domain cellId)
       (PolicySourceCell.recordAt state)
   | .pay, state => cellId = Kernel.PayCell.physicalId deployment.domain ∧ Kernel.PayCell.Law state
-  | .stream, state => StreamCell.StreamLaw state
+  | .stream, state => StreamCell.StreamLaw state ∧ Kernel.DomainEpoch.ChannelStoreLaw state
   | .nockProgram, state => PresentLaw (NockProgramCodec.CellValid deployment.domain cellId)
       (NockProgramCodec.programAt state)
   | .clock, state => cellId = Kernel.ClockCell.physicalId deployment.domain ∧
@@ -461,13 +500,14 @@ instance finalPostLawDecidable (deployment : Deployment) (cellId : Nat)
   unfold FinalPostLaw
   infer_instance
 
-/-- Neutral content genesis is an empty document cell: the cell's identifier is
-the new document's identity.  Historical provenance, authority grants, Book
+/-- Neutral content genesis is an empty document cell, holding at most its
+hiding key: the cell's identifier is the new document's identity.  Historical provenance, authority grants, Book
 balances and policy sources are generated by their semantic controllers, never
 injected as raw user initial payloads. -/
 def UserShape : (kind : Kind) → Store (layout kind) → Prop
   | .declaredObject, _ | .accountMetadata, _ | .declaredProgram, _ => True
-  | .content, state => state.support = ∅
+  -- Empty but for the owner-derived blinding (K-NARROW-HIDE).
+  | .content, state => ∀ address ∈ state.support, address = ⟨.blinding, ()⟩
   | .stream, state => state.support = ∅
   | .nockProgram, state => PresentLaw NockProgramCodec.Admissible (NockProgramCodec.programAt state)
   | .eventHistory, _ | .authority, _ | .resourceBook, _ | .policySource, _ | .pay, _ | .clock, _ => False
@@ -973,7 +1013,8 @@ theorem user_content_inhabited : UserInitial deployment 11 emptyContent := by
   refine ⟨⟨by decide, ?_⟩, ?_⟩
   · intro left member
     exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
-  · rfl
+  · intro address member
+    exact ((DFinsupp.mem_support_toFun _ _).mp member rfl).elim
 
 end Witness
 

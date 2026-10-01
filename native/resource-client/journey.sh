@@ -19,6 +19,10 @@
 #   K4     one resource holds 32 fields and reads them back (list item 2)
 #   KC     K-CLOCK: journey.d/jclock.sh (ticks move the one clock; a law reads clock/now)
 #   JJ     K-JOINT-INDEX: journey.d/jjoint.sh (a law reads a participant by position)
+#   KCH    CH-EPOCH: journey.d/jchan-epoch.sh (a channel domain's epoch records under ChannelLaw)
+#   KCHR   CH-RELAY-1: journey.d/jchan-relay.sh (`mini relay` ticking in real time; records appended per epoch)
+#   KCHC   CH-CLIENT-1 + CH-J-TRACE: journey.d/jchan-client.sh (`mini channel`: sealed messages in the constant-rate
+#          cells; the trace test across runs with different traffic; the presence pole; the own-slot re-send)
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
 #   J12    PLACE §2.2/§2.4: two friends co-write a document through `mini shell`
@@ -41,7 +45,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jsync m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve jjob1 jjob-money): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jchan-epoch jchan-relay jchan-client jsync m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve jjob1 jjob-money): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -149,7 +153,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 JSYNC BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOBM J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC JJ K10 K11 KCH KCHR KCHC KIX KF KH K12C KHQ KW JN2 JN3 JN5 JSYNC BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOBM J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -171,8 +175,12 @@ TITLE[JSERVE]="a hostile client (trickle, long request, 50 silent, route-mismatc
 TITLE[J5]="a key with no grant: read and write refused"
 TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refused at the controller"
 TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
+TITLE[KCH]="a channel domain's epoch records: delta exactly 1, E roots, the sequencer only, openings checked"
+TITLE[KCHC]="two friends talk through the relay in sealed cells; a third member cannot read them and the wire is the same whatever they say"
+TITLE[KCHR]="a channel relay ticks in real time: every slot every tick, one admitted record per epoch, the opening only at the witness"
 TITLE[KIX]="the index the world keeps: who, since, and a read at a past height"
 TITLE[KF]="a scope names fields and bounds each field change per write"
+TITLE[KH]="a narrowed read verifies against a salted root: covered entries open, the rest are sealed leaves"
 TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
 TITLE[KHQ]="commit-reveal at the kernel: a sealed bid opens only to its commitment"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
@@ -821,8 +829,12 @@ step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append
 step_J12C() { hook j12c "B quotes a range of commons/wall into lab/paper; C (commons only) is refused no-grant reading the quote; A reads the quoted bytes; A's doc follow is refused no-grant (PLACE §2.4)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
+step_KCH() { hook jchan-epoch "CH-EPOCH rows: e0 e1 e2 admitted; a gap, an out-of-order record, E-1 roots and a non-sequencer refused by name; a wrong-length opening refused maskLength; tail in order; cold audit (lane ch-epoch)"; }
+step_KCHC() { hook jchan-client "CH-CLIENT-1 rows: alice -> bob delivered byte-exact in order (one message over 3 cells), carol opens nothing; 887 B down and 256 B up per (tick, slot) in every run; the (tick, slot, size) logs of runs with different traffic diff to 0 lines; with carol killed only her slot differs at the relay; a dropped cell is re-sent by its sender own-slot check; every record checked; cold audit (lane ch-client)"; }
+step_KCHR() { hook jchan-relay "CH-RELAY-1 rows: two runs at P1 n=3 with 0 missed ticks and one admitted record per epoch; 3 sends every tick with a member killed and the same member receipt shape; openings at the witness and not in the Store; a gap record refused epochGap; cold audit (lane ch-relay)"; }
 step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last visible write, since lists only later writes, at differs across a write above and below the checkpoint and equals the read now, a height above now is refused, a cold reopen prints the same index (lane k-index)"; }
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
+step_KH() { hook jhide "K-NARROW-HIDE rows: a field-3 reader verifies its opening against the salted cell root, field 4 reaches it only as a sealed leaf, the owner re-derives every salt from its own key, tampered views refuse, a field-4 write moves only the root and one leaf, restart and audit replay (lane k-narrow-hide)"; }
 step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
 step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHAKE256 digest, the right opening installs, a wrong opening or a reveal before the deadline is refused, the plaintext is on the Store only after the reveal (lane k-hasheq)"; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
@@ -866,8 +878,12 @@ run_step KC J2
 run_step JJ J2
 run_step K10 J5
 run_step K11 J5
+run_step KCH J5
+run_step KCHR J5
+run_step KCHC J5
 run_step KIX K10
 run_step KF J5
+run_step KH J5
 run_step K12C J5
 run_step KHQ J4
 run_step KW J5

@@ -202,6 +202,8 @@ def sourceComponents : List (List UInt8) :=
    StoreCodec.frame Kernel.ClockCell.wire,
    Kernel.ClockCell.idCustomization,
    StoreCodec.rootCustomization,
+   StoreCodec.saltCustomization,
+   StoreCodec.leafCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,
    StreamCodec.nat.encode CanonicalResourcePageMaterializer.wireVersion,

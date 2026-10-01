@@ -792,6 +792,9 @@ inductive Namespace where
   | transclusions
   | marks
   | annotations
+  /-- The cell's hiding key (K-NARROW-HIDE): one entry, at key `()`, set at
+  birth; no content action writes it and no reader receives it. -/
+  | blinding
   deriving DecidableEq, Repr
 
 def Key : Namespace -> Type
@@ -805,6 +808,7 @@ def Key : Namespace -> Type
   | .transclusions => TransclusionId
   | .marks => MarkId
   | .annotations => AnnotationId
+  | .blinding => Unit
 
 def Value : (space : Namespace) -> Type
   | .documents => DocumentRecord
@@ -817,6 +821,7 @@ def Value : (space : Namespace) -> Type
   | .transclusions => TransclusionRecord
   | .marks => MarkRecord
   | .annotations => AnnotationRecord
+  | .blinding => Digest
 
 instance keyDecidableEq (space : Namespace) : DecidableEq (Key space) := by
   cases space <;> simp only [Key] <;> infer_instance

@@ -29,6 +29,7 @@ mod fleet;
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
+mod hiding;
 #[cfg(unix)]
 mod historical_call_receipt;
 #[cfg(unix)]
@@ -49,6 +50,10 @@ mod prepare_refusal;
 mod proxy;
 #[cfg(unix)]
 mod publisher;
+#[cfg(unix)]
+mod relay;
+#[cfg(unix)]
+mod channel;
 #[cfg(unix)]
 mod selected_exchange;
 #[cfg(unix)]
@@ -339,6 +344,10 @@ usage:
   mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT
   mini shell --remote DEST --workspace JOIN-ROOT/workspace --home SESSION-HOME [--line LINE]
   mini socket-proxy --socket PUBLIC-SOCKET
+  mini key --action export-blinding --secret KEY
+  mini verify-view --view VIEW.json
+  mini key --action cell-blinding --secret KEY --cell CELL
+  mini key --action derive-salt --secret KEY --cell CELL --storage declared|content --entry HEX
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini pay address|status --dir WORKSPACE [--account REF]
   mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
@@ -435,6 +444,15 @@ usage:
   mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
+  mini relay --lean-lib LIB.so --class ID --domain D --n N --leases LEASES.txt --ticks K --unix SOCKET --state-dir DIR --out-dir DIR [--tcp 127.0.0.1:PORT] [--witness WITNESS.sock] [--append-ws WS --stream NAME] [--first-epoch E] [--start-delay-ms MS] [--wait-members-ms MS] [--spin-ms MS] [--fault-gap-at-epoch E] [--fault-drop SLOT:TICK] [--records-dir DIR]
+  mini relay-emit --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --slot S --subject ID --key KEY --out MEMBER.csv [--ticks K]
+  mini relay-witness --lean-lib LIB.so --unix WITNESS.sock --out WITNESS.csv
+  mini relay-key --key SEED-FILE
+  mini channel key ROOM [--home DIR]
+  mini channel join ROOM --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --leases LEASES.txt --key ED25519-SEED --roster ROSTER [--class P1|P1phone] [--ticks K] [--records-dir DIR] [--home DIR]
+  mini channel say ROOM @NAME TEXT... [--home DIR]
+  mini channel tail ROOM [--follow] [--home DIR]
+  mini channel status ROOM [--home DIR]
   mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini reply-consumer-drain-once --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
@@ -495,8 +513,40 @@ impl Args {
                 values.push((OsString::from("--action"), action));
             }
         }
+        // `mini channel ACTION ROOM [@NAME TEXT...]` (CHANNELS.md §9 row 10 spells the verbs this way):
+        // ACTION, ROOM, @NAME and the words of TEXT are positional, up to the first `--` flag; a bare
+        // `--follow` (tail) takes no value.
+        if command == OsStr::new("channel") {
+            let mut positional = Vec::new();
+            while let Some(word) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                positional.push(word);
+            }
+            let mut words = positional.into_iter();
+            if let Some(action) = words.next() {
+                values.push((OsString::from("--action"), action));
+            }
+            if let Some(room) = words.next() {
+                values.push((OsString::from("--room"), room));
+            }
+            if let Some(to) = words.next() {
+                values.push((OsString::from("--to"), to));
+            }
+            let text: Vec<String> = words.map(|w| w.to_string_lossy().into_owned()).collect();
+            if !text.is_empty() {
+                values.push((OsString::from("--text"), OsString::from(text.join(" "))));
+            }
+            if raw.next_if(|next| next == OsStr::new("--follow")).is_some() {
+                let value = raw.next_if(|next| !next.to_string_lossy().starts_with("--")).unwrap_or_else(|| OsString::from("true"));
+                values.push((OsString::from("--follow"), value));
+            }
+        }
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
+            if command == OsStr::new("channel") && flag == OsStr::new("--follow") {
+                let value = raw.next_if(|next| !next.to_string_lossy().starts_with("--")).unwrap_or_else(|| OsString::from("true"));
+                values.push((flag, value));
+                continue;
+            }
             if !rendered.starts_with("--") || rendered.len() == 2 {
                 return Err(format!("unexpected argument {rendered}\n\n{USAGE}"));
             }
@@ -514,6 +564,11 @@ impl Args {
             return Err(format!("missing --{name}"));
         };
         Ok(self.values.remove(index).1)
+    }
+
+    fn peek(&self, name: &str) -> Option<&OsStr> {
+        let flag = OsString::from(format!("--{name}"));
+        self.values.iter().find(|(key, _)| *key == flag).map(|(_, value)| value.as_os_str())
     }
 
     fn optional(&mut self, name: &str) -> Option<OsString> {
@@ -754,6 +809,10 @@ fn keygen(secret: &Path, public: &Path, escrow: Option<(OsString, OsString)>) ->
         create_private(Path::new(&escrow_path), &wrapped.to_bytes())?;
     }
     eprintln!("{}", workspace::private::KEYGEN_NOTICE);
+    eprintln!(
+        "Your blinding key is derived from this seed (`mini key --action export-blinding`); it \
+keys the salts that hide each cell's fields from readers you have not named."
+    );
     println!("{}", hex(&signing.verifying_key().to_bytes()));
     Ok(())
 }
@@ -1595,6 +1654,19 @@ fn query_retained(
         &view_bin,
         &view_json,
     )?;
+    // K-NARROW-HIDE: a resource or at-height view is checked against its own
+    // root before it is shown; a view whose opening does not recompute the root
+    // is refused, with the signed view retained for inspection.
+    let presented = if inspection_kind == "view-resource" || inspection_kind == "view-at" {
+        let summary = hiding::verify_view(&presented)?;
+        let mut presented = presented;
+        if let Some(object) = presented.as_object_mut() {
+            object.insert("hiding".to_owned(), summary);
+        }
+        presented
+    } else {
+        presented
+    };
     if inspection_kind == "fn-inbox-resource"
         && presented.get("type").and_then(Value::as_str) != Some("fn-inbox-resource-summary-v1")
     {
@@ -2447,9 +2519,24 @@ fn run(mut args: Args) -> Result<()> {
         "clock" => clock::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
+        // mini key carries two verb families: the credential store (keys.rs) and the
+        // owner-derived hiding keys (K-NARROW-HIDE, the arm below). Route by --action.
         #[cfg(unix)]
-        "key" => keys::run(args),
+        "key" if !matches!(
+            args.peek("action").and_then(OsStr::to_str),
+            Some("export-blinding" | "cell-blinding" | "derive-salt")
+        ) => keys::run(args),
         "fleet" => fleet::run(args),
+        #[cfg(unix)]
+        "relay" => relay::run_relay(args),
+        #[cfg(unix)]
+        "relay-emit" => relay::run_emit(args),
+        #[cfg(unix)]
+        "relay-witness" => relay::run_witness(args),
+        #[cfg(unix)]
+        "relay-key" => relay::run_key(args),
+        #[cfg(unix)]
+        "channel" => channel::run(args),
         "well" => well::run(args),
         "pay" => pay::run(args),
         #[cfg(unix)]
@@ -2790,6 +2877,52 @@ fn run(mut args: Args) -> Result<()> {
                 }
             };
             keygen(&secret, &public, escrow)
+        }
+        "verify-view" => {
+            let view = path(args.required("view")?);
+            args.finish()?;
+            let bytes = fs::read(&view)
+                .map_err(|error| format!("cannot read {}: {error}", view.display()))?;
+            let value: Value = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("{} is not JSON: {error}", view.display()))?;
+            print_json(&hiding::verify_view(&value)?)
+        }
+        "key" => {
+            let action = args.required("action")?;
+            let seed = hiding::read_seed(&path(args.required("secret")?))?;
+            match action.to_str() {
+                Some("export-blinding") => {
+                    args.finish()?;
+                    eprintln!("{}", hiding::BLINDING_NOTICE);
+                    println!("{}", hex(&hiding::blinding_key(&seed)));
+                    Ok(())
+                }
+                Some("cell-blinding") => {
+                    let cell = args.required("cell")?;
+                    args.finish()?;
+                    let cell = cell.to_str().ok_or("--cell must be UTF-8")?;
+                    println!("{}", hiding::cell_blinding(&hiding::blinding_key(&seed), cell)?);
+                    Ok(())
+                }
+                Some("derive-salt") => {
+                    let cell = args.required("cell")?;
+                    let storage = args.required("storage")?;
+                    let entry = args.required("entry")?;
+                    args.finish()?;
+                    let entry = workspace::private::decode_hex(
+                        entry.to_str().ok_or("--entry must be UTF-8 hex")?,
+                    )?;
+                    let salt = hiding::owner_salt(
+                        &seed,
+                        storage.to_str().ok_or("--storage must be UTF-8")?,
+                        cell.to_str().ok_or("--cell must be UTF-8")?,
+                        &entry,
+                    )?;
+                    println!("{}", hex(&salt));
+                    Ok(())
+                }
+                _ => Err("key --action is export-blinding, cell-blinding or derive-salt".to_owned()),
+            }
         }
         "bootstrap" => {
             if SOCKET.get().is_some() {

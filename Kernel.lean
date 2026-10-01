@@ -80,9 +80,14 @@ import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver
 import Kernel.ResourceTransactionAudit
-import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired), Turn, admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, poles
+import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/head/retired/parent/spent/allowance), Turn (creates carry their ROM image, T3b), admit/step, fold, Checkpoint; replay exactness, checkpoint soundness, journal exactness, fail-closed admission, frame, rom_cell_immutable_after_birth, poles
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
+import Kernel.TurnCensus  -- T1/T3b: every live admission constructor (37) is a Turn shape accepted by World.admit, its negation refused by name; every_admission_is_turn, theList_empty (ROM births included); step_conserves for Book postings
+import Kernel.TurnCensusCoverage  -- BRAID-PROOF: fails the build unless TurnCensus.Ctor and NativeAdmission name the same constructors
 import Kernel.TurnRecord  -- B2: an AcceptedCellEffect is a Leg (exactPost derived from step); ImplementationRefinement re-indexed by Turn/World, trace_represents_fold (crash recovery = fold of a sublist); model refines, torn install refuted
+import Kernel.TurnOfIntent  -- T3: Turn.ofIntent = the diff of each written cell against the held cell (a G-NORM fixed point; ofIntent_minimal: footprint = the addresses that differ); ofIntent_step; legPatch_valid_iff (refused exactly when no guarded patch reaches the image)
+import Kernel.DeployedBridge  -- T3b: the deployed Bridge (lifecycle-image decoder + one StoreCodec.Wire per registered kind); bridge_decode_total_on_registry, deployed_cells_iff
+import Kernel.HostRefinesWorld  -- T3/T3b: Represents : Loaded -> World; ofIntent_run; deployed_refines_step; host_trace_represents_fold; confirmed_represents (rebase included); policy_source_birth_is_turn; birth_rom_image; poles appendOnly_rewrite_has_no_turn, policy_source_rewrite_has_no_turn; host_submit_is_step stated for T4
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles
 import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
@@ -99,6 +104,12 @@ import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
 import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)
+import Kernel.DomainEpoch  -- channel epoch record, absent opening, ChannelLaw, omission theorems (CHANNELS §2.4, CH-EPOCH)
+import Kernel.DomainEpochStream  -- the channel law at the kernel append: refusals by name (CH-EPOCH)
+import Kernel.DomainEpochExport  -- the relay byte entry points: tick root, seal, opening, topic (CH-RELAY-1)
+import Kernel.DomainEpochLaw  -- the kernel side of the epoch record: ChannelLaw, admitAppend, ChannelStoreLaw (split from DomainEpoch, CH-CLIENT-1)
+import Kernel.DomainEpochAudit  -- the axiom pins of DomainEpoch, DomainEpochLaw, DomainEpochExport (runtime closure has no Mathlib, CH-CLIENT-1)
 import Kernel.NockProgramCell -- NOCK K-NOCK-CELL: sampleOf (targets + ABI slots), sampleOf_injective/_deterministic; reads for ops 131-133
 import Kernel.NockDoor -- NOCK N11: a NockApp kernel door (poke 23 / peek 22, state at axis 6) refereed by re-execution; door_poke_sound / door_state_stale_refused / door_effects_are_writes / door_peek_pure / door_load_deterministic; ops 135-137
 import Kernel.NockRun -- NOCK K-RAN: RunClaim, checkRun (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle; op 134 dryRun
+import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 the field-3 reader's opened items are unchanged by a write to field 4 and only the root moves (narrowed_view_hides_field_four)

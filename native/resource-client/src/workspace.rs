@@ -757,21 +757,37 @@ fn to_hex(bytes: &[u8]) -> String {
 }
 
 /// One stream append: `{"type":"append","topic":TEXT,"text":TEXT[,"to":SUBJECT][,"ref":{cell,sequence}]}`.
-/// The Host derives the sequence position and the payload digest; the text rides in the signed command.
+/// Raw bytes ride as `"topicHex"` / `"payloadHex"` in place of `"topic"` / `"text"` (a channel epoch
+/// record, CH-EPOCH, is binary). The Host derives the sequence position and the payload digest; the
+/// bytes ride in the signed command.
 fn stream_append(payload: &Value) -> Result<Value> {
     let obj = payload
         .as_object()
         .ok_or("append payload must be an object")?;
-    if obj
-        .keys()
-        .any(|key| !matches!(key.as_str(), "type" | "topic" | "text" | "to" | "ref"))
-        || !obj.contains_key("topic")
-        || !obj.contains_key("text")
+    let has = |key: &str| obj.contains_key(key);
+    if obj.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "type" | "topic" | "topicHex" | "text" | "payloadHex" | "to" | "ref"
+        )
+    }) || has("topic") == has("topicHex")
+        || has("text") == has("payloadHex")
     {
-        return Err("append payload has type, topic, text and optional to, ref".into());
+        return Err(
+            "append payload has type, one of topic/topicHex, one of text/payloadHex, and optional to, ref"
+                .into(),
+        );
     }
-    let topic = member(payload, "topic")?;
-    let text = member(payload, "text")?;
+    let topic = if has("topic") {
+        member(payload, "topic")?.as_bytes().to_vec()
+    } else {
+        unhex(member(payload, "topicHex")?)?
+    };
+    let text = if has("text") {
+        member(payload, "text")?.as_bytes().to_vec()
+    } else {
+        unhex(member(payload, "payloadHex")?)?
+    };
     if topic.len() > 64 {
         return Err("append topic exceeds 64 bytes".into());
     }
@@ -790,8 +806,8 @@ fn stream_append(payload: &Value) -> Result<Value> {
         None | Some(Value::Null) => Value::Null,
         Some(value) => json!({"cell":member(value,"cell")?,"sequence":member(value,"sequence")?}),
     };
-    Ok(json!({"type":"append","topic":to_hex(topic.as_bytes()),
-        "payload":to_hex(text.as_bytes()),"to":to,"ref":reference}))
+    Ok(json!({"type":"append","topic":to_hex(&topic),
+        "payload":to_hex(&text),"to":to,"ref":reference}))
 }
 
 /// The room named by a workspace reference, and its latest key from the cache.
@@ -1804,6 +1820,19 @@ fn birth(
             "controlCapability":reservation.ids["controlCapability"],
             "predicate":shape.predicate}),
     };
+    // K-NARROW-HIDE: a declared or content cell is born blinded, with a
+    // blinding this workspace's key derives for this cell id, so its owner
+    // recomputes every salt and no reader of a subset of fields holds an
+    // unsalted commitment to the rest.
+    let mut resource = resource;
+    if matches!(shape.storage, "declared" | "content" | "grain") && program.is_none() {
+        let seed = crate::hiding::read_seed(&member_path(workspace, "key")?)?;
+        let target = reservation.ids["target"].as_str();
+        resource["blinding"] = json!(crate::hiding::cell_blinding(
+            &crate::hiding::blinding_key(&seed),
+            target
+        )?);
+    }
     let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
@@ -2877,6 +2906,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(lowered["actions"][0]["value"], "11033321548135836207");
+    }
+
+    #[test]
+    fn stream_append_carries_text_or_raw_bytes() {
+        let text = stream_append(&json!({"type":"append","topic":"t","text":"hi"})).unwrap();
+        assert_eq!(text["topic"], "74");
+        assert_eq!(text["payload"], "6869");
+        let raw = stream_append(&json!({"type":"append","topicHex":"00ff","payloadHex":"80"})).unwrap();
+        assert_eq!(raw["topic"], "00ff");
+        assert_eq!(raw["payload"], "80");
+        for bad in [
+            json!({"type":"append","topic":"t","topicHex":"00","text":"x"}),
+            json!({"type":"append","topic":"t","text":"x","payloadHex":"00"}),
+            json!({"type":"append","topic":"t"}),
+            json!({"type":"append","topicHex":"0","text":"x"}),
+            json!({"type":"append","topicHex":"zz","text":"x"}),
+        ] {
+            assert!(stream_append(&bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

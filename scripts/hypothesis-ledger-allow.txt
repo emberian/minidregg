@@ -61,7 +61,6 @@ Minidregg.Compiler.Logup256ReceiptClause.Tower256ClausePremises  [1 consumers; p
 Minidregg.Compiler.CommittedTerminalFactoredProver.FactoredProverHonest  [1 consumers; poles: none] closed Prop bound as premise: prove or refute; task 01a0f802-033d
 Minidregg.Selvage.adaptiveIncrement_sound_via_log  [1 consumers; poles: ref/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
 Minidregg.Selvage.OracleLogProgramLinked  [1 consumers; poles: ref] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
-Minidregg.Pred.HashEqHiding  [1 consumers; poles: none] computational hiding premise (cSHAKE256 commit), no model of feasibility; task 01a0f802-0303
 Minidregg.Assurance.SemanticHistoryRecursiveAir.SecurityEvidence  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
 Minidregg.Selvage.FsKnowledgeSoundRO  [1 consumers; poles: sat/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
 Minidregg.Compiler.PayEnrolSignatureIO.SshsigRefinement  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
