@@ -132,7 +132,7 @@ grain_action() {
     --slurpfile read "$EVIDENCE/$name-before/view.json" \
     --slurpfile challenge "$EVIDENCE/$name-before/challenge.json" \
     '{grain:{task:$task,subject:$subject,capability:$cap,observeCapability:$cap,
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$nonce,payload:"fresh grain-backed birth acceptance"},
       before:{generation:$read[0].cell.grain.generation,status:$read[0].cell.grain.status,
@@ -172,7 +172,7 @@ jq -n --slurpfile genesis "$EVIDENCE/genesis.json" \
   --slurpfile parent "$EVIDENCE/parent-ready/view.json" \
   --slurpfile challenge "$EVIDENCE/tool-ready/challenge.json" \
   '{subject:"8",nonce:"41000",
-    grainBirth:{tariff:{base:"2",perBirth:"1"},authorityRoot:$challenge[0].signing[0].authorityRoot,
+    grainBirth:{tariff:{base:"2",perBirth:"1"},authorityRoot:$challenge[0].authorityRoot,
       birth:{genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
         height:$challenge[0].height,creator:"8",nonce:"41000",
         resources:[{kind:"object",storage:"content",

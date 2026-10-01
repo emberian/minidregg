@@ -52,7 +52,7 @@ jq -n --slurpfile view "$EVIDENCE/before/view.json" \
   --slurpfile challenge "$EVIDENCE/before/challenge.json" \
   --arg payload "$NOTE_INITIAL_HEX" \
   '{subject:"8",nonce:"50001",purpose:{type:"prepare",draft:{type:"invoke",
-    command:{subject:"8",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+    command:{subject:"8",expectedAuthorityRoot:$challenge[0].authorityRoot,
       nonce:"50002",targets:[{kind:"object",target:"8001",capability:"95",
         observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",
@@ -72,7 +72,7 @@ jq -n --slurpfile view "$EVIDENCE/created/view.json" \
   --slurpfile challenge "$EVIDENCE/created/challenge.json" \
   --arg payload "$NOTE_FINAL_HEX" \
   '{subject:"8",nonce:"50004",purpose:{type:"prepare",draft:{type:"invoke",
-    command:{subject:"8",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+    command:{subject:"8",expectedAuthorityRoot:$challenge[0].authorityRoot,
       nonce:"50005",targets:[{kind:"object",target:"8001",capability:"95",
         observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"editAtom",atom:"7401",

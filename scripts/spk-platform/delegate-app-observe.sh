@@ -85,7 +85,7 @@ for route in bob-web hermes-a hermes-b; do
   jq -e --slurpfile parent "$EVIDENCE/$route-parent/challenge.json" '
     .domain == $parent[0].domain and .semantics == $parent[0].semantics and
     .worldRoot == $parent[0].worldRoot and
-    .signing[0].authorityRoot == $parent[0].signing[0].authorityRoot' \
+    .authorityRoot == $parent[0].authorityRoot' \
     "$EVIDENCE/$route-owner/challenge.json" >/dev/null || fail "current authority changed; retain attempt"
   jq -n --slurpfile cap "$EVIDENCE/$route-parent/head.json" \
     --slurpfile current "$EVIDENCE/$route-owner/challenge.json" \
@@ -96,7 +96,7 @@ for route in bob-web hermes-a hermes-b; do
     {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
         expectedTargetRoot:$resource[0].cell.root,parentId:$p.id,target:"8401",
-        expectedPreRoot:$c.signing[0].authorityRoot,
+        expectedPreRoot:$c.authorityRoot,
         child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
           targets:["8401"],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
       grants:[{kind:"object",target:"8401",capability:$p.id}]}' >"$EVIDENCE/$route-delegate-intent.json"

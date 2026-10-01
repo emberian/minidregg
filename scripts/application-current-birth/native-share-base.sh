@@ -105,7 +105,7 @@ reserve_tool() {
     --slurpfile read "$EVIDENCE/$name-before/view.json" \
     --slurpfile challenge "$EVIDENCE/$name-before/challenge.json" \
     '{grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$n,payload:"current app birth reserve"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -133,7 +133,7 @@ ensure_app_parent_reserved() {
   jq -n --slurpfile read "$EVIDENCE/app-parent-prepare-before/view.json" \
     --slurpfile challenge "$EVIDENCE/app-parent-prepare-before/challenge.json" '
     {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:"42970",payload:"current app parent hard attach"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -151,7 +151,7 @@ ensure_app_parent_reserved() {
   jq -n --slurpfile read "$EVIDENCE/app-parent-attached/view.json" \
     --slurpfile challenge "$EVIDENCE/app-parent-attached/challenge.json" '
     {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:"42980",payload:"current app parent witness reserve"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -183,7 +183,7 @@ ensure_app_tool_attached() {
   jq -n --slurpfile read "$EVIDENCE/app-tool-attach-before/view.json" \
     --slurpfile challenge "$EVIDENCE/app-tool-attach-before/challenge.json" '
     {grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:"42990",payload:"current app tool hard attach"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -223,7 +223,7 @@ birth_source() {
         {kind:"object",target:"7902",capability:"81"},
         {kind:"object",target:"7901",capability:"73"}],
       shell:{tariff:{base:"2",perBirth:"1"},
-        authorityRoot:$challenge[0].signing[0].authorityRoot,
+        authorityRoot:$challenge[0].authorityRoot,
         source:{genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
           creator:"8",nonce:$nonce,sourceCapabilities:["42"],funding:[],feePayer:"8"},
         tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].cell.root,

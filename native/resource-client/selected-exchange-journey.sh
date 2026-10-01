@@ -272,7 +272,7 @@ jq -e --arg s "$SOURCE_SUBJECT" '.predicate == {"type":"eq","slot":"request/subj
   "$B/owner-policy-read/view.json" >/dev/null
 jq -e '.cell.entries == []' "$B/owner-inbox-read/view.json" >/dev/null
 POLICY_ROOT=$(jq -er '.address' "$B/owner-policy-read/view.json")
-AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$B/owner-inbox-read/challenge.json")
+AUTHORITY_ROOT=$(jq -er '.authorityRoot' "$B/owner-inbox-read/challenge.json")
 TARGET_ROOT=$(jq -er '.cell.root' "$B/owner-inbox-read/view.json")
 
 # --- 5. fn node ----------------------------------------------------------------
@@ -439,7 +439,7 @@ end
 # inbox and submitted to B's served Store; each must refuse with no write.
 signed_query "$B" "$A/sponsor.key" "$SOURCE_SUBJECT" "$INBOX" "$RECIPIENT_CAP" resource \
   "$N/inbox-after-admission"
-POST_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$N/inbox-after-admission/challenge.json")
+POST_AUTHORITY=$(jq -er '.authorityRoot' "$N/inbox-after-admission/challenge.json")
 POST_ROOT=$(jq -er '.cell.root' "$N/inbox-after-admission/view.json")
 submit_negative() { # label packet target-root
   "$HOST" "$B/deployment/pinned-config.json" selected-release-ingress \

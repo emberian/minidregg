@@ -183,7 +183,7 @@ EOF
   --intent "$ROOT/gateway-query.json" --key "$ROOT/custody.key" --view resource \
   --dir "$ROOT/gateway-query" >"$ROOT/gateway-query.stdout"
 TARGET_ROOT=$(jq -er '.cell.root' "$ROOT/gateway-query/view.json")
-AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$ROOT/gateway-query/challenge.json")
+AUTHORITY_ROOT=$(jq -er '.authorityRoot' "$ROOT/gateway-query/challenge.json")
 cat >"$ROOT/delegate-intent.json" <<EOF
 {"subject":"$GATEWAY_SUBJECT","nonce":"30009","purpose":{"type":"prepare","draft":{
  "type":"delegate-source","command":{"kind":"object","domain":"8501",
