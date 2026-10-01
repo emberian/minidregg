@@ -15,6 +15,12 @@ open Minidregg.Kernel
 set_option autoImplicit false
 
 /-- AgentGrain permission micro-units charged per million reported tokens.
+The unit is **credit**: a purse is funded only by `Kernel.PurseRefill`, which
+burns the pay tariff's credit asset (asset 0 on the devnet genesis) 1:1 into
+the purse's allowance, so one permission micro-unit is one credit and
+`inputMicroPerMillion = 20000000` means 20 credits per million input tokens.
+The unit was already the purse's allowance unit; P6 only fixes what funds it,
+so no arithmetic here changed.
 The version is an operator-controlled tariff identity, not a provider price feed. -/
 structure Tariff where
   version : Nat

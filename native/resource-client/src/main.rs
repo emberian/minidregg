@@ -35,6 +35,7 @@ mod historical_call_receipt;
 mod meter;
 #[cfg(unix)]
 mod participant_enrollment;
+mod pay_refill;
 #[cfg(unix)]
 mod pay;
 #[cfg(unix)]
@@ -270,6 +271,8 @@ usage:
   mini pay observe --dir OBSERVER-WORKSPACE --capability CAP (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
   mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
   mini pay audit --dir OBSERVER-WORKSPACE [--offline true]
+  mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
+  mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]

@@ -10,6 +10,7 @@ The admission gate a committed turn passes is
 import Kernel.PayObservationProofs  -- PAY P3: observed payments mint Book credit; the audit identity, the transfer nullifier, the clock
 import Kernel.PayEnrolProofs  -- PAY P3b-2: one enrollment-index payment is one turn over authority, factory, Book and pay cell
 import Kernel.PayEnrolDecision  -- PAY P3b-1: the self-enrollment memo, its refusals, and the enrol/renew/journal decision
+import Kernel.PurseRefillProofs  -- PAY P6: a Book burn funds an AgentGrain purse in one joint turn; ledger identity; purse never mints
 import Kernel.State   -- the minimal kernel state: accounts + bal + caps + one UKey map; Σ-conservation
 import Kernel.Turn    -- the turn as a wide pullback (hyperedge): cone + balance, legs_agree, the binding tooth
 import Kernel.TurnLimit  -- N2a: the hyperedge cone data IS a wide-pullback limit (Types.isLimit), keystones

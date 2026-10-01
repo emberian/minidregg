@@ -44,6 +44,7 @@ import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
 import Kernel.PayObservationReceiver
 import Kernel.PayEnrolReceiver
+import Kernel.PurseRefillReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -741,6 +742,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : PayEnrolReceiver.AcceptedEnrol config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
       NativeAdmission config opened (PayEnrolReceiver.intent accepted)
+  | payRefill {ingress : PurseRefillReceiver.DecodedIngress}
+      (accepted : PurseRefillReceiver.AcceptedRefill config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (PurseRefillReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1568,6 +1573,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨PayEnrolReceiver.intent accepted,
           .payEnrol accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PurseRefillReceiver.decodeIngress bytes then
+    match ← PurseRefillReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"pay refill refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨PurseRefillReceiver.intent accepted,
+          .payRefill accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

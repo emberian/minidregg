@@ -1489,6 +1489,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         .required("action")?
         .into_string()
         .map_err(|_| "pay action must be UTF-8")?;
+    // P6's purse refill is signed by a Book account's owner key, not run from a workspace.
+    if action == "refill" {
+        return crate::pay_refill::run(args);
+    }
     let root = path(args.required("dir")?);
     let account = args
         .optional("account")
@@ -1557,7 +1561,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             audit(&Session::open(&root)?, offline)
         }
         other => Err(format!(
-            "unknown pay action {other}: address|status|book|watch-config|observe|heartbeat|audit"
+            "unknown pay action {other}: address|status|book|watch-config|observe|heartbeat|audit|refill"
         )),
     }
 }

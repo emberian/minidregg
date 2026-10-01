@@ -182,6 +182,11 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME
         }
         [107 | 112] => true,
+        // PAY P6: the purse refill quartet. The Host decodes each component canonically.
+        [113 | 115 | 116, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [114, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
         _ => false,
     }
 }
