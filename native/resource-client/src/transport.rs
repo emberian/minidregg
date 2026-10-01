@@ -166,6 +166,19 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         // P-AFFORDANCES dry run: one signed observation (as op 1) and one
         // signature list. The Host re-plans, assembles and commits nothing.
         [130, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
+        // Key pre-rotation: plan (one command), assembly (one plan and one raw
+        // signature by the NEW key), submit/lookup (one ingress), status (one
+        // JSON query). No current-key or sponsor signature participates.
+        [140 | 142 | 143, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [141, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
+        [144, payload @ ..] => {
+            !payload.is_empty()
+                && payload.len() <= 1024
+                && serde_json::from_slice::<serde_json::Value>(payload)
+                    .is_ok_and(|value| value.is_object())
+        }
         [102, digits @ ..] => {
             !digits.is_empty()
                 && digits.len() <= 80

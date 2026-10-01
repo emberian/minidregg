@@ -561,6 +561,39 @@ fn plan(mut args: Args) -> Result<()> {
             )
         }
     };
+    // Pre-rotation is the default: the enrolled record commits to the digest of
+    // the principal's NEXT public key (keygen writes it at KEY.next.pub). Only
+    // an explicit --no-prerotation enrolls a key that can never rotate.
+    let next_public_arg = args
+        .optional("next-public-key")
+        .map(|value| absolute(&path(value)))
+        .transpose()?;
+    let without_prerotation = args.optional("no-prerotation").is_some();
+    let next_public_path = match (next_public_arg, without_prerotation, &new_key) {
+        (Some(_), true, _) => {
+            return Err("--next-public-key and --no-prerotation exclude each other".into())
+        }
+        (Some(explicit), false, _) => Some(explicit),
+        (None, true, _) => None,
+        (None, false, Some(secret)) => {
+            let conventional = crate::key_rotation::conventional_next_public(secret);
+            if !conventional.is_file() {
+                return Err(format!(
+                    "enrollment commits to a next key by default: {} is missing (make keys with `mini keygen`), pass --next-public-key, or --no-prerotation to enroll a key that can never rotate",
+                    conventional.display()
+                ));
+            }
+            Some(conventional)
+        }
+        (None, false, None) => {
+            return Err("a home-identity enrollment needs --next-public-key or --no-prerotation".into())
+        }
+    };
+    let next_public = next_public_path
+        .as_deref()
+        .map(public_key_file)
+        .transpose()?
+        .map(|key| key.to_bytes());
     let operator_override = args
         .optional("operator-socket")
         .map(path)
@@ -667,6 +700,12 @@ fn plan(mut args: Args) -> Result<()> {
         }
         expected_request["homeSubject"] = json!(subject);
     }
+    if let Some(next) = &next_public {
+        if hex(next) == public_key {
+            return Err("the next key must differ from the key being enrolled".into());
+        }
+        expected_request["nextPublicKey"] = json!(hex(next));
+    }
     let request = retained_request(&directory, &expected_request)?;
     let roles = enrollment_roles(home);
     let request_bytes = private_bytes(&directory.join("request.json"), 256 * 1024)?;
@@ -699,12 +738,22 @@ fn plan(mut args: Args) -> Result<()> {
     )?;
     let factory_root = factory_root.as_str();
     let authority_root = authority_root.as_str();
+    let next_key_digest = match &next_public {
+        Some(next) => json!(crate::key_rotation::next_key_digest(
+            &host,
+            &public_socket,
+            &retained_config,
+            next
+        )?),
+        None => Value::Null,
+    };
     let command_source = json!({"sponsor":sponsor,"control":control,
         "nonce":field(&request,"nonce")?,"expectedFactoryRoot":factory_root,
         "expectedAuthorityRoot":authority_root,
         "key":{"keyId":reservation.ids["keyId"],"keyEpoch":"1","algorithm":"1",
             "subject":subject,"publicKey":public_key,
-            "activeFrom":"0","activeUntil":u64::MAX.to_string()}});
+            "activeFrom":"0","activeUntil":u64::MAX.to_string(),
+            "nextKeyDigest":next_key_digest}});
     save_json_staged(&directory.join("source.json"), &command_source)?;
     transform(
         &host,

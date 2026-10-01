@@ -13,10 +13,15 @@ namespace Minidregg.Compiler.CredentialSigningKeyCodec
 open Minidregg.Compiler.Tower256ConcreteBackend
 open Minidregg.Theory.CredentialSigningKey
 open Minidregg.Theory.IndexedProgram
+open Minidregg.Theory.TypedAuthorization (Digest)
 
 set_option autoImplicit false
 
-abbrev KeyRecordTuple := Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat
+/-- Record v3: v2 plus the pre-rotation commitment `nextKeyDigest` as an
+optional digest.  A v2 record does not decode as v3 (the option tag is missing
+or misread and the strict codecs refuse the residue), so an authority cell
+written before pre-rotation must be re-genesised. -/
+abbrev KeyRecordTuple := Nat × Nat × Nat × Nat × List UInt8 × Nat × Nat × Option Digest
 
 def keyRecordTupleStream : StreamCodec KeyRecordTuple :=
   StreamCodec.product StreamCodec.nat
@@ -24,15 +29,16 @@ def keyRecordTupleStream : StreamCodec KeyRecordTuple :=
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product StreamCodec.nat
           (StreamCodec.product bytesStream
-            (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+            (StreamCodec.product StreamCodec.nat
+              (StreamCodec.product StreamCodec.nat (StreamCodec.option digestStream)))))))
 
 def toTuple (key : KeyRecord) : KeyRecordTuple :=
   (key.keyId, key.keyEpoch, key.algorithm, key.subject, key.publicKey,
-    key.activeFrom, key.activeUntil)
+    key.activeFrom, key.activeUntil, key.nextKeyDigest)
 
 def ofTuple : KeyRecordTuple → KeyRecord
-  | (keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil) =>
-      { keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil }
+  | (keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil, nextKeyDigest) =>
+      { keyId, keyEpoch, algorithm, subject, publicKey, activeFrom, activeUntil, nextKeyDigest }
 
 @[simp] theorem ofTuple_toTuple (key : KeyRecord) : ofTuple (toTuple key) = key := by
   cases key

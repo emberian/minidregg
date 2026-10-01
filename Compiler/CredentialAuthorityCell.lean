@@ -159,7 +159,7 @@ def valueCodecId : AuthorityPlane → String
   | .policyRevision => "nat/base255"
   | .policyAddress => "digest/nat"
   | .subjectKeyEpoch => "nat/base255"
-  | .subjectKey => "signing-key-record/v2"
+  | .subjectKey => "signing-key-record/v3"
   | .revoked => "unit/presence"
   | .registered => "unit/presence"
 
@@ -170,7 +170,7 @@ def planes : List AuthorityPlane :=
 
 /-- The authority layout on the wire. -/
 def wire : Wire layout where
-  name := "minidregg/credential-authority/v3"
+  name := "minidregg/credential-authority/v3-prerotate"
   namespaces := planes
   namespaces_complete := by
     intro plane

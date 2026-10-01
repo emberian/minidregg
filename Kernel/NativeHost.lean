@@ -246,6 +246,44 @@ def enrollmentAssemble (plan : ParticipantKeyEnrollment.SigningPlan)
   pure (ParticipantKeyEnrollment.ingressCodec.encode
     ⟨plan.commandBytes, envelope, possessionSignature⟩)
 
+/-! ## Subject key rotation (pre-rotation)
+
+Public: a rotation needs no capability and no current-key signature, only the
+commitment the subject's current record holds and possession of the committed
+key.  So plan, assembly, submit, lookup and status are open to the friend who
+holds only the next key. -/
+
+/-- Host-authored rotation plan: the exact possession frame the new key signs.
+It prepares the rotation first, assuming that signature, so a rotation the gate
+refuses (a key whose digest is not the commitment, a subject without one) is
+refused here by name. -/
+def rotationPlanLoaded (config : Config) (opened : Opened config)
+    (commandBytes : List UInt8) : Except String SubjectKeyRotation.SigningPlan := do
+  let command ← need "noncanonical subject key rotation command"
+    (SubjectKeyRotation.commandCodec.decode commandBytes)
+  let _ ← (SubjectKeyRotation.prepare config.deployment config.profile.semantics
+    opened.durable command).mapError (fun reason => s!"rotation preparation: {repr reason}")
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    SubjectKeyRotation.possessionFrame config.deployment.domain config.profile.semantics command⟩
+
+/-- Assembly transports the new key's detached possession signature. -/
+def rotationAssemble (plan : SubjectKeyRotation.SigningPlan)
+    (possessionSignature : List UInt8) : Except String (List UInt8) := do
+  check (decide (possessionSignature.length = 64)) "possession signature must be 64 bytes"
+  let command ← need "noncanonical rotation plan command"
+    (SubjectKeyRotation.commandCodec.decode plan.commandBytes)
+  check (decide (plan.possessionHeader = SubjectKeyRotation.possessionFrame
+    plan.domain plan.semantics command)) "rotation possession frame differs"
+  pure (SubjectKeyRotation.ingressCodec.encode ⟨plan.commandBytes, possessionSignature⟩)
+
+/-- The current key status of `subject` as seen by the holder of `publicKey`. -/
+def keyStatusLoaded (config : Config) (opened : Opened config) (subject : SubjectId)
+    (publicKey : List UInt8) : Except String SubjectKeyRotation.Status := do
+  let authority ← need "authority cell unavailable"
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  need "subject has no current signing key"
+    (SubjectKeyRotation.status authority.snapshot.logical subject publicKey)
+
 /-- Source-authored factory-observation provisioning plan on one verified
 image. The single slot is the sponsor's ordinary current-authority header for
 the factory-management request; the capability fields are source-derived. -/
@@ -592,6 +630,33 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   match ← openExisting config with
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok opened => return enrollmentLookupLoaded config opened bytes
+
+def rotationSubmitLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : IO Outcome := do
+  match ← SubjectKeyRotation.receiveLoaded config.deployment config.profile.semantics
+      config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "rotate-key" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of one rotation ingress. -/
+def rotationLookupLoaded (config : Config) (opened : Opened config)
+    (bytes : List UInt8) : Outcome :=
+  match SubjectKeyRotation.decodeIngress bytes with
+  | none => refused .malformed "rotate-key" "noncanonical signed ingress"
+  | some ingress =>
+    match SubjectKeyRotation.replay config.deployment.domain
+        config.profile.semantics opened.durable ingress with
+    | some (.ok receipt) =>
+        match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+        | some original => .confirmed .replayed original
+        | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+    | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+    | none => .absent
 
 def provisionSubmitLoaded (config : Config) (opened : Opened config)
     (bytes : List UInt8) : IO Outcome := do

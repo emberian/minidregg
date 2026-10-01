@@ -50,7 +50,9 @@ pub(crate) struct Verb {
 
 pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home and subject" },
-    Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub" },
+    Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
+    Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether HOME/keys/<key>.next.pub matches it" },
+    Verb { name: "rotate-key", usage: "rotate-key NEXTFILE", operation: "mini rotate-key --workspace WORKSPACE --next-key HOME/keys/NEXTFILE: rotate to the committed next key; NEXTFILE then holds the key after it" },
     Verb { name: "init", usage: "init KEYFILE SUBJECT", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace" },
     Verb { name: "enroll", usage: "enroll plan NAME KEYFILE [FACTORY-REF] | enroll seal|submit|lookup NAME", operation: "mini enroll --action plan|seal|submit|lookup --dir HOME/enroll/NAME" },
     Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
@@ -652,6 +654,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 vec![
                     flag("secret", keys.join(&w[1])),
                     flag("public", keys.join(format!("{}.pub", w[1]))),
+                    flag("hosted", "yes"),
                 ],
             )
         }
@@ -716,6 +719,21 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 _ => return Err(u.to_owned()),
             }
+        }
+        "key-status" => {
+            arity(&w, 0, 0, u)?;
+            client("key-status", vec![flag("workspace", ws())])
+        }
+        "rotate-key" => {
+            arity(&w, 1, 1, u)?;
+            session_file(&w[1], "next key file")?;
+            client(
+                "rotate-key",
+                vec![
+                    flag("workspace", ws()),
+                    flag("next-key", session.home.join("keys").join(&w[1])),
+                ],
+            )
         }
         "refs" => {
             arity(&w, 0, 0, u)?;

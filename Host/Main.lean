@@ -43,7 +43,10 @@ assembly, 98=checked fleet turn submit, 99=receipt-only fleet lookup, 100=topic
 poll since a cursor behind a signed account observation, 101=agent fleet head
 behind a signed account observation, 102=exact receipt by transaction id,
 103=pay command signing plan (either pay family), 104=pay detached assembly,
-105=pay submit, 106=pay receipt-only lookup, 107=public pay-cell view.
+105=pay submit, 106=pay receipt-only lookup, 107=public pay-cell view,
+140=public subject key rotation plan, 141=rotation detached assembly,
+142=rotation submit, 143=rotation receipt-only lookup, 144=public key status
+(JSON query of a subject and one public key the asker holds; JSON reply).
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -5244,6 +5247,45 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let outcome := NativeHost.payLookupLoaded pinnedConfig opened payload
                             return ((106 : UInt8), outcomeCodec.encode outcome)
+                        | 140 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            match NativeHost.rotationPlanLoaded pinnedConfig opened payload with
+                            | .error detail =>
+                                return ((255 : UInt8), failure .operationRejected "rotate-key-plan" detail)
+                            | .ok plan =>
+                                let bytes := SubjectKeyRotation.signingPlanCodec.encode plan
+                                unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                                  throw (IO.userError "rotation plan exceeds host frame bound")
+                                return ((140 : UInt8), bytes)
+                        | 141 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := SubjectKeyRotation.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical subject key rotation plan")
+                            let ingress ← IO.ofExcept (NativeHost.rotationAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "rotation ingress exceeds host frame bound")
+                            return ((141 : UInt8), ingress)
+                        | 142 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.rotationSubmitLoaded pinnedConfig opened payload
+                            return ((142 : UInt8), outcomeCodec.encode outcome)
+                        | 143 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome := NativeHost.rotationLookupLoaded pinnedConfig opened payload
+                            return ((143 : UInt8), outcomeCodec.encode outcome)
+                        | 144 =>
+                            let some text := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "key status query is not UTF-8")
+                            let query ← IO.ofExcept (Minidregg.Host.Json.parse text)
+                            let (subject, publicKey) ← IO.ofExcept
+                              (Minidregg.Host.Json.subjectKeyStatusQuery query)
+                            let opened ← sessionOpened pinnedConfig state
+                            match NativeHost.keyStatusLoaded pinnedConfig opened ⟨subject⟩ publicKey with
+                            | .error detail =>
+                                return ((255 : UInt8), failure .operationRejected "key-status" detail)
+                            | .ok status =>
+                                return ((144 : UInt8),
+                                  (Minidregg.Host.Json.subjectKeyStatusJson subject status).compress.toUTF8.toList)
                         | 107 =>
                             let opened ← sessionOpened pinnedConfig state
                             let view ← IO.ofExcept (NativeHost.payViewLoaded pinnedConfig opened)
