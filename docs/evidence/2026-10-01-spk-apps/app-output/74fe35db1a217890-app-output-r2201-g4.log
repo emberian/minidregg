@@ -1,0 +1,14 @@
+**StartingMongo...
+2026-10-01T15:57:26.682+0000ISTORAGEEnginecustomoption:log=(prealloc=false,file_max=200KB)
+abouttoforkchildprocess,waitinguntilserverisreadyforconnections.
+forkedprocess:10
+childprocessstartedsuccessfully,parentexiting
+**StartingMeteor...
+Note:youareusingapure-JavaScriptimplementationofbcrypt.
+Whilethisimplementationwillworkcorrectly,itisknowntobe
+approximatelythreetimesslowerthanthenativeimplementation.
+Inordertousethenativeimplementationinstead,run
+
+meteornpminstall--savebcrypt
+
+intherootdirectoryofyourapplication.

@@ -1,0 +1,14 @@
+2026/10/0112:24:33[TRACE]Custompath:/opt/app/gogs/custom
+2026/10/0112:24:33[TRACE]Logpath:/var/gogs/log
+2026/10/0112:24:33[TRACE]LogMode:Console(Trace)
+2026/10/0112:24:33[INFO]Gogs0.11.34.1122
+2026/10/0112:24:33[INFO]CacheServiceEnabled
+2026/10/0112:24:33[INFO]SessionServiceEnabled
+2026/10/0112:24:35[INFO]GitVersion:2.1.4
+2026/10/0112:24:35[INFO]Gitconfiguser.namesettoGogs
+2026/10/0112:24:35[INFO]Gitconfiguser.emailsettogogs@fake.local
+2026/10/0112:24:35[INFO]SQLite3Supported
+2026/10/0112:24:35[INFO]RunMode:Production
+2026/10/0112:24:35[TRACE]Doing:CheckRepoStats
+2026/10/0112:24:36[INFO]Listen:http://0.0.0.0:8000
+2026/10/0112:34:35[TRACE]Doing:MirrorUpdate

@@ -1,0 +1,14 @@
+waitingforroottobeavailableat/var/certificates/ca-bundle.crt.
+waitingforroottobeavailableat/var/certificates/ca-bundle.crt.
+waitingforroottobeavailableat/var/certificates/ca-bundle.crt.
+waitingforroottobeavailableat/var/certificates/ca-bundle.crt.
+waitingforroottobeavailableat/var/certificates/ca-bundle.crt.
+[01-Oct-202612:24:59]NOTICE:PHPmessage:PHPWarning:PHPStartup:Unabletoloaddynamiclibrary'pdo_sqlite.so'(tried:/usr/lib/php/20180731/pdo_sqlite.so(/usr/lib/php/20180731/pdo_sqlite.so:undefinedsymbol:php_pdo_unregister_driver),/usr/lib/php/20180731/pdo_sqlite.so.so(/usr/lib/php/20180731/pdo_sqlite.so.so:cannotopensharedobjectfile:Nosuchfileordirectory))inUnknownonline0
+[01-Oct-202612:24:59]NOTICE:PHPmessage:PHPWarning:Module'curl'alreadyloadedinUnknownonline0
+[01-Oct-202612:24:59]NOTICE:PHPmessage:PHPWarning:Module'gd'alreadyloadedinUnknownonline0
+[01-Oct-202612:24:59]NOTICE:PHPmessage:PHPWarning:Module'gettext'alreadyloadedinUnknownonline0
+[01-Oct-202612:24:59]NOTICE:PHPmessage:PHPWarning:Module'sqlite3'alreadyloadedinUnknownonline0
+[01-Oct-202612:24:59]NOTICE:[poolwww]'user'directiveisignoredwhenFPMisnotrunningasroot
+[01-Oct-202612:24:59]NOTICE:[poolwww]'group'directiveisignoredwhenFPMisnotrunningasroot
+startedphp-fpm.statuscode:0
+startednginx.statuscode:0
