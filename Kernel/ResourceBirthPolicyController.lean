@@ -335,7 +335,7 @@ def oldAuthority (prepared : PreparedBirth profile.compilerProfile deployment pi
 policy-control grant per newborn. Sharing is a later authorized delegation,
 not permission to nominate extra arbitrary grants during creation. -/
 def ownerVerbs : (kind : ResourceKind) → Finset (Verb kind)
-  | .object => {.observeObject, .mutateObject, .delegateObject, .appendObject}
+  | .object => {.observeObject, .mutateObject, .delegateObject, .appendObject, .placeObject}
   | .account => {.observeAccount, .transfer, .delegateAccount, .mintAsset, .burnAsset}
   | .program => {.observeProgram, .installProgram, .delegateProgram}
 
@@ -1345,7 +1345,7 @@ def admitDecodedNative [DecidableEq F]
     (native : CredentialSignatureIO.NativeConfig) (durable : Durable) (height : Height)
     (ingress : DecodedIngress) : IO (Except Reject (AcceptedBirth profile deployment pins durable height)) := do
   match ResourceBirthController.Concrete.prepareBirth profile.compilerProfile deployment pins
-      durable ingress.descriptor with
+      durable ingress.descriptor height with
   | .error reason => return .error (.preparation reason)
   | .ok prepared =>
       match preparePending prepared height with
@@ -1383,6 +1383,27 @@ theorem AcceptedBirth.native_ingress_exact {height : Height}
 
 def AcceptedBirth.descriptor {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) := accepted.ingress.descriptor
+
+/-- **`birth_under_room_requires_grant`** at the native admission: an admitted
+birth of an item into room `R` names the creator's placing capability, stored in
+the authority cell, held by the creator and admissible for its `placeObject`
+request on `R` (the gate ran at `admitDecodedNative`'s admission height, which
+it passes to `prepareBirth`). `R`'s law accepting it is the remaining conjunct
+of `PreparedBirth.birth_under_room_requires_grant`. -/
+theorem AcceptedBirth.birth_under_room_requires_grant {height : Height}
+    (accepted : AcceptedBirth profile deployment pins durable height)
+    {item : BirthItem Registry} (member : item ∈ accepted.descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) :
+    ∃ placement cap, item.placement = some placement ∧
+      RoomBirthGate.storedAt accepted.prepared.authority placement = some cap ∧
+      cap.holder.Covers accepted.descriptor.creator ∧
+      cap.Admissible accepted.prepared.authority.snapshot.authState
+        (RoomBirthGate.placeRequest pins accepted.prepared.authority.snapshot.authState
+          (RoomBirthGate.roomRoot durable room) accepted.prepared.gateHeight
+          accepted.descriptor room) :=
+  let ⟨placement, cap, named, stored, holder, admissible, _⟩ :=
+    accepted.prepared.birth_under_room_requires_grant member inRoom
+  ⟨placement, cap, named, stored, holder, admissible⟩
 
 def AcceptedBirth.tuple {height : Height}
     (accepted : AcceptedBirth profile deployment pins durable height) :=

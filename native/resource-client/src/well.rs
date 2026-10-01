@@ -254,6 +254,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 "account",
                 None,
                 None,
+                None,
             )
         }
         "mint" | "burn" => command(&root, args, &action),

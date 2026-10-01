@@ -117,7 +117,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW K10C JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -132,6 +132,7 @@ TITLE[KF]="a scope names fields and bounds each field change per write"
 TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
 TITLE[KHQ]="commit-reveal at the kernel: a sealed bid opens only to its commitment"
 TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
+TITLE[K10C]="rooms through the shell: the birth gate, re-delegation, the J7 pole, kick, a realm"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
 TITLE[JN3]="the kernel checks a Nock run by re-executing it (own Store)"
 TITLE[JN5]="a NockApp kernel door refereed by re-execution (own Store)"
@@ -751,6 +752,7 @@ step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last vis
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
 step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
 step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHAKE256 digest, the right opening installs, a wrong opening or a reveal before the deadline is refused, the plaintext is on the Store only after the reveal (lane k-hasheq)"; }
+step_K10C() { hook j10c "K-ROOM 3c rows: a founder room, a narrowed invite, a member birth admitted and a stranger birth refused notRoomMember, re-delegation by a non-sponsor, an ordinary law change leaves grants standing while a placement law refuses birthRefused, a kick takes the attenuated invite with it, a realm refuses fake wells, restart and audit (lane k-room-3c)" shell; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
@@ -784,6 +786,7 @@ run_step KF J5
 run_step K12C J5
 run_step KHQ J4
 run_step KW J5
+run_step K10C J5
 run_step JN2 J0
 run_step JN3 J0
 run_step JN5 J0

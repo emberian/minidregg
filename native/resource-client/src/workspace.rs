@@ -182,6 +182,25 @@ pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// The identifier namespace this workspace reserves fresh IDs in: the shared
+/// root it was initialized with (`--namespace-root`), or else its own private
+/// `ROOT/namespace`. Reservations are random 63-bit draws and the Host refuses
+/// a collision, so a workspace without a shared root (a newcomer initialized
+/// from its enrollment alone) can still create and re-delegate.
+pub(crate) fn namespace_root(root: &Path, workspace: &Value) -> Result<PathBuf> {
+    match workspace.get("namespaceRoot") {
+        Some(Value::String(_)) => member_path(workspace, "namespaceRoot"),
+        Some(Value::Null) | None => {
+            let own = root.join("namespace");
+            if !own.exists() {
+                make_private_dir(&own)?;
+            }
+            Ok(own)
+        }
+        Some(_) => Err("workspace namespaceRoot is not a path".into()),
+    }
+}
+
 fn os_string(value: OsString, label: &str) -> Result<String> {
     value
         .into_string()
@@ -392,6 +411,9 @@ pub(crate) struct ImportInput<'a> {
     pub(crate) operation: Option<&'a str>,
     pub(crate) control: Option<&'a str>,
     pub(crate) provenance: Option<&'a Path>,
+    /// The reference is a room: an imported room invite, or a room this
+    /// workspace founded (`room new`). Discovery only; the Host decides.
+    pub(crate) room: Option<&'a str>,
 }
 
 pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
@@ -403,6 +425,7 @@ pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
         operation,
         control,
         provenance,
+        room,
     } = input;
     validate_name(name_value)?;
     if !matches!(kind, "object" | "account" | "program") {
@@ -417,10 +440,13 @@ pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
         decimal(control, "control capability")?;
     }
     let provenance = provenance.map(bounded_json).transpose()?;
-    let value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
+    let mut value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
         "kind":kind,"target":target,"observeCapability":observe,
         "operationCapability":operation.unwrap_or(observe),"controlCapability":control,
         "provenance":provenance,"authority":"hint-only"});
+    if let Some(room) = room {
+        value["room"] = json!(room);
+    }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(
@@ -459,6 +485,7 @@ fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -
             operation: Some(member(&value, "capability")?),
             control: None,
             provenance: Some(source),
+            room: (value.get("room") == Some(&json!(true))).then_some("member"),
         },
     )
 }
@@ -1083,7 +1110,7 @@ fn propose(
             {
                 ancestors.push(json!(parent_id));
             }
-            let namespace = member_path(workspace, "namespaceRoot")?;
+            let namespace = namespace_root(root, workspace)?;
             let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
                 "subject":member(workspace,"subject")?}))
             .map_err(|error| error.to_string())?;
@@ -1289,7 +1316,7 @@ fn bind_delegation_attempt(
     let fingerprint = serde_json::to_vec(&json!({"request":request,"reference":reference,
         "subject":member(workspace,"subject")?}))
     .map_err(|error| error.to_string())?;
-    let namespace = member_path(workspace, "namespaceRoot")?;
+    let namespace = namespace_root(root, workspace)?;
     let reservation = participant_namespace::reserve(
         &namespace,
         member(delegation, "domain")?,
@@ -1399,12 +1426,17 @@ fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<
     retry(&attempt, "lookup", false)?;
     let receipt = accepted_outcome(&attempt)?
         .ok_or("delegation historical lookup did not confirm admission")?;
-    let value = json!({"type":"minidregg-delegated-reference-v1",
+    let mut value = json!({"type":"minidregg-delegated-reference-v1",
         "recipient":member(delegation,"recipient")?,"kind":member(delegation,"kind")?,
         "target":member(delegation,"target")?,
         "capability":member(delegation,"childCapability")?,
         "receipt":receipt,"proposalSha256":member(&summary,"intentSha256")?,
         "authority":"hint-only"});
+    // A room invite (the child is `under` the target): the recipient's
+    // reference says so, and `room list` shows it.
+    if child.get("room").is_some() {
+        value["room"] = json!(true);
+    }
     let path = proposal_dir.join("recipient-reference.json");
     if path.exists() {
         if bounded_json(&path)? != value {
@@ -1427,6 +1459,7 @@ fn complete_birth(
     receipt: &Value,
     reservation: &participant_namespace::Reservation,
     program_cell: Option<&str>,
+    room_template: Option<&str>,
 ) -> Result<Value> {
     let birth = source.get("birth").ok_or("retained birth source absent")?;
     let parts = birth
@@ -1457,11 +1490,14 @@ fn complete_birth(
         }
         return Err("confirmed birth conflicts with existing workspace reference".into());
     }
-    let value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
+    let mut value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
         "kind":kind,"target":target,"observeCapability":owner,
         "operationCapability":owner,"controlCapability":control,
         "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,
             "reservationRecord":reservation.record_path},"authority":"hint-only"});
+    if let Some(template) = room_template {
+        value["room"] = json!(template);
+    }
     private_file(
         &reference_path,
         &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
@@ -1608,8 +1644,20 @@ fn birth(
     validate_name(name_value)?;
     // `--in ROOM`: the new resource is born in the room a workspace reference
     // names. The Host refuses a room that is not a present resource cell.
+    // The creator's placing capability is the room reference's operation
+    // capability (its observe capability when it holds no other): the Host's
+    // birth gate requires it to cover the room with `place` (or `mutate`), held
+    // by the creator, and the room's law to accept the placement.
     let room = match shape.room {
-        Some(room_name) => Some(member(&reference(root, room_name)?, "target")?.to_string()),
+        Some(room_name) => {
+            let room_ref = reference(root, room_name)?;
+            let placement = room_ref
+                .get("operationCapability")
+                .and_then(Value::as_str)
+                .map_or_else(|| member(&room_ref, "observeCapability"), Ok)?
+                .to_string();
+            Some((member(&room_ref, "target")?.to_string(), placement))
+        }
         None => None,
     };
     if !matches!(shape.storage, "content" | "declared" | "stream" | "nock") {
@@ -1629,7 +1677,7 @@ fn birth(
         _ => {}
     }
     let context_path = member_path(workspace, "birthContext")?;
-    let namespace_root = member_path(workspace, "namespaceRoot")?;
+    let namespace_root = namespace_root(root, workspace)?;
     let context = bounded_json(&context_path)?;
     if member(&context, "type")? != "minidregg-participant-birth-context-v1" {
         return Err("unknown birth context version".into());
@@ -1641,8 +1689,9 @@ fn birth(
         "name":name_value,"kind":shape.kind,"storage":shape.storage,"owner":shape.owner,
         "funding":shape.funding,"predicate":shape.predicate,"context":context,
         "subject":member(workspace,"subject")?});
-    if let Some(room) = &room {
+    if let Some((room, placement)) = &room {
         requested_core["room"] = json!(room);
+        requested_core["placement"] = json!(placement);
     }
     if let Some((hex, _)) = &program {
         requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
@@ -1752,8 +1801,9 @@ fn birth(
                 "sourceCapabilities":source_capabilities,
                 "funding":funding,"feePayer":context["feePayer"]},
             "grants":context["grants"]});
-    if let Some(room) = &room {
+    if let Some((room, placement)) = &room {
         expected_source["birth"]["resources"][0]["room"] = json!(room);
+        expected_source["birth"]["resources"][0]["placement"] = json!(placement);
     }
     let source = if source_path.exists() {
         let saved = bounded_json_limit(&source_path, MAX_PROGRAM_SOURCE)?;
@@ -1889,6 +1939,7 @@ pub(crate) fn create(
     kind: &str,
     owner: Option<&str>,
     program_path: Option<&Path>,
+    room_template: Option<&str>,
 ) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
     // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
@@ -1928,7 +1979,8 @@ pub(crate) fn create(
         },
     )?;
     let program_cell = program.as_ref().and_then(|(_, cell)| cell.as_deref());
-    complete_birth(root, name_value, &source, &receipt, &reservation, program_cell).map(|_| ())
+    complete_birth(root, name_value, &source, &receipt, &reservation, program_cell, room_template)
+        .map(|_| ())
 }
 
 /// A declared account the sponsor births for another admitted subject, funded
@@ -2034,7 +2086,7 @@ fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<
                 .get()
                 .ok_or("provisioning requires a pinned persistent Host socket")?,
             sponsor_key: &member_path(workspace, "key")?,
-            namespace_root: &member_path(workspace, "namespaceRoot")?,
+            namespace_root: &namespace_root(root, workspace)?,
             domain: member(&context["genesis"], "domain")?,
             name: request.name,
             sponsor: member(workspace, "subject")?,
@@ -2107,7 +2159,7 @@ fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &st
                 .get()
                 .ok_or("provisioning requires a pinned persistent Host socket")?,
             sponsor_key: &member_path(workspace, "key")?,
-            namespace_root: &member_path(workspace, "namespaceRoot")?,
+            namespace_root: &namespace_root(root, workspace)?,
             domain: member(&context["genesis"], "domain")?,
             name,
             sponsor: member(workspace, "subject")?,
@@ -2616,6 +2668,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                     operation: operation.as_deref(),
                     control: control.as_deref(),
                     provenance: provenance.as_deref(),
+                    room: None,
                 },
             )
         }
@@ -2647,6 +2700,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 },
                 None,
             )
+        }
+        // `who`: the room's members as the Host's who view lists them — the
+        // subjects holding a standing capability that covers the room — read
+        // with this workspace's own grant (so only a member may ask).
+        "who" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            read(&root, &workspace, &name, "who", None)
         }
         "tail" => {
             let name = os_string(args.required("name")?, "reference name")?;
@@ -2706,6 +2767,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => Some(os_string(value, "resource owner")?),
                 None => None,
             };
+            // `--room-template T`: this resource is a room this workspace
+            // founds (`room new`); its reference records the template.
+            let room_template = match args.optional("room-template") {
+                Some(value) => Some(os_string(value, "room template")?),
+                None => None,
+            };
             args.finish()?;
             create(
                 &root,
@@ -2717,6 +2784,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &kind,
                 owner.as_deref(),
                 program.as_deref(),
+                room_template.as_deref(),
             )
         }
         "provision" => {
@@ -3089,6 +3157,7 @@ mod tests {
             operation: None,
             control: None,
             provenance: None,
+            room: None,
         };
         assert!(import(&root, named("../escape", "123")).is_err());
         assert!(import(&root, named("one", "01")).is_err());
@@ -3235,6 +3304,7 @@ mod tests {
                 operation: Some("61"),
                 control: None,
                 provenance: None,
+                room: None,
             },
         )
         .unwrap();

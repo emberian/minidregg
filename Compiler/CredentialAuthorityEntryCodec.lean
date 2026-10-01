@@ -83,11 +83,13 @@ def verbTag : {kind : ResourceKind} → Verb kind → Nat
   | _, .appendObject => 7
   | _, .mintAsset => 8
   | _, .burnAsset => 9
+  | _, .placeObject => 10
 
 def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .object, 1 => .observeObject
   | .object, 2 => .mutateObject
   | .object, 7 => .appendObject
+  | .object, 10 => .placeObject
   | .object, _ => .delegateObject
   | .account, 1 => .observeAccount
   | .account, 2 => .transfer

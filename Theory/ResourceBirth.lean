@@ -341,6 +341,11 @@ structure BirthItem (registry : TypeRegistry Digest) where
   authority batch records `create.cellId ↦ room` in the append-only `parent`
   plane, so `under R` covers the new cell from its first height. -/
   parent : Option Nat
+  /-- The creator's capability that places the cell in its room: the birth gate
+  (`Kernel.RoomBirthGate`) requires it to be a stored capability admissible for
+  the creator's `placeObject` request on the room, and the room's law to accept
+  that request. Present exactly when `parent` is. -/
+  placement : Option CapabilityId := none
 
 /-- Full canonical capability content, not a grant bit or host permissions map.
 The authority adapter validates and installs these exact stored capabilities. -/

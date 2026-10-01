@@ -93,6 +93,27 @@ mini> board new tasks                     # tasks 0 and 1: `board add`, `board t
 share a doc the same way as `notes` (delegate, publish, export/import). a page holds 16
 entries (lines and links), so docs are short for now.
 
+rooms. a room is a resource that other things are born *in*; holding a grant under the
+room reaches the room and everything in it. the five verbs you'll use:
+```
+mini> room new lab                         # a workroom you found (`--template social`, or
+                                           #   `--template realm` where only you place things)
+mini> room invite i1 lab SAMS-SUBJECT      # one grant under lab: observe + place (add things)
+mini> submit i1                            #   widen with --verbs observe,place,mutate,delegate;
+mini> publish i1                           #   narrow with --fields 1,2 or --max-delta 7=50
+mini> export i1                            # → the reference; sam runs `import lab <it>`
+sam> doc new notes --in lab                # sam adds a doc to the room (so does `create … --in lab`)
+mini> room members lab                     # who holds a standing grant under lab
+mini> room kick k1 lab SAMS-SUBJECT        # then `submit k1`: sam's grant, and every grant sam
+                                           #   handed on from it, is refused `revoked`
+```
+also `room list` (your rooms), `room law lab` (its current law). someone with no grant
+under lab can't add anything to it: they get `refused: … notRoomMember`. the room's law
+decides who may add things: changing it never revokes anyone's grant (the J7 rule), but a
+law like `any [ not (verb == place), subject in {YOU} ]` stops everyone else adding
+(`birthRefused`), while their reads keep working. you can't leave a room yourself yet
+(`room leave` says so): ask its founder to kick you.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
@@ -119,7 +140,7 @@ the reason after `refused:`:
 
 ## what not to expect yet
 
-- numbered fields, one scalar action per `invoke`, laws as JSON. no rooms, chat or paying
+- numbered fields, one scalar action per `invoke`, laws as JSON. no chat or paying
   yet; docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
   pick a new one per request. `help guide` prints this guide.
 
@@ -130,8 +151,7 @@ because it holds the Host's own decoding.
 
 ## what's planned
 
-this is why you'd come back, with no dates promised: **rooms** (a place with members,
-where your stuff lives), **docs** and **streams** inside them, **laws in a one-line
+this is why you'd come back, with no dates promised: **streams** (chat) inside rooms, **laws in a one-line
 grammar** instead of JSON, **Hermes in a room** (an agent that reads the room and does
 small useful things), **paying with $DREGG** for a room's week (a few dollars), and
 eventually **a MUD** built from the same pieces.

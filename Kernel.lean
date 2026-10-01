@@ -7,6 +7,7 @@ The admission gate a committed turn passes is
 `DeclaredHyperedge.Declaration.authorizationCheck`, consulted by
 `DeclaredHyperedge.execute`.
 -/
+import Kernel.RoomBirthGateAdmission  -- K-ROOM 3c: the room birth gate runs at the admission height; every 3c theorem pinned
 import Kernel.RealmWellReceiver  -- K-WELL: realm wells mint and burn under the well law; the audit identity per realm asset
 import Kernel.State   -- the minimal kernel state: accounts + bal + caps + one UKey map; Σ-conservation
 import Kernel.Turn    -- the turn as a wide pullback (hyperedge): cone + balance, legs_agree, the binding tooth

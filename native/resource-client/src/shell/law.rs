@@ -15,19 +15,27 @@
 //!         | 'pair' A ',' B 'delta'            resource/pair/A/B/delta
 //!         | 'subject' | 'verb' | 'cost'       request/*
 //!         | 'slot' STRING                     any other projected slot
-//! value  := integer | read | write | delegate | install | revoke   (names on `verb` only)
+//! value  := integer | read | write | delegate | install | revoke | append | place   (names on `verb` only)
 //! ```
 //!
 //! Verb names are the tags `request/verb` carries
 //! (`CredentialAuthorityEntryCodec.verbTag`): read 1, write 2, delegate 3,
-//! install 4, revoke 5. `monotone` and `writeOnce` compare the old and new
+//! install 4, revoke 5, append 7, place 10 (bearing a cell into a room). `monotone` and `writeOnce` compare the old and new
 //! views of one slot; they take only a field's `after` view, because the old
 //! and new views of `before` and `delta` coincide and the atom could never
 //! refuse. The Host renders a refused clause in this same grammar.
 
 use serde_json::{json, Value};
 
-const VERBS: [(&str, i64); 5] = [("read", 1), ("write", 2), ("delegate", 3), ("install", 4), ("revoke", 5)];
+const VERBS: [(&str, i64); 7] = [
+    ("read", 1),
+    ("write", 2),
+    ("delegate", 3),
+    ("install", 4),
+    ("revoke", 5),
+    ("append", 7),
+    ("place", 10),
+];
 
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
