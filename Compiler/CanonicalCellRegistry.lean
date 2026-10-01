@@ -424,11 +424,11 @@ theorem empty_event_history_lawful (deployment : Deployment) :
     EventHistoryLaw deployment 0 := by
   constructor <;> intro address member <;> simp at member
 
-/-- Semantic identity of the source-owned loaded/final law.  v9 (BRAID-COMPUTE):
+/-- Semantic identity of the source-owned loaded/final law.  v10 (BRAID-COMPUTE):
 K-FIELD-CLOSURE's v7 (declared cells closed by default) and C14's tail-bound genesis
-cell in one bump; v8 belongs to the channel line (another braid). -/
+cell in one bump; v8 is ch-client, v9 the proof braid (merged first). -/
 def logicalLawVersion : List UInt8 :=
-  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v9".toUTF8.toList
+  "DREGG.REGISTRY.LOADED-AND-FINAL.STORE-CELLS/v10".toUTF8.toList
 
 /-- Checked both on the loaded cell and on the ACTUAL final joint post, after
 all effects have composed. Local candidate validity alone does not imply this. -/
