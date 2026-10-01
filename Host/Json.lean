@@ -3682,8 +3682,7 @@ def fleetPollJson (view : NativeHost.FleetPollView) : Lean.Json := .mkObj
       ("height", decimal event.height),
       ("author", decimal event.author.value),
       ("payloadDigest", decimal event.payloadDigest.value),
-      ("payload", match event.payload with | none => .null | some bytes => hexJson bytes),
-      ("receipt", match event.receipt with | none => .null | some r => fleetReceiptJson r)])]
+      ("payload", match event.payload with | none => .null | some bytes => hexJson bytes)])]
 
 def fleetHeadJson (view : NativeHost.FleetHeadView) : Lean.Json := .mkObj
   [("type", "minidregg-fleet-agent-head-v1"), ("subject", decimal view.subject.value),

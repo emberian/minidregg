@@ -747,7 +747,10 @@ def receiptByTransactionLoaded (config : Config) (opened : Opened config)
 
 /-- One topic event as a reader sees it. `height` is the admission height,
 unique per accepted record on one Host: K authors' streams of one topic merge
-into one ordered feed by `(height, sequence)`. -/
+into one ordered feed by `(height, sequence)`. A poll carries no receipt: a
+historical receipt seals its prefix's world root, which costs a world-root
+evaluation of that prefix, so a reader that wants one asks op 102 for that
+transaction. -/
 structure FleetPolledEvent where
   sequence : Nat
   eventKey : Digest
@@ -759,7 +762,6 @@ structure FleetPolledEvent where
   /-- The exact payload from the accepted signed ingress, present only when
   its digest equals the one the entry committed. -/
   payload : Option (List UInt8)
-  receipt : Option Receipt
 
 structure FleetPollView where
   subject : SubjectId
@@ -784,9 +786,8 @@ def fleetPolledEvent (config : Config) (opened : Opened config)
     ingress.command.publication.bind fun publication =>
       if StreamCell.payloadDigest publication.payload = record.entry.payloadDigest
       then some publication.payload else none
-  let receipt := receiptByTransactionLoaded config opened record.transaction
   ⟨sequence, StreamCell.entryKey entry, entry.parent, record.transaction, record.height,
-    record.author, record.entry.payloadDigest, payload, receipt⟩
+    record.author, record.entry.payloadDigest, payload⟩
 
 def fleetPollMax : Nat := 64
 
