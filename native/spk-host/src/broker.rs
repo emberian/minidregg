@@ -408,6 +408,7 @@ fn helper(program: &Path, args: &[&str]) -> io::Result<String> {
 fn write_root_text(path: &Path, text: &str, mode: u32, replace: bool) -> io::Result<bool> {
     if let Ok(current) = fs::read(path) {
         if current == text.as_bytes() {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
             return Ok(false);
         }
         if !replace {
@@ -430,6 +431,8 @@ fn write_root_text(path: &Path, text: &str, mode: u32, replace: bool) -> io::Res
         .create_new(true)
         .mode(mode)
         .open(&temp)?;
+    // The broker's umask is 077; unit files are meant to be world-readable.
+    file.set_permissions(fs::Permissions::from_mode(mode))?;
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
     fs::rename(&temp, path)?;
@@ -543,6 +546,10 @@ impl Broker {
     }
 
     /// The supervisor template and the grains slice, rendered at startup.
+    /// The supervisor is `Type=exec`, not oneshot: while an `OnFailure=`
+    /// target's start job is pending, systemd keeps the failed resident unit
+    /// loaded with its old InvocationID, and STOP's exact post-stop audit
+    /// requires that InvocationID cleared (Mini's `managerInvocationCleared`).
     fn render_static(&self) -> io::Result<()> {
         let prefix = &self.config.unit_prefix;
         let slice = "# rendered by mini-spk-broker\n[Unit]\nDescription=Mini SPK grains\n\n\
@@ -555,11 +562,11 @@ impl Broker {
         )?;
         let supervisor = format!(
             "# rendered by mini-spk-broker\n[Unit]\nDescription=Mini SPK grain supervisor %i\n\
-             StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=oneshot\n\
+             StartLimitIntervalSec=1800\nStartLimitBurst=3\n\n[Service]\nType=exec\n\
              User={user}\nGroup={group}\nSlice={prefix}-grains.slice\n\
              ExecStart={spk} grain supervise-instance {root} %i\n\
              Restart=on-failure\nRestartSec=30\nRestartPreventExitStatus=3\n\
-             TimeoutStartSec=3h\nNoNewPrivileges=yes\nUMask=0077\nPrivateTmp=yes\n",
+             NoNewPrivileges=yes\nUMask=0077\nPrivateTmp=yes\n",
             user = self.config.operator_user,
             group = self.operator_gid,
             spk = self.config.spk_host.display(),
@@ -998,14 +1005,20 @@ impl Broker {
                     false,
                 )?;
                 write_root_text(&Path::new(RUNTIME_UNITS).join(&unit), &text, 0o644, false)?;
+                // No reset-failed here: a crashed generation's failed state and
+                // InvocationID are what STOP's pre-stop check identifies the
+                // dead incarnation by. `start` and `stop` reset it.
                 systemctl(&["daemon-reload"])?;
-                let _ = systemctl(&["reset-failed", &unit]);
                 Ok(json!({"unit":unit,"slice":app_slice(prefix, &store, &app)}))
             }
             Request::Start { unit } => {
                 Self::check_resident_unit_name(&unit)?;
                 if self.unit_store(&unit)?.is_none() {
                     return Err(invalid("start refused: unit not installed by this broker"));
+                }
+                // A never-begun generation's earlier failed attempt.
+                if active_state(&unit)? == "failed" {
+                    systemctl(&["reset-failed", &unit])?;
                 }
                 systemctl(&["start", &unit])?;
                 Ok(json!({"unit":unit,"activeState":active_state(&unit)?}))

@@ -1187,6 +1187,14 @@ fn supervise(host: &Host, app: &str) -> io::Result<Value> {
             // wedged until Mini's `reconcileFailedStart` (9 -> 2) is admitted.
             crate::grain_export::reconcile_failed_start(app, latest.generation)
         }
+        // A STOP this supervisor (or the operator) began resumes from STOP's
+        // own journal: exact recovery, never a second claim.
+        RunState::Uncertain(reason) if reason.starts_with("STOP") => {
+            let stopped = stop(host, app)?;
+            let started = start(host, app)?;
+            Ok(json!({"protocol":"mini-spk-grain-supervise-v1","app":app,
+                "action":"resume-stop-and-continue","stop":stopped,"start":started}))
+        }
         RunState::Uncertain(reason) => Err(unresolved(format!(
             "{} is uncertain ({reason}); the supervisor does not retry it",
             latest.dir.display()
