@@ -159,6 +159,7 @@ theorem eval_congr_slot : ∀ (p : Pred) {k : Slot}, singleSlot p = some k →
   | .leSlots _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .leSlotsOff _ _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .witnessed _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
+  | .hashEq _ _ _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .allL _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
   | .anyL _, _, hk, _, _, _, _, _ => by simp [singleSlot] at hk
 
@@ -175,6 +176,7 @@ def NewOnly : Pred → Bool
   | .leSlots _ _ => true
   | .leSlotsOff _ _ _ => true
   | .witnessed _ => false
+  | .hashEq _ _ _ => true
   | .not q => NewOnly q
   | .allL ps => NewOnlyList ps
   | .anyL ps => NewOnlyList ps
@@ -205,6 +207,10 @@ theorem eval_congr_toFun : ∀ (p : Pred), NewOnly p = true →
   | .leSlotsOff a b _, _, _, _, _, _, h => by
       simp only [eval, evalWith, ofRead_injective (congrFun h a), ofRead_injective (congrFun h b)]
   | .witnessed _, hp, _, _, _, _, _ => by simp [NewOnly] at hp
+  | .hashEq v b c, _, old, old', s, s', h => by
+      have hg : ∀ k, s.get k = s'.get k := fun k => ofRead_injective (congrFun h k)
+      show hashEqHolds _ s v b c = hashEqHolds _ s' v b c
+      simp only [hashEqHolds, hashEqOpening, hg]
   | .not q, hp, old, old', _, _, h => by
       rw [eval_not, eval_not,
         eval_congr_toFun q (by simpa [NewOnly] using hp) (old := old) (old' := old') h]
@@ -309,6 +315,7 @@ def dial : Pred → Verdict
   | .leSlots _ _ => .free
   | .leSlotsOff _ _ _ => .free
   | .witnessed _ => .thirdParty
+  | .hashEq _ _ _ => .ordering
   | .not q => if (singleSlot q).isSome then .free else Verdict.combine .ordering (dial q)
   | .allL ps => dialList ps
   | .anyL ps => Verdict.combine .ordering (dialList ps)
@@ -358,6 +365,7 @@ theorem dial_free_closed : ∀ (p : Pred), dial p = .free → MergeClosed p
       exact max_le (Int.le_trans h₁ (Int.add_le_add_right (Int.le_max_left _ _) c))
         (Int.le_trans h₂ (Int.add_le_add_right (Int.le_max_right _ _) c))
   | .witnessed _, h => by simp [dial] at h
+  | .hashEq _ _ _, h => by simp [dial] at h
   | .not q, h => fun old s t hs ht => by
       have hk : (singleSlot q).isSome = true := by
         by_contra hne
@@ -500,10 +508,15 @@ theorem leSlotsOff_merge_closed (a b : Slot) (c : Int) : MergeClosed (.leSlotsOf
 /-- info: 'Minidregg.Pred.CoordinationDial.toFun_mergeState' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms toFun_mergeState
 
-/-- info: 'Minidregg.Pred.CoordinationDial.eval_congr_toFun' depends on axioms: [propext] -/
+-- `eval_congr_toFun` and `inv_rep_independent` gained `Quot.sound` with `hashEq`: their
+-- statements mention `Pred.eval`, whose definition now reaches the Keccak-f[1600] sponge
+-- (`Compiler.Sp800185Cshake256Core.absorbPadded`, itself `[propext, Quot.sound]`). It is the
+-- closure of a definition, not a step of either proof; `Classical.choice` stays out
+-- (`Pred.HashEqDigest.frame` keeps `Nat.digits` out of the evaluator).
+/-- info: 'Minidregg.Pred.CoordinationDial.eval_congr_toFun' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms eval_congr_toFun
 
-/-- info: 'Minidregg.Pred.CoordinationDial.inv_rep_independent' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Pred.CoordinationDial.inv_rep_independent' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms inv_rep_independent
 
 /-- info: 'Minidregg.Pred.CoordinationDial.single_slot_closed' depends on axioms: [propext, Quot.sound] -/

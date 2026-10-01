@@ -3016,6 +3016,33 @@ mod tests {
     }
 
     #[test]
+    fn scalar_value_is_a_canonical_signed_decimal_of_any_width() {
+        let action = |value: &str| {
+            scalar_actions(
+                &json!([{"type":"create","key":{"type":"object","field":"2"},"value":value}]),
+                "123",
+            )
+        };
+        // A hashEq commitment: a 256-bit integer, past i64.
+        let commit = "14088966009597722056427368520402764894210252134876007857874900863984935149567";
+        assert_eq!(action(commit).unwrap()["actions"][0]["value"], commit);
+        assert!(action("-5").is_ok());
+        assert!(action("0").is_ok());
+        for bad in ["", "-", "+1", "01", "-0", "-01", "1.0", " 1", &"9".repeat(81)] {
+            assert!(action(bad).is_err(), "{bad:?} accepted");
+        }
+        let write = |expected: &str| {
+            scalar_actions(
+                &json!([{"type":"write","key":{"type":"object","field":"2"},
+                    "value":"1","expected":expected}]),
+                "123",
+            )
+        };
+        assert!(write(commit).is_ok());
+        assert!(write("01").is_err());
+    }
+
+    #[test]
     fn exact_lookup_replay_completes_an_interrupted_birth() {
         let root = std::env::temp_dir().join(format!(
             "mini-replayed-birth-{}-{}",

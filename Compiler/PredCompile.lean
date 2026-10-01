@@ -46,6 +46,7 @@ or product range. Larger integer promises require a bounded-limb extension.
 be lowered here rather than added through a second policy verifier.
 -/
 import Pred.Core
+import Pred.HashEq
 import Compiler.PredOrderGadget
 import Mathlib.Data.List.Dedup
 import Std.Data.HashSet
@@ -127,6 +128,13 @@ inductive Wire where
   | val  (isNew : Bool) (s : Slot)
   /-- Presence wire: `1` if the slot is present on the chosen side, else `0`. -/
   | pres (isNew : Bool) (s : Slot)
+  /-- `hashEq` digest wire: `Int.cast` of the cSHAKE256 digest of the new side's opening of
+  `(value, blinder, commit)` (`0` if it has none). Like `val`, it is computed by the verifier from
+  the pinned step and is never prover-supplied: the hash runs in the kernel's assignment, and the
+  system compares it with the commit wire. -/
+  | digest (value blinder commit : Slot)
+  /-- `hashEq` opening wire: `1` if the new side has an admissible opening, else `0`. -/
+  | opened (value blinder commit : Slot)
   /-- Auxiliary (prover-supplied) wire at an AST path. -/
   | aux  (path : List ℕ) (k : ℕ)
 deriving DecidableEq, Repr
@@ -141,12 +149,25 @@ def valOf (st : State) (s : Slot) : F :=
 def presOf (st : State) (s : Slot) : F :=
   cond (st.get s).isSome 1 0
 
+/-- The digest reading of a `hashEq` opening on a state (`0` if there is none). -/
+def digestOf (st : State) (v b c : Slot) : F :=
+  match Minidregg.Pred.hashEqOpening st v b c with
+  | some o =>
+      ((Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed o : Int) : F)
+  | none => 0
+
+/-- The opening reading: `1` if the state has an admissible `hashEq` opening, else `0`. -/
+def openedOf (st : State) (v b c : Slot) : F :=
+  cond (Minidregg.Pred.hashEqOpening st v b c).isSome 1 0
+
 /-- **The step assignment**: input wires pinned by the (old, new) step, aux wires supplied
 by `A`. The refinement quantifies `A` (existential in `lower_correct`, universal in
 `lower_sound`) while the step stays pinned. -/
 def stepAsg (old new : State) (A : List ℕ → ℕ → F) : Wire → F
   | .val b s  => valOf (cond b new old) s
   | .pres b s => presOf (cond b new old) s
+  | .digest v b c => digestOf new v b c
+  | .opened v b c => openedOf new v b c
   | .aux p k  => A p k
 
 /-- The `Int`s a state exposes (for the cast-injectivity label). -/
@@ -440,6 +461,15 @@ def eqSlotsD (a b : Slot) : Term (AirSig F Wire) :=
   simp only [woD2, eval_add', eval_mul', eval_vr, eval_cst, stepAsg, cond_true, cond_false]
   ring
 
+/-- `hashEq` difference: `digest(new; value, blinder, commit) − val(new, commit)`. -/
+def hashD (v b c : Slot) : Term (AirSig F Wire) :=
+  add' (vr (.digest v b c)) (mul' (cst (-1)) (vr (.val true c)))
+
+@[simp] theorem eval_hashD (old new : State) (A : List ℕ → ℕ → F) (v b c : Slot) :
+    eval (stepAsg old new A) (hashD v b c) = digestOf new v b c - valOf new c := by
+  simp only [hashD, eval_add', eval_mul', eval_vr, eval_cst, stepAsg, cond_true]
+  ring
+
 /-- Order aux 0 is the shifted value; bits occupy exactly 1..width+1. -/
 def orderBits (width : Nat) (i : Fin (width + 1)) : Wire := .aux [] (i.val + 1)
 
@@ -566,6 +596,9 @@ def lowerA (profile : CompilerProfile) : Pred → Term (AirSig F Wire) × Constr
              (.aux [] 0) (orderBits width))
   | .witnessed _ =>
       (cst 0, [])        -- first-party fail-closed: the indicator is constant 0
+  | .hashEq v b c =>
+      (mul' (vr (.opened v b c)) (mul' (vr (.pres true c)) (vr (.aux [] 0))),
+       isZero (hashD v b c) (.aux [] 0) (.aux [] 1))
   | .not p =>
       let l := lowerA profile p
       (notT l.1, l.2)
@@ -604,6 +637,7 @@ def supported (profile : CompilerProfile) : Pred → Bool
   | .leSlots _ _  => match profile.order with | .disabled => false | .scalar _ => true
   | .leSlotsOff _ _ _ => match profile.order with | .disabled => false | .scalar _ => true
   | .witnessed _  => true
+  | .hashEq _ _ _ => true
   | .not p        => supported profile p
   | .allL ps      => supportedL profile ps
   | .anyL ps      => supportedL profile ps
@@ -625,6 +659,7 @@ def lits : Pred → List ℤ
   | .leSlots _ _  => []
   | .leSlotsOff _ _ c => [c]
   | .witnessed _  => []
+  | .hashEq _ _ _ => []
   | .not p        => lits p
   | .allL ps      => litsL ps
   | .anyL ps      => litsL ps
@@ -634,10 +669,31 @@ def litsL : PredList → List ℤ
   | .cons p ps => lits p ++ litsL ps
 end
 
+mutual
+/-- The digests a predicate's `hashEq` atoms derive from the new state (each opening's
+cSHAKE256 integer, when it has one). They enter the circuit on `digest` wires, so they belong in
+the cast-injectivity label beside the state's values. -/
+def digests : Pred → State → List ℤ
+  | .hashEq v b c, new =>
+      match Minidregg.Pred.hashEqOpening new v b c with
+      | some o => [Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed o]
+      | none => []
+  | .not p, new => digests p new
+  | .allL ps, new => digestsL ps new
+  | .anyL ps, new => digestsL ps new
+  | .eq _ _, _ | .le _ _, _ | .memberOf _ _, _ | .writeOnce _, _ | .monotone _, _
+  | .eqSlots _ _, _ | .leSlots _ _, _ | .leSlotsOff _ _ _, _
+  | .witnessed _, _ => []
+
+def digestsL : PredList → State → List ℤ
+  | .nil, _ => []
+  | .cons p ps, new => digests p new ++ digestsL ps new
+end
+
 /-- All `Int`s an instance touches: `0` (the `writeOnce` sentinel), the predicate's
-literals, and both states' values. -/
+literals, both states' values, and the digests its `hashEq` atoms derive. -/
 def intsOf (p : Pred) (old new : State) : List ℤ :=
-  0 :: (lits p ++ stateVals old ++ stateVals new)
+  0 :: (lits p ++ stateVals old ++ stateVals new ++ digests p new)
 
 /-! ## §8. The witness generator — derived in the same fold (the prover routine the
 compiler emits alongside the constraints). -/
@@ -675,6 +731,7 @@ def wit (profile : CompilerProfile) : Pred → State → State → List ℕ → 
       | .scalar width => orderAux width
           ((new.get a).isSome && (new.get b).isSome) (intOf new a) (intOf new b + c) k
   | .witnessed _  => fun _ _ _ _ => 0
+  | .hashEq v b c => fun _ new _ k => auxPair (digestOf new v b c - valOf new c) k
   | .not p        => wit profile p
   | .allL ps      => witL profile ps 0
   | .anyL ps      => witL profile ps 0
@@ -1052,11 +1109,35 @@ theorem lowerA_forced (profile : CompilerProfile)
   | .witnessed vk, old, new, A, _, _, _, _ => by
     simp [lowerA, eval_cst, Minidregg.Pred.eval, Minidregg.Pred.evalWith,
       Minidregg.Pred.failClosed]
+  | .hashEq v b c, old, new, A, hinj, _, _, h => by
+    simp only [lowerA] at h ⊢
+    have hb := isZero_forced h
+    simp only [eval_mul', eval_vr, hb, eval_hashD]
+    show openedOf new v b c * (presOf new c * _) = _
+    simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, Minidregg.Pred.hashEqHolds,
+      openedOf, digestOf]
+    rcases Option.eq_none_or_eq_some (Minidregg.Pred.hashEqOpening new v b c) with ho | ⟨o, ho⟩
+    · simp [ho]
+    · rcases Option.eq_none_or_eq_some (new.get c) with hget | ⟨x, hget⟩
+      · simp [presOf, ho, hget]
+      · have hx : x ∈ intsOf (.hashEq v b c) old new := by
+          simp [intsOf, List.mem_append, get_mem_stateVals hget]
+        have hd : Minidregg.Pred.HashEqDigest.digestWith Minidregg.Pred.HashEqDigest.deployed o ∈
+            intsOf (.hashEq v b c) old new := by
+          simp [intsOf, digests, ho]
+        simp only [presOf, valOf, ho, hget, Option.isSome_some, cond_true, one_mul]
+        by_cases hdx : Minidregg.Pred.HashEqDigest.digestWith
+            Minidregg.Pred.HashEqDigest.deployed o = x
+        · simp [hdx]
+        · have hne : ¬(((Minidregg.Pred.HashEqDigest.digestWith
+              Minidregg.Pred.HashEqDigest.deployed o : Int) : F) - (x : F) = 0) := fun hc =>
+            hdx (hinj _ hd x hx (sub_eq_zero.mp hc))
+          simp [hdx, hne]
   | .not p, old, new, A, hinj, hsup, hrange, h => by
     simp only [supported] at hsup
     simp only [inputsInRange] at hrange
     have hinj' : castInjOn F (intsOf p old new) := by
-      simpa only [intsOf, lits] using hinj
+      simpa only [intsOf, lits, digests] using hinj
     simp only [lowerA] at h ⊢
     rw [eval_notT, lowerA_forced profile hprofile p old new A hinj' hsup hrange h]
     simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith]
@@ -1064,8 +1145,9 @@ theorem lowerA_forced (profile : CompilerProfile)
   | .allL ps, old, new, A, hinj, hsup, hrange, h => by
     simp only [supported] at hsup
     simp only [inputsInRange] at hrange
-    have hinj' : castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new)) := by
-      simpa only [intsOf, lits] using hinj
+    have hinj' : castInjOn F
+        (0 :: (litsL ps ++ stateVals old ++ stateVals new ++ digestsL ps new)) := by
+      simpa only [intsOf, lits, digests] using hinj
     simp only [lowerA] at h ⊢
     rw [eval_prodT, lowerL_forced profile hprofile ps 0 old new A hinj' hsup hrange h, prod_ind]
     simp only [Minidregg.Pred.eval, Minidregg.Pred.evalWith, evalWithAll_toList]
@@ -1073,8 +1155,9 @@ theorem lowerA_forced (profile : CompilerProfile)
   | .anyL ps, old, new, A, hinj, hsup, hrange, h => by
     simp only [supported] at hsup
     simp only [inputsInRange] at hrange
-    have hinj' : castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new)) := by
-      simpa only [intsOf, lits] using hinj
+    have hinj' : castInjOn F
+        (0 :: (litsL ps ++ stateVals old ++ stateVals new ++ digestsL ps new)) := by
+      simpa only [intsOf, lits, digests] using hinj
     simp only [lowerA] at h ⊢
     rw [eval_notT, eval_prodT_notT, lowerL_forced profile hprofile ps 0 old new A hinj' hsup hrange h,
       prod_one_sub_ind, all_not_eq_not_any]
@@ -1084,7 +1167,7 @@ theorem lowerA_forced (profile : CompilerProfile)
 theorem lowerL_forced (profile : CompilerProfile)
     (hprofile : profile.Admissible F) :
     ∀ (ps : PredList) (i : ℕ) (old new : State) (A : List ℕ → ℕ → F),
-      castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new)) →
+      castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new ++ digestsL ps new)) →
       supportedL profile ps = true →
       inputsInRangeL profile ps old new = true →
       systemAccepts (stepAsg old new A) (lowerL profile ps i).2 →
@@ -1101,12 +1184,13 @@ theorem lowerL_forced (profile : CompilerProfile)
     have hinjp : castInjOn F (intsOf p old new) :=
       castInjOn_mono (by
         intro a ha
-        simp only [intsOf, litsL, List.mem_cons, List.mem_append] at ha ⊢
+        simp only [intsOf, litsL, digestsL, List.mem_cons, List.mem_append] at ha ⊢
         tauto) hinj
-    have hinjps : castInjOn F (0 :: (litsL ps ++ stateVals old ++ stateVals new)) :=
+    have hinjps : castInjOn F
+        (0 :: (litsL ps ++ stateVals old ++ stateVals new ++ digestsL ps new)) :=
       castInjOn_mono (by
         intro a ha
-        simp only [litsL, List.mem_cons, List.mem_append] at ha ⊢
+        simp only [litsL, digestsL, List.mem_cons, List.mem_append] at ha ⊢
         tauto) hinj
     have ih₁ := lowerA_forced profile hprofile p old new (fun path k => A (i :: path) k)
       hinjp hsup.1 hrange.1 h₁
@@ -1201,6 +1285,13 @@ theorem lowerA_complete (profile : CompilerProfile) :
   | .witnessed vk, old, new, _, _ => by
     simp only [lowerA]
     exact systemAccepts_nil _
+  | .hashEq v b c, old, new, _, _ => by
+    simp only [lowerA]
+    apply isZero_complete
+    · show auxPair (digestOf new v b c - valOf new c) 0 = _
+      rw [eval_hashD]; simp [auxPair]
+    · show auxPair (digestOf new v b c - valOf new c) 1 = _
+      rw [eval_hashD]; simp [auxPair]
   | .not p, old, new, hsup, hrange => by
     simp only [supported] at hsup
     simp only [inputsInRange] at hrange
@@ -1592,6 +1683,59 @@ example : ∃ A : List ℕ → ℕ → ZMod 7,
 #guard_msgs (whitespace := lax) in #print axioms lowerA_complete_leSlotsOff
 /-- info: 'Minidregg.Compiler.lower_leSlotsOff_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lower_leSlotsOff_correct
+
+/-! ## §16. `hashEq` — the hash runs in the step assignment, the system compares
+
+`hashEq value blinder commit` lowers to one `isZero` over `digest − val(new, commit)`, gated by
+the `opened` and commit-presence wires. `digest`/`opened` are input wires the verifier computes
+from the pinned new state (the kernel's executable cSHAKE256), exactly as it computes `val`/`pres`;
+a prover supplies only the two is-zero aux wires. No hash is arithmetized: a Poseidon2 or Keccak
+gadget in this system is out of scope, and nothing here needs one, because the verdict is
+`systemAccepts` of the step assignment the verifier itself builds. The atom is supported in every
+profile (it uses no order gadget), so the disabled profile does not refuse it. The digest joins
+the cast-injectivity label (`digests`), so equality in `F` is exact integer equality whenever the
+controller's `castInjOn` check admits the step. -/
+
+section DecEqF
+variable [DecidableEq F]
+
+/-- **`hashEq`, compiled, in source terms**, for every profile: the emitted system accepts some
+aux assignment iff the new state has an admissible opening and the commit slot holds its
+cSHAKE256 digest. -/
+theorem lower_hashEq_correct (profile : CompilerProfile) (hprofile : profile.Admissible F)
+    {v b c : Slot} {old new : State} (hinj : castInjOn F (intsOf (.hashEq v b c) old new)) :
+    (∃ A : List ℕ → ℕ → F, systemAccepts (stepAsg old new A) (lower profile (.hashEq v b c)))
+      ↔ ∃ o, Minidregg.Pred.hashEqOpening new v b c = some o ∧
+          new.get c = some (Minidregg.Pred.HashEqDigest.digestWith
+            Minidregg.Pred.HashEqDigest.deployed o) := by
+  rw [lower_correct profile hprofile hinj rfl rfl]
+  exact Minidregg.Pred.hashEqHolds_iff _ _ _ _ _
+
+/-- A wrong opening is refused for **every** aux assignment, unless cSHAKE256 collides: if a step
+whose commit slot holds the digest of opening `o` is compiled-accepted, its own opening is `o`
+or there is a collision. -/
+theorem lower_hashEq_binds (profile : CompilerProfile) (hprofile : profile.Admissible F)
+    {v b c : Slot} {old new : State} (hinj : castInjOn F (intsOf (.hashEq v b c) old new))
+    {o : Minidregg.Pred.HashEqDigest.Opening} (hadm : o.Admissible)
+    (hcommit : new.get c = some (Minidregg.Pred.HashEqDigest.digestWith
+      Minidregg.Pred.HashEqDigest.deployed o))
+    (A : List ℕ → ℕ → F) (h : systemAccepts (stepAsg old new A) (lower profile (.hashEq v b c))) :
+    Minidregg.Pred.hashEqOpening new v b c = some o ∨
+      Minidregg.Pred.HashEqDigest.Collision Minidregg.Pred.HashEqDigest.deployed := by
+  obtain ⟨o', ho', hc'⟩ := (lower_hashEq_correct profile hprofile hinj).mp ⟨A, h⟩
+  rw [hcommit] at hc'
+  have hadm' := (Minidregg.Pred.hashEqOpening_eq_some.mp ho').2.2.2.2.2.2
+  rcases Minidregg.Pred.HashEqDigest.binds_or_collides _ hadm hadm' (Option.some.inj hc') with
+    heq | hcol
+  · exact .inl (heq ▸ ho')
+  · exact .inr hcol
+
+end DecEqF
+
+/-- info: 'Minidregg.Compiler.lower_hashEq_correct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lower_hashEq_correct
+/-- info: 'Minidregg.Compiler.lower_hashEq_binds' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms lower_hashEq_binds
 
 /-! ### Closing audit note
 

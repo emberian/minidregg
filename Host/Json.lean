@@ -237,6 +237,11 @@ partial def predicate (path : String) (json : Lean.Json) : Result Pred := do
   | "witnessed" =>
       let obj ← exactObject path ["type", "identifier"] json
       pure (.witnessed ⟨← string (path ++ ".identifier") (← field path "identifier" obj)⟩)
+  | "hashEq" =>
+      let obj ← exactObject path ["type", "value", "blinder", "commit"] json
+      pure (.hashEq (← string (path ++ ".value") (← field path "value" obj))
+        (← string (path ++ ".blinder") (← field path "blinder" obj))
+        (← string (path ++ ".commit") (← field path "commit" obj)))
   | "not" =>
       let obj ← exactObject path ["type", "predicate"] json
       pure (.not (← predicate (path ++ ".predicate") (← field path "predicate" obj)))
@@ -263,6 +268,8 @@ private partial def predicateJson : Pred → Lean.Json
       ("right", .str right), ("offset", signedDecimal offset)]
   | .witnessed identifier => .mkObj [("type", "witnessed"),
       ("identifier", .str identifier.id)]
+  | .hashEq value blinder commit => .mkObj [("type", "hashEq"), ("value", .str value),
+      ("blinder", .str blinder), ("commit", .str commit)]
   | .not child => .mkObj [("type", "not"), ("predicate", predicateJson child)]
   | .allL children => .mkObj [("type", "all"),
       ("predicates", .arr (children.toList.toArray.map predicateJson))]

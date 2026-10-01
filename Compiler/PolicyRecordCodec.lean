@@ -55,12 +55,17 @@ inductive Token where
   | eqSlots (left right : String)
   | leSlots (left right : String)
   | leSlotsOff (left right : String) (offset : Int)
+  /-- Tag 15. Tags 11–14 are taken on sibling branches (`eqSlots`, `leSlots`, `leSlotsOff`,
+  `ran`); the integrator reconciles the numbering once. -/
+  | hashEq (value blinder commit : String)
   deriving DecidableEq, Repr
 
 def slotIntStream := StreamCodec.product stringStream IntStream.intStream
 def slotListStream := StreamCodec.product stringStream (StreamCodec.list IntStream.intStream)
 def slotPairStream := StreamCodec.product stringStream stringStream
 def slotPairIntStream := StreamCodec.product slotPairStream IntStream.intStream
+def slotTripleStream :=
+  StreamCodec.product stringStream (StreamCodec.product stringStream stringStream)
 
 def encodeToken : Token → List UInt8
   | .eq slot value => 0 :: slotIntStream.encode (slot, value)
@@ -77,6 +82,7 @@ def encodeToken : Token → List UInt8
   | .eqSlots left right => 11 :: slotPairStream.encode (left, right)
   | .leSlots left right => 12 :: slotPairStream.encode (left, right)
   | .leSlotsOff left right offset => 13 :: slotPairIntStream.encode ((left, right), offset)
+  | .hashEq value blinder commit => 15 :: slotTripleStream.encode (value, (blinder, commit))
 
 def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 0 :: bytes => do
@@ -111,6 +117,9 @@ def decodeToken : List UInt8 → Option (Token × List UInt8)
   | 13 :: bytes => do
       let (((left, right), offset), suffix) ← slotPairIntStream.decodePrefix bytes
       some (.leSlotsOff left right offset, suffix)
+  | 15 :: bytes => do
+      let ((value, (blinder, commit)), suffix) ← slotTripleStream.decodePrefix bytes
+      some (.hashEq value blinder commit, suffix)
   | _ => none
 
 theorem decodeToken_encode (token : Token) (suffix : List UInt8) :
@@ -135,6 +144,7 @@ def step : Token → Stack → Option Stack
   | .eqSlots left right, stack => some (.inl (.eqSlots left right) :: stack)
   | .leSlots left right, stack => some (.inl (.leSlots left right) :: stack)
   | .leSlotsOff left right offset, stack => some (.inl (.leSlotsOff left right offset) :: stack)
+  | .hashEq value blinder commit, stack => some (.inl (.hashEq value blinder commit) :: stack)
   | .not, .inl predicate :: stack => some (.inl (.not predicate) :: stack)
   | .all, .inr predicates :: stack => some (.inl (.allL predicates) :: stack)
   | .any, .inr predicates :: stack => some (.inl (.anyL predicates) :: stack)
@@ -161,6 +171,7 @@ def tokensInto : Pred → List Token → List Token
   | .leSlots left right, suffix => .leSlots left right :: suffix
   | .leSlotsOff left right offset, suffix => .leSlotsOff left right offset :: suffix
   | .witnessed vk, suffix => .witnessed vk.id :: suffix
+  | .hashEq value blinder commit, suffix => .hashEq value blinder commit :: suffix
   | .not predicate, suffix => tokensInto predicate (.not :: suffix)
   | .allL predicates, suffix => listTokensInto predicates (.all :: suffix)
   | .anyL predicates, suffix => listTokensInto predicates (.any :: suffix)
@@ -185,6 +196,7 @@ theorem runTokens_tokensInto (predicate : Pred) (suffix : List Token) (stack : S
   | leSlots left right => rfl
   | leSlotsOff left right offset => rfl
   | witnessed vk => cases vk; rfl
+  | hashEq value blinder commit => rfl
   | not predicate =>
       rw [tokensInto, runTokens_tokensInto]
       rfl
@@ -322,6 +334,20 @@ theorem rejects_trailing (record : PolicyRecord) (suffix : List UInt8)
 theorem unknown_token_rejected (suffix : List UInt8) :
     decodeToken (255 :: suffix) = none := rfl
 
+/-- `hashEq` is tag 15 with a (string, string, string) payload. -/
+theorem hashEq_tag (value blinder commit : String) :
+    (encodeToken (.hashEq value blinder commit)).head? = some 15 := rfl
+
+theorem hashEq_token_round_trip (value blinder commit : String) (suffix : List UInt8) :
+    decodeToken (encodeToken (.hashEq value blinder commit) ++ suffix) =
+      some (.hashEq value blinder commit, suffix) :=
+  decodeToken_encode _ _
+
+/-- On `final` tags 11-13 are eqSlots/leSlots/leSlotsOff and 15 is hashEq;
+14 (reserved for `ran`) and 16 are unassigned and refuse. -/
+theorem unassigned_tags_rejected (suffix : List UInt8) :
+    decodeToken (14 :: suffix) = none ∧ decodeToken (16 :: suffix) = none := ⟨rfl, rfl⟩
+
 theorem wrong_stack_sort_rejected : decodePred [.nil, .not] = none := rfl
 
 theorem stack_underflow_rejected : decodePred [.cons] = none := rfl
@@ -408,7 +434,8 @@ theorem leSlotsOff_tag (left right : String) (offset : Int) :
 
 /-- The v4 vocabulary is exactly tags 0..13: a token byte of 14 or more refuses to decode, so a
 record from any later vocabulary is refused rather than read. -/
-theorem decodeToken_unknown_tag (tag : UInt8) (htag : 14 ≤ tag.toNat) (rest : List UInt8) :
+theorem decodeToken_unknown_tag (tag : UInt8) (htag : tag.toNat = 14 ∨ 16 ≤ tag.toNat)
+    (rest : List UInt8) :
     decodeToken (tag :: rest) = none := by
   unfold decodeToken
   split <;> first
@@ -452,3 +479,12 @@ end Minidregg.Compiler.PolicyRecordCodec
 /-- info: 'Minidregg.Compiler.PolicyRecordCodec.decodeToken_unknown_tag' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in
   #print axioms Minidregg.Compiler.PolicyRecordCodec.decodeToken_unknown_tag
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.hashEq_tag' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.hashEq_tag
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.hashEq_token_round_trip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.hashEq_token_round_trip
+/-- info: 'Minidregg.Compiler.PolicyRecordCodec.unassigned_tags_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in
+  #print axioms Minidregg.Compiler.PolicyRecordCodec.unassigned_tags_rejected
