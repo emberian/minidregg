@@ -448,8 +448,34 @@ LAUNCHER = path("launcher/bwrap")
 open(LAUNCHER, "w").write(launcher); os.chmod(LAUNCHER, 0o700)
 open(path("launcher/launch-gate"), "wb").write(open(LAUNCH_GATE, "rb").read())
 os.chmod(path("launcher/launch-gate"), 0o700)
-open(os.path.join(STATE, "upstream-local-fixture.key"), "w").write("local-fixture-key\n")
-os.chmod(os.path.join(STATE, "upstream-local-fixture.key"), 0o600)
+# HERMES-KEYS: the provider request's route is a row of the operator's provider
+# table (root-owned, as in production: `sudo -n install`), and its bearer is the
+# operator's pool secret in the sealed credential store, written by `mini key`.
+# The pool row is the one whose spend the purse reserve gates; its tariff is
+# the Host's pinned provider tariff, or the controller refuses tariff-mismatch.
+CRED, CKEY = path("credentials"), path("etc/credentials.key")
+os.makedirs(CRED, mode=0o700); os.makedirs(path("etc"), mode=0o700)
+open(CKEY, "wb").write(os.urandom(32)); os.chmod(CKEY, 0o600)
+TABLE_SOURCE, TABLE = path("providers-source.json"), path("etc/providers.json")
+json.dump({"type": "mini-provider-table-v1", "providers": [
+    {"name": "local", "endpoint": f"http://127.0.0.1:{UPORT}/v1/chat/completions",
+     "kind": "openai-compatible", "models": [MODEL],
+     "tariff": {"version": "1", "inputMicroPerMillion": str(RATE_IN),
+                "outputMicroPerMillion": str(RATE_OUT)},
+     "credential": "pool"}]}, open(TABLE_SOURCE, "w"))
+installed = subprocess.run(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644",
+                            TABLE_SOURCE, TABLE], capture_output=True)
+if installed.returncode != 0:
+    fail("the provider table must be root-owned; sudo -n install failed: "
+         + installed.stderr.decode("utf-8", "replace")[-200:])
+pool_secret = path("pool.secret")
+open(pool_secret, "w").write("local-fixture-key\n"); os.chmod(pool_secret, 0o600)
+keyed = subprocess.run([MINI, "key", "--action", "set", "--pool", "true", "--provider", "local",
+                        "--secret", pool_secret, "--providers", TABLE, "--credentials", CRED,
+                        "--credentials-key", CKEY], capture_output=True)
+os.unlink(pool_secret)
+if keyed.returncode != 0:
+    fail("mini key set --pool: " + (keyed.stdout + keyed.stderr).decode("utf-8", "replace")[-300:])
 pinned = json.load(open(CONFIG))
 added = []
 for key in ("continuityProviderResourceId", "providerMetering"):
@@ -483,8 +509,8 @@ runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOC
                             "custodyKey": path(f"keys/{PROVIDER}.key"), "parentCapability": "75",
                             "parentObserveCapability": "75", "reserve": str(PROVIDER_RESERVE), "charge": "0",
                             "metering": True, "maxInputTokens": MAX_IN, "maxOutputTokens": MAX_OUT,
-                            "model": MODEL, "upstreamUrl": f"http://127.0.0.1:{UPORT}/v1/chat/completions",
-                            "providerKeyFile": os.path.join(STATE, "upstream-local-fixture.key"),
+                            "model": MODEL, "providers": TABLE, "credentialsRoot": CRED,
+                            "credentialsKey": CKEY,
                             "gatewayBind": f"127.0.0.1:{GPORT}", "maxRequestBytes": 1048576,
                             "maxResponseBytes": 8388608, "timeoutSeconds": 600, "localFixtureHostNetwork": True},
            "commands": [{"name": "hermes-acp", "program": LAUNCHER,
@@ -564,11 +590,12 @@ try:
     row("controller SIGKILLed after the send boundary; systemd restarted it (Restart=on-failure)",
         "NRestarts >= 1, new MainPID", f"killed={main_pid} now={unit_prop('MainPID')} NRestarts={unit_prop('NRestarts')}",
         int(unit_prop("NRestarts") or 0) >= 1)
-    # On this branch the controller recovers on the owner's explicit `recover`
-    # (M5's automatic startup recovery is on the product line). The owner
-    # reconnects (the killed controller's socket file lingers until the new
-    # one binds, so retry a refused connect): attach is refused while the
-    # task is fenced, then `recover`.
+    # On final the restarted controller runs M5's provable recovery at startup,
+    # and an owner's attach to a fenced task runs it again first; recovery
+    # cannot prove the uncertain provider send, so the attach is refused with
+    # the provider hold still fenced. The owner reconnects (the killed
+    # controller's socket file lingers until the new one binds, so retry a
+    # refused connect), then also asks `recover` explicitly.
     def owner_connected():
         owner = subprocess.Popen([GRAIN, "connect", os.path.join(STATE, "control.sock")], stdin=subprocess.PIPE,
                                  stdout=open(path("recover.stdout"), "ab"), stderr=open(path("recover.stderr"), "ab"))
@@ -582,11 +609,18 @@ try:
         notes = " ".join(str(n) for n in (j.get("unresolvedExternal") or []))
         return j.get("connection") == "fenced" and "uncertain" in notes and j.get("providerAttempt") is not None
     wait_for("owner recovery", recovered, 900)
-    # the connector prints the controller's replies on stdout, its own errors on stderr
-    refused_attach = open(path("recover.stdout")).read() + open(path("recover.stderr")).read()
-    row("the owner reconnects to the fenced task", "attach refused (fenced), recover runs",
-        " | ".join(line for line in refused_attach.splitlines() if "fenced" in line)[:240],
-        "task is fenced or unresolved; cannot attach" in refused_attach)
+    # the connector prints the controller's replies on stdout, its own errors on stderr;
+    # the attach-time recovery runs signed queries first, so its reply can trail the
+    # journal's fence by a while
+    def attach_replies():
+        return open(path("recover.stdout")).read() + open(path("recover.stderr")).read()
+    for _ in range(300):
+        if "provider reservation remains held after fence" in attach_replies(): break
+        time.sleep(1)
+    refused_attach = attach_replies()
+    row("the owner reconnects to the fenced task", "attach refused: attach-time recovery keeps the provider hold fenced",
+        " | ".join(line for line in refused_attach.splitlines() if "fence" in line)[:240],
+        "provider reservation remains held after fence" in refused_attach)
     j = journal()
     attempt, hold = j["providerAttempt"], j.get("providerHold") or {}
     row("recovery records the provider attempt as uncertain and keeps the hold",
