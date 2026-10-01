@@ -390,6 +390,9 @@ ok social carl "import mine object $CS $COWN"
 ok social carl "propose s1 {\"type\":\"minidregg-workspace-proposal-v1\",\"action\":\"invoke\",\"targets\":[{\"name\":\"mine\",\"payload\":{\"type\":\"append\",\"topic\":\"hello\",\"text\":\"carl speaks\"}}]}"
 ok social carl "submit s1"
 ok social carl "read mine"
+# A stream read shows its head; its entries are their own cells, read by
+# position (FLEET-TOPIC-ON-STREAM): the entry is checked on a tail.
+raw social carl "tails mine from position 1" ok "$MINI" workspace --action tail --dir "$(ws_of carl)" --name mine --from 1 --count 16
 check social "carl's entry is in his stream, authored by carl" jq -e --arg c "$C" '[.. | objects | select(has("author")) | .author] | index($c)' "$OUT"
 PUBCAP=$(jq -r .operationCapability "$AW/pub.json")
 ok social alice "import carl-via-pub object $CS $PUBCAP"
