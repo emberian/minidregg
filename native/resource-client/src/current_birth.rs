@@ -12,7 +12,8 @@ use std::io::Read;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::Path;
 
-const MAX_SOURCE: usize = 256 * 1024;
+/// Births carrying a Nock program (NOCK K-NOCK-CELL) carry its hex in the source.
+const MAX_SOURCE: usize = 4 * 1024 * 1024;
 const MAX_INTENT: usize = 4 * 1024 * 1024;
 
 fn retained_file(path: &Path, limit: usize) -> Result<Vec<u8>> {
@@ -70,7 +71,7 @@ fn bounded_source(path: &Path) -> Result<Vec<u8>> {
         .map_err(|e| format!("current birth source {}: {e}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > MAX_SOURCE as u64
     {
-        return Err("current birth source must be a nonempty regular file at most 256 KiB".into());
+        return Err("current birth source must be a nonempty regular file at most 4 MiB".into());
     }
     let mut bytes = Vec::new();
     File::open(path)

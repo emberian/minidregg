@@ -16,6 +16,8 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 const MAX_RECORD: u64 = 256 * 1024;
+/// A Nock program birth carries the program (jam + ABI) as hex in its source.
+const MAX_PROGRAM_SOURCE: u64 = 4 * 1024 * 1024;
 
 fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
@@ -123,9 +125,13 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn bounded_json(path: &Path) -> Result<Value> {
+    bounded_json_limit(path, MAX_RECORD)
+}
+
+fn bounded_json_limit(path: &Path, limit: u64) -> Result<Value> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-    if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD {
+    if !metadata.file_type().is_file() || metadata.len() > limit {
         return Err(format!(
             "{} must be a bounded regular JSON file",
             path.display()
@@ -133,9 +139,9 @@ fn bounded_json(path: &Path) -> Result<Value> {
     }
     let mut bytes = Vec::new();
     File::open(path)
-        .and_then(|file| file.take(MAX_RECORD + 1).read_to_end(&mut bytes))
+        .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes))
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    if bytes.len() as u64 > MAX_RECORD {
+    if bytes.len() as u64 > limit {
         return Err(format!("{} exceeds workspace JSON bound", path.display()));
     }
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
@@ -1100,6 +1106,7 @@ fn complete_birth(
     source: &Value,
     receipt: &Value,
     reservation: &participant_namespace::Reservation,
+    program_cell: Option<&str>,
 ) -> Result<()> {
     let birth = source.get("birth").ok_or("retained birth source absent")?;
     let parts = birth
@@ -1107,10 +1114,15 @@ fn complete_birth(
         .and_then(Value::as_array)
         .and_then(|values| values.first())
         .ok_or("retained birth source lacks resource")?;
-    let target = member(parts, "target")?;
+    // A Nock program is born at its content address: the Host derives its
+    // target, so the reservation holds only the two capability identifiers.
+    let target = match program_cell {
+        Some(cell) => cell,
+        None => member(parts, "target")?,
+    };
     let owner = member(parts, "ownerCapability")?;
     let control = member(parts, "controlCapability")?;
-    if reservation.ids.get("target").map(String::as_str) != Some(target)
+    if (program_cell.is_none() && reservation.ids.get("target").map(String::as_str) != Some(target))
         || reservation.ids.get("ownerCapability").map(String::as_str) != Some(owner)
         || reservation.ids.get("controlCapability").map(String::as_str) != Some(control)
     {
@@ -1146,11 +1158,29 @@ fn create(
     name_value: &str,
     storage: &str,
     predicate_path: &Path,
+    program_path: Option<&Path>,
 ) -> Result<()> {
     validate_name(name_value)?;
-    if !matches!(storage, "content" | "declared") {
-        return Err("supported resource storage is content or declared".into());
+    if !matches!(storage, "content" | "declared" | "nock") {
+        return Err("supported resource storage is content, declared or nock".into());
     }
+    // `nock`: the program is the Host's own op-117 verdict (its canonical
+    // DREGG/NOCK/PROGRAM/v1 bytes and, when admissible, its cell id).
+    let program: Option<(String, Option<String>)> = match (storage, program_path) {
+        ("nock", Some(path)) => {
+            let verdict = bounded_json_limit(path, MAX_PROGRAM_SOURCE)?;
+            if verdict.get("type").and_then(Value::as_str) != Some("nock-check") {
+                return Err("--program must be a Host nock-check verdict".into());
+            }
+            Some((
+                member(&verdict, "program")?.to_owned(),
+                verdict.get("cellId").and_then(Value::as_str).map(str::to_owned),
+            ))
+        }
+        ("nock", None) => return Err("nock storage requires --program".into()),
+        (_, Some(_)) => return Err("--program is only for nock storage".into()),
+        _ => None,
+    };
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = member_path(workspace, "namespaceRoot")?;
     let context = bounded_json(&context_path)?;
@@ -1161,9 +1191,12 @@ fn create(
     let request_path = root
         .join("sources")
         .join(format!("create-{name_value}.request.json"));
-    let requested_core = json!({"type":"minidregg-workspace-create-request-v1",
+    let mut requested_core = json!({"type":"minidregg-workspace-create-request-v1",
         "name":name_value,"storage":storage,"predicate":predicate,"context":context,
         "subject":member(workspace,"subject")?});
+    if let Some((hex, _)) = &program {
+        requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
+    }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
         let nonce = member(&saved, "nonce")?;
@@ -1182,7 +1215,7 @@ fn create(
         requested
     };
     let stable_request = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
-    let roles = [
+    let mut roles = vec![
         Role {
             label: "target".into(),
             kind: IdKind::Resource,
@@ -1196,6 +1229,9 @@ fn create(
             kind: IdKind::Capability,
         },
     ];
+    if program.is_some() {
+        roles.remove(0);
+    }
     let reservation = participant_namespace::reserve(
         &namespace_root,
         member(&context["genesis"], "domain")?,
@@ -1208,19 +1244,27 @@ fn create(
         .join("sources")
         .join(format!("create-{name_value}.json"));
     let nonce = member(&request, "nonce")?;
+    let resource = match &program {
+        Some((hex, _)) => json!({"kind":"object","storage":storage,"program":hex,
+            "owner":member(workspace,"subject")?,
+            "ownerCapability":reservation.ids["ownerCapability"],
+            "controlCapability":reservation.ids["controlCapability"],
+            "predicate":predicate}),
+        None => json!({"kind":"object","storage":storage,
+            "target":reservation.ids["target"],"owner":member(workspace,"subject")?,
+            "ownerCapability":reservation.ids["ownerCapability"],
+            "controlCapability":reservation.ids["controlCapability"],
+            "predicate":predicate}),
+    };
     let expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
-                "resources":[{"kind":"object","storage":storage,
-                    "target":reservation.ids["target"],"owner":member(workspace,"subject")?,
-                    "ownerCapability":reservation.ids["ownerCapability"],
-                    "controlCapability":reservation.ids["controlCapability"],
-                    "predicate":predicate}],
+                "resources":[resource],
                 "sourceCapabilities":context["sourceCapabilities"],
                 "funding":context["funding"],"feePayer":context["feePayer"]},
             "grants":context["grants"]});
     let source = if source_path.exists() {
-        let saved = bounded_json(&source_path)?;
+        let saved = bounded_json_limit(&source_path, MAX_PROGRAM_SOURCE)?;
         if saved != expected_source {
             return Err("retained birth source differs from reservation request".into());
         }
@@ -1237,6 +1281,9 @@ fn create(
         .and_then(|values| values.first())
         .ok_or("retained birth source lacks resource")?;
     for role in ["target", "ownerCapability", "controlCapability"] {
+        if role == "target" && program.is_some() {
+            continue;
+        }
         if parts.get(role).and_then(Value::as_str) != reservation.ids.get(role).map(String::as_str)
         {
             return Err("retained birth source differs from namespace reservation".into());
@@ -1311,12 +1358,12 @@ fn create(
             ));
         }
         if let Some(receipt) = accepted_outcome(&attempt)? {
-            return complete_birth(root, name_value, &source, &receipt, &reservation);
+            return complete_birth(root, name_value, &source, &receipt, &reservation, program.as_ref().and_then(|(_, cell)| cell.as_deref()));
         }
         retry(&attempt, "lookup", false)?;
         let receipt = accepted_outcome(&attempt)?
             .ok_or("historical create lookup did not confirm installed birth")?;
-        return complete_birth(root, name_value, &source, &receipt, &reservation);
+        return complete_birth(root, name_value, &source, &receipt, &reservation, program.as_ref().and_then(|(_, cell)| cell.as_deref()));
     }
     eprintln!("workspace birth attempt: {}", attempt.display());
     submit(
@@ -1329,7 +1376,7 @@ fn create(
         false,
     )?;
     let receipt = accepted_outcome(&attempt)?.ok_or("birth returned without installed receipt")?;
-    complete_birth(root, name_value, &source, &receipt, &reservation)
+    complete_birth(root, name_value, &source, &receipt, &reservation, program.as_ref().and_then(|(_, cell)| cell.as_deref()))
 }
 
 pub(crate) fn run(mut args: Args) -> Result<()> {
@@ -1447,8 +1494,9 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = os_string(args.required("name")?, "resource name")?;
             let storage = os_string(args.required("storage")?, "storage")?;
             let predicate = path(args.required("predicate")?);
+            let program = args.optional("program").map(path);
             args.finish()?;
-            create(&root, &workspace, &name, &storage, &predicate)
+            create(&root, &workspace, &name, &storage, &predicate, program.as_deref())
         }
         "recover" => {
             let attempt = path(args.required("attempt")?);

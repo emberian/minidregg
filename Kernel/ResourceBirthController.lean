@@ -364,6 +364,7 @@ inductive PreparationReject where
   | directory
   | initialPayload
   | initialPolicy
+  | nockLibrary
   | factory
   | resourceBook
   | authorityDomain
@@ -431,6 +432,9 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   policiesBound : descriptor.InitialPoliciesBound
+  /-- Every Nock program born here names only program cells already present. -/
+  librariesPresent : CanonicalCellRegistry.birthLibrariesPresent deployment.domain
+    directory.directory descriptor = true
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
   book : ObservedCell deployment directory.directory deployment.resourceBookId .resourceBook
   authority : CredentialAuthorityDomainReceiver.Loaded deployment durable.snapshot
@@ -445,6 +449,9 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deploy
   let initials ← requirePreparation
     (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .initialPayload
   let policiesBound ← requirePreparation descriptor.InitialPoliciesBound .initialPolicy
+  let libraries ← requirePreparation
+    (CanonicalCellRegistry.birthLibrariesPresent deployment.domain directory.directory descriptor =
+      true) .nockLibrary
   let factory ← fromOption
     (observeCell deployment directory.directory deployment.factoryId .declaredObject) .factory
   let book ← fromOption
@@ -452,7 +459,7 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deploy
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
-    initials.down, policiesBound.down, factory, book, authority⟩
+    initials.down, policiesBound.down, libraries.down, factory, book, authority⟩
 
 /-- Common post-authority physical checks. The authority route supplies only
 its already checked physical writes; allocation, conserved Book application,
