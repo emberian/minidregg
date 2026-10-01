@@ -57,7 +57,7 @@ behind a signed account observation, 102=exact receipt by transaction id,
 128=clock tick submit, 129=public clock view.
 
 131=Nock program check (pair: minimal jam bytes, ABI JSON) -> JSON verdict and the
-canonical DREGG/NOCK/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
+canonical DREGG/NOCK/PROGRAM/v3 bytes a `storage: "nock"` birth carries,
 132=Nock program show (decimal programId) -> JSON, 133=Nock sample (JSON request)
 -> JSON with the kernel's canonical sample jam, 134=Nock run dry run (JSON
 {programId, caller, room, targets, values}) -> JSON with the kernel's sample at
@@ -534,11 +534,15 @@ structure Settings where
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
   agentLifetimeDispatchServices : Option (List AgentLifetimeDispatchFixedSettings) := none
+  /-- Compiled-in evaluators (by decimal registry id) this operator disabled; committed in
+  the runtime semantics, so `expectedSemantics` must be computed with the same list. -/
+  disabledEvaluators : Option (List Nat) := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
   deployment := ⟨⟨settings.domain⟩, settings.factoryId, settings.resourceBookId, settings.authorityCellId⟩
   federation := ⟨settings.federation⟩
+  disabledEvaluators := (settings.disabledEvaluators.getD []).map fun id => ⟨id⟩
   template := ⟨⟨settings.issuer⟩, settings.ownerBudget, settings.lifetime⟩
   tariff := ⟨settings.tariffBase, settings.tariffPerBirth, settings.tariffPerGrant,
     settings.tariffPerInitialPayloadByte, settings.collector, settings.asset⟩
@@ -5500,7 +5504,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let height := NativeHost.logicalHeight pinnedConfig opened.durable
                             let directory ← nockDirectory pinnedConfig state
-                            let verdict := Minidregg.Kernel.NockRun.dryRun
+                            let verdict := Minidregg.Kernel.Run.dryRun
+                              pinnedConfig.disabledEvaluators
                               pinnedConfig.deployment.domain directory programId
                               ⟨height, caller, room⟩ targets values
                             return ((134 : UInt8), (Minidregg.Host.Json.nockRunJson programId height
@@ -5526,8 +5531,8 @@ def run (arguments : List String) : IO UInt32 := do
                             let (programId, view, path) ← IO.ofExcept
                               (Minidregg.Host.Json.nockDoorReadRequest source isPeek)
                             let directory ← nockDirectory pinnedConfig state
-                            let verdict : Except Minidregg.Kernel.NockRun.Refusal
-                                Minidregg.Kernel.NockRun.Ran :=
+                            let verdict : Except Minidregg.Kernel.Run.Refusal
+                                (Minidregg.Theory.Eval.Ran Minidregg.Theory.Noun) :=
                               match CanonicalCellRegistry.loadProgram
                                   pinnedConfig.deployment.domain directory programId with
                               | none => .error .programUnknown

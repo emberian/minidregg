@@ -25,11 +25,13 @@ has no fuel, so exhaustion says nothing about the term
 the term: `run_crash_iff`.
 -/
 import Theory.Noun
+import Theory.Eval
 
 namespace Minidregg.Theory
 namespace Nock
 
 open Noun
+open Eval
 
 /-- A decoded formula: exactly the shapes `nockvm`'s decoder accepts. -/
 inductive Form where
@@ -214,11 +216,6 @@ def exec : Nat → Nat → Noun → Noun → Res
         | none => .crash r'
     | some (.hintS _ z) => exec d b s z
     | some (.hintD _ c z) => (exec d b s c).bind fun _ r => exec d r s z
-
-inductive Outcome where
-  | crash
-  | exhausted
-  deriving DecidableEq, Repr
 
 /-- `*[s f]` with a budget of `fuel` rule applications. -/
 def run (fuel : Nat) (s f : Noun) : Except Outcome Noun :=
@@ -975,14 +972,7 @@ theorem reduces_deterministic {sf v v' : Noun} (h : Reduces sf v) (h' : Reduces 
 /-! ## The byte-level entry point (what the host and `nock-eval` call) -/
 
 /-- Running a jammed `[subject formula]`. -/
-inductive JamRun where
-  | ok (steps : Nat) (out : List UInt8)
-  | crash (steps : Nat)
-  | exhausted (steps : Nat)
-  | malformed
-  deriving DecidableEq, Repr
-
-def runJammed (fuel : Nat) (input : List UInt8) : JamRun :=
+def runJammed (fuel : Nat) (input : List UInt8) : ByteRun :=
   match cue input with
   | some (cell s f) =>
     match exec fuel fuel s f with
@@ -1019,18 +1009,12 @@ theorem runJammed_crash_sound {fuel : Nat} {input : List UInt8} {k : Nat}
     · cases h
   · cases h
 
-/-- C ABI for the host: `[status] ++ steps (8 bytes, little-endian) ++ jam`, status
-`0` ok · `1` crash · `2` exhausted · `3` malformed input. -/
+/-- C ABI for the host: `Eval.ByteRun.toBytes` of `runJammed`, i.e.
+`[status] ++ steps (8 bytes, little-endian) ++ jam`, status `0` ok · `1` crash ·
+`2` exhausted · `3` malformed input. -/
 @[export minidregg_nock_run_jammed]
 def runJammedBytes (fuel : UInt64) (input : ByteArray) : ByteArray :=
-  let le8 (n : Nat) : List UInt8 := (List.range 8).map fun i => (n >>> (8 * i)).toUInt8
-  let out : List UInt8 :=
-    match runJammed fuel.toNat input.toList with
-    | .ok k bs => 0 :: le8 k ++ bs
-    | .crash k => 1 :: le8 k
-    | .exhausted k => 2 :: le8 k
-    | .malformed => 3 :: le8 0
-  ⟨out.toArray⟩
+  ⟨(runJammed fuel.toNat input.toList).toBytes.toArray⟩
 
 /-! ## Divergence: exhaustion at every fuel -/
 
