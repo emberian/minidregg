@@ -17,11 +17,17 @@ the registry's `ContentLaw`, which every final cell runs.  Authorization and
 current installed Pred evaluation belong to the enclosing ResourceTransaction
 receiver.
 
-Command grammar v4 (`DREGG/CONTENT/MUTATE` ++ [4]) replaces v3's one-atom
-`quote` with `transclude`, a range of another document.  Version-1 commands
-(links carried the retired `ForwardTarget`), version-2 commands (no
-annotate/quote; atoms without a revision) and version-3 commands (the atom
-`quote`) refuse to decode (`retired_command_refused`).
+Command grammar v5 (`DREGG/CONTENT/MUTATE` ++ [5]) gives a document an element
+tree.  `createDocument` makes the root, an empty container; `createAtom` and
+`transclude` append their new leaf (an `atom` or `embed` element carrying the
+record's own identifier) to the root; and `editElement` splices a detached
+element into a container, moves a child within one, or removes (detaches) one,
+each against the revision of the container its author read.  A line placed at
+position N is a `createAtom` and a `move` to N in one command, all or nothing.  Document order is the pre-order walk of the
+tree (`documentOrder`), never an identifier sort.  Versions 1–4 refuse to decode
+(`retired_command_refused`): v4 had no tree (a document's lines were ordered by
+atom identifier), v3 had the atom `quote`, v2 no annotate and no atom revision,
+v1 the retired `ForwardTarget`.
 
 `annotate` attaches an annotation record to one atom at the revision the
 annotator read and writes nothing else.  `transclude` writes a
@@ -108,8 +114,56 @@ structure Context where
 is ever recorded under it. -/
 def Context.closed : Context := ⟨0, fun _ => none⟩
 
+/-! ## The element tree: placements and edits -/
+
+/-- One edit of one container's children. -/
+inductive ElementOp where
+  /-- Attach a detached element as the child at `index`. -/
+  | splice (index : Nat) (child : ElementId)
+  /-- Move a child of this container to `index` among its children. -/
+  | move (child : ElementId) (index : Nat)
+  /-- Detach a child: it stays stored, in no container and not in the order. -/
+  | remove (child : ElementId)
+  deriving DecidableEq
+
+abbrev ElementOpWire := Sum (Nat × ElementId) (Sum (ElementId × Nat) ElementId)
+
+def ElementOp.toWire : ElementOp → ElementOpWire
+  | .splice index child => .inl (index, child)
+  | .move child index => .inr (.inl (child, index))
+  | .remove child => .inr (.inr child)
+
+def ElementOp.ofWire : ElementOpWire → ElementOp
+  | .inl (index, child) => .splice index child
+  | .inr (.inl (child, index)) => .move child index
+  | .inr (.inr child) => .remove child
+
+def elementOpStream : StreamCodec ElementOp :=
+  StreamCodec.xmap
+    (StreamCodec.sum (StreamCodec.product StreamCodec.nat (identifierStream .v1 .element))
+      (StreamCodec.sum (StreamCodec.product (identifierStream .v1 .element) StreamCodec.nat)
+        (identifierStream .v1 .element)))
+    ElementOp.toWire ElementOp.ofWire (by intro op; cases op <;> rfl)
+
+/-- An edit of container `element`, whose children its author read at `revision`. -/
+structure EditElement where
+  element : ElementId
+  revision : OperationId
+  op : ElementOp
+  deriving DecidableEq
+
+def editElementStream : StreamCodec EditElement :=
+  StreamCodec.xmap
+    (StreamCodec.product (identifierStream .v1 .element)
+      (StreamCodec.product (identifierStream .v1 .operationIntent) elementOpStream))
+    (fun edit => (edit.element, edit.revision, edit.op))
+    (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩)
+    (by intro edit; cases edit; rfl)
+
 inductive Action where
-  | createDocument (rootElement : ElementId) (schema : Digest) (body : ElementBody)
+  /-- The document record and its root element, an empty container. -/
+  | createDocument (rootElement : ElementId) (schema : Digest)
+  /-- A new atom, and in a document its `atom` leaf, appended to the root. -/
   | createAtom (atom : AtomId) (kind : AtomKind) (payload : List UInt8)
   | editAtom (edit : EditAtomPayload)
   | link (link : LinkId) (source : Option StableRange) (target : LinkTarget)
@@ -121,20 +175,25 @@ inductive Action where
   /-- Transclude a range of another document (`snapshot` or `live`): a
   `TransclusionRecord` holding the opening, and a forward link to it. -/
   | transclude (transclusion : TransclusionId) (link : LinkId) (request : TranscludeRequest)
+  /-- Splice, move or remove one child of one container. -/
+  | editElement (edit : EditElement)
+  /-- A new empty container (a section), appended to the root; refused in a
+  cell that holds no document. -/
+  | createContainer (element : ElementId)
   deriving DecidableEq
 
-abbrev ActionWire := Sum (ElementId × Digest × ElementBody)
+abbrev ActionWire := Sum (ElementId × Digest)
   (Sum (AtomId × AtomKind × List UInt8)
     (Sum EditAtomPayload
       (Sum (LinkId × Option StableRange × LinkTarget × Digest)
         (Sum (RunId × List AtomId)
           (Sum (AnnotationId × AtomId × OperationId × List UInt8)
-            (TransclusionId × LinkId × TranscludeRequest))))))
+            (Sum (TransclusionId × LinkId × TranscludeRequest)
+              (Sum EditElement ElementId)))))))
 
 def actionWireStream : StreamCodec ActionWire :=
   StreamCodec.sum
-    (StreamCodec.product (identifierStream .v1 .element)
-      (StreamCodec.product digestStream elementBodyStream))
+    (StreamCodec.product (identifierStream .v1 .element) digestStream)
     (StreamCodec.sum
       (StreamCodec.product (identifierStream .v1 .atom)
         (StreamCodec.product atomKindStream bytesStream))
@@ -150,11 +209,13 @@ def actionWireStream : StreamCodec ActionWire :=
               (StreamCodec.product (identifierStream .v1 .annotation)
                 (StreamCodec.product (identifierStream .v1 .atom)
                   (StreamCodec.product (identifierStream .v1 .operationIntent) bytesStream)))
-              (StreamCodec.product (identifierStream .v1 .transclusion)
-                (StreamCodec.product (identifierStream .v1 .link) transcludeRequestStream)))))))
+              (StreamCodec.sum
+                (StreamCodec.product (identifierStream .v1 .transclusion)
+                  (StreamCodec.product (identifierStream .v1 .link) transcludeRequestStream))
+                (StreamCodec.sum editElementStream (identifierStream .v1 .element))))))))
 
 def Action.toWire : Action → ActionWire
-  | .createDocument root schema body => .inl (root, schema, body)
+  | .createDocument root schema => .inl (root, schema)
   | .createAtom atom kind payload => .inr (.inl (atom, kind, payload))
   | .editAtom edit => .inr (.inr (.inl edit))
   | .link linkId source target relation =>
@@ -163,10 +224,12 @@ def Action.toWire : Action → ActionWire
   | .annotate annotationId atom revision body =>
       .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body))))))
   | .transclude transclusion linkId request =>
-      .inr (.inr (.inr (.inr (.inr (.inr (transclusion, linkId, request))))))
+      .inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request)))))))
+  | .editElement edit => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit)))))))
+  | .createContainer element => .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr element)))))))
 
 def Action.ofWire : ActionWire → Action
-  | .inl (root, schema, body) => .createDocument root schema body
+  | .inl (root, schema) => .createDocument root schema
   | .inr (.inl (atom, kind, payload)) => .createAtom atom kind payload
   | .inr (.inr (.inl edit)) => .editAtom edit
   | .inr (.inr (.inr (.inl (linkId, source, target, relation)))) =>
@@ -174,8 +237,10 @@ def Action.ofWire : ActionWire → Action
   | .inr (.inr (.inr (.inr (.inl (runId, atoms))))) => .createRun runId atoms
   | .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body)))))) =>
       .annotate annotationId atom revision body
-  | .inr (.inr (.inr (.inr (.inr (.inr (transclusion, linkId, request)))))) =>
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inl (transclusion, linkId, request))))))) =>
       .transclude transclusion linkId request
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inl edit))))))) => .editElement edit
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr (.inr element))))))) => .createContainer element
 
 @[simp] theorem Action.ofWire_toWire (action : Action) :
     Action.ofWire action.toWire = action := by cases action <;> rfl
@@ -192,7 +257,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 4
+def commandVersion : Nat := 5
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -220,15 +285,16 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- Version-1, version-2 and version-3 command frames refuse to decode. -/
-theorem retired_command_refused (version : UInt8) (retired : version = 1 ∨ version = 2 ∨ version = 3)
+/-- Version-1 through version-4 command frames refuse to decode. -/
+theorem retired_command_refused (version : UInt8)
+    (retired : version = 1 ∨ version = 2 ∨ version = 3 ∨ version = 4)
     (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
-    rcases retired with rfl | rfl | rfl <;> decide +kernel
+    rcases retired with rfl | rfl | rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -245,6 +311,20 @@ inductive Reject where
   | sourceNotCovered
   /-- A transclusion whose opening the source's state at this height does not hold. -/
   | staleOpening
+  /-- No element of this document has that identifier. -/
+  | noSuchElement
+  /-- A placement or edit names a leaf where a container is required. -/
+  | notAContainer
+  /-- A position past the end of the container's children. -/
+  | indexOutOfRange
+  /-- A splice that would place an element under itself or its own descendant. -/
+  | cycle
+  /-- The container's children moved since the revision its editor read. -/
+  | staleElement
+  /-- A move or remove of an element that is not a child of the container. -/
+  | notAChild
+  /-- A splice of an element that already has a place (or is the document root). -/
+  | attached
   deriving DecidableEq, Repr
 
 /-! ## Lowering actions to guarded operations -/
@@ -414,13 +494,160 @@ def transcludePayload (document : DocumentId) (transclusion : TransclusionId) (l
   disclosurePolicy := read.policy
 
 
+/-! ## The element tree -/
+
+/-- The element record at `element`, if any. -/
+def elementAt (store : ContentStore) (element : ElementId) : Option ElementRecord :=
+  Hyperdocument.lookup store .elements element
+
+def parentOf (store : ContentStore) (element : ElementId) : Option ElementId :=
+  (elementAt store element).bind ElementRecord.parent
+
+def bodyChildren : ElementBody → List ElementId
+  | .container children => children
+  | _ => []
+
+/-- A container's ordered children; a leaf or an absent element has none. -/
+def childrenOf (store : ContentStore) (element : ElementId) : List ElementId :=
+  match elementAt store element with
+  | some record => bodyChildren record.body
+  | none => []
+
+/-- The root element of the cell's document, if the cell holds one. -/
+def rootOf (store : ContentStore) (document : DocumentId) : Option ElementId :=
+  (Hyperdocument.lookup store .documents document).map DocumentRecord.rootElement
+
+/-- A line's leaf element carries its atom's identifier. -/
+def atomElement (atom : AtomId) : ElementId := ⟨atom.digest⟩
+
+/-- A transclusion's `embed` leaf carries the transclusion's identifier. -/
+def transclusionElement (transclusion : TransclusionId) : ElementId := ⟨transclusion.digest⟩
+
+/-- A container with new children, stamped with the operation that moved them. -/
+def withChildren (record : ElementRecord) (children : List ElementId) (operation : OperationId) :
+    ElementRecord :=
+  { record with body := .container children, revision := operation }
+
+/-- Rewrite one present element, guarded by its exact current record. -/
+def rewriteElement (progress : Progress) (element : ElementId) (after : ElementRecord) :
+    Except Reject Progress :=
+  match elementAt progress.1 element with
+  | none => .error .noSuchElement
+  | some before => .ok (progress.1.set ⟨.elements, element⟩ (some after),
+      progress.2 ++ [.write .elements element before after])
+
+/-- Give one present element a new parent (`none`: detached), keeping the rest
+of its current record. -/
+def reparent (progress : Progress) (element : ElementId) (parent : Option ElementId) :
+    Except Reject Progress :=
+  match elementAt progress.1 element with
+  | none => .error .noSuchElement
+  | some before => .ok (progress.1.set ⟨.elements, element⟩ (some { before with parent := parent }),
+      progress.2 ++ [.write .elements element before { before with parent := parent }])
+
+/-- The container `element` of this document, whose children its editor read at
+`revision`.  A container already moved by an earlier action of this same
+operation is current for it: that action was itself checked. -/
+def openContainer (store : ContentStore) (document : DocumentId) (element : ElementId)
+    (revision operation : OperationId) : Except Reject (ElementRecord × List ElementId) :=
+  match elementAt store element with
+  | none => .error .noSuchElement
+  | some record =>
+      if record.document ≠ document then .error .noSuchElement
+      else match record.body with
+        | .container children =>
+            if record.revision = revision ∨ record.revision = operation then .ok (record, children)
+            else .error .staleElement
+        | _ => .error .notAContainer
+
+/-- The leaf record an append allocates. -/
+def leafRecord (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (parent : ElementId) (body : ElementBody) : ElementRecord :=
+  ⟨document, some parent, body, author, operation, operation, none⟩
+
+/-- Append a new leaf to the document's root.  An append moves no existing
+child, so the root's revision stays as it was: an edit naming a position
+computed before the append still means the same position.  A cell holding no
+document has no tree, so there the leaf is not created. -/
+def appendLeaf (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (progress : Progress) (leaf : ElementId) (body : ElementBody) : Except Reject Progress :=
+  match rootOf progress.1 document with
+  | none => .ok progress
+  | some root =>
+      match elementAt progress.1 root with
+      | none => .error .noSuchElement
+      | some record =>
+          match record.body with
+          | .container children => do
+              let next ← rewriteElement progress root
+                { record with body := .container (children ++ [leaf]) }
+              allocate next .elements leaf (leafRecord author operation document root body)
+          | _ => .error .notAContainer
+
+/-- `true` when the ancestors of `element`, walked up within `fuel` steps, reach
+the top without meeting `child`; `false` when they meet it or the fuel runs out. -/
+def clearOf : Nat → ContentStore → ElementId → ElementId → Bool
+  | 0, _, _, _ => false
+  | fuel + 1, store, element, child =>
+      decide (element ≠ child) && match parentOf store element with
+        | none => true
+        | some parent => clearOf fuel store parent child
+
+/-- Fuel for a walk over the tree: one more than the number of stored records. -/
+def treeFuel (store : ContentStore) : Nat := store.support.card + 1
+
+def editElementStep (operation : OperationId) (document : DocumentId) (progress : Progress)
+    (edit : EditElement) : Except Reject Progress := do
+  let (record, children) ← openContainer progress.1 document edit.element edit.revision operation
+  match edit.op with
+  | .splice index child =>
+      if index ≤ children.length then
+        match elementAt progress.1 child with
+        | none => .error .noSuchElement
+        | some childRecord =>
+            if childRecord.document ≠ document then .error .noSuchElement
+            else if childRecord.parent.isSome || decide (rootOf progress.1 document = some child) then
+              .error .attached
+            else if clearOf (treeFuel progress.1) progress.1 edit.element child then do
+              let next ← rewriteElement progress edit.element
+                (withChildren record (children.insertIdx index child) operation)
+              reparent next child (some edit.element)
+            else .error .cycle
+      else .error .indexOutOfRange
+  | .move child index =>
+      if child ∈ children then
+        if index < children.length then
+          rewriteElement progress edit.element
+            (withChildren record ((children.erase child).insertIdx index child) operation)
+        else .error .indexOutOfRange
+      else .error .notAChild
+  | .remove child =>
+      if child ∈ children then do
+        let next ← rewriteElement progress edit.element
+          (withChildren record (children.erase child) operation)
+        reparent next child none
+      else .error .notAChild
+
+/-- The pre-order walk from `element`, `fuel` levels deep. -/
+def walk : Nat → ContentStore → ElementId → List ElementId
+  | 0, _, _ => []
+  | fuel + 1, store, element => element :: (childrenOf store element).flatMap (walk fuel store)
+
+/-- Document order: the pre-order walk of the tree below the document's root.
+This is the canonical line order; a client renders its leaves and never sorts. -/
+def documentOrder (store : ContentStore) (document : DocumentId) : List ElementId :=
+  match rootOf store document with
+  | none => []
+  | some root => (walk (treeFuel store) store root).tail
+
 def step (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) (progress : Progress) : Action → Except Reject Progress
-  | .createDocument root schema body => do
+  | .createDocument root schema => do
       let next ← allocate progress .documents document ⟨root, schema, author, operation⟩
-      allocate next .elements root ⟨document, none, body, author, operation, none⟩
-  | .createAtom atom kind payload =>
-      allocate progress .atoms atom ⟨document, kind, payload, author, operation, operation, none⟩
+      allocate next .elements root ⟨document, none, .container [], author, operation, operation, none⟩
+  | .createAtom atom kind payload => do
+      let next ← allocate progress .atoms atom ⟨document, kind, payload, author, operation, operation, none⟩
+      appendLeaf author operation document next (atomElement atom) (.atom atom)
   | .editAtom edit =>
       replaceAtom document progress edit.atomId edit.before (editAtomRecord operation edit)
   | .link link source target relation =>
@@ -443,7 +670,14 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
           let payload := transcludePayload document transclusion link request context.height read
           let next ← allocate progress .transclusions transclusion
             (transclusionRecord operation author payload)
-          allocate next .links link (transclusionForwardLink operation author payload)
+          let next ← allocate next .links link (transclusionForwardLink operation author payload)
+          appendLeaf author operation document next (transclusionElement transclusion)
+            (.embed transclusion)
+  | .editElement edit => editElementStep operation document progress edit
+  | .createContainer element =>
+      match rootOf progress.1 document with
+      | none => .error .noSuchElement
+      | some _ => appendLeaf author operation document progress element (.container [])
 
 def run (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (command : Command) : Except Reject Progress :=
@@ -494,22 +728,172 @@ theorem replaceAtom_executes (pre : ContentStore) (document : DocumentId)
       exact executes_append pre progress (.write .atoms atom before after) holds
         ⟨rfl, not_not.mp present⟩
 
+
+theorem bind_eq_ok {α β : Type} {x : Except Reject α} {f : α → Except Reject β} {b : β}
+    (accepted : (x >>= f) = .ok b) : ∃ a, x = .ok a ∧ f a = .ok b := by
+  cases x with
+  | error reason => simp [bind, Except.bind] at accepted
+  | ok a => exact ⟨a, rfl, accepted⟩
+
+theorem allocate_ok {progress next : Progress} {space : Namespace} {key : Key space}
+    {value : Value space} (accepted : allocate progress space key value = .ok next) :
+    progress.1 ⟨space, key⟩ = none ∧
+      next = (progress.1.set ⟨space, key⟩ (some value), progress.2 ++ [.allocate space key value]) := by
+  unfold allocate at accepted
+  split at accepted
+  · rename_i fresh
+    cases accepted
+    exact ⟨fresh, rfl⟩
+  · cases accepted
+
+theorem rewriteElement_ok {progress next : Progress} {element : ElementId} {after : ElementRecord}
+    (accepted : rewriteElement progress element after = .ok next) :
+    ∃ before, elementAt progress.1 element = some before ∧
+      next = (progress.1.set ⟨.elements, element⟩ (some after),
+        progress.2 ++ [.write .elements element before after]) := by
+  unfold rewriteElement at accepted
+  split at accepted
+  · cases accepted
+  · rename_i before found
+    cases accepted
+    exact ⟨before, found, rfl⟩
+
+/-- `next` extends `progress` by guarded writes and allocations of elements only. -/
+def ElementStep (progress next : Progress) : Prop :=
+  (∀ pre, Executes pre progress → Executes pre next) ∧
+    ∀ address : Hyperdocument.Address, address.1 ≠ .elements → next.1 address = progress.1 address
+
+theorem ElementStep.refl (progress : Progress) : ElementStep progress progress :=
+  ⟨fun _ holds => holds, fun _ _ => rfl⟩
+
+theorem ElementStep.trans {first second third : Progress}
+    (left : ElementStep first second) (right : ElementStep second third) :
+    ElementStep first third :=
+  ⟨fun pre holds => right.1 pre (left.1 pre holds),
+    fun address other => (right.2 address other).trans (left.2 address other)⟩
+
+theorem allocate_element_step {progress next : Progress} {key : ElementId} {value : ElementRecord}
+    (accepted : allocate progress .elements key value = .ok next) : ElementStep progress next := by
+  refine ⟨fun pre holds => allocate_executes pre progress next _ _ _ holds accepted, ?_⟩
+  obtain ⟨_, rfl⟩ := allocate_ok accepted
+  intro address other
+  exact Store.Store.set_ne _ _ _ address (fun same => other (congrArg Sigma.fst same))
+
+theorem rewriteElement_step {progress next : Progress} {element : ElementId} {after : ElementRecord}
+    (accepted : rewriteElement progress element after = .ok next) : ElementStep progress next := by
+  obtain ⟨before, found, rfl⟩ := rewriteElement_ok accepted
+  refine ⟨fun pre holds => executes_append pre progress (.write .elements element before after)
+    holds ⟨rfl, found⟩, ?_⟩
+  intro address other
+  exact Store.Store.set_ne _ _ _ address (fun same => other (congrArg Sigma.fst same))
+
+theorem reparent_ok {progress next : Progress} {element : ElementId} {parent : Option ElementId}
+    (accepted : reparent progress element parent = .ok next) :
+    ∃ before, elementAt progress.1 element = some before ∧
+      next = (progress.1.set ⟨.elements, element⟩ (some { before with parent := parent }),
+        progress.2 ++ [.write .elements element before { before with parent := parent }]) := by
+  unfold reparent at accepted
+  split at accepted
+  · cases accepted
+  · rename_i before found
+    cases accepted
+    exact ⟨before, found, rfl⟩
+
+theorem reparent_step {progress next : Progress} {element : ElementId} {parent : Option ElementId}
+    (accepted : reparent progress element parent = .ok next) : ElementStep progress next := by
+  obtain ⟨before, found, rfl⟩ := reparent_ok accepted
+  refine ⟨fun pre holds => executes_append pre progress
+    (.write .elements element before { before with parent := parent }) holds ⟨rfl, found⟩, ?_⟩
+  intro address other
+  exact Store.Store.set_ne _ _ _ address (fun same => other (congrArg Sigma.fst same))
+
+theorem appendLeaf_step (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    {progress next : Progress} {leaf : ElementId} {body : ElementBody}
+    (accepted : appendLeaf author operation document progress leaf body = .ok next) :
+    ElementStep progress next := by
+  unfold appendLeaf at accepted
+  split at accepted
+  · cases accepted
+    exact ElementStep.refl _
+  · split at accepted
+    · cases accepted
+    · split at accepted
+      · obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+        exact (rewriteElement_step first).trans (allocate_element_step rest)
+      · cases accepted
+
+theorem openContainer_ok {store : ContentStore} {document : DocumentId} {element : ElementId}
+    {revision operation : OperationId} {record : ElementRecord} {children : List ElementId}
+    (opened : openContainer store document element revision operation = .ok (record, children)) :
+    elementAt store element = some record ∧ record.document = document ∧
+      record.body = .container children ∧ (record.revision = revision ∨ record.revision = operation) := by
+  unfold openContainer at opened
+  split at opened
+  · cases opened
+  · rename_i found
+    split at opened
+    · cases opened
+    · rename_i local_
+      split at opened
+      · rename_i list body
+        split at opened
+        · rename_i current
+          cases opened
+          exact ⟨found, not_not.mp local_, body, current⟩
+        · cases opened
+      · cases opened
+
+theorem editElementStep_step (operation : OperationId) (document : DocumentId)
+    {progress next : Progress} {edit : EditElement}
+    (accepted : editElementStep operation document progress edit = .ok next) :
+    ElementStep progress next := by
+  unfold editElementStep at accepted
+  obtain ⟨⟨record, children⟩, _, rest⟩ := bind_eq_ok accepted
+  cases operation_ : edit.op with
+  | splice index child =>
+      simp only [operation_] at rest
+      split at rest
+      · split at rest
+        · cases rest
+        · split at rest
+          · cases rest
+          · split at rest
+            · cases rest
+            · split at rest
+              · obtain ⟨middle, first, last⟩ := bind_eq_ok rest
+                exact (rewriteElement_step first).trans (reparent_step last)
+              · cases rest
+      · cases rest
+  | move child index =>
+      simp only [operation_] at rest
+      split at rest
+      · split at rest
+        · exact rewriteElement_step rest
+        · cases rest
+      · cases rest
+  | remove child =>
+      simp only [operation_] at rest
+      split at rest
+      · obtain ⟨middle, first, last⟩ := bind_eq_ok rest
+        exact (rewriteElement_step first).trans (reparent_step last)
+      · cases rest
+
 theorem step_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (progress next : Progress) (action : Action)
     (holds : Executes pre progress)
     (accepted : step author operation document context progress action = .ok next) :
     Executes pre next := by
   cases action with
-  | createDocument root schema body =>
+  | createDocument root schema =>
       simp only [step] at accepted
-      cases first : allocate progress .documents document ⟨root, schema, author, operation⟩ with
-      | error reason => simp [first, bind, Except.bind] at accepted
-      | ok middle =>
-          simp only [first, bind, Except.bind] at accepted
-          exact allocate_executes pre middle next _ _ _
-            (allocate_executes pre progress middle _ _ _ holds first) accepted
+      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+      exact allocate_executes pre middle next _ _ _
+        (allocate_executes pre progress middle _ _ _ holds first) rest
   | createAtom atom kind payload =>
-      exact allocate_executes pre progress next _ _ _ holds accepted
+      simp only [step] at accepted
+      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+      exact (appendLeaf_step author operation document rest).1 pre
+        (allocate_executes pre progress middle _ _ _ holds first)
   | editAtom edit =>
       exact replaceAtom_executes pre document progress next _ _ _ holds accepted
   | link link source target relation =>
@@ -532,13 +916,18 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
       | none => simp [step, covered] at accepted
       | some read =>
           simp only [step, covered] at accepted
-          cases first : allocate progress .transclusions transclusion (transclusionRecord operation
-              author (transcludePayload document transclusion link request context.height read)) with
-          | error reason => simp [first, bind, Except.bind] at accepted
-          | ok middle =>
-              simp only [first, bind, Except.bind] at accepted
-              exact allocate_executes pre middle next _ _ _
-                (allocate_executes pre progress middle _ _ _ holds first) accepted
+          obtain ⟨first, firstOk, rest⟩ := bind_eq_ok accepted
+          obtain ⟨second, secondOk, last⟩ := bind_eq_ok rest
+          exact (appendLeaf_step author operation document last).1 pre
+            (allocate_executes pre first second _ _ _
+              (allocate_executes pre progress first _ _ _ holds firstOk) secondOk)
+  | editElement edit =>
+      exact (editElementStep_step operation document accepted).1 pre holds
+  | createContainer element =>
+      simp only [step] at accepted
+      split at accepted
+      · cases accepted
+      · exact (appendLeaf_step author operation document accepted).1 pre holds
 
 theorem foldlM_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId) (context : Context)
     (pre : ContentStore) (actions : List Action) (progress next : Progress)
@@ -664,7 +1053,7 @@ def payloadBytesAt (store : ContentStore) : Store.Address Hyperdocument.layout �
       | none => 0
   | ⟨.elements, element⟩ =>
       match Hyperdocument.lookup store .elements element with
-      | some ⟨_, _, .opaque _ payload, _, _, _⟩ => payload.length
+      | some ⟨_, _, .opaque _ payload, _, _, _, _⟩ => payload.length
       | _ => 0
   | _ => 0
 
@@ -702,6 +1091,8 @@ def Action.tag : Action → Nat
   | .createRun .. => 4
   | .annotate .. => 5
   | .transclude .. => 6
+  | .editElement .. => 7
+  | .createContainer .. => 8
 
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
@@ -724,6 +1115,8 @@ def project (before after : ContentStore) (command : Command) : List (String × 
    ("content/run-creates", actionCount command 4),
    ("content/annotations", actionCount command 5),
    ("content/transclusions", actionCount command 6),
+   ("content/element-edits", actionCount command 7),
+   ("content/container-creates", actionCount command 8),
    ("content/writes/body", bodyWrites before after),
    ("content/writes/annotations", annotationWrites before after),
    ("content/tombstones", (command.actions.filter fun action => match action with
@@ -804,7 +1197,7 @@ theorem annotation_stale_after_edit (store : ContentStore) (record : AnnotationR
 
 /-! ## The field footprint: annotate writes only the annotations field -/
 
-private theorem changedIn_empty_of_agree (field : Bool) (before after : ContentStore)
+theorem changedIn_empty_of_agree (field : Bool) (before after : ContentStore)
     (agree : ∀ address : Hyperdocument.Address, annotationNamespace address.1 = field →
       after address = before address) :
     changedIn field before after = ∅ := by
@@ -1076,34 +1469,43 @@ private theorem allocate_post (progress next : Progress) (space : Namespace) (ke
   · cases accepted; rfl
   · cases accepted
 
-/-- The host's post is the record and its forward link, computed from the
+/-- The host's post holds the record and its forward link, computed from the
 request, the height and the read's capability and policy: no source store is an
-input of the host's computation, so no source byte reaches the host.  Every
-other address of the host (atoms, runs, elements, the document) is framed. -/
+input of the host's computation, so no source byte reaches the host.  The only
+other writes are the element tree's (the `embed` leaf naming the record, and
+its parent's children); every other address of the host (atoms, runs, the
+document, annotations) is framed. -/
 theorem no_bytes_in_host (author : PrincipalRef) (operation : OperationId)
     (document : DocumentId) (context : Context) (progress next : Progress)
     (transclusion : TransclusionId) (link : LinkId) (request : TranscludeRequest)
     (read : SourceRead) (covered : context.sourceRead request.source = some read)
     (accepted : step author operation document context progress
       (.transclude transclusion link request) = .ok next) :
-    next.1 = (progress.1.set ⟨.transclusions, transclusion⟩ (some (transclusionRecord operation author
-        (transcludePayload document transclusion link request context.height read)))).set
-      ⟨.links, link⟩ (some (transclusionForwardLink operation author
-        (transcludePayload document transclusion link request context.height read))) ∧
+    Hyperdocument.lookup next.1 .transclusions transclusion = some (transclusionRecord operation author
+        (transcludePayload document transclusion link request context.height read)) ∧
+    Hyperdocument.lookup next.1 .links link = some (transclusionForwardLink operation author
+        (transcludePayload document transclusion link request context.height read)) ∧
     ∀ address : Hyperdocument.Address, address.1 ≠ .transclusions → address.1 ≠ .links →
-      next.1 address = progress.1 address := by
+      address.1 ≠ .elements → next.1 address = progress.1 address := by
   simp only [step, covered] at accepted
-  cases first : allocate progress .transclusions transclusion (transclusionRecord operation author
-      (transcludePayload document transclusion link request context.height read)) with
-  | error reason => simp [first, bind, Except.bind] at accepted
-  | ok middle =>
-      simp only [first, bind, Except.bind] at accepted
-      have exact := allocate_post middle next _ _ _ accepted
-      rw [allocate_post progress middle _ _ _ first] at exact
-      refine ⟨exact, ?_⟩
-      intro address notRecord notLink
-      rw [exact, Store.Store.set_ne _ _ _ _ (fun same => notLink (congrArg Sigma.fst same)),
-        Store.Store.set_ne _ _ _ _ (fun same => notRecord (congrArg Sigma.fst same))]
+  obtain ⟨first, firstOk, rest⟩ := bind_eq_ok accepted
+  obtain ⟨second, secondOk, last⟩ := bind_eq_ok rest
+  have frame := (appendLeaf_step author operation document last).2
+  have secondPost := allocate_post first second _ _ _ secondOk
+  have firstPost := allocate_post progress first _ _ _ firstOk
+  refine ⟨?_, ?_, ?_⟩
+  · unfold Hyperdocument.lookup
+    rw [frame ⟨.transclusions, transclusion⟩ (by simp), secondPost,
+      Store.Store.set_ne _ _ _ _ (fun same => absurd (congrArg Sigma.fst same) (by simp)),
+      firstPost, Store.Store.set_eq]
+    try exact rfl
+  · unfold Hyperdocument.lookup
+    rw [frame ⟨.links, link⟩ (by simp), secondPost, Store.Store.set_eq]
+    try exact rfl
+  · intro address notRecord notLink notElement
+    rw [frame address notElement, secondPost,
+      Store.Store.set_ne _ _ _ _ (fun same => notLink (congrArg Sigma.fst same)), firstPost,
+      Store.Store.set_ne _ _ _ _ (fun same => notRecord (congrArg Sigma.fst same))]
 
 /-- A reader without a read of the source learns only that a transclusion
 stands and its shape (how many atoms, of which cell); what it sees does not
@@ -1156,24 +1558,34 @@ private theorem keepsAt_allocate_other (revision : OperationId) (progress next :
 /-- A step by an operation other than `revision` changes no atom that stands at
 `revision` afterwards: every atom it creates or edits is stamped with the
 operation itself. -/
+private theorem keepsAt_of_elementStep (revision : OperationId) {progress next : Progress}
+    (stepped : ElementStep progress next) : KeepsAt revision progress.1 next.1 := by
+  intro atom record found _
+  unfold Hyperdocument.lookup at found ⊢
+  rwa [stepped.2 ⟨.atoms, atom⟩ (by simp)] at found
+
+/-- A step by an operation other than `revision` changes no atom that stands at
+`revision` afterwards: every atom it creates or edits is stamped with the
+operation itself. -/
 theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) (progress next : Progress) (action : Action) (revision : OperationId)
     (other : operation ≠ revision)
     (accepted : step author operation document context progress action = .ok next) :
     KeepsAt revision progress.1 next.1 := by
   cases action with
-  | createDocument root schema body =>
+  | createDocument root schema =>
       simp only [step] at accepted
-      cases first : allocate progress .documents document ⟨root, schema, author, operation⟩ with
-      | error reason => simp [first, bind, Except.bind] at accepted
-      | ok middle =>
-          simp only [first, bind, Except.bind] at accepted
-          exact (keepsAt_allocate_other revision progress middle _ _ _ first (by decide)).trans
-            (keepsAt_allocate_other revision middle next _ _ _ accepted (by decide))
+      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+      exact (keepsAt_allocate_other revision progress middle _ _ _ first (by decide)).trans
+        (keepsAt_allocate_other revision middle next _ _ _ rest (by decide))
   | createAtom atom kind payload =>
       simp only [step] at accepted
-      rw [allocate_post progress next _ _ _ accepted]
-      exact keepsAt_set_atom revision progress.1 atom _ other
+      obtain ⟨middle, first, rest⟩ := bind_eq_ok accepted
+      have atomKept : KeepsAt revision progress.1 middle.1 := by
+        rw [allocate_post progress middle _ _ _ first]
+        exact keepsAt_set_atom revision progress.1 atom _ other
+      exact atomKept.trans
+        (keepsAt_of_elementStep revision (appendLeaf_step author operation document rest))
   | editAtom edit =>
       simp only [step] at accepted
       unfold replaceAtom at accepted
@@ -1203,13 +1615,18 @@ theorem step_keepsAt (author : PrincipalRef) (operation : OperationId) (document
       | none => simp [step, covered] at accepted
       | some read =>
           simp only [step, covered] at accepted
-          cases first : allocate progress .transclusions transclusion (transclusionRecord operation
-              author (transcludePayload document transclusion link request context.height read)) with
-          | error reason => simp [first, bind, Except.bind] at accepted
-          | ok middle =>
-              simp only [first, bind, Except.bind] at accepted
-              exact (keepsAt_allocate_other revision progress middle _ _ _ first (by decide)).trans
-                (keepsAt_allocate_other revision middle next _ _ _ accepted (by decide))
+          obtain ⟨first, firstOk, rest⟩ := bind_eq_ok accepted
+          obtain ⟨second, secondOk, last⟩ := bind_eq_ok rest
+          exact ((keepsAt_allocate_other revision progress first _ _ _ firstOk (by decide)).trans
+            (keepsAt_allocate_other revision first second _ _ _ secondOk (by decide))).trans
+            (keepsAt_of_elementStep revision (appendLeaf_step author operation document last))
+  | editElement edit =>
+      exact keepsAt_of_elementStep revision (editElementStep_step operation document accepted)
+  | createContainer element =>
+      simp only [step] at accepted
+      split at accepted
+      · cases accepted
+      · exact keepsAt_of_elementStep revision (appendLeaf_step author operation document accepted)
 
 theorem run_keepsAt (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (context : Context) (pre : ContentStore) (command : Command) (next : Progress)

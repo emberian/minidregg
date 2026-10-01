@@ -140,14 +140,14 @@ for n in 1 2 3 4 5; do eval "L$n=\$(hexof 'wall line $n')"; done
 L3b=$(hexof 'wall line 3, revised'); L1b=$(hexof 'wall line 1, revised')
 invoke a-writes-wall "$SPONSOR_WS" "$(content wall "$(jq -n --arg l1 "$L1" --arg l2 "$L2" --arg l3 "$L3" \
   --arg l4 "$L4" --arg l5 "$L5" '[
-  {type:"createDocument",rootElement:"1",schema:"0",body:{type:"runs",runs:["2000"]}},
+  {type:"createDocument",rootElement:"1",schema:"0"},
   {type:"createAtom",atom:"1001",kind:{type:"text"},payload:$l1},
   {type:"createAtom",atom:"1002",kind:{type:"text"},payload:$l2},
   {type:"createAtom",atom:"1003",kind:{type:"text"},payload:$l3},
   {type:"createAtom",atom:"1004",kind:{type:"text"},payload:$l4},
   {type:"createAtom",atom:"1005",kind:{type:"text"},payload:$l5},
   {type:"createRun",run:"2000",atoms:["1001","1002","1003","1004","1005"]}]')")"; ok a-writes-wall
-invoke a-writes-page "$SPONSOR_WS" "$(content page '[{"type":"createDocument","rootElement":"1","schema":"0","body":{"type":"runs","runs":[]}}]')"
+invoke a-writes-page "$SPONSOR_WS" "$(content page '[{"type":"createDocument","rootElement":"1","schema":"0"}]')"
 ok a-writes-page
 
 delegate grant-c-wall "$SPONSOR_WS" wall "$C_SUBJECT" '["observe"]' "$CW" wall

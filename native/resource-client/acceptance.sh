@@ -219,8 +219,7 @@ cat >"$EVIDENCE/content-intent.json" <<EOF
             "actions": [{
               "type": "createDocument",
               "rootElement": "1001",
-              "schema": "1",
-              "body": {"type": "container", "children": []}
+              "schema": "1"
             }]
           }
         }]

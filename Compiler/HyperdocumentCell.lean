@@ -63,14 +63,15 @@ def elementRecordStream : StreamCodec ElementRecord :=
         (StreamCodec.product elementBodyStream
           (StreamCodec.product principalRefStream
             (StreamCodec.product (identifierStream .v1 .operationIntent)
-              (StreamCodec.option
-                (identifierStream .v1 .operationIntent)))))))
+              (StreamCodec.product (identifierStream .v1 .operationIntent)
+                (StreamCodec.option
+                  (identifierStream .v1 .operationIntent))))))))
     (fun record =>
       (record.document, record.parent, record.body, record.createdBy,
-        record.createdAt, record.tombstonedAt))
+        record.createdAt, record.revision, record.tombstonedAt))
     (fun wire =>
       ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
-        wire.2.2.2.2.1, wire.2.2.2.2.2⟩)
+        wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
     (by intro record; rfl)
 
 def runRecordStream : StreamCodec RunRecord :=
@@ -358,15 +359,16 @@ def contentNamespaces : List Hyperdocument.Namespace :=
 /-- Record codec version per namespace.  v2: atoms carry `revision` and an
 annotation carries an anchor and an inline-or-reference body.  v3 (elements,
 K-TRANSCLUDE): an element's embed names a `TransclusionRecord`, never an atom.
-The layout digest in every cell frame covers these ids, so a v1 or v2 content
-cell refuses to load. -/
+v4 (elements, K-ELEMENT-TREE): an element carries a `revision`, and an `atom`
+leaf places a line in the tree.  The layout digest in every cell frame covers
+these ids, so a v1, v2 or v3 content cell refuses to load. -/
 def contentRecordVersion : Hyperdocument.Namespace → String
-  | .elements => "v3"
+  | .elements => "v4"
   | .atoms | .annotations => "v2"
   | _ => "v1"
 
 def contentWire : Wire Hyperdocument.layout where
-  name := "minidregg/hyperdocument-content/v3"
+  name := "minidregg/hyperdocument-content/v4"
   namespaces := contentNamespaces
   namespaces_complete := by intro space; cases space <;> simp [contentNamespaces]
   namespaceStream := namespaceStream

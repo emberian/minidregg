@@ -100,7 +100,7 @@ def baseAtomRecord : AtomRecord :=
 def baseRunRecord : RunRecord :=
   ⟨baseIdentifier, [], basePrincipal, baseIdentifier, none⟩
 def baseElementRecord : ElementRecord :=
-  ⟨baseIdentifier, none, .container [], basePrincipal, baseIdentifier, none⟩
+  ⟨baseIdentifier, none, .container [], basePrincipal, baseIdentifier, baseIdentifier, none⟩
 def baseFieldRecord : FieldRecord where
   valueType := .flag
   value := false

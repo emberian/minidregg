@@ -162,6 +162,14 @@ fn os_string(value: OsString, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} must be UTF-8"))
 }
 
+fn line_number(value: OsString, flag: &str) -> Result<usize> {
+    os_string(value, flag)?
+        .parse::<usize>()
+        .ok()
+        .filter(|line| *line > 0)
+        .ok_or_else(|| format!("{flag} must be a line number, 1 or more"))
+}
+
 fn random_nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
@@ -588,6 +596,7 @@ fn transclude(
     to: &str,
     live: bool,
     death: &str,
+    at: Option<usize>,
 ) -> Result<()> {
     decimal(from, "first atom")?;
     decimal(to, "last atom")?;
@@ -646,11 +655,16 @@ fn transclude(
         json!({"run":run["id"],"neighbor":atom,"bias":bias,"death":death})
     };
     let id = random_nonce()?;
+    let mut actions = vec![json!({"type":"transclude",
+        "transclusion":id,"link":random_nonce()?,
+        "request":{"source":target,"range":{"start":point(from,"before"),"finish":point(to,"after")},
+            "mode":if live {"live"} else {"snapshot"},"pins":pins}})];
+    if let Some(at) = at {
+        let host_ref = reference(root, host)?;
+        actions.extend(place_new_leaf(&host_document(root, workspace, &host_ref)?, &id, at)?);
+    }
     let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
-        {"name":host,"payload":{"type":"content","actions":[{"type":"transclude",
-            "transclusion":id,"link":random_nonce()?,
-            "request":{"source":target,"range":{"start":point(from,"before"),"finish":point(to,"after")},
-                "mode":if live {"live"} else {"snapshot"},"pins":pins}}]}},
+        {"name":host,"payload":{"type":"content","actions":actions}},
         {"name":source,"payload":{"type":"read"}}]});
     let proposal_id = format!("transclude-{id}");
     let request_path = root.join("sources").join(format!("{proposal_id}.json"));
@@ -671,13 +685,21 @@ fn transclude(
     )
 }
 
-/// Render HOST's transclusions over this workspace's own source reads: a
-/// current read of each source this workspace can read (a refused read
-/// contributes nothing, so the transclusion renders `unavailable` with its
-/// shape only), and, for a snapshot whose pins moved, a read of the source
-/// `at` the opening's height.  With `only`, that one transclusion, and its
-/// source read must succeed (`follow`: re-resolve at the current height).
-fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<()> {
+/// HOST's document as the kernel orders it (`inspect view-document`: the
+/// pre-order walk of its element tree), with its transclusions rendered over
+/// this workspace's own source reads: a current read of each source this
+/// workspace can read (a refused read contributes nothing, so the transclusion
+/// renders `unavailable` with its shape only), and, for a snapshot whose pins
+/// moved, a read of the source `at` the opening's height.  With `only`, that one
+/// transclusion, and its source read must succeed (`follow`: re-resolve at the
+/// current height).  Returns HOST's target, the kernel's document view, and the
+/// rendered transclusions, each with its `text`.
+fn rendered_document(
+    root: &Path,
+    workspace: &Value,
+    host_name: &str,
+    only: Option<&str>,
+) -> Result<(String, Value, Vec<Value>)> {
     let host_ref = reference(root, host_name)?;
     let (host_view, _, signed) = signed_view(root, workspace, &host_ref, "resource")?;
     let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
@@ -729,7 +751,7 @@ fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&
         inspect(
             &member_path(workspace, "host")?,
             &member_path(workspace, "config")?,
-            "view-transclusions",
+            "view-document",
             &input,
             &attempt.join("transclusions.json"),
         )
@@ -789,10 +811,262 @@ fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&
         item["text"] = json!(text);
         shown.push(item);
     }
+    Ok((member(&host_ref, "target")?.to_owned(), current, shown))
+}
+
+/// `transclusions` / `follow`: HOST's rendered transclusions.
+fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<()> {
+    let (host, _, shown) = rendered_document(root, workspace, host_name, only)?;
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({"type":"transclusions","host":member(&host_ref,"target")?,
+        serde_json::to_string_pretty(&json!({"type":"transclusions","host":host,
             "transclusions":shown}))
+        .map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// The kernel's document view of one reference, without rendering any
+/// transclusion: what placement needs (the order, each element's parent, each
+/// container's revision).
+fn host_document(root: &Path, workspace: &Value, host_ref: &Value) -> Result<Value> {
+    let (_, _, signed) = signed_view(root, workspace, host_ref, "resource")?;
+    let host_bin = fs::read(signed.with_file_name("view.bin")).map_err(|error| error.to_string())?;
+    let (attempt, _) = new_attempt(root)?;
+    make_private_dir(&attempt)?;
+    let input = attempt.join("document-in.json");
+    private_file(
+        &input,
+        &serde_json::to_vec(&json!({"host":hex(&host_bin),"sources":[]}))
+            .map_err(|error| error.to_string())?,
+    )?;
+    inspect(
+        &member_path(workspace, "host")?,
+        &member_path(workspace, "config")?,
+        "view-document",
+        &input,
+        &attempt.join("document.json"),
+    )
+}
+
+/// The document's lines: the leaves of the kernel's order that a reader reads
+/// as a line — a live atom or a transclusion.  A struck atom stands in the order
+/// but is no line, so line numbers, `doc show`'s and a refusal's, agree.
+fn live_lines(document: &Value) -> Result<Vec<&Value>> {
+    Ok(document["order"]
+        .as_array()
+        .ok_or("document view has no order")?
+        .iter()
+        .filter(|entry| match entry["kind"].as_str() {
+            Some("atom") => entry["struck"] != true,
+            Some("embed") => true,
+            _ => false,
+        })
+        .collect())
+}
+
+/// Where element ELEMENT stands: its container, that container's revision as
+/// this view read it, and its index among the container's children (struck
+/// lines and sections included: they are children too).
+fn place_of(document: &Value, element: &str) -> Result<(String, String, usize)> {
+    let order = document["order"].as_array().ok_or("document view has no order")?;
+    let entry = order
+        .iter()
+        .find(|entry| entry["element"].as_str() == Some(element))
+        .ok_or("element is not in the document's order")?;
+    let parent = member(entry, "parent")?.to_owned();
+    let index = order
+        .iter()
+        .filter(|other| other["parent"].as_str() == Some(parent.as_str()))
+        .position(|other| other["element"].as_str() == Some(element))
+        .ok_or("element is not among its parent's children")?;
+    Ok((parent.clone(), container_revision(document, &parent)?, index))
+}
+
+fn container_revision(document: &Value, container: &str) -> Result<String> {
+    if document["root"].as_str() == Some(container) {
+        return Ok(member(document, "rootRevision")?.to_owned());
+    }
+    let order = document["order"].as_array().ok_or("document view has no order")?;
+    order
+        .iter()
+        .find(|entry| entry["element"].as_str() == Some(container) && entry["kind"] == "container")
+        .map(|entry| member(entry, "revision").map(str::to_owned))
+        .ok_or_else(|| "no such section".to_owned())?
+}
+
+/// The element of line N (1-based).
+fn line_element(document: &Value, line: usize) -> Result<String> {
+    let lines = live_lines(document)?;
+    if line == 0 || line > lines.len() {
+        return Err(format!("the document has {} lines; there is no line {line}", lines.len()));
+    }
+    Ok(member(lines[line - 1], "element")?.to_owned())
+}
+
+fn edit_element(container: &str, revision: &str, op: Value) -> Value {
+    json!({"type":"editElement","element":container,"revision":revision,"op":op})
+}
+
+/// The edits that place LEAF — appended to the root by the action that creates
+/// it, in the same command — at line AT: where the line now numbered AT stands,
+/// in that line's container, which shifts it and every later line down by one.
+/// AT one past the last line is the append itself: no edit.  Each edit names
+/// the revision of its container this view read, so a container whose children
+/// moved since is refused `staleElement` and nothing lands.  This replaces
+/// minting an identifier between two neighbours (K-DOC-ORDER): an insert costs
+/// one edit however many inserts went to the same spot before it.
+fn place_new_leaf(document: &Value, leaf: &str, at: usize) -> Result<Vec<Value>> {
+    let lines = live_lines(document)?;
+    if at == lines.len() + 1 {
+        return Ok(Vec::new());
+    }
+    let root = member(document, "root")?;
+    let (parent, revision, index) = place_of(document, &line_element(document, at)?)?;
+    if parent == root {
+        Ok(vec![edit_element(&parent, &revision, json!({"type":"move","child":leaf,"index":index.to_string()}))])
+    } else {
+        Ok(vec![
+            edit_element(root, member(document, "rootRevision")?, json!({"type":"remove","child":leaf})),
+            edit_element(&parent, &revision, json!({"type":"splice","index":index.to_string(),"child":leaf})),
+        ])
+    }
+}
+
+/// The edits that move line FROM to stand where line TO stands now.
+fn move_line(document: &Value, from: usize, to: usize) -> Result<Vec<Value>> {
+    let element = line_element(document, from)?;
+    let (source, source_revision, _) = place_of(document, &element)?;
+    let (target, target_revision, index) = place_of(document, &line_element(document, to)?)?;
+    if from == to {
+        return Err("a line moved to where it stands is no edit".into());
+    }
+    if source == target {
+        Ok(vec![edit_element(&source, &source_revision, json!({"type":"move","child":element,"index":index.to_string()}))])
+    } else {
+        Ok(vec![
+            edit_element(&source, &source_revision, json!({"type":"remove","child":element})),
+            edit_element(&target, &target_revision, json!({"type":"splice","index":index.to_string(),"child":element})),
+        ])
+    }
+}
+
+/// One content command on NAME, proposed and submitted.
+fn submit_content(root: &Path, workspace: &Value, name: &str, actions: Vec<Value>, label: &str) -> Result<()> {
+    let id = random_nonce()?;
+    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[
+        {"name":name,"payload":{"type":"content","actions":actions}}]});
+    let proposal_id = format!("{label}-{id}");
+    let request_path = root.join("sources").join(format!("{proposal_id}.json"));
+    private_file(
+        &request_path,
+        &serde_json::to_vec(&request).map_err(|error| error.to_string())?,
+    )?;
+    propose(root, workspace, &request_path, &proposal_id)?;
+    let attempt = root.join("attempts").join(&proposal_id);
+    submit_intent(
+        root,
+        workspace,
+        &root.join("proposals").join(&proposal_id).join("intent.json"),
+        "intent",
+        false,
+        Some(attempt.as_path()),
+    )
+}
+
+/// `doc-insert`: a new text line, at line AT or (absent) after the last line.
+fn doc_insert(root: &Path, workspace: &Value, name: &str, text: &str, at: Option<usize>) -> Result<()> {
+    if text.contains('\n') {
+        return Err("a line holds no newline".into());
+    }
+    let atom = random_nonce()?;
+    let mut actions = vec![json!({"type":"createAtom","atom":atom,"kind":{"type":"text"},
+        "payload":hex(text.as_bytes())})];
+    if let Some(at) = at {
+        let reference = reference(root, name)?;
+        actions.extend(place_new_leaf(&host_document(root, workspace, &reference)?, &atom, at)?);
+    }
+    eprintln!("workspace line: {atom}");
+    submit_content(root, workspace, name, actions, "insert")
+}
+
+/// `doc-move`: line FROM moves to stand where line TO stands.
+fn doc_move(root: &Path, workspace: &Value, name: &str, from: usize, to: usize) -> Result<()> {
+    let reference = reference(root, name)?;
+    let actions = move_line(&host_document(root, workspace, &reference)?, from, to)?;
+    submit_content(root, workspace, name, actions, "move")
+}
+
+/// `doc-remove`: line N leaves the document's order; its atom record stays.
+fn doc_remove(root: &Path, workspace: &Value, name: &str, line: usize) -> Result<()> {
+    let reference = reference(root, name)?;
+    let document = host_document(root, workspace, &reference)?;
+    let element = line_element(&document, line)?;
+    let (parent, revision, _) = place_of(&document, &element)?;
+    submit_content(root, workspace, name,
+        vec![edit_element(&parent, &revision, json!({"type":"remove","child":element}))], "remove")
+}
+
+/// `doc-show`: the document in the kernel's order.  Each live line is numbered;
+/// a struck line shows as `-`; a transclusion is one line, shown as this
+/// workspace's own read of its source renders it; a section is a heading.
+/// Nothing is sorted here: the order is the kernel's.
+fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
+    let (host, document, shown) = rendered_document(root, workspace, name, None)?;
+    let order = document["order"].as_array().ok_or("document view has no order")?;
+    let mut depth = std::collections::BTreeMap::<String, usize>::new();
+    if let Some(root_element) = document["root"].as_str() {
+        depth.insert(root_element.to_owned(), 0);
+    }
+    let mut lines = Vec::new();
+    let mut text = Vec::new();
+    let mut number = 0usize;
+    for entry in order {
+        let element = member(entry, "element")?.to_owned();
+        let level = entry["parent"].as_str().and_then(|parent| depth.get(parent)).map_or(1, |d| d + 1);
+        depth.insert(element.clone(), level);
+        let indent = "  ".repeat(level.saturating_sub(1));
+        let (n, body) = match entry["kind"].as_str() {
+            Some("atom") => {
+                let bytes = crate::decode_hex(entry["payload"].as_str().unwrap_or("")).unwrap_or_default();
+                let body = String::from_utf8_lossy(&bytes).into_owned();
+                if entry["struck"] == true {
+                    (None, body)
+                } else {
+                    number += 1;
+                    (Some(number), body)
+                }
+            }
+            Some("embed") => {
+                number += 1;
+                let id = member(entry, "transclusion")?;
+                let body = shown
+                    .iter()
+                    .find(|item| item["id"].as_str() == Some(id))
+                    .and_then(|item| item["text"].as_str())
+                    .unwrap_or("[transclusion]")
+                    .to_owned();
+                (Some(number), body)
+            }
+            Some("container") => (None, format!("[section {element}]")),
+            Some(other) => (None, format!("[{other}]")),
+            None => (None, String::new()),
+        };
+        text.push(match n {
+            Some(n) => format!("{indent}{n:>3}  {body}"),
+            None if entry["kind"] == "atom" => format!("{indent}  -  {body} (struck)"),
+            None => format!("{indent}     {body}"),
+        });
+        let mut line = entry.clone();
+        line["line"] = n.map_or(Value::Null, |n| json!(n));
+        line["text"] = json!(body);
+        lines.push(line);
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({"type":"document","host":host,
+            "root":document["root"],"rootRevision":document["rootRevision"],
+            "lines":lines,"text":text.join("\n")}))
         .map_err(|error| error.to_string())?
     );
     Ok(())
@@ -873,7 +1147,9 @@ fn content_actions(actions: &Value) -> Result<Value> {
             .ok_or("content action must be an object")?;
         let (tag, fields): (&str, &[&str]) = match member(action, "type")? {
             "createAtom" => ("createAtom", &["type", "atom", "kind", "payload"]),
-            "createDocument" => ("createDocument", &["type", "rootElement", "schema", "body"]),
+            "createDocument" => ("createDocument", &["type", "rootElement", "schema"]),
+            "createContainer" => ("createContainer", &["type", "element"]),
+            "editElement" => ("editElement", &["type", "element", "revision", "op"]),
             "createRun" => ("createRun", &["type", "run", "atoms"]),
             "editAtom" => (
                 "editAtom",
@@ -968,8 +1244,8 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 // observe-only `read` of a content cell is checked under too.
                 let (lowered, schema_version) = match member(payload, "type")? {
                     "scalar" => (scalar_actions(&payload["actions"], target)?, "1"),
-                    "content" => (content_actions(&payload["actions"])?, "4"),
-                    "read" => (json!({"type":"read"}), "4"),
+                    "content" => (content_actions(&payload["actions"])?, "5"),
+                    "read" => (json!({"type":"read"}), "5"),
                     _ => return Err("unsupported workspace payload type".into()),
                 };
                 // A read target's authorization leg is checked under the observe
@@ -1798,8 +2074,34 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => os_string(value, "death policy")?,
                 None => "keepTombstone".to_owned(),
             };
+            let at = args.optional("at").map(|value| line_number(value, "--at")).transpose()?;
             args.finish()?;
-            transclude(&root, &workspace, &host, &source, &from, &to, live, &death)
+            transclude(&root, &workspace, &host, &source, &from, &to, live, &death, at)
+        }
+        "doc-show" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            args.finish()?;
+            doc_show(&root, &workspace, &name)
+        }
+        "doc-insert" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let text = os_string(args.required("text")?, "line text")?;
+            let at = args.optional("at").map(|value| line_number(value, "--at")).transpose()?;
+            args.finish()?;
+            doc_insert(&root, &workspace, &name, &text, at)
+        }
+        "doc-move" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let from = line_number(args.required("from")?, "--from")?;
+            let to = line_number(args.required("to")?, "--to")?;
+            args.finish()?;
+            doc_move(&root, &workspace, &name, from, to)
+        }
+        "doc-remove" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let line = line_number(args.required("line")?, "--line")?;
+            args.finish()?;
+            doc_remove(&root, &workspace, &name, line)
         }
         "transclusions" | "follow" => {
             let host = os_string(args.required("name")?, "host name")?;
@@ -2040,4 +2342,65 @@ mod tests {
         );
         fs::remove_dir_all(root).unwrap();
     }
+
+    fn document_fixture() -> Value {
+        // root 1: line a, struck b, section s (line c inside), transclusion t, line d
+        json!({"type":"document","root":"1","rootRevision":"70","order":[
+            {"element":"10","parent":"1","kind":"atom","atom":"10","payload":"61","struck":false},
+            {"element":"11","parent":"1","kind":"atom","atom":"11","payload":"62","struck":true},
+            {"element":"5","parent":"1","kind":"container","revision":"71","children":"1"},
+            {"element":"12","parent":"5","kind":"atom","atom":"12","payload":"63","struck":false},
+            {"element":"13","parent":"1","kind":"embed","transclusion":"13"},
+            {"element":"14","parent":"1","kind":"atom","atom":"14","payload":"64","struck":false}]})
+    }
+
+    #[test]
+    fn element_tree_lines_are_the_kernel_order_without_struck_lines() {
+        let document = document_fixture();
+        let lines: Vec<&str> = live_lines(&document)
+            .unwrap()
+            .iter()
+            .map(|line| line["element"].as_str().unwrap())
+            .collect();
+        assert_eq!(lines, ["10", "12", "13", "14"]);
+        assert_eq!(place_of(&document, "13").unwrap(), ("1".to_owned(), "70".to_owned(), 3));
+        assert_eq!(place_of(&document, "12").unwrap(), ("5".to_owned(), "71".to_owned(), 0));
+    }
+
+    #[test]
+    fn element_tree_insert_is_one_edit_at_the_lines_place() {
+        let document = document_fixture();
+        // line 3 is the transclusion, index 3 among the root's children (the struck line counts)
+        assert_eq!(
+            place_new_leaf(&document, "99", 3).unwrap(),
+            vec![json!({"type":"editElement","element":"1","revision":"70",
+                "op":{"type":"move","child":"99","index":"3"}})]
+        );
+        // one past the last line: the append is the place
+        assert!(place_new_leaf(&document, "99", 5).unwrap().is_empty());
+        // line 2 stands in a section: out of the root, into the section
+        assert_eq!(
+            place_new_leaf(&document, "99", 2).unwrap(),
+            vec![
+                json!({"type":"editElement","element":"1","revision":"70",
+                    "op":{"type":"remove","child":"99"}}),
+                json!({"type":"editElement","element":"5","revision":"71",
+                    "op":{"type":"splice","index":"0","child":"99"}}),
+            ]
+        );
+        assert!(place_new_leaf(&document, "99", 6).is_err());
+    }
+
+    #[test]
+    fn element_tree_move_names_both_places() {
+        let document = document_fixture();
+        assert_eq!(
+            move_line(&document, 4, 1).unwrap(),
+            vec![json!({"type":"editElement","element":"1","revision":"70",
+                "op":{"type":"move","child":"14","index":"0"}})]
+        );
+        assert_eq!(move_line(&document, 1, 2).unwrap().len(), 2);
+        assert!(move_line(&document, 2, 2).is_err());
+    }
+
 }

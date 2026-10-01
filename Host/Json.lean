@@ -454,25 +454,6 @@ private def transclusionMode (path : String) (json : Lean.Json) :
   | "snapshot" => pure .snapshot | "live" => pure .live
   | _ => failAt path "expected snapshot or live"
 
-private def elementBody (path : String) (json : Lean.Json) : Result Hyperdocument.ElementBody := do
-  let (tag, _) ← tagged path json
-  match tag with
-  | "container" | "runs" =>
-      let name := if tag = "container" then "children" else "runs"
-      let obj ← exactObject path ["type", name] json
-      if tag = "container" then
-        pure (.container (← list (path ++ ".children") identifier (← field path "children" obj)))
-      else
-        pure (.runs (← list (path ++ ".runs") identifier (← field path "runs" obj)))
-  | "embed" =>
-      let obj ← exactObject path ["type", "transclusion"] json
-      pure (.embed (← identifier (path ++ ".transclusion") (← field path "transclusion" obj)))
-  | "opaque" =>
-      let obj ← exactObject path ["type", "schema", "payload"] json
-      pure (.opaque ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩
-        (← decodeHex (path ++ ".payload") (← field path "payload" obj)))
-  | _ => failAt (path ++ ".type") "unknown element body"
-
 private def atomRecord (path : String) (json : Lean.Json) : Result Hyperdocument.AtomRecord := do
   let obj ← exactObject path ["document", "kind", "payload", "createdBy", "createdAt", "revision",
     "tombstonedAt"] json
@@ -545,14 +526,39 @@ private def linkTarget (path : String) (json : Lean.Json) : Result Hyperdocument
         (← decodeHex (path ++ ".path") (← field path "path" obj)))
   | _ => failAt (path ++ ".type") "unknown link target"
 
+/-- `{"type":"splice","index":N,"child":E}`, `{"type":"move","child":E,"index":N}` or
+`{"type":"remove","child":E}`. -/
+private def elementOp (path : String) (json : Lean.Json) : Result ContentResource.ElementOp := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "splice" =>
+      let obj ← exactObject path ["type", "index", "child"] json
+      pure (.splice (← nat (path ++ ".index") (← field path "index" obj))
+        (← identifier (path ++ ".child") (← field path "child" obj)))
+  | "move" =>
+      let obj ← exactObject path ["type", "child", "index"] json
+      pure (.move (← identifier (path ++ ".child") (← field path "child" obj))
+        (← nat (path ++ ".index") (← field path "index" obj)))
+  | "remove" =>
+      let obj ← exactObject path ["type", "child"] json
+      pure (.remove (← identifier (path ++ ".child") (← field path "child" obj)))
+  | _ => failAt (path ++ ".type") "expected splice, move or remove"
+
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
   let (tag, _) ← tagged path json
   match tag with
   | "createDocument" =>
-      let obj ← exactObject path ["type", "rootElement", "schema", "body"] json
+      let obj ← exactObject path ["type", "rootElement", "schema"] json
       pure (.createDocument (← identifier (path ++ ".rootElement") (← field path "rootElement" obj))
-        ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩
-        (← elementBody (path ++ ".body") (← field path "body" obj)))
+        ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩)
+  | "createContainer" =>
+      let obj ← exactObject path ["type", "element"] json
+      pure (.createContainer (← identifier (path ++ ".element") (← field path "element" obj)))
+  | "editElement" =>
+      let obj ← exactObject path ["type", "element", "revision", "op"] json
+      pure (.editElement ⟨← identifier (path ++ ".element") (← field path "element" obj),
+        ← identifier (path ++ ".revision") (← field path "revision" obj),
+        ← elementOp (path ++ ".op") (← field path "op" obj)⟩)
   | "createAtom" =>
       let obj ← exactObject path ["type", "atom", "kind", "payload"] json
       pure (.createAtom (← identifier (path ++ ".atom") (← field path "atom" obj))
@@ -2798,6 +2804,7 @@ private def elementBodyJson : Hyperdocument.ElementBody → Lean.Json
       ("runs", .arr <| runs.toArray.map fun run => decimal run.digest.value)]
   | .embed transclusion => .mkObj [("type", "embed"),
       ("transclusion", decimal transclusion.digest.value)]
+  | .atom atom => .mkObj [("type", "atom"), ("atom", decimal atom.digest.value)]
   | .opaque schema payload => .mkObj [("type", "opaque"), ("schema", decimal schema.value),
       ("payload", hexJson payload)]
 
@@ -2827,7 +2834,12 @@ private def contentEntryJson (store : ContentResource.ContentStore)
       let identifier : Hyperdocument.ElementId := identifier
       let record : Hyperdocument.ElementRecord := record
       .mkObj [("type", "element"), ("id", decimal identifier.digest.value),
+        ("document", decimal record.document.digest.value),
+        ("parent", match record.parent with
+          | some parent => decimal parent.digest.value
+          | none => .null),
         ("body", elementBodyJson record.body), ("createdBy", principalJson record.createdBy),
+        ("revision", decimal record.revision.digest.value),
         ("canonical", canonical)]
   | ⟨⟨.annotations, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.AnnotationId := identifier
@@ -2920,17 +2932,47 @@ private def contentOfAtView (path : String) (bytes : List UInt8) :
   | some (.live ⟨.content, payload⟩) => pure payload.logical
   | _ => failAt path "not a live content cell at that height"
 
-/-- `view-transclusions`: every transclusion record of the host view rendered
-by `ContentResource.renderTransclusion` against the source views the reader
+/-- One element of the document order: its place (parent) and what stands
+there — a line's atom (bytes, revision, struck or not), a transclusion's embed,
+or a section. -/
+private def orderEntryJson (store : ContentResource.ContentStore)
+    (element : Hyperdocument.ElementId) : Lean.Json :=
+  let place : List (String × Lean.Json) := [("element", decimal element.digest.value),
+    ("parent", match ContentResource.parentOf store element with
+      | some parent => decimal parent.digest.value
+      | none => .null)]
+  match ContentResource.elementAt store element with
+  | none => .mkObj (place ++ [("kind", .str "missing")])
+  | some record =>
+      match record.body with
+      | .atom atom =>
+          let line : List (String × Lean.Json) :=
+            match Hyperdocument.lookup store .atoms atom with
+            | some atomRecord => [("payload", hexJson atomRecord.payload),
+                ("revision", decimal atomRecord.revision.digest.value),
+                ("struck", .bool atomRecord.tombstonedAt.isSome)]
+            | none => [("payload", .null)]
+          .mkObj (place ++ [("kind", .str "atom"), ("atom", decimal atom.digest.value)] ++ line)
+      | .embed transclusion => .mkObj (place ++ [("kind", .str "embed"),
+          ("transclusion", decimal transclusion.digest.value)])
+      | .container children => .mkObj (place ++ [("kind", .str "container"),
+          ("revision", decimal record.revision.digest.value), ("children", decimal children.length)])
+      | .runs _ => .mkObj (place ++ [("kind", .str "runs")])
+      | .opaque _ _ => .mkObj (place ++ [("kind", .str "opaque")])
+
+/-- `view-document`: the host document in the kernel's order
+(`ContentResource.documentOrder`, the pre-order walk of its element tree), and
+every transclusion record of the host view rendered by
+`ContentResource.renderTransclusion` against the source views the reader
 itself obtained.  Input: `{"host": HEX, "sources": [{"target": DEC, "view": HEX}
 | {"target": DEC, "at": HEX}]}`: a signed `view-resource` binary, or a signed
 `view-at` binary of the source at a past height.  A transclusion whose source
 cell has no supplied view renders `unavailable`, with its shape only. -/
-private def transclusionsJson (bytes : List UInt8) : Result Lean.Json := do
+private def documentJson (bytes : List UInt8) : Result Lean.Json := do
   let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with
-    | some text => pure text | none => failAt "view-transclusions" "input is not UTF-8"
+    | some text => pure text | none => failAt "view-document" "input is not UTF-8"
   let json ← match Lean.Json.parse text with
-    | .ok json => pure json | .error message => failAt "view-transclusions" message
+    | .ok json => pure json | .error message => failAt "view-document" message
   let obj ← exactObject "$" ["host", "sources"] json
   let host ← contentOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
   let sources ← list "$.sources" (fun path entry => do
@@ -2956,7 +2998,26 @@ private def transclusionsJson (bytes : List UInt8) : Result Lean.Json := do
                 ("render", transclusionViewJson
                   (ContentResource.renderTransclusion source opening record.reference.mode))]
     | _ => none
-  pure <| .mkObj [("type", "transclusions"), ("transclusions", .arr rendered.toArray)]
+  -- A content cell holds one document (`ContentLaw`); a view does not carry the
+  -- cell's identifier, so the document is the one record of `documents`.
+  let document? : Option Hyperdocument.DocumentId :=
+    (StoreCodec.entries HyperdocumentCell.contentWire host).findSome? fun entry =>
+      match entry with
+      | ⟨⟨.documents, identifier⟩, _⟩ => some identifier
+      | _ => none
+  let root := document?.bind (ContentResource.rootOf host)
+  let order := match document? with
+    | some document => ContentResource.documentOrder host document
+    | none => []
+  pure <| .mkObj [("type", "document"),
+    ("root", match root with
+      | some element => decimal element.digest.value
+      | none => .null),
+    ("rootRevision", match root.bind (ContentResource.elementAt host) with
+      | some record => decimal record.revision.digest.value
+      | none => .null),
+    ("order", .arr <| order.toArray.map (orderEntryJson host)),
+    ("transclusions", .arr rendered.toArray)]
 
 private def launchPhysicalReportJson
     (report : ApplicationLifecycleCompletionV2Report.Report) : Result Lean.Json := do
@@ -3128,7 +3189,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "view-resource" => do
       let value ← decoded "view-resource" NativeObservationController.resourceViewCodec bytes
       resourceJson value
-  | "view-transclusions" => transclusionsJson bytes
+  | "view-document" => documentJson bytes
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"
@@ -3168,6 +3229,6 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-transclusions, view-policy, view-capability, view-who, view-since, or view-at"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-document, view-policy, view-capability, view-who, view-since, or view-at"
 
 end Minidregg.Host.Json

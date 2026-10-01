@@ -147,6 +147,7 @@ def createWrites (operation : OperationId) (author : PrincipalRef)
         body := payload.rootBody
         createdBy := author
         createdAt := operation
+        revision := operation
         tombstonedAt := none } ]
 
 def editAtomRecord (operation : OperationId)

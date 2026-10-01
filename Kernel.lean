@@ -70,6 +70,7 @@ import Kernel.FnReplyPublication
 import Kernel.FnReplySource
 import Kernel.ContentResource
 import Kernel.ContentResourceAudit
+import Kernel.ContentElementTree
 import Kernel.AgentGrain
 import Kernel.AgentGrainAudit
 import Kernel.CapabilityRevocationReceiver

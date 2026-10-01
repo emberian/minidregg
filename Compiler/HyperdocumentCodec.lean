@@ -274,7 +274,8 @@ def elementBodyTag : ElementBody -> Nat
   | .container _ => 0
   | .runs _ => 1
   | .embed _ => 2
-  | .opaque _ _ => 3
+  | .atom _ => 3
+  | .opaque _ _ => 4
 
 def elementBodyStream : StreamCodec ElementBody where
   encode value :=
@@ -284,6 +285,7 @@ def elementBodyStream : StreamCodec ElementBody where
           (StreamCodec.list (identifierStream .v1 .element)).encode children
       | .runs runs => (StreamCodec.list (identifierStream .v1 .run)).encode runs
       | .embed transclusion => (identifierStream .v1 .transclusion).encode transclusion
+      | .atom atom => (identifierStream .v1 .atom).encode atom
       | .opaque schema payload =>
           digestStream.encode schema ++ bytesStream.encode payload
   decodePrefix bytes := do
@@ -301,6 +303,9 @@ def elementBodyStream : StreamCodec ElementBody where
         let (transclusion, suffix) ←
           (identifierStream .v1 .transclusion).decodePrefix afterTag
         some (.embed transclusion, suffix)
+    | 3 => do
+        let (atom, suffix) ← (identifierStream .v1 .atom).decodePrefix afterTag
+        some (.atom atom, suffix)
     | _ => do
         let (schema, afterSchema) ← digestStream.decodePrefix afterTag
         let (payload, suffix) ← bytesStream.decodePrefix afterSchema
@@ -312,7 +317,8 @@ def elementBodyStream : StreamCodec ElementBody where
         StreamCodec.nat.decodePrefix_encode,
         (StreamCodec.list (identifierStream .v1 .element)).decodePrefix_encode,
         (StreamCodec.list (identifierStream .v1 .run)).decodePrefix_encode,
-        (identifierStream .v1 .transclusion).decodePrefix_encode, digestStream.decodePrefix_encode,
+        (identifierStream .v1 .transclusion).decodePrefix_encode,
+        (identifierStream .v1 .atom).decodePrefix_encode, digestStream.decodePrefix_encode,
         bytesStream.decodePrefix_encode]
 
 def linkTargetTag : LinkTarget -> Nat

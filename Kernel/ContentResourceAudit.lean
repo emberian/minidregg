@@ -140,7 +140,7 @@ def anchoredRange : StableRange :=
     ⟨runId, some atom, .after, .keepTombstone⟩⟩
 
 def linkedDocument : Command :=
-  ⟨[.createDocument ⟨⟨104⟩⟩ ⟨21⟩ (.runs [runId]),
+  ⟨[.createDocument ⟨⟨104⟩⟩ ⟨21⟩,
     .createAtom atom .text original.payload,
     .createRun runId [atom],
     .link linkId (some anchoredRange) remote ⟨55⟩]⟩
@@ -250,6 +250,79 @@ theorem transclude_needs_a_read :
         ⟨[.transclude transclusionId transcludeLink (request .keepTombstone .snapshot)]⟩) = none := by
   decide
 
+/-! ## The element tree, on real runs -/
+
+def treeRoot : ElementId := ⟨⟨104⟩⟩
+def treeLine (n : Nat) : AtomId := ⟨⟨300 + n⟩⟩
+def sectionA : ElementId := ⟨⟨401⟩⟩
+def sectionB : ElementId := ⟨⟨402⟩⟩
+def laterOperation : OperationId := ⟨⟨9003⟩⟩
+
+/-- A document of three lines and two sections, by `operation`. -/
+def treeDocument : Command :=
+  ⟨[.createDocument treeRoot ⟨21⟩, .createAtom (treeLine 1) .text [1], .createAtom (treeLine 2) .text [2],
+    .createAtom (treeLine 3) .text [3], .createContainer sectionA, .createContainer sectionB]⟩
+
+def treeStore : ContentStore := postOf (run author operation document ctx empty treeDocument)
+
+/-- Appends land in order under the root; an append leaves the root's revision. -/
+theorem appends_in_order :
+    childrenOf treeStore treeRoot = [atomElement (treeLine 1), atomElement (treeLine 2),
+      atomElement (treeLine 3), sectionA, sectionB] ∧
+      parentOf treeStore (atomElement (treeLine 2)) = some treeRoot := by
+  decide
+
+/-- Line 3 moved to the front, by `nextOperation`, against the revision it read. -/
+def moveToFront : Command := ⟨[.editElement ⟨treeRoot, operation, .move (atomElement (treeLine 3)) 0⟩]⟩
+
+def movedStore : ContentStore := postOf (run author nextOperation document ctx treeStore moveToFront)
+
+theorem move_reorders :
+    childrenOf movedStore treeRoot = [atomElement (treeLine 3), atomElement (treeLine 1),
+      atomElement (treeLine 2), sectionA, sectionB] := by
+  decide
+
+/-- The same move again, against the revision before the first one: refused. -/
+theorem stale_move_refused_on_a_run :
+    refusalOf (run author laterOperation document ctx movedStore moveToFront) = some .staleElement := by
+  decide
+
+/-- Section B into section A, then A into B: the second splice would put A
+below itself and is refused `cycle`; nothing of the command lands. -/
+def nestThenCycle : Command :=
+  ⟨[.editElement ⟨treeRoot, nextOperation, .remove sectionB⟩,
+    .editElement ⟨sectionA, operation, .splice 0 sectionB⟩,
+    .editElement ⟨treeRoot, nextOperation, .remove sectionA⟩,
+    .editElement ⟨sectionB, operation, .splice 0 sectionA⟩]⟩
+
+theorem cycle_refused_on_a_run :
+    refusalOf (run author laterOperation document ctx movedStore nestThenCycle) = some .cycle := by
+  decide
+
+/-- Without the last two edits the nesting is admitted: B is A's child. -/
+theorem nest_admitted_on_a_run :
+    childrenOf (postOf (run author laterOperation document ctx movedStore
+      ⟨nestThenCycle.actions.take 2⟩)) sectionA = [sectionB] := by
+  decide
+
+/-- Removing line 1 detaches it; its atom record stays. -/
+def removeLineOne : Command := ⟨[.editElement ⟨treeRoot, nextOperation, .remove (atomElement (treeLine 1))⟩]⟩
+
+theorem remove_keeps_the_atom :
+    childrenOf (postOf (run author laterOperation document ctx movedStore removeLineOne)) treeRoot =
+        [atomElement (treeLine 3), atomElement (treeLine 2), sectionA, sectionB] ∧
+      parentOf (postOf (run author laterOperation document ctx movedStore removeLineOne))
+        (atomElement (treeLine 1)) = none ∧
+      (Hyperdocument.lookup (postOf (run author laterOperation document ctx movedStore removeLineOne))
+        .atoms (treeLine 1)).isSome := by
+  decide
+
+/-- A cell with no document has no tree: a section there is refused. -/
+theorem container_needs_a_document :
+    refusalOf (run author operation document ctx empty ⟨[.createContainer sectionA]⟩) =
+      some .noSuchElement := by
+  decide
+
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.create_exact_bytes_and_provenance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms create_exact_bytes_and_provenance
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.seventeen_atoms_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -263,5 +336,20 @@ theorem transclude_needs_a_read :
 #guard_msgs (whitespace := lax) in #print axioms opening_checked_at_admission
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.transclude_needs_a_read' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms transclude_needs_a_read
+
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.appends_in_order' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms appends_in_order
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.move_reorders' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms move_reorders
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.stale_move_refused_on_a_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms stale_move_refused_on_a_run
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.cycle_refused_on_a_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms cycle_refused_on_a_run
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.nest_admitted_on_a_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms nest_admitted_on_a_run
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.remove_keeps_the_atom' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms remove_keeps_the_atom
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.container_needs_a_document' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms container_needs_a_document
 
 end Minidregg.Kernel.ContentResource.Audit

@@ -125,7 +125,7 @@ notes=$(jq -r .target "$SPONSOR_WS/refs/notes.json")
 
 L1=$(hexof "the first line"); L2=$(hexof "the second line"); L2b=$(hexof "the second line, revised"); L2c=$(hexof "the second line, final")
 invoke a-writes "$SPONSOR_WS" paper "$(jq -n --arg d "$paper" --arg l1 "$L1" --arg l2 "$L2" '[
-  {type:"createDocument",rootElement:"1",schema:"0",body:{type:"runs",runs:[]}},
+  {type:"createDocument",rootElement:"1",schema:"0"},
   {type:"createAtom",atom:"1001",kind:{type:"text"},payload:$l1},
   {type:"createAtom",atom:"1002",kind:{type:"text"},payload:$l2}]')"; ok a-writes
 

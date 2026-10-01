@@ -300,23 +300,31 @@ inductive TransclusionMode where
   | live
   deriving DecidableEq, Repr
 
-/-- A transclusion is placed in the element tree by an `embed` element naming
-its `TransclusionRecord`.  The element stores no source bytes and no source
-reference of its own: the record is the one durable reference
-(`ContentResource.transclude`). -/
+/-- The element tree of a document.  A `container`'s `children` is the one
+ordering representation: document order is the pre-order walk of the tree from
+the document's root element (`ContentResource.documentOrder`).  A line of text
+is placed by an `atom` leaf naming its `AtomRecord`; a transclusion is placed
+by an `embed` leaf naming its `TransclusionRecord`.  Neither leaf stores bytes
+or a reference of its own: the named record is the one durable object. -/
 inductive ElementBody where
   | container (children : List ElementId)
   | runs (runs : List RunId)
   | embed (transclusion : TransclusionId)
+  | atom (atom : AtomId)
   | opaque (schema : Digest) (payload : List UInt8)
   deriving DecidableEq, Repr
 
+/-- `parent` is the container whose `children` lists this element (`none` for
+the document root and for a detached element).  `revision` is the operation
+that last changed the positions of this element's children, so an edit that
+names a position is checked against the revision its author read. -/
 structure ElementRecord where
   document : DocumentId
   parent : Option ElementId
   body : ElementBody
   createdBy : PrincipalRef
   createdAt : OperationId
+  revision : OperationId
   tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
