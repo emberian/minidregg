@@ -64,6 +64,10 @@ inductive RefusalReason where
   | staleGrant
   /-- The resource's current committed law denies this operation. -/
   | lawDenied
+  /-- An order clause of the law compares two values further apart than the
+  native order comparison decides (`NativeHostProfile.orderWidth`); the clause
+  and its two values are named. Fail-closed: no verdict is guessed. -/
+  | lawInputRange
   /-- Authorized, but the operation's controller or receiver refused it. -/
   | operationRejected
   /-- A different transaction already holds this transaction identity. -/
@@ -85,6 +89,7 @@ def name : RefusalReason → String
   | .outsideValidity => "outside-validity"
   | .staleGrant => "stale-grant"
   | .lawDenied => "law-denied"
+  | .lawInputRange => "law-input-range"
   | .operationRejected => "operation-rejected"
   | .conflict => "conflict"
   | .undisclosed => "undisclosed"
@@ -100,13 +105,15 @@ def describe : RefusalReason → String
   | .outsideValidity => "the request is outside the grant's validity window"
   | .staleGrant => "the grant's issuer or policy epoch is no longer current"
   | .lawDenied => "the resource's current law denies this operation"
+  | .lawInputRange => "a law clause compares two values outside the native order range"
   | .operationRejected => "the operation was refused by its controller"
   | .conflict => "transaction identity conflict"
   | .undisclosed => "request refused; a blind submission discloses no reason"
 
 def all : List RefusalReason :=
   [.malformed, .unknownKey, .staleRoot, .badSignature, .noGrant, .revoked,
-    .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed]
+    .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed,
+    .lawInputRange]
 
 theorem mem_all (reason : RefusalReason) : reason ∈ all := by
   cases reason <;> decide
@@ -131,6 +138,7 @@ def stream : StreamCodec RefusalReason where
     | .operationRejected => [9]
     | .conflict => [10]
     | .undisclosed => [11]
+    | .lawInputRange => [12]
   decodePrefix
     | 0 :: suffix => some (.malformed, suffix)
     | 1 :: suffix => some (.unknownKey, suffix)
@@ -144,11 +152,12 @@ def stream : StreamCodec RefusalReason where
     | 9 :: suffix => some (.operationRejected, suffix)
     | 10 :: suffix => some (.conflict, suffix)
     | 11 :: suffix => some (.undisclosed, suffix)
+    | 12 :: suffix => some (.lawInputRange, suffix)
     | _ => none
   decodePrefix_encode := by intro value suffix; cases value <;> rfl
 
 theorem stream_unknown_tag (suffix : List UInt8) :
-    stream.decodePrefix (12 :: suffix) = none := rfl
+    stream.decodePrefix (13 :: suffix) = none := rfl
 
 /-- The signature adapter's typed rejection, named. Key absence, unusable key
 records and a key version that is unregistered or revoked (its standing in the
@@ -463,6 +472,17 @@ def render (leaf : LawLeaf) : String :=
     | _ => ""
   renderClause clause ++ values
 
+/-- An out-of-range order clause: where it sits in the law (`clause` is the index of
+the law's top-level clause, `atom` the rest of the path), the atom as written, and the
+two integers it compares (`before` holds the left operand, `after` the right one, with
+`leSlotsOff`'s offset added). -/
+def renderRange (leaf : LawLeaf) : String :=
+  let place := match leaf.path with
+    | [] => "the law"
+    | [k] => s!"clause {k}"
+    | k :: atom => s!"clause {k} atom {atom}"
+  s!"{place}: {renderClause leaf.clause} (left {shown leaf.before}, right {shown leaf.after})"
+
 /-! ### Wire form
 
 The clause travels as the policy record's own token stream, so the refusal
@@ -546,8 +566,17 @@ def Refusal.of (reason : RefusalReason) : Refusal := ⟨reason, reason.describe,
 def Refusal.lawDenied (leaf : Option LawLeaf) : Refusal :=
   ⟨.lawDenied, RefusalReason.lawDenied.describe, leaf⟩
 
+/-- An out-of-range order clause, named with its two values. -/
+def Refusal.lawInputRange (leaf : LawLeaf) : Refusal :=
+  ⟨.lawInputRange, RefusalReason.lawInputRange.describe, some leaf⟩
+
+/-- The text a refusal's leaf is explained by: the out-of-range rendering for
+`lawInputRange`, the failing-clause rendering otherwise. -/
+def LawLeaf.explain (reason : RefusalReason) (leaf : LawLeaf) : String :=
+  if reason = .lawInputRange then leaf.renderRange else leaf.render
+
 instance : ToString Refusal := ⟨fun refusal => match refusal.leaf with
-  | some leaf => s!"refused: {refusal.reason.name}: {leaf.render}"
+  | some leaf => s!"refused: {refusal.reason.name}: {leaf.explain refusal.reason}"
   | none => s!"refused: {refusal.reason.name}: {refusal.detail}"⟩
 
 end Minidregg.Compiler

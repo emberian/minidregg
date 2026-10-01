@@ -360,6 +360,19 @@ def invokeLawLeaf (config : Config) (opened : Opened config) : Draft → Option 
       DeclaredResourceController.firstLawLeaf prepared tuple
   | _ => none
 
+/-- The out-of-range order clause of a target's committed law that an invocation
+draft would hit, on the same projected step and resolved law that
+`DeclaredResourceController.authorizeLeg` range-checks at submission
+(`DeclaredResourceController.rangeLeaf_none_iff_inputsInRange`). -/
+def invokeRangeLeaf (config : Config) (opened : Opened config) : Draft → Option LawLeaf
+  | .invoke bytes => do
+      let command ← DeclaredResourceController.commandCodec.decode bytes
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+      let tuple ← DeclaredResourceController.prepareTuple prepared
+      DeclaredResourceController.firstRangeLeaf prepared tuple
+  | _ => none
+
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
@@ -373,10 +386,13 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
   | .ok _ =>
       match signed.challenge.intent.purpose with
       | .prepare draft =>
-          match invokeLawLeaf config opened draft with
-          | some leaf => return .error (Refusal.lawDenied (some leaf))
-          | none => return ((prepareLoaded config opened draft).mapError
-              fun detail => ⟨.operationRejected, detail, none⟩)
+          match invokeRangeLeaf config opened draft with
+          | some leaf => return .error (Refusal.lawInputRange leaf)
+          | none =>
+              match invokeLawLeaf config opened draft with
+              | some leaf => return .error (Refusal.lawDenied (some leaf))
+              | none => return ((prepareLoaded config opened draft).mapError
+                  fun detail => ⟨.operationRejected, detail, none⟩)
       | .query _ => return .error (.of .malformed)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/

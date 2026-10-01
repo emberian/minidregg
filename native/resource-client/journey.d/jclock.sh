@@ -28,6 +28,15 @@
 # tick; a tick whose reply is lost resolves as `replayed` on the next run; 200
 # ephemeral ticks leave no attempt dir and 200 journal lines; 20 ephemeral reads
 # leave no attempt dir and 20 journal lines.
+# K-ORDER-WIDE rows (after the wall-clock tick, so clock/now is real unix time,
+# about 1.79e9): 20 signed reads of the same positive clock law answered; a write
+# at or below the clock admitted and one ahead of it refused naming the clock
+# clause; a write of 2^126 (outside R = [-2^123, 2^123)) refused as
+# law-input-range naming the clause and both values, and the same on a read; a
+# fresh MUD sheet (law.management ; law.sheet, every timestamp field 0) takes an
+# owner strike, the referee (the newcomer) charges its balance to now + 100, the
+# next strike is refused by clause 10 (bal <= now) and admitted once the clock
+# passes the balance.
 set -uo pipefail
 umask 077
 for name in MINI SPONSOR_WS NEWCOMER_WS JOURNEY_WORLD JOURNEY_STEP_DIR; do
@@ -175,10 +184,8 @@ row "the same read after the clock subject ticks 200" "answered; judgedAt.clock.
   "tick rc=$(rc t200) read rc=$(rc rafter) judgedAt.now=$judged height=$(jq -r '.judgedAt.height // empty' "$D/rafter.out" 2>/dev/null)" \
   "$([ "$(rc t200)" = 0 ] && [ "$(rc rafter)" = 0 ] && [ "$judged" = 200 ]; echo $?)"
 
-# The 20 reads run while clock/now - field 1 is small: the law compiler's order gadget
-# admits a comparison only when the difference is within 2^29 (profile .scalar 29), so
-# after the wall-clock tick (~1.79e9) a comparison against field 1 = 200 is refused for
-# range on every path (run r1 of CLOCK-SUBJECT; cv task).
+# These 20 reads run at clock 200; the K-ORDER-WIDE rows below repeat them at real
+# unix time (the native order width was 29 until K-ORDER-WIDE: r1 of CLOCK-SUBJECT).
 before=$(find "$SPONSOR_WS/attempts" -mindepth 1 -maxdepth 1 | wc -l)
 srcs=$(find "$SPONSOR_WS/sources" -mindepth 1 -maxdepth 1 | wc -l)
 rl0=$(cat "$SPONSOR_WS"/read-journal.tsv 2>/dev/null | wc -l); rfail=0
@@ -226,6 +233,116 @@ view v6
 row "200 ephemeral ticks by the clock subject" "200 confirmed; at most 1 attempt dir at any time, 0 after; 200 journal lines" \
   "failed=$failed maxHeld=$maxheld left=$(attempt_dirs "$CLOCK_WS") journal=+$lines now=$(now_of v6) ($(( $(date +%s) - t0 )) s)" \
   "$([ $failed = 0 ] && [ "$maxheld" -le 1 ] && [ "$(attempt_dirs "$CLOCK_WS")" = 0 ] && [ $lines = 200 ] && [ "$(now_of v6)" = $((base + 201)) ]; echo $?)"
+
+# --- K-ORDER-WIDE: laws over clock/now at real unix time -------------------------------
+# turn WS ID REQUEST -> rc 0 iff installed; the Host's refusal line is in $D/ID-submit.err
+turn() {
+  local ws=$1 id=$2 req=$3
+  run "$id-propose" "$MINI" workspace --action propose --dir "$ws" --request "$req" --proposal-id "clock-$id" || true
+  [ "$(rc "$id-propose")" = 0 ] || return 1
+  run "$id-submit" "$MINI" workspace --action submit --dir "$ws" \
+    --intent "$ws/proposals/clock-$id/intent.json" --attempt "$ws/attempts/clock-$id"
+  [ "$(rc "$id-submit")" = 0 ] && jq -e '.type == "confirmed"' "$ws/attempts/clock-$id/outcome.json" >/dev/null 2>&1
+}
+refused_line() { cat "$D/$1-submit.err" "$D/$1-propose.err" 2>/dev/null | grep -m1 '^refused:' | cut -c1-400; }
+writes() {  # writes NAME FIELD:EXPECTED:VALUE... : one invoke of guarded writes
+  local name=$1; shift
+  printf '%s\n' "$@" | jq -R 'split(":") | {type:"write",key:{type:"object",field:.[0]},expected:.[1],value:.[2]}' \
+    | jq -s --arg n "$name" '{type:"minidregg-workspace-proposal-v1",action:"invoke",targets:[{name:$n,payload:{type:"scalar",actions:.}}]}'
+}
+FAR=85070591730234615865843651857942052864   # 2^126: outside R, and 2^126 - now is past 2^125
+view vw
+NOW=$(now_of vw)
+
+rl0=$(cat "$SPONSOR_WS"/read-journal.tsv 2>/dev/null | wc -l); rfail=0
+for i in $(seq 1 20); do
+  "$MINI" workspace --action read --dir "$SPONSOR_WS" --name opens --ephemeral true >"$D/rw20.out" 2>"$D/rw20.err" || rfail=$((rfail + 1))
+done
+judged=$(jq -r '.judgedAt.clock.now // empty' "$D/rw20.out" 2>/dev/null)
+rl=$(( $(cat "$SPONSOR_WS"/read-journal.tsv | wc -l) - rl0 ))
+row "20 signed reads at real unix time (field 1 = 200, law any[verb 2, field 1 <= clock/now])" \
+  "20 answered, judged at the wall clock" "failed=$rfail journal=+$rl judgedAt.now=$judged view.now=$NOW [$(head -c 160 "$D/rw20.err")]" \
+  "$([ $rfail = 0 ] && [ $rl = 20 ] && [ "$judged" = "$NOW" ] && [ "$NOW" -ge "$wall" ]; echo $?)"
+
+writes timed 5:100:200 >"$REQ/w-unix.json"
+turn "$SPONSOR_WS" w-unix "$REQ/w-unix.json"; r=$?
+row "write field 5 := 200 at clock $NOW (law field 5 <= clock/now)" "admitted (confirmed)" \
+  "admitted=$([ $r = 0 ] && echo yes || echo no) [$(refused_line w-unix)]" "$([ $r = 0 ]; echo $?)"
+
+writes timed 5:200:$((NOW + 1000000)) >"$REQ/w-ahead.json"
+turn "$SPONSOR_WS" w-ahead "$REQ/w-ahead.json"; r=$?; why=$(refused_line w-ahead)
+row "write field 5 := now + 10^6" "refused law-denied on the clock clause (eval refuses; not an input-range refusal)" \
+  "admitted=$([ $r = 0 ] && echo yes || echo no) [$why]" \
+  "$([ $r != 0 ] && [[ "$why" == 'refused: law-denied: '*'clock/now'* ]]; echo $?)"
+
+writes timed 5:200:$FAR >"$REQ/w-far.json"
+turn "$SPONSOR_WS" w-far "$REQ/w-far.json"; r=$?; why=$(refused_line w-far)
+row "write field 5 := 2^126 (outside R)" "refused law-input-range naming the clause and both values" \
+  "admitted=$([ $r = 0 ] && echo yes || echo no) [$why]" \
+  "$([ $r != 0 ] && [[ "$why" == 'refused: law-input-range: '*'field 5 <= slot "clock/now" + 0'*"left $FAR"*"right $NOW"* ]]; echo $?)"
+
+# The read side: a value outside R written under the open law, then the clock law installed.
+run fcreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name far --storage declared --predicate "$REQ/permit.json"
+writes far 1:0:$FAR >"$REQ/far-stamp.json"
+turn "$SPONSOR_WS" far-stamp "$REQ/far-stamp.json"; fs=$?
+jq -n --slurpfile p "$REQ/opens-at.json" '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:"far",predicate:$p[0]}' >"$REQ/far-law.json"
+turn "$SPONSOR_WS" far-law "$REQ/far-law.json"; fl=$?
+run rfar "$MINI" workspace --action read --dir "$SPONSOR_WS" --name far --ephemeral true
+why=$(grep -m1 '^refused:' "$D/rfar.err" 2>/dev/null | cut -c1-400)
+row "signed read of field 1 = 2^126 under any[verb 2, field 1 <= clock/now]" "refused law-input-range naming the clause and both values" \
+  "create rc=$(rc fcreate) stamp=$fs law=$fl read rc=$(rc rfar) [$why]" \
+  "$([ "$(rc fcreate)" = 0 ] && [ $fs = 0 ] && [ $fl = 0 ] && [ "$(rc rfar)" != 0 ] && [[ "$why" == 'refused: law-input-range: '*'clock/now'*"left $FAR"* ]]; echo $?)"
+
+# A MUD sheet (deploy/shell/templates/mud/sheet): the sponsor is the sheet's subject {S} and the
+# founder; the newcomer is the referee {REF}. Every timestamp field (bal 3, eq 4, respawn 9) starts at 0.
+MUD=$(CDPATH='' cd -- "$(dirname -- "$0")/../../../deploy/shell/templates/mud" && pwd)
+S=$(jq -r .subject "$SPONSOR_WS/workspace.json"); REF=$(jq -r .subject "$NEWCOMER_WS/workspace.json")
+SHEET=tidewrack-sheet-$S
+subst() {
+  sed -e "s/{S}/$S/g" -e "s/{REF}/$REF/g" -e "s/{W_FOUNDER}/$S/g" -e "s/{REALM}/tidewrack/g" -e "s/{HOME}/$(jq -r .shrine "$MUD/tidewrack/realm.json")/g" \
+    $(jq -r '.constants | to_entries[] | select(.key != "derivation") | "-e s/{\(.key)}/\(.value)/g"' "$MUD/tidewrack/realm.json")
+}
+subst <"$MUD/law.management.json" >"$REQ/sheet-mgmt.json"
+jq -n --slurpfile m "$MUD/law.management.json" --slurpfile s "$MUD/sheet/law.sheet.json" \
+  '{type:"all",predicates:([$m[0]] + $s[0].predicates)}' | subst >"$REQ/sheet-law.json"
+# init.sheet.json creates all 15 fields; field 1 exists from birth, so it is a guarded write 0 -> HOME.
+subst <"$MUD/sheet/init.sheet.json" | jq '.targets[0].payload.actions |= map(if .key.field == "1" then {type:"write",key,expected:"0",value} else . end)' >"$REQ/sheet-init.json"
+run screate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "$SHEET" --storage declared --predicate "$REQ/sheet-mgmt.json"
+turn "$SPONSOR_WS" sheet-init "$REQ/sheet-init.json"; si=$?
+jq -n --arg r "$REF" --arg n "$SHEET" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$REQ/sheet-grant.json"
+turn "$SPONSOR_WS" sheet-grant "$REQ/sheet-grant.json"; sg=$?
+run sheet-publish "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id clock-sheet-grant --attempt "$SPONSOR_WS/attempts/clock-sheet-grant"
+run sheet-import "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name "$SHEET" --from-ref "$SPONSOR_WS/proposals/clock-sheet-grant/recipient-reference.json"
+jq -n --slurpfile p "$REQ/sheet-law.json" --arg n "$SHEET" '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:$n,predicate:$p[0]}' >"$REQ/sheet-install.json"
+turn "$SPONSOR_WS" sheet-install "$REQ/sheet-install.json"; sl=$?
+row "MUD sheet birth: create under law.management, init 15 fields, grant the referee, install law.management ; law.sheet" "every step confirmed" \
+  "create rc=$(rc screate) init=$si grant=$sg publish rc=$(rc sheet-publish) import rc=$(rc sheet-import) law=$sl [$(refused_line sheet-init)$(refused_line sheet-install)]" \
+  "$([ "$(rc screate)" = 0 ] && [ $si = 0 ] && [ $sg = 0 ] && [ "$(rc sheet-publish)" = 0 ] && [ "$(rc sheet-import)" = 0 ] && [ $sl = 0 ]; echo $?)"
+
+view vs; NOW=$(now_of vs)
+writes "$SHEET" 7:0:1 8:0:$S >"$REQ/strike1.json"
+turn "$SPONSOR_WS" strike1 "$REQ/strike1.json"; r=$?
+row "fresh sheet (bal 0, eq 0, respawn 0): the owner's strike at clock $NOW" "admitted (clause 10: bal 0 <= now; every clock clause decided)" \
+  "admitted=$([ $r = 0 ] && echo yes || echo no) [$(refused_line strike1)]" "$([ $r = 0 ]; echo $?)"
+
+BAL=$((NOW + 100))
+writes "$SHEET" 3:0:$BAL 7:1:0 8:$S:0 >"$REQ/pay1.json"
+turn "$NEWCOMER_WS" pay1 "$REQ/pay1.json"; r=$?
+row "the referee charges the strike: bal := now + 100, intent cleared" "admitted (clause 28: now <= bal - COST; clause 30)" \
+  "admitted=$([ $r = 0 ] && echo yes || echo no) [$(refused_line pay1)]" "$([ $r = 0 ]; echo $?)"
+
+writes "$SHEET" 7:0:1 8:0:$S >"$REQ/strike2.json"
+turn "$SPONSOR_WS" strike2 "$REQ/strike2.json"; r=$?; why=$(refused_line strike2)
+row "the owner strikes again inside the cooldown (bal = now + 100)" "refused law-denied by clause 10 (field 3 before <= clock/now)" \
+  "admitted=$([ $r = 0 ] && echo yes || echo no) [$why]" \
+  "$([ $r != 0 ] && [[ "$why" == 'refused: law-denied: '*'field 3 before <= slot "clock/now"'* ]]; echo $?)"
+
+tick tbal "$CLOCK_WS" --now $((BAL + 1))
+writes "$SHEET" 7:0:1 8:0:$S >"$REQ/strike3.json"
+turn "$SPONSOR_WS" strike3 "$REQ/strike3.json"; r=$?
+row "the clock subject ticks past the balance; the owner strikes" "tick confirmed; strike admitted" \
+  "tick rc=$(rc tbal) admitted=$([ $r = 0 ] && echo yes || echo no) [$(refused_line strike3)]" \
+  "$([ "$(rc tbal)" = 0 ] && [ $r = 0 ]; echo $?)"
 
 verdict="K-CLOCK $([ $PASS = $TOTAL ] && echo PASS || echo FAIL) $PASS/$TOTAL ($(( $(date +%s) - started )) s)"
 echo "$verdict"

@@ -2888,7 +2888,7 @@ private def outcomeJson : Outcome → Lean.Json
       ("phase", hexJson phase), ("detail", hexJson detail)]
   | .refused reason phase detail (some leaf) => .mkObj [("type", "refused"), ("reason", reason.name),
       ("phase", hexJson phase), ("detail", hexJson detail), ("leaf", lawLeafJson leaf),
-      ("explain", .str leaf.render)]
+      ("explain", .str (leaf.explain reason))]
   | .contention => .mkObj [("type", "contention")]
   | .unavailable detail => .mkObj [("type", "unavailable"), ("detail", hexJson detail)]
   | .uncertain detail => .mkObj [("type", "uncertain"), ("detail", hexJson detail)]
