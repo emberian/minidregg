@@ -69,7 +69,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
-    Verb { name: "doc", usage: "doc new NAME [draft|note] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
+    Verb { name: "doc", usage: "doc new NAME [draft|note] | doc show NAME | doc pull NAME | doc push ID NAME @FILE|@- | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | doc-pull | doc-push (propose payload document: push, then submit) | propose (payload document: append, edit, link) | doc-backlinks" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
@@ -517,7 +517,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         writes: vec![request_file(path, &law)],
                     }
                 }
-                "show" | "backlinks" => {
+                "show" | "backlinks" | "pull" => {
                     arity(&w, 2, 2, u)?;
                     workspace_name(&w[2], "document name")?;
                     client(
@@ -526,6 +526,32 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                             flag("action", format!("doc-{action}")),
                             flag("dir", ws()),
                             flag("name", w[2].clone()),
+                        ],
+                    )
+                }
+                "push" => {
+                    arity(&w, 4, 4, u)?;
+                    workspace_name(&w[2], "proposal ID")?;
+                    workspace_name(&w[3], "document name")?;
+                    // @FILE is HOME/requests/FILE; @- is standard input
+                    // (`ssh … doc push ID NAME @- < f.md`).
+                    let file = match w[4].strip_prefix('@') {
+                        Some("-") => PathBuf::from("-"),
+                        Some(file) => {
+                            session_file(file, "pushed file")?;
+                            session.home.join("requests").join(file)
+                        }
+                        None => return Err("doc push takes the file as @FILE or @-".into()),
+                    };
+                    client(
+                        "workspace",
+                        vec![
+                            flag("action", "doc-push"),
+                            flag("dir", ws()),
+                            flag("name", w[3].clone()),
+                            flag("file", file),
+                            flag("proposal-id", w[2].clone()),
+                            flag("attempt", ws().join("attempts").join(&w[2])),
                         ],
                     )
                 }
@@ -995,6 +1021,9 @@ pub(crate) enum Ending {
         decoded: Option<std::result::Result<Value, String>>,
         evidence: Option<PathBuf>,
     },
+    /// A refused `doc push` whose pinned lines changed since the pull: the
+    /// line diagnosis, above the Host's own refusal (`host`).
+    LineRefused { lines: String, host: Box<Ending> },
 }
 
 fn hex_text(value: Option<&Value>) -> String {
@@ -1039,6 +1068,10 @@ fn outcome_line(outcome: &Value) -> (i32, String) {
 pub(crate) fn render(ending: &Ending) -> (i32, String) {
     match ending {
         Ending::Done => (EXIT_OK, String::new()),
+        Ending::LineRefused { lines, host } => {
+            let (code, text) = render(host);
+            (code, format!("refused: stale-line: {lines}\n{text}"))
+        }
         Ending::Usage(message) => (EXIT_USAGE, format!("usage: {message}\n")),
         Ending::Client(message) => (EXIT_CLIENT, format!("error: {message}\n")),
         Ending::Host { client, decision, decoded, evidence } => {
@@ -1166,6 +1199,7 @@ fn execute(session: &Session, plan: Plan) -> Ending {
             .collect(),
     };
     let _ = super::take_host_decision();
+    let _ = super::take_line_refusal();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| super::run(args)))
         .unwrap_or_else(|_| Err("the client panicked; see the message above".into()));
     let _ = io::stdout().flush();
@@ -1181,7 +1215,11 @@ fn execute(session: &Session, plan: Plan) -> Ending {
                 }
                 HostDecision::Outcome(_) => (None, None),
             };
-            Ending::Host { client, decision, decoded, evidence }
+            let host = Ending::Host { client, decision, decoded, evidence };
+            match super::take_line_refusal() {
+                Some(lines) => Ending::LineRefused { lines, host: Box::new(host) },
+                None => host,
+            }
         }
     }
 }
@@ -1436,11 +1474,11 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("invoke" | "delegate" | "law", 2) => refs(),
         ("invoke", 3) => vec!["create".into(), "write".into()],
         ("revoke", 2) => refs(),
-        ("doc", 1) => ["new", "show", "append", "edit", "link", "backlinks", "annotate", "quote"]
+        ("doc", 1) => ["new", "show", "pull", "push", "append", "edit", "link", "backlinks", "annotate", "quote"]
             .map(String::from)
             .to_vec(),
-        ("doc", 2) if matches!(w[1].as_str(), "show" | "backlinks") => refs(),
-        ("doc", 3) if matches!(w[1].as_str(), "append" | "edit" | "link") => refs(),
+        ("doc", 2) if matches!(w[1].as_str(), "show" | "backlinks" | "pull") => refs(),
+        ("doc", 3) if matches!(w[1].as_str(), "append" | "edit" | "link" | "push") => refs(),
         ("doc", 4) if w[1] == "link" => refs(),
         ("board", 1) => ["new", "add", "move", "take"].map(String::from).to_vec(),
         ("board", 3) if w[1] != "new" => refs(),
@@ -2116,6 +2154,36 @@ mod tests {
         );
         assert!(plan(&s, "revoke cut shared someone").is_err());
         assert_eq!(plan(&s, "revoke cut shared").unwrap_err(), usage_of("revoke"));
+    }
+
+    #[test]
+    fn doc_push_and_pull_are_one_client_operation_each() {
+        let s = session();
+        assert_eq!(
+            client(plan(&s, "doc pull paper").unwrap()).1,
+            pairs(&[("action", "doc-pull"), ("dir", "/w"), ("name", "paper")])
+        );
+        let home_file = s.home.join("requests").join("p.md");
+        let (command, flags, writes) = client(plan(&s, "doc push p1 paper @p.md").unwrap());
+        assert_eq!(command, "workspace");
+        assert!(writes.is_empty());
+        assert_eq!(
+            flags,
+            pairs(&[
+                ("action", "doc-push"),
+                ("dir", "/w"),
+                ("name", "paper"),
+                ("file", home_file.to_str().unwrap()),
+                ("proposal-id", "p1"),
+                ("attempt", "/w/attempts/p1"),
+            ])
+        );
+        assert_eq!(client(plan(&s, "doc push p1 paper @-").unwrap()).1[3], pairs(&[("file", "-")])[0]);
+        for bad in ["doc pull", "doc push p1 paper p.md", "doc push p1 paper @../x", "doc push p1 paper",
+            "doc push ../p paper @p.md"] {
+            assert!(plan(&s, bad).is_err(), "{bad}");
+        }
+        assert_eq!(complete(&s, "doc pu"), ["pull", "push"]);
     }
 
     #[test]

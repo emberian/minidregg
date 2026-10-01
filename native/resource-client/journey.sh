@@ -19,6 +19,7 @@
 #   M3-M7  list items 3-7; each runs journey.d/<id>.sh when that file exists
 #          and is UNBUILT until then (contract below)
 #   J12    PLACE §2.2/§2.4: two friends co-write a document through `mini shell`
+#   J12W   DEOS §2.2 #4: doc pull / doc push @FILE, stale by line (journey.d/j12w.sh)
 #   J12C   PLACE §2.4: a transclusion across rooms (journey.d/j12c.sh)
 #   BD     c-bind: plan footprints commute/overlap (journey.d/bind.sh, on this Store)
 #   M8     agent fleet (journey.d/m8.sh -> fleet-journey.sh, its own Store)
@@ -36,7 +37,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12w j12c j13 jpay1 jpay2 jpriv2 j12i-links j12t-kernel j12e j12m j12r j12h-history jweb jdocuverse): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -53,7 +54,9 @@
 # Tunables: JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
-# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule).
+# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule);
+# JOURNEY_ONLY="J0 J12 …" runs only the named steps; every other step is
+# NOT-RUN, so such a run never reaches END (a lane's regression, not done).
 # Requires: Linux (/proc-free, but GNU date +%N, setsid, timeout), bash, jq, sha256sum.
 
 set -u
@@ -119,7 +122,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C K12I K12T K12E K12M K12R K12H WEB KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C K12I K12T K12E K12M K12R K12H WEB KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12W J12C J13 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -164,6 +167,7 @@ TITLE[M7]="candidate built from portable interfaces reproduces hashes"
 TITLE[BD]="plans bind address footprints: disjoint plans commute, overlap refused"
 TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
+TITLE[J12W]="a friend writes in their own editor: doc pull, doc push, stale by line"
 TITLE[J12C]="a quote (transclusion) across rooms: four grants, four outcomes"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
@@ -760,6 +764,7 @@ step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the cl
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
 step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl through the ordinary mechanism (list item 6, lane m6-grain)" spkHost; }
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
+step_J12W() { hook j12w "a friend pulls a doc to a file, edits it in their editor and pushes: the minimal createAtom/editAtom/tombstone actions in one proposal; an edit of a line someone changed since the pull is refused by the Host (staleAtom) and the refusal names the line; restart and audit leave the doc identical (DEOS #4, P-DOC-WRITE)" shell; }
 step_J12C() { hook j12c "B quotes a range of commons/wall into lab/paper; C (commons only) is refused no-grant reading the quote; A reads the quoted bytes; A's doc follow is refused no-grant (PLACE §2.4)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
 step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
@@ -832,6 +837,7 @@ run_step M7 J0
 run_step M8 J0
 run_step BD J2
 run_step J12 J0
+run_step J12W J0
 run_step J12C J0
 run_step J13 J0
 run_step JPAY1 J0

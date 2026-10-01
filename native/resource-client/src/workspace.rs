@@ -1910,8 +1910,26 @@ fn propose(
     proposal_id: &str,
     private_room_name: Option<&str>,
 ) -> Result<()> {
-    validate_name(proposal_id)?;
     let request = bounded_json(request_path)?;
+    let summary = propose_request(root, workspace, &request, proposal_id, private_room_name)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&summary).map_err(|error| error.to_string())?
+    );
+    Ok(())
+}
+
+/// Author and retain one proposal (`proposals/ID/`) from a request value; the
+/// summary is what `propose` prints.
+fn propose_request(
+    root: &Path,
+    workspace: &Value,
+    request: &Value,
+    proposal_id: &str,
+    private_room_name: Option<&str>,
+) -> Result<Value> {
+    validate_name(proposal_id)?;
+    let request = request.clone();
     if member(&request, "type")? != "minidregg-workspace-proposal-v1" {
         return Err("unknown workspace proposal version".into());
     }
@@ -2346,11 +2364,7 @@ fn propose(
         "delegation":delegation});
     let bytes = serde_json::to_vec_pretty(&summary).map_err(|error| error.to_string())?;
     private_file(&proposal_dir.join("proposal.json"), &bytes)?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&summary).map_err(|error| error.to_string())?
-    );
-    Ok(())
+    Ok(summary)
 }
 
 fn submit_intent(
@@ -3340,9 +3354,7 @@ fn retain_seen(root: &Path, name: &str, view: &Value, document: &Value, challeng
     private_dir(&dir)?;
     let path = seen_path(root, name)?;
     let staged = dir.join(format!(".{name}.{}", random_nonce()?));
-    let value = json!({"type":"minidregg-workspace-seen-document-v1","name":name,
-        "height":challenge.get("height"),"worldRoot":challenge.get("worldRoot"),
-        "view":view,"document":document});
+    let value = seen_value(name, view, document, challenge);
     private_file(
         &staged,
         &serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?,
@@ -3392,10 +3404,17 @@ fn document_actions(
             "append" => &["type", "text"],
             "edit" => &["type", "line", "text"],
             "link" => &["type", "to", "relation"],
-            _ => return Err("document action must be append, edit or link".into()),
+            "push" => &["type", "bytes"],
+            _ => return Err("document action must be append, edit, link or push".into()),
         };
         if obj.len() != keys.len() || keys.iter().any(|key| !obj.contains_key(*key)) {
             return Err(format!("document action {} has unexpected fields", member(action, "type")?));
+        }
+        if member(action, "type")? == "push" {
+            let seen = read_seen(root, name, "a push is a diff against your last read")?;
+            let file = crate::decode_hex(member(action, "bytes")?)?;
+            lowered.extend(push_actions(&seen, &file)?.actions);
+            continue;
         }
         lowered.push(match member(action, "type")? {
             // A created atom joins the end of the document's root (K-ELEMENT-TREE).
@@ -3403,9 +3422,7 @@ fn document_actions(
                 "kind":{"type":"text"},"payload":text_argument(action)?}),
             "edit" => {
                 let line = line_argument(action)?;
-                let seen = bounded_json(&seen_path(root, name)?).map_err(|_| {
-                    format!("doc show {name} first: an edit names a line as you last read it")
-                })?;
+                let seen = read_seen(root, name, "an edit names a line as you last read it")?;
                 let seen_page = content_page(&seen["view"], name)?;
                 // Line N is the Nth line of the kernel's order as `doc show`
                 // numbered it (`live_lines`), never an order of atom ids.
@@ -3442,6 +3459,466 @@ fn document_actions(
         });
     }
     Ok(Value::Array(lowered))
+}
+
+// `doc pull` / `doc push`: a friend writes in their own editor and the kernel
+// still judges per line (P-DOC-WRITE), over the element tree (K-ELEMENT-TREE).
+//
+// The file is the document's LIVE lines in the kernel's order (`live_lines` of
+// the retained `view-document`, the numbering `doc show` prints): a text atom's
+// payload bytes, or, for a transclusion, the marker `⟦transclusion ID⟧`; each
+// followed by one `\n`. A file's line N is the Nth live line, which is how a
+// refusal names it. Reading a file back, one final `\n` ends the last line and
+// is not content; every other byte is content, so trailing spaces, `\r` and
+// blank lines are lines exactly as written.
+//
+// `doc push` diffs the file against `seen/NAME.json` (the last pull or show)
+// with the Wagner–Fischer edit-distance recurrence over whole lines. An
+// unchanged line is no action; a changed line is one `editAtom` pinned to the
+// record as the pull saw it; a deleted line is one `editAtom` with `tombstone:
+// true` (a transclusion: one `editElement remove`); a new line is one
+// `createAtom` (which appends it to the root) and, unless it ends the document,
+// the `editElement` that places it before the line it precedes: a `move` in the
+// root, or a `remove` from the root and a `splice` into a section. Each edit
+// names the revision of its container as the pull read it, so a container whose
+// children moved since is refused `staleElement`. There is no identifier to mint
+// between two neighbours (K-DOC-ORDER): a thousand inserts at one place cost a
+// thousand placements, never a renumbering. The actions go in ONE content
+// command, which the kernel folds all-or-nothing: a stale edit refuses the whole
+// push and nothing of it lands.
+
+/// The most a pushed file may hold, and the most lines either side of a diff.
+const PUSH_MAX_BYTES: usize = 64 * 1024;
+const PUSH_MAX_LINES: usize = 2048;
+/// A content proposal carries at most this many actions (`content_actions`).
+const PUSH_MAX_ACTIONS: usize = 64;
+const LINE_MAX_BYTES: usize = 4096;
+const SEEN_TYPE: &str = "minidregg-workspace-seen-document-v2";
+
+/// The line a pulled file carries for a transclusion: it may be kept, moved
+/// away (a strike), never edited.
+fn transclusion_marker(id: &str) -> Vec<u8> {
+    format!("⟦transclusion {id}⟧").into_bytes()
+}
+
+/// The retained "as I last read it" record of one document: the host page, the
+/// kernel's `view-document` of it, and the read's height and world root.
+fn seen_value(name: &str, view: &Value, document: &Value, challenge: &Value) -> Value {
+    json!({"type":SEEN_TYPE,"name":name,
+        "height":challenge.get("height"),"worldRoot":challenge.get("worldRoot"),
+        "view":view,"document":document})
+}
+
+fn read_seen(root: &Path, name: &str, why: &str) -> Result<Value> {
+    let seen = bounded_json(&seen_path(root, name)?)
+        .map_err(|_| format!("doc show {name} (or doc pull {name}) first: {why}"))?;
+    if seen.get("type").and_then(Value::as_str) != Some(SEEN_TYPE) {
+        return Err(format!("doc pull {name} again: the retained read predates the element tree"));
+    }
+    Ok(seen)
+}
+
+/// One live line of a retained read: its order row, its atom record (a text
+/// line) and the bytes a file holds for it.
+struct PulledLine<'a> {
+    row: &'a Value,
+    atom: Option<&'a Value>,
+    bytes: Vec<u8>,
+}
+
+fn pulled_lines(seen: &Value) -> Result<Vec<PulledLine<'_>>> {
+    let name = member(seen, "name")?;
+    let entries = page_entries(content_page(&seen["view"], name)?)?;
+    let mut lines = Vec::new();
+    for (index, row) in live_lines(&seen["document"])?.into_iter().enumerate() {
+        let line = index + 1;
+        lines.push(match row["kind"].as_str() {
+            Some("embed") => PulledLine { row, atom: None, bytes: transclusion_marker(member(row, "transclusion")?) },
+            _ => {
+                let id = member(row, "atom")?;
+                let atom = entries
+                    .iter()
+                    .find(|entry| entry["type"] == "atom" && entry["id"].as_str() == Some(id))
+                    .ok_or_else(|| format!("line {line} names atom {id}, which the page you read does not hold"))?;
+                if atom.get("kind") != Some(&json!({"type":"text"})) {
+                    return Err(format!("line {line} is not a text atom; a file cannot carry it"));
+                }
+                let bytes = crate::decode_hex(member(atom, "payload")?)?;
+                if bytes.contains(&b'\n') {
+                    return Err(format!("line {line} holds a newline; a file cannot carry it as one line"));
+                }
+                PulledLine { row, atom: Some(atom), bytes }
+            }
+        });
+    }
+    Ok(lines)
+}
+
+/// The file `doc pull` prints for a retained read.
+fn pull_text(seen: &Value) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    for line in pulled_lines(seen)? {
+        out.extend(line.bytes);
+        out.push(b'\n');
+    }
+    Ok(out)
+}
+
+/// A file's lines: split at `\n`, the one final `\n` ending the last line.
+fn file_lines(bytes: &[u8]) -> Vec<&[u8]> {
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+    let body = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    body.split(|byte| *byte == b'\n').collect()
+}
+
+/// A file as `doc pull` would print its lines (one final `\n` per line).
+fn normalized_file(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for line in file_lines(bytes) {
+        out.extend_from_slice(line);
+        out.push(b'\n');
+    }
+    out
+}
+
+/// A signed read of NAME, its `view-document`, retained as `seen/NAME.json`.
+fn doc_read(root: &Path, workspace: &Value, name: &str) -> Result<Value> {
+    let read = rendered_document(root, workspace, name, None, None)?;
+    content_page(&read.view, name)?;
+    let challenge = bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
+    retain_seen(root, name, &read.view, &read.document, &challenge)?;
+    Ok(seen_value(name, &read.view, &read.document, &challenge))
+}
+
+fn doc_pull(root: &Path, workspace: &Value, name: &str) -> Result<()> {
+    let seen = doc_read(root, workspace, name)?;
+    let text = pull_text(&seen)?;
+    let mut out = std::io::stdout().lock();
+    out.write_all(&text)
+        .and_then(|()| out.flush())
+        .map_err(|error| format!("cannot write the pulled document: {error}"))
+}
+
+/// One step of a line diff. Indices are 0-based into the old (pulled) and new
+/// (file) line lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LineOp {
+    Keep(usize, usize),
+    Edit(usize, usize),
+    Insert(usize),
+    Strike(usize),
+}
+
+/// The minimal line diff: Wagner–Fischer (1974) edit distance over lines,
+/// O(N·M). Ties are traced back (from the end) preferring keep, then insert,
+/// then strike, then edit, so an edit pairs a changed line with the earliest
+/// position it can: "a b" → "a B c" edits b and adds c.
+fn line_diff(old: &[&[u8]], new: &[&[u8]]) -> Result<Vec<LineOp>> {
+    if old.len() > PUSH_MAX_LINES || new.len() > PUSH_MAX_LINES {
+        return Err(format!("doc push diffs at most {PUSH_MAX_LINES} lines a side"));
+    }
+    let (n, m) = (old.len(), new.len());
+    let width = m + 1;
+    let mut d = vec![0u32; (n + 1) * width];
+    for i in 0..=n {
+        for j in 0..=m {
+            d[i * width + j] = if i == 0 {
+                j as u32
+            } else if j == 0 {
+                i as u32
+            } else {
+                let substitute = d[(i - 1) * width + j - 1] + u32::from(old[i - 1] != new[j - 1]);
+                substitute
+                    .min(d[(i - 1) * width + j] + 1)
+                    .min(d[i * width + j - 1] + 1)
+            };
+        }
+    }
+    let mut ops = Vec::new();
+    let (mut i, mut j) = (n, m);
+    while i > 0 || j > 0 {
+        let here = d[i * width + j];
+        if i > 0 && j > 0 && old[i - 1] == new[j - 1] && here == d[(i - 1) * width + j - 1] {
+            ops.push(LineOp::Keep(i - 1, j - 1));
+            i -= 1;
+            j -= 1;
+        } else if j > 0 && here == d[i * width + j - 1] + 1 {
+            ops.push(LineOp::Insert(j - 1));
+            j -= 1;
+        } else if i > 0 && here == d[(i - 1) * width + j] + 1 {
+            ops.push(LineOp::Strike(i - 1));
+            i -= 1;
+        } else {
+            ops.push(LineOp::Edit(i - 1, j - 1));
+            i -= 1;
+            j -= 1;
+        }
+    }
+    ops.reverse();
+    Ok(ops)
+}
+
+/// The element tree as the pull read it, kept current while a push's actions
+/// are planned: each container's children, each element's parent, and the
+/// revision each container's edits name (the one the pull read; a container
+/// this push already moved is current for it, `openContainer`).
+struct TreeModel {
+    root: String,
+    children: std::collections::BTreeMap<String, Vec<String>>,
+    parent: std::collections::BTreeMap<String, String>,
+    revision: std::collections::BTreeMap<String, String>,
+}
+
+impl TreeModel {
+    fn of(document: &Value) -> Result<Self> {
+        let root = member(document, "root")?.to_owned();
+        let mut model = TreeModel {
+            root: root.clone(),
+            children: std::collections::BTreeMap::from([(root.clone(), Vec::new())]),
+            parent: std::collections::BTreeMap::new(),
+            revision: std::collections::BTreeMap::from([(root, member(document, "rootRevision")?.to_owned())]),
+        };
+        for row in document["order"].as_array().ok_or("document view has no order")? {
+            let element = member(row, "element")?.to_owned();
+            let parent = member(row, "parent")?.to_owned();
+            model.children.entry(parent.clone()).or_default().push(element.clone());
+            model.parent.insert(element.clone(), parent);
+            if row["kind"] == "container" {
+                model.children.entry(element.clone()).or_default();
+                model.revision.insert(element, member(row, "revision")?.to_owned());
+            }
+        }
+        Ok(model)
+    }
+
+    fn edit(&self, container: &str, op: Value) -> Result<Value> {
+        let revision = self.revision.get(container).ok_or("a container the pull did not read")?;
+        Ok(edit_element(container, revision, op))
+    }
+
+    fn index_of(&self, container: &str, element: &str) -> Result<usize> {
+        self.children
+            .get(container)
+            .and_then(|children| children.iter().position(|child| child == element))
+            .ok_or_else(|| "an element is not among its container's children".to_owned())
+    }
+
+    /// `createAtom LEAF` (appended to the root), then the edits that put it
+    /// immediately before BEFORE; none when it ends the document.
+    fn insert(&mut self, leaf: &str, before: Option<&str>) -> Result<Vec<Value>> {
+        let root = self.root.clone();
+        self.children.get_mut(&root).ok_or("the root has no children list")?.push(leaf.to_owned());
+        self.parent.insert(leaf.to_owned(), root.clone());
+        let Some(before) = before else {
+            return Ok(Vec::new());
+        };
+        let container = self.parent.get(before).ok_or("a line has no container")?.clone();
+        if container == root {
+            let children = self.children.get_mut(&root).ok_or("the root has no children list")?;
+            children.retain(|child| child != leaf);
+            let index = children.iter().position(|child| child == before).ok_or("a line left the root")?;
+            children.insert(index, leaf.to_owned());
+            Ok(vec![self.edit(&root, json!({"type":"move","child":leaf,"index":index.to_string()}))?])
+        } else {
+            let remove = self.edit(&root, json!({"type":"remove","child":leaf}))?;
+            self.children.get_mut(&root).ok_or("the root has no children list")?.retain(|child| child != leaf);
+            let index = self.index_of(&container, before)?;
+            let splice = self.edit(&container, json!({"type":"splice","index":index.to_string(),"child":leaf}))?;
+            self.children.get_mut(&container).ok_or("a container has no children list")?.insert(index, leaf.to_owned());
+            self.parent.insert(leaf.to_owned(), container);
+            Ok(vec![remove, splice])
+        }
+    }
+
+    /// `editElement remove`: ELEMENT leaves the order (its record stays stored).
+    fn remove(&mut self, element: &str) -> Result<Value> {
+        let container = self.parent.remove(element).ok_or("a line has no container")?;
+        let edit = self.edit(&container, json!({"type":"remove","child":element}))?;
+        self.children.get_mut(&container).ok_or("a container has no children list")?.retain(|child| child != element);
+        Ok(edit)
+    }
+}
+
+/// What a push of `file` against a retained seen record submits.
+struct PushPlan {
+    actions: Vec<Value>,
+    edits: usize,
+    inserts: usize,
+    strikes: usize,
+    /// The pulled lines an action pins (edit or strike): (file line, atom id).
+    pinned: Vec<(usize, String)>,
+    pulled_at: String,
+}
+
+fn push_actions(seen: &Value, file: &[u8]) -> Result<PushPlan> {
+    let pulled_at = seen.get("height").and_then(Value::as_str).unwrap_or("?").to_owned();
+    if file.len() > PUSH_MAX_BYTES {
+        return Err(format!("doc push takes a file of at most {PUSH_MAX_BYTES} bytes"));
+    }
+    let lines = pulled_lines(seen)?;
+    let old: Vec<&[u8]> = lines.iter().map(|line| line.bytes.as_slice()).collect();
+    let new = file_lines(file);
+    if let Some(index) = new.iter().position(|line| line.len() > LINE_MAX_BYTES) {
+        return Err(format!("line {} is longer than {LINE_MAX_BYTES} bytes", index + 1));
+    }
+    let markers: Vec<&[u8]> = lines.iter().filter(|line| line.atom.is_none()).map(|line| line.bytes.as_slice()).collect();
+    let ops = line_diff(&old, &new)?;
+    let mut model = TreeModel::of(&seen["document"])?;
+    let mut plan = PushPlan { actions: Vec::new(), edits: 0, inserts: 0, strikes: 0, pinned: Vec::new(), pulled_at };
+    for (position, op) in ops.iter().enumerate() {
+        match *op {
+            LineOp::Keep(..) => {}
+            LineOp::Edit(o, n) => {
+                let Some(atom) = lines[o].atom else {
+                    return Err(format!("line {} is a transclusion; a file cannot edit it (doc follow, doc move)", o + 1));
+                };
+                let before = atom_record(atom)?;
+                plan.actions.push(json!({"type":"editAtom","atom":member(atom,"id")?,
+                    "before":before,"kind":before["kind"],"payload":hex(new[n]),"tombstone":false}));
+                plan.pinned.push((o + 1, member(atom, "id")?.to_owned()));
+                plan.edits += 1;
+            }
+            LineOp::Strike(o) => match lines[o].atom {
+                Some(atom) => {
+                    let before = atom_record(atom)?;
+                    plan.actions.push(json!({"type":"editAtom","atom":member(atom,"id")?,
+                        "before":before,"kind":before["kind"],"payload":before["payload"],"tombstone":true}));
+                    plan.pinned.push((o + 1, member(atom, "id")?.to_owned()));
+                    plan.strikes += 1;
+                }
+                None => {
+                    plan.actions.push(model.remove(member(lines[o].row, "element")?)?);
+                    plan.strikes += 1;
+                }
+            },
+            LineOp::Insert(n) => {
+                if markers.contains(&new[n]) {
+                    return Err(format!(
+                        "line {} names a transclusion where the pull did not have it; move it with doc move",
+                        n + 1
+                    ));
+                }
+                // Before the next pulled line the diff keeps, edits or strikes;
+                // after the last one, the insert ends the document.
+                let next = ops[position + 1..].iter().find_map(|op| match *op {
+                    LineOp::Keep(o, _) | LineOp::Edit(o, _) | LineOp::Strike(o) => Some(o),
+                    LineOp::Insert(_) => None,
+                });
+                let before = next.map(|o| member(lines[o].row, "element")).transpose()?;
+                let leaf = random_nonce()?;
+                plan.actions.push(json!({"type":"createAtom","atom":leaf,"kind":{"type":"text"},"payload":hex(new[n])}));
+                plan.actions.extend(model.insert(&leaf, before)?);
+                plan.inserts += 1;
+            }
+        }
+    }
+    if plan.actions.len() > PUSH_MAX_ACTIONS {
+        return Err(format!(
+            "this push is {} actions; one proposal carries at most {PUSH_MAX_ACTIONS} (push in parts, pulling between)",
+            plan.actions.len()
+        ));
+    }
+    Ok(plan)
+}
+
+/// After a refused push: which of the lines it pinned changed since the pull,
+/// read again now (the retained seen record is left as it was).
+fn stale_lines(root: &Path, workspace: &Value, name: &str, seen: &Value, plan: &PushPlan) -> Result<Option<String>> {
+    let reference = reference(root, name)?;
+    let (view, challenge, _) = signed_view(root, workspace, &reference, "resource")?;
+    let now = member(&challenge, "height")?.to_owned();
+    let atom_of = |entries: &[Value], id: &str| -> Option<Value> {
+        entries.iter().find(|entry| entry["type"] == "atom" && entry["id"].as_str() == Some(id)).cloned()
+    };
+    let was_entries = page_entries(content_page(&seen["view"], name)?)?.clone();
+    let now_entries = page_entries(content_page(&view, name)?)?.clone();
+    let mut changed = Vec::new();
+    for (line, id) in &plan.pinned {
+        let was = atom_of(&was_entries, id).ok_or("a pinned line is missing from the seen record")?;
+        let how = match atom_of(&now_entries, id) {
+            None => "is gone".to_owned(),
+            Some(atom) if atom_record(&atom)? == atom_record(&was)? => continue,
+            Some(atom) if atom.get("tombstonedAt").is_some_and(|value| !value.is_null()) => "was struck".to_owned(),
+            Some(atom) => {
+                let bytes = crate::decode_hex(atom["payload"].as_str().unwrap_or("")).unwrap_or_default();
+                let mut text = String::from_utf8_lossy(&bytes).into_owned();
+                if text.chars().count() > 60 {
+                    text = text.chars().take(57).collect::<String>() + "...";
+                }
+                format!("changed (now {text:?})")
+            }
+        };
+        changed.push(format!("line {line} {how}"));
+    }
+    if changed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "{} since you pulled {name} at {} (read again at {now}; the store records who created a line, not who edited it); nothing of this push landed: doc pull {name}, merge, push again",
+        changed.join(", "),
+        plan.pulled_at
+    )))
+}
+
+fn doc_push(root: &Path, workspace: &Value, name: &str, file: &Path, proposal_id: &str, attempt: &Path) -> Result<()> {
+    validate_name(proposal_id)?;
+    let seen = read_seen(root, name, "a push is a diff against your last read")?;
+    let mut bytes = Vec::new();
+    let limit = PUSH_MAX_BYTES as u64 + 1;
+    if file == Path::new("-") {
+        std::io::stdin().lock().take(limit).read_to_end(&mut bytes)
+    } else {
+        File::open(file).and_then(|handle| handle.take(limit).read_to_end(&mut bytes))
+    }
+    .map_err(|error| format!("cannot read {}: {error}", file.display()))?;
+    let plan = push_actions(&seen, &bytes)?;
+    if plan.actions.is_empty() {
+        println!("doc push {name}: the file matches your pull at height {}; nothing submitted", plan.pulled_at);
+        return Ok(());
+    }
+    let request = json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+        "targets":[{"name":name,"payload":{"type":"document",
+            "actions":[{"type":"push","bytes":hex(&bytes)}]}}]});
+    propose_request(root, workspace, &request, proposal_id, None)?;
+    println!(
+        "doc push {name}: proposal {proposal_id}: {} action(s) against your pull at height {}: {} edit(s), {} new line(s), {} struck",
+        plan.actions.len(),
+        plan.pulled_at,
+        plan.edits,
+        plan.inserts,
+        plan.strikes
+    );
+    let intent = root.join("proposals").join(proposal_id).join("intent.json");
+    if let Err(refused) = submit_intent(root, workspace, &intent, "intent", false, Some(attempt)) {
+        let Some(decision) = crate::take_host_decision() else {
+            return Err(refused);
+        };
+        let stale = stale_lines(root, workspace, name, &seen, &plan);
+        crate::note_host_decision(decision);
+        return match stale {
+            Ok(Some(lines)) => {
+                crate::note_line_refusal(lines.clone());
+                Err(format!("{lines}; {refused}"))
+            }
+            Ok(None) => Err(refused),
+            Err(why) => Err(format!("{refused}; and the read after it failed: {why}")),
+        };
+    }
+    // Admitted. When the document now reads exactly as the file, that read is
+    // the new seen record; otherwise someone else changed it too, and the old
+    // record is retired so a second push cannot re-create these lines.
+    let now = doc_read(root, workspace, name)?;
+    let height = now.get("height").and_then(Value::as_str).unwrap_or("?").to_owned();
+    if pull_text(&now).ok().as_deref() == Some(normalized_file(&bytes).as_slice()) {
+        println!("doc push {name}: admitted; at height {height} the document reads exactly as your file");
+    } else {
+        let retired = root.join("seen").join(format!(".{name}.pushed.{}", random_nonce()?));
+        fs::rename(seen_path(root, name)?, &retired).map_err(|error| format!("cannot retire the seen record: {error}"))?;
+        println!("doc push {name}: admitted; at height {height} {name} also holds others' changes: doc pull {name} before your next push");
+    }
+    Ok(())
 }
 
 /// The child capability this workspace delegated on `name` to `recipient`,
@@ -3787,8 +4264,21 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let diff = doc_diff(&root, &workspace, &name, &from, &to)?;
             print_changes(format, &diff, crate::render::history::diff_text, crate::render::history::diff_html)
         }
+        "doc-pull" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            args.finish()?;
+            doc_pull(&root, &workspace, &name)
+        }
+        "doc-push" => {
+            let name = os_string(args.required("name")?, "reference name")?;
+            let file = path(args.required("file")?);
+            let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+            let attempt = path(args.required("attempt")?);
+            args.finish()?;
+            doc_push(&root, &workspace, &name, &file, &proposal_id, &attempt)
+        }
         _ => Err(
-            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions or follow".into(),
+            "workspace action must be init, import, list, describe, read, submit, propose, create, provision, provision-lookup, recover, publish-delegation, doc-show, doc-outline, doc-history, doc-diff, doc-insert, doc-move, doc-remove, doc-backlinks, doc-links, mark, unmark, transclude, transclusions, follow, doc-pull or doc-push".into(),
         ),
     }
 }
@@ -3806,6 +4296,226 @@ mod tests {
 
     fn page(entries: Vec<Value>) -> Value {
         json!({"type":"resource","cell":{"root":"77","entries":entries},"balances":[]})
+    }
+
+    /// A retained read of a document: atoms (id, text, struck) in the kernel's
+    /// order under root "1"; `section` puts the ids it names in a section "5"
+    /// placed after the first atom; `embed` adds a transclusion line at the end.
+    fn seen_doc(lines: &[(&str, &str, bool)], section: &[&str], embed: bool) -> Value {
+        let row = |id: &str, text: &str, struck: bool, parent: &str| {
+            json!({"element":id,"atom":id,"kind":"atom","payload":hex(text.as_bytes()),
+                "struck":struck,"parent":parent})
+        };
+        let mut entries = Vec::new();
+        let mut order = Vec::new();
+        for (index, (id, text, struck)) in lines.iter().enumerate() {
+            let mut entry = atom(id, text, "7");
+            if *struck {
+                entry["tombstonedAt"] = json!("12");
+            }
+            entries.push(entry);
+            if section.contains(id) {
+                continue;
+            }
+            order.push(row(id, text, *struck, "1"));
+            if index == 0 && !section.is_empty() {
+                order.push(json!({"element":"5","kind":"container","parent":"1","revision":"61"}));
+                for (inner, text, struck) in lines.iter().filter(|line| section.contains(&line.0)) {
+                    order.push(row(inner, text, *struck, "5"));
+                }
+            }
+        }
+        if embed {
+            order.push(json!({"element":"8001","kind":"embed","transclusion":"8001","parent":"1"}));
+        }
+        json!({"type":SEEN_TYPE,"name":"paper","height":"40","worldRoot":"41","view":page(entries),
+            "document":{"root":"1","rootRevision":"60","order":order}})
+    }
+
+    /// Apply a push's actions to the retained read as the kernel would
+    /// (`createAtom` appends to the root; move, remove and splice as
+    /// `editElementStep`; an edit rewrites the payload or strikes), and return
+    /// the pulled file of the result.
+    fn applied(seen: &Value, plan: &PushPlan) -> Vec<u8> {
+        let mut model = TreeModel::of(&seen["document"]).unwrap();
+        let mut text: std::collections::BTreeMap<String, (Vec<u8>, bool)> = std::collections::BTreeMap::new();
+        for row in seen["document"]["order"].as_array().unwrap() {
+            if row["kind"] == "atom" {
+                text.insert(row["element"].as_str().unwrap().into(),
+                    (crate::decode_hex(row["payload"].as_str().unwrap()).unwrap(), row["struck"] == true));
+            } else if row["kind"] == "embed" {
+                let id = row["transclusion"].as_str().unwrap();
+                text.insert(row["element"].as_str().unwrap().into(), (transclusion_marker(id), false));
+            }
+        }
+        for action in &plan.actions {
+            match action["type"].as_str().unwrap() {
+                "createAtom" => {
+                    let id = action["atom"].as_str().unwrap().to_owned();
+                    model.children.get_mut("1").unwrap().push(id.clone());
+                    model.parent.insert(id.clone(), "1".into());
+                    text.insert(id, (crate::decode_hex(action["payload"].as_str().unwrap()).unwrap(), false));
+                }
+                "editAtom" => {
+                    let entry = text.get_mut(action["atom"].as_str().unwrap()).unwrap();
+                    *entry = (crate::decode_hex(action["payload"].as_str().unwrap()).unwrap(), action["tombstone"] == true);
+                }
+                "editElement" => {
+                    let container = action["element"].as_str().unwrap().to_owned();
+                    let op = &action["op"];
+                    let child = op["child"].as_str().unwrap().to_owned();
+                    let children = model.children.get_mut(&container).unwrap();
+                    match op["type"].as_str().unwrap() {
+                        "move" => {
+                            children.retain(|c| *c != child);
+                            children.insert(op["index"].as_str().unwrap().parse().unwrap(), child);
+                        }
+                        "remove" => children.retain(|c| *c != child),
+                        "splice" => children.insert(op["index"].as_str().unwrap().parse().unwrap(), child),
+                        other => panic!("{other}"),
+                    }
+                }
+                other => panic!("{other}"),
+            }
+        }
+        fn walk(model: &TreeModel, at: &str, out: &mut Vec<String>) {
+            for child in model.children.get(at).cloned().unwrap_or_default() {
+                out.push(child.clone());
+                walk(model, &child, out);
+            }
+        }
+        let mut order = Vec::new();
+        walk(&model, "1", &mut order);
+        let mut out = Vec::new();
+        for element in order {
+            if let Some((bytes, struck)) = text.get(&element) {
+                if !struck {
+                    out.extend_from_slice(bytes);
+                    out.push(b'\n');
+                }
+            }
+        }
+        out
+    }
+
+    fn kinds(plan: &PushPlan) -> Vec<(String, bool)> {
+        plan.actions
+            .iter()
+            .map(|a| (a["type"].as_str().unwrap().to_owned(), a.get("tombstone") == Some(&json!(true))))
+            .collect()
+    }
+
+    #[test]
+    fn doc_push_diff_is_minimal_edit_distance() {
+        let l = |t: &str| t.as_bytes().to_vec();
+        let old = [l("a"), l("b"), l("c")];
+        let old: Vec<&[u8]> = old.iter().map(Vec::as_slice).collect();
+        let ops = line_diff(&old, &old).unwrap();
+        assert!(ops.iter().all(|op| matches!(op, LineOp::Keep(..))));
+        // a replaced line is ONE edit, not strike + insert
+        let new: Vec<&[u8]> = vec![b"a", b"B", b"c"];
+        assert_eq!(line_diff(&old, &new).unwrap()[1], LineOp::Edit(1, 1));
+        let new: Vec<&[u8]> = vec![b"A", b"b", b"C", b"d"];
+        let ops = line_diff(&old, &new).unwrap();
+        assert_eq!(ops.iter().filter(|op| !matches!(op, LineOp::Keep(..))).count(), 3);
+        let new: Vec<&[u8]> = vec![b"a", b"c"];
+        assert_eq!(line_diff(&old, &new).unwrap(), vec![LineOp::Keep(0, 0), LineOp::Strike(1), LineOp::Keep(2, 1)]);
+        let new: Vec<&[u8]> = vec![b"z", b"a", b"b", b"c"];
+        assert_eq!(line_diff(&old, &new).unwrap()[0], LineOp::Insert(0));
+        let k: Vec<&[u8]> = "kitten".as_bytes().chunks(1).collect();
+        let t: Vec<&[u8]> = "sitting".as_bytes().chunks(1).collect();
+        assert_eq!(line_diff(&k, &t).unwrap().iter().filter(|op| !matches!(op, LineOp::Keep(..))).count(), 3);
+    }
+
+    #[test]
+    fn doc_push_trailing_newline_rule_and_pull_round_trip() {
+        let seen = seen_doc(&[("100", "one", false), ("200", "two ", false)], &[], false);
+        assert_eq!(pull_text(&seen).unwrap(), b"one\ntwo \n");
+        for same in [&b"one\ntwo \n"[..], &b"one\ntwo "[..]] {
+            assert!(push_actions(&seen, same).unwrap().actions.is_empty());
+        }
+        let plan = push_actions(&seen, b"one\ntwo\n").unwrap();
+        assert_eq!(kinds(&plan), vec![("editAtom".into(), false)]);
+        assert_eq!(plan.pinned, vec![(2, "200".to_owned())]);
+        // an extra final newline is a blank last line: appended, no placement
+        let plan = push_actions(&seen, b"one\ntwo \n\n").unwrap();
+        assert_eq!(kinds(&plan), vec![("createAtom".into(), false)]);
+        assert_eq!(plan.actions[0]["payload"], "");
+        let plan = push_actions(&seen, b"").unwrap();
+        assert_eq!(plan.strikes, 2);
+        assert_eq!(plan.actions[0]["payload"], seen["view"]["cell"]["entries"][0]["payload"]);
+    }
+
+    /// Inserts are placed by the element tree (K-DOC-ORDER closed): before the
+    /// line they precede, in the root or inside a section, at the start, and
+    /// appended at the end; the result reads back as the file, in order.
+    #[test]
+    fn doc_push_places_inserts_by_the_element_tree() {
+        let seen = seen_doc(&[("100", "a", false), ("300", "gone", true), ("101", "b", false), ("102", "c", false)],
+            &["101"], false);
+        // the kernel's order: a, gone (struck), section{ b }, c — the file is a, b, c
+        assert_eq!(pull_text(&seen).unwrap(), b"a\nb\nc\n");
+        let file = b"x\na\ny\nb\nz\nc\nw\n";
+        let plan = push_actions(&seen, file).unwrap();
+        assert_eq!(plan.inserts, 4);
+        assert_eq!(applied(&seen, &plan), file);
+        // y precedes b, which stands in the section: removed from the root, spliced in
+        let splices = plan.actions.iter().filter(|a| a["op"]["type"] == "splice").count();
+        assert_eq!(splices, 1);
+        // w ends the document: its createAtom is all it takes
+        assert_eq!(plan.actions.last().unwrap()["type"], "createAtom");
+        // every edit names a revision the pull read
+        assert!(plan.actions.iter().filter(|a| a["type"] == "editElement")
+            .all(|a| a["revision"] == "60" || a["revision"] == "61"));
+    }
+
+    /// Adjacent lines have no identifier space between them to exhaust: thirty
+    /// lines inserted between two neighbours land in file order.
+    #[test]
+    fn doc_push_inserts_between_adjacent_lines_without_bisection() {
+        let seen = seen_doc(&[("100", "a", false), ("101", "b", false)], &[], false);
+        let mut file = b"a\n".to_vec();
+        for i in 0..30 {
+            file.extend(format!("new {i}\n").into_bytes());
+        }
+        file.extend(b"b\n");
+        let plan = push_actions(&seen, &file).unwrap();
+        assert_eq!(plan.inserts, 30);
+        assert_eq!(applied(&seen, &plan), file);
+    }
+
+    #[test]
+    fn doc_push_refuses_what_it_cannot_say() {
+        let seen = seen_doc(&[("100", "a\nb", false)], &[], false);
+        assert!(pull_text(&seen).unwrap_err().contains("line 1"));
+        let seen = seen_doc(&[], &[], false);
+        let big: Vec<u8> = (0..65).flat_map(|i| format!("{i}\n").into_bytes()).collect();
+        assert!(push_actions(&seen, &big).err().unwrap().contains("at most 64"));
+        // a transclusion line is a marker: kept as is, struck by remove, never edited
+        let seen = seen_doc(&[("100", "a", false)], &[], true);
+        assert_eq!(pull_text(&seen).unwrap(), "a\n⟦transclusion 8001⟧\n".as_bytes());
+        assert!(push_actions(&seen, "a\n⟦transclusion 8001⟧\n".as_bytes()).unwrap().actions.is_empty());
+        assert!(push_actions(&seen, b"a\nedited\n").err().unwrap().contains("is a transclusion"));
+        let plan = push_actions(&seen, b"a\n").unwrap();
+        assert_eq!(plan.actions, vec![edit_element("1", "60", json!({"type":"remove","child":"8001"}))]);
+        // a second copy of the marker would be a transclusion the pull did not have
+        assert!(push_actions(&seen, "a\n⟦transclusion 8001⟧\n⟦transclusion 8001⟧\n".as_bytes())
+            .err().unwrap().contains("doc move"));
+    }
+
+    #[test]
+    fn doc_push_lowers_through_the_document_payload() {
+        let root = std::env::temp_dir().join(format!("pdw-{}", random_nonce().unwrap()));
+        fs::create_dir_all(&root).unwrap();
+        let seen = seen_doc(&[("100", "a", false), ("200", "b", false)], &[], false);
+        retain_seen(&root, "paper", &seen["view"], &seen["document"], &json!({"height":"40","worldRoot":"41"})).unwrap();
+        let actions = json!([{"type":"push","bytes":hex(b"a\nB\nc\n")}]);
+        let lowered = document_actions(&root, &json!({}), "paper", &seen["view"], &actions).unwrap();
+        let types: Vec<&str> = lowered.as_array().unwrap().iter().map(|a| a["type"].as_str().unwrap()).collect();
+        assert_eq!(types, ["editAtom", "createAtom"]);
+        assert_eq!(lowered[0]["before"]["payload"], hex(b"b"));
+        assert!(content_actions(&lowered, false).is_ok());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -3857,7 +4567,7 @@ mod tests {
         let edit = json!([{"type":"edit","line":"2","text":"better"}]);
         assert!(document_actions(&root, &workspace, "paper", &current, &edit)
             .unwrap_err()
-            .contains("doc show paper first"));
+            .contains("doc show paper (or doc pull paper) first"));
         let seen = page(vec![atom("401", "first", "7"), atom("402", "old second", "1103")]);
         let order = json!({"order":[{"kind":"atom","element":"401"},{"kind":"atom","element":"402"}]});
         retain_seen(&root, "paper", &seen, &order, &json!({"height":"3","worldRoot":"4"})).unwrap();

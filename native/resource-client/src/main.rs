@@ -130,6 +130,24 @@ pub(crate) fn take_host_decision() -> Option<HostDecision> {
         .take()
 }
 
+/// A refused `doc push`'s diagnosis: which pulled lines changed since the
+/// pull (`workspace::stale_lines`). The shell prints it as the refusal's first
+/// line, above the Host's own decoding of the same refusal.
+static LINE_REFUSAL: Mutex<Option<String>> = Mutex::new(None);
+
+pub(crate) fn note_line_refusal(lines: String) {
+    *LINE_REFUSAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(lines);
+}
+
+pub(crate) fn take_line_refusal() -> Option<String> {
+    LINE_REFUSAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
+
 /// Exit code for a request the Host refused.
 pub(crate) const EXIT_REFUSED: u8 = 3;
 
