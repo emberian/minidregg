@@ -244,7 +244,7 @@ run(MINI, "workspace", "--action", "import", "--dir", S, "--name", "j1", "--kind
 def pole(label, built, ws, prefix, rc, err):
     why = explain(ws, prefix)
     row(label, f"refused undisclosed; explained: {built}", f"rc={rc} {err[:100]} | {why}", rc != 0 and built in why)
-rc, out, err = job(S, "fund", "--name", "j1", "--account", "purse")
+rc, out, err = job(S, "fund", "--name", "j1", "--account", "purse", "--amount", str(PRICE))
 pole("S funds A's job with its own account", "notCaller", S, "j1.fund-", rc, err)
 rc, out, err = job(A, "fund", "--name", "j1", "--account", "purse", "--amount", str(PRICE - 1000))
 pole("A funds 9 000 against a 10 000 price (the joint commit does not balance)", "unbalanced", A, "j1.fund-", rc, err)
@@ -260,7 +260,8 @@ row("the refused turns moved nothing", "ledger and job unchanged", f"well={led_p
 rc, out, err = job(A, "fund", "--name", "j1", "--account", "purse")
 row("A funds j1 with the price (into the job's held account and its escrow field, one joint turn)", "confirmed",
     f"rc={rc} {out.get('type')} {err}", rc == 0)
-fund_dir = sorted(d for d in os.listdir(os.path.join(A, "jobs")) if d.startswith("j1.fund-"))
+fund_dir = sorted((d for d in os.listdir(os.path.join(A, "jobs")) if d.startswith("j1.fund-")),
+                  key=lambda d: os.path.getmtime(os.path.join(A, "jobs", d)))
 ingress = open(os.path.join(A, "jobs", fund_dir[-1], "ingress.bin"), "rb").read() if fund_dir else b""
 code, data = op(163, ingress)
 looked = outcome(data) if code == 163 else {"type": f"op{code}"}
@@ -369,7 +370,17 @@ row("A writes upheld, funded job fields onto an ordinary declared object (its la
     "confirmed; the cell claims 20 000 held, the Book holds 0", f"{o.get('type')} " + money(f0),
     o.get("type") == "confirmed" and f0.get("held") == str(PRICE + BOND) and f0.get("bookHeld") == "0")
 rc, out, err = job(A, "settle", "--name", "forged")
-pole("settle the forged job (the receiver pins C1's job law)", "notJobLaw", A, "forged.settle-", rc, err)
+pole("settle the forged job: the Book holds nothing for it", "heldMismatch", A, "forged.settle-", rc, err)
+# The pin on its own: an ordered, unfunded job-shaped cell under `all []` (not the job law). The
+# money decision accepts A's fund (A is its caller, the Book has room); the receiver's pin refuses.
+run(MINI, "workspace", "--action", "create", "--dir", A, "--name", "forged2", "--storage", "declared", "--predicate", path("open.json"),
+    "--fields", "0-15")
+order2 = [(0, 0), (1, 42), (2, 5), (3, 7), (4, 7), (5, PRICE), (6, 999999), (7, 999999), (8, 0), (9, 0), (10, 0), (11, 0)]
+propose_submit(A, "forge2", {"type": "minidregg-workspace-proposal-v1", "action": "invoke",
+    "targets": [{"name": "forged2", "payload": {"type": "scalar", "actions": [
+        {"type": "create", "key": {"type": "object", "field": str(f)}, "value": str(v)} for f, v in order2]}}]})
+rc, out, err = job(A, "fund", "--name", "forged2", "--account", "purse")
+pole("fund an ordered job-shaped cell whose law is all [] (the receiver pins C1's job law)", "notJobLaw", A, "forged2.fund-", rc, err)
 ledg, _ = book()
 row("the forgery minted and moved nothing", "ledger unchanged", f"well={ledg.get('well')} total={ledg.get('total')}",
     {k: v for k, v in ledg.items()} == {k: v for k, v in ledf.items()})
