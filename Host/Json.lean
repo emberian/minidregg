@@ -3760,10 +3760,11 @@ def nockAbi (path : String) (json : Lean.Json) : Result NockProgramCodec.Abi := 
 
 def nockAbiJson (abi : NockProgramCodec.Abi) : Lean.Json :=
   Lean.Json.mkObj [("version", toString abi.version), ("arm", toString abi.arm),
-    ("sample", .arr (abi.sample.map fun slot => .mkObj ([("target", toString slot.target),
-      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)] ++
+    ("sample", .arr (abi.sample.map fun slot => .mkObj (([("target", toString slot.target),
+      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)] :
+        List (String × Lean.Json)) ++
         match slot.max with
-        | some m => [("max", toString m)]
+        | some m => [("max", Lean.Json.str (toString m))]
         | none => [])).toArray),
     ("outputs", .arr (abi.outputs.map fun slot => .mkObj [("key", slot.key),
       ("target", toString slot.target), ("field", toString slot.field),
