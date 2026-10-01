@@ -788,13 +788,26 @@ fn transclude(
 /// transclusion, and its source read must succeed (`follow`: re-resolve at the
 /// current height).  Returns HOST's target, the kernel's document view, and the
 /// rendered transclusions, each with its `text`.
-fn rendered_document(
+/// One rendered page of a document: HOST's cell, the host page's presentation
+/// (a resource view; at a past height the `at` view's `resource`, null when
+/// the cell was not live then), the attempt directory of the host read (its
+/// `challenge.json`), the kernel's document view, and the rendered
+/// transclusions, each with its `text`.
+pub(crate) struct Rendered {
+    pub host: String,
+    pub view: Value,
+    pub attempt: PathBuf,
+    pub document: Value,
+    pub shown: Vec<Value>,
+}
+
+pub(crate) fn rendered_document(
     root: &Path,
     workspace: &Value,
     host_name: &str,
     only: Option<&str>,
     at: Option<&str>,
-) -> Result<(String, Value, Vec<Value>)> {
+) -> Result<Rendered> {
     let host_ref = reference(root, host_name)?;
     // The host page: current, or `at` a past height under the grant as it stood
     // then (the Host refuses the read otherwise; that refusal is the answer).
@@ -808,6 +821,10 @@ fn rendered_document(
             (view["resource"].clone(), bin)
         }
     };
+    let host_attempt = host_bin
+        .parent()
+        .ok_or("host read lacks its attempt directory")?
+        .to_path_buf();
     let host_bin = fs::read(host_bin).map_err(|error| error.to_string())?;
     let no_entries = Vec::new();
     let host_entries = if at.is_some() && host_view.is_null() {
@@ -897,14 +914,23 @@ fn rendered_document(
         if member(&item["render"], "view")? == "moved" {
             if let Some(Some(reference)) = readable.get(&source) {
                 let height = member(&item["opening"], "height")?.to_owned();
-                let (_, bin) = signed_at(root, workspace, reference, &height)?;
-                let at = fs::read(&bin).map_err(|error| error.to_string())?;
-                let again = render(&vec![json!({"target":source,"at":hex(&at)})])?;
-                if let Some(found) = again["transclusions"].as_array().and_then(|all| {
-                    all.iter().find(|other| other.get("id") == item.get("id"))
-                }) {
-                    item["render"] = found["render"].clone();
-                    item["at"] = json!(height);
+                // The snapshot is rendered by a read of the source `at` its
+                // opening height, which the Host answers only when this
+                // reader's grant stood then. A reader granted later keeps the
+                // `moved` placeholder: it is told the lines moved, not shown them.
+                match signed_at(root, workspace, reference, &height) {
+                    Ok((_, bin)) => {
+                        let at = fs::read(&bin).map_err(|error| error.to_string())?;
+                        let again = render(&vec![json!({"target":source,"at":hex(&at)})])?;
+                        if let Some(found) = again["transclusions"].as_array().and_then(|all| {
+                            all.iter().find(|other| other.get("id") == item.get("id"))
+                        }) {
+                            item["render"] = found["render"].clone();
+                            item["at"] = json!(height);
+                        }
+                    }
+                    Err(error) if history_refused(&error) => item["atRefused"] = json!(height),
+                    Err(error) => return Err(error),
                 }
             }
         }
@@ -936,17 +962,27 @@ fn rendered_document(
                 };
                 format!("[{mark} of {source}]\n{}", lines.join("\n"))
             }
+            "moved" if item.get("atRefused").is_some() => format!(
+                "[snapshot of {source}: its lines moved since height {}, and your grant did not cover {source} then]",
+                item["atRefused"].as_str().unwrap_or("?")
+            ),
             other => format!("[transclusion of {source}: {other}]"),
         };
         item["text"] = json!(text);
         shown.push(item);
     }
-    Ok((member(&host_ref, "target")?.to_owned(), current, shown))
+    Ok(Rendered {
+        host: member(&host_ref, "target")?.to_owned(),
+        view: host_view,
+        attempt: host_attempt,
+        document: current,
+        shown,
+    })
 }
 
 /// `transclusions` / `follow`: HOST's rendered transclusions.
 fn transclusions(root: &Path, workspace: &Value, host_name: &str, only: Option<&str>) -> Result<()> {
-    let (host, _, shown) = rendered_document(root, workspace, host_name, only, None)?;
+    let Rendered { host, shown, .. } = rendered_document(root, workspace, host_name, only, None)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({"type":"transclusions","host":host,
@@ -1141,8 +1177,8 @@ fn doc_remove(root: &Path, workspace: &Value, name: &str, line: usize) -> Result
 /// a struck line shows as `-`; a transclusion is one line, shown as this
 /// workspace's own read of its source renders it; a section is a heading.
 /// Nothing is sorted here: the order is the kernel's.
-fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>) -> Result<()> {
-    let (host, document, shown) = rendered_document(root, workspace, name, None, at)?;
+pub(crate) fn document_lines(rendered: &Rendered) -> Result<(Vec<Value>, Vec<String>)> {
+    let (document, shown) = (&rendered.document, &rendered.shown);
     let order = document["order"].as_array().ok_or("document view has no order")?;
     let mut depth = std::collections::BTreeMap::<String, usize>::new();
     if let Some(root_element) = document["root"].as_str() {
@@ -1189,9 +1225,17 @@ fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>) -> Res
         });
         let mut line = entry.clone();
         line["line"] = n.map_or(Value::Null, |n| json!(n));
+        line["depth"] = json!(level);
         line["text"] = json!(body);
         lines.push(line);
     }
+    Ok((lines, text))
+}
+
+fn doc_show(root: &Path, workspace: &Value, name: &str, at: Option<&str>) -> Result<()> {
+    let rendered = rendered_document(root, workspace, name, None, at)?;
+    let (lines, text) = document_lines(&rendered)?;
+    let (host, document) = (&rendered.host, &rendered.document);
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({"type":"document","host":host,
@@ -1211,7 +1255,7 @@ fn view_hex(attempt: &Path) -> Result<String> {
 }
 
 /// Render `input` with the Host's `kind` inspection, retained beside `attempt`.
-fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> Result<()> {
+fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> Result<Value> {
     let input_path = attempt.join(format!("{kind}-input.json"));
     private_file(
         &input_path,
@@ -1224,7 +1268,7 @@ fn doc_render(workspace: &Value, attempt: &Path, kind: &str, input: &Value) -> R
         &input_path,
         &attempt.join(format!("{kind}.json")),
     )?;
-    print_json(&rendered)
+    Ok(rendered)
 }
 
 /// Whether a client error is the Host's `at` refusal (its reason travels hex
@@ -1275,7 +1319,7 @@ fn history_heights(since: &Value, target: &str) -> Result<Vec<u64>> {
 /// `doc history NAME`: `since 0` cut to the document, and the `at` reads at
 /// each row's height and the one below it; a height the grant did not cover
 /// contributes no read. The Host renders the rows and their atom changes.
-fn doc_history(root: &Path, workspace: &Value, name: &str) -> Result<()> {
+pub(crate) fn doc_history(root: &Path, workspace: &Value, name: &str) -> Result<Value> {
     let reference = reference(root, name)?;
     let target = member(&reference, "target")?;
     let (since, attempt) = doc_query(
@@ -1308,7 +1352,7 @@ fn doc_history(root: &Path, workspace: &Value, name: &str) -> Result<()> {
 }
 
 /// `doc diff NAME H1 H2`: the atom changes between the two `at` reads.
-fn doc_diff(root: &Path, workspace: &Value, name: &str, from: &str, to: &str) -> Result<()> {
+pub(crate) fn doc_diff(root: &Path, workspace: &Value, name: &str, from: &str, to: &str) -> Result<Value> {
     let reference = reference(root, name)?;
     let (_, left) = doc_query(root, workspace, &reference, "at", Some(from), "view-at")?;
     let (_, right) = doc_query(root, workspace, &reference, "at", Some(to), "view-at")?;
@@ -2407,14 +2451,14 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         "doc-history" => {
             let name = os_string(args.required("name")?, "reference name")?;
             args.finish()?;
-            doc_history(&root, &workspace, &name)
+            print_json(&doc_history(&root, &workspace, &name)?)
         }
         "doc-diff" => {
             let name = os_string(args.required("name")?, "reference name")?;
             let from = os_string(args.required("from")?, "height")?;
             let to = os_string(args.required("to")?, "height")?;
             args.finish()?;
-            doc_diff(&root, &workspace, &name, &from, &to)
+            print_json(&doc_diff(&root, &workspace, &name, &from, &to)?)
         }
         _ => Err(
             "workspace action must be init, import, list, describe, read, doc-backlinks, doc-links, doc-show, doc-history, doc-diff, doc-insert, doc-move, doc-remove, transclude, transclusions, follow, submit or recover".into(),

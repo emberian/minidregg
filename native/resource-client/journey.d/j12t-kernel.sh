@@ -23,6 +23,9 @@
 #   a-edits-inside            A edits w3                                      -> installed
 #   inside-snapshot           T1 after the edit: read `at` its opening height -> snapshot w2 w3 w4, at H
 #   inside-live               T2 after the edit                               -> live w2 w3' w4, revised
+#   late-joiner-placeholder   L, granted wall and page only after T1 moved: T1 needs a read of
+#                             wall `at` its opening height, where L's grant did not stand
+#                             -> T1 moved (placeholder, at-read refused at H); T2 live
 #   a-edits-outside           A edits w1                                      -> installed
 #   outside-unchanged         T1 and T2 renderings after the outside edit     -> unchanged
 #   a-deletes-endpoint        A tombstones w4 (both ranges' finish)           -> installed
@@ -221,6 +224,14 @@ show r-after-inside "$NEWCOMER_WS"; ok r-after-inside
 row inside-snapshot "snapshot:$L2,$L3,$L4::$H" "$(render r-after-inside "$T1"):$(jq -r --arg id "$T1" \
   '.transclusions[] | select(.id == $id) | .at // ""' "$D/r-after-inside.out")" "T1, re-read at its opening height"
 row inside-live "live:$L2,$L3b,$L4:true" "$(render r-after-inside "$T2")" "T2 after the inside edit"
+
+L_SUBJECT=$(enroll tlate); LW=$W/tlate-workspace
+delegate grant-l-wall "$SPONSOR_WS" wall "$L_SUBJECT" '["observe"]' "$LW" wall
+delegate grant-l-page "$SPONSOR_WS" page "$L_SUBJECT" '["observe"]' "$LW" page
+show l-late-joiner "$LW"; ok l-late-joiner
+row late-joiner-placeholder "moved:$H:live" "$(jq -r --arg a "$T1" --arg b "$T2" '[(.transclusions[] | select(.id == $a)
+  | .render.view + ":" + (.atRefused // "")), (.transclusions[] | select(.id == $b) | .render.view)] | join(":")' \
+  "$D/l-late-joiner.out")" "$(jq -r --arg a "$T1" '.transclusions[] | select(.id == $a) | .text' "$D/l-late-joiner.out")"
 
 edit_line a-edits-outside 1 "$L1b" false
 row a-edits-outside installed "$(outcome a-edits-outside)" "$(detail a-edits-outside)"

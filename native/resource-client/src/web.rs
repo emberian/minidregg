@@ -2,22 +2,25 @@
 //!
 //! A loopback HTTP server beside the client. Every page that shows kernel
 //! state is one or more signed reads under the workspace's own key, through
-//! `workspace::signed_view` (the same path `workspace --action read` takes);
-//! quotes render through the Host's `inspect view-quotes`, fed only the source
-//! views this reader's own grants obtained. There is no write route: the router
+//! `workspace::signed_view` / `workspace::rendered_document` (the paths
+//! `workspace --action read` and `doc-show` take). A document renders through
+//! the Host's `inspect view-document`: the kernel's element-tree order, with
+//! transclusions inline as this reader's own source reads render them; links
+//! and backlinks are the Host's link-index views; history, a page at a past
+//! height and a diff are K-DOC-HISTORY's `at`-height reads. There is no write route: the router
 //! answers GET and HEAD and nothing else. It binds 127.0.0.1 only, accepts only
 //! `Host: 127.0.0.1:PORT` / `localhost:PORT` (the DNS-rebinding guard), refuses a
 //! foreign `Origin`, and every path sits under a per-launch secret printed at
 //! start, so another local user or a page in the browser cannot read it.
 
 use crate::workspace;
-use crate::{absolute, hex, inspect, path, Args, Result};
-use serde_json::{json, Value};
+use crate::{absolute, hex, path, Args, Result};
+use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 const MAX_REQUEST: usize = 16 * 1024;
@@ -381,38 +384,19 @@ fn simple(status: u16, title: &str, text: &str) -> Page {
     }
 }
 
-/// A backlink found by folding over a readable page.
-pub(crate) struct Backlink {
-    pub from: String,
-    pub kind: &'static str,
-    pub id: String,
-    pub creator: String,
-    pub detail: String,
-}
-
 /// Everything `render_document` needs; built from real reads, or from fixtures.
 pub(crate) struct DocInput<'a> {
     pub base: &'a str,
+    /// The page's lines in the kernel's order (`workspace::document_lines`).
+    pub lines: &'a [Value],
+    /// The host page's entries (annotations, link records).
     pub entries: &'a [Value],
-    pub quotes: std::result::Result<Option<Value>, String>,
-    pub backlinks: Vec<Backlink>,
-    pub unread: Vec<(String, String)>,
+    /// The K-DOC-INDEX `links` / `backlinks` view rows; `None` on a page at a
+    /// past height (the index answers the current height only).
+    pub links: Option<&'a [Value]>,
+    pub backlinks: Option<&'a [Value]>,
     /// workspace reference name for a cell or document id
     pub names: &'a dyn Fn(&str) -> Option<String>,
-}
-
-/// Atom entries in line order, as `doc show` orders them: the numeric order of
-/// atom ids (shorter first, then lexicographic).
-pub(crate) fn lines(entries: &[Value]) -> Vec<&Value> {
-    let mut lines: Vec<&Value> = entries
-        .iter()
-        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some("atom"))
-        .collect();
-    lines.sort_by_key(|entry| {
-        let id = entry.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
-        (id.len(), id)
-    });
-    lines
 }
 
 fn of_type<'a>(entries: &'a [Value], kind: &str) -> Vec<&'a Value> {
@@ -433,216 +417,315 @@ fn doc_link(base: &str, names: &dyn Fn(&str) -> Option<String>, document: &str) 
     }
 }
 
-pub(crate) fn render_document(input: &DocInput<'_>) -> String {
+fn annotations_of(annotations: &[&Value], atom: &str) -> String {
+    let mut notes = String::new();
+    for annotation in annotations.iter().filter(|annotation| {
+        annotation["anchor"]["type"].as_str() == Some("atom")
+            && annotation["anchor"]["atom"].as_str() == Some(atom)
+    }) {
+        let fresh = annotation["fresh"].as_bool();
+        let body = match annotation["body"]["type"].as_str() {
+            Some("inline") => escape(&bytes_text(annotation["body"]["bytes"].as_str().unwrap_or(""))),
+            _ => format!("<code>{}</code>", escape(&annotation["body"].to_string())),
+        };
+        notes.push_str(&format!(
+            "<p class=\"ann{}\" data-annotation=\"{}\" data-fresh=\"{}\">annotation by {}: {}{}</p>",
+            if fresh == Some(false) { " stale" } else { "" },
+            escape(annotation["id"].as_str().unwrap_or("?")),
+            fresh.map(|value| value.to_string()).unwrap_or_else(|| "?".into()),
+            escape(subject_of(&annotation["author"])),
+            body,
+            if fresh == Some(false) {
+                " <em>(stale: the line moved since this was written)</em>"
+            } else {
+                " <em>(fresh)</em>"
+            }
+        ));
+    }
+    notes
+}
+
+/// One transclusion, inline at its place: its mark (snapshot, snapshot at H,
+/// live, live revised) and lines when this reader's own source read rendered
+/// it; the placeholder (shape only) when it did not.
+fn transclusion_cell(base: &str, names: &dyn Fn(&str) -> Option<String>, item: &Value) -> (String, String) {
+    let render = &item["render"];
+    let view = render["view"].as_str().unwrap_or("unrendered").to_owned();
+    let source = item["opening"]["source"].as_str().unwrap_or("?");
+    let atoms = item["opening"]["atoms"].as_str().unwrap_or("?");
+    let from = doc_link(base, names, source);
+    let shown = match view.as_str() {
+        "snapshot" | "live" => {
+            let mark = if view == "snapshot" {
+                match item["at"].as_str() {
+                    Some(height) => format!("snapshot at height {}", escape(height)),
+                    None => "snapshot".to_owned(),
+                }
+            } else if render["revised"] == true {
+                "live, revised since it was transcluded".to_owned()
+            } else {
+                "live".to_owned()
+            };
+            let lines: Vec<String> = render["lines"]
+                .as_array()
+                .map(|lines| {
+                    lines
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(|line| escape(&bytes_text(line)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            format!(
+                "<p class=note>[{mark} of {from}]</p><blockquote>{}</blockquote>",
+                lines.join("<br>")
+            )
+        }
+        "unavailable" => format!(
+            "<p class=note data-placeholder>[transclusion: {} atoms of {from}, not readable by you]</p>",
+            escape(atoms)
+        ),
+        "moved" => format!(
+            "<p class=stale data-placeholder>[snapshot of {from}: its lines moved since height {}, and your grant \
+             did not cover the source then]</p>",
+            escape(render["height"].as_str().unwrap_or("?"))
+        ),
+        other => format!("<p class=stale>[transclusion of {from}: {}]</p>", escape(other)),
+    };
+    (view, shown)
+}
+
+pub(crate) fn render_document(input: &DocInput<'_>, shown: &[Value]) -> String {
     let base = input.base;
     let mut out = String::new();
     let annotations = of_type(input.entries, "annotation");
-    let lines = lines(input.entries);
+    let numbered = input.lines.iter().filter(|line| !line["line"].is_null()).count();
     out.push_str(&format!(
-        "<section><h2>Lines</h2>\n<table data-lines=\"{}\"><tr><th>#</th><th>text</th><th>creator</th>\
-         <th>revision</th><th>atom</th></tr>\n",
-        lines.len()
+        "<section><h2>Lines</h2>\n<p class=note>In the kernel's document order (the element tree's walk); \
+         nothing is sorted here.</p>\n<table data-lines=\"{numbered}\"><tr><th>#</th><th>text</th>\
+         <th>creator</th><th>revision</th><th>element</th></tr>\n"
     ));
-    for (index, atom) in lines.iter().enumerate() {
-        let id = atom["id"].as_str().unwrap_or("?");
-        let creator = subject_of(&atom["createdBy"]);
-        let revision = atom["revision"].as_str().unwrap_or("?");
-        let tombstoned = !atom["tombstonedAt"].is_null() && atom.get("tombstonedAt").is_some();
-        let text = bytes_text(atom["payload"].as_str().unwrap_or(""));
-        let shown = if tombstoned {
-            format!("<del>{}</del>", escape(&text))
-        } else {
-            escape(&text)
-        };
-        let mut notes = String::new();
-        for annotation in annotations.iter().filter(|annotation| {
-            annotation["anchor"]["type"].as_str() == Some("atom")
-                && annotation["anchor"]["atom"].as_str() == Some(id)
-        }) {
-            let fresh = annotation["fresh"].as_bool();
-            let body = match annotation["body"]["type"].as_str() {
-                Some("inline") => escape(&bytes_text(annotation["body"]["bytes"].as_str().unwrap_or(""))),
-                _ => format!("<code>{}</code>", escape(&annotation["body"].to_string())),
-            };
-            notes.push_str(&format!(
-                "<p class=\"ann{}\" data-annotation=\"{}\" data-fresh=\"{}\">annotation by {}: {}{}</p>",
-                if fresh == Some(false) { " stale" } else { "" },
-                escape(annotation["id"].as_str().unwrap_or("?")),
-                fresh.map(|value| value.to_string()).unwrap_or_else(|| "?".into()),
-                escape(subject_of(&annotation["author"])),
-                body,
-                if fresh == Some(false) {
-                    " <em>(the line moved since this was written)</em>"
+    for line in input.lines {
+        let element = line["element"].as_str().unwrap_or("?");
+        let kind = line["kind"].as_str().unwrap_or("?");
+        let depth = line["depth"].as_u64().unwrap_or(1).saturating_sub(1) as usize;
+        let indent = format!(" style=\"padding-left:{}rem\"", depth);
+        let number = line["line"]
+            .as_u64()
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| if kind == "atom" { "-".into() } else { String::new() });
+        let (attrs, cell, creator, revision) = match kind {
+            "atom" => {
+                let atom = line["atom"].as_str().unwrap_or("?");
+                let text = bytes_text(line["payload"].as_str().unwrap_or(""));
+                let struck = line["struck"] == true;
+                let shown_text = if struck {
+                    format!("<del>{}</del>", escape(&text))
                 } else {
-                    ""
-                }
-            ));
-        }
+                    escape(&text)
+                };
+                (
+                    format!(
+                        " data-atom=\"{}\" data-creator=\"{}\" data-revision=\"{}\" data-struck=\"{struck}\"",
+                        escape(atom),
+                        escape(subject_of(&line["createdBy"])),
+                        escape(line["revision"].as_str().unwrap_or("?"))
+                    ),
+                    format!("{shown_text}{}", annotations_of(&annotations, atom)),
+                    escape(subject_of(&line["createdBy"])),
+                    short(line["revision"].as_str().unwrap_or("?")),
+                )
+            }
+            "embed" => {
+                let id = line["transclusion"].as_str().unwrap_or("?");
+                let item = shown.iter().find(|item| item["id"].as_str() == Some(id));
+                let (view, cell) = match item {
+                    Some(item) => transclusion_cell(base, input.names, item),
+                    None => ("unrendered".to_owned(), "<p class=note>[transclusion]</p>".to_owned()),
+                };
+                let mode = item.and_then(|item| item["mode"].as_str()).unwrap_or("?");
+                (
+                    format!(
+                        " data-transclusion=\"{}\" data-mode=\"{}\" data-render=\"{}\"",
+                        escape(id),
+                        escape(mode),
+                        escape(&view)
+                    ),
+                    cell,
+                    String::new(),
+                    String::new(),
+                )
+            }
+            "container" => (
+                format!(" data-section=\"{}\"", escape(line["revision"].as_str().unwrap_or("?"))),
+                format!("<strong>section {}</strong>", short(element)),
+                String::new(),
+                short(line["revision"].as_str().unwrap_or("?")),
+            ),
+            other => (String::new(), format!("[{}]", escape(other)), String::new(), String::new()),
+        };
         out.push_str(&format!(
-            "<tr id=\"line-{n}\" data-atom=\"{a}\" data-creator=\"{c}\" data-revision=\"{r}\"><td>{n}</td>\
-             <td>{shown}{notes}</td><td>{c}</td><td>{rs}</td><td class=id>{a}</td></tr>\n",
-            n = index + 1,
-            a = escape(id),
-            c = escape(creator),
-            r = escape(revision),
-            rs = short(revision),
+            "<tr data-element=\"{e}\" data-kind=\"{k}\" data-line=\"{n}\"{attrs}><td>{n}</td><td{indent}>{cell}</td>\
+             <td>{creator}</td><td>{revision}</td><td class=id>{e}</td></tr>\n",
+            e = escape(element),
+            k = escape(kind),
+            n = escape(&number),
         ));
     }
     out.push_str("</table></section>\n");
 
-    let embeds: Vec<&Value> = of_type(input.entries, "element")
-        .into_iter()
-        .filter(|element| element["body"]["type"].as_str() == Some("embed"))
-        .collect();
-    if !embeds.is_empty() {
-        out.push_str("<section><h2>Quotes and transclusions</h2>\n");
-        let rendered: Vec<Value> = match &input.quotes {
-            Ok(Some(value)) => value["quotes"].as_array().cloned().unwrap_or_default(),
-            Ok(None) => Vec::new(),
-            Err(error) => {
-                out.push_str(&format!(
-                    "<p class=refusal>view-quotes could not render: {}</p>\n",
-                    escape(error)
-                ));
-                Vec::new()
-            }
-        };
-        for element in embeds {
-            let id = element["id"].as_str().unwrap_or("?");
-            let reference = &element["body"]["reference"];
-            let mode = reference["mode"].as_str().unwrap_or("?");
-            let render = rendered
-                .iter()
-                .find(|quote| quote["element"].as_str() == Some(id))
-                .map(|quote| &quote["render"]);
-            let (state, shown) = match render.and_then(|render| render["view"].as_str()) {
-                Some("quoted") => {
-                    let revised = render.and_then(|r| r["revised"].as_bool()) == Some(true);
-                    (
-                        "quoted",
-                        format!(
-                            "<blockquote>{}</blockquote>{}",
-                            escape(&bytes_text(render.and_then(|r| r["bytes"].as_str()).unwrap_or(""))),
-                            if revised { "<p class=note>revised since it was quoted</p>" } else { "" }
-                        ),
-                    )
-                }
-                Some("stale") => (
-                    "stale",
-                    "<p class=stale>stale: the quoted line has moved past the pinned revision</p>".to_owned(),
-                ),
-                Some("unavailable") => (
-                    "unavailable",
-                    "<p class=note>unavailable: you hold no read of the source</p>".to_owned(),
-                ),
-                _ => ("unrendered", "<p class=note>not rendered</p>".to_owned()),
-            };
+    match input.links {
+        Some(rows) => {
             out.push_str(&format!(
-                "<div data-quote=\"{}\" data-mode=\"{}\" data-render=\"{state}\"><p>{} of line atom {} in {} \
-                 by {}</p>{shown}</div>\n",
-                escape(id),
-                escape(mode),
-                if mode == "live" { "transclusion" } else { "quote" },
-                escape(reference["atom"].as_str().unwrap_or("?")),
-                doc_link(base, input.names, reference["document"].as_str().unwrap_or("?")),
-                escape(subject_of(&element["createdBy"])),
+                "<section><h2>Links out</h2>\n<ul data-links=\"{}\">\n",
+                rows.len()
+            ));
+            for row in rows {
+                let kind = row["kind"].as_str().unwrap_or("?");
+                let target = row["target"].as_str().unwrap_or("?");
+                let shown = match kind {
+                    "document" | "range" => doc_link(base, input.names, target),
+                    other => format!("{} {}", escape(other), short(target)),
+                };
+                out.push_str(&format!(
+                    "<li data-link=\"{}\" data-kind=\"{}\">link {} -> {} (live since height {})</li>\n",
+                    escape(row["link"].as_str().unwrap_or("?")),
+                    escape(kind),
+                    short(row["link"].as_str().unwrap_or("?")),
+                    shown,
+                    escape(row["height"].as_str().unwrap_or("?"))
+                ));
+            }
+            out.push_str("</ul></section>\n");
+        }
+        None => out.push_str(
+            "<section><h2>Links</h2><p class=note>Links and backlinks are the link index's current view; \
+             a page at a past height does not show them.</p></section>\n",
+        ),
+    }
+
+    if let Some(rows) = input.backlinks {
+        out.push_str(&format!(
+            "<section><h2>Backlinks</h2>\n<ul data-backlinks=\"{}\">\n",
+            rows.len()
+        ));
+        for row in rows {
+            let source = row["source"].as_str().unwrap_or("?");
+            let from = (input.names)(source).unwrap_or_else(|| source.to_owned());
+            let kind = row["kind"].as_str().unwrap_or("?");
+            out.push_str(&format!(
+                "<li data-backlink=\"{from}\" data-kind=\"{kind}\">{link} {kind} {id} (live since height {since})</li>\n",
+                from = escape(&from),
+                link = doc_link(base, input.names, source),
+                kind = escape(kind),
+                id = short(row["link"].as_str().unwrap_or("?")),
+                since = escape(row["height"].as_str().unwrap_or("?")),
             ));
         }
-        out.push_str("</section>\n");
+        out.push_str(
+            "</ul>\n<p class=note>From the Host's link index, cut to the documents a standing grant of yours \
+             covers; a transclusion of this document counts as a backlink of it.</p></section>\n",
+        );
     }
+    out
+}
 
-    let links = of_type(input.entries, "link");
-    if !links.is_empty() {
-        out.push_str("<section><h2>Links out</h2>\n<ul>\n");
-        for link in links {
-            let id = link["id"].as_str().unwrap_or("?");
-            let target = &link["target"];
-            let shown = match target["type"].as_str() {
-                Some("document") => doc_link(base, input.names, target["id"].as_str().unwrap_or("?")),
-                Some("range") => doc_link(base, input.names, target["document"].as_str().unwrap_or("?")),
-                Some(other) => format!("{} {}", escape(other), escape(&target.to_string())),
-                None => "target not spelled by this Host's view".to_owned(),
-            };
-            out.push_str(&format!("<li data-link=\"{}\">link {} -> {}</li>\n", escape(id), short(id), shown));
+fn change_text(change: &Value) -> String {
+    let element = short(change["element"].as_str().unwrap_or("?"));
+    let line = |value: &Value| -> String {
+        match value["kind"].as_str() {
+            Some("atom") => format!(
+                "\"{}\"{}",
+                escape(&bytes_text(value["payload"].as_str().unwrap_or(""))),
+                if value["struck"] == true { " (struck)" } else { "" }
+            ),
+            Some("embed") => format!("transclusion {}", short(value["transclusion"].as_str().unwrap_or("?"))),
+            Some("container") => "section".to_owned(),
+            Some(other) => escape(other),
+            None => "?".to_owned(),
         }
-        out.push_str("</ul></section>\n");
+    };
+    match change["type"].as_str() {
+        Some("added") => format!("+ {element} {}", line(&change["after"])),
+        Some("removed") => format!("- {element} {}", line(&change["before"])),
+        Some("changed") => format!("~ {element} {} -> {}", line(&change["before"]), line(&change["after"])),
+        Some("moved") => {
+            let side = |value: &Value| value.as_str().map(short).unwrap_or_else(|| "the start".to_owned());
+            format!("moved {element}: after {} -> after {}", side(&change["before"]), side(&change["after"]))
+        }
+        _ => escape(&change.to_string()),
     }
+}
 
-    out.push_str(&format!(
-        "<section><h2>Backlinks</h2>\n<ul data-backlinks=\"{}\">\n",
-        input.backlinks.len()
-    ));
-    for backlink in &input.backlinks {
-        out.push_str(&format!(
-            "<li data-backlink=\"{from}\" data-kind=\"{kind}\"><a href=\"{base}/doc/{from}\">{from}</a> {kind} {id} \
-             by {creator}{detail}</li>\n",
-            from = escape(&backlink.from),
-            kind = backlink.kind,
-            id = short(&backlink.id),
-            creator = escape(&backlink.creator),
-            detail = escape(&backlink.detail),
-        ));
+fn changes_list(changes: &Value) -> String {
+    match changes.as_array() {
+        Some(changes) if changes.is_empty() => "<p class=note>no change</p>".to_owned(),
+        Some(changes) => {
+            let mut out = format!("<ul data-changes=\"{}\">", changes.len());
+            for change in changes {
+                out.push_str(&format!(
+                    "<li data-change=\"{}\" data-element=\"{}\">{}</li>",
+                    escape(change["type"].as_str().unwrap_or("?")),
+                    escape(change["element"].as_str().unwrap_or("?")),
+                    change_text(change)
+                ));
+            }
+            out.push_str("</ul>");
+            out
+        }
+        None => "<p class=note data-no-content>content not shown: your grant did not cover this document at \
+                 that height</p>"
+            .to_owned(),
     }
-    out.push_str("</ul>\n");
-    for (name, why) in &input.unread {
+}
+
+/// `/doc/NAME/history`: K-DOC-HISTORY's rows. Every row says who wrote the
+/// document at which height; its changes are shown only where this reader's
+/// grant stood at the height (and the one below).
+pub(crate) fn render_history(base: &str, name: &str, history: &Value) -> String {
+    let rows = history["rows"].as_array().cloned().unwrap_or_default();
+    let mut out = format!(
+        "<section><h2>History</h2>\n<table data-history=\"{}\"><tr><th>height</th><th>subject</th>\
+         <th>transaction</th><th>changes</th></tr>\n",
+        rows.len()
+    );
+    for row in &rows {
+        let height = row["height"].as_str().unwrap_or("?");
+        let below = height.parse::<u64>().ok().and_then(|h| h.checked_sub(1));
+        let links = match below {
+            Some(below) => format!(
+                " <a href=\"{base}/at/{h}/doc/{n}\">show</a> | <a href=\"{base}/doc/{n}/diff/{below}/{h}\">diff</a>",
+                h = escape(height),
+                n = escape(name)
+            ),
+            None => String::new(),
+        };
         out.push_str(&format!(
-            "<p class=note data-unread=\"{0}\">{0}: not read ({1})</p>\n",
-            escape(name),
-            escape(why)
+            "<tr data-row=\"{h}\" data-subject=\"{s}\" data-content=\"{c}\"><td>{h}{links}</td><td>{s}</td>\
+             <td>{t}</td><td>{changes}</td></tr>\n",
+            h = escape(height),
+            s = escape(row["subject"].as_str().unwrap_or("-")),
+            t = short(row["transaction"].as_str().unwrap_or("?")),
+            c = !row["changes"].is_null(),
+            changes = changes_list(&row["changes"]),
         ));
     }
     out.push_str(
-        "<p class=note>Backlinks are a fold over every page this workspace can read now; a page the \
-         Host refuses you contributes nothing.</p></section>\n",
+        "</table><p class=note>Rows are the signed log's writes of this document (your current grant decides \
+         which you see); a row's content is read `at` its height, which the Host answers only when your grant \
+         stood then.</p></section>\n",
     );
     out
 }
 
-/// Backlinks found in one readable page to any of `documents`.
-pub(crate) fn backlinks_in(from: &str, entries: &[Value], documents: &BTreeSet<String>) -> Vec<Backlink> {
-    let mut found = Vec::new();
-    for entry in entries {
-        match entry["type"].as_str() {
-            Some("link") => {
-                let target = &entry["target"];
-                let hit = match target["type"].as_str() {
-                    Some("document") => target["id"].as_str(),
-                    Some("range") => target["document"].as_str(),
-                    _ => None,
-                };
-                if hit.is_some_and(|id| documents.contains(id)) {
-                    found.push(Backlink {
-                        from: from.to_owned(),
-                        kind: "link",
-                        id: entry["id"].as_str().unwrap_or("?").to_owned(),
-                        creator: subject_of(&entry["createdBy"]).to_owned(),
-                        detail: String::new(),
-                    });
-                }
-            }
-            Some("element") if entry["body"]["type"].as_str() == Some("embed") => {
-                let reference = &entry["body"]["reference"];
-                if reference["document"]
-                    .as_str()
-                    .is_some_and(|id| documents.contains(id))
-                {
-                    found.push(Backlink {
-                        from: from.to_owned(),
-                        kind: if reference["mode"].as_str() == Some("live") {
-                            "transclusion"
-                        } else {
-                            "quote"
-                        },
-                        id: entry["id"].as_str().unwrap_or("?").to_owned(),
-                        creator: subject_of(&entry["createdBy"]).to_owned(),
-                        detail: format!(" of atom {}", reference["atom"].as_str().unwrap_or("?")),
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    found
+/// `/doc/NAME/diff/H1/H2`: the changes between two pages at past heights.
+pub(crate) fn render_diff(diff: &Value) -> String {
+    format!(
+        "<section><h2>Changes from height {} to height {}</h2>\n{}</section>\n",
+        escape(diff["from"]["height"].as_str().unwrap_or("?")),
+        escape(diff["to"]["height"].as_str().unwrap_or("?")),
+        changes_list(&diff["changes"])
+    )
 }
 
 /// A scalar cell's fields, and the board reading of them (P-SHELL-DOCS' layout:
@@ -729,20 +812,17 @@ impl Site {
         let parts: Vec<&str> = segments.iter().map(String::as_str).collect();
         match parts.as_slice() {
             [] => self.index(),
-            ["doc", name] => self.doc(name),
+            ["doc", name] => self.doc(name, None),
+            ["doc", name, "history"] => self.history(name),
+            ["doc", name, "diff", from, to] => self.diff(name, from, to),
+            ["at", height, "doc", name] => self.doc(name, Some(height)),
             ["board", name] => self.board(name),
             ["room", name] => self.room(name),
             ["stream", _] => simple(
                 501,
                 "Not on this tree",
-                "streams are K-STREAM (branch k-stream: the `tail` view); this mini was built from k-content, \
-                 which has no stream kind",
-            ),
-            ["at", _, "doc", _] => simple(
-                501,
-                "Not on this tree",
-                "a read at a past height is K-INDEX (branch k-index: `at h`); this mini was built from \
-                 k-content, which has no past-height view",
+                "streams are K-STREAM (branch k-stream: the `tail` view); this mini was built from the \
+                 docuverse braid, which does not carry k-stream",
             ),
             _ => simple(404, "Not found", "no such route"),
         }
@@ -766,14 +846,25 @@ impl Site {
         names
     }
 
+    /// Cell id -> this workspace's reference name for it.
+    fn targets(&self) -> Vec<(String, String)> {
+        self.names()
+            .into_iter()
+            .filter_map(|other| {
+                let reference = workspace::reference(&self.root, &other).ok()?;
+                Some((reference["target"].as_str()?.to_owned(), other))
+            })
+            .collect()
+    }
+
     fn reference(&self, name: &str) -> std::result::Result<Value, Page> {
         workspace::reference(&self.root, name).map_err(|error| {
             simple(404, name, &format!("no usable workspace reference named {name}: {error}"))
         })
     }
 
-    fn read(&self, reference: &Value) -> Result<(Value, Value, PathBuf)> {
-        workspace::signed_view(&self.root, &self.workspace, reference, "resource")
+    fn read(&self, reference: &Value, view: &str) -> Result<(Value, Value, PathBuf)> {
+        workspace::signed_view(&self.root, &self.workspace, reference, view)
     }
 
     /// The room a reference was born in, from this workspace's retained birth source.
@@ -806,8 +897,8 @@ impl Site {
             let room = if rooms.contains(target) { " (room)" } else { "" };
             rows.push_str(&format!(
                 "<tr data-ref=\"{n}\"><td><a href=\"{base}/doc/{n}\">{n}</a>{room}</td><td>{k}</td><td>{t}</td>\
-                 <td><a href=\"{base}/doc/{n}\">doc</a> | <a href=\"{base}/board/{n}\">board</a> | \
-                 <a href=\"{base}/room/{n}\">room</a></td></tr>\n",
+                 <td><a href=\"{base}/doc/{n}\">doc</a> | <a href=\"{base}/doc/{n}/history\">history</a> | \
+                 <a href=\"{base}/board/{n}\">board</a> | <a href=\"{base}/room/{n}\">room</a></td></tr>\n",
                 n = escape(name),
                 k = escape(reference["kind"].as_str().unwrap_or("?")),
                 t = short(target),
@@ -826,22 +917,34 @@ impl Site {
         }
     }
 
-    fn doc(&self, name: &str) -> Page {
-        let reference = match self.reference(name) {
-            Ok(reference) => reference,
-            Err(page) => return page,
+    /// `/doc/NAME` and `/at/H/doc/NAME`. Reads: the host page (current, or `at
+    /// H` under the grant as it stood at H), one read per transcluded source
+    /// (at H too, for a past page; plus an `at` read for a moved snapshot), and,
+    /// for the current page, the link index's `links` and `backlinks` views.
+    fn doc(&self, name: &str, at: Option<&str>) -> Page {
+        let title = match at {
+            Some(height) => format!("{name} at height {height}"),
+            None => name.to_owned(),
         };
-        let (view, challenge, signed) = match self.read(&reference) {
-            Ok(read) => read,
-            Err(error) => return failure_page(name, &error),
+        if let Err(page) = self.reference(name) {
+            return page;
+        }
+        let rendered = match workspace::rendered_document(&self.root, &self.workspace, name, None, at) {
+            Ok(rendered) => rendered,
+            Err(error) => return failure_page(&title, &error),
         };
-        let context = ReadContext::of(&challenge, &view);
-        let entries = view["cell"]["entries"].as_array().cloned().unwrap_or_default();
+        let challenge = workspace::bounded_json(&rendered.attempt.join("challenge.json")).unwrap_or(Value::Null);
+        let context = ReadContext {
+            height: challenge["height"].as_str().unwrap_or("?").to_owned(),
+            authority_root: challenge["authorityRoot"].as_str().unwrap_or("?").to_owned(),
+            cell_root: rendered.document["cellRoot"].as_str().unwrap_or("?").to_owned(),
+        };
+        let entries = rendered.view["cell"]["entries"].as_array().cloned().unwrap_or_default();
         let base = self.base();
-        if !is_content(&entries) {
+        if at.is_none() && !is_content(&entries) {
             return Page {
                 status: 200,
-                title: name.to_owned(),
+                title,
                 stamp: Stamp::Read(context),
                 body: format!(
                     "<p class=note>{0} is not a document; its fields are below (<a href=\"{base}/board/{0}\">as a \
@@ -851,109 +954,106 @@ impl Site {
                 ),
             };
         }
-        let target = reference["target"].as_str().unwrap_or("").to_owned();
-        let mut documents: BTreeSet<String> = of_type(&entries, "document")
-            .iter()
-            .filter_map(|entry| entry["id"].as_str().map(str::to_owned))
-            .collect();
-        documents.insert(target);
-        let targets: Vec<(String, String)> = self
-            .names()
-            .into_iter()
-            .filter_map(|other| {
-                let reference = workspace::reference(&self.root, &other).ok()?;
-                Some((reference["target"].as_str()?.to_owned(), other))
-            })
-            .collect();
+        let lines = match workspace::document_lines(&rendered) {
+            Ok((lines, _)) => lines,
+            Err(error) => return failure_page(&title, &error),
+        };
+        let reference = match self.reference(name) {
+            Ok(reference) => reference,
+            Err(page) => return page,
+        };
+        let index_view = |view: &str| -> std::result::Result<Option<Vec<Value>>, Page> {
+            if at.is_some() {
+                return Ok(None);
+            }
+            match self.read(&reference, view) {
+                Ok((value, _, _)) => Ok(Some(value["rows"].as_array().cloned().unwrap_or_default())),
+                Err(error) => Err(failure_page(&title, &error)),
+            }
+        };
+        let links = match index_view("links") {
+            Ok(rows) => rows,
+            Err(page) => return page,
+        };
+        let backlinks = match index_view("backlinks") {
+            Ok(rows) => rows,
+            Err(page) => return page,
+        };
+        let targets = self.targets();
         let names = |id: &str| {
             targets
                 .iter()
                 .find(|(target, _)| target == id)
                 .map(|(_, name)| name.clone())
         };
-        let quotes = self.quotes(&entries, &signed, &targets);
-        let mut backlinks = Vec::new();
-        let mut unread = Vec::new();
-        for other in self.names() {
-            if other == name {
-                backlinks.extend(backlinks_in(name, &entries, &documents));
-                continue;
-            }
-            let Ok(other_ref) = workspace::reference(&self.root, &other) else {
-                continue;
-            };
-            match self.read(&other_ref) {
-                Ok((other_view, _, _)) => {
-                    let other_entries = other_view["cell"]["entries"].as_array().cloned().unwrap_or_default();
-                    backlinks.extend(backlinks_in(&other, &other_entries, &documents));
-                }
-                Err(error) => unread.push((
-                    other,
-                    refusal_text(&error).map(|text| format!("refused: {text}")).unwrap_or(error),
-                )),
-            }
+        let mut body = String::new();
+        if let Some(height) = at {
+            body.push_str(&format!(
+                "<p class=note data-at=\"{h}\">This page is {n} as it stood at height {h} (state {s}), read under \
+                 your grant as it stood then. <a href=\"{base}/doc/{n}\">current</a> | \
+                 <a href=\"{base}/doc/{n}/history\">history</a></p>\n",
+                h = escape(height),
+                n = escape(name),
+                s = escape(rendered.document["state"].as_str().unwrap_or("?")),
+            ));
+        } else {
+            body.push_str(&format!(
+                "<p class=note><a href=\"{base}/doc/{n}/history\">history</a></p>\n",
+                n = escape(name)
+            ));
         }
-        let body = render_document(&DocInput {
-            base: &base,
-            entries: &entries,
-            quotes,
-            backlinks,
-            unread,
-            names: &names,
-        });
+        body.push_str(&render_document(
+            &DocInput {
+                base: &base,
+                lines: &lines,
+                entries: &entries,
+                links: links.as_deref(),
+                backlinks: backlinks.as_deref(),
+                names: &names,
+            },
+            &rendered.shown,
+        ));
         Page {
             status: 200,
-            title: name.to_owned(),
+            title,
             stamp: Stamp::Read(context),
             body,
         }
     }
 
-    /// Render this page's quotes through the Host's `inspect view-quotes`, with
-    /// the source views this reader's own grants obtain. A refused source read
-    /// contributes no source, so its quotes render `unavailable`.
-    fn quotes(
-        &self,
-        entries: &[Value],
-        signed: &Path,
-        targets: &[(String, String)],
-    ) -> std::result::Result<Option<Value>, String> {
-        let documents: BTreeSet<&str> = entries
-            .iter()
-            .filter(|entry| entry["body"]["type"].as_str() == Some("embed"))
-            .filter_map(|entry| entry["body"]["reference"]["document"].as_str())
-            .collect();
-        if documents.is_empty() {
-            return Ok(None);
+    fn history(&self, name: &str) -> Page {
+        let title = format!("history of {name}");
+        if let Err(page) = self.reference(name) {
+            return page;
         }
-        let attempt = signed.parent().ok_or("signed read lacks its attempt directory")?;
-        let host_view = fs::read(attempt.join("view.bin")).map_err(|error| error.to_string())?;
-        let mut sources = Vec::new();
-        for document in documents {
-            for (target, other) in targets.iter().filter(|(target, _)| target == document) {
-                let Ok(reference) = workspace::reference(&self.root, other) else {
-                    continue;
-                };
-                if let Ok((_, _, source_signed)) = self.read(&reference) {
-                    let view = source_signed
-                        .parent()
-                        .map(|dir| dir.join("view.bin"))
-                        .ok_or("source read lacks its attempt directory")?;
-                    let bytes = fs::read(&view).map_err(|error| error.to_string())?;
-                    sources.push(json!({"target": target, "view": hex(&bytes)}));
-                }
-            }
+        match workspace::doc_history(&self.root, &self.workspace, name) {
+            Ok(history) => Page {
+                status: 200,
+                title,
+                stamp: Stamp::None,
+                body: render_history(&self.base(), name, &history),
+            },
+            Err(error) => failure_page(&title, &error),
         }
-        let input = json!({"host": hex(&host_view), "sources": sources});
-        let input_path = attempt.join("view-quotes.in.json");
-        workspace::private_file(
-            &input_path,
-            &serde_json::to_vec(&input).map_err(|error| error.to_string())?,
-        )?;
-        let output = attempt.join("view-quotes.json");
-        let host = workspace::member_path(&self.workspace, "host")?;
-        let config = workspace::member_path(&self.workspace, "config")?;
-        inspect(&host, &config, "view-quotes", &input_path, &output).map(Some)
+    }
+
+    fn diff(&self, name: &str, from: &str, to: &str) -> Page {
+        let title = format!("{name}: height {from} to {to}");
+        if let Err(page) = self.reference(name) {
+            return page;
+        }
+        if !from.bytes().all(|byte| byte.is_ascii_digit()) || !to.bytes().all(|byte| byte.is_ascii_digit()) {
+            return simple(404, "Not found", "a height is a decimal");
+        }
+        match workspace::doc_diff(&self.root, &self.workspace, name, from, to) {
+            Ok(diff) => Page {
+                status: 200,
+                title,
+                stamp: Stamp::None,
+                body: render_diff(&diff),
+            },
+            Err(error) => failure_page(&title, &error),
+        }
     }
 
     fn board(&self, name: &str) -> Page {
@@ -961,7 +1061,7 @@ impl Site {
             Ok(reference) => reference,
             Err(page) => return page,
         };
-        match self.read(&reference) {
+        match self.read(&reference, "resource") {
             Ok((view, challenge, _)) => {
                 let entries = view["cell"]["entries"].as_array().cloned().unwrap_or_default();
                 let body = if is_content(&entries) {
@@ -984,13 +1084,16 @@ impl Site {
         }
     }
 
+    /// `/room/NAME`: the room cell, what this workspace created in it, and its
+    /// members (K-INDEX's `who`: the subjects a standing grant covers the room
+    /// with, and when each was last seen writing).
     fn room(&self, name: &str) -> Page {
         let reference = match self.reference(name) {
             Ok(reference) => reference,
             Err(page) => return page,
         };
         let target = reference["target"].as_str().unwrap_or("?").to_owned();
-        let (view, challenge, _) = match self.read(&reference) {
+        let (view, challenge, _) = match self.read(&reference, "resource") {
             Ok(read) => read,
             Err(error) => return failure_page(name, &error),
         };
@@ -1017,9 +1120,34 @@ impl Site {
         body.push_str(
             "</ul><p class=note>Listed: resources this workspace itself created in the room (its retained birth \
              sources). Opening each is a signed read; a room grant (`under R`) is what lets it succeed.</p>\
-             </section>\n<section><h2>Members</h2><p class=note>Who holds a standing grant over this room is \
-             K-INDEX's `who` view (branch k-index), not on this tree.</p></section>\n",
+             </section>\n<section><h2>Members</h2>\n",
         );
+        match self.read(&reference, "who") {
+            Ok((who, _, _)) => {
+                let members = who["members"].as_array().cloned().unwrap_or_default();
+                body.push_str(&format!("<ul data-members=\"{}\">\n", members.len()));
+                for member in &members {
+                    let subject = member["subject"].as_str().unwrap_or("?");
+                    body.push_str(&format!(
+                        "<li data-member=\"{0}\">subject {0}{1}</li>\n",
+                        escape(subject),
+                        match member["lastSeen"].as_str() {
+                            Some(height) => format!(", last wrote at height {}", escape(height)),
+                            None => ", has not written".to_owned(),
+                        }
+                    ));
+                }
+                body.push_str(
+                    "</ul><p class=note>The subjects a standing grant covers this room with (the Host's `who` \
+                     view, cut by your grant).</p>",
+                );
+            }
+            Err(error) => body.push_str(&format!(
+                "<p class=note data-members-refused>members not shown: {}</p>",
+                escape(&refusal_text(&error).unwrap_or(error))
+            )),
+        }
+        body.push_str("</section>\n");
         Page {
             status: 200,
             title: format!("room {name}"),
@@ -1066,10 +1194,8 @@ fn respond(stream: &mut TcpStream, head_only: bool, page: &Page, base: &str, sub
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    const PAPER: &str = include_str!("web/fixtures/paper-read.json");
-    const NOTES: &str = include_str!("web/fixtures/notes-read.json");
-    const QUOTES: &str = include_str!("web/fixtures/notes-quotes-stale.json");
     const FIELDS: &str = include_str!("web/fixtures/scalar-read.json");
     const REFUSAL: &str = include_str!("web/fixtures/refused-read.err");
 
@@ -1093,61 +1219,126 @@ mod tests {
         None
     }
 
+    /// A page in the kernel's order (`workspace::document_lines`' shape): a
+    /// struck line, a section, a transclusion, a line after it.
+    fn page_lines() -> Vec<Value> {
+        vec![
+            json!({"element":"1002","parent":"1","kind":"atom","atom":"1002","payload":hex(b"second, placed first"),
+                "revision":"71","createdBy":{"subject":"7"},"struck":false,"line":1,"depth":1}),
+            json!({"element":"1001","parent":"1","kind":"atom","atom":"1001","payload":hex(b"the first line"),
+                "revision":"70","createdBy":{"subject":"7"},"struck":true,"line":null,"depth":1}),
+            json!({"element":"5","parent":"1","kind":"container","revision":"72","children":"1","line":null,"depth":1}),
+            json!({"element":"8001","parent":"5","kind":"embed","transclusion":"8001","line":2,"depth":2}),
+            json!({"element":"8002","parent":"1","kind":"embed","transclusion":"8002","line":3,"depth":1}),
+        ]
+    }
+
+    fn shown() -> Vec<Value> {
+        vec![
+            json!({"id":"8001","mode":"snapshot","opening":{"source":"15383085687320778865","atoms":"2"},
+                "render":{"view":"snapshot","lines":[hex(b"w2"),hex(b"w3")]},"at":"27"}),
+            json!({"id":"8002","mode":"live","opening":{"source":"15383085687320778865","atoms":"3"},
+                "render":{"view":"unavailable","atoms":"3","source":"15383085687320778865"}}),
+        ]
+    }
+
     #[test]
-    fn lines_follow_doc_show_order_with_creator_and_revision() {
-        let entries = entries(PAPER);
-        let html = render_document(&DocInput {
-            base: "/t",
-            entries: &entries,
-            quotes: Ok(None),
-            backlinks: Vec::new(),
-            unread: Vec::new(),
-            names: &no_names,
-        });
-        let first = html.find("data-atom=\"1001\"").unwrap();
-        let second = html.find("data-atom=\"1002\"").unwrap();
-        assert!(first < second);
-        assert!(html.contains("data-lines=\"2\""));
-        assert!(html.contains("the first line"));
-        assert!(html.contains("the second line, revised"));
-        assert!(html.contains("id=\"line-2\" data-atom=\"1002\" data-creator=\"7\" data-revision=\"75608161264795635450568153077390084790153955599406130858924037196896369833322\""));
+    fn lines_follow_the_kernel_order_with_transclusions_inline() {
+        let lines = page_lines();
+        let entries = vec![json!({"type":"annotation","id":"7001","anchor":{"type":"atom","atom":"1002"},
+            "fresh":false,"author":{"subject":"9"},"body":{"type":"inline","bytes":hex(b"cite this")}})];
+        let names = |id: &str| (id == "15383085687320778865").then(|| "wall".to_owned());
+        let html = render_document(
+            &DocInput {
+                base: "/t",
+                lines: &lines,
+                entries: &entries,
+                links: Some(&[]),
+                backlinks: Some(&[]),
+                names: &names,
+            },
+            &shown(),
+        );
+        let first = html.find("data-element=\"1002\"").unwrap();
+        let struck = html.find("data-element=\"1001\"").unwrap();
+        let section = html.find("data-section=\"72\"").unwrap();
+        let embed = html.find("data-transclusion=\"8001\"").unwrap();
+        assert!(first < struck && struck < section && section < embed);
+        assert!(html.contains("data-lines=\"3\""));
+        assert!(html.contains("<del>the first line</del>"));
+        assert!(html.contains("data-transclusion=\"8001\" data-mode=\"snapshot\" data-render=\"snapshot\""));
+        assert!(html.contains("[snapshot at height 27 of <a href=\"/t/doc/wall\">wall</a>]"));
+        assert!(html.contains("w2<br>w3"));
+        assert!(html.contains("data-transclusion=\"8002\" data-mode=\"live\" data-render=\"unavailable\""));
+        assert!(html.contains("data-placeholder>[transclusion: 3 atoms of <a href=\"/t/doc/wall\">wall</a>, not readable by you]"));
         assert!(html.contains("data-annotation=\"7001\" data-fresh=\"false\""));
         assert!(html.contains("cite this"));
     }
 
     #[test]
-    fn quotes_render_from_view_quotes_and_links_resolve_to_workspace_names() {
-        let entries = entries(NOTES);
-        let quotes: Value = serde_json::from_str(QUOTES).unwrap();
-        let names = |id: &str| (id == "15383085687320778865").then(|| "paper".to_owned());
-        let html = render_document(&DocInput {
-            base: "/t",
-            entries: &entries,
-            quotes: Ok(Some(quotes)),
-            backlinks: Vec::new(),
-            unread: Vec::new(),
-            names: &names,
-        });
-        assert!(html.contains("data-quote=\"8001\" data-mode=\"snapshot\" data-render=\"stale\""));
-        assert!(html.contains("data-quote=\"8002\" data-mode=\"live\" data-render=\"quoted\""));
-        assert!(html.contains("the second line, final"));
-        assert!(html.contains("<a href=\"/t/doc/paper\">paper</a>"));
-        assert!(html.contains("data-link=\"9001\""));
+    fn links_and_backlinks_come_from_the_index_views() {
+        let lines = page_lines();
+        let links = vec![json!({"source":"3","link":"9101","kind":"document","target":"15383085687320778865",
+            "relation":"0","revision":"1","height":"20"})];
+        let backlinks = vec![
+            json!({"source":"44","link":"9201","kind":"document","target":"3","relation":"0","revision":"1","height":"21"}),
+            json!({"source":"45","link":"9301","kind":"transclusion","target":"8009","relation":"5","revision":"1","height":"22"}),
+        ];
+        let names = |id: &str| match id {
+            "15383085687320778865" => Some("paper".to_owned()),
+            "44" => Some("notes".to_owned()),
+            _ => None,
+        };
+        let html = render_document(
+            &DocInput {
+                base: "/t",
+                lines: &lines,
+                entries: &[],
+                links: Some(&links),
+                backlinks: Some(&backlinks),
+                names: &names,
+            },
+            &shown(),
+        );
+        assert!(html.contains("data-link=\"9101\" data-kind=\"document\">link <span class=id>9101</span> -> <a href=\"/t/doc/paper\">paper</a>"));
+        assert!(html.contains("data-backlinks=\"2\""));
+        assert!(html.contains("data-backlink=\"notes\" data-kind=\"document\""));
+        assert!(html.contains("data-backlink=\"45\" data-kind=\"transclusion\""));
+        let past = render_document(
+            &DocInput {
+                base: "/t",
+                lines: &lines,
+                entries: &[],
+                links: None,
+                backlinks: None,
+                names: &names,
+            },
+            &shown(),
+        );
+        assert!(!past.contains("data-backlinks"));
+        assert!(past.contains("a page at a past height does not show them"));
     }
 
     #[test]
-    fn backlinks_fold_quotes_and_spelled_links() {
-        let mut documents = BTreeSet::new();
-        documents.insert("15383085687320778865".to_owned());
-        let found = backlinks_in("notes", &entries(NOTES), &documents);
-        let kinds: Vec<&str> = found.iter().map(|backlink| backlink.kind).collect();
-        assert_eq!(kinds, ["quote", "transclusion"]);
-        let spelled = vec![json!({"type":"link","id":"9101","target":{"type":"document","id":"15383085687320778865"},
-            "createdBy":{"subject":"9"}})];
-        let found = backlinks_in("other", &spelled, &documents);
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].kind, "link");
-        assert!(backlinks_in("paper", &entries(PAPER), &documents).is_empty());
+    fn history_rows_show_content_only_where_the_grant_stood() {
+        let history = json!({"rows":[
+            {"height":"99","subject":"7","transaction":"1","changes":null},
+            {"height":"103","subject":"8","transaction":"2","changes":[
+                {"type":"changed","element":"1001","before":{"kind":"atom","payload":hex(b"a")},
+                    "after":{"kind":"atom","payload":hex(b"b")}},
+                {"type":"moved","element":"1002","before":null,"after":"1001"}]}]});
+        let html = render_history("/t", "paper", &history);
+        assert!(html.contains("data-history=\"2\""));
+        assert!(html.contains("data-row=\"99\" data-subject=\"7\" data-content=\"false\""));
+        assert!(html.contains("data-no-content"));
+        assert!(html.contains("data-row=\"103\" data-subject=\"8\" data-content=\"true\""));
+        assert!(html.contains("~ <span class=id>1001</span> \"a\" -> \"b\""));
+        assert!(html.contains("data-change=\"moved\""));
+        assert!(html.contains("<a href=\"/t/at/103/doc/paper\">show</a> | <a href=\"/t/doc/paper/diff/102/103\">diff</a>"));
+        let diff = render_diff(&json!({"from":{"height":"100"},"to":{"height":"104"},"changes":[
+            {"type":"added","element":"1003","after":{"kind":"atom","payload":hex(b"c")}}]}));
+        assert!(diff.contains("from height 100 to height 104"));
+        assert!(diff.contains("+ <span class=id>1003</span> \"c\""));
     }
 
     #[test]
@@ -1177,16 +1368,19 @@ mod tests {
     #[test]
     fn escapes_every_text_path() {
         assert_eq!(escape("<a href=\"x\">&'"), "&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
-        let hostile = vec![json!({"type":"atom","id":"1","createdBy":{"subject":"7"},"revision":"1",
-            "tombstonedAt":null,"payload":hex(b"<script>alert(1)</script>")})];
-        let html = render_document(&DocInput {
-            base: "/t",
-            entries: &hostile,
-            quotes: Ok(None),
-            backlinks: Vec::new(),
-            unread: Vec::new(),
-            names: &no_names,
-        });
+        let hostile = vec![json!({"element":"1","parent":"0","kind":"atom","atom":"1","createdBy":{"subject":"7"},
+            "revision":"1","struck":false,"line":1,"depth":1,"payload":hex(b"<script>alert(1)</script>")})];
+        let html = render_document(
+            &DocInput {
+                base: "/t",
+                lines: &hostile,
+                entries: &[],
+                links: None,
+                backlinks: None,
+                names: &no_names,
+            },
+            &[],
+        );
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
     }

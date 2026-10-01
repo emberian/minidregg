@@ -6,18 +6,24 @@
 # Parties: A = sponsor (owns `hist`), B = the newcomer (observe+mutate on hist,
 # granted after h2), C = the third key (observe on hist, granted after h2).
 # Five edits: h1 A creates the document and line 1001; h2 A appends 1002;
-# h3 B edits 1001; h4 A appends 1003; h5 B edits 1002. After each, A runs
-# `doc-show` (current read) and the line table is saved: the control.
+# h3 B edits 1001; h4 A appends 1003; h5 B edits 1002; h6 A moves 1003 to the
+# top (an element-tree move: no atom changes, the order does). After each, A
+# runs `doc-show` (current read) and the line table is saved: the control.
+# Lines are the element tree's walk (view-document's order); changes are keyed
+# by element (an atom's element is the atom's own id).
 # Rows:
-#   history-edits        A's history: rows at h1..h5, subjects A A B A B     -> exact
-#   history-atoms        each row's atom changes                          -> +1001 | +1002 | ~1001 | +1003 | ~1002
+#   history-edits        A's history: rows at h1..h6, subjects A A B A B A   -> exact
+#   history-atoms        each row's changes                               -> +1001 | +1002 | ~1001 | +1003 | ~1002 | moved 1001,1003
 #   history-below        rows below h1 (the birth)                        -> 1
-#   show-at-hN (N=1..5)  `doc-show --at hN` lines+root = saved control     -> equal
+#   show-at-hN (N=1..6)  `doc-show --at hN` lines+root = saved control     -> equal
+#   order-at-h6          the line order at h6                             -> 1003 1001 1002
 #   diff-h2-h4           Lean diff h2→h4                                  -> ~1001 +1003
-#   diff-agrees-show     jq diff of the two --at line tables = Lean diff  -> equal
+#   diff-agrees-show     jq diff (incl. moves) of the two --at tables = Lean diff -> equal
+#   diff-h5-h6-moves     Lean diff h5→h6: the move's seams                 -> moved 1001, moved 1003
+#   diff-moves-agree     jq diff of the --at h5 / h6 tables = Lean diff   -> equal
 #   c-at-h2              C (granted after h2) --at h2                      -> refused (did not cover)
 #   c-at-h3              C --at h3                                         -> read, = control h3
-#   c-history-split      C's history: rows h1,h2 carry no content; h3..h5 do -> exact
+#   c-history-split      C's history: rows h1,h2 carry no content; h3..h6 do -> exact
 #   restart-identical    stop+start the service; history and --at h4 again -> byte-identical
 #   audit                Host audit re-admits every accepted record        -> re-admitted
 # Exit 0 = every row as expected. Last stdout line = the rows file.
@@ -59,7 +65,26 @@ atom_before() { # READNAME ATOM -> editAtom's `before`
 }
 show() { run "$1" "$MINI" workspace --action doc-show --dir "$2" --name hist ${3:+--at "$3"}; }
 table() { jq -c '{root, lines}' "$D/$1.out"; }
-kinds() { jq -c '[.[] | (if .type == "added" then "+" elif .type == "removed" then "-" else "~" end) + .atom]'; }
+kinds() { jq -c '[.[] | (if .type == "added" then "+" elif .type == "removed" then "-" elif .type == "moved" then "m" else "~" end) + .element]'; }
+# The Lean diff and an independent jq diff of two `doc-show --at` tables, both
+# keyed by element and projected to {type, element, before, after} (a line's
+# revision; a move's predecessor among the lines on both sides).
+lean_diff() { jq -c '[.changes[] | if .type == "moved" then {type, element, before, after}
+  else {type, element, before: (.before.revision // null), after: (.after.revision // null)} end]
+  | sort_by(.type, .element)' "$D/$1.out"; }
+jq_diff() { jq -cn --slurpfile l "$D/$1.out" --slurpfile r "$D/$2.out" '
+  def value: {kind, atom, payload, revision, createdBy, struck, transclusion};
+  def pred($c; $k): ($c | index($k)) as $i | if $i == 0 then null else $c[$i - 1] end;
+  ($l[0].lines | map({key: .element, value: .}) | from_entries) as $L |
+  ($r[0].lines | map({key: .element, value: .}) | from_entries) as $R |
+  ($l[0].lines | map(.element) | map(select($R[.] != null))) as $CL |
+  ($r[0].lines | map(.element) | map(select($L[.] != null))) as $CR |
+  ([$L | keys[] | select($R[.] == null) | {type: "removed", element: ., before: $L[.].revision, after: null}] +
+   [$R | keys[] | select($L[.] == null) | {type: "added", element: ., before: null, after: $R[.].revision}] +
+   [$L | keys[] | select($R[.] != null and ($L[.] | value) != ($R[.] | value)) |
+     {type: "changed", element: ., before: $L[.].revision, after: $R[.].revision}] +
+   [$CL[] | {type: "moved", element: ., before: pred($CL; .), after: pred($CR; .)} | select(.before != .after)])
+  | sort_by(.type, .element)'; }
 
 A=$(subject_of "$SPONSOR_WS"); B=$(subject_of "$NEWCOMER_WS"); C=$(subject_of "$TW")
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
@@ -68,7 +93,7 @@ hist=$(jq -r .target "$SPONSOR_WS/refs/hist.json")
 
 declare -A H
 H[1]=$(invoke h-e1 "$SPONSOR_WS" "$(jq -n --arg p "$(hexof one)" '[
-  {type:"createDocument",rootElement:"1",schema:"0",body:{type:"runs",runs:[]}},
+  {type:"createDocument",rootElement:"1",schema:"0"},
   {type:"createAtom",atom:"1001",kind:{type:"text"},payload:$p}]')")
 show ctl-1 "$SPONSOR_WS"; ok ctl-1
 H[2]=$(invoke h-e2 "$SPONSOR_WS" "$(jq -n --arg p "$(hexof two)" '[{type:"createAtom",atom:"1002",kind:{type:"text"},payload:$p}]')")
@@ -85,27 +110,30 @@ run b-read5 "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name hist; ok
 H[5]=$(invoke h-e5 "$NEWCOMER_WS" "$(jq -n --argjson b "$(atom_before b-read5 1002)" --arg p "$(hexof 'two, by B')" \
   '[{type:"editAtom",atom:"1002",before:$b,kind:{type:"text"},payload:$p,tombstone:false}]')")
 show ctl-5 "$SPONSOR_WS"; ok ctl-5
+H[6]=$(invoke h-e6 "$SPONSOR_WS" "$(jq -n --arg r "$(jq -r .rootRevision "$D/ctl-5.out")" \
+  '[{type:"editElement",element:"1",revision:$r,op:{type:"move",child:"1003",index:"0"}}]')")
+show ctl-6 "$SPONSOR_WS"; ok ctl-6
 
 # Absolute heights: genesis height G = the current read's challenge height - the last log height.
-att=$(grep -o 'workspace read attempt: .*' "$D/ctl-5.err" | tail -1 | cut -d' ' -f4)
-G=$(( $(jq -r .height "$att/challenge.json") - H[5] ))
-for i in 1 2 3 4 5; do H[$i]=$((G + H[$i])); done
-echo "genesis $G; edit heights ${H[1]} ${H[2]} ${H[3]} ${H[4]} ${H[5]}; subjects A=$A B=$B C=$C" >&2
+att=$(grep -o 'workspace read attempt: .*' "$D/ctl-6.err" | tail -1 | cut -d' ' -f4)
+G=$(( $(jq -r .height "$att/challenge.json") - H[6] ))
+for i in 1 2 3 4 5 6; do H[$i]=$((G + H[$i])); done
+echo "genesis $G; edit heights ${H[1]} ${H[2]} ${H[3]} ${H[4]} ${H[5]} ${H[6]}; subjects A=$A B=$B C=$C" >&2
 
 # history
 run hist-a "$MINI" workspace --action doc-history --dir "$SPONSOR_WS" --name hist; ok hist-a
-want=$(jq -cn --arg a "$A" --arg b "$B" --argjson h "[\"${H[1]}\",\"${H[2]}\",\"${H[3]}\",\"${H[4]}\",\"${H[5]}\"]" \
-  '[$h, [$a,$a,$b,$a,$b]] | transpose | map({height: .[0], subject: .[1]})')
+want=$(jq -cn --arg a "$A" --arg b "$B" --argjson h "[\"${H[1]}\",\"${H[2]}\",\"${H[3]}\",\"${H[4]}\",\"${H[5]}\",\"${H[6]}\"]" \
+  '[$h, [$a,$a,$b,$a,$b,$a]] | transpose | map({height: .[0], subject: .[1]})')
 got=$(jq -c --argjson h1 "${H[1]}" '[.rows[] | select((.height|tonumber) >= $h1) | {height, subject}]' "$D/hist-a.out")
-row history-edits "$want" "$got" "5 edits by two subjects"
-got=$(jq -c --argjson h1 "${H[1]}" '[.rows[] | select((.height|tonumber) >= $h1) | .changes | [.[] | (if .type == "added" then "+" elif .type == "removed" then "-" else "~" end) + .atom]]' "$D/hist-a.out")
-row history-atoms '[["+1001"],["+1002"],["~1001"],["+1003"],["~1002"]]' "$got" "atom changes per row"
+row history-edits "$want" "$got" "6 edits by two subjects"
+got=$(jq -c --argjson h1 "${H[1]}" '[.rows[] | select((.height|tonumber) >= $h1) | .changes | [.[] | (if .type == "added" then "+" elif .type == "removed" then "-" elif .type == "moved" then "m" else "~" end) + .element]]' "$D/hist-a.out")
+row history-atoms '[["+1001"],["+1002"],["~1001"],["+1003"],["~1002"],["m1001","m1003"]]' "$got" "changes per row, keyed by element"
 revs=$(jq -c --argjson h "${H[3]}" '.rows[] | select((.height|tonumber) == $h) | .changes[0] | [.before.revision, .after.revision]' "$D/hist-a.out")
 got=$(jq -c --argjson h1 "${H[1]}" '[.rows[] | select((.height|tonumber) < $h1)] | length' "$D/hist-a.out")
 row history-below 1 "$got" "the birth row; h3 revision before→after $revs"
 
 # show --at each height = the control saved right after that edit
-for i in 1 2 3 4 5; do
+for i in 1 2 3 4 5 6; do
   show at-$i "$SPONSOR_WS" "${H[$i]}"
   if [ "$(cat "$D/at-$i.rc")" = 0 ] && [ "$(table at-$i)" = "$(table ctl-$i)" ]; then g=equal; else g=differ; fi
   row show-at-h$i equal "$g" "height ${H[$i]}: $(jq -c '[.lines[] | .atom + "@" + .revision]' "$D/at-$i.out" 2>/dev/null | cut -c1-160)"
@@ -115,15 +143,12 @@ done
 run diff-24 "$MINI" workspace --action doc-diff --dir "$SPONSOR_WS" --name hist --from "${H[2]}" --to "${H[4]}"; ok diff-24
 got=$(jq -c '.changes' "$D/diff-24.out" | kinds)
 row diff-h2-h4 '["~1001","+1003"]' "$got" "Lean diff ${H[2]}→${H[4]}"
-lean=$(jq -c '[.changes[] | {type, atom, before: (.before.revision // null), after: (.after.revision // null)}] | sort_by(.atom)' "$D/diff-24.out")
-mine=$(jq -cn --slurpfile l "$D/at-2.out" --slurpfile r "$D/at-4.out" '
-  ($l[0].lines | map({key: .atom, value: .}) | from_entries) as $L |
-  ($r[0].lines | map({key: .atom, value: .}) | from_entries) as $R |
-  ([$L | keys[] | select($R[.] == null) | {type: "removed", atom: ., before: $L[.].revision, after: null}] +
-   [$R | keys[] | select($L[.] == null) | {type: "added", atom: ., before: null, after: $R[.].revision}] +
-   [$L | keys[] | select($R[.] != null and ($L[.] | del(.line)) != ($R[.] | del(.line))) |
-     {type: "changed", atom: ., before: $L[.].revision, after: $R[.].revision}]) | sort_by(.atom)')
-row diff-agrees-show "$lean" "$mine" "jq diff of show --at ${H[2]} / ${H[4]}"
+row diff-agrees-show "$(lean_diff diff-24)" "$(jq_diff at-2 at-4)" "jq diff of show --at ${H[2]} / ${H[4]}"
+row order-at-h6 "1003 1001 1002" "$(jq -r '[.lines[].element] | join(" ")' "$D/at-6.out")" "the element tree's walk at ${H[6]}"
+run diff-56 "$MINI" workspace --action doc-diff --dir "$SPONSOR_WS" --name hist --from "${H[5]}" --to "${H[6]}"; ok diff-56
+row diff-h5-h6-moves '["m1001","m1003"]' "$(jq -c '.changes' "$D/diff-56.out" | kinds)" \
+  "Lean diff ${H[5]}→${H[6]}: $(lean_diff diff-56 | cut -c1-200)"
+row diff-moves-agree "$(lean_diff diff-56)" "$(jq_diff at-5 at-6)" "jq diff of show --at ${H[5]} / ${H[6]}"
 
 # coverage at the asked height
 show c-at-2 "$TW" "${H[2]}"
@@ -134,7 +159,7 @@ if [ "$(cat "$D/c-at-3.rc")" = 0 ] && [ "$(table c-at-3)" = "$(table ctl-3)" ]; 
 row c-at-h3 equal "$g" "C reads h3 = A's control at h3"
 run hist-c "$MINI" workspace --action doc-history --dir "$TW" --name hist; ok hist-c
 got=$(jq -c --argjson h1 "${H[1]}" '[.rows[] | select((.height|tonumber) >= $h1) | (.after != null)]' "$D/hist-c.out")
-row c-history-split '[false,false,true,true,true]' "$got" "C sees every row (current grant); content only from its grant height"
+row c-history-split '[false,false,true,true,true,true]' "$got" "C sees every row (current grant); content only from its grant height"
 
 # restart: stop the service, start it again, and read the same history and --at
 cp "$D/hist-a.out" "$D/hist-a.before"; cp "$D/at-4.out" "$D/at-4.before"

@@ -13,9 +13,12 @@
 #   e-backlinks               E's backlinks of target (no grant covers srcy) -> srcx only
 #   e-not-srcy                srcy's link is absent from E's view           -> absent
 #   oracle-a / oracle-e       the old client fold over every readable page agrees with the view
+#                             (the fold counts a transclusion whose source is DOC as a backlink)
 #   e-after-grant             A delegates srcy (observe) to E; E's backlinks -> srcx, srcy
 #   oracle-e2                 the fold agrees again
-#   quote-backlink            A quotes target#1 into qdoc; A's backlinks   -> + qdoc (quote relation)
+#   transclusion-backlink     A transcludes target's line into qdoc; A's backlinks of target
+#                             -> + qdoc (its transclusion link counts as a backlink of the
+#                             source, LinkIndex.transclusion_backlink_complete)
 #   srcx-forward              doc links srcx                                -> 1 link -> target
 #   unlink                    A unlinks srcx's link                         -> installed
 #   unlink-gone               A's and E's backlinks lose srcx; doc links srcx -> 0
@@ -97,8 +100,11 @@ oracle() { # TAG WS DOCID -> sorted "name:link"
     name=$(basename "$f" .json)
     run "oracle-$tag-$name" "$MINI" workspace --action read --dir "$ws" --name "$name"
     [ "$(cat "$D/oracle-$tag-$name.rc")" = 0 ] || continue
-    jq -r --arg d "$doc" --arg n "$name" '.cell.entries[]? | select(.type == "link" and .tombstonedAt == null)
-      | select((.target.type == "document" and .target.id == $d) or (.target.type == "range" and .target.document == $d))
+    jq -r --arg d "$doc" --arg n "$name" '(.cell.entries // []) as $e
+      | ([$e[] | select(.type == "transclusion" and .opening.source == $d) | .id]) as $reads
+      | $e[] | select(.type == "link" and .tombstonedAt == null)
+      | select((.target.type == "document" and .target.id == $d) or (.target.type == "range" and .target.document == $d)
+          or (.target.type == "transclusion" and ([.target.id] | inside($reads))))
       | $n + ":" + .id' "$D/oracle-$tag-$name.out" >>"$D/oracle/$tag.txt" 2>/dev/null
   done
   sort "$D/oracle/$tag.txt" | tr '\n' ' ' | sed 's/ $//'
@@ -120,8 +126,9 @@ qdoc=$(tgt "$SPONSOR_WS" qdoc); roomx=$(tgt "$SPONSOR_WS" roomx)
 
 doc_create() { # NAME ROOTELEMENT ATOM TEXT
   invoke "write-$1" "$SPONSOR_WS" "$1" "$(jq -n --arg e "$2" --arg a "$3" --arg t "$(hexof "$4")" '[
-    {type:"createDocument",rootElement:$e,schema:"0",body:{type:"runs",runs:[]}},
-    {type:"createAtom",atom:$a,kind:{type:"text"},payload:$t}]')"; ok "write-$1"
+    {type:"createDocument",rootElement:$e,schema:"0"},
+    {type:"createAtom",atom:$a,kind:{type:"text"},payload:$t},
+    {type:"createRun",run:("9" + $a),atoms:[$a]}]')"; ok "write-$1"
 }
 doc_create target 1 1001 "the target line"
 doc_create srcx 2 2001 "x cites the target"
@@ -176,17 +183,20 @@ row e-after-grant "srcx:9101 srcy:9201" "$got" "after the srcy delegation"
 o=$(oracle e2 "$EW" "$target")
 row oracle-e2 "$o" "$got" "fold vs view after the delegation"
 
-# A quote is a link (quote relation) to the source document.
-run a-read-target "$MINI" workspace --action read --dir "$SPONSOR_WS" --name target; ok a-read-target
-rev=$(jq -r '.cell.entries[] | select(.type == "atom" and .id == "1001") | .revision' "$D/a-read-target.out")
-invoke a-quotes "$SPONSOR_WS" qdoc "$(jq -n --arg d "$target" --arg rv "$rev" \
-  '[{type:"quote",element:"8401",link:"9301",reference:{document:$d,atom:"1001",revision:$rv,mode:"snapshot"}}]')"
-ok a-quotes
+# A transclusion's forward link targets the TRANSCLUSION record; the index
+# answers it as a backlink of the document it reads (cv 01a0f612-7abd).
+run a-transcludes "$MINI" workspace --action transclude --dir "$SPONSOR_WS" --name qdoc --source target \
+  --from 1001 --to 1001 --mode snapshot; ok a-transcludes
+tid=$(grep -o 'workspace transclusion: [0-9]*' "$D/a-transcludes.err" | tail -1 | cut -d' ' -f3)
+run a-read-qdoc "$MINI" workspace --action read --dir "$SPONSOR_WS" --name qdoc; ok a-read-qdoc
+tl=$(jq -r --arg t "$tid" '.cell.entries[] | select(.type == "link" and .target.type == "transclusion" and .target.id == $t) | .id' "$D/a-read-qdoc.out")
 view_pairs a-backlinks2 "$SPONSOR_WS" target doc-backlinks; ok a-backlinks2
 got=$(backlink_set "$SPONSOR_WS" a-backlinks2)
 qrel=$(grep '^qdoc ' "$D/a-backlinks2.out" | awk '{print $5}')
-row quote-backlink "qdoc:9301 srcx:9101 srcy:9201" "$got" "qdoc's relation $qrel (the quote relation, not 0)"
-[ -n "$qrel" ] && [ "$qrel" != 0 ] || bad=$((bad + 1))
+qkind=$(grep '^qdoc ' "$D/a-backlinks2.out" | awk '{print $11}')
+expect=$(printf '%s\n' "qdoc:$tl" srcx:9101 srcy:9201 | sort | tr '\n' ' ' | sed 's/ $//')
+row transclusion-backlink "$expect:transclusion" "$got:$qkind" "transclusion $tid, link $tl, relation $qrel (the transclude relation, not 0)"
+[ -n "$tl" ] && [ -n "$qrel" ] && [ "$qrel" != 0 ] || bad=$((bad + 1))
 view_pairs srcx-forward "$SPONSOR_WS" srcx doc-links; ok srcx-forward
 got=$(grep -c '^link ' "$D/srcx-forward.out")
 row srcx-forward "1:target" "$got:$(grep '^link ' "$D/srcx-forward.out" | awk '{print $5}')" "$(head -2 "$D/srcx-forward.out" | tail -1)"
@@ -198,7 +208,7 @@ view_pairs a-backlinks3 "$SPONSOR_WS" target doc-backlinks; ok a-backlinks3
 view_pairs e-backlinks3 "$EW" target doc-backlinks; ok e-backlinks3
 view_pairs srcx-forward2 "$SPONSOR_WS" srcx doc-links; ok srcx-forward2
 got="$(backlink_set "$SPONSOR_WS" a-backlinks3)|$(backlink_set "$EW" e-backlinks3)|$(grep -c '^link ' "$D/srcx-forward2.out")"
-row unlink-gone "qdoc:9301 srcy:9201|qdoc:9301 srcy:9201|0" "$got" "A | E | srcx's forward links"
+row unlink-gone "qdoc:$tl srcy:9201|qdoc:$tl srcy:9201|0" "$got" "A | E | srcx's forward links"
 o=$(oracle a2 "$SPONSOR_WS" "$target")
 row oracle-a2 "$o" "$(backlink_set "$SPONSOR_WS" a-backlinks3)" "fold vs view after the unlink"
 
@@ -231,5 +241,5 @@ row audit re-admitted "$(grep -q "every signed ingress re-admitted" "$D/audit.ou
 cat "$rows" >&2
 total=$(wc -l <"$rows")
 [ "$bad" = 0 ] || { echo "$bad of $total link rows differ from expectation (see $rows)" >&2; exit 1; }
-echo "$total/$total link rows as expected: backlinks from the Host's index, cut to the reader's readable sources, agreeing with the page fold; unlink and quote move the index; cold reopen and audit agree" >&2
+echo "$total/$total link rows as expected: backlinks from the Host's index, cut to the reader's readable sources, agreeing with the page fold; unlink and transclusion move the index; cold reopen and audit agree" >&2
 echo "$rows"
