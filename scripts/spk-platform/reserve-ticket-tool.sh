@@ -125,7 +125,7 @@ if [ "$#" -eq 11 ] && [ "$1" = prepare ]; then
     --slurpfile read "$ATTEMPT/before/view.json" \
     --slurpfile challenge "$ATTEMPT/before/challenge.json" '
     {grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
+      schemaVersion:"1",
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$nonce,payload:"one event22 ticket birth reserve"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),

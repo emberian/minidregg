@@ -154,7 +154,7 @@ make_edit() {
     --arg subject "$subject" --arg capability "$capability" \
     --arg payload "$payload" --arg nonce "$nonce" \
     '{subject:$subject,nonce:$nonce,purpose:{type:"prepare",draft:{type:"invoke",
-      command:{subject:$subject,expectedAuthorityRoot:$challenge[0].authorityRoot,
+      command:{subject:$subject,
         nonce:($nonce + "1"),targets:[{kind:"object",target:"8001",
           capability:$capability,
           observeCapability:(if $subject == "9" then "98" else null end),
@@ -194,7 +194,7 @@ jq -n --slurpfile view "$EVIDENCE/first-before/view.json" \
   --slurpfile challenge "$EVIDENCE/first-before/challenge.json" \
   --arg payload "$initial" \
   '{subject:"8",nonce:"60100",purpose:{type:"prepare",draft:{type:"invoke",
-    command:{subject:"8",expectedAuthorityRoot:$challenge[0].authorityRoot,
+    command:{subject:"8",
       nonce:"60101",targets:[{kind:"object",target:"8001",capability:"95",
         observeCapability:null,schemaVersion:"1",expectedTargetRoot:$view[0].cell.root,
         payload:{type:"content",actions:[{type:"createAtom",atom:"7401",

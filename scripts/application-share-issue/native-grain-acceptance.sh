@@ -130,7 +130,7 @@ jq -e '.cell.grain.status == "1" and .cell.grain.remaining == "38" and
 jq -n --slurpfile read "$EVIDENCE/tool-before-reserve/view.json" \
   --slurpfile challenge "$EVIDENCE/tool-before-reserve/challenge.json" \
   '{grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
+      schemaVersion:"1",
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:"85991",payload:"grain share ticket reserve"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),

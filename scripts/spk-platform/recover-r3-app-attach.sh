@@ -116,7 +116,7 @@ jq -e '.cell.grain == {task:"7901",generation:"0",status:"0",remaining:"100",res
 jq -n --slurpfile read "$EVIDENCE/app-parent-attach-recovery-before/view.json" \
   --slurpfile challenge "$EVIDENCE/app-parent-attach-recovery-before/challenge.json" '
   {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
-    schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
+    schemaVersion:"1",
     expectedTargetRoot:$read[0].cell.root,
     context:{operationId:"43400",payload:"r3 app parent hard attach"},
     before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -136,7 +136,7 @@ query app-parent-reserve-recovery-before 7 7901 71 "$EVIDENCE/workroom/controlle
 jq -n --slurpfile read "$EVIDENCE/app-parent-reserve-recovery-before/view.json" \
   --slurpfile challenge "$EVIDENCE/app-parent-reserve-recovery-before/challenge.json" '
   {grain:{task:"7901",subject:"7",capability:"71",observeCapability:"71",
-    schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
+    schemaVersion:"1",
     expectedTargetRoot:$read[0].cell.root,
     context:{operationId:"43410",payload:"r3 app parent witness reserve"},
     before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -159,7 +159,7 @@ jq -e '.cell.grain == {task:"7902",generation:"0",status:"0",remaining:"50",rese
 jq -n --slurpfile read "$EVIDENCE/app-tool-attach-recovery-before/view.json" \
   --slurpfile challenge "$EVIDENCE/app-tool-attach-recovery-before/challenge.json" '
   {grain:{task:"7902",subject:"8",capability:"81",observeCapability:"81",
-    schemaVersion:"1",expectedAuthorityRoot:$challenge[0].authorityRoot,
+    schemaVersion:"1",
     expectedTargetRoot:$read[0].cell.root,
     context:{operationId:"43500",payload:"r3 app tool hard attach"},
     before:($read[0].cell.grain | {generation,status,remaining,reserved}),
