@@ -36,6 +36,34 @@ mkdir -m 700 "$ROOT/public" "$ROOT/namespace" "$ROOT/attempts"
   >"$ROOT/sponsor-keygen.json"
 "$MINI" keygen --secret "$ROOT/newcomer.key" --public "$ROOT/newcomer.pub" \
   >"$ROOT/newcomer-keygen.json"
+"$MINI" keygen --secret "$ROOT/clock.key" --public "$ROOT/clock.pub" \
+  >"$ROOT/clock-keygen.json"
+CLOCK_PUBLIC=$(od -An -tx1 -v "$ROOT/clock.pub" | tr -d ' \n')
+
+# NEWPARTICIPANT_CLOCK_OBSERVER=SUBJECT adds a second clock ticker (a chain observer
+# that asserts chain time) to genesis: enrolled with its own key and account, with a
+# C_tick of its own (SUBJECT*100+1), and a clock workspace at ROOT/observer.
+OBSERVER=${NEWPARTICIPANT_CLOCK_OBSERVER:-}
+if [ -n "$OBSERVER" ]; then
+  case $OBSERVER in 0?*|*[!0-9]*) echo "observer subject must be canonical decimal" >&2; exit 2;; esac
+  [ -z "${EXTRA_GENESIS_ENROLLMENTS:-}" ] && [ -z "${EXTRA_CLOCK_TICKERS:-}" ] ||
+    { echo "NEWPARTICIPANT_CLOCK_OBSERVER composes with no other extra genesis input" >&2; exit 2; }
+  "$MINI" keygen --secret "$ROOT/observer.key" --public "$ROOT/observer.pub" \
+    >"$ROOT/observer-keygen.json"
+  OBSERVER_PUBLIC=$(od -An -tx1 -v "$ROOT/observer.pub" | tr -d ' \n')
+  jq -n --arg s "$OBSERVER" --arg public "$OBSERVER_PUBLIC" '
+    ($s|tonumber) as $n | def c(k): ($n * 100 + k | tostring);
+    [{key: {keyId: c(0), keyEpoch: "2", algorithm: "1", subject: $s, publicKey: $public,
+            activeFrom: "0", activeUntil: "1000000"},
+      accountId: $s, spendCapabilityId: c(2), controlCapabilityId: c(3),
+      factoryObserveCapabilityId: c(4), initialBalance: "0",
+      accountPredicate: {type: "all", predicates: []}}]' >"$ROOT/observer-enrollment.json"
+  jq -n --arg s "$OBSERVER" '[{subject: $s, capability: (($s|tonumber) * 100 + 1 | tostring)}]' \
+    >"$ROOT/observer-ticker.json"
+  EXTRA_GENESIS_ENROLLMENTS=$ROOT/observer-enrollment.json
+  EXTRA_CLOCK_TICKERS=$ROOT/observer-ticker.json
+  export EXTRA_GENESIS_ENROLLMENTS EXTRA_CLOCK_TICKERS
+fi
 SPONSOR_PUBLIC=$(od -An -tx1 -v "$ROOT/sponsor.pub" | tr -d ' \n')
 NEWCOMER_PUBLIC=$(od -An -tx1 -v "$ROOT/newcomer.pub" | tr -d ' \n')
 [ "$SPONSOR_PUBLIC" != "$NEWCOMER_PUBLIC" ] || { echo 'keys unexpectedly equal' >&2; exit 1; }
@@ -45,7 +73,7 @@ NEWCOMER_PUBLIC=$(od -An -tx1 -v "$ROOT/newcomer.pub" | tr -d ' \n')
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" \
   '.domain = $domain | .sponsor.subject = $subject' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
-sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" \
+sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" "$CLOCK_PUBLIC" \
   "$HOST" "$STORE" "$VERIFIER" "$ROOT"
 
 "$MINI" bootstrap --host "$HOST" --config "$ROOT/operator.json" \
@@ -83,6 +111,17 @@ done
   >"$ROOT/factory-import.stdout"
 "$MINI" workspace --action read --dir "$ROOT/sponsor" --name factory \
   >"$ROOT/factory-read.json"
+# The clock subject's own workspace (the ticker's; not the sponsor's).
+"$MINI" clock --action init --dir "$ROOT/clock" --host "$HOST" --config "$CONFIG" \
+  --socket "$SOCKET" --key "$ROOT/clock.key" \
+  --subject "$(jq -r .clock.subject "$ROOT/genesis-params.json")" \
+  --capability "$(jq -r .clock.tickCapabilityId "$ROOT/genesis-params.json")" \
+  >"$ROOT/clock-workspace.stdout"
+if [ -n "$OBSERVER" ]; then
+  "$MINI" clock --action init --dir "$ROOT/observer" --host "$HOST" --config "$CONFIG" \
+    --socket "$SOCKET" --key "$ROOT/observer.key" --subject "$OBSERVER" \
+    --capability "$((OBSERVER * 100 + 1))" >"$ROOT/observer-workspace.stdout"
+fi
 jq -e '.type == "minidregg-participant-reference-v1" and .target == "10" and
   .observeCapability == "54" and .controlCapability == "53"' \
   "$ROOT/sponsor/refs/factory.json" >/dev/null
@@ -94,7 +133,7 @@ cat >"$ROOT/handoff.json" <<EOF
 {"type":"minidregg-newparticipant-fixture-v1",
  "root":"$ROOT","host":"$HOST","mini":"$MINI",
  "config":"$CONFIG","publicSocket":"$SOCKET","sponsorWorkspace":"$ROOT/sponsor",
- "factoryRef":"factory","newKey":"$ROOT/newcomer.key",
+ "factoryRef":"factory","newKey":"$ROOT/newcomer.key","clockWorkspace":"$ROOT/clock",
  "newPublicKey":"$NEWCOMER_PUBLIC","namespaceRoot":"$ROOT/namespace",
  "enrollmentAttempt":"$ROOT/attempts/newcomer",
  "domain":"$DOMAIN","sponsorSubject":"$SUBJECT",

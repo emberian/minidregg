@@ -13,6 +13,7 @@ Key shape/enrollment is checked, not private-key possession or policy liveness.
 A deliberately denying factory policy is valid deployment configuration.
 -/
 import Kernel.ResourceBirthPolicyController
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.NativeHostGenesis
 
@@ -53,6 +54,19 @@ structure FactoryController where
   capabilityId : CapabilityId
   deriving DecidableEq, Repr
 
+/-- A subject that advances the deployment's one clock cell, and the
+identifier of its `C_tick`: a root capability on the clock cell
+(`ClockCell.physicalId`) carrying the one verb `tickClock`
+(`tickCapability`).  The clock cell's genesis law admits exactly these
+subjects and that verb (`clockPredicate`), and the factory law refuses them
+everything (`factoryLaw`): a ticker can advance the clock and do nothing else
+(`clock_subject_confined`).  The operator's wall-clock ticker is one; a chain
+observer that asserts chain time is another. -/
+structure ClockTicker where
+  subject : SubjectId
+  capabilityId : CapabilityId
+  deriving DecidableEq, Repr
+
 structure Config where
   deployment : CanonicalCellRegistry.Deployment
   federation : FederationId
@@ -64,6 +78,9 @@ structure Config where
   enrollments : List Enrollment
   factoryController : FactoryController
   meterAllowance : ResourceCost.Charge
+  /-- Every subject that may tick the clock.  Empty means the clock stays at
+  genesis for the life of the deployment: the clock law admits no one. -/
+  clockTickers : List ClockTicker
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -97,12 +114,23 @@ def enrollmentStream : StreamCodec Enrollment :=
 /-- Finite transport over the existing public-key, predicate, and metering
 codecs. Exact scalar arity is required, and the outer codec requires canonical
 re-encoding; no optional coordinate acquires an implicit default. -/
-abbrev ConfigWire := List Nat × List PolicyRecordCodec.Token × List Enrollment × ResourceCost.Charge
+abbrev ConfigWire :=
+  List Nat × List PolicyRecordCodec.Token × List Enrollment × ResourceCost.Charge × List (Nat × Nat)
 
 def configWireStream : StreamCodec ConfigWire :=
   StreamCodec.product (StreamCodec.list StreamCodec.nat)
     (StreamCodec.product (StreamCodec.list PolicyRecordCodec.tokenStream)
-      (StreamCodec.product (StreamCodec.list enrollmentStream) DurableReceiverCodec.chargeStream))
+      (StreamCodec.product (StreamCodec.list enrollmentStream)
+        (StreamCodec.product DurableReceiverCodec.chargeStream
+          (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCodec.nat)))))
+
+def tickerWire (ticker : ClockTicker) : Nat × Nat := (ticker.subject.value, ticker.capabilityId.value)
+
+def tickerOfWire (wire : Nat × Nat) : ClockTicker := ⟨⟨wire.1⟩, ⟨wire.2⟩⟩
+
+@[simp] theorem tickerOfWire_comp_tickerWire : tickerOfWire ∘ tickerWire = _root_.id := by
+  funext ticker
+  rfl
 
 def Config.toWire (config : Config) : ConfigWire :=
   ([config.deployment.domain.value, config.deployment.factoryId,
@@ -113,7 +141,7 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
     config.factoryController.capabilityId.value],
    PolicyRecordCodec.encodePred config.factoryPredicate,
-   config.enrollments, config.meterAllowance)
+   config.enrollments, config.meterAllowance, config.clockTickers.map tickerWire)
 
 def Config.ofWire (wire : ConfigWire) : Option Config := do
   let [domain, factory, book, authority, federation, base, perBirth, perGrant,
@@ -130,16 +158,18 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       factoryPredicate := predicate
       enrollments := wire.2.2.1
       factoryController := ⟨⟨controller⟩, ⟨controlCapability⟩⟩
-      meterAllowance := wire.2.2.2 }
+      meterAllowance := wire.2.2.2.1
+      clockTickers := wire.2.2.2.2.map tickerOfWire }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
   cases config
   simp [Config.ofWire, Config.toWire]
 
-/-- Version 2: the fourth deployment coordinate is the one authority cell's
-identifier (it was the retired catalogue's). -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v2".toUTF8.toList
+/-- Version 3: the source names the clock tickers (the clock cell's law and
+each ticker's `C_tick` are derived from them).  Version 2 named the authority
+cell as the fourth deployment coordinate and had no tickers. -/
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v3".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -166,10 +196,10 @@ theorem config_canonical {bytes : List UInt8} {config : Config}
     configCodec.encode config = bytes :=
   ResourceBirthCodec.strictCodec_canonical configRawCodec accepted
 
-def retiredConfigFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v1".toUTF8.toList
+def retiredConfigFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v2".toUTF8.toList
 
-/-- A version-1 genesis source (naming a catalogue identifier) refuses. -/
-theorem v1_config_refused (payload : List UInt8) :
+/-- A version-2 genesis source (no clock tickers) refuses. -/
+theorem v2_config_refused (payload : List UInt8) :
     configCodec.decode (retiredConfigFrame ++ payload) = none := by
   have lengthExact : configFrame.length = retiredConfigFrame.length := by decide +kernel
   have different : retiredConfigFrame ≠ configFrame := by decide +kernel
@@ -204,7 +234,18 @@ def Config.Valid {F : Type} [Field F]
     enrollment.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
     enrollment.key.publicKey.length = 32 ∧
     enrollment.key.activeFrom ≤ initialAuthorityRevision ∧
-    initialAuthorityRevision ≤ enrollment.key.activeUntil)
+    initialAuthorityRevision ≤ enrollment.key.activeUntil) ∧
+  -- The clock tickers: enrolled, distinct, never the factory controller, and
+  -- their `C_tick` identifiers distinct from every other genesis capability.
+  (config.clockTickers.map (·.subject.value)).Nodup ∧
+  (∀ ticker ∈ config.clockTickers,
+    ticker.subject.value ∈ config.enrollments.map (·.key.subject)) ∧
+  config.factoryController.subject.value ∉ config.clockTickers.map (·.subject.value) ∧
+  (config.clockTickers.map (·.capabilityId) ++
+    config.factoryController.capabilityId ::
+    config.enrollments.flatMap (fun enrollment =>
+      [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
+       enrollment.factoryObserveCapabilityId])).Nodup
 
 instance configValidDecidable {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
@@ -265,9 +306,34 @@ def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (identifier : Nat) (predicate : Minidregg.Pred.Pred) : PolicyRecord :=
   ⟨⟨identifier⟩, 0, config.deployment.domain, profile.semantics, none, predicate⟩
 
+/-- The factory law with every clock ticker confined: a ticker's request is
+refused whatever the deployment's own law says (`factory_refuses_ticker`), and
+every other request meets exactly that law (`factory_law_others`). -/
+def confinedFactoryLaw (tickers : List ClockTicker) (base : Minidregg.Pred.Pred) :
+    Minidregg.Pred.Pred :=
+  .all (tickers.map (fun ticker =>
+      .not (.eq "request/subject" (Int.ofNat ticker.subject.value))) ++ [base])
+
+def factoryLaw (config : Config) : Minidregg.Pred.Pred :=
+  confinedFactoryLaw config.clockTickers config.factoryPredicate
+
 def factoryPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) : PolicyRecord :=
-  policy profile config config.deployment.factoryId config.factoryPredicate
+  policy profile config config.deployment.factoryId (factoryLaw config)
+
+/-- The request-verb tag of a tick (`CredentialAuthorityEntryCodec.verbTag`). -/
+def tickVerbTag : Nat := CredentialAuthorityEntryCodec.verbTag (Verb.tickClock : Verb .program)
+
+/-- The clock cell's law: the verb is `tickClock` and the subject is a ticker. -/
+def clockPredicate (tickers : List ClockTicker) : Minidregg.Pred.Pred :=
+  .all [.eq "request/verb" (Int.ofNat tickVerbTag),
+    .any (tickers.map fun ticker => .eq "request/subject" (Int.ofNat ticker.subject.value))]
+
+def clockTarget (config : Config) : Nat := Kernel.ClockCell.physicalId config.deployment.domain
+
+def clockPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) : PolicyRecord :=
+  policy profile config (clockTarget config) (clockPredicate config.clockTickers)
 
 def accountPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (enrollment : Enrollment) : PolicyRecord :=
@@ -315,9 +381,17 @@ def factoryObserveCapability {F : Type} [Field F]
   rootCapability profile config .object enrollment.factoryObserveCapabilityId
     ⟨enrollment.key.subject⟩ config.deployment.factoryId {.observeObject}
 
+/-- A ticker's `C_tick`: target and policy the clock cell, verb `tickClock` only. -/
+def tickCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (ticker : ClockTicker) :
+    Capability .program :=
+  rootCapability profile config .program ticker.capabilityId ticker.subject
+    (clockTarget config) {.tickClock}
+
 def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
-  factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config)
+  factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config) ++
+    [clockPolicy profile config]
 
 def policyEntries (record : PolicyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
@@ -354,7 +428,8 @@ def entries {F : Type} [Field F]
     keyEntries enrollment.key ++
     capabilityEntries (accountCapability profile config enrollment) ++
     capabilityEntries (accountControlCapability profile config enrollment) ++
-    capabilityEntries (factoryObserveCapability profile config enrollment))
+    capabilityEntries (factoryObserveCapability profile config enrollment)) ++
+  config.clockTickers.flatMap (fun ticker => capabilityEntries (tickCapability profile config ticker))
 
 /-- The genesis authority store. -/
 def authorityStore {F : Type} [Field F]
@@ -541,9 +616,185 @@ def buildBytes {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F
   let built ← build profile config
   pure ⟨config, built⟩
 
+/-! ## The clock subject (CLOCK-SUBJECT)
+
+Genesis names the clock tickers.  Each holds one `C_tick` (`tickCapability`):
+the clock cell as target and policy, the verb `tickClock` alone.  The clock
+cell's law admits exactly a ticker's `tickClock` (`clockPredicate_eval`); the
+factory law refuses every ticker request (`factory_refuses_ticker`) and leaves
+every other request to the deployment's own law (`factory_law_others`).  No
+genesis capability of the factory controller carries `tickClock`, and the
+clock law refuses the controller (`tick_requires_clock_capability`). -/
+
+theorem tickVerbTag_eq : tickVerbTag = 7 := rfl
+
+/-- The clock law, decided: a request is admitted exactly when its verb is
+`tickClock` and its subject is a ticker. -/
+theorem clockPredicate_eval (tickers : List ClockTicker) (old new : Minidregg.Pred.State)
+    (subject verb : Nat)
+    (named : new.get "request/subject" = some (Int.ofNat subject))
+    (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
+    Minidregg.Pred.eval (clockPredicate tickers) old new = true ↔
+      verb = tickVerbTag ∧ subject ∈ tickers.map (·.subject.value) := by
+  unfold Minidregg.Pred.eval clockPredicate
+  rw [Minidregg.Pred.evalWith_all]
+  simp only [List.all_cons, List.all_nil, Bool.and_true, Bool.and_eq_true]
+  rw [Minidregg.Pred.evalWith_any]
+  simp only [List.any_map, List.any_eq_true, Function.comp_apply, Minidregg.Pred.evalWith,
+    named, verbed, decide_eq_true_eq, Option.some.injEq, Int.ofNat.injEq, List.mem_map]
+  constructor
+  · rintro ⟨verbExact, ticker, member, subjectExact⟩
+    exact ⟨verbExact, ticker, member, subjectExact.symm⟩
+  · rintro ⟨verbExact, ticker, member, subjectExact⟩
+    exact ⟨verbExact, ticker, member, subjectExact.symm⟩
+
+/-- Refuting pole of the clock law: a subject that is not a ticker is refused,
+whatever its verb. -/
+theorem clock_law_refuses_nonticker (tickers : List ClockTicker) (old new : Minidregg.Pred.State)
+    (subject : Nat) (named : new.get "request/subject" = some (Int.ofNat subject))
+    (other : subject ∉ tickers.map (·.subject.value)) :
+    Minidregg.Pred.eval (clockPredicate tickers) old new = false := by
+  unfold Minidregg.Pred.eval clockPredicate
+  rw [Minidregg.Pred.evalWith_all]
+  simp only [List.all_cons, List.all_nil, Bool.and_true]
+  rw [Minidregg.Pred.evalWith_any]
+  have none_ : (tickers.map fun ticker =>
+      (Minidregg.Pred.Pred.eq "request/subject" (Int.ofNat ticker.subject.value))).any
+      (fun q => Minidregg.Pred.evalWith Minidregg.Pred.failClosed q old new) = false := by
+    rw [Bool.eq_false_iff]
+    intro some_
+    obtain ⟨q, member, holds⟩ := List.any_eq_true.mp some_
+    obtain ⟨ticker, tickerMember, rfl⟩ := List.mem_map.mp member
+    simp only [Minidregg.Pred.evalWith, named, decide_eq_true_eq, Option.some.injEq,
+      Int.ofNat.injEq] at holds
+    exact other (List.mem_map.mpr ⟨ticker, tickerMember, holds.symm⟩)
+  rw [none_, Bool.and_false]
+
+/-- **`factory_refuses_ticker`**: under the confined factory law a ticker's
+request is refused, whatever the deployment's own law says: no birth, no key
+enrollment, no provisioning, no policy install. -/
+theorem factory_refuses_ticker (tickers : List ClockTicker) (base : Minidregg.Pred.Pred)
+    (ticker : ClockTicker) (member : ticker ∈ tickers) (old new : Minidregg.Pred.State)
+    (byTicker : new.get "request/subject" = some (Int.ofNat ticker.subject.value)) :
+    Minidregg.Pred.eval (confinedFactoryLaw tickers base) old new = false := by
+  have refused : Minidregg.Pred.evalWith Minidregg.Pred.failClosed
+      (.not (.eq "request/subject" (Int.ofNat ticker.subject.value))) old new = false := by
+    simp [Minidregg.Pred.evalWith, byTicker]
+  unfold Minidregg.Pred.eval confinedFactoryLaw
+  rw [Minidregg.Pred.evalWith_all, Bool.eq_false_iff]
+  intro all_
+  have holds := List.all_eq_true.mp all_ _
+    (List.mem_append_left _ (List.mem_map.mpr ⟨ticker, member, rfl⟩))
+  rw [refused] at holds
+  exact Bool.false_ne_true holds
+
+/-- Every request whose subject is not a ticker meets exactly the deployment's
+own factory law. -/
+theorem factory_law_others (tickers : List ClockTicker) (base : Minidregg.Pred.Pred)
+    (old new : Minidregg.Pred.State) (subject : Nat)
+    (named : new.get "request/subject" = some (Int.ofNat subject))
+    (other : subject ∉ tickers.map (·.subject.value)) :
+    Minidregg.Pred.eval (confinedFactoryLaw tickers base) old new =
+      Minidregg.Pred.eval base old new := by
+  unfold Minidregg.Pred.eval confinedFactoryLaw
+  rw [Minidregg.Pred.evalWith_all, List.all_append]
+  have guards : (tickers.map fun ticker =>
+      (Minidregg.Pred.Pred.not (.eq "request/subject" (Int.ofNat ticker.subject.value)))).all
+      (fun q => Minidregg.Pred.evalWith Minidregg.Pred.failClosed q old new) = true := by
+    rw [List.all_eq_true]
+    intro q member
+    obtain ⟨ticker, tickerMember, rfl⟩ := List.mem_map.mp member
+    simp only [Minidregg.Pred.evalWith, named, Option.some.injEq, Int.ofNat.injEq,
+      Bool.not_eq_true', decide_eq_false_iff_not]
+    intro same
+    exact other (List.mem_map.mpr ⟨ticker, tickerMember, same.symm⟩)
+  rw [guards]
+  simp
+
+/-- **`clock_subject_confined`**: a ticker's `C_tick` is held by the ticker,
+names the clock cell as its only target and policy and `tickClock` as its only
+verb (no delegation, no policy install, no revocation), and is installed at
+genesis; and the factory refuses the ticker every request.  `C_tick` covers
+the tick verb on the clock cell and nothing else. -/
+theorem clock_subject_confined {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) (ticker : ClockTicker) (member : ticker ∈ config.clockTickers) :
+    (tickCapability profile config ticker).holder = .subject ticker.subject ∧
+      (tickCapability profile config ticker).scope.targets = {⟨clockTarget config⟩} ∧
+      (tickCapability profile config ticker).scope.verbs = {.tickClock} ∧
+      (tickCapability profile config ticker).policyId = ⟨clockTarget config⟩ ∧
+      capabilityEntry (tickCapability profile config ticker) ∈ entries profile config ∧
+      (factoryPolicy profile config).predicate =
+        confinedFactoryLaw config.clockTickers config.factoryPredicate ∧
+      (∀ old new, new.get "request/subject" = some (Int.ofNat ticker.subject.value) →
+        Minidregg.Pred.eval (factoryPolicy profile config).predicate old new = false) := by
+  refine ⟨rfl, rfl, rfl, rfl, ?_, rfl, fun old new byTicker =>
+    factory_refuses_ticker _ _ ticker member old new byTicker⟩
+  simp only [entries, capabilityEntries, List.mem_append, List.mem_flatMap, List.mem_cons,
+    List.not_mem_nil, or_false]
+  exact Or.inr ⟨ticker, member, Or.inl rfl⟩
+
+/-- **`tick_requires_clock_capability`** (K-CLOCK's `tick_requires_capability`
+at the genesis shape): the factory controller's genesis program capabilities
+do not carry `tickClock`, and the clock cell's law refuses the factory
+controller (a valid genesis never makes it a ticker).  The sponsor cannot
+tick: with no evidence the receiver refuses `capabilityRejected`
+(`ClockTickReceiver.tick_requires_capability`), and with any evidence the law
+refuses. -/
+theorem tick_requires_clock_capability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (valid : config.Valid profile) :
+    Verb.tickClock ∉ (controlCapability profile config).scope.verbs ∧
+      (∀ enrollment ∈ config.enrollments,
+        Verb.tickClock ∉ (accountControlCapability profile config enrollment).scope.verbs) ∧
+      (∀ old new, new.get "request/subject" =
+          some (Int.ofNat config.factoryController.subject.value) →
+        Minidregg.Pred.eval (clockPolicy profile config).predicate old new = false) := by
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, notTicker, -⟩ := valid
+  refine ⟨by simp [controlCapability, rootCapability], fun _ _ => by
+    simp [accountControlCapability, rootCapability], fun old new named => ?_⟩
+  exact clock_law_refuses_nonticker _ old new _ named notTicker
+
+/-- Request states for the poles: clock ticker 70 (the journey's clock subject),
+sponsor 7, the journeys' permit-all base law. -/
+def requestState (subject verb : Nat) : Minidregg.Pred.State :=
+  ⟨[("request/subject", Int.ofNat subject), ("request/verb", Int.ofNat verb)]⟩
+
+def poleTickers : List ClockTicker := [⟨⟨70⟩, ⟨71⟩⟩]
+
+theorem ticker_tick_admitted :
+    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 70 7) = true := by
+  decide +kernel
+
+theorem sponsor_tick_refused :
+    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 7 7) = false := by
+  decide +kernel
+
+theorem ticker_install_refused :
+    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 70 4) = false := by
+  decide +kernel
+
+theorem ticker_factory_refused :
+    Minidregg.Pred.eval (confinedFactoryLaw poleTickers (.all [])) ⟨[]⟩ (requestState 70 4) = false := by
+  decide +kernel
+
+theorem sponsor_factory_admitted :
+    Minidregg.Pred.eval (confinedFactoryLaw poleTickers (.all [])) ⟨[]⟩ (requestState 7 4) = true := by
+  decide +kernel
+
+#assert_axioms clockPredicate_eval
+#assert_axioms clock_law_refuses_nonticker
+#assert_axioms factory_refuses_ticker
+#assert_axioms factory_law_others
+#assert_axioms clock_subject_confined
+#assert_axioms tick_requires_clock_capability
+#assert_axioms ticker_tick_admitted
+#assert_axioms sponsor_tick_refused
+#assert_axioms ticker_install_refused
+#assert_axioms ticker_factory_refused
+#assert_axioms sponsor_factory_admitted
+
 /-- info: 'Minidregg.Kernel.NativeHostGenesis.genesis_revision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms genesis_revision
-/-- info: 'Minidregg.Kernel.NativeHostGenesis.v1_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v1_config_refused
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.v2_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v2_config_refused
 
 end Minidregg.Kernel.NativeHostGenesis

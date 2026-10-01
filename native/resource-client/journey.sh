@@ -347,7 +347,8 @@ craft() {  # craft SOURCE_INTENT SUBJECT [AUTHORITY_ROOT] > out
 
 step_J0() {
   ARTIFACT=$W/handoff.json
-  call bootstrap sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
+  call bootstrap env NEWPARTICIPANT_CLOCK_OBSERVER=30 \
+    sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
     || fail "bootstrap exit $(cat "$SD/bootstrap.rc"): $(tail -1 "$SD/bootstrap.err")" || return
   jq -e '.type == "minidregg-newparticipant-fixture-v1"' "$W/handoff.json" >/dev/null \
     || fail "no handoff.json" || return
@@ -718,7 +719,7 @@ hook() {
   ours "$(server_pid)" || fail "hook left the journey service stopped" || return
 }
 step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
-step_KC() { hook jclock "the one clock ticks forward only, under a capability, and a law over clock/now admits after the tick and refuses before (MUD item 3, K-CLOCK)"; }
+step_KC() { hook jclock "the one clock ticks forward only, under the clock subject's C_tick (the sponsor's is refused), a law over clock/now admits after the tick and refuses before on writes and signed reads, and 200 ephemeral ticks leave no attempt behind (MUD item 3, K-CLOCK; CLOCK-SUBJECT)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }

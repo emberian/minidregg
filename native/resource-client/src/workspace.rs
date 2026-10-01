@@ -5,7 +5,8 @@
 use crate::current_birth;
 use crate::participant_namespace::{self, IdKind, Role};
 use crate::{
-    absolute, author, hex, path, query, query_retained, retry, submit, Args, Result, SOCKET,
+    absolute, author, hex, path, print_json, query_retained, retry, submit, Args, Result,
+    SOCKET,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -14,6 +15,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_RECORD: u64 = 256 * 1024;
 
@@ -480,7 +482,47 @@ fn list(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Result<()> {
+/// Ephemeral reads keep only one line per read in this rotating journal
+/// (`unix-time  height  read  outcome  clock-now  reference`).
+const READ_JOURNAL: &str = "read-journal.tsv";
+const READ_JOURNAL_LIMIT: u64 = 1 << 20;
+
+fn read_journal(root: &Path, height: &str, outcome: &str, now: &str, name: &str) -> Result<()> {
+    let path = root.join(READ_JOURNAL);
+    if fs::metadata(&path).map(|meta| meta.len() >= READ_JOURNAL_LIMIT).unwrap_or(false) {
+        fs::rename(&path, root.join(format!("{READ_JOURNAL}.1")))
+            .map_err(|error| format!("cannot rotate {}: {error}", path.display()))?;
+    }
+    let unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| "wall clock is before the unix epoch")?
+        .as_secs();
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
+    file.write_all(format!("{unix}\t{height}\tread\t{outcome}\t{now}\t{name}\n").as_bytes())
+        .map_err(|error| format!("cannot append {}: {error}", path.display()))
+}
+
+/// The coordinates a read was judged at, from its retained challenge: the world root,
+/// the height, and the deployment clock the resource's law saw
+/// (`NativeObservationController.read_judged_at_named_clock`).
+fn judged_at(attempt: &Path) -> Result<Value> {
+    let challenge = bounded_json(&attempt.join("challenge.json"))?;
+    Ok(json!({"worldRoot": challenge.get("worldRoot"), "height": challenge.get("height"),
+        "clock": challenge.get("clock")}))
+}
+
+fn read(
+    root: &Path,
+    workspace: &Value,
+    resource_name: &str,
+    view: &str,
+    ephemeral: bool,
+) -> Result<()> {
     let reference = reference(root, resource_name)?;
     let (attempt, nonce) = new_attempt(root)?;
     let intent = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
@@ -492,8 +534,10 @@ fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Resu
     bytes.push(b'\n');
     let source = root.join("sources").join(format!("q-{nonce}.json"));
     private_file(&source, &bytes)?;
-    eprintln!("workspace read attempt: {}", attempt.display());
-    query(
+    if !ephemeral {
+        eprintln!("workspace read attempt: {}", attempt.display());
+    }
+    let answered = query_retained(
         &member_path(workspace, "host")?,
         &member_path(workspace, "config")?,
         &source,
@@ -501,7 +545,39 @@ fn read(root: &Path, workspace: &Value, resource_name: &str, view: &str) -> Resu
         &member_path(workspace, "key")?,
         &format!("view-{view}"),
         &attempt,
-    )
+    );
+    let judged = judged_at(&attempt).ok();
+    if ephemeral {
+        // A read commits nothing: once its answer (or refusal) is in hand the attempt
+        // and its intent source are not needed for any retry. One journal line stays.
+        let at = |name: &str| -> String {
+            judged
+                .as_ref()
+                .and_then(|value| value.get(name))
+                .and_then(Value::as_str)
+                .unwrap_or("-")
+                .to_string()
+        };
+        let now = judged
+            .as_ref()
+            .and_then(|value| value.pointer("/clock/now"))
+            .and_then(Value::as_str)
+            .unwrap_or("-")
+            .to_string();
+        let outcome = if answered.is_ok() { "answered" } else { "refused" };
+        read_journal(root, &at("height"), outcome, &now, resource_name)?;
+        if attempt.exists() {
+            fs::remove_dir_all(&attempt)
+                .map_err(|error| format!("cannot remove {}: {error}", attempt.display()))?;
+        }
+        fs::remove_file(&source)
+            .map_err(|error| format!("cannot remove {}: {error}", source.display()))?;
+    }
+    let mut answered = answered?;
+    if let (Some(object), Some(judged)) = (answered.as_object_mut(), judged) {
+        object.insert("judgedAt".to_owned(), judged);
+    }
+    print_json(&answered)
 }
 
 pub(crate) fn signed_view(
@@ -2344,6 +2420,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .optional("private")
                 .map(|value| os_string(value, "private room"))
                 .transpose()?;
+            let ephemeral = match args.optional("ephemeral").as_deref() {
+                None => false,
+                Some(value) if value == OsStr::new("false") => false,
+                Some(value) if value == OsStr::new("true") => true,
+                _ => return Err("--ephemeral must be true or false".into()),
+            };
             args.finish()?;
             if let Some(room) = room {
                 if action == "describe" {
@@ -2360,6 +2442,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 } else {
                     "resource"
                 },
+                ephemeral,
             )
         }
         "submit" => {

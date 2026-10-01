@@ -58,6 +58,10 @@ structure Challenge where
   command still names an authority root reads it here. -/
   authorityRoot : Digest
   height : Nat
+  /-- The deployment clock (`now`, `slot`) of the snapshot at `height`: the
+  clock the read's law is judged at.  Public (the clock view publishes it). -/
+  clockNow : Nat
+  clockSlot : Nat
   headers : List (List UInt8)
   deriving DecidableEq, Repr
 
@@ -127,20 +131,25 @@ def challengeStream : StreamCodec Challenge :=
     (StreamCodec.product intentStream (StreamCodec.product digestStream
       (StreamCodec.product digestStream (StreamCodec.product federationStream
         (StreamCodec.product digestStream (StreamCodec.product digestStream
-          (StreamCodec.product StreamCodec.nat (StreamCodec.list bytesStream))))))))
+          (StreamCodec.product StreamCodec.nat
+            (StreamCodec.product StreamCodec.nat
+              (StreamCodec.product StreamCodec.nat (StreamCodec.list bytesStream))))))))))
     (fun value => (value.intent, value.domain, value.semantics, value.federation,
-      value.worldRoot, value.authorityRoot, value.height, value.headers))
-    (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1,
-      wire.2.2.2.2.1, wire.2.2.2.2.2.1, wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
+      value.worldRoot, value.authorityRoot, value.height, value.clockNow, value.clockSlot,
+      value.headers))
+    (fun (intent, domain, semantics, federation, worldRoot, authorityRoot, height, now, slot,
+        headers) =>
+      ⟨intent, domain, semantics, federation, worldRoot, authorityRoot, height, now, slot, headers⟩)
     (by intro value; cases value; rfl)
 
-/-- v5 (the wave-c merge; lane C1's v4 and lane BIND's v4 were two different
-shapes under one name): the challenge binds `(worldRoot, height)`, names the
-authority root as public read data, and its headers carry the plan footprint
-(envelope version 2).  Every v4 challenge refuses (`v4_challenge_refused`). -/
-def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v5".toUTF8.toList
+/-- v6 (CLOCK-SUBJECT): the challenge also names the deployment clock
+`(now, slot)` at `height`, the clock a read's law is judged at.  v5 bound
+`(worldRoot, height)`, named the authority root as public read data, and its
+headers carry the plan footprint (envelope version 2).  Every v5 challenge
+refuses (`v5_challenge_refused`). -/
+def challengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v6".toUTF8.toList
 
-def retiredChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v4".toUTF8.toList
+def retiredChallengeFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v5".toUTF8.toList
 
 def challengeCodec : LawfulCodec Challenge := NativeHostCodec.framed challengeFrame challengeStream
 
@@ -149,10 +158,9 @@ def signedStream : StreamCodec Signed :=
     (fun value => (value.challenge, value.signatures))
     (fun wire => ⟨wire.1, wire.2⟩) (by intro value; cases value; rfl)
 
-def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v5".toUTF8.toList
+def signedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v6".toUTF8.toList
 
-
-def retiredSignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v4".toUTF8.toList
+def retiredSignedFrame : List UInt8 := "DREGG/NATIVE-HOST/OBSERVE-SIGNED/v5".toUTF8.toList
 
 def signedCodec : LawfulCodec Signed := NativeHostCodec.framed signedFrame signedStream
 
@@ -183,8 +191,8 @@ theorem signed_canonical {bytes : List UInt8} {signed : Signed}
     (decoded : signedCodec.decode bytes = some signed) : signedCodec.encode signed = bytes :=
   NativeHostCodec.framed_canonical _ _ decoded
 
-/-- A v4 challenge (either lane's v4 shape) refuses to decode. -/
-theorem v4_challenge_refused (payload : List UInt8) :
+/-- A v5 challenge (no clock) refuses to decode. -/
+theorem v5_challenge_refused (payload : List UInt8) :
     challengeCodec.decode (retiredChallengeFrame ++ payload) = none := by
   have lengthExact : challengeFrame.length = retiredChallengeFrame.length := by decide +kernel
   have different : retiredChallengeFrame ≠ challengeFrame := by decide +kernel
@@ -193,8 +201,8 @@ theorem v4_challenge_refused (payload : List UInt8) :
     simp [NativeHostCodec.framedRaw, lengthExact, different]
   simp [challengeCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
 
-/-- A v4 signed observation refuses to decode. -/
-theorem v4_signed_refused (payload : List UInt8) :
+/-- A v5 signed observation refuses to decode. -/
+theorem v5_signed_refused (payload : List UInt8) :
     signedCodec.decode (retiredSignedFrame ++ payload) = none := by
   have lengthExact : signedFrame.length = retiredSignedFrame.length := by decide +kernel
   have different : retiredSignedFrame ≠ signedFrame := by decide +kernel
@@ -203,9 +211,9 @@ theorem v4_signed_refused (payload : List UInt8) :
     simp [NativeHostCodec.framedRaw, lengthExact, different]
   simp [signedCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec, raw]
 
-/-- info: 'Minidregg.Compiler.NativeObservationCodec.v4_challenge_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v4_challenge_refused
-/-- info: 'Minidregg.Compiler.NativeObservationCodec.v4_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v4_signed_refused
+/-- info: 'Minidregg.Compiler.NativeObservationCodec.v5_challenge_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v5_challenge_refused
+/-- info: 'Minidregg.Compiler.NativeObservationCodec.v5_signed_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v5_signed_refused
 
 end Minidregg.Compiler.NativeObservationCodec

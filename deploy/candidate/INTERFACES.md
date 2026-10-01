@@ -182,7 +182,7 @@ these; everything else is `254 operation unavailable`:
 | 1 | prepare (authorized) | `OBSERVE-SIGNED/v5` whose intent purpose is a draft | `SIGNING-PLAN/v4` |
 | 2 | submit | `SIGNED-CALL/v3` | `OUTCOME/v4` |
 | 3 | lookup | `SIGNED-CALL/v3` | `OUTCOME/v4` (`absent` if never admitted) |
-| 4 | challenge | `OBSERVE-INTENT/v3` | `OBSERVE-CHALLENGE/v5` |
+| 4 | challenge | `OBSERVE-INTENT/v3` | `OBSERVE-CHALLENGE/v6` |
 | 5 | query (authorized) | `OBSERVE-SIGNED/v5` whose purpose is a query | the view bytes |
 | 6 | profile | empty | JSON metering/semantics profile |
 | 7 | author | kind frame: u16 LE kind length, UTF-8 kind, UTF-8 JSON source | canonical bytes |
@@ -208,9 +208,9 @@ these; everything else is `254 operation unavailable`:
 | 103, 104 | pay command signing plan / assembly (P2) | command / pair: plan, 64-byte signature | `DREGG/PAY/PLAN/v1` / ingress |
 | 105, 106 | pay submit (blind: every refusal is `undisclosed`) / lookup | ingress | `OUTCOME/v4` |
 | 107 | public pay-cell view (no assignment map, no clock) | empty | `DREGG/PAY/VIEW/v2` |
-| 126, 127 | clock tick signing plan / assembly (K-CLOCK) | command / pair: plan, 64-byte signature | `DREGG/CLOCK/PLAN/v1` / ingress |
+| 126, 127 | clock tick signing plan / assembly (K-CLOCK); the command is `DREGG/CLOCK/TICK/v2` (sponsor, `C_tick`, nonce, authority root, clock root, now, slot) | command / pair: plan, 64-byte signature | `DREGG/CLOCK/PLAN/v1` / ingress |
 | 128 | clock tick submit (refusals name their reason: `clockNotAdvancing`, `capabilityRejected`, ...) | ingress | `OUTCOME/v4` |
-| 129 | public clock view: now, slot and the roots a tick pins | empty | `DREGG/CLOCK/VIEW/v1` |
+| 129 | public clock view: now, slot and the two roots a tick pins (clock, authority) | empty | `DREGG/CLOCK/VIEW/v2` |
 
 `mini serve-operator` serves a separate owner-private socket (same framing,
 peer UID must equal the server's) with the lifecycle, dispatch, share-issue,
@@ -270,11 +270,12 @@ Messages (`Compiler/NativeHostCodec.lean`, `Compiler/NativeObservationCodec.lean
 * `DREGG/NATIVE-HOST/OBSERVE-INTENT/v3` — subject, nonce, purpose (query(kind,
   target, view: resource | policy | capability) or prepare(draft)), list of
   grants (kind, target, capability).
-* `DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v5` — intent, domain, semantics,
-  federation, world root, authority root, height, list of canonical signing
-  headers. v4 refuses.
-* `DREGG/NATIVE-HOST/OBSERVE-SIGNED/v5` — challenge, list of 64-byte signatures
-  (one per header). v4 refuses.
+* `DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v6` — intent, domain, semantics,
+  federation, world root, authority root, height, the deployment clock at that
+  height (`now`, `slot`: the clock the read's law is judged at), list of
+  canonical signing headers. v5 refuses.
+* `DREGG/NATIVE-HOST/OBSERVE-SIGNED/v6` — challenge, list of 64-byte signatures
+  (one per header). v5 refuses.
 
 A refusal's `phase` is a short source-selected word (`observation`, `prepare`,
 `wire`, `replay`, ...). The client prints it as
@@ -315,6 +316,8 @@ Everything is created owner-only (`umask 077`, directories `0700`).
 | `state.json` | init | `minidregg-candidate-state-v1`: absolute manifest path, Host SHA-256, pinned-config SHA-256, creation time. Every later command re-checks the manifest pins, this Host pin, and the helper paths in the pinned config. |
 | `genesis-params.json` | init | copy of the operator's params (schema below) |
 | `keys/sponsor.key`, `keys/sponsor.pub`, `keys/sponsor.pub.hex` | `mini keygen` | the genesis sponsor's key (format in §8) |
+| `keys/clock.key`, `keys/clock.pub`, `keys/clock.pub.hex` | `mini keygen` | the clock subject's key: its only authority is `C_tick`; its workspace is made with `mini clock --action init` (deploy: `/var/lib/mini/clock`) |
+| `clock-birth-context.json` | init | the clock subject's birth context (the factory law refuses it every birth) |
 | `operator.json` | init | Host operator config (schema below) |
 | `profile.json` | `minidregg-host operator.json profile` | semantics digest and metering profile |
 | `genesis.json` | init | genesis source (schema below) |
@@ -333,12 +336,17 @@ authorityCellId issuer ownerBudget lifetime tariffBase tariffPerBirth
 tariffPerGrant tariffPerInitialPayloadByte collector asset genesisHeight
 issuerEpoch factoryControllerCapability`, `sponsor {subject keyId keyEpoch
 activeFrom activeUntil accountId spendCapabilityId controlCapabilityId
-factoryObserveCapabilityId initialBalance}`, and `meterAllowance` with the ten
+factoryObserveCapabilityId initialBalance}`, `clock {subject keyId keyEpoch
+activeFrom activeUntil accountId spendCapabilityId controlCapabilityId
+factoryObserveCapabilityId tickCapabilityId}` (the dedicated clock subject,
+distinct from the sponsor; `tickCapabilityId` is its `C_tick`), and `meterAllowance` with the ten
 keys `incidences turnBytes memoryTouches witnessBytes proofWork storageBytes
 networkBytes sideEffectCount feeDebit leaseByteBlocks`.
 `genesis-params.example.json` holds the values the recorded qualification runs
-used. The sponsor is the only identity genesis names; every later participant
-is enrolled through the client and receives Host-allocated identifiers.
+used. The sponsor and the clock subject are the identities genesis names; every
+later participant is enrolled through the client and receives Host-allocated
+identifiers. `genesis.sh PARAMS SPONSOR_PUBLIC_HEX CLOCK_PUBLIC_HEX HOST STORE
+VERIFIER DIR` takes both public keys.
 
 **`operator.json`** (Host `Settings`, `Host/Main.lean`): the 16 genesis numbers
 above that the Host needs (`domain federation factoryId resourceBookId
@@ -358,7 +366,12 @@ this candidate.
 (`key {keyId keyEpoch algorithm:"1" subject publicKey(hex) activeFrom activeUntil
 revoked:false}`, `accountId spendCapabilityId controlCapabilityId
 factoryObserveCapabilityId initialBalance accountPredicate`),
-`factoryControllerSubject`, `factoryControllerCapability`, `meterAllowance`.
+`factoryControllerSubject`, `factoryControllerCapability`, `meterAllowance`,
+and `clockTickers` (`[{subject, capability}]`: the clock subject first; genesis
+installs the clock cell's law `all [request/verb = 7 (tickClock), request/subject
+∈ tickers]`, one `C_tick` per ticker on the clock cell, and confines the factory
+law against every ticker). The clock subject has a second enrollment (balance
+0). Genesis source frame `GENESIS-SOURCE/v3`; v2 refuses.
 The Host refuses a genesis whose coordinates differ from `operator.json`.
 
 **`pinned-config.json`** is `operator.json` plus the genesis `expectedSeed`

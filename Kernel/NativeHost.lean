@@ -917,9 +917,9 @@ def payViewLoaded (config : Config) (opened : Opened config) : Except String Pay
 /-! ## The clock (K-CLOCK): session operations 126-129
 
 126 = tick signing plan, 127 = detached assembly, 128 = submit, 129 = public
-clock view.  The command is authored by `author clock-tick`; the signer is any
-subject the factory law admits in capability mode for
-`authority/operation/clock-tick`. -/
+clock view.  The command is authored by `author clock-tick`; the signer is a
+genesis clock ticker presenting its `C_tick` on the clock cell, under the
+clock cell's law (`NativeHostGenesis.clock_subject_confined`). -/
 
 def clockPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     Except String ClockTickReceiver.SigningPlan := do
@@ -954,13 +954,10 @@ def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List U
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
 
-/-- The public view of the clock: its value and the three roots a tick pins. -/
+/-- The public view of the clock: its value and the two roots a tick pins. -/
 def clockViewLoaded (config : Config) (opened : Opened config) : Except String ClockCellDomain.View := do
   let clock ← need "clock cell unavailable" (ClockCellDomain.load config.deployment opened.durable.snapshot)
-  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
-    | .present before => pure before.payload.root
-    | .absent => .error "factory unavailable"
-  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, factoryRoot, clock.clock⟩
+  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, clock.clock⟩
 
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do

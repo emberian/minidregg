@@ -1,19 +1,51 @@
-# The v1 time source of a Mini deployment's one clock (K-CLOCK).
+# The v1 time source of a Mini deployment's one clock (K-CLOCK), run by the
+# deployment's dedicated clock subject (CLOCK-SUBJECT).
 #
-# Reads the operator's wall clock and submits one tick through the operator's
-# workspace under the factory control capability. The Host refuses a tick that
-# does not advance the clock, so a delayed or duplicated run cannot move time
-# backwards. This source is the operator's wall clock, trusted as the operator
-# is; PAY's chain observer ticks the same cell with chain time.
+# Reads the wall clock and submits one tick from the clock subject's own workspace,
+# /var/lib/mini/clock, under the clock subject's genesis capability C_tick (on the
+# clock cell, verb tickClock, nothing else). The sponsor's workspace and authority are
+# not involved: the sponsor holds no tick authority, and the clock subject's key can do
+# nothing but tick (the factory law refuses it every birth, enrollment and install).
 #
-# Install (user units): copy both files to ~/.config/systemd/user/, set the two
-# Environment lines, then `systemctl --user enable --now mini-clock-tick.timer`.
+# The Host refuses a tick that does not advance the clock, so a delayed or doubled run
+# cannot move time backwards. Attempts are ephemeral: a tick's signed ingress is kept
+# in /var/lib/mini/clock/clock-attempts only until its outcome is definite, and a tick
+# whose reply was lost is resubmitted byte-for-byte by the next run (it resolves as
+# `replayed`). What stays is one line per tick in the rotating journal
+# /var/lib/mini/clock/clock-journal.tsv (1 MiB, one rotated generation).
+#
+# One-time setup, as the mini user, after genesis (genesis.sh made the clock key's
+# public half part of genesis; params .clock.subject and .clock.tickCapabilityId):
+#   install -d -m 700 -o mini -g mini /var/lib/mini/clock
+#   install -m 600 -o mini -g mini <clock.key> /var/lib/mini/clock/clock.key
+#   mini clock --action init --dir /var/lib/mini/clock --host <HOST> \
+#     --config <pinned-config.json> --socket <public socket> \
+#     --key /var/lib/mini/clock/clock.key --subject <clock subject> \
+#     --capability <C_tick id>
+# then `systemctl enable --now mini-clock-tick.timer`.
+#
+# The hardening lines follow product/deploy-3-prep.md's sandbox recipe. connect() to the
+# public socket needs no write access to its filesystem (a socket inode is exempt from
+# the read-only check), so the clock workspace is the only writable path.
 [Unit]
-Description=Mini clock tick (operator wall clock)
+Description=Mini clock tick (the clock subject, wall clock)
+After=mini-store.service
+Requires=mini-store.service
+ConditionPathExists=/var/lib/mini/clock/workspace.json
 
 [Service]
 Type=oneshot
+User=mini
+Group=mini
+Slice=mini.slice
+Nice=10
+UMask=0077
 Environment=MINI=/usr/local/bin/mini
-Environment=MINI_CLOCK_WORKSPACE=%h/mini/operator-workspace
-Environment=MINI_CLOCK_CONTROL=53
-ExecStart=/bin/sh -c 'exec "$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE" --control "$MINI_CLOCK_CONTROL"'
+Environment=MINI_CLOCK_WORKSPACE=/var/lib/mini/clock
+ExecStart=/bin/sh -c 'exec "$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE"'
+TimeoutStartSec=50
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mini/clock

@@ -88,6 +88,11 @@ inductive Verb : ResourceKind → Type
   | installPolicy : Verb .program
   /-- Revoking a resource grant is independently scoped management authority. -/
   | revokeCapability : Verb .program
+  /-- Advancing the deployment's one clock cell (`Kernel.ClockTickReceiver`).
+  Genesis issues it only as a clock ticker's `C_tick`, on the clock cell
+  alone; no management verb reaches that cell and `C_tick` reaches nothing
+  else. -/
+  | tickClock : Verb .program
   deriving DecidableEq, Repr
 
 /-- The complete semantic authorization request.  Verifiers receive this value

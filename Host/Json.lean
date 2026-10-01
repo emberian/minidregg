@@ -311,6 +311,7 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .program, "delegate" => pure .delegateProgram
   | .program, "installPolicy" => pure .installPolicy
   | .program, "revokeCapability" => pure .revokeCapability
+  | .program, "tickClock" => pure .tickClock
   | _, _ => failAt path "verb is not defined for this resource kind"
 
 private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) :
@@ -731,12 +732,18 @@ private def charge (path : String) (json : Lean.Json) : Result ResourceCost.Char
     | .proofWork => 4 | .storageBytes => 5 | .networkBytes => 6 | .sideEffectCount => 7
     | .feeDebit => 8 | .leaseByteBlocks => 9)]?).getD 0
 
+/-- A clock ticker: its enrolled subject and the identifier of its `C_tick`. -/
+private def clockTicker (path : String) (json : Lean.Json) : Result NativeHostGenesis.ClockTicker := do
+  let obj ← exactObject path ["subject", "capability"] json
+  pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
+    ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩⟩
+
 private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesis.Config := do
   let names := ["domain", "factoryId", "resourceBookId", "authorityCellId", "federation",
     "tariffBase", "tariffPerBirth", "tariffPerGrant", "tariffPerInitialPayloadByte",
     "collector", "asset", "expectedSemantics", "issuerEpoch", "genesisHeight",
     "factoryPredicate", "enrollments", "factoryControllerSubject",
-    "factoryControllerCapability", "meterAllowance"]
+    "factoryControllerCapability", "meterAllowance", "clockTickers"]
   let obj ← exactObject path names json
   pure {
     deployment := ⟨⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
@@ -759,7 +766,8 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
       (← field path "factoryControllerSubject" obj)⟩,
       ⟨← nat (path ++ ".factoryControllerCapability")
       (← field path "factoryControllerCapability" obj)⟩⟩
-    meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj) }
+    meterAllowance := ← charge (path ++ ".meterAllowance") (← field path "meterAllowance" obj)
+    clockTickers := ← list (path ++ ".clockTickers") clockTicker (← field path "clockTickers" obj) }
 
 private def funding (path : String) (json : Lean.Json) : Result ResourceBirth.InitialFunding := do
   let obj ← exactObject path ["source", "destination", "asset", "amount"] json
@@ -2104,16 +2112,16 @@ private def applicationSpkPackageIdentity (json : Lean.Json) : Result (List UInt
     failAt "$" "signed SPK descriptor or fixed bridge mapping refused"
   return descriptor.canonicalBytes
 
-/-- A clock tick: the observer asserts `now` (unix seconds) and `slot`,
-pinning the current factory, authority and clock roots (from the clock view). -/
+/-- A clock tick: a ticker asserts `now` (unix seconds) and `slot` under its
+`C_tick` (`capability`), pinning the current authority and clock roots (from
+the clock view). -/
 private def clockTick (json : Lean.Json) : Result (List UInt8) := do
-  let obj ← exactObject "$" ["sponsor", "control", "nonce", "expectedFactoryRoot",
+  let obj ← exactObject "$" ["sponsor", "capability", "nonce",
     "expectedAuthorityRoot", "expectedClockRoot", "now", "slot"] json
   let command : ClockTickReceiver.Command :=
     { sponsor := ⟨← nat "$.sponsor" (← field "$" "sponsor" obj)⟩
-      control := ⟨← nat "$.control" (← field "$" "control" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
       nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
-      expectedFactoryRoot := ⟨← nat "$.expectedFactoryRoot" (← field "$" "expectedFactoryRoot" obj)⟩
       expectedAuthorityRoot :=
         ⟨← nat "$.expectedAuthorityRoot" (← field "$" "expectedAuthorityRoot" obj)⟩
       expectedClockRoot := ⟨← nat "$.expectedClockRoot" (← field "$" "expectedClockRoot" obj)⟩
@@ -2851,6 +2859,9 @@ private def challengeJson (value : Challenge) : Lean.Json := .mkObj
    ("semantics", decimal value.semantics.value), ("federation", decimal value.federation.value),
    ("worldRoot", decimal value.worldRoot.value),
    ("authorityRoot", decimal value.authorityRoot.value), ("height", decimal value.height),
+   ("clock", .mkObj [("now", decimal value.clockNow),
+     ("day", decimal (value.clockNow / Kernel.ClockCell.secondsPerDay)),
+     ("slot", decimal value.clockSlot)]),
    ("headers", .arr <| value.headers.toArray.map hexJson),
    ("signing", .arr <| value.headers.toArray.map signedHeaderJson)]
 
@@ -3182,9 +3193,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "clock-tick" => do
       let c ← decoded "clock-tick" ClockTickReceiver.commandCodec bytes
       pure <| .mkObj
-        [("type", "clock-tick-v1"), ("sponsor", decimal c.sponsor.value),
-         ("control", decimal c.control.value), ("nonce", decimal c.nonce),
-         ("expectedFactoryRoot", decimal c.expectedFactoryRoot.value),
+        [("type", "clock-tick-v2"), ("sponsor", decimal c.sponsor.value),
+         ("capability", decimal c.capability.value), ("nonce", decimal c.nonce),
          ("expectedAuthorityRoot", decimal c.expectedAuthorityRoot.value),
          ("expectedClockRoot", decimal c.expectedClockRoot.value),
          ("now", decimal c.now), ("slot", decimal c.slot)]
@@ -3198,9 +3208,8 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "clock-view" => do
       let view ← decoded "clock-view" ClockTickReceiver.viewCodec bytes
       pure <| .mkObj
-        [("type", "clock-view-v1"), ("clockRoot", decimal view.clockRoot.value),
+        [("type", "clock-view-v2"), ("clockRoot", decimal view.clockRoot.value),
          ("authorityRoot", decimal view.authorityRoot.value),
-         ("factoryRoot", decimal view.factoryRoot.value),
          ("now", decimal view.clock.now),
          ("day", decimal (view.clock.now / Kernel.ClockCell.secondsPerDay)),
          ("slot", decimal view.clock.slot)]

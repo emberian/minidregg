@@ -29,6 +29,18 @@
     "factoryObserveCapabilityId": 54,
     "initialBalance": 100000
   },
+  "clock": {
+    "subject": 70,
+    "keyId": 7070,
+    "keyEpoch": 2,
+    "activeFrom": 0,
+    "activeUntil": 1000000,
+    "accountId": 70,
+    "spendCapabilityId": 72,
+    "controlCapabilityId": 73,
+    "factoryObserveCapabilityId": 74,
+    "tickCapabilityId": 71
+  },
   "meterAllowance": {
     "incidences": 10000000,
     "turnBytes": 10000000,
