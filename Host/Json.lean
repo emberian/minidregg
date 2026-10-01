@@ -1433,7 +1433,8 @@ private def birthParts (path : String)
     else if storage = "content" then
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "stream" then
-      pure ⟨.stream, CellState.materialize StreamCell.materializer 0⟩
+      pure ⟨.stream, CellState.materialize StreamCell.headMaterializer
+        (StreamCell.headStore StreamCell.emptyRoomHead)⟩
     else if storage = "job" then
       let caller ← nat (path ++ ".caller") (← field path "caller" obj)
       let callerAcct ← nat (path ++ ".callerAcct") (← field path "callerAcct" obj)
@@ -3766,10 +3767,16 @@ private def streamTailEntryJson (sequence : Nat) (record : StreamCell.StreamReco
       [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null),
     ("payload", shown), ("payloadState", .str state)]
 
-private def streamCellJson (root : Digest) (store : Minidregg.Theory.Store.Store StreamCell.layout) : Lean.Json :=
-  .mkObj [("root", decimal root.value), ("nextSeq", decimal (StreamCell.nextSeq store)),
-    ("entries", .arr <| (StreamCell.tail store 1 store.support.card).toArray.map
-      fun (k, r) => streamRecordJson k r)]
+/-- A stream read shows its head; the entries are read by position with `tail`. -/
+private def streamCellJson (root : Digest) (store : StreamCell.HeadStore) : Lean.Json :=
+  match StreamCell.headOf store with
+  | none => .mkObj [("root", decimal root.value), ("head", .null)]
+  | some head => .mkObj [("root", decimal root.value), ("nextSeq", decimal head.nextSeq),
+      ("count", decimal head.count),
+      ("tail", head.tail.map (fun d => decimal d.value) |>.getD .null),
+      ("binding", match head.binding with
+        | .room => "room"
+        | .topic stream => .mkObj [("topic", decimal stream.value)])]
 
 /-- `cell.root` is the cell's own root (the view's leading digest); the
 entries are the cell as the reader's scope narrows it. -/
@@ -4271,20 +4278,19 @@ private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
 /-- The topic poll view. `payload` is null when the accepted ingress does not
 reproduce the committed digest; the reader must then treat the event as unreadable. -/
 def fleetPollJson (view : NativeHost.FleetPollView) : Lean.Json := .mkObj
-  [("type", "minidregg-fleet-topic-poll-v1"), ("subject", decimal view.subject.value),
+  [("type", "minidregg-fleet-topic-poll-v2"), ("subject", decimal view.subject.value),
    ("payer", decimal view.payer), ("topic", hexJson view.topic),
    ("stream", decimal view.stream.value), ("cursor", decimal view.cursor),
    ("head", decimal view.head),
+   ("tail", view.tail.map (fun d => decimal d.value) |>.getD .null),
    ("events", .arr <| view.events.toArray.map fun event => .mkObj
      [("sequence", decimal event.sequence), ("eventKey", decimal event.eventKey.value),
+      ("parent", event.parent.map (fun d => decimal d.value) |>.getD .null),
       ("transactionId", decimal event.transactionId.value),
-      ("effectId", decimal event.effectId.value),
+      ("height", decimal event.height),
+      ("author", decimal event.author.value),
       ("payloadDigest", decimal event.payloadDigest.value),
-      ("payload", match event.payload with | none => .null | some bytes => hexJson bytes),
-      ("author", principalJson event.author),
-      ("bookPreRoot", decimal event.bookPreRoot.value),
-      ("bookPostRoot", decimal event.bookPostRoot.value),
-      ("receipt", match event.receipt with | none => .null | some r => fleetReceiptJson r)])]
+      ("payload", match event.payload with | none => .null | some bytes => hexJson bytes)])]
 
 def fleetHeadJson (view : NativeHost.FleetHeadView) : Lean.Json := .mkObj
   [("type", "minidregg-fleet-agent-head-v1"), ("subject", decimal view.subject.value),

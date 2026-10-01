@@ -7,6 +7,7 @@ import Kernel.ResourceTransaction
 import Kernel.ResourceObservationAdmission
 import Compiler.ResourceAuthorityProjection
 import Kernel.JointSlots
+import Kernel.StreamWrite
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -203,7 +204,7 @@ open JointSlots
 
 /-- A stream append's slots (`request/topic…`, `stream/sequence`, `request/to`,
 `request/ref/…`) are not joint keys. -/
-theorem streamSlots_unjoint (request : StreamCell.Append) (before : Store StreamCell.layout) :
+theorem streamSlots_unjoint (request : StreamCell.Append) (before : Store StreamCell.headLayout) :
     Unjoint (streamSlots request before) := by
   unfold streamSlots
   refine unjoint_append _ _ (unjoint_append _ _ (unjoint_append _ _ ?_
@@ -936,10 +937,19 @@ def targetWrite (prepared : PreparedInvocation deployment profile ambient durabl
   ResourceBirthController.Concrete.packedWrite command.targets[i].target (prepared.targets i).before
     (packTarget command.targets[i] (prepared.targets i).candidate.post)
 
-/-- The physical writes are the targets' alone: the authority incidence is a
-read, so the authority cell enters as a read guard (`readGuards`). -/
+/-- The fresh entry cell of each stream-append target (`StreamWrite.entryWrite`):
+the target write is the stream's head, this is its one new entry. -/
+def entryWrites (prepared : PreparedInvocation deployment profile ambient durable command) :
+    List DataWrite :=
+  (List.finRange command.targets.length).filterMap fun i =>
+    (appendedEntry prepared.authority.snapshot profile.semantics ambient command command.targets[i]
+      (prepared.targets i).pre).map StreamWrite.entryWrite
+
+/-- The physical writes are the targets' (one each) and one fresh entry cell
+per stream append: the authority incidence is a read, so the authority cell
+enters as a read guard (`readGuards`). -/
 def writes (prepared : PreparedInvocation deployment profile ambient durable command) : List DataWrite :=
-  (List.finRange command.targets.length).map (targetWrite prepared)
+  (List.finRange command.targets.length).map (targetWrite prepared) ++ entryWrites prepared
 
 def sourceGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
   (List.finRange command.targets.length).map fun i =>
@@ -988,8 +998,12 @@ instance physicalShapeDecidable (prepared : PreparedInvocation deployment profil
 theorem writes_roots_bound (prepared : PreparedInvocation deployment profile ambient durable command) :
     ∀ write ∈ writes prepared, ResourceBirthCodec.rootBytes write.canonicalPostBytes = write.exactPost := by
   intro write member
-  obtain ⟨i, _, rfl⟩ := List.mem_map.mp member
-  rfl
+  rcases List.mem_append.mp member with target | entry
+  · obtain ⟨i, _, rfl⟩ := List.mem_map.mp target
+    rfl
+  · obtain ⟨i, _, found⟩ := List.mem_filterMap.mp entry
+    obtain ⟨appended, _, rfl⟩ := Option.map_eq_some_iff.mp found
+    exact StreamWrite.entryWrite_root appended
 
 theorem readGuards_readonly (prepared : PreparedInvocation deployment profile ambient durable command)
     (shape : PhysicalShape prepared) :
@@ -1081,15 +1095,16 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
 
 /-- **Charging rule: a record is charged the bytes it writes.**  The storage
 charge of an accepted invocation is exactly the canonical bytes of the cells
-its record writes, and those writes are the targets' alone (one per target):
-the authority cell is read (a guard), neither stored nor charged. -/
+its record writes, and those writes are the targets' (one per target) plus one
+fresh entry cell per stream append: the authority cell is read (a guard),
+neither stored nor charged. -/
 theorem AcceptedInvocation.storage_charge_is_written_bytes [DecidableEq F]
     {prepared : PreparedInvocation deployment profile ambient durable command} {signed : SignedCommand}
     (accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     (accepted.dataIntent shape).exactCharge .storageBytes =
         ((accepted.dataIntent shape).writes.map fun write => write.canonicalPostBytes.length).sum ∧
       (accepted.dataIntent shape).writes =
-        (List.finRange command.targets.length).map (targetWrite prepared) :=
+        (List.finRange command.targets.length).map (targetWrite prepared) ++ entryWrites prepared :=
   ⟨rfl, rfl⟩
 
 theorem AcceptedInvocation.dataIntent_exact_charge [DecidableEq F]

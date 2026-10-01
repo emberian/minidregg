@@ -23,7 +23,7 @@ const LIMIT: usize = transport::HOST_MAX_FRAME - 1;
 const MAX_TOPIC: usize = 64;
 const MAX_PAYLOAD: usize = 16_384;
 
-fn digest(bytes: &[u8]) -> String {
+pub(crate) fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
@@ -44,7 +44,7 @@ fn canonical_decimal(value: &str, label: &str) -> Result<()> {
     Ok(())
 }
 
-fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
+pub(crate) fn field<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     value
         .get(key)
         .and_then(Value::as_str)
@@ -103,7 +103,7 @@ fn retain_json(path: &Path, value: &Value) -> Result<()> {
     retain(path, &bytes)
 }
 
-fn read_json(path: &Path) -> Result<Value> {
+pub(crate) fn read_json(path: &Path) -> Result<Value> {
     workspace::bounded_json(path)
 }
 
@@ -124,8 +124,8 @@ fn inspect(agent: &Agent, kind: &str, input: &Path, output: &Path) -> Result<Val
     crate::inspect(&agent.host, &agent.config, kind, input, output)
 }
 
-struct Agent {
-    root: PathBuf,
+pub(crate) struct Agent {
+    pub(crate) root: PathBuf,
     workspace: Value,
     host: PathBuf,
     config: PathBuf,
@@ -133,7 +133,7 @@ struct Agent {
     subject: String,
 }
 
-fn agent(root: &Path) -> Result<Agent> {
+pub(crate) fn agent(root: &Path) -> Result<Agent> {
     let root = absolute(root)?;
     let workspace = workspace::load(&root)?;
     let socket = SOCKET
@@ -152,7 +152,7 @@ fn agent(root: &Path) -> Result<Agent> {
 
 /// The account reference: a discovery hint naming the paying account and the
 /// grant the agent presents. Admission rechecks the grant and current law.
-fn account(agent: &Agent, name: &str) -> Result<Value> {
+pub(crate) fn account(agent: &Agent, name: &str) -> Result<Value> {
     let reference = workspace::reference(&agent.root, name)?;
     if field(&reference, "kind")? != "account" {
         return Err(format!("reference {name} is not an account"));
@@ -162,7 +162,7 @@ fn account(agent: &Agent, name: &str) -> Result<Value> {
 
 /// A signed current observation of `reference` by this agent, retained in its
 /// own workspace attempt. Returns the Host's account view and the signed bytes.
-fn observe(agent: &Agent, reference: &Value) -> Result<(Value, Vec<u8>)> {
+pub(crate) fn observe(agent: &Agent, reference: &Value) -> Result<(Value, Vec<u8>)> {
     let (view, _, signed) =
         workspace::signed_view(&agent.root, &agent.workspace, reference, "resource")?;
     let bytes = crate::agent_reserve::bounded(&signed, LIMIT)?;
@@ -170,7 +170,7 @@ fn observe(agent: &Agent, reference: &Value) -> Result<(Value, Vec<u8>)> {
 }
 
 /// The account view lists `[asset, balance]` pairs for the observed account.
-fn balance(view: &Value, asset: &str) -> Option<String> {
+pub(crate) fn balance(view: &Value, asset: &str) -> Option<String> {
     view.get("balances")?.as_array()?.iter().find_map(|entry| {
         let entry = entry.as_array()?;
         (entry.first()?.as_str()? == asset)
@@ -179,7 +179,7 @@ fn balance(view: &Value, asset: &str) -> Option<String> {
     })
 }
 
-fn tariff(agent: &Agent) -> Result<(String, String)> {
+pub(crate) fn tariff(agent: &Agent) -> Result<(String, String)> {
     let config: Value = serde_json::from_slice(&crate::agent_reserve::bounded(&agent.config, 65_536)?)
         .map_err(|error| error.to_string())?;
     let read = |key: &str| {
@@ -244,7 +244,7 @@ fn validate_plan(draft: &Value, plan: &Value, plan_bytes: &[u8], base: &str) -> 
     Ok(())
 }
 
-fn confirmed(value: &Value) -> bool {
+pub(crate) fn confirmed(value: &Value) -> bool {
     value.get("type").and_then(Value::as_str) == Some("confirmed")
         && matches!(
             value.get("confirmation").and_then(Value::as_str),
@@ -303,14 +303,55 @@ fn lookup_exact(agent: &Agent, directory: &Path, ingress: &[u8]) -> Result<Value
     )
 }
 
+/// The Host's own decoding of this attempt's plan refusal (op 96 answered
+/// 255), or `None` when the plan frame is not a refusal. A `stale-root`
+/// reason means the signed observation it was given is no longer current;
+/// nothing was signed yet, so the attempt is decided and a fresh observation
+/// re-plans it. The reason is read from the decoding, never from the text.
+fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
+    let frame = crate::agent_reserve::bounded(&directory.join("plan.frame"), LIMIT)?;
+    let [255, body @ ..] = frame.as_slice() else {
+        return Ok(None);
+    };
+    retain(&directory.join("plan-refusal.bin"), body)?;
+    let outcome = inspect(
+        agent,
+        "outcome",
+        &directory.join("plan-refusal.bin"),
+        &directory.join("plan-refusal.json"),
+    )?;
+    Ok((outcome.get("type").and_then(Value::as_str) == Some("refused")).then_some(outcome))
+}
+
+/// Did the Host refuse this attempt's signed observation `stale-root` (a
+/// commit landed between its challenge and the signed query)? Read from the
+/// decision the session recorded with the Host's own decoding. Only the read
+/// was signed, so the turn re-plans. Any other decision is put back for the
+/// caller's report.
+fn observation_stale() -> bool {
+    match crate::take_host_decision() {
+        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+            if outcome.get("reason").and_then(Value::as_str) == Some("stale-root") =>
+        {
+            true
+        }
+        Some(other) => {
+            crate::note_host_decision(other);
+            false
+        }
+        None => false,
+    }
+}
+
 /// How many times a turn is re-planned after the Host reports contention.
 const MAX_REPLANS: usize = 8;
 
 /// Plan, sign, assemble and submit one fleet turn in a new private attempt.
 /// The submit marker is durable before the one submission; after it, only the
-/// read-only exact lookup of the same ingress is ever sent. `Ok(None)` is the
-/// Host's typed contention: the plan was made against an older image, the
-/// attempt is decided, and nothing moved.
+/// read-only exact lookup of the same ingress is ever sent. `Ok(None)` is a
+/// decided attempt that moved nothing: the Host's typed contention at submit,
+/// or its `stale-root` refusal of the observation or the plan before the turn
+/// was signed.
 fn attempt(
     agent: &Agent,
     reference: &Value,
@@ -334,10 +375,45 @@ fn attempt(
     )?;
     let draft_bytes = crate::agent_reserve::bounded(&directory.join("draft.bin"), LIMIT)?;
     let draft_view = inspect(agent, "fleet-turn", &directory.join("draft.bin"), &directory.join("draft-inspected.json"))?;
-    let (view, signed) = observe(agent, reference)?;
+    // A decision left by an earlier request must not be read as this one's.
+    let _ = crate::take_host_decision();
+    let (view, signed) = match observe(agent, reference) {
+        Ok(observed) => observed,
+        Err(error) => {
+            if observation_stale() {
+                retain_json(
+                    &directory.join("superseded.json"),
+                    &json!({"format":FORMAT,"reason":"stale-root-at-observation",
+                        "status":"decided-nothing-signed"}),
+                )?;
+                return Ok((directory, None));
+            }
+            return Err(error);
+        }
+    };
     retain(&directory.join("signed-observation.bin"), &signed)?;
     retain_json(&directory.join("account-view.json"), &view)?;
-    let plan = invoke(agent, &directory, "plan", 96, &pair(&signed, &draft_bytes)?)?;
+    let plan = match invoke(agent, &directory, "plan", 96, &pair(&signed, &draft_bytes)?) {
+        Ok(plan) => plan,
+        Err(error) => match plan_refusal(agent, &directory)? {
+            Some(refusal) if refusal.get("reason").and_then(Value::as_str) == Some("stale-root") => {
+                retain_json(
+                    &directory.join("superseded.json"),
+                    &json!({"format":FORMAT,"reason":"stale-root-at-plan",
+                        "status":"decided-nothing-signed"}),
+                )?;
+                return Ok((directory, None));
+            }
+            Some(refusal) => {
+                return Err(format!(
+                    "fleet {verb} {}; exact refusal retained in {}",
+                    crate::refusal_line(&refusal).unwrap_or(error),
+                    directory.display()
+                ))
+            }
+            None => return Err(error),
+        },
+    };
     let plan_view = inspect(agent, "fleet-turn-plan", &directory.join("plan.bin"), &directory.join("plan.json"))?;
     validate_plan(&draft_view, &plan_view, &plan, base)?;
     let header = decode_hex(field(&plan_view, "header")?)?;
@@ -397,13 +473,13 @@ fn attempt(
 
 /// One fleet turn, re-planned in a fresh attempt only after typed contention.
 /// Every superseded attempt is named in the result.
-fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publication: Value) -> Result<Value> {
+pub(crate) fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publication: Value) -> Result<Value> {
     let (base, _) = tariff(agent)?;
     let mut superseded = Vec::new();
     for _ in 0..=MAX_REPLANS {
         let (directory, admitted) = attempt(agent, reference, verb, &transfer, &publication, &base)?;
         let Some((plan_view, outcome)) = admitted else {
-            eprintln!("fleet {verb}: contention; re-planning against the new image");
+            eprintln!("fleet {verb}: superseded (stale plan or contention); re-planning against the new image");
             superseded.push(directory);
             continue;
         };
@@ -416,7 +492,7 @@ fn turn(agent: &Agent, reference: &Value, verb: &str, transfer: Value, publicati
     ))
 }
 
-fn topic_bytes(topic: &str) -> Result<Vec<u8>> {
+pub(crate) fn topic_bytes(topic: &str) -> Result<Vec<u8>> {
     if topic.is_empty() || topic.len() > MAX_TOPIC {
         return Err("topic must be 1..64 bytes".into());
     }
@@ -435,7 +511,7 @@ fn payload_bytes(args: &mut Args) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn transfer_value(to: &str, amount: &str, asset: &str) -> Result<Value> {
+pub(crate) fn transfer_value(to: &str, amount: &str, asset: &str) -> Result<Value> {
     canonical_decimal(to, "--to account")?;
     canonical_decimal(amount, "--amount")?;
     canonical_decimal(asset, "--asset")?;
@@ -445,19 +521,50 @@ fn transfer_value(to: &str, amount: &str, asset: &str) -> Result<Value> {
     Ok(json!({"destination":to,"asset":asset,"amount":amount}))
 }
 
-/// Receipt-only exact lookup of one retained fleet attempt.
-fn lookup(agent: &Agent, directory: &Path) -> Result<()> {
+/// The retained exact ingress of one of this workspace's attempts, checked
+/// against the digest its submit marker recorded before the one submission.
+fn retained_ingress(agent: &Agent, directory: &Path) -> Result<(PathBuf, Vec<u8>)> {
     let directory = absolute(directory)?;
     let attempts = fs::canonicalize(agent.root.join("attempts")).map_err(|error| error.to_string())?;
     let canonical = fs::canonicalize(&directory).map_err(|error| error.to_string())?;
     if canonical.parent() != Some(attempts.as_path()) {
-        return Err("fleet lookup attempt must belong to this workspace".into());
+        return Err("fleet attempt must belong to this workspace".into());
     }
     let marker = read_json(&canonical.join("submit-marker.json"))?;
     let ingress = crate::agent_reserve::bounded(&canonical.join("ingress.bin"), LIMIT)?;
     if field(&marker, "ingressSha256")? != digest(&ingress) {
         return Err("retained fleet ingress differs from its submit marker".into());
     }
+    Ok((canonical, ingress))
+}
+
+/// Exact resubmission: the SAME retained ingress bytes go to the checked
+/// submit (op 98) again. The receiver looks the operation identity up before
+/// admission, so an accepted original answers `replayed` with its original
+/// receipt and nothing moves twice; a never-accepted one is admitted now.
+pub(crate) fn resubmit(agent: &Agent, directory: &Path) -> Result<Value> {
+    let (canonical, ingress) = retained_ingress(agent, directory)?;
+    let count = fs::read_dir(&canonical)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.starts_with("resubmit-") && name.ends_with(".frame")
+        })
+        .count();
+    let stem = format!("resubmit-{count:04}");
+    invoke(agent, &canonical, &stem, 98, &ingress)?;
+    inspect(
+        agent,
+        "outcome",
+        &canonical.join(format!("{stem}.bin")),
+        &canonical.join(format!("{stem}.json")),
+    )
+}
+
+/// Receipt-only exact lookup of one retained fleet attempt.
+fn lookup(agent: &Agent, directory: &Path) -> Result<()> {
+    let (canonical, ingress) = retained_ingress(agent, directory)?;
     let outcome = lookup_exact(agent, &canonical, &ingress)?;
     print_json(&outcome)?;
     if !confirmed(&outcome) {
@@ -466,11 +573,16 @@ fn lookup(agent: &Agent, directory: &Path) -> Result<()> {
     Ok(())
 }
 
-fn by_transaction(agent: &Agent, transaction: &str) -> Result<()> {
+/// The Host's answer to op 102 for one transaction id, uninterpreted.
+pub(crate) fn receipt_by_transaction(agent: &Agent, transaction: &str) -> Result<Value> {
     canonical_decimal(transaction, "--transaction")?;
     let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 102, transaction.as_bytes())?;
     let body = reply(&frame, 102)?;
-    let value: Value = serde_json::from_slice(body).map_err(|error| error.to_string())?;
+    serde_json::from_slice(body).map_err(|error| error.to_string())
+}
+
+fn by_transaction(agent: &Agent, transaction: &str) -> Result<()> {
+    let value = receipt_by_transaction(agent, transaction)?;
     print_json(&value)?;
     match field(&value, "type")? {
         "confirmed" if field(&value["receipt"], "transactionId")? == transaction => Ok(()),
@@ -479,7 +591,8 @@ fn by_transaction(agent: &Agent, transaction: &str) -> Result<()> {
     }
 }
 
-fn head(agent: &Agent, reference: &Value) -> Result<()> {
+/// The agent head (op 101) of `reference`, behind this agent's signed observation.
+pub(crate) fn head_of(agent: &Agent, reference: &Value) -> Result<Value> {
     let (_, signed) = observe(agent, reference)?;
     let frame = session_invoke(&agent.host, &agent.socket, &agent.config, 101, &signed)?;
     let value: Value =
@@ -487,13 +600,77 @@ fn head(agent: &Agent, reference: &Value) -> Result<()> {
     if field(&value, "payer")? != field(reference, "target")? {
         return Err("agent head answered for another account".into());
     }
-    print_json(&value)
+    Ok(value)
+}
+
+fn head(agent: &Agent, reference: &Value) -> Result<()> {
+    print_json(&head_of(agent, reference)?)
 }
 
 /// Events of one account topic after `since`. Each event's payload is present
-/// only when the accepted ingress reproduces the digest its page committed; an
+/// only when the accepted ingress reproduces the digest its entry committed; an
 /// event without one is reported and fails the poll rather than being skipped.
 fn poll(agent: &Agent, reference: &Value, topic: &str, since: &str, limit: &str) -> Result<()> {
+    let (value, unreadable) = poll_value(agent, reference, topic, since, limit)?;
+    print_json(&value)?;
+    if unreadable > 0 {
+        return Err(format!("{unreadable} topic event(s) lack a payload matching their committed digest"));
+    }
+    Ok(())
+}
+
+/// One topic, several authors, ONE ordered feed. Each account's topic is its
+/// own stream (its writers never contend with another account's); the Host
+/// stamps every event with its admission height, unique per accepted record, so
+/// the streams merge into one total order by `(height, sequence)`. Every stream
+/// is read from its start, page by page, behind this agent's own signed
+/// observation of that account.
+fn feed(agent: &Agent, names: &[String], topic: &str) -> Result<()> {
+    let mut events = Vec::new();
+    let mut streams = Vec::new();
+    let mut unreadable = 0usize;
+    for name in names {
+        let reference = account(agent, name)?;
+        let mut since = "0".to_owned();
+        loop {
+            let (page, missing) = poll_value(agent, &reference, topic, &since, "64")?;
+            unreadable += missing;
+            let next = field(&page, "nextCursor")?.to_owned();
+            let batch = page["events"].as_array().cloned().unwrap_or_default();
+            for mut event in batch {
+                event["account"] = json!(name);
+                event["payer"] = page["payer"].clone();
+                events.push(event);
+            }
+            if next == since {
+                streams.push(json!({"account":name,"payer":page["payer"],"stream":page["stream"],
+                    "head":page["head"],"tail":page["tail"]}));
+                break;
+            }
+            since = next;
+        }
+    }
+    let key = |event: &Value| -> Result<(u128, u128)> {
+        Ok((
+            field(event, "height")?.parse::<u128>().map_err(|error| error.to_string())?,
+            field(event, "sequence")?.parse::<u128>().map_err(|error| error.to_string())?,
+        ))
+    };
+    let mut keyed = events.into_iter().map(|event| key(&event).map(|k| (k, event))).collect::<Result<Vec<_>>>()?;
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
+    if keyed.windows(2).any(|pair| pair[0].0 .0 == pair[1].0 .0) {
+        return Err("two topic events claim one admission height".into());
+    }
+    print_json(&json!({"type":"minidregg-fleet-topic-feed-v1","topic":hex(&topic_bytes(topic)?),
+        "topicText":topic,"streams":streams,
+        "events":keyed.into_iter().map(|(_, event)| event).collect::<Vec<_>>()}))?;
+    if unreadable > 0 {
+        return Err(format!("{unreadable} topic event(s) lack a payload matching their committed digest"));
+    }
+    Ok(())
+}
+
+fn poll_value(agent: &Agent, reference: &Value, topic: &str, since: &str, limit: &str) -> Result<(Value, usize)> {
     canonical_decimal(since, "--since")?;
     canonical_decimal(limit, "--limit")?;
     let topic = topic_bytes(topic)?;
@@ -535,11 +712,7 @@ fn poll(agent: &Agent, reference: &Value, topic: &str, since: &str, limit: &str)
     value["events"] = Value::Array(rendered);
     value["nextCursor"] = json!(next);
     value["topicText"] = json!(String::from_utf8_lossy(&topic));
-    print_json(&value)?;
-    if unreadable > 0 {
-        return Err(format!("{unreadable} topic event(s) lack a payload matching their committed digest"));
-    }
-    Ok(())
+    Ok((value, unreadable))
 }
 
 // ---------------------------------------------------------------- for `mini credit`
@@ -636,7 +809,7 @@ pub(crate) fn incoming(root: &Path, name: &str, topic: &str, since: &str, limit:
 /// sponsor create one account owned by the new subject and funded by a Book
 /// posting from the sponsor's fee payer. Each step is resumable from its
 /// retained artifacts; a completed step is never repeated.
-fn join(mut args: Args) -> Result<()> {
+pub(crate) fn join(mut args: Args) -> Result<()> {
     let sponsor_root = absolute(&path(args.required("sponsor-workspace")?))?;
     let factory_ref = text(args.required("factory-ref")?, "factory reference")?;
     let name = text(args.required("name")?, "join name")?;
@@ -868,7 +1041,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             print_json(&incoming(&agent.root, &name, &topic, &since, &limit)?)
         }
-        _ => Err("fleet action must be join, send, publish, transfer, lookup, receipt, poll or incoming".into()),
+        "feed" => {
+            let names = text(args.required("accounts")?, "account references")?;
+            let topic = text(args.required("topic")?, "topic")?;
+            args.finish()?;
+            let names: Vec<String> = names.split(',').map(str::to_owned).collect();
+            if names.iter().any(String::is_empty) {
+                return Err("--accounts is a comma-separated list of account references".into());
+            }
+            feed(&agent, &names, &topic)
+        }
+        _ => Err("fleet action must be join, send, publish, transfer, lookup, receipt, poll, incoming or feed".into()),
     }
 }
 

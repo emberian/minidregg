@@ -28,6 +28,8 @@ mod fn_frontier;
 #[cfg(unix)]
 mod fleet;
 #[cfg(unix)]
+mod fleet_sign;
+#[cfg(unix)]
 mod fn_namespace;
 #[cfg(unix)]
 mod grain_share_issue;
@@ -322,9 +324,11 @@ usage:
   mini fleet --action incoming --dir WORKSPACE --account NAME [--topic TOPIC] [--since HEIGHT] [--limit N]
   mini credit --action balance|room|tariff|pay|topup|renew|status|ledger|install|adopt --dir WORKSPACE [--room REF] … (PLACE §2.10; `mini shell` spells them credit / pay ROOM week / tariff / topup / room status|renew|concierge)
   mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
+  mini fleet --action feed --dir WORKSPACE --accounts NAME[,NAME...] --topic TOPIC   (one topic, several authors: one feed ordered by admission height)
   mini well --action new --dir WORKSPACE --name NAME --in REALM --law LAW.json
   mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
   mini well --action ledger --dir WORKSPACE --output LEDGER.json
+  mini fleet-sign join|send|transfer|receipt|retry [--profile P] ...   (dregg-client-sign's verbs on Mini; `mini fleet-sign --help`)
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -692,6 +696,22 @@ fn keygen(
     next: NextKey,
     hosted: bool,
 ) -> Result<()> {
+    let public_key = generate_key(secret, public, escrow, next, hosted)?;
+    println!("{}", hex(&public_key));
+    Ok(())
+}
+
+/// Create a fresh Ed25519 seed at `secret`, its public key at `public` and,
+/// unless `NextKey::Without`, the NEXT key (K-PREROTATE); returns the public
+/// key and prints nothing on stdout (`mini fleet-sign` answers in JSON there).
+/// No file may already exist.
+fn generate_key(
+    secret: &Path,
+    public: &Path,
+    escrow: Option<(OsString, OsString)>,
+    next: NextKey,
+    hosted: bool,
+) -> Result<[u8; 32]> {
     if secret.exists() {
         return Err(format!("refusing to replace {}", secret.display()));
     }
@@ -771,8 +791,7 @@ fn keygen(
             }
         }
     }
-    println!("{}", hex(&signing.verifying_key().to_bytes()));
-    Ok(())
+    Ok(signing.verifying_key().to_bytes())
 }
 
 fn process(host: &Path, config: &Path, arguments: &[&OsStr]) -> Result<Output> {
@@ -3542,7 +3561,16 @@ fn run(mut args: Args) -> Result<()> {
 }
 
 fn main() -> ExitCode {
-    match Args::parse().and_then(run) {
+    #[cfg(unix)]
+    let parsed = match env::args_os().nth(1) {
+        Some(command) if command == OsStr::new("fleet-sign") => {
+            fleet_sign::run(env::args_os().skip(2).collect())
+        }
+        _ => Args::parse().and_then(run),
+    };
+    #[cfg(not(unix))]
+    let parsed = Args::parse().and_then(run);
+    match parsed {
         Ok(()) => ExitCode::from(EXIT_STATUS.load(Ordering::Relaxed)),
         Err(error) if error == USAGE => {
             print!("{error}");

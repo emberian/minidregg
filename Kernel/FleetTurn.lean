@@ -4,14 +4,18 @@ base tariff from the paying account to the deployment collector in the one
 canonical Book. It may also move value to another registered account, and it
 may append one event to a topic stream owned by the paying account.
 
-A topic stream is the existing typed append-only causal event log: one
-`eventHistory` cell per stream (a StoreCodec cell, unbounded), not a side
-channel. Its stream id, cell id, sequence position and parent event are
-derived by this source from the paying account, the topic bytes and the
-current cell; the event
-record binds the exact payload digest, this turn's transaction id and effect
-digest, the Book roots around the turn and the typed author. The payload bytes
-themselves stay in the signed ingress retained by the accepted journal.
+A topic is a `stream` (`Compiler.StreamCell`): one head cell bound to the
+topic's stream digest, plus one cell per event. A send appends: it rewrites the
+bounded head and births one entry cell, and reads nothing but the head, so its
+cost does not depend on how many events the topic already holds
+(`fleet_send_footprint`, `fleet_send_cost_independent_of_history`). The stream
+digest is derived from the paying account and the topic bytes, so each account's
+topic is its own stream: K agents sending to one topic name write K disjoint
+heads and never stale one another (`fleet_disjoint_authors_no_replan`); a reader
+merges them by `(height, sequence)`. The entry record binds the exact payload
+digest, this turn's transaction id, the admission height and the signing
+subject. The payload bytes themselves stay in the signed ingress retained by the
+accepted journal.
 
 Authority is the ordinary account capability path: one native signature by
 the current holder of a `transfer` capability over the paying account, checked
@@ -22,6 +26,7 @@ and a changed command under the same identity conflicts.
 -/
 import Kernel.ParticipantKeyEnrollment
 import Compiler.NativeHostCodec
+import Kernel.StreamWrite
 
 namespace Minidregg.Kernel.FleetTurn
 
@@ -52,17 +57,10 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 abbrev AuthorityMaterializer := CredentialAuthorityCell.materializer
-abbrev EventStore := Minidregg.Theory.Store.Store HyperdocumentEventLog.Sparse.layout
-
-/-- One recorded topic event: its derived event key and its record. -/
-structure EventEntry where
-  key : Hyperdocument.VersionEventId
-  record : Hyperdocument.VersionEventRecord
-
 /-- Topic labels are bytes chosen by the account holder. They name a stream
 of that account only; the same label under another account is another stream. -/
 def maxTopicBytes : Nat := 64
-/-- Payloads ride in the signed ingress; the topic cell stores only their digest. -/
+/-- Payloads ride in the signed ingress; the entry cell stores only their digest. -/
 def maxPayloadBytes : Nat := 16384
 
 structure Transfer where
@@ -197,17 +195,8 @@ def streamDigest (domain : Digest) (payer : Nat) (topic : List UInt8) : Digest :
     ((StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat bytesStream)).encode
       (domain, payer, topic))
 
-/-- The one event cell of a stream. -/
-def topicCellId (stream : Digest) : Nat :=
-  (cshake "DREGG.FLEET.TOPIC.CELL/v1" (digestStream.encode stream)).value
-
-def payloadDigest (domain : Digest) (payload : List UInt8) : Digest :=
-  cshake "DREGG.FLEET.TOPIC.PAYLOAD/v1"
-    ((StreamCodec.product digestStream bytesStream).encode (domain, payload))
-
-/-- The one schema of a fleet topic event record. -/
-def eventSchema : CausalVersionDag.SchemaRef :=
-  ⟨cshake "DREGG.FLEET.TOPIC.EVENT-SCHEMA/v1" [], 1⟩
+/-- The head cell of a topic stream. -/
+abbrev topicCellId (stream : Digest) : Nat := StreamCell.topicHeadCellId stream
 
 
 structure Declaration where
@@ -319,105 +308,85 @@ def requireSome {A : Type} (reason : Reject) : Option A → Except Reject A
   | none => .error reason
   | some value => .ok value
 
-/-! ## Topic cells -/
+/-! ## Topic streams -/
 
-/-- The events of one topic cell, in canonical store order. -/
-def storedEvents (store : EventStore) : List EventEntry :=
-  (StoreCodec.entries HyperdocumentCell.eventWire store).map fun entry => ⟨entry.1.2, entry.2⟩
-
-/-- The recorded event at one stream position. -/
-def eventAt (store : EventStore) (sequence : Nat) : Option EventEntry :=
-  (storedEvents store).find? fun entry => entry.record.semanticVersion == sequence
-
-def topicCell (store : EventStore) : PackedCell Registry :=
-  ⟨.eventHistory, CellState.materialize HyperdocumentCell.eventMaterializer store⟩
-
-/-- The current occupant of one derived topic cell id. A present cell of
-another kind, or one that fails the event-history law, is not a topic. -/
+/-- The current occupant of one derived topic head cell: nothing yet, or a
+lawful `stream` head (the observed packed cell and its head value). A present
+cell of another kind, or one that fails the registry law, is not a topic. -/
 inductive TopicRead where
   | fresh
-  | live (cell : PackedCell Registry) (store : EventStore)
+  | live (cell : PackedCell Registry) (head : StreamCell.Head)
 
+/-- Reads exactly one slot: the head cell's. -/
 def readTopic (deployment : Deployment) (directory : Directory Nat Registry) (cellId : Nat) :
     Option TopicRead :=
   match directory.slots cellId with
   | .absent => some .fresh
-  | .present _ =>
-      match ResourceBirthController.Concrete.observeCell deployment directory cellId .eventHistory with
-      | none => none
-      | some observed => some (.live ⟨.eventHistory, observed.payload⟩ observed.payload.logical)
+  | .present cell =>
+      match cell with
+      | ⟨.stream, payload⟩ =>
+          if CanonicalCellRegistry.CellLaw deployment cellId ⟨.stream, payload⟩ then
+            (StreamCell.headOf payload.logical).map (.live ⟨.stream, payload⟩)
+          else none
+      | _ => none
 
-/-- The number of recorded events of a stream. Positions are admitted only in
-order (`planTopic`), so a stream of `n` events holds exactly positions `1..n`. -/
-def TopicRead.count : TopicRead → Nat
-  | .fresh => 0
-  | .live _ store => (storedEvents store).length
+/-- **`readTopic_local`.** A topic read depends on the head cell's slot alone. -/
+theorem readTopic_local (deployment : Deployment) (left right : Directory Nat Registry)
+    (cellId : Nat) (same : left.slots cellId = right.slots cellId) :
+    readTopic deployment left cellId = readTopic deployment right cellId := by
+  unfold readTopic; rw [same]
 
-def TopicRead.store : TopicRead → EventStore
-  | .fresh => 0
-  | .live _ store => store
+/-- The head a read stands for: before the first event, the empty head bound
+to this stream. -/
+def TopicRead.head (stream : Digest) : TopicRead → StreamCell.Head
+  | .fresh => StreamCell.emptyTopicHead stream
+  | .live _ head => head
 
 def TopicRead.image : TopicRead → LifecycleImage Registry
   | .fresh => .fresh
   | .live cell _ => .live cell
 
-/-- Source-derived placement of one topic event: the stream's one cell, before
-and after the append. -/
+/-- Source-derived placement of one topic event: the head cell before and
+after, and the one new entry. -/
 structure TopicPlan where
   stream : Digest
   cellId : Nat
   pre : LifecycleImage Registry
-  post : EventStore
-  entry : EventEntry
+  post : StreamCell.Head
+  entry : StreamCell.Entry
 
-def TopicPlan.write (plan : TopicPlan) : DataWrite where
-  cellId := ⟨plan.cellId⟩
-  expectedPre := physicalRoot plan.pre
-  exactPost := physicalRoot (.live (topicCell plan.post))
-  canonicalPostBytes := LifecycleImage.bytes Registry (.live (topicCell plan.post))
+/-- A send's topic writes: the head and the one fresh entry cell. -/
+def TopicPlan.writes (plan : TopicPlan) : List DataWrite :=
+  [StreamWrite.headWrite plan.cellId plan.pre plan.post, StreamWrite.entryWrite plan.entry]
 
-def eventRecord (domain stream : Digest) (sequence : Nat) (payload : Digest)
-    (parents : List Hyperdocument.VersionEventId) (bookPre bookPost txId effect : Digest)
-    (author : Hyperdocument.PrincipalRef) : Hyperdocument.VersionEventRecord where
-  historyDomain := domain
-  document := ⟨stream⟩
-  schema := eventSchema
-  semanticVersion := sequence
-  operation := ⟨payload⟩
-  parents := parents
-  preStateRoot := bookPre
-  postStateRoot := bookPost
-  requestId := txId
-  effectId := effect
-  author := author
+/-- The record an event stores: the topic, the payload digest (the bytes stay
+in the signed ingress), the signing subject, the admission height and the
+transaction id. -/
+def eventRecord (author : SubjectId) (height : Nat) (txId : Digest) (publication : Publication) :
+    StreamCell.StreamRecord :=
+  ⟨author, height, txId, ⟨publication.topic, StreamCell.payloadDigest publication.payload, none, none⟩⟩
 
-def eventEntry (record : Hyperdocument.VersionEventRecord) : EventEntry :=
-  ⟨Hyperdocument.deriveVersionEventId HyperdocumentCell.eventPreimageStream.toLawful
-    HyperdocumentCell.eventDerivation record, record⟩
+/-- The plan from one read of the head. Sequence `n` is admitted only as the
+stream's next position: a position the head already counts is `sequenceTaken`,
+any other is `sequenceGap`. The parent is the head's tail. A head bound to
+anything but this stream (a room stream, another topic) is `topicUnavailable`. -/
+def planFrom (stream : Digest) (cellId : Nat) (current : TopicRead) (publication : Publication)
+    (author : SubjectId) (height : Nat) (txId : Digest) : Except Reject TopicPlan := do
+  let head := current.head stream
+  unless head.binding == .topic stream do throw .topicUnavailable
+  if publication.sequence = 0 then throw .sequenceGap
+  if publication.sequence ≤ head.count then throw .sequenceTaken
+  if publication.sequence ≠ head.count + 1 then throw .sequenceGap
+  let entry := StreamCell.appendEntry cellId head (eventRecord author height txId publication)
+  pure ⟨stream, cellId, current.image, head.append entry, entry⟩
 
-/-- Sequence `n` is admitted only as the stream's next position: the stream
-holds exactly `n - 1` events and none at `n`. The parent is exactly the event
-at `n - 1`; the first event has none. A live cell must be this stream's. -/
 def planTopic (deployment : Deployment) (directory : Directory Nat Registry)
     (domain : Digest) (payer : Nat) (publication : Publication)
-    (author : Hyperdocument.PrincipalRef) (bookPre bookPost txId effect : Digest) :
-    Except Reject TopicPlan := do
+    (author : SubjectId) (height : Nat) (txId : Digest) : Except Reject TopicPlan := do
   let stream := streamDigest domain payer publication.topic
   let cellId := topicCellId stream
   let current ← requireSome .topicUnavailable (readTopic deployment directory cellId)
-  let store := current.store
-  unless (storedEvents store).all (fun entry => entry.record.document == ⟨stream⟩) do
-    throw .topicUnavailable
-  if (eventAt store publication.sequence).isSome then throw .sequenceTaken
-  if publication.sequence = 0 ∨ current.count + 1 ≠ publication.sequence then throw .sequenceGap
-  let parents ← if publication.sequence = 1 then pure ([] : List Hyperdocument.VersionEventId)
-    else match eventAt store (publication.sequence - 1) with
-      | some previous => pure [previous.key]
-      | none => throw .sequenceGap
-  let record := eventRecord domain stream publication.sequence
-    (payloadDigest domain publication.payload) parents bookPre bookPost txId effect author
-  let entry := eventEntry record
-  pure ⟨stream, cellId, current.image, store.update ⟨.events, entry.key⟩ (some record), entry⟩
+  planFrom stream cellId current publication author height txId
 
 /-! ## Preparation, authorization, plan -/
 
@@ -459,10 +428,8 @@ def prepare {F : Type} [Field F] (deployment : Deployment)
           | none => pure none
           | some publication =>
               (planTopic deployment directory.directory snapshot.domain
-                command.payer publication ⟨command.subject, .account, command.spend⟩
-                book.payload.root resources.post.root
-                ⟨marker snapshot.domain profile.semantics command⟩
-                (effectDigest snapshot.domain profile.semantics command)).map some
+                command.payer publication command.subject ambient.height
+                ⟨marker snapshot.domain profile.semantics command⟩).map some
         if snapshot.spent d.operationNullifier = false then
           match validate AuthorityMaterializer snapshot.cell snapshot.cell.root d.patch with
           | .rejected _ => throw .validation
@@ -613,27 +580,148 @@ def signingPlanCodec : LawfulCodec SigningPlan :=
 
 /-! ## Topic reading -/
 
-/-- The stream head: the highest occupied sequence, which is the number of
-recorded events (positions are admitted only in order). -/
+/-- The stream head: the number of recorded events (positions are admitted
+only in order). A head cell that is not this stream's reads as empty. -/
 def streamHead (deployment : Deployment) (directory : Directory Nat Registry)
-    (stream : Digest) : Nat :=
+    (stream : Digest) : StreamCell.Head :=
   match readTopic deployment directory (topicCellId stream) with
-  | some current => current.count
-  | none => 0
+  | some current =>
+      let head := current.head stream
+      if head.binding = .topic stream then head else StreamCell.emptyTopicHead stream
+  | none => StreamCell.emptyTopicHead stream
 
 /-- Events of one stream with sequence strictly above `cursor`, in order, at
-most `limit` of them. A gap ends the read. -/
+most `limit` of them: entry cells read back by position (`StreamWrite.window`). -/
 def eventsSince (deployment : Deployment) (directory : Directory Nat Registry)
-    (stream : Digest) (cursor limit : Nat) : List EventEntry :=
-  match readTopic deployment directory (topicCellId stream) with
-  | some (.live _ store) =>
-      let rec collect : Nat → Nat → List EventEntry → List EventEntry
-        | 0, _, acc => acc.reverse
-        | fuel + 1, sequence, acc =>
-            match eventAt store sequence with
-            | some entry => collect fuel (sequence + 1) (entry :: acc)
-            | none => acc.reverse
-      collect limit (cursor + 1) []
-  | _ => []
+    (stream : Digest) (cursor limit : Nat) : List (Nat × StreamCell.Entry) :=
+  StreamWrite.window deployment directory (topicCellId stream)
+    (streamHead deployment directory stream) (cursor + 1) limit
+
+/-! ## Theorems: the send's footprint, its cost, and who may append -/
+
+/-- **`fleet_send_footprint`.** A planned send writes exactly two cells of its
+topic: the stream's head and one fresh entry at the next position; the entry
+is recorded at the head's next position with the head's tail as parent, and
+the head after counts it. -/
+theorem fleet_send_footprint (stream : Digest) (cellId : Nat) (current : TopicRead)
+    (publication : Publication) (author : SubjectId) (height : Nat) (txId : Digest)
+    (plan : TopicPlan) (planned : planFrom stream cellId current publication author height txId = .ok plan) :
+    plan.writes.map DataWrite.cellId =
+        [⟨cellId⟩, ⟨StreamCell.entryCellId cellId ((current.head stream).count + 1)⟩] ∧
+      (StreamWrite.entryWrite plan.entry).expectedPre =
+        physicalRoot (.fresh : LifecycleImage Registry) ∧
+      plan.entry = StreamCell.appendEntry cellId (current.head stream)
+        (eventRecord author height txId publication) ∧
+      plan.post = (current.head stream).append plan.entry ∧
+      publication.sequence = (current.head stream).count + 1 := by
+  unfold planFrom at planned
+  simp only [bind, Except.bind, pure, Except.pure] at planned
+  split at planned <;> try cases planned
+  split at planned <;> try cases planned
+  split at planned <;> try cases planned
+  split at planned <;> try cases planned
+  rename_i nonzero notTaken notGap
+  refine ⟨?_, rfl, rfl, rfl, by omega⟩
+  simp [TopicPlan.writes, StreamWrite.headWrite, StreamWrite.entryWrite, StreamCell.appendEntry,
+    StreamCell.Head.nextSeq]
+
+/-- **`fleet_send_cost_independent_of_history`.** A send's plan, and therefore
+every byte it writes, is a function of the topic's head cell alone: two
+directories that agree on that one slot plan identically, whatever else they
+hold, every earlier entry of this stream included. -/
+theorem fleet_send_cost_independent_of_history (deployment : Deployment)
+    (left right : Directory Nat Registry) (domain : Digest) (payer : Nat)
+    (publication : Publication) (author : SubjectId) (height : Nat) (txId : Digest)
+    (sameHead : left.slots (topicCellId (streamDigest domain payer publication.topic)) =
+      right.slots (topicCellId (streamDigest domain payer publication.topic))) :
+    planTopic deployment left domain payer publication author height txId =
+      planTopic deployment right domain payer publication author height txId := by
+  unfold planTopic
+  simp only [readTopic_local deployment left right _ sameHead]
+
+/-- **`fleet_disjoint_authors_no_replan`.** Another account's send (or any
+write to a cell other than this topic's head) leaves this send's plan exactly
+as it was: K agents on one topic name never re-plan for one another. -/
+theorem fleet_disjoint_authors_no_replan (deployment : Deployment)
+    (directory : Directory Nat Registry) (domain : Digest) (payer : Nat)
+    (publication : Publication) (author : SubjectId) (height : Nat) (txId : Digest)
+    (other : Nat) (cell : PackedCell Registry)
+    (distinct : other ≠ topicCellId (streamDigest domain payer publication.topic)) :
+    planTopic deployment (Directory.insert Registry directory other cell) domain payer publication
+        author height txId =
+      planTopic deployment directory domain payer publication author height txId :=
+  fleet_send_cost_independent_of_history deployment _ _ domain payer publication author height txId
+    (Directory.insert_slot_other _ _ (Ne.symm distinct) cell)
+
+/-- **`fleet_admits_next_position`** (admitting pole). On a fresh topic or its
+own head, the next position is admitted. -/
+theorem fleet_admits_next_position (stream : Digest) (cellId : Nat) (current : TopicRead)
+    (publication : Publication) (author : SubjectId) (height : Nat) (txId : Digest)
+    (own : (current.head stream).binding = .topic stream)
+    (next : publication.sequence = (current.head stream).count + 1) :
+    ∃ plan, planFrom stream cellId current publication author height txId = .ok plan := by
+  unfold planFrom
+  simp [own, next, bind, Except.bind, pure, Except.pure]
+
+/-- **`fleet_refuses_foreign_head`** (refusing pole, by name). A head bound to
+anything but this stream — a room stream, or another topic — is not appended
+to by a fleet send: `topicUnavailable`. -/
+theorem fleet_refuses_foreign_head (stream : Digest) (cellId : Nat) (current : TopicRead)
+    (publication : Publication) (author : SubjectId) (height : Nat) (txId : Digest)
+    (foreign : (current.head stream).binding ≠ .topic stream) :
+    planFrom stream cellId current publication author height txId = .error .topicUnavailable := by
+  unfold planFrom
+  simp [foreign, bind, Except.bind]
+
+/-- A position the head already counts is refused `sequenceTaken`. -/
+theorem fleet_refuses_taken_position (stream : Digest) (cellId : Nat) (current : TopicRead)
+    (publication : Publication) (author : SubjectId) (height : Nat) (txId : Digest)
+    (own : (current.head stream).binding = .topic stream)
+    (positive : 0 < publication.sequence)
+    (taken : publication.sequence ≤ (current.head stream).count) :
+    planFrom stream cellId current publication author height txId = .error .sequenceTaken := by
+  unfold planFrom
+  simp [own, taken, Nat.pos_iff_ne_zero.mp positive, bind, Except.bind]
+  rfl
+
+/-- The stream a send appends to is the authorized account's: the signed
+request's target is the paying account, and the topic head is derived from it. -/
+theorem fleet_stream_is_payers (snapshot : Snapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) :
+    (request snapshot semantics ambient command).target = ⟨command.payer⟩ := rfl
+
+/-- **`fleet_refuses_without_capability`** (refusing pole, by name). A signer
+whose presented grant is not a capability of the paying account — another
+account's holder, or a key the account never delegated to — is refused
+`capabilityRejected` before any law runs. -/
+theorem fleet_refuses_without_capability [DecidableEq F]
+    (prepared : Prepared deployment profile tariff ambient durable command)
+    (receipt : CredentialSignatureAdmission.CheckedSignature prepared.authority.snapshot)
+    (noGrant : sourceCapabilityOnlyEvidence profile.compilerProfile prepared.authority.snapshot
+      (sourceStore prepared) (marker prepared.authority.snapshot.domain profile.semantics command)
+      (step prepared) (request prepared.authority.snapshot profile.semantics ambient command)
+      command.spend receipt = none) :
+    authorize prepared receipt = .error .capabilityRejected := by
+  unfold authorize
+  simp [requireSome, noGrant, bind, Except.bind]
+
+/-- info: 'Minidregg.Kernel.FleetTurn.readTopic_local' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms readTopic_local
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_send_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_send_footprint
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_send_cost_independent_of_history' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_send_cost_independent_of_history
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_disjoint_authors_no_replan' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_disjoint_authors_no_replan
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_admits_next_position' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_admits_next_position
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_refuses_foreign_head' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_refuses_foreign_head
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_refuses_taken_position' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_refuses_taken_position
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_stream_is_payers' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_stream_is_payers
+/-- info: 'Minidregg.Kernel.FleetTurn.fleet_refuses_without_capability' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fleet_refuses_without_capability
 
 end Minidregg.Kernel.FleetTurn

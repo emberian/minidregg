@@ -17,6 +17,7 @@ import Compiler.NativeObservationCodec
 import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceObservationAdmission
 import Kernel.CapabilityRenounce
+import Kernel.StreamWrite
 
 namespace Minidregg.Kernel.NativeObservationController
 
@@ -587,8 +588,9 @@ theorem streamPayload_sound {accepted : List DurableReceiver.IntentRecord} {targ
                 sameTarget, append, rfl⟩
             · simp [digestEq] at shown
 
-/-- A stream window: the cell root, its next sequence position, and the
-recorded entries in the window, each with the payload `streamPayload` found. -/
+/-- A stream window: the head cell's root, its next sequence position, and the
+recorded entries in the window, each read back from its own entry cell
+(`StreamWrite.window`) with the payload `streamPayload` found for it. -/
 def tailViewStream :
     StreamCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord × Option (List UInt8))) :=
   StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
@@ -925,10 +927,12 @@ def AuthorizedIntent.queryResult
           | none => throw .malformed
     | .tail start count =>
         match checked.selected.packed with
-        | ⟨.stream, payload⟩ => pure (tailViewCodec.encode (payload.root,
-            StreamCell.nextSeq payload.logical,
-            (StreamCell.tail payload.logical start count).map fun (sequence, record) =>
-              (sequence, record, streamPayload durable.image.accepted query.target record)))
+        | ⟨.stream, payload⟩ => do
+            let some head := StreamCell.headOf payload.logical | throw .malformed
+            pure (tailViewCodec.encode (payload.root, head.nextSeq,
+              (StreamWrite.window deployment context.directory.directory query.target head start count).map
+                fun (sequence, entry) =>
+                  (sequence, entry.record, streamPayload durable.image.accepted query.target entry.record)))
         | _ => throw .malformed
   else throw .malformed
 

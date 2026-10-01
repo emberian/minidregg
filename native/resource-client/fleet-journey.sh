@@ -164,6 +164,19 @@ step subscribe-poll poll -- "$MINI" fleet --action poll --dir "$ROOT/agent-b" \
   --account a-feed --topic news --since 0
 jq -e --slurpfile p "$OUT/poll-news-0.json" --arg b "$B_SUBJECT" \
   '.subject == $b and .events == $p[0].events' "$OUT/subscribe-poll.json" >/dev/null
+# --- one topic, two authors, one feed ------------------------------------
+# agent-b sends on the same topic name in its own account: its own stream, so
+# neither author re-plans for the other; the feed merges both streams by
+# admission height into one ordered list.
+step publish-b publish -- "$MINI" fleet --action publish --dir "$ROOT/agent-b" \
+  --account account --topic news --payload 'news from b'
+jq -e '.publication.sequence == "1"' "$OUT/publish-b.json" >/dev/null
+step feed-news feed -- "$MINI" fleet --action feed --dir "$ROOT/agent-b" \
+  --accounts a-feed,account --topic news
+jq -e '[.events[].payloadText] == ["first news", "second news", "news from b"] and
+  ([.events[].height | tonumber] | . == sort and (unique | length) == 3) and
+  (.streams | length) == 2 and .streams[0].stream != .streams[1].stream' \
+  "$OUT/feed-news.json" >/dev/null
 # The receiver itself refuses a spend presented with the observe-only grant:
 # the plan is released (agent-b may observe), the admission is not.
 refuse observe-only-spend transfer -- "$MINI" fleet --action transfer --dir "$ROOT/agent-b" \
@@ -174,7 +187,7 @@ grep -q 'capabilityRejected' "$OUT/observe-only-spend.stderr"
 step read-a read -- "$MINI" workspace --action read --dir "$ROOT/agent-a" --name account
 step read-b read -- "$MINI" workspace --action read --dir "$ROOT/agent-b" --name account
 EXPECT_A=$((1000 - 7 - 25 - 4 * FEE))
-EXPECT_B=$((500 + 7 + 25))
+EXPECT_B=$((500 + 7 + 25 - FEE))
 jq -e --arg v "$EXPECT_A" '[.balances[] | select(.[0] == "0") | .[1]] == [$v]' "$OUT/read-a.json" >/dev/null
 jq -e --arg v "$EXPECT_B" '[.balances[] | select(.[0] == "0") | .[1]] == [$v]' "$OUT/read-b.json" >/dev/null
 
