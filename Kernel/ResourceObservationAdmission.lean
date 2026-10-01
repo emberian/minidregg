@@ -1,8 +1,17 @@
 /- Resource-local observation admission shared by native reads and joint
-transactions. Every policy sees only its own unchanged canonical payload and
-its own sparse account cut. Selection, credentials and committed policy source
-all come from one loaded image; no foreign state enters this admission step. -/
+transactions. Every policy sees only its own unchanged canonical payload, its
+own sparse account cut, and the deployment's one clock (`clock/now`,
+`clock/day`, `clock/slot`, first, exactly as a resource invocation sees them;
+`read_law_sees_clock`). Selection, credentials, the clock and committed policy
+source all come from one loaded image; no other foreign state enters this
+admission step.
+
+A read commits nothing, so the clock it was judged at is not pinned by a CAS:
+it is the clock cell of the very snapshot the read is answered from, and the
+read's challenge names it beside the world root and height
+(`NativeObservationController.challenge_names_clock`). -/
 import Compiler.CanonicalRuntimeProfile
+import Compiler.PredRangeLeaf
 import Compiler.CredentialAuthorityDomainReceiver
 import Compiler.CredentialAuthorityPolicyRegistry
 import Compiler.ResourceTargetAdmission
@@ -11,6 +20,8 @@ import Compiler.ResourceAuthorityProjection
 import Kernel.ContentResource
 import Kernel.DeclaredResourceProjection
 import Theory.RoomAuthorization
+import Kernel.ClockCellDomain
+import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.ResourceObservationAdmission
 
@@ -118,6 +129,9 @@ structure Prepared (context : Context deployment durable) (profile : CanonicalRu
   revisionExact : wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId
   accountBalances : List (Nat × Int)
   balancesExact : balances context kind wanted.target.value = some accountBalances
+  /-- The deployment clock of the snapshot the read is answered from. -/
+  clock : Kernel.ClockCellDomain.Loaded deployment durable.snapshot
+  clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot = some clock
 
 /-- Each refusing branch names its reason. The request is host-built from the
 same image, so a component mismatch means the caller asked for something other
@@ -138,8 +152,12 @@ def prepare (context : Context deployment durable) (profile : CanonicalRuntimePr
                 if revisionExact : wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId then
                   match balancesExact : balances context kind wanted.target.value with
                   | none => .error (.of .noGrant)
-                  | some values => .ok ⟨observed, observeExact, domainExact, semanticsExact,
-                      policyExact, epochExact, revisionExact, values, balancesExact⟩
+                  | some values =>
+                    match clockLoaded : Kernel.ClockCellDomain.load deployment durable.snapshot with
+                    | none => .error (.of .operationRejected)
+                    | some clock => .ok ⟨observed, observeExact, domainExact, semanticsExact,
+                        policyExact, epochExact, revisionExact, values, balancesExact, clock,
+                        clockLoaded⟩
                 else .error (.of .staleRoot)
               else .error (.of .staleRoot)
             else .error (.of .malformed)
@@ -152,7 +170,8 @@ variable {context : Context deployment durable} {profile : CanonicalRuntimeProfi
 
 def project (prepared : Prepared context profile wanted marker capability contextBytes)
     (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) : Minidregg.Pred.State :=
-  ⟨CanonicalRuntimeProfile.requestSlots wanted ++
+  ⟨Kernel.ClockCell.slots prepared.clock.clock ++
+    CanonicalRuntimeProfile.requestSlots wanted ++
     ResourceAuthorityProjection.bytesSlots "context/bytes" 0 contextBytes ++
     ResourceAuthorityProjection.bytesSlots "resource/bytes" 0
       ((CanonicalCellRegistry.materializer prepared.observed.before.kind).codec.encode logical) ++
@@ -176,7 +195,11 @@ def portal (prepared : Prepared context profile wanted marker capability context
 failures carry the reason of the component that decided them
 (`sourceCapabilityOnlyEvidenceChecked`); a missing or failing committed law is
 `lawDenied`, and a failing law names its failing clause (`LawLeaf.of`) on the
-very witness states the law was admitted against. -/
+very witness states the law was admitted against. A law refused because one of
+its order clauses compares two values outside the native order range is
+`lawInputRange`, naming that clause and its two values (`LawLeaf.ofRange`), and
+one refused because two integers of the step share a field image is
+`lawInputRange` naming the two integers (`castAlias`). -/
 def authorizeChecked (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot) :
     Except Refusal (Authorized (portal prepared) context.authority.snapshot.authState wanted) :=
@@ -193,8 +216,16 @@ def authorizeChecked (prepared : Prepared context profile wanted marker capabili
           match CanonicalPolicyAdmission.admit config context.authority.snapshot.authState wanted
               evidence witness (.policy wanted.policyId wanted.policyRevision)
               prepared.epochExact prepared.revisionExact with
-          | none => .error (Refusal.lawDenied
-              (LawLeaf.of committed.record.predicate witness.oldState witness.newState))
+          | none =>
+              match LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
+                  witness.oldState witness.newState with
+              | some leaf => .error (Refusal.lawInputRange leaf)
+              | none =>
+                  match castAlias F (intsOf committed.record.predicate
+                      witness.oldState witness.newState) with
+                  | some (x, y) => .error (Refusal.castAlias x y)
+                  | none => .error (Refusal.lawDenied
+                      (LawLeaf.of committed.record.predicate witness.oldState witness.newState))
           | some authorized => .ok authorized
 
 def authorize (prepared : Prepared context profile wanted marker capability contextBytes)
@@ -213,9 +244,10 @@ theorem authorizeChecked_capability_reason
     authorizeChecked prepared signature = .error (.of reason) := by
   simp only [authorizeChecked, refused]
 
-/-- With admissible capability evidence and a resolved committed law, a law
-that does not accept is reported as `lawDenied`, naming the failing clause of
-that law on the same witness states the admission was decided on. -/
+/-- With admissible capability evidence and a resolved committed law whose order
+clauses are all in range and whose step's integers have distinct field images, a law that does not accept is reported as `lawDenied`,
+naming the failing clause of that law on the same witness states the admission
+was decided on. -/
 theorem authorizeChecked_lawDenied
     (prepared : Prepared context profile wanted marker capability contextBytes)
     (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
@@ -230,11 +262,71 @@ theorem authorizeChecked_lawDenied
       (canonicalWitness profile.compilerProfile.compiler committed
         (step prepared).oldState (step prepared).newState)
       (.policy wanted.policyId wanted.policyRevision)
-      prepared.epochExact prepared.revisionExact = none) :
+      prepared.epochExact prepared.revisionExact = none)
+    (inRange : inputsInRange profile.compilerProfile.compiler committed.record.predicate
+      (step prepared).oldState (step prepared).newState = true)
+    (castExact : castInjOn F (intsOf committed.record.predicate
+      (step prepared).oldState (step prepared).newState)) :
     authorizeChecked prepared signature = .error (Refusal.lawDenied
       (LawLeaf.of committed.record.predicate (step prepared).oldState (step prepared).newState)) := by
+  have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
+    committed.record.predicate (step prepared).oldState (step prepared).newState).mpr inRange
+  have noAlias := (castAlias_none_iff F (intsOf committed.record.predicate
+    (step prepared).oldState (step prepared).newState)).mpr castExact
   simp only [authorizeChecked, supplied, resolved, denied]
-  rfl
+  simp only [canonicalWitness, none_, noAlias]
+
+/-- With every order clause in range, a law refused because two integers of its
+step share a field image is reported as `lawInputRange` naming the two integers,
+never a bare `lawDenied`. -/
+theorem authorizeChecked_castAlias
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (committed : CommittedPolicy) (x y : Int)
+    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
+    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+      some committed)
+    (denied : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
+      wanted evidence
+      (canonicalWitness profile.compilerProfile.compiler committed
+        (step prepared).oldState (step prepared).newState)
+      (.policy wanted.policyId wanted.policyRevision)
+      prepared.epochExact prepared.revisionExact = none)
+    (inRange : inputsInRange profile.compilerProfile.compiler committed.record.predicate
+      (step prepared).oldState (step prepared).newState = true)
+    (alias_ : castAlias F (intsOf committed.record.predicate
+      (step prepared).oldState (step prepared).newState) = some (x, y)) :
+    authorizeChecked prepared signature = .error (Refusal.castAlias x y) := by
+  have none_ := (LawLeaf.ofRange_none_iff profile.compilerProfile.compiler
+    committed.record.predicate (step prepared).oldState (step prepared).newState).mpr inRange
+  simp only [authorizeChecked, supplied, resolved, denied]
+  simp only [canonicalWitness, none_, alias_]
+
+/-- A law refused while one of its order clauses compares two values outside the
+native order range is reported as `lawInputRange`, naming that clause and the two
+values, never a bare `lawDenied`. -/
+theorem authorizeChecked_lawInputRange
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (evidence : Evidence (portal prepared) context.authority.snapshot.authState wanted)
+    (committed : CommittedPolicy) (leaf : LawLeaf)
+    (supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature = .ok evidence)
+    (resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision =
+      some committed)
+    (denied : CanonicalPolicyAdmission.admit (policyConfig prepared) context.authority.snapshot.authState
+      wanted evidence
+      (canonicalWitness profile.compilerProfile.compiler committed
+        (step prepared).oldState (step prepared).newState)
+      (.policy wanted.policyId wanted.policyRevision)
+      prepared.epochExact prepared.revisionExact = none)
+    (out : LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
+      (step prepared).oldState (step prepared).newState = some leaf) :
+    authorizeChecked prepared signature = .error (Refusal.lawInputRange leaf) := by
+  simp only [authorizeChecked, supplied, resolved, denied]
+  simp only [canonicalWitness, out]
 
 /-- The clause a read refusal names is false on the step the law was
 evaluated on. -/
@@ -252,9 +344,13 @@ theorem authorizeChecked_leaf_fails
       Minidregg.Pred.eval leaf.clause (step prepared).oldState (step prepared).newState = false := by
   simp only [authorizeChecked, supplied, resolved] at refused
   split at refused
-  · simp only [Except.error.injEq, Refusal.lawDenied, Refusal.mk.injEq, true_and] at refused
-    obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf refused
-    exact ⟨at_, fails⟩
+  · split at refused
+    · simp [Refusal.lawInputRange, Refusal.lawDenied] at refused
+    · split at refused
+      · simp [Refusal.castAlias, Refusal.lawDenied] at refused
+      · simp only [Except.error.injEq, Refusal.lawDenied, Refusal.mk.injEq, true_and] at refused
+        obtain ⟨at_, _, fails⟩ := LawLeaf.of_fails _ _ _ leaf refused
+        exact ⟨at_, fails⟩
   · cases refused
 
 /-- The admitted pole: the law's acceptance is returned unchanged. -/
@@ -334,6 +430,65 @@ theorem checked_current_source (prepared : Prepared context profile wanted marke
     wanted.policyEpoch = context.authority.snapshot.authState.policyEpoch wanted.policyId ∧
       wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
   ⟨checked.authorization.policyEpochExact, checked.authorization.policyRevisionExact⟩
+
+/-! ## The clock a read's law sees -/
+
+/-- **`read_law_sees_clock`**: the clock slots a read's law is evaluated on —
+old and new alike — are exactly the clock cell's of the snapshot the read is
+answered from (`clock/now`, `clock/day`, `clock/slot`), and that cell decodes
+to that clock.  The read-path twin of `DeclaredResourceController.now_slot_exact`. -/
+theorem read_law_sees_clock (prepared : Prepared context profile wanted marker capability contextBytes)
+    (logical : Store (CanonicalCellRegistry.layout prepared.observed.before.kind)) :
+    (project prepared logical).get "clock/now" = some (Int.ofNat prepared.clock.clock.now) ∧
+      (project prepared logical).get "clock/day" =
+        some (Int.ofNat (prepared.clock.clock.now / Kernel.ClockCell.secondsPerDay)) ∧
+      (project prepared logical).get "clock/slot" = some (Int.ofNat prepared.clock.clock.slot) ∧
+      Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock ∧
+      Kernel.ClockCellDomain.load deployment durable.snapshot = some prepared.clock := by
+  refine ⟨?_, ?_, ?_, prepared.clock.clockExact, ?_⟩
+  · simp [project, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
+  · simp [project, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
+  · simp [project, Kernel.ClockCell.slots, Minidregg.Pred.State.get]
+  · exact prepared.clockLoaded
+
+/-- **`read_now_slot_exact`** (K-CLOCK's `now_slot_exact` on the read path):
+the law's old and new states both carry `clock/now` = the loaded clock's. -/
+theorem read_now_slot_exact (prepared : Prepared context profile wanted marker capability contextBytes) :
+    (step prepared).oldState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) ∧
+      (step prepared).newState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) ∧
+      Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock := by
+  have views := policy_views_equal prepared
+  have old : (step prepared).oldState.get "clock/now" = some (Int.ofNat prepared.clock.clock.now) :=
+    (read_law_sees_clock prepared prepared.observed.before.payload.logical).1
+  exact ⟨old, views ▸ old, prepared.clock.clockExact⟩
+
+/-! The two poles of a positive clock law on reads, "no reads before the
+time in field 1": `resource/field/1/after <= clock/now + 0`, a positive
+slot-to-slot atom (no fail-open `not`). -/
+
+def opensAt : Minidregg.Pred.Pred :=
+  .leSlotsOff "resource/field/1/after" "clock/now" 0
+
+/-- The read state of the poles: the clock slots first (as `project` puts
+them), then the law's constant. -/
+def poleState (clock : Kernel.ClockCell.Clock) (t : Nat) : Minidregg.Pred.State :=
+  ⟨Kernel.ClockCell.slots clock ++ [("resource/field/1/after", Int.ofNat t)]⟩
+
+/-- **Refuting pole**: at the genesis clock (now 0) a law opening reads at
+100 refuses the read. -/
+theorem read_before_tick_refused :
+    Minidregg.Pred.eval opensAt (poleState ⟨0, 0⟩ 100) (poleState ⟨0, 0⟩ 100) = false := by
+  decide +kernel
+
+/-- **Admitting pole**: after a tick to 100 the same law admits the read. -/
+theorem read_after_tick_admitted :
+    Minidregg.Pred.eval opensAt (poleState ⟨100, 0⟩ 100) (poleState ⟨100, 0⟩ 100) = true := by
+  decide +kernel
+
+#assert_axioms read_law_sees_clock
+#assert_axioms read_now_slot_exact
+#assert_axioms read_before_tick_refused
+#assert_axioms read_after_tick_admitted
 
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorizeChecked_lawDenied' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_lawDenied
@@ -637,6 +792,8 @@ theorem footprint_touched_exact {L : Layout.{0, 0, 0}} (field : Address L → Ce
     named ∈ (footprint field amount pre post).touched ↔
       ∃ address, pre address ≠ post address ∧ field address = named := by
   simp only [footprint, footprintOf, Finset.mem_image, mem_changed]
+#assert_axioms authorizeChecked_lawInputRange
+#assert_axioms authorizeChecked_castAlias
 
 end Minidregg.Kernel.ResourceObservationAdmission
 

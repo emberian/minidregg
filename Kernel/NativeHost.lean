@@ -370,6 +370,31 @@ def invokeLawLeaf (config : Config) (opened : Opened config) : Draft → Option 
       DeclaredResourceController.firstLawLeaf prepared tuple
   | _ => none
 
+/-- The out-of-range order clause of a target's committed law that an invocation
+draft would hit, on the same projected step and resolved law that
+`DeclaredResourceController.authorizeLeg` range-checks at submission
+(`DeclaredResourceController.rangeLeaf_none_iff_inputsInRange`). -/
+def invokeRangeLeaf (config : Config) (opened : Opened config) : Draft → Option LawLeaf
+  | .invoke bytes => do
+      let command ← DeclaredResourceController.commandCodec.decode bytes
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+      let tuple ← DeclaredResourceController.prepareTuple prepared
+      DeclaredResourceController.firstRangeLeaf prepared tuple
+  | _ => none
+
+/-- Two integers of an invocation draft's step with one field image, on the same
+step and resolved law `DeclaredResourceController.authorizeLeg` cast-checks
+(`DeclaredResourceController.castAliasLeg_none_iff_castInjOn`). -/
+def invokeCastAlias (config : Config) (opened : Opened config) : Draft → Option (Int × Int)
+  | .invoke bytes => do
+      let command ← DeclaredResourceController.commandCodec.decode bytes
+      let prepared ← (DeclaredResourceController.prepare config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command).toOption
+      let tuple ← DeclaredResourceController.prepareTuple prepared
+      DeclaredResourceController.firstCastAlias prepared tuple
+  | _ => none
+
 /-- The only public preparation path. A source-owned proof of every actual
 read permission is required before the internal planner may disclose a result
 or a detailed state-dependent error, on the very same opened image. -/
@@ -383,10 +408,16 @@ def prepareAuthorizedLoaded (config : Config) (opened : Opened config)
   | .ok _ =>
       match signed.challenge.intent.purpose with
       | .prepare draft =>
-          match invokeLawLeaf config opened draft with
-          | some leaf => return .error (Refusal.lawDenied (some leaf))
-          | none => return ((prepareLoaded config opened draft).mapError
-              fun detail => ⟨.operationRejected, detail, none⟩)
+          match invokeRangeLeaf config opened draft with
+          | some leaf => return .error (Refusal.lawInputRange leaf)
+          | none =>
+              match invokeCastAlias config opened draft with
+              | some (x, y) => return .error (Refusal.castAlias x y)
+              | none =>
+                  match invokeLawLeaf config opened draft with
+                  | some leaf => return .error (Refusal.lawDenied (some leaf))
+                  | none => return ((prepareLoaded config opened draft).mapError
+                      fun detail => ⟨.operationRejected, detail, none⟩)
       | .query _ => return .error (.of .malformed)
 
 /-- One-shot form. An unopenable Store is an error, never a refusal. -/
@@ -1015,9 +1046,9 @@ def wellLedger (config : Config) : IO (Except String WellLedger) := do
 /-! ## The clock (K-CLOCK): session operations 126-129
 
 126 = tick signing plan, 127 = detached assembly, 128 = submit, 129 = public
-clock view.  The command is authored by `author clock-tick`; the signer is any
-subject the factory law admits in capability mode for
-`authority/operation/clock-tick`. -/
+clock view.  The command is authored by `author clock-tick`; the signer is a
+genesis clock ticker presenting its `C_tick` on the clock cell, under the
+clock cell's law (`NativeHostGenesis.clock_subject_confined`). -/
 
 def clockPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
     Except String ClockTickReceiver.SigningPlan := do
@@ -1052,13 +1083,10 @@ def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List U
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
 
-/-- The public view of the clock: its value and the three roots a tick pins. -/
+/-- The public view of the clock: its value and the two roots a tick pins. -/
 def clockViewLoaded (config : Config) (opened : Opened config) : Except String ClockCellDomain.View := do
   let clock ← need "clock cell unavailable" (ClockCellDomain.load config.deployment opened.durable.snapshot)
-  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
-    | .present before => pure before.payload.root
-    | .absent => .error "factory unavailable"
-  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, factoryRoot, clock.clock⟩
+  pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, clock.clock⟩
 
 /-- Session operation 112 (PAY P3b): the public enrollment view — the hour of
 the deployment clock and every self-enrolled Mini key with its subject, ssh

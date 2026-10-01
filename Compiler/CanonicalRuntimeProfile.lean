@@ -100,10 +100,11 @@ def revocationProjectionVersion : List UInt8 :=
   "DREGG.RUNTIME.CAPABILITY-REVOCATION.SCOPED-VICTIM-CONTROL-AUTHORITY/v2".toUTF8.toList
 
 /-- Signed snapshot observation uses the actual resource page and only the
-selected account's sparse balance cut. Preparation must cover every private
+selected account's sparse balance cut; the deployment clock's `clock/now`,
+`clock/day` and `clock/slot` come first (v4), as on every invocation. Preparation must cover every private
 read with an exact observe-grant footprint from the same loaded image. -/
 def observationProjectionVersion : List UInt8 :=
-  "observe/v3:exact-ordered-joint-targets;object=declaredObject|content;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-and-content-slots;sparse-account-cut;same-image-signatures;submit-foreign-view-read-gate".toUTF8.toList
+  "observe/v4:clock-slots-first;exact-ordered-joint-targets;object=declaredObject|content;account=accountMetadata;program=declaredProgram;shared-resource-local-noop-admission;context-bytes;scalar-and-content-slots;sparse-account-cut;same-image-signatures;submit-foreign-view-read-gate".toUTF8.toList
 
 /-- Exact request fields and request-bound capability possession are part of this epoch. -/
 def authorizationVersion : List UInt8 :=
@@ -235,7 +236,8 @@ def sourceComponents : List (List UInt8) :=
        CredentialAuthorityEntryCodec.verbTag (.delegateProgram),
        CredentialAuthorityEntryCodec.verbTag (.installPolicy),
        CredentialAuthorityEntryCodec.verbTag (.revokeCapability),
-       CredentialAuthorityEntryCodec.verbTag (.observePayment)]]]
+       CredentialAuthorityEntryCodec.verbTag (.observePayment),
+       CredentialAuthorityEntryCodec.verbTag (.tickClock)]]]
 
 def runtimeStream : StreamCodec (List (List UInt8) × FactoryTemplate) :=
   StreamCodec.product (StreamCodec.list bytesStream) factoryTemplateStream

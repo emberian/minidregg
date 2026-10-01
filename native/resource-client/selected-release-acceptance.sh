@@ -98,7 +98,7 @@ EOF
    "spendCapabilityId":"41","controlCapabilityId":"51",
    "factoryObserveCapabilityId":"54","initialBalance":"100",
    "accountPredicate":{"type":"all","predicates":[]} }],
- "factoryControllerSubject":"7","factoryControllerCapability":"53",
+ "factoryControllerSubject":"7","factoryControllerCapability":"53","clockTickers":[],
  "meterAllowance":{"incidences":"10000000","turnBytes":"10000000",
    "memoryTouches":"10000000","witnessBytes":"10000000",
    "proofWork":"10000000","storageBytes":"10000000",

@@ -719,7 +719,7 @@ def profileDescription (config : NativeHost.Config)
      ("factoryId", n config.deployment.factoryId),
      ("resourceBookId", n config.deployment.resourceBookId),
      ("authorityCellId", n config.deployment.authorityCellId),
-     ("fieldModulus", n Minidregg.Compiler.babyBearP),
+     ("fieldModulus", n NativeHostProfile.characteristic),
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("genesisHeight", n config.genesisHeight),
      ("template", Lean.Json.mkObj [("issuer", n config.template.issuer.value),
@@ -756,7 +756,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
      ("semantics", n config.profile.semantics.value),
      ("domain", n config.deployment.domain.value),
      ("payCell", n (Kernel.PayCell.physicalId config.deployment.domain)),
-     ("fieldModulus", n Minidregg.Compiler.babyBearP),
+     ("fieldModulus", n NativeHostProfile.characteristic),
      ("orderDifferenceWidth", n NativeHostProfile.orderWidth),
      ("nativeChecked", toJson true), ("succinctProofDeployment", toJson false),
      ("operations", toJson

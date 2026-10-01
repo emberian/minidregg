@@ -111,6 +111,9 @@ import Compiler.DurableCheckpointCodec -- DATAMODEL C2: seed/log/checkpoint fram
 import Compiler.PredCastHashProofs
 import Compiler.PredCompileOrderWitness
 import Compiler.PredOrderGadgetWitness
+import Compiler.PredOrderWide  -- a bound on every value an instance touches gives the order range premise and, over a prime field of characteristic at least 2B, the cast premise
+import Compiler.PredRangeLeaf  -- an input-range refusal names the out-of-range order atom and its two values (rangeLeaf_none_iff, ofRange_out_of_range)
+import Compiler.NativeOrderPoles  -- the native profile (ZMod (2^127-1), width 125) decides clock/now = 1,790,846,960 against small fields, balances 10^12 apart and the edges of R as eval does
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
 import Compiler.NockProgramCodec -- NOCK K-NOCK-CELL: program cell (jam + ABI), DREGG/NOCK/PROGRAM/v1 + ABI/v1, programId, birth admissibility

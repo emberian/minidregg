@@ -112,6 +112,7 @@ cat >"$EVIDENCE/genesis.json" <<EOF
   }],
   "factoryControllerSubject": "7",
   "factoryControllerCapability": "53",
+  "clockTickers": [],
   "meterAllowance": {
     "incidences": "10000000",
     "turnBytes": "10000000",

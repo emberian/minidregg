@@ -100,3 +100,4 @@ import Kernel.StreamResource  -- per-author streams: append leg theorems, author
 import Kernel.NockProgramCell -- NOCK K-NOCK-CELL: sampleOf (targets + ABI slots), sampleOf_injective/_deterministic; reads for ops 131-133
 import Kernel.NockDoor -- NOCK N11: a NockApp kernel door (poke 23 / peek 22, state at axis 6) refereed by re-execution; door_poke_sound / door_state_stale_refused / door_effects_are_writes / door_peek_pure / door_load_deterministic; ops 135-137
 import Kernel.NockRun -- NOCK K-RAN: RunClaim, checkRun (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle; op 134 dryRun
+import Kernel.DeclaredOrderRange  -- field values in [-2^121, 2^121) put every projected slot (fields, deltas, pair deltas) in the native order range R

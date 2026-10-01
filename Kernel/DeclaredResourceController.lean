@@ -581,6 +581,77 @@ theorem lawLeaf_refuses_iff_verifies_rejects [DecidableEq F]
         (step prepared tuple incidence).oldState (step prepared tuple incidence).newState) <;>
     simp_all
 
+/-- The out-of-range order clause of this leg's committed law, read on exactly the
+witness `authorizeLeg` range-checks before it refuses with `policyInputRange`. It
+decides nothing; the Host uses it to name the clause and its two values. -/
+def rangeLeaf [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option LawLeaf := do
+  let wanted := (tuple.request incidence).2
+  let context := step prepared tuple incidence
+  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
+    context.oldState context.newState
+  LawLeaf.ofRange profile.compilerProfile.compiler committed.record.predicate
+    witness.oldState witness.newState
+
+/-- The leg names an out-of-range clause exactly when `authorizeLeg`'s range check
+on its resolved law fails: the named refusal and `policyInputRange` agree. -/
+theorem rangeLeaf_none_iff_inputsInRange [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    {committed : CommittedPolicy}
+    (resolved : (policyConfig prepared tuple incidence).registry.resolve
+      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed) :
+    rangeLeaf prepared tuple incidence = none ↔
+      inputsInRange profile.compilerProfile.compiler committed.record.predicate
+        (step prepared tuple incidence).oldState (step prepared tuple incidence).newState = true := by
+  unfold rangeLeaf
+  simp only [resolved, Option.bind_eq_bind, Option.bind_some, canonicalWitness]
+  exact LawLeaf.ofRange_none_iff _ _ _ _
+
+/-- Two integers of this leg's step with one field image, read on exactly the
+integers `authorizeLeg`'s cast check covers before it refuses with
+`policyCastAlias`. -/
+def castAliasLeg [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) : Option (Int × Int) := do
+  let wanted := (tuple.request incidence).2
+  let context := step prepared tuple incidence
+  let committed ← (policyConfig prepared tuple incidence).registry.resolve wanted.policyId wanted.policyRevision
+  let witness := canonicalWitness (F := F) profile.compilerProfile.compiler committed
+    context.oldState context.newState
+  castAlias F (intsOf committed.record.predicate witness.oldState witness.newState)
+
+/-- The leg names a pair exactly when `authorizeLeg`'s cast check on its resolved law fails. -/
+theorem castAliasLeg_none_iff_castInjOn [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command)
+    {committed : CommittedPolicy}
+    (resolved : (policyConfig prepared tuple incidence).registry.resolve
+      (tuple.request incidence).2.policyId (tuple.request incidence).2.policyRevision = some committed) :
+    castAliasLeg prepared tuple incidence = none ↔
+      castInjOn F (intsOf committed.record.predicate
+        (step prepared tuple incidence).oldState (step prepared tuple incidence).newState) := by
+  unfold castAliasLeg
+  simp only [resolved, Option.bind_eq_bind, Option.bind_some, canonicalWitness]
+  exact castAlias_none_iff F _
+
+/-- The first leg whose step carries two integers with one field image. -/
+def firstCastAlias [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option (Int × Int) :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+    (castAliasLeg prepared tuple)
+
+/-- The first leg (targets in order, then the authority leg) whose law holds an
+out-of-range order clause. -/
+def firstRangeLeaf [DecidableEq F]
+    (prepared : PreparedInvocation deployment profile ambient durable command)
+    (tuple : PreparedTuple (plan prepared)) : Option LawLeaf :=
+  ((List.finRange command.targets.length).map some ++ [none]).findSome?
+    (rangeLeaf prepared tuple)
+
 /-- The first leg (targets in order, then the authority leg) whose law names a
 failing clause. -/
 def firstLawLeaf [DecidableEq F]
@@ -1186,6 +1257,8 @@ def receive {F : Type} [Field F] [DecidableEq F]
 #guard_msgs (whitespace := lax) in #print axioms lawLeaf_none_iff_verifies
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.lawLeaf_refuses_iff_verifies_rejects' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lawLeaf_refuses_iff_verifies_rejects
+#assert_axioms rangeLeaf_none_iff_inputsInRange
+#assert_axioms castAliasLeg_none_iff_castInjOn
 
 end Minidregg.Kernel.DeclaredResourceController
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.fieldsCheck_ok' depends on axioms: [propext, Quot.sound] -/

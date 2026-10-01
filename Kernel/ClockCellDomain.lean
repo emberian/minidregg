@@ -158,7 +158,6 @@ theorem Loaded.write_pre_is_loaded_root {deployment : CanonicalCellRegistry.Depl
 structure View where
   clockRoot : Digest
   authorityRoot : Digest
-  factoryRoot : Digest
   clock : ClockCell.Clock
   deriving DecidableEq, Repr
 
