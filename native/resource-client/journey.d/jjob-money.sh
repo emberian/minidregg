@@ -149,7 +149,7 @@ def job(ws, action, *flags):
 def money(j): return f"state={j.get('state')} escrow={j.get('escrow')} provider={j.get('provider')} bond={j.get('bond')} held={j.get('held')} bookHeld={j.get('bookHeld')}"
 def agrees(j): return j.get("held") == j.get("bookHeld")
 def clock(): return int(json.loads(run(MINI, "clock", "--action", "view", "--workspace", A).stdout)["now"])
-def tick(now): return run(MINI, "clock", "--action", "tick", "--workspace", A, "--control", "53", "--now", str(now)).returncode == 0
+def tick(now): return run(MINI, "clock", "--action", "tick", "--workspace", os.path.join(W, "clock"), "--now", str(now)).returncode == 0
 def named(err, name): return "refused" in err and name in err
 
 def raw_op(code, payload):

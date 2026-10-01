@@ -168,17 +168,23 @@ row "clock subject asks the factory for a birth" "refused by the factory law (ti
 
 # A signed read under a positive clock law: reads open at the time in field 1.
 printf '%s\n' '{"type":"any","predicates":[{"type":"eq","slot":"request/verb","value":"2"},{"type":"leSlotsOff","left":"resource/field/1/after","right":"clock/now","offset":"0"}]}' >"$REQ/opens-at.json"
-run ocreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name opens --storage declared --predicate "$REQ/opens-at.json"
-# Field 1 exists from birth (at 0); the stamp is a guarded write 0 -> 200.
+# K-FIELD-CLOSURE: the cell declares field 1 and is born holding none. A read under the
+# clock law needs field 1 present, so the cell is born under the open law, field 1 is created
+# at 0 and stamped 200, and only then is the clock law installed.
+run ocreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name opens --storage declared --predicate "$REQ/permit.json" --fields 1
+printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"opens","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"1"},"value":"0"}]}}]}\n' >"$REQ/o-init.json"
 printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"opens","payload":{"type":"scalar","actions":[{"type":"write","key":{"type":"object","field":"1"},"expected":"0","value":"200"}]}}]}\n' >"$REQ/o-stamp.json"
-run o-stamp-propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/o-stamp.json" --proposal-id clock-o-stamp
-run o-stamp-submit "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
-  --intent "$SPONSOR_WS/proposals/clock-o-stamp/intent.json" --attempt "$SPONSOR_WS/attempts/clock-o-stamp"
+jq -n --slurpfile p "$REQ/opens-at.json" '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:"opens",predicate:$p[0]}' >"$REQ/o-law.json"
+for step in o-init o-stamp o-law; do
+  run $step-propose "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$REQ/$step.json" --proposal-id clock-$step
+  run $step-submit "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
+    --intent "$SPONSOR_WS/proposals/clock-$step/intent.json" --attempt "$SPONSOR_WS/attempts/clock-$step"
+done
 run rbefore "$MINI" workspace --action read --dir "$SPONSOR_WS" --name opens --ephemeral true
 rwhy=$(grep -m1 '^refused: law-denied' "$D/rbefore.err" 2>/dev/null | cut -c1-140)
 row "owner's signed read at clock 100 of a resource opening at 200" "refused law-denied on the clock clause" \
-  "create rc=$(rc ocreate) stamp rc=$(rc o-stamp-submit) read rc=$(rc rbefore) [$rwhy]" \
-  "$([ "$(rc ocreate)" = 0 ] && [ "$(rc o-stamp-submit)" = 0 ] && [ "$(rc rbefore)" != 0 ] && [[ "$rwhy" == *clock/now* ]]; echo $?)"
+  "create rc=$(rc ocreate) init rc=$(rc o-init-submit) stamp rc=$(rc o-stamp-submit) law rc=$(rc o-law-submit) read rc=$(rc rbefore) [$rwhy]" \
+  "$([ "$(rc ocreate)" = 0 ] && [ "$(rc o-init-submit)" = 0 ] && [ "$(rc o-stamp-submit)" = 0 ] && [ "$(rc o-law-submit)" = 0 ] && [ "$(rc rbefore)" != 0 ] && [[ "$rwhy" == *clock/now* ]]; echo $?)"
 tick t200 "$CLOCK_WS" --now 200
 run rafter "$MINI" workspace --action read --dir "$SPONSOR_WS" --name opens --ephemeral true
 judged=$(jq -r '.judgedAt.clock.now // empty' "$D/rafter.out" 2>/dev/null)
@@ -285,7 +291,9 @@ row "write field 5 := 2^126 (outside R)" "refused law-input-range naming the cla
 
 # Under the open law, 2^126 in field 1 makes the pair delta 2 * 2^126 = 2^127, whose image in
 # ZMod (2^127 - 1) is that of 1: the cast check refuses, and prepare names the two integers.
-run fcreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name far --storage declared --predicate "$REQ/permit.json"
+run fcreate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name far --storage declared --predicate "$REQ/permit.json" --fields 1
+printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"%s","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"1"},"value":"0"}]}}]}\n' far >"$REQ/far-init.json"
+turn "$SPONSOR_WS" far-init "$REQ/far-init.json" || true
 P127=170141183460469231731687303715884105728
 writes far 1:0:$FAR >"$REQ/far-alias.json"
 turn "$SPONSOR_WS" far-alias "$REQ/far-alias.json"; r=$?; why=$(refused_line far-alias)
@@ -317,9 +325,9 @@ subst() {
 subst <"$MUD/law.management.json" >"$REQ/sheet-mgmt.json"
 jq -n --slurpfile m "$MUD/law.management.json" --slurpfile s "$MUD/sheet/law.sheet.json" \
   '{type:"all",predicates:([$m[0]] + $s[0].predicates)}' | subst >"$REQ/sheet-law.json"
-# init.sheet.json creates all 15 fields; field 1 exists from birth, so it is a guarded write 0 -> HOME.
-subst <"$MUD/sheet/init.sheet.json" | jq '.targets[0].payload.actions |= map(if .key.field == "1" then {type:"write",key,expected:"0",value} else . end)' >"$REQ/sheet-init.json"
-run screate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "$SHEET" --storage declared --predicate "$REQ/sheet-mgmt.json"
+# init.sheet.json creates all 15 fields (0-14); the cell declares them and is born holding none.
+subst <"$MUD/sheet/init.sheet.json" >"$REQ/sheet-init.json"
+run screate "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "$SHEET" --storage declared --predicate "$REQ/sheet-mgmt.json" --fields 0-14
 turn "$SPONSOR_WS" sheet-init "$REQ/sheet-init.json"; si=$?
 jq -n --arg r "$REF" --arg n "$SHEET" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$REQ/sheet-grant.json"
 turn "$SPONSOR_WS" sheet-grant "$REQ/sheet-grant.json"; sg=$?

@@ -139,7 +139,7 @@ def clock_view():
     r = run(MINI, "clock", "--action", "view", "--workspace", A)
     return int(json.loads(r.stdout)["now"])
 def tick(now):
-    r = run(MINI, "clock", "--action", "tick", "--workspace", A, "--control", "53", "--now", str(now))
+    r = run(MINI, "clock", "--action", "tick", "--workspace", os.path.join(W, "clock"), "--now", str(now))
     return r.returncode == 0
 T0 = clock_view() + 1000
 row("setup", f"tick the clock to {T0}", f"now {T0}", f"tick={tick(T0)} now={clock_view()}", clock_view() == T0)
@@ -171,7 +171,7 @@ row("setup", "A creates the room lab and invites P (a room invite: under lab); P
     lab_ok and outcome is not None and outcome.get("type") == "confirmed" and r4.returncode == 0)
 
 # The programs: collatz (the job program) and liar (names the truth field, always answers 9).
-def abi(fuel): return {"version": "2", "arm": "2", "fuel": str(fuel),
+def abi(fuel): return {"evaluator": "nock", "version": "5", "context": "live", "arm": "2", "fuel": str(fuel),
     "sample": [{"target": "0", "slot": "resource/field/2/before", "key": "input", "type": "nat"}],
     "outputs": [{"key": "truth", "target": "0", "field": "15", "type": "nat"}], "libraries": []}
 PID = {}

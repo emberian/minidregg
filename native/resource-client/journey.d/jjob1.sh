@@ -87,7 +87,7 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/open.json"
 PID=$(python3 - "$CONFIG" "$SOCK" "$JOB_PROGRAMS/collatz.jam" "$D/collatz.check.json" <<'PY'
 import json, socket, struct, sys
 cfg = open(sys.argv[1], "rb").read(); sock = sys.argv[2]; jam = open(sys.argv[3], "rb").read()
-abi = {"version": "2", "arm": "2", "fuel": "5000000",
+abi = {"evaluator": "nock", "version": "5", "context": "live", "arm": "2", "fuel": "5000000",
        "sample": [{"target": "0", "slot": "resource/field/2/before", "key": "input", "type": "nat"}],
        "outputs": [{"key": "truth", "target": "0", "field": "15", "type": "nat"}], "libraries": []}
 payload = struct.pack("<I", len(jam)) + jam + json.dumps(abi).encode()
@@ -175,7 +175,7 @@ jdeny() {  # jdeny JOB ID LABEL CLAUSE WS ACTION FLAGS...
 }
 WS=$WS_A
 view() { run "$1" "$MINI" clock --action view --workspace "$WS_A"; jq -r .now "$D/$1.out"; }
-tick() { run "tick-$1" "$MINI" clock --action tick --workspace "$WS_A" --control 53 --now "$1"; }
+tick() { run "tick-$1" "$MINI" clock --action tick --workspace "$W/clock" --now "$1"; }
 
 # ---- cells: each created by A under the job law, delegated observe+mutate to B, imported by B
 T=$(view v0)
