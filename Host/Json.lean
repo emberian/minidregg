@@ -67,10 +67,37 @@ set_option autoImplicit false
 
 abbrev Result := Except String
 
+/-- One object key of the duplicate scan: refused when the object already holds
+it, recorded otherwise. A hash set, so an object of n keys costs O(n): with a
+list it cost O(n^2), and one 1.6 MB public op 7 body of 160k keys held the one
+Host for minutes (SERVE-ROBUST, measured: 40k keys +7 s, 1M keys > 330 s). -/
+def admitKey (keys : Std.HashSet String) (key : String) : Result (Std.HashSet String) :=
+  if keys.contains key then .error s!"duplicate JSON object field: {key}"
+  else .ok (keys.insert key)
+
+/-- A key the object already holds is refused, by name. -/
+theorem admitKey_refuses_held (keys : Std.HashSet String) (key : String)
+    (held : keys.contains key = true) :
+    admitKey keys key = .error s!"duplicate JSON object field: {key}" := by
+  simp [admitKey, held]
+
+/-- A key the object does not hold is admitted, and afterwards it is held along
+with every key held before: a later repeat of any of them is refused. -/
+theorem admitKey_records (keys : Std.HashSet String) (key : String)
+    (fresh : keys.contains key = false) :
+    ∃ after, admitKey keys key = .ok after ∧ after.contains key = true ∧
+      ∀ k, keys.contains k = true → after.contains k = true := by
+  refine ⟨keys.insert key, by simp [admitKey, fresh], by simp, ?_⟩
+  intro k held
+  simp [Std.HashSet.contains_insert, held]
+
+#assert_axioms admitKey_refuses_held
+#assert_axioms admitKey_records
+
 private structure ScanFrame where
   object : Bool
   expectKey : Bool := false
-  keys : List String := []
+  keys : Std.HashSet String := {}
 
 private def scanString : List Char → List Char → Result (List Char × List Char)
   | [], _ => .error "unterminated JSON string"
@@ -85,8 +112,8 @@ private partial def duplicateScan : List Char → List ScanFrame → Result Unit
   | c :: rest, stack =>
       if c.isWhitespace then duplicateScan rest stack else
       match c, stack with
-      | '{', _ => duplicateScan rest (⟨true, true, []⟩ :: stack)
-      | '[', _ => duplicateScan rest (⟨false, false, []⟩ :: stack)
+      | '{', _ => duplicateScan rest (⟨true, true, {}⟩ :: stack)
+      | '[', _ => duplicateScan rest (⟨false, false, {}⟩ :: stack)
       | '}', frame :: tail =>
           if frame.object then duplicateScan rest tail else .error "mismatched JSON container"
       | ']', frame :: tail =>
@@ -99,8 +126,8 @@ private partial def duplicateScan : List Char → List ScanFrame → Result Unit
           if frame.object ∧ frame.expectKey then
             let keyJson ← Lean.Json.parse (String.ofList token)
             let key ← keyJson.getStr?
-            if frame.keys.contains key then throw s!"duplicate JSON object field: {key}"
-            duplicateScan suffix ({ frame with expectKey := false, keys := key :: frame.keys } :: tail)
+            let keys ← admitKey frame.keys key
+            duplicateScan suffix ({ frame with expectKey := false, keys } :: tail)
           else duplicateScan suffix stack
       | '"', [] => do
           let (_, suffix) ← scanString rest ['"']
