@@ -242,9 +242,14 @@ fn resource(run: &mut Run<'_>, me: &str, name: &str, all: bool) -> Result<()> {
                 let head = &record["head"];
                 let holder = &head["holder"];
                 let mine = holder["type"] == "bearer" || holder["subject"].as_str() == Some(me);
+                // A scope is `targets` (explicit) or `room` (`under R`, K-ROOM: an
+                // owner's capability on a cell it created is `room` = that cell).
+                // Whether a room covers a target inside it depends on the parent
+                // chain; the Host judges each probe, as it does at submission.
                 let covers = head["targets"]
                     .as_array()
-                    .is_some_and(|targets| targets.iter().any(|t| t.as_str() == Some(&target)));
+                    .is_some_and(|targets| targets.iter().any(|t| t.as_str() == Some(&target)))
+                    || head["room"].is_string();
                 if !mine || !covers {
                     notes.push(format!("capability {id}: not held by {me} on {target}"));
                     continue;
