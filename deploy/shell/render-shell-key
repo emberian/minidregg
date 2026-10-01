@@ -1,23 +1,50 @@
 #!/usr/bin/env bash
-# Render one session-bound OpenSSH authorized_keys entry; do not install it.
-# restrict disables forwarding and agent access; pty is re-allowed so that
-# `ssh -t` gets the interactive shell.
+# Render one OpenSSH authorized_keys entry; do not install it.
+#
+#   render-shell-key [mode=shell] ABS_WRAPPER ABS_MINI ABS_HOST ABS_CONFIG ABS_SOCKET ABS_WORKSPACE ABS_HOME FRIEND_PUBKEY_FILE
+#   render-shell-key mode=proxy ABS_PROXY_WRAPPER ABS_MINI ABS_SOCKET FRIEND_PUBKEY_FILE
+#
+# mode=shell (the default): a hosted session. The key is bound to one workspace
+# and session home on this box (mini-shell-ssh); keys made in the session live
+# here, readable by the operator. `pty` is re-allowed so `ssh -t` gets the
+# interactive shell.
+# mode=proxy: a byte pipe to the public socket (mini-socket-proxy) for a friend
+# running `mini --remote` on their own machine. No pty, no workspace, no home:
+# nothing of theirs is on this box but what the Host stores.
+# restrict disables forwarding and agent access in both modes.
 set -euo pipefail
-if [[ $# != 8 ]]; then
-  echo 'usage: render-shell-key ABS_WRAPPER ABS_MINI ABS_HOST ABS_CONFIG ABS_SOCKET ABS_WORKSPACE ABS_HOME FRIEND_PUBKEY_FILE' >&2
+mode=shell
+case ${1-} in
+  mode=shell) shift ;;
+  mode=proxy) mode=proxy; shift ;;
+  mode=*) echo "unknown ${1}; use mode=shell or mode=proxy" >&2; exit 64 ;;
+esac
+if [[ $mode == shell ]]; then
+  count=8 paths=7
+  usage='usage: render-shell-key [mode=shell] ABS_WRAPPER ABS_MINI ABS_HOST ABS_CONFIG ABS_SOCKET ABS_WORKSPACE ABS_HOME FRIEND_PUBKEY_FILE'
+else
+  count=4 paths=3
+  usage='usage: render-shell-key mode=proxy ABS_PROXY_WRAPPER ABS_MINI ABS_SOCKET FRIEND_PUBKEY_FILE'
+fi
+if [[ $# != "$count" ]]; then
+  echo "$usage" >&2
   exit 64
 fi
-public_key=$8
-for path in "${@:1:7}"; do
+public_key=${!count}
+for path in "${@:1:$paths}"; do
   [[ $path =~ ^/[A-Za-z0-9_./-]+$ && $path != */../* && $path != */.. ]] || {
     echo 'paths must be simple absolute paths without traversal or shell syntax' >&2
     exit 64
   }
 done
-[[ -x $1 && -x $2 && -x $3 && -f $4 ]] || {
-  echo 'wrapper, mini and Host must be executable and the config must exist' >&2
-  exit 66
-}
+if [[ $mode == shell ]]; then
+  [[ -x $1 && -x $2 && -x $3 && -f $4 ]] || {
+    echo 'wrapper, mini and Host must be executable and the config must exist' >&2
+    exit 66
+  }
+else
+  [[ -x $1 && -x $2 ]] || { echo 'proxy wrapper and mini must be executable' >&2; exit 66; }
+fi
 [[ -f $public_key ]] || exit 66
 read -r key_type key_data _ < "$public_key"
 [[ $key_type == ssh-ed25519 && $key_data =~ ^[A-Za-z0-9+/=]+$ ]] || {
@@ -25,5 +52,9 @@ read -r key_type key_data _ < "$public_key"
   exit 65
 }
 ssh-keygen -lf "$public_key" >/dev/null
-printf 'restrict,pty,command="%s %s %s %s %s %s %s" %s %s\n' \
-  "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$key_type" "$key_data"
+if [[ $mode == shell ]]; then
+  printf 'restrict,pty,command="%s %s %s %s %s %s %s" %s %s\n' \
+    "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$key_type" "$key_data"
+else
+  printf 'restrict,command="%s %s %s" %s %s\n' "$1" "$2" "$3" "$key_type" "$key_data"
+fi
