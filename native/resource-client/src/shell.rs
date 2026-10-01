@@ -55,6 +55,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "enroll", usage: "enroll plan NAME KEYFILE [FACTORY-REF] | enroll seal|submit|lookup NAME", operation: "mini enroll --action plan|seal|submit|lookup --dir HOME/enroll/NAME" },
     Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
     Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
+    Verb { name: "can", usage: "can [REF] [--all]", operation: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
     Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
     Verb { name: "create", usage: "create NAME STORAGE PREDICATE-JSON|@FILE", operation: "mini workspace --action create" },
@@ -719,6 +720,21 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
         "refs" => {
             arity(&w, 0, 0, u)?;
             client("workspace", vec![flag("action", "list"), flag("dir", ws())])
+        }
+        "can" => {
+            arity(&w, 0, 2, u)?;
+            let mut flags = vec![flag("action", "can"), flag("dir", ws())];
+            for word in &w[1..] {
+                if word == "--all" {
+                    flags.push(flag("all", "true"));
+                } else if flags.iter().any(|(name, _)| name == "name") {
+                    return Err(u.to_owned());
+                } else {
+                    workspace_name(word, "reference name")?;
+                    flags.push(flag("name", word.clone()));
+                }
+            }
+            client("workspace", flags)
         }
         "read" | "describe" => {
             arity(&w, 1, 1, u)?;
