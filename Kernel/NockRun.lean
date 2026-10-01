@@ -70,6 +70,8 @@ inductive Refusal where
   | libraryNested
   | programMalformed
   | sampleUnavailable
+  /-- NC-2: a sample value above its slot's declared maximum (`SampleSlot.max`). -/
+  | fieldOverMax
   | sampleStale
   | fuelExceeded
   | crash (steps : Nat)
@@ -94,6 +96,7 @@ def Refusal.name : Refusal → String
   | .libraryNested => "libraryNested"
   | .programMalformed => "programMalformed"
   | .sampleUnavailable => "sampleUnavailable"
+  | .fieldOverMax => "fieldOverMax"
   | .sampleStale => "sampleStale"
   | .fuelExceeded => "fuelExceeded"
   | .crash _ => "crash"

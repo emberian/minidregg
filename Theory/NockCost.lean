@@ -1,47 +1,11 @@
 import Theory.Nock
+import Theory.NockCost.Shape
 import Theory.AssertAxioms
 
 namespace Minidregg.Theory
 namespace NockCost
 
 open Noun Nock
-
-/-- A subject shape. `exact` is a known noun (a battery, a constant); `range lo hi` an atom in
-`[lo, hi]` (DML's `int` index); `atom` any atom; `list n e` a null-terminated list of at most
-`n` elements of shape `e`; `any` anything. -/
-inductive Shape where
-  | exact (n : Noun)
-  | range (lo hi : Nat)
-  | atom
-  | cell (h t : Shape)
-  | list (n : Nat) (e : Shape)
-  | any
-  /-- No noun: the product of a formula that cannot answer (`!!`, a walk into an atom). -/
-  | bot
-  deriving Repr, Inhabited
-
-/-- An atom of at most `b` bits. -/
-def Shape.bits (b : Nat) : Shape := .range 0 (2 ^ b - 1)
-
-/-- Membership of a noun in a shape. -/
-def fits : Noun → Shape → Bool
-  | v, .exact n => decide (v = n)
-  | _, .any => true
-  | _, .bot => false
-  | .atom k, .range lo hi => decide (lo ≤ k ∧ k ≤ hi)
-  | .atom _, .atom => true
-  | .atom k, .list _ _ => decide (k = 0)
-  | .atom _, .cell _ _ => false
-  | .cell _ _, .range _ _ => false
-  | .cell _ _, .atom => false
-  | .cell h t, .cell a b => fits h a && fits t b
-  | .cell _ _, .list 0 _ => false
-  | .cell h t, .list (n + 1) e => fits h e && fits t (.list n e)
-
-def HasShape (v : Noun) (sh : Shape) : Prop := fits v sh = true
-
-instance (v : Noun) (sh : Shape) : Decidable (HasShape v sh) :=
-  inferInstanceAs (Decidable (fits v sh = true))
 
 /-! ## Shape operations, each mirroring the noun operation it over-approximates -/
 
@@ -193,62 +157,77 @@ def sixSubjects (ac : Noun → Option (Nat × Shape)) (sh : Shape) (x : Noun) : 
 def sixOut (m₀ m₁ : Bool) (oy oz : Shape) : Shape :=
   if m₀ then (if m₁ then join joinDepth oy oz else oy) else if m₁ then oz else .bot
 
+/-- A summary oracle (NC-2): for some (subject shape, formula) pairs, a step bound and product
+shape proved once elsewhere (`Theory.NockCost.Summaries`), so the interpreter need not unroll the
+loop the formula is. `none` = no summary: interpret the formula rule by rule. -/
+abbrev Oracle := Shape → Noun → Option (Nat × Shape)
+
+/-- No summaries: every loop is unrolled (NC-1's `cost`). -/
+def noSummaries : Oracle := fun _ _ => none
+
 /-- The abstract interpreter: an upper bound on the steps `exec` takes on any subject of shape
 `sh`, and the shape of the product. `none` = outside the fragment (or the abstract fuel `D` ran
-out). `%2` and `%9` need a formula whose shape is `exact`; every other rule is first-order. A
+out). The oracle `O` is asked first at every node; where it answers, its summary is the price.
+Otherwise: `%2` and `%9` need a formula whose shape is `exact`; every other rule is first-order. A
 `%6` whose test the shapes decide costs one arm; otherwise it costs the dearer arm. -/
-def acost : Nat → Shape → Noun → Option (Nat × Shape)
+def acostWith (O : Oracle) : Nat → Shape → Noun → Option (Nat × Shape)
   | 0, _, _ => none
   | D + 1, sh, f =>
+    match O sh f with
+    | some r => some r
+    | none =>
     match parse f with
     | none => some (1, .bot)
     | some (.cons x y z) =>
-      (acost D sh (.cell x y)).bind fun p₁ =>
-      (acost D sh z).bind fun p₂ =>
+      (acostWith O D sh (.cell x y)).bind fun p₁ =>
+      (acostWith O D sh z).bind fun p₂ =>
       some (1 + (p₁.1 + p₂.1), .cell p₁.2 p₂.2)
     | some (.slot a) => some (1, sAxis a sh)
     | some (.quote x) => some (1, .exact x)
     | some (.eval x y) =>
-      (acost D sh x).bind fun p₁ =>
-      (acost D sh y).bind fun p₂ =>
+      (acostWith O D sh x).bind fun p₁ =>
+      (acostWith O D sh y).bind fun p₂ =>
       match p₂.2 with
-      | .exact g => (acost D p₁.2 g).bind fun p₃ => some (1 + (p₁.1 + (p₂.1 + p₃.1)), p₃.2)
+      | .exact g => (acostWith O D p₁.2 g).bind fun p₃ => some (1 + (p₁.1 + (p₂.1 + p₃.1)), p₃.2)
       | _ => none
-    | some (.wut x) => (acost D sh x).bind fun p₁ => some (1 + p₁.1, wutShape p₁.2)
-    | some (.lus x) => (acost D sh x).bind fun p₁ => some (1 + p₁.1, lusShape p₁.2)
+    | some (.wut x) => (acostWith O D sh x).bind fun p₁ => some (1 + p₁.1, wutShape p₁.2)
+    | some (.lus x) => (acostWith O D sh x).bind fun p₁ => some (1 + p₁.1, lusShape p₁.2)
     | some (.tis x y) =>
-      (acost D sh x).bind fun p₁ =>
-      (acost D sh y).bind fun p₂ =>
+      (acostWith O D sh x).bind fun p₁ =>
+      (acostWith O D sh y).bind fun p₂ =>
       some (1 + (p₁.1 + p₂.1), tisShape p₁.2 p₂.2)
     | some (.six x y z) =>
-      (acost D sh x).bind fun p₁ =>
-      (if mayBe 0 p₁.2 then acost D (sixSubjects (acost D sh) sh x).1 y else some (0, .bot)).bind
+      (acostWith O D sh x).bind fun p₁ =>
+      (if mayBe 0 p₁.2 then acostWith O D (sixSubjects (acostWith O D sh) sh x).1 y else some (0, .bot)).bind
         fun py =>
-      (if mayBe 1 p₁.2 then acost D (sixSubjects (acost D sh) sh x).2 z else some (0, .bot)).bind
+      (if mayBe 1 p₁.2 then acostWith O D (sixSubjects (acostWith O D sh) sh x).2 z else some (0, .bot)).bind
         fun pz =>
       some (1 + (p₁.1 + max py.1 pz.1), sixOut (mayBe 0 p₁.2) (mayBe 1 p₁.2) py.2 pz.2)
     | some (.seven x y) =>
-      (acost D sh x).bind fun p₁ =>
-      (acost D p₁.2 y).bind fun p₂ =>
+      (acostWith O D sh x).bind fun p₁ =>
+      (acostWith O D p₁.2 y).bind fun p₂ =>
       some (1 + (p₁.1 + p₂.1), p₂.2)
     | some (.eight x y) =>
-      (acost D sh x).bind fun p₁ =>
-      (acost D (.cell p₁.2 sh) y).bind fun p₂ =>
+      (acostWith O D sh x).bind fun p₁ =>
+      (acostWith O D (.cell p₁.2 sh) y).bind fun p₂ =>
       some (1 + (p₁.1 + p₂.1), p₂.2)
     | some (.nine a c) =>
-      (acost D sh c).bind fun p₁ =>
+      (acostWith O D sh c).bind fun p₁ =>
       match sAxis a p₁.2 with
-      | .exact g => (acost D p₁.2 g).bind fun p₂ => some (1 + (p₁.1 + p₂.1), p₂.2)
+      | .exact g => (acostWith O D p₁.2 g).bind fun p₂ => some (1 + (p₁.1 + p₂.1), p₂.2)
       | _ => none
     | some (.ten a c z) =>
-      (acost D sh z).bind fun p₁ =>
-      (acost D sh c).bind fun p₂ =>
+      (acostWith O D sh z).bind fun p₁ =>
+      (acostWith O D sh c).bind fun p₂ =>
       some (1 + (p₁.1 + p₂.1), sEdit a p₂.2 p₁.2)
-    | some (.hintS _ z) => (acost D sh z).bind fun p₁ => some (1 + p₁.1, p₁.2)
+    | some (.hintS _ z) => (acostWith O D sh z).bind fun p₁ => some (1 + p₁.1, p₁.2)
     | some (.hintD _ c z) =>
-      (acost D sh c).bind fun p₁ =>
-      (acost D sh z).bind fun p₂ =>
+      (acostWith O D sh c).bind fun p₁ =>
+      (acostWith O D sh z).bind fun p₂ =>
       some (1 + (p₁.1 + p₂.1), p₂.2)
+
+/-- NC-1's interpreter: every loop unrolled. -/
+def acost : Nat → Shape → Noun → Option (Nat × Shape) := acostWith noSummaries
 
 /-- Abstract fuel: the nesting depth the abstract interpreter may unroll. -/
 def costFuel : Nat := 1000000
@@ -663,6 +642,13 @@ depth, the run is never exhausted. -/
 def Sound (B : Nat) (o : Shape) (s f : Noun) : Prop :=
   ∀ d b, Res.within (exec d b s f) b B o ∧ (B ≤ d → B ≤ b → exec d b s f ≠ .exhausted)
 
+/-- An oracle is sound when every summary it gives is a price: `Sound` on every subject of the
+shape it was asked about. -/
+def OracleSound (O : Oracle) : Prop :=
+  ∀ sh f B o, O sh f = some (B, o) → ∀ s, fits s sh = true → Sound B o s f
+
+theorem noSummaries_sound : OracleSound noSummaries := fun _ _ _ _ h => by simp [noSummaries] at h
+
 theorem Sound.of_succ {B : Nat} {o : Shape} {s f : Noun} (hB : 1 ≤ B)
     (h : ∀ d b, Res.within (exec (d + 1) (b + 1) s f) (b + 1) B o ∧
       (B ≤ d + 1 → B ≤ b + 1 → exec (d + 1) (b + 1) s f ≠ .exhausted)) : Sound B o s f := by
@@ -749,12 +735,20 @@ theorem sixSubjects_sound {ac : Noun → Option (Nat × Shape)} {sh : Shape} {x 
 /-- **Soundness of the abstract interpreter.** If `acost` answers `(B, o)` on `f` and `sh`, then on
 every subject of shape `sh`: every run of `f` (any depth, any budget) that ends ends within `B`
 steps with a product of shape `o`, and a run given at least `B` budget and depth never exhausts. -/
-theorem acost_sound : ∀ (D : Nat) (sh : Shape) (f : Noun) (B : Nat) (o : Shape),
-    acost D sh f = some (B, o) → ∀ s, fits s sh = true → Sound B o s f
-  | 0, _, _, _, _, h, _, _ => by simp [acost] at h
+theorem acostWith_sound {O : Oracle} (hO : OracleSound O) : ∀ (D : Nat) (sh : Shape) (f : Noun)
+    (B : Nat) (o : Shape), acostWith O D sh f = some (B, o) → ∀ s, fits s sh = true → Sound B o s f
+  | 0, _, _, _, _, h, _, _ => by simp [acostWith] at h
   | D + 1, sh, f, B, o, h, s, hs => by
-    have IH := acost_sound D
-    simp only [acost] at h
+    have IH := acostWith_sound hO D
+    simp only [acostWith] at h
+    cases hO' : O sh f
+    case some r =>
+      rw [hO'] at h
+      simp only [Option.some.injEq] at h
+      subst h
+      exact hO _ _ _ _ hO' s hs
+    rw [hO'] at h
+    simp only at h
     cases hp : parse f with
     | none =>
       rw [hp] at h
@@ -871,7 +865,7 @@ theorem acost_sound : ∀ (D : Nat) (sh : Shape) (f : Noun) (B : Nat) (o : Shape
         simp only [Option.some.injEq, Prod.mk.injEq] at h hy hz
         obtain ⟨rfl, rfl⟩ := h
         have S₁ := IH sh _ _ _ h₁ s hs
-        have hac : ∀ w B k, acost D sh w = some (B, .exact k) → Sound B (.exact k) s w :=
+        have hac : ∀ w B k, acostWith O D sh w = some (B, .exact k) → Sound B (.exact k) s w :=
           fun w B k hw => IH sh w B _ hw s hs
         -- the arm taken on a yes / a no
         have armY : ∀ d b v r, exec d b s x = .ok v r → v = .atom 0 → Sound by₁ oy s y := by
@@ -1011,6 +1005,11 @@ theorem acost_sound : ∀ (D : Nat) (sh : Shape) (f : Noun) (B : Nat) (o : Shape
           fun hd hb => ?_⟩
         exact (S₁ d b).1.bind_ne ((S₁ d b).2 (by omega) (by omega)) (B₂ := b₂)
           (fun _ r _ _ hr => (S₂ d r).2 (by omega) hr) (by omega)
+
+/-- NC-1's interpreter (no summaries) is sound. -/
+theorem acost_sound (D : Nat) (sh : Shape) (f : Noun) (B : Nat) (o : Shape)
+    (h : acost D sh f = some (B, o)) (s : Noun) (hs : fits s sh = true) : Sound B o s f :=
+  acostWith_sound noSummaries_sound D sh f B o h s hs
 
 /-- **`cost_sound`.** A bound `cost` gives is a price: on every subject of the declared shape, a
 run given at least `B` fuel does not exhaust, and the metered count is at most `B` — whatever
@@ -1201,6 +1200,8 @@ open Minidregg.Theory.AssertAxioms
 #assert_axioms Res.within.mono
 #assert_axioms Res.within.succ
 #assert_axioms Sound.of_succ
+#assert_axioms noSummaries_sound
+#assert_axioms acostWith_sound
 #assert_axioms sixSubjects_sound
 #assert_axioms acost_sound
 #assert_axioms cost_sound

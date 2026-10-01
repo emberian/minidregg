@@ -38,9 +38,12 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-def wireVersion : Nat := 1
-/-- v2: the ABI may name a NockApp kernel `door` (N11). -/
-def abiVersion : Nat := 2
+/-- v2 (NC-2): the program record's sample slots carry a declared maximum; a v1 cell refuses at
+the version gate (`wrong_version_refused`) rather than being re-read under the new slot layout. -/
+def wireVersion : Nat := 2
+/-- v2: the ABI may name a NockApp kernel `door` (N11). v3 (NC-2): a sample slot may declare its
+value's maximum (`SampleSlot.max`). -/
+def abiVersion : Nat := 3
 /-- Registry tag 13 (final: 11 pay, 12 stream, 13 nockProgram, 14 clock); schema 91011. -/
 def registryTag : UInt8 := 13
 def schemaId : Nat := 91011
@@ -57,12 +60,19 @@ inductive SlotType where
 
 /-- One sample entry: the program sees `[key value]`, where `value` is the
 participant slot `slot` of the command's `target`-th target (0-based, the
-command's signed target order, K-JOINT's `joint/index/{target}/…`). -/
+command's signed target order, K-JOINT's `joint/index/{target}/…`).
+
+`max` (NC-2, DML's `int(n)` at the ABI): the largest atom the program will ever be
+handed for this entry. A sample whose value encodes above it is refused
+(`fieldOverMax`), so the program's sample shape holds `[0, max]` there
+(`NockProgramCell.shapeOf`) and a step bound can be read from that shape
+(`Theory.NockCost.Summaries.costSym`) before any run. `none`: undeclared, any atom. -/
 structure SampleSlot where
   target : Nat
   slot : String
   key : String
   type : SlotType
+  max : Option Nat := none
   deriving DecidableEq, Repr
 
 /-- One write the program may emit: `[key value]` in its output list is a write
@@ -113,8 +123,10 @@ def slotTypeStream : StreamCodec SlotType :=
 def sampleSlotStream : StreamCodec SampleSlot :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product stringStream (StreamCodec.product stringStream slotTypeStream)))
-    (fun s => (s.target, s.slot, s.key, s.type)) (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2⟩)
+      (StreamCodec.product stringStream (StreamCodec.product stringStream
+        (StreamCodec.product slotTypeStream (StreamCodec.option StreamCodec.nat)))))
+    (fun s => (s.target, s.slot, s.key, s.type, s.max))
+    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def outputSlotStream : StreamCodec OutputSlot :=
@@ -178,12 +190,12 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
   decode := framedDecode frame stream
   decode_encode := framedDecode_encode frame stream
 
-/-- `DREGG/NOCK/ABI/v2` -/
+/-- `DREGG/NOCK/ABI/v3` -/
 def abiFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 50]
-/-- `DREGG/NOCK/PROGRAM/v1` -/
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 51]
+/-- `DREGG/NOCK/PROGRAM/v2` (NC-2: sample slots carry `max`; every `programId` changes). -/
 def programFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 50]
 
 def abiCodec : LawfulCodec Abi := framed abiFrame abiStream
 def programCodec : LawfulCodec Program := framed programFrame programStream

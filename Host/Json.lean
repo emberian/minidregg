@@ -3716,11 +3716,14 @@ private def nockSlotTypeName : NockProgramCodec.SlotType → String
 
 private def nockSampleSlot (path : String) (json : Lean.Json) :
     Result NockProgramCodec.SampleSlot := do
-  let obj ← exactObject path ["target", "slot", "key", "type"] json
+  let hasMax := ((← object path json).get? "max").isSome
+  let obj ← exactObject path
+    (["target", "slot", "key", "type"] ++ if hasMax then ["max"] else []) json
+  let max ← if hasMax then some <$> nat (path ++ ".max") (← field path "max" obj) else pure none
   pure ⟨← nat (path ++ ".target") (← field path "target" obj),
     ← string (path ++ ".slot") (← field path "slot" obj),
     ← string (path ++ ".key") (← field path "key" obj),
-    ← nockSlotType (path ++ ".type") (← field path "type" obj)⟩
+    ← nockSlotType (path ++ ".type") (← field path "type" obj), max⟩
 
 private def nockOutputSlot (path : String) (json : Lean.Json) :
     Result NockProgramCodec.OutputSlot := do
@@ -3757,8 +3760,11 @@ def nockAbi (path : String) (json : Lean.Json) : Result NockProgramCodec.Abi := 
 
 def nockAbiJson (abi : NockProgramCodec.Abi) : Lean.Json :=
   Lean.Json.mkObj [("version", toString abi.version), ("arm", toString abi.arm),
-    ("sample", .arr (abi.sample.map fun slot => .mkObj [("target", toString slot.target),
-      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)]).toArray),
+    ("sample", .arr (abi.sample.map fun slot => .mkObj ([("target", toString slot.target),
+      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)] ++
+        match slot.max with
+        | some m => [("max", toString m)]
+        | none => [])).toArray),
     ("outputs", .arr (abi.outputs.map fun slot => .mkObj [("key", slot.key),
       ("target", toString slot.target), ("field", toString slot.field),
       ("type", nockSlotTypeName slot.type)]).toArray),
