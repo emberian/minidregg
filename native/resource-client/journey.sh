@@ -46,7 +46,7 @@
 # Note: by the time M3-M7 run, the resource `shared` is deliberately locked
 # (J8). A hook that needs an open resource creates its own through SPONSOR_WS.
 #
-# Tunables: JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
+# Tunables: JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
 # JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule).
@@ -235,6 +235,16 @@ run_step() {
   local dep t0 t1 rc
   SD=$S/$id; mkdir -p -m 700 "$SD"
   DETAIL=""; ARTIFACT=""
+  # JOURNEY_ONLY="ID ..." runs only those steps; the rest are SKIPPED (never
+  # PASS), so a skipped dependency blocks its dependents and the frontier
+  # names the first skipped step: a partial run cannot read as a full one.
+  if [ -n "${JOURNEY_ONLY:-}" ] && [[ " $JOURNEY_ONLY " != *" $id "* ]]; then
+    STATUS[$id]=SKIPPED; WALL[$id]=0.000; ART[$id]=""; DET[$id]="skipped: not in JOURNEY_ONLY"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" SKIPPED 0.000 "" "${DET[$id]}" >>"$TSV"
+    echo "STEP $id SKIPPED" >&2
+    result_json "$(frontier)"
+    return
+  fi
   for dep in "$@"; do
     if [ "${STATUS[$dep]:-}" != PASS ]; then
       STATUS[$id]=FAIL; WALL[$id]=0.000; ART[$id]=""; DET[$id]="blocked: $dep did not pass"

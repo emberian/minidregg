@@ -99,20 +99,20 @@ row outsider-tail refused
 # Invites: room delegations to B and C (observe + append under commons).
 invite() { # WHO SUBJECT
   jq -n --arg r "$2" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"commons",
-    recipient:$r,verbs:["observe","append"],maxCost:"50000",room:true}' >"$D/req/invite-$1.json"
-  run "invite-$1-propose" "$MINI" workspace --action propose --dir "$AW" --request "$D/req/invite-$1.json" \
-    --proposal-id "invite-$1"; ok "invite-$1-propose"
-  run "invite-$1-submit" "$MINI" workspace --action submit --dir "$AW" \
-    --intent "$AW/proposals/invite-$1/intent.json" --attempt "$AW/attempts/invite-$1"; ok "invite-$1-submit"
-  run "invite-$1-publish" "$MINI" workspace --action publish-delegation --dir "$AW" --proposal-id "invite-$1" \
-    --attempt "$AW/attempts/invite-$1"; ok "invite-$1-publish"
+    recipient:$r,verbs:["observe","append"],maxCost:"50000",room:true}' >"$D/req/sinvite-$1.json"
+  run "sinvite-$1-propose" "$MINI" workspace --action propose --dir "$AW" --request "$D/req/sinvite-$1.json" \
+    --proposal-id "sinvite-$1"; ok "sinvite-$1-propose"
+  run "sinvite-$1-submit" "$MINI" workspace --action submit --dir "$AW" \
+    --intent "$AW/proposals/sinvite-$1/intent.json" --attempt "$AW/attempts/sinvite-$1"; ok "sinvite-$1-submit"
+  run "sinvite-$1-publish" "$MINI" workspace --action publish-delegation --dir "$AW" --proposal-id "sinvite-$1" \
+    --attempt "$AW/attempts/sinvite-$1"; ok "sinvite-$1-publish"
 }
 invite b "$B"
 invite c "$C"
 run b-import-commons "$MINI" workspace --action import --dir "$BW" --name commons \
-  --from-ref "$AW/proposals/invite-b/recipient-reference.json"; ok b-import-commons
+  --from-ref "$AW/proposals/sinvite-b/recipient-reference.json"; ok b-import-commons
 run c-import-commons "$MINI" workspace --action import --dir "$CW" --name commons \
-  --from-ref "$AW/proposals/invite-c/recipient-reference.json"; ok c-import-commons
+  --from-ref "$AW/proposals/sinvite-c/recipient-reference.json"; ok c-import-commons
 bcap=$(jq -r .observeCapability "$BW/refs/commons.json")
 ccap=$(jq -r .observeCapability "$CW/refs/commons.json")
 
