@@ -49,11 +49,11 @@ state_paths() {
   fi
 }
 state_paths
-# Resource coordinates: GRAIN_A/GRAIN_B/GRAIN_C are the two-digit prefixes of
-# instance a/b/c's app (NN01), session (NN10) and ticket (NN20). CLASS_X is
+# Resource coordinates: GRAIN_A..GRAIN_E are the two-digit prefixes of
+# instance a..e's app (NN01), session (NN10) and ticket (NN20). CLASS_X is
 # its size class (S or M); IMPORT_X (an export directory) with IMPORT_KEY
 # installs it from an export.
-A=${GRAIN_A:-91} B=${GRAIN_B:-92} C=${GRAIN_C:-93}
+A=${GRAIN_A:-91} B=${GRAIN_B:-92} C=${GRAIN_C:-93} D=${GRAIN_D:-94} E=${GRAIN_E:-95}
 
 fail() { echo "grain journey: $*" >&2; exit 1; }
 now() { date +%s.%N; }
@@ -534,7 +534,7 @@ write_profile() {
 
 
 # Phases: store, services, workroom, profile, then VERB-XN for instance X in
-# a b c and an optional repeat number N (enroll-a2, get-a2, ...). Nonces are
+# a b c d e and an optional repeat number N (enroll-a2, get-a2, ...). Nonces are
 # derived per instance so every signed command's nonce is fresh.
 run_phase() {
   case "$1" in
@@ -550,11 +550,14 @@ run_phase() {
   phase=$1 verb=${1%-*} tail=${1##*-}
   letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
   case "$letter" in
-    a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; *) fail "unknown phase $1" ;;
+    a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;; *) fail "unknown phase $1" ;;
   esac
-  upper=$(printf '%s' "$letter" | tr a-c A-C)
+  upper=$(printf '%s' "$letter" | tr a-e A-E)
   eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-}"
-  base=$((40000 + i * 10000)) app=${P}01
+  # NONCE_BASE_X moves an instance's nonces when its coordinates are reused
+  # after a refused attempt consumed some (every signed nonce is a nullifier).
+  eval "base=\${NONCE_BASE_$upper:-$((40000 + i * 10000))}"
+  app=${P}01
   case "$verb" in
     birth) step "$phase" birth_app "$letter" $((base + 1000)) "$app" "3${i}01" ;;
     install)

@@ -176,6 +176,12 @@ if [[ $action == create || $action == create-from ]]; then
   /usr/bin/mount -t ext4 -o loop,nosuid,nodev,noatime -- "$image" "$target"
   app_gid=$(getent passwd "$app_uid" | cut -d: -f4)
   [[ $app_gid =~ ^[1-9][0-9]{0,9}$ ]] || { echo 'app primary group refused' >&2; exit 1; }
+  if [[ $action == create-from ]]; then
+    # An imported /var belongs to the exporting grain's app UID; this grain
+    # runs under its own. Re-own every entry without following a symlink
+    # (-P, -h); root-owned entries (lost+found) stay root's.
+    /usr/bin/find "$target" -xdev ! -uid 0 -exec /usr/bin/chown -h "$app_uid:$app_gid" -- {} +
+  fi
   chown "$app_uid:$app_gid" -- "$target"
   chmod 700 -- "$target"
 fi
