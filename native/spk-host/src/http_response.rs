@@ -95,7 +95,18 @@ fn content_disposition(value: &str) -> io::Result<String> {
     ))
 }
 
-fn relative_location(value: &str) -> io::Result<&str> {
+/// A redirect stays inside the grain: a relative location, or an absolute
+/// one on the route's own origin (`https://HOST`), which is rewritten to its
+/// path. An app builds the latter from X-Sandstorm-Base-Path (that origin):
+/// WordPress redirects `/` to `https://HOST/...` and answered 503 before
+/// (SPK-APPS 2026-10-01). Every other absolute or scheme-relative location
+/// is still refused (no open redirect off the grain's origin).
+fn relative_location<'a>(value: &'a str, origin: Option<&str>) -> io::Result<&'a str> {
+    let value = match origin.and_then(|origin| value.strip_prefix(origin)) {
+        Some("") => "/",
+        Some(rest) if rest.starts_with(['/', '?', '#']) => rest,
+        _ => value,
+    };
     field(value)?;
     if value.is_empty()
         || value != value.trim()
@@ -177,6 +188,17 @@ fn cookie_expires(epoch_seconds: i64) -> io::Result<String> {
 /// Serializes one already completed app response; the caller owns authority,
 /// deadline, exact request matching, and the no-retry decision.
 pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Result<Vec<u8>> {
+    serialize_for_origin(response, head_request, None)
+}
+
+/// `origin` is the browser route's `https://HOST`, the WebSession base path,
+/// so a redirect the app made absolute on it can be served (see
+/// `relative_location`).
+pub(crate) fn serialize_for_origin(
+    response: &WebResponse,
+    head_request: bool,
+    origin: Option<&str>,
+) -> io::Result<Vec<u8>> {
     if response.headers.len() + response.set_cookies.len() > MAX_HEADERS {
         return Err(invalid("too many WebSession response headers"));
     }
@@ -255,7 +277,7 @@ pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Resul
             switch_to_get,
             location,
         } => {
-            add(&mut headers, "Location", relative_location(location)?)?;
+            add(&mut headers, "Location", relative_location(location, origin)?)?;
             let status = match (*permanent, *switch_to_get) {
                 (false, false) => 307,
                 (true, false) => 308,
@@ -437,6 +459,31 @@ mod tests {
             location: "\\\\evil.example/".into(),
         };
         assert!(serialize(&reply, false).is_err());
+        // The route's own origin is served as its path; any other is refused,
+        // including a longer host that shares the origin as a prefix.
+        let origin = Some("https://grain.test");
+        for (absolute, path) in [
+            ("https://grain.test/wp-admin/", "Location: /wp-admin/\r\n"),
+            ("https://grain.test", "Location: /\r\n"),
+            ("https://grain.test?x=1", "Location: ?x=1\r\n"),
+        ] {
+            reply.result = WebResult::Redirect {
+                permanent: false,
+                switch_to_get: true,
+                location: absolute.into(),
+            };
+            let served = String::from_utf8(serialize_for_origin(&reply, false, origin).unwrap()).unwrap();
+            assert!(served.contains(path), "{absolute}: {served}");
+            assert!(serialize(&reply, false).is_err());
+        }
+        for foreign in ["https://grain.test.evil/", "https://grain.testx/", "http://grain.test/", "//grain.test/"] {
+            reply.result = WebResult::Redirect {
+                permanent: false,
+                switch_to_get: true,
+                location: foreign.into(),
+            };
+            assert!(serialize_for_origin(&reply, false, origin).is_err(), "{foreign}");
+        }
     }
 
     #[test]

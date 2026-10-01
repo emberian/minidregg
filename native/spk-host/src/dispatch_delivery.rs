@@ -96,7 +96,9 @@ impl ResidentHuman<'_> {
             MAX_APP_RESPONSE,
             APP_CALL_TIME,
         );
-        let serialized = response.and_then(|reply| http_response::serialize(&reply, head));
+        let origin = format!("https://{}", policy.expected_host);
+        let serialized = response
+            .and_then(|reply| http_response::serialize_for_origin(&reply, head, Some(&origin)));
         match serialized {
             Ok(bytes) => {
                 recorded.finish(self.journal, true)?;
