@@ -194,6 +194,25 @@ and `room status` says ENDED. `pay lab week` again renews. a founder runs a room
 week 100`, renews by hand with `room renew lab SUBJECT`, and funds the concierge with
 `topup lab N`. a room whose week is 0 is free: `pay` files a request instead.
 
+## a librarian in a room
+
+a room's founder can bring in the node's Hermes, an agent that holds only what it is given and
+pays for each thing it writes from a budget the founder funds:
+
+```
+mini> summon lab as librarian --budget 100   # founder: Hermes joins lab's roster with 100 credit
+mini> ask lab what changed since 48          # a say addressed to Hermes; it answers in its stream
+mini> topup lab 50                           # its budget ran out: it said so, and stopped
+mini> dismiss lab                            # founder: its grants are revoked, the rest comes back
+```
+the librarian links every document in the room from `lab-index`, writes a digest of what was
+said into `lab-digest`, and answers "since" questions from the room's signed history. its
+instructions are a document in the room, `lab-hermes-librarian`: you can read it, the founder
+can edit it. each write it makes costs the room's `hermes/turn` price (`tariff lab`) plus the
+fee, paid into the room's till; when its account can't pay, the Host refuses the turn and Hermes
+says "out of budget" in its stream. it can't write anything it holds no grant on: ask it to
+edit your document and the Host refuses it.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
@@ -214,7 +233,8 @@ the reason after `refused:`:
 - `stale-root`: you signed against a state that has since moved; do it again.
 - `bad-signature`: the signature didn't verify for that key and that exact request.
 - `malformed`: the request didn't decode, or didn't fit its operation.
-- `undisclosed`: a refusal before you proved who you are, so on purpose it names nothing.
+- `undisclosed`: a refusal before you proved who you are, or of a write at admission: on purpose
+  it names nothing on your channel (the operator's log names it).
 
 (rarer ones exist too, like `outside-validity`. refused frames are kept under `refusals/`.)
 
@@ -232,8 +252,8 @@ because it holds the Host's own decoding.
 ## what's planned
 
 this is why you'd come back, with no dates promised: **streams** (chat) inside rooms, **laws in a one-line
-grammar** instead of JSON, **Hermes in a room** (an agent that reads the room and does
-small useful things), **paying with $DREGG** for a room's week (a few dollars), and
+grammar** instead of JSON, Hermes as a **game master** and as a **runner** you hand a program,
+**paying with $DREGG** for a room's week (a few dollars), and
 eventually **a MUD** built from the same pieces.
 
 thank you for poking at it early. (｡◕‿◕｡)

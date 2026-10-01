@@ -33,7 +33,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-mod law;
+pub(crate) mod law;
 mod template;
 
 pub(crate) const EXIT_OK: i32 = 0;
@@ -71,14 +71,14 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "publish", usage: "publish ID", operation: "mini workspace --action publish-delegation --proposal-id ID --attempt attempts/ID" },
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
-    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room leave NAME | room members NAME | room list | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true) | propose (action revoke) | not here (K-RENOUNCE) | who | local: references that are rooms | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
+    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room leave NAME | room members NAME | room list | room ls [ROOM] [--since H] [--import] [--json] | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true) | propose (action revoke) | not here (K-RENOUNCE) | who | local: references that are rooms | chat: the Host's signed since view under the room grant, with the roster's streams and my names (--import names the rest ROOM-cell-ID) | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
     Verb { name: "pay", usage: "pay ROOM week|N [--account REF] | pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini credit --action pay --room ROOM [--amount N] (one fleet turn: N, or the room's week, to its till, publishing renew; a free room files a request in HOME/outbox) | mini pay --action address|status|audit --dir WS [--account REF]" },
     Verb { name: "credit", usage: "credit [ACCOUNT-REF]", operation: "mini credit --action balance (a signed read of my account)" },
     Verb { name: "tariff", usage: "tariff ROOM | tariff ROOM set week|birth|hermes/turn|period N", operation: "mini credit --action tariff --room ROOM [--set FIELD --value N] (a signed read of the room cell's tariff fields | one scalar turn on the room cell: only its founder holds write)" },
-    Verb { name: "topup", usage: "topup ROOM N [--account REF]", operation: "mini credit --action topup --room ROOM --amount N (one fleet transfer to the room's runner account)" },
+    Verb { name: "topup", usage: "topup ROOM N [hermes|concierge] [--account REF]", operation: "mini credit --action topup --room ROOM --amount N [--to hermes|concierge] (one fleet transfer to Hermes's budget account when the room has a Hermes, else to the concierge's runner account)" },
     Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB|guide]", operation: "local; `help guide` prints the friends' guide" },
@@ -523,7 +523,6 @@ fn session_subject(session: &Session) -> std::result::Result<String, String> {
 /// (a hosted subject) invited into a room created `--private` would put that
 /// room's key where root can read it. Refuse unless the inviter said
 /// `--i-know`. The `room invite` verb is a later lane; this is its check.
-#[cfg_attr(not(test), allow(dead_code))] // its verb is K-ROOM 3c `room invite`
 pub(crate) fn hosted_private_invite(
     room_private: bool,
     invitee_hosted: bool,
@@ -1255,7 +1254,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             client("credit", flags)
         }
         "topup" => {
-            if !(w.len() == 3 || w.len() == 5) {
+            if w.len() < 3 {
                 return Err(u.to_owned());
             }
             ref_name(&w[1], "room name")?;
@@ -1266,12 +1265,18 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 flag("room", w[1].clone()),
                 flag("amount", w[2].clone()),
             ];
-            if w.len() == 5 {
-                if w[3] != "--account" {
-                    return Err(u.to_owned());
+            let mut i = 3;
+            while i < w.len() {
+                match w[i].as_str() {
+                    "--account" if i + 1 < w.len() => {
+                        workspace_name(&w[i + 1], "account reference")?;
+                        flags.push(flag("account", w[i + 1].clone()));
+                        i += 1;
+                    }
+                    whose @ ("hermes" | "concierge") => flags.push(flag("to", whose)),
+                    _ => return Err(u.to_owned()),
                 }
-                workspace_name(&w[4], "account reference")?;
-                flags.push(flag("account", w[4].clone()));
+                i += 1;
             }
             client("credit", flags)
         }
@@ -1853,14 +1858,14 @@ fn rooms(session: &Session) {
 fn help_text(topic: Option<&str>) -> String {
     match topic {
         Some("chat") => crate::chat::HELP.to_owned(),
-        Some(name) => match VERBS.iter().chain(crate::chat::VERBS).find(|v| v.name == name) {
+        Some(name) => match VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).find(|v| v.name == name) {
             Some(v) => format!("{}\n  = {}\n", v.usage, v.operation),
             None => format!("no verb {name}\n"),
         },
         None => {
             let mut text = format!("{HOSTED_CUSTODY_BANNER}\n");
             text.push_str("Every verb is one client operation; the Host decides. Words: 'literal', \"escaped\", {json} or [json], @FILE (HOME/requests/FILE).\n");
-            for v in VERBS.iter().chain(crate::chat::VERBS) {
+            for v in VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS) {
                 text.push_str(&format!("  {:<10} {}\n", v.name, v.usage));
             }
             text.push_str("Endings on stderr: usage: (2)  error: client (1)  refused: Host (3)  undecided: Host (4).\n");
@@ -1984,7 +1989,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
     let enrolled = || stems(&session.home.join("enroll"), "", |_| false);
     let verb = w[0].as_str();
     let candidates: Vec<String> = match (verb, position) {
-        (_, 0) => VERBS.iter().chain(crate::chat::VERBS).map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
+        (_, 0) => VERBS.iter().chain(crate::chat::VERBS).chain(crate::hermes::VERBS).map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
         ("read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
         ("lookup" | "retry", 1) => attempts(),
@@ -2645,7 +2650,7 @@ mod tests {
         fs::write(ws.join("refs").join("shared.json"), b"{}").unwrap();
         fs::write(ws.join("refs").join("factory.json"), b"{}").unwrap();
         let s = Session { workspace: ws, home: root.join("h"), host: "/x".into(), config: "/y".into() };
-        assert_eq!(complete(&s, "su"), ["submit"]);
+        assert_eq!(complete(&s, "su"), ["submit", "summon"]);
         assert_eq!(complete(&s, "re"), ["refs", "read", "retry", "revoke", "react"]);
         assert_eq!(complete(&s, "doc show "), ["factory", "shared"]);
         assert_eq!(complete(&s, "doc link x shared f"), ["factory"]);

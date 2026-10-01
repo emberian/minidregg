@@ -576,6 +576,11 @@ pub(crate) fn pay_turn(
     turn(&agent, &reference, verb, transfer, publication)
 }
 
+/// The pinned tariff's per-turn fee (`tariffBase`).
+pub(crate) fn tariff_base(root: &Path) -> Result<String> {
+    Ok(tariff(&agent(root)?)?.0)
+}
+
 /// A signed current read of account reference `name`: (balance of the pinned
 /// asset, the asset, the signed view's height, the account id).
 pub(crate) fn account_balance(root: &Path, name: &str) -> Result<(String, String, String, String)> {

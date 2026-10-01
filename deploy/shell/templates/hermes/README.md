@@ -1,71 +1,69 @@
 # Hermes role templates
 
-`summon ROOM as ROLE [--budget N]` reads `hermes/ROLE/` and nothing else. The
-three roles differ only in these files: the grants and the program text (PLACE
-§2.7). Placeholders are `{UPPER}` words, substituted textually. Every
-placeholder a file uses is listed in its `placeholders` object, or at the top of
-its program.
+`summon ROOM as ROLE [--budget N]` reads `hermes/ROLE/` and nothing else
+(`native/resource-client/src/hermes.rs` compiles these files in: the files are
+the roles). The roles differ only in their grants and their program text
+(PLACE §2.7).
 
-| placeholder | bound by | notes |
+| file | read by | what it is |
 |---|---|---|
-| `{ROOM}` / `{STORY}` | the ROOM argument | the story role calls it `{STORY}` |
-| `{H}` | step 1 | Hermes's subject, decimal |
-| `{ACCOUNT}` | step 2 | the name of Hermes's account |
-| `{N}` | librarian: `summon`, default 10 | digest cadence in stream entries. In the gm files `{N}` is a scene number from `story.json` |
-| `{S}`, `{CELL}`, `{OUT}`, `{IN}` | each `delegateEach` iteration | as each file's `placeholders` says |
-| `{P}`, `{INPUTS}`, `{OUTPUTS}`, `{TASK}` | runner only, see `runner/README.md` | |
+| `ROLE/grants.json` | `summon`, `dismiss` | `mini-hermes-role-grants-v2`: `room` = Hermes's verbs under the room (the roster grant `chat invite` makes), `docs` = documents the role writes (name, verbs, and the law `summon` gives them: born `--in ROOM` when absent, installed by their owner when present), `program` = the program document's name and law |
+| `ROLE/program.md` | `summon` | the program, written once into the room as a document (`ROOM-hermes-ROLE`); members read it, the founder edits it, Hermes reads it on every attach |
+| `ROLE/budget.json` | `summon` | `fund` = the budget when `--budget` is omitted |
 
-## `summon ROOM as ROLE [--budget N]`, in order
+Placeholders are `{UPPER}` words, filled textually: `{ROOM}`, `{FOUNDER}` (the
+summoner, who must be the room's founder), `{H}` (Hermes's subject: the node's
+Hermes in `HOME/hermes/node.json`, or `--hermes`), `{ACCOUNT}` (`ROOM-hermes`),
+`{N}` (the digest cadence, `--every`, default 3).
 
-| step | file | what happens |
-|---|---|---|
-| 1 | — | enroll Hermes's key, or reuse the one already enrolled. This binds `{H}`. |
-| 2 | `ROLE/budget.json` | birth Hermes's account `{ACCOUNT}`, owned by `{H}` and funded from the summoner's account with `--budget N`, or with `fund` if N is not given (the M3 sponsor-funded account path, `product/m3-provision.md:17-22`). |
-| 3 | `ROLE/grants.json` | one `delegate` proposal per entry in `delegate`, and one per cell for each `delegateEach` (`over` names the set). Each entry is already the request `delegate` sends today (`shell.rs:480-487`: `name`, `recipient`, `verbs`, `maxCost`; the client requires `observe` among the verbs, `workspace.rs:54-66`). `own` lists cells Hermes creates itself, under its own account, so it needs no grant for them. |
-| 4 | `ROLE/program.md` | substitute, then write it to the room's program document `{ROOM}-program-hermes`. Members can read and edit it; Hermes reads it on every attach as its instructions. |
-| 5 | — | attach Hermes (M5 phase A). It works only through the MCP tools, which are the client contract: `mini_workspace_read/propose/submit/attempts/import_reference/export_reference` (`product/m5-hermes.md:18-40`). It imports each delegated reference with `mini_workspace_import_reference`. |
+## `summon ROOM as ROLE [--budget N]`, in order (each step is resumable)
 
-For the `gm` role, `summon` also re-installs the story's state and scene laws
-with `{GM}` = `{H}` (`grants.json` `relaw`, and `../story/README.md`). That is
-only possible before `story seal`.
+1. **The till.** A room without one gets `ROOM-till`, an account the founder
+   owns; its target is written to the room cell's `till` field. Hermes's turns
+   pay `hermes/turn` into it.
+2. **The budget account** `ROOM-hermes` (`A_P`): born owned by Hermes, funded
+   N from the founder's own account at its birth (one posting; the founder's
+   balance moves by N and the birth fee).
+3. **The roster.** Hermes joins as a friend does (`chat invite`): a grant of
+   the role's `room` verbs under the room, Hermes's stream born `--in ROOM`
+   under Hermes's author law (only Hermes writes it), the roster row.
+4. **The documents** in `docs`, each given its law and delegated to Hermes with
+   its verbs. For the librarian: `ROOM-index` and `ROOM-digest`, append-only,
+   written only by the founder and Hermes.
+5. **The program document** `ROOM-hermes-ROLE`, one append of `program.md`
+   filled in.
+6. **The room cell's fields** `hermes` = H and `hermes/account` = A_P (above the
+   roster: `credit::ROOM_FIELDS_START`), so `ask` finds Hermes from a signed read.
+7. **The hand-off** in `HOME/outbox/H/`: the account handoff, the invitation,
+   each delegated reference, and `summon-ROOM.json` (the manifest Hermes's
+   controller reads). Delivering the outbox to Hermes's inbox is the
+   deployment's (as for the concierge).
 
-`dismiss ROOM` revokes the grants from step 3. Hermes's stream and history stay.
+`ask ROOM TEXT` is `say --to H` in the room. `dismiss ROOM` revokes the room
+grant and each `docs` delegation (the founder's own revocations), sets the
+room's `hermes` fields to 0, and leaves `dismiss-ROOM.json`: the budget account
+is Hermes's, so the remainder (less the fleet fee) comes back as a transfer
+Hermes's controller signs on its next attach. Hermes's stream and history stay.
 
 ## Roles
 
-| role | mutate | observe | program |
+| role | under the room | writes | program |
 |---|---|---|---|
-| librarian | `{ROOM}-index`, `{ROOM}-digest` | every other cell of the room | keep the index current, digest every `{N}` stream entries, answer `since` questions from history |
-| gm | `{STORY}-state`, every `{STORY}-scene-{N}` | every player cell and player stream | narrate to players, advance the story's scene, never move a player |
-| runner | the outputs named in its program | the inputs named in its program | compute outputs from inputs, write nothing else |
-
-PLACE §2.7 says the librarian has mutate on `R/index` only, and its program
-writes `R/digest`. Those cannot both hold, so this template grants both cells.
-J14's refusal (`lab/paper` refused `no-grant`) is unaffected.
+| librarian | observe, append (its own stream: the author law refuses any other) | `ROOM-index`, `ROOM-digest` (observe, mutate) | link every document from the index; digest every N entries; answer `since` questions from the signed history |
+| runner | observe, append | the outputs its program names (observe, mutate); inputs observe | `summon ROOM as runner --program @FILE`; FILE is `runner/program.md` with its Inputs, Outputs and Task lines filled in |
+| gm | — | — | marked for MUD-GM: `summon … as gm` refuses here; the story verbs own the cells it would write |
 
 ## Budget
 
-`fund` is the default when `--budget` is omitted. Every admitted write costs
-`Operation.fee`, which must equal the pinned `tariff.base`
-(`product/m8-fleet-surface.md:40-43`; `Kernel/FleetTurn.lean:74,462` on the m8
-branch). The one measured value is 3 (`m8-fleet-surface.md:86-87`), so 100 is
-about 33 writes. That figure is in `tariffBaseObserved` for people reading the
-file; nothing computes with it. When the account cannot pay, the turn is
-refused `bookRefused` at plan. `maxCostPerTurn` is the `maxCost` on every grant
-(the value J3 used, `shell.rs:1293`). It caps one turn's cost, not the total.
+Every Hermes write is a turn: before it, the controller pays `hermes/turn`
+from `ROOM-hermes` to the till in one fleet turn (`mini credit --action turn`),
+so a turn costs `hermes/turn` plus the fleet fee (`tariff.base`). A turn the
+account cannot cover is refused by the Host at the fleet plan (`bookRefused`),
+the write is not attempted, and Hermes says "out of budget" in its stream (that
+notice is the one unmetered write). `topup ROOM N` refills `ROOM-hermes`.
 
-## What binds a runner's writes at assurance level 1
-
-Two things, and nothing else:
-
-1. **The output cell's law.** A write the law refuses is refused, whatever the
-   runner meant. Today a law compares a slot with a constant, not with another
-   slot (`Pred/Core.lean:103-122`), so it cannot say "the output equals that
-   input". That needs K-PRED-SLOTEQ.
-2. **The retained signed observations.** Every read Hermes makes is a signed
-   Mini read, and M5's attempt journal keeps each attempt's resolution
-   (`performed` / `refused` / `uncertain` with a basis). After the fact, anyone
-   can check a write against the reads that came before it.
-
-The kernel does not check that the output was computed from the inputs. At
-level 1 the runner is accountable, not verified.
+What binds this, said plainly: the kernel guarantees Hermes cannot spend more
+than `ROOM-hermes` holds and cannot write what it holds no grant on. That each
+write is preceded by its payment is the controller's discipline (its journal
+shows every payment and every write); joining the posting and the write in one
+transaction is K-BOOK-SLOTS (PLACE §4.8).
