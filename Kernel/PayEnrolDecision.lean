@@ -416,7 +416,7 @@ self-enrollment on at index 0 with the P1 mint, rate 1, a 10¹⁰ cap, node rate
 hour 500 000. -/
 
 def enrolFixtureTariff : Tariff :=
-  ⟨2, 0, fixtureMint, List.replicate 32 9, 6, 1, 10000000000, 1500, 5952380, some 0, 1000000⟩
+  ⟨2, 0, fixtureMint, List.replicate 32 9, 6, 1, 10000000000, 1500, 5952380, some 0, 1000000, 500⟩
 
 def fixtureStore : PayStore :=
   ((((genesisStore.set tariffAddress (some enrolFixtureTariff)).set (bookAddress 0)

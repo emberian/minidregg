@@ -186,7 +186,7 @@ address = lambda i: hashlib.sha256(f"jpay3 fixture deposit address {i}".encode()
 signature = lambda label: hashlib.sha512(f"jpay3 transfer {label}".encode()).hexdigest()
 tariff = {"version": "1", "asset": "0", "mint": P1_MINT, "tokenProgram": P1_PROGRAM, "decimals": "6",
           "creditPerAtomic": str(RATE), "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK),
-          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000"}
+          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}
 def credit_for(amount): return min(amount, CAP) * RATE
 nonce = [100]
 def book_command(v, book, start, t):

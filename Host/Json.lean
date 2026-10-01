@@ -1358,6 +1358,9 @@ private def birthParts (path : String)
         (if worker.isSome then grainWorkerFields raw else [])
     else if storage = "nock" then
       ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
+    else if storage = "job" then
+      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "caller",
+        "callerAcct", "price"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
       roomField) json
@@ -1366,12 +1369,12 @@ private def birthParts (path : String)
     | some value => some <$> nat (path ++ ".room") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨
-      storage = "nock" do
-    throw s!"{path}.storage: expected declared, content, grain, stream or nock"
+      storage = "nock" ∨ storage = "job" do
+    throw s!"{path}.storage: expected declared, content, grain, stream, nock or job"
   unless (storage = "declared" ∧ (kind = .object ∨ kind = .account)) ∨
-      ((storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨ storage = "nock") ∧
-        kind = .object) do
-    throw s!"{path}: declared storage is object/account; content, grain, stream and nock storage are object"
+      ((storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨ storage = "nock" ∨
+        storage = "job") ∧ kind = .object) do
+    throw s!"{path}: declared storage is object/account; content, grain, stream, nock and job storage are object"
   -- A Nock program cell has no chosen identifier: it is born at its content
   -- address, so the request names the program and the source derives the target.
   let program : Option NockProgramCodec.Program ← if storage = "nock" then do
@@ -1390,6 +1393,7 @@ private def birthParts (path : String)
     (← nat (path ++ ".controlCapability") (← field path "controlCapability" obj))
   let rulePredicate ← if storage = "grain" then
       pure (grainPolicy owner.value worker)
+    else if storage = "job" then pure JobMoney.standInLaw
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
@@ -1399,6 +1403,12 @@ private def birthParts (path : String)
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "stream" then
       pure ⟨.stream, CellState.materialize StreamCell.materializer 0⟩
+    else if storage = "job" then
+      let caller ← nat (path ++ ".caller") (← field path "caller" obj)
+      let callerAcct ← nat (path ++ ".callerAcct") (← field path "callerAcct" obj)
+      let price ← nat (path ++ ".price") (← field path "price" obj)
+      pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
+        (JobMoney.initialStore target caller callerAcct price)⟩
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
@@ -2396,7 +2406,7 @@ private def fleetTurnCommand (json : Lean.Json) : Result (List UInt8) := do
 private def payTariff (path : String) (json : Lean.Json) : Result PayTariff.Tariff := do
   let obj ← exactObject path ["version", "asset", "mint", "tokenProgram", "decimals",
     "creditPerAtomic", "maxPerObservation", "minTickSlots", "nodeHourRate", "enrolIndex",
-    "journalFloor"] json
+    "journalFloor", "slashCallerPermille"] json
   pure
     { version := ← nat s!"{path}.version" (← field path "version" obj)
       asset := ← nat s!"{path}.asset" (← field path "asset" obj)
@@ -2408,7 +2418,9 @@ private def payTariff (path : String) (json : Lean.Json) : Result PayTariff.Tari
       minTickSlots := ← nat s!"{path}.minTickSlots" (← field path "minTickSlots" obj)
       nodeHourRate := ← nat s!"{path}.nodeHourRate" (← field path "nodeHourRate" obj)
       enrolIndex := ← optional s!"{path}.enrolIndex" nat (← field path "enrolIndex" obj)
-      journalFloor := ← nat s!"{path}.journalFloor" (← field path "journalFloor" obj) }
+      journalFloor := ← nat s!"{path}.journalFloor" (← field path "journalFloor" obj)
+      slashCallerPermille := ← nat s!"{path}.slashCallerPermille"
+        (← field path "slashCallerPermille" obj) }
 
 /-- The operator's pay-cell change: deposit rows (hex) appended from
 `bookStart`, and/or a new tariff (`null` for none).  The bytes claim nothing:
@@ -2461,6 +2473,23 @@ private def payRefill (json : Lean.Json) : Result (List UInt8) := do
       expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
         (← field "$" "expectedAuthorityRoot" obj)⟩ }
   return PurseRefillReceiver.commandCodec.encode command
+
+/-- A job-money command (lane C3): `action` 1 fund · 2 claim · 3 settle.
+The bytes claim nothing: the receiver decides every amount a settle pays. -/
+private def jobMoney (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "capability", "job", "action", "account", "amount",
+    "nonce", "expectedAuthorityRoot"] json
+  let command : JobMoneyReceiver.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      job := ← nat "$.job" (← field "$" "job" obj)
+      action := ← nat "$.action" (← field "$" "action" obj)
+      account := ← nat "$.account" (← field "$" "account" obj)
+      amount := ← nat "$.amount" (← field "$" "amount" obj)
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩ }
+  return JobMoneyReceiver.commandCodec.encode command
 
 /-- A natural number as the pay watcher emits it (a JSON integer) or as the
 Host's own JSON writes it (a canonical unsigned decimal string). -/
@@ -2575,6 +2604,7 @@ def author (kind : String) (json : Lean.Json)
   | "pay-observation" => payObservationCommand json
   | "pay-enrol" => payEnrolCommand json
   | "pay-refill" => payRefill json
+  | "job-money" => jobMoney json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2752,6 +2782,7 @@ private def payTariffJson (tariff : PayTariff.Tariff) : Lean.Json := .mkObj
      | none => .null
      | some index => decimal index),
    ("journalFloor", decimal tariff.journalFloor),
+   ("slashCallerPermille", decimal tariff.slashCallerPermille),
    ("valid", .bool (decide tariff.valid))]
 
 private def payBookCommandJson (command : PayBookReceiver.Command) : Lean.Json := .mkObj
@@ -2826,6 +2857,15 @@ private def payRefillCommandJson (command : PurseRefillReceiver.Command) : Lean.
    ("nonce", decimal command.nonce),
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value)]
 
+private def jobMoneyCommandJson (command : JobMoneyReceiver.Command) : Lean.Json := .mkObj
+  [("type", "job-money-v1"),
+   ("canonical", hexJson (JobMoneyReceiver.commandCodec.encode command)),
+   ("subject", decimal command.subject.value), ("capability", decimal command.capability.value),
+   ("job", decimal command.job), ("action", decimal command.action),
+   ("account", decimal command.account), ("amount", decimal command.amount),
+   ("nonce", decimal command.nonce),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value)]
+
 private def payCommandJson (bytes : List UInt8) : Lean.Json :=
   match PayBookReceiver.commandCodec.decode bytes with
   | some command => payBookCommandJson command
@@ -2841,7 +2881,10 @@ private def payCommandJson (bytes : List UInt8) : Lean.Json :=
               | none =>
                   match PurseRefillReceiver.commandCodec.decode bytes with
                   | some command => payRefillCommandJson command
-                  | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
+                  | none =>
+                      match JobMoneyReceiver.commandCodec.decode bytes with
+                      | some command => jobMoneyCommandJson command
+                      | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
 
 private def payMemoRefusalName : PayEnrolMemo.Refusal → String
   | .shape => "memoShape" | .version => "memoVersion" | .badMiniKey => "memoBadMiniKey"
@@ -3025,6 +3068,22 @@ def payLedgerJson (ledger : NativeHost.PayLedger) : Lean.Json := .mkObj
    ("payers", .arr (ledger.rows.map fun row => Lean.Json.mkObj
      [("index", decimal row.index), ("account", decimal row.account),
       ("balance", .str (toString row.balance))]).toArray)]
+
+/-- The operator's local read of one job's money fields. -/
+def payJobJson (view : NativeHost.PayJob) : Lean.Json := .mkObj
+  [("type", "pay-job-v1"),
+   ("job", decimal view.job),
+   ("root", decimal view.root.value),
+   ("state", decimal view.state.state),
+   ("caller", decimal view.state.caller),
+   ("callerAcct", decimal view.state.callerAcct),
+   ("price", decimal view.state.price),
+   ("escrow", decimal view.state.escrow),
+   ("provider", decimal view.state.provider),
+   ("providerAcct", decimal view.state.providerAcct),
+   ("bond", decimal view.state.bond),
+   ("held", decimal view.state.held),
+   ("bookHeld", .str (toString view.bookHeld))]
 
 /-- The operator's local read of one AgentGrain purse. -/
 def payPurseJson (purse : NativeHost.PayPurse) : Lean.Json := .mkObj
@@ -3884,6 +3943,14 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ("command", payObservationCommandJson command), ("envelope", hexJson ingress.envelope)]
   | "pay-refill" => payRefillCommandJson <$>
       decoded "pay-refill" PurseRefillReceiver.commandCodec bytes
+  | "job-money" => jobMoneyCommandJson <$>
+      decoded "job-money" JobMoneyReceiver.commandCodec bytes
+  | "job-money-ingress" => do
+      let ingress ← decoded "job-money-ingress" JobMoneyReceiver.ingressCodec bytes
+      let command ← decoded "job-money-ingress" JobMoneyReceiver.commandCodec
+        ingress.commandBytes
+      pure <| .mkObj [("type", "job-money-ingress-v1"),
+        ("command", jobMoneyCommandJson command), ("envelope", hexJson ingress.envelope)]
   | "pay-refill-ingress" => do
       let ingress ← decoded "pay-refill-ingress" PurseRefillReceiver.ingressCodec bytes
       let command ← decoded "pay-refill-ingress" PurseRefillReceiver.commandCodec

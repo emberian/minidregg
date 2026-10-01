@@ -33,11 +33,12 @@ to both its address (`bookAt`) and its account (`assignmentAt`); a payment
 nullifier covering signature ‖ address (PAY §10 erratum 1) reads the address
 from `bookAt`.
 
-Wire: the store codec with layout name `DREGG/PAY/CELL/v3` (its frame commits
+Wire: the store codec with layout name `DREGG/PAY/CELL/v4` (its frame commits
 to the name and every namespace's codec identifier); the tariff value is
-`DREGG/PAY/TARIFF/v2`.  v3 = P3b-1's enrolment namespaces without P2's in-cell
-clock: namespace tag 3 (the clock) is retired and decodes to nothing. A v1 or
-v2 cell refuses to decode.
+`DREGG/PAY/TARIFF/v3`.  v3 = P3b-1's enrolment namespaces without P2's in-cell
+clock: namespace tag 3 (the clock) is retired and decodes to nothing.  v4 = v3
+with the tariff at `DREGG/PAY/TARIFF/v3` (C3's `slashCallerPermille`).  A v1,
+v2 or v3 cell refuses to decode.
 -/
 import Compiler.StoreCodec
 import Kernel.PayTariff
@@ -237,7 +238,7 @@ instance (store : PayStore) : Decidable (Law store) := by
   unfold Law
   infer_instance
 
-/-! ## Wire `DREGG/PAY/CELL/v3` -/
+/-! ## Wire `DREGG/PAY/CELL/v4` -/
 
 def namespaceStream : StreamCodec Namespace where
   encode
@@ -294,7 +295,7 @@ def valueStream : (space : Namespace) → StreamCodec (Namespace.Value space)
   | .sshIndex => bytesStream
   | .journal => unattributedStream
 
-def wireName : String := "DREGG/PAY/CELL/v3"
+def wireName : String := "DREGG/PAY/CELL/v4"
 
 def wire : Wire layout where
   name := wireName
@@ -311,7 +312,7 @@ def wire : Wire layout where
     | .sshIndex => "ssh-ed25519-blob/bytes"
     | .journal => "soltx-nullifier/bytes"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v2"
+    | .tariff => "DREGG/PAY/TARIFF/v3"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
     | .enrolment => "DREGG/PAY/ENROLMENT/v1"
