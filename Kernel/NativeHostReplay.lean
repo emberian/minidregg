@@ -42,6 +42,7 @@ import Kernel.ParticipantFactoryProvisioningReceiver
 import Kernel.FleetTurnReceiver
 import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
+import Kernel.RealmWellReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -731,6 +732,11 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : PayAssignmentReceiver.AcceptedAssignment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (PayAssignmentReceiver.intent accepted)
+  | realmWell {ingress : RealmWellReceiver.DecodedIngress}
+      (accepted : RealmWellReceiver.AcceptedWell config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+        opened.durable ingress) :
+      NativeAdmission config opened (RealmWellReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1544,6 +1550,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨PayAssignmentReceiver.intent accepted,
           .payAssignment accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := RealmWellReceiver.decodeIngress bytes then
+    match ← RealmWellReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height, config.tariff.asset⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"realm well command refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨RealmWellReceiver.intent accepted,
+          .realmWell accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

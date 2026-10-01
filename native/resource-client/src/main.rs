@@ -63,6 +63,8 @@ mod transport;
 mod worker;
 #[cfg(unix)]
 mod workspace;
+#[cfg(unix)]
+mod well;
 
 static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
@@ -264,6 +266,9 @@ usage:
   mini fleet --action receipt --dir WORKSPACE (--transaction ID|--head-of NAME)
   mini fleet --action lookup --dir WORKSPACE --attempt WORKSPACE/attempts/a-NONCE
   mini fleet --action poll --dir WORKSPACE --account NAME --topic TOPIC [--since CURSOR] [--limit N]
+  mini well --action new --dir WORKSPACE --name NAME --in REALM --law LAW.json
+  mini well --action mint|burn --dir WORKSPACE --well NAME|ID --account NAME|ID --amount N [--capability ID] [--attempt NEW-DIR]
+  mini well --action ledger --dir WORKSPACE --output LEDGER.json
   mini selected-exchange --phase prepare|status|publish|receive|receive-transport|cover-plan|cover-advance|ack|verify|verify-transport --contract CONTRACT.json --state-dir PRIVATE-STATE [--approval APPROVAL.json]
   mini profile --host HOST --config CONFIG.json [--socket SOCKET]
   mini describe --host HOST --config CONFIG.json [--socket SOCKET]
@@ -2150,6 +2155,7 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "shell" => shell::run(args),
         "fleet" => fleet::run(args),
+        "well" => well::run(args),
         #[cfg(unix)]
         "selected-exchange" => {
             let phase = args.required("phase")?;

@@ -115,7 +115,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 K10 K11 KIX KF K12C KHQ BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 K10 K11 KIX KF K12C KHQ KW BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -129,6 +129,7 @@ TITLE[KIX]="the index the world keeps: who, since, and a read at a past height"
 TITLE[KF]="a scope names fields and bounds each field change per write"
 TITLE[K12C]="content actions: annotate at a revision, quote and transclude across cells"
 TITLE[KHQ]="commit-reveal at the kernel: a sealed bid opens only to its commitment"
+TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, conservation"
 TITLE[J6]="stop/reopen: receipts recovered, exact retry replays"
 TITLE[G]="growth 10/100/500/1000: write<=5s, reopen<=60s at 1000"
 TITLE[J7]="law replaced; newcomer's existing grant still works"
@@ -741,6 +742,7 @@ step_KIX() { hook j10-index "K-INDEX rows: who lists members with their last vis
 step_KF() { hook jfields "K-FIELDS rows: maxDelta bounds a field move per write, a scope naming fields refuses a write to another and narrows reads to the named fields, re-delegation must narrow, a reviewer annotates but cannot edit the body (lane k-fields)"; }
 step_K12C() { hook j12c-kernel "K-CONTENT rows: a reviewer annotates but cannot edit, an annotation goes stale after an edit, quotes and transclusions install with backlinks and render only through the reader own read (lane k-content)"; }
 step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHAKE256 digest, the right opening installs, a wrong opening or a reveal before the deadline is refused, the plaintext is on the Store only after the reveal (lane k-hasheq)"; }
+step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
@@ -767,6 +769,7 @@ run_step KIX K10
 run_step KF J5
 run_step K12C J5
 run_step KHQ J4
+run_step KW J5
 run_step M3 J0
 run_step M4 J0
 run_step M5 J0

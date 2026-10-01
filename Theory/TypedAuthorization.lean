@@ -91,6 +91,13 @@ inductive Verb : ResourceKind → Type
   /-- Appending one entry to a stream object: "may speak, may not edit".
   `mutateObject` covers it too (`Verb.AllowedBy`). -/
   | appendObject : Verb .object
+  /-- Issuing a realm asset from its issuer well (`Kernel.RealmWellReceiver`):
+  the request targets the well account and is admitted under the WELL's law. -/
+  | mintAsset : Verb .account
+  /-- Destroying a held realm asset back into its well: the request targets the
+  debited account and is admitted under that ACCOUNT's law. Distinct from
+  `transfer`, so a holder can delegate consumption without delegating payment. -/
+  | burnAsset : Verb .account
   deriving DecidableEq, Repr
 
 /-- The granted verbs that cover a requested verb: the verb itself, and for an

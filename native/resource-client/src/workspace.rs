@@ -1399,6 +1399,7 @@ fn complete_birth(
         .and_then(|values| values.first())
         .ok_or("retained birth source lacks resource")?;
     let target = member(parts, "target")?;
+    let kind = member(parts, "kind")?;
     let owner = member(parts, "ownerCapability")?;
     let control = member(parts, "controlCapability")?;
     if reservation.ids.get("target").map(String::as_str) != Some(target)
@@ -1416,7 +1417,7 @@ fn complete_birth(
         return Err("confirmed birth conflicts with existing workspace reference".into());
     }
     let value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
-        "kind":"object","target":target,"observeCapability":owner,
+        "kind":kind,"target":target,"observeCapability":owner,
         "operationCapability":owner,"controlCapability":control,
         "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,
             "reservationRecord":reservation.record_path},"authority":"hint-only"});
@@ -1570,6 +1571,10 @@ fn birth(
         return Err("supported resource storage is content, declared or stream".into());
     }
     decimal(shape.owner, "birth owner")?;
+    // An account (a realm well, or a holder's purse) is declared storage only.
+    if !matches!((shape.kind, shape.storage), ("object", _) | ("account", "declared")) {
+        return Err("resource kind is object, or account with declared storage".into());
+    }
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = member_path(workspace, "namespaceRoot")?;
     let context = bounded_json(&context_path)?;
@@ -1804,13 +1809,14 @@ fn birth(
     Ok((source, receipt, reservation))
 }
 
-fn create(
+pub(crate) fn create(
     root: &Path,
     workspace: &Value,
     name_value: &str,
     storage: &str,
     predicate_path: &Path,
     room: Option<&str>,
+    kind: &str,
     owner: Option<&str>,
 ) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
@@ -1826,7 +1832,7 @@ fn create(
         workspace,
         name_value,
         &BirthShape {
-            kind: "object",
+            kind,
             storage,
             owner: &subject,
             predicate: &predicate,
@@ -2598,6 +2604,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => Some(os_string(value, "room name")?),
                 None => None,
             };
+            let kind = match args.optional("kind") {
+                Some(value) => os_string(value, "resource kind")?,
+                None => "object".to_owned(),
+            };
             let owner = match args.optional("owner") {
                 Some(value) => Some(os_string(value, "resource owner")?),
                 None => None,
@@ -2610,6 +2620,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &storage,
                 &predicate,
                 room.as_deref(),
+                &kind,
                 owner.as_deref(),
             )
         }
