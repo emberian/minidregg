@@ -817,6 +817,9 @@ fn socket_process(
             (10, pair(read(1)?, read(2)?)?, Some(arguments[3]))
         }
         "assemble" if arguments.len() == 4 => (11, pair(read(1)?, read(2)?)?, Some(arguments[3])),
+        "dry-run" if arguments.len() == 4 => {
+            (130, pair(read(1)?, read(2)?)?, Some(arguments[3]))
+        }
         _ => {
             return Err(format!(
                 "{command} is not available through the persistent host session"
@@ -1411,6 +1414,102 @@ fn submit(
         &outcome_json,
     )?;
     print_confirmed_outcome(&outcome)
+}
+
+/// A Host refusal as data: `Ok(Err(line))` when the Host refused the request
+/// (`refused: REASON: ...`, from the Host's own decoding of its frame),
+/// `Err` for a client failure. Clear the decision slot before the request.
+pub(crate) fn host_decided<T>(result: Result<T>) -> Result<std::result::Result<T, String>> {
+    match result {
+        Ok(value) => Ok(Ok(value)),
+        Err(error) => match take_host_decision() {
+            Some(HostDecision::RefusedFrame {
+                decoded: Some(outcome),
+                ..
+            }) => Ok(Err(refusal_line(&outcome)
+                .unwrap_or_else(|| format!("stopped: {}", outcome["type"])))),
+            Some(HostDecision::RefusedFrame { command, .. }) => Ok(Err(format!(
+                "refused: Host refused {command}; the frame was not decoded"
+            ))),
+            _ => Err(error),
+        },
+    }
+}
+
+/// P-AFFORDANCES: the Host's judgement of one intent, without submitting it.
+/// Plans it exactly as `submit` does (observe, op 1), signs the plan, and asks
+/// the Host to dry-run that plan (op 130: assemble and submit over a Store
+/// writer that never appends). `Ok(None)` is admitted; `Ok(Some(line))` is the
+/// Host's own refusal line (`refused: REASON: ...`), from the Host's decoding of
+/// its frame; a client failure is `Err`.
+pub(crate) fn dry_run(
+    host: &Path,
+    config: &Path,
+    intent: &Path,
+    intent_kind: &OsStr,
+    key: &Path,
+    directory: &Path,
+) -> Result<Option<String>> {
+    create_dir(directory)?;
+    let retained_intent = directory.join(if intent_kind == OsStr::new("binary") {
+        "intent-source.bin"
+    } else {
+        "intent.json"
+    });
+    copy_new(intent, &retained_intent)?;
+    let retained_config = directory.join("config.json");
+    copy_new(config, &retained_config)?;
+    write_manifest(directory, host, &retained_config, "dry-run")?;
+    let signing = read_secret(key)?;
+    take_host_decision();
+    let observed = match host_decided(authorize_observation(
+        host,
+        &retained_config,
+        &retained_intent,
+        intent_kind,
+        &signing,
+        directory,
+    ))? {
+        Ok(observed) => observed,
+        Err(line) => return Ok(Some(line)),
+    };
+    let plan_bin = directory.join("plan.bin");
+    if let Err(line) = host_decided(host_files(
+        host,
+        &retained_config,
+        &[Path::new("prepare"), &observed.signed, &plan_bin],
+    ))? {
+        return Ok(Some(line));
+    }
+    let presentation = inspect(
+        host,
+        &retained_config,
+        "plan",
+        &plan_bin,
+        &directory.join("plan.json"),
+    )?;
+    let signatures_bin = directory.join("transaction-signatures.bin");
+    encode_signatures(
+        host,
+        &retained_config,
+        &signing,
+        plan_headers(&presentation)?,
+        &directory.join("transaction-signatures.json"),
+        &signatures_bin,
+    )?;
+    match host_decided(host_files(
+        host,
+        &retained_config,
+        &[
+            Path::new("dry-run"),
+            &observed.signed,
+            &signatures_bin,
+            &directory.join("dry-run-plan.bin"),
+        ],
+    ))? {
+        Ok(()) => Ok(None),
+        Err(line) => Ok(Some(line)),
+    }
 }
 
 fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {

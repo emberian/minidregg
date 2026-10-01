@@ -122,6 +122,7 @@ import Host.ApplicationAgentLifetimeDispatchPaidInspection
 import Host.ApplicationLifecycleClaimInspection
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
+import Host.DryRun
 import Host.ApplicationLifecycleLaunchBeginAuthoring
 import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleLaunchClaimAuthoring
@@ -1585,6 +1586,15 @@ def dispatchSession (config : NativeHost.Config)
       let signatures ← decodeSignatures signaturesBytes
       let call ← IO.ofExcept (NativeHost.assemble plan signatures)
       return (11, callCodec.encode call)
+  | 130 =>
+      -- Dry run (P-AFFORDANCES): plan as op 1, assemble as op 11, submit as op 2
+      -- over a Store writer that never appends (`Host.DryRun`). Commits nothing.
+      let (observation, signaturesBytes) ← splitPair payload
+      let signatures ← decodeSignatures signaturesBytes
+      let session ← sessionCurrent config state
+      match ← DryRun.dryRunLoaded config session.opened observation signatures with
+      | .admitted plan => return (130, signingPlanCodec.encode plan)
+      | .stopped outcome => return (255, outcomeCodec.encode outcome)
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))
@@ -6101,6 +6111,17 @@ def run (arguments : List String) : IO UInt32 := do
       | "submit", [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.submit config (← readBytes input)))
           pure 0
+      | "dry-run", [observationPath, signaturesPath, output] =>
+          let signatures ← decodeSignatures (← readBytes signaturesPath)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          match ← DryRun.dryRunLoaded config opened (← readBytes observationPath) signatures with
+          | .admitted plan =>
+              writeBytes output (signingPlanCodec.encode plan)
+              pure 0
+          | .stopped outcome =>
+              writeBytes output (outcomeCodec.encode outcome)
+              IO.eprintln "dry run stopped; the outcome frame is in the output file"
+              pure 3
       | "lookup", [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.lookup config (← readBytes input)))
           pure 0
