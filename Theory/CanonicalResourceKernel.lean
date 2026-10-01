@@ -594,6 +594,55 @@ theorem fee_debits_payer
   simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
     Book.applyPosting, Book.leases]
 
+/-! ## One-operation batches and the per-asset frame (K-WELL)
+
+A realm well's mint or burn is one signed operation, posted as the batch
+`⟨[], [operation]⟩`. Every operation posts in exactly one asset, so every other
+asset's balances are untouched: issuing a realm asset never moves credit. -/
+
+theorem burn_debits_source
+    (book : Book) (source : AccountId) (asset : AssetId) (amount : Nat)
+    (different : asset ≠ source) :
+    ((Operation.burn source asset amount).apply book).balance source asset =
+      book.balance source asset - Int.ofNat amount := by
+  simp [Operation.apply, Operation.posting, Operation.leaseRecord?,
+    Book.applyPosting, Book.balance, DFinsupp.single_apply,
+    different, sub_eq_add_neg]
+
+/-- An operation moves only balances of its own posting asset. -/
+theorem Operation.apply_balance_other_asset
+    (operation : Operation) (book : Book) (account : AccountId) (asset : AssetId)
+    (other : operation.posting.asset ≠ asset) :
+    (operation.apply book).balance account asset = book.balance account asset := by
+  have balances : (operation.apply book).balances = (book.applyPosting operation.posting).balances := by
+    cases operation <;> rfl
+  have source : ¬ ((operation.posting.source, operation.posting.asset) = (account, asset)) :=
+    fun same => other (Prod.mk.inj same).2
+  have destination :
+      ¬ ((operation.posting.destination, operation.posting.asset) = (account, asset)) :=
+    fun same => other (Prod.mk.inj same).2
+  unfold Book.balance
+  rw [balances]
+  simp [Book.applyPosting, DFinsupp.add_apply, DFinsupp.single_apply, source, destination]
+
+@[simp] theorem Batch.single_apply (operation : Operation) (book : Book) :
+    (⟨[], [operation]⟩ : Batch).apply book = operation.apply book := rfl
+
+theorem Batch.single_admission (operation : Operation) (book : Book) :
+    (⟨[], [operation]⟩ : Batch).Admission book ↔ CanonicalResourceKernel.Admission book operation := by
+  simp [Batch.Admission, RegistrationsAdmitted, OperationsAdmitted, registerAccounts]
+
+/-- The holders' sum of an asset is the negated well: `Σ_{x ≠ a} bal x a = -bal a a`
+whenever the asset's total is zero and its well is a registered account. -/
+theorem Book.holders_sum_eq_neg_well (book : Book) (asset : AssetId)
+    (present : asset ∈ book.accounts) (zero : book.totalAsset asset = 0) :
+    ∑ account ∈ book.accounts.erase asset, book.balance account asset =
+      -(book.balance asset asset) := by
+  have split := Finset.add_sum_erase book.accounts (fun account => book.balance account asset) present
+  simp only at split
+  unfold Book.totalAsset at zero
+  linarith
+
 /-! ## Negative pole: credit-only mint is not in the language -/
 
 /-- A hostile credit with no issuer-well debit, used only to state the tooth. -/
@@ -741,5 +790,14 @@ example :
 #guard_msgs (whitespace := lax) in #print axioms Book.creditOnly_breaks_conservation
 /-- info: 'Minidregg.Theory.CanonicalResourceKernel.lease_installs_exact_record' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms lease_installs_exact_record
+
+/-- info: 'Minidregg.Theory.CanonicalResourceKernel.burn_debits_source' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms burn_debits_source
+/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Operation.apply_balance_other_asset' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Operation.apply_balance_other_asset
+/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Batch.single_admission' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Batch.single_admission
+/-- info: 'Minidregg.Theory.CanonicalResourceKernel.Book.holders_sum_eq_neg_well' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Book.holders_sum_eq_neg_well
 
 end Minidregg.Theory.CanonicalResourceKernel

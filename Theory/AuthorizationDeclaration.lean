@@ -78,6 +78,8 @@ def verbTag {kind : ResourceKind} : Verb kind → Nat
   | .delegateProgram => 9
   | .installPolicy => 10
   | .revokeCapability => 11
+  | .mintAsset => 14
+  | .burnAsset => 15
 
 /-- Kind-directed decoding makes an ill-kinded verb tag fail rather than
 manufacturing an equality proof after the fact. -/
@@ -94,6 +96,8 @@ def decodeVerb (kind : ResourceKind) (tag : Nat) : Option (Verb kind) :=
   | .program, 9 => some .delegateProgram
   | .program, 10 => some .installPolicy
   | .program, 11 => some .revokeCapability
+  | .account, 14 => some .mintAsset
+  | .account, 15 => some .burnAsset
   | _, _ => none
 
 @[simp] theorem decodeVerb_tag {kind : ResourceKind} (verb : Verb kind) :

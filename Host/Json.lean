@@ -284,6 +284,8 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .account, "observe" => pure .observeAccount
   | .account, "transfer" => pure .transfer
   | .account, "delegate" => pure .delegateAccount
+  | .account, "mintAsset" => pure .mintAsset
+  | .account, "burnAsset" => pure .burnAsset
   | .program, "observe" => pure .observeProgram
   | .program, "install" => pure .installProgram
   | .program, "delegate" => pure .delegateProgram
@@ -2111,6 +2113,23 @@ private def participantKeyEnrollment (json : Lean.Json) : Result (List UInt8) :=
       key := ← keyRecord "$.key" (← field "$" "key" obj) }
   return ParticipantKeyEnrollment.commandCodec.encode command
 
+/-- A realm-well command (lane K-WELL): `op` is `mint` or `burn`. -/
+private def wellCommand (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "capability", "well", "op", "account", "amount", "nonce"] json
+  let op ← match ← string "$.op" (← field "$" "op" obj) with
+    | "mint" => pure RealmWellCodec.WellOp.mint
+    | "burn" => pure RealmWellCodec.WellOp.burn
+    | _ => failAt "$.op" "expected mint or burn"
+  let command : RealmWellCodec.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      well := ← nat "$.well" (← field "$" "well" obj)
+      op := op
+      account := ← nat "$.account" (← field "$" "account" obj)
+      amount := ← nat "$.amount" (← field "$" "amount" obj)
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj) }
+  return RealmWellCodec.commandCodec.encode command
+
 /-- Encode an operator's chosen issue, role and capability selectors. -/
 private def sessionEnrollmentRequest (json : Lean.Json) : Result (List UInt8) := do
   let obj ← exactObject "$"
@@ -2153,6 +2172,7 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "participant-key-enrollment" => participantKeyEnrollment json
+  | "well-command" => wellCommand json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2761,6 +2781,29 @@ private def resourceJson (value : List UInt8 × List (Nat × Int)) : Result Lean
   pure <| .mkObj [("type", "resource"), ("cell", view),
     ("balances", .arr <| value.2.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2])]
 
+private def wellCommandJson (command : RealmWellCodec.Command) : Lean.Json :=
+  .mkObj [("type", "well-command-v1"), ("subject", decimal command.subject.value),
+    ("capability", decimal command.capability.value), ("well", decimal command.well),
+    ("op", match command.op with | .mint => "mint" | .burn => "burn"),
+    ("account", decimal command.account), ("amount", decimal command.amount),
+    ("nonce", decimal command.nonce)]
+
+/-- The operator-local realm-well ledger (`well-ledger`). -/
+def wellLedgerJson (ledger : NativeHost.WellLedger) : Lean.Json :=
+  .mkObj
+    [("type", "well-ledger-v1"),
+     ("bookRoot", decimal ledger.bookRoot.value),
+     ("creditAsset", decimal ledger.creditAsset),
+     ("creditWell", signedDecimal ledger.creditWell),
+     ("creditTotal", signedDecimal ledger.creditTotal),
+     ("wells", .arr (ledger.wells.toArray.map fun row => .mkObj
+       [("asset", decimal row.asset), ("realm", decimal row.realm),
+        ("well", signedDecimal row.well),
+        ("holders", .arr (row.holders.toArray.map fun (holder, balance) =>
+          .mkObj [("account", decimal holder), ("balance", signedDecimal balance)])),
+        ("holdersSum", signedDecimal row.holdersSum),
+        ("total", signedDecimal row.total)]))]
+
 private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCodec α)
     (bytes : List UInt8) : Result α :=
   match codec.decode bytes with
@@ -2915,6 +2958,28 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("possessionSignature", hexJson parsed.ingress.possessionSignature),
          ("possessionSignatureLength", decimal parsed.ingress.possessionSignature.length),
          ("signatureVerified", .bool false)]
+  | "well-command" => wellCommandJson <$> decoded "well-command" RealmWellCodec.commandCodec bytes
+  | "well-plan" => do
+      let plan ← decoded "well-plan" RealmWellCodec.signingPlanCodec bytes
+      let some command := RealmWellCodec.commandCodec.decode plan.commandBytes
+        | failAt "well-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "well-plan-v1"),
+         ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value),
+         ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("command", wellCommandJson command),
+         ("header", hexJson plan.header),
+         ("signedHeader", signedHeaderJson plan.header)]
+  | "well-ingress" => do
+      let some parsed := RealmWellReceiver.decodeIngress bytes
+        | failAt "well-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "well-ingress-v1"),
+         ("canonical", hexJson bytes),
+         ("command", wellCommandJson parsed.command),
+         ("envelope", hexJson parsed.ingress.envelope)]
   | "outcome" => outcomeJson <$> decoded "outcome" outcomeCodec bytes
   | "application-permission-schema" => do
       let schema ← decoded "application-permission-schema"

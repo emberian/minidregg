@@ -336,7 +336,7 @@ policy-control grant per newborn. Sharing is a later authorized delegation,
 not permission to nominate extra arbitrary grants during creation. -/
 def ownerVerbs : (kind : ResourceKind) → Finset (Verb kind)
   | .object => {.observeObject, .mutateObject, .delegateObject}
-  | .account => {.observeAccount, .transfer, .delegateAccount}
+  | .account => {.observeAccount, .transfer, .delegateAccount, .mintAsset, .burnAsset}
   | .program => {.observeProgram, .installProgram, .delegateProgram}
 
 def RootGrantShape (template : CanonicalRuntimeProfile.FactoryTemplate)

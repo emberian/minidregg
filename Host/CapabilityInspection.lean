@@ -30,6 +30,8 @@ private def verbName : {kind : ResourceKind} → Verb kind → Json
   | _, .delegateObject | _, .delegateAccount | _, .delegateProgram => "delegate"
   | _, .installPolicy => "installPolicy"
   | _, .revokeCapability => "revokeCapability"
+  | _, .mintAsset => "mintAsset"
+  | _, .burnAsset => "burnAsset"
 
 /-- Every authorable head field comes from the decoded source capability.
 Canonical bytes retain the full ancestry, which is not recreated in JSON. -/

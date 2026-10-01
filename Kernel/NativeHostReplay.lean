@@ -38,6 +38,7 @@ import Kernel.ApplicationLifecycleCompletionV2Core
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
+import Kernel.RealmWellReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -711,6 +712,11 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
+  | realmWell {ingress : RealmWellReceiver.DecodedIngress}
+      (accepted : RealmWellReceiver.AcceptedWell config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+        opened.durable ingress) :
+      NativeAdmission config opened (RealmWellReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1496,6 +1502,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
           .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := RealmWellReceiver.decodeIngress bytes then
+    match ← RealmWellReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height, config.tariff.asset⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"realm well command refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨RealmWellReceiver.intent accepted,
+          .realmWell accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

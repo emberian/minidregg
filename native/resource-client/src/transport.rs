@@ -85,6 +85,8 @@ fn request_from_envelope<'a>(
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
         [0..=11, ..] => true,
+        // Realm wells (K-WELL): plan, detached assembly, submit.
+        [123..=125, _, ..] => true,
         [12 | 14] => true,
         [13 | 15, digits @ ..] => {
             !digits.is_empty()

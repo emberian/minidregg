@@ -181,7 +181,7 @@ fn new_attempt(root: &Path) -> Result<(PathBuf, String)> {
     Err("could not allocate a distinct workspace attempt name".into())
 }
 
-fn load(root: &Path) -> Result<Value> {
+pub(crate) fn load(root: &Path) -> Result<Value> {
     private_dir(root)?;
     private_dir(&root.join("refs"))?;
     private_dir(&root.join("attempts"))?;
@@ -325,7 +325,7 @@ fn init(
     Ok(())
 }
 
-fn reference(root: &Path, name: &str) -> Result<Value> {
+pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
     validate_name(name)?;
     let value = bounded_json(&root.join("refs").join(format!("{name}.json")))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
@@ -1133,6 +1133,7 @@ fn complete_birth(
         .and_then(|values| values.first())
         .ok_or("retained birth source lacks resource")?;
     let target = member(parts, "target")?;
+    let kind = member(parts, "kind")?;
     let owner = member(parts, "ownerCapability")?;
     let control = member(parts, "controlCapability")?;
     if reservation.ids.get("target").map(String::as_str) != Some(target)
@@ -1150,7 +1151,7 @@ fn complete_birth(
         return Err("confirmed birth conflicts with existing workspace reference".into());
     }
     let value = json!({"type":"minidregg-participant-reference-v1","name":name_value,
-        "kind":"object","target":target,"observeCapability":owner,
+        "kind":kind,"target":target,"observeCapability":owner,
         "operationCapability":owner,"controlCapability":control,
         "provenance":{"birthReceipt":receipt,"reservationDigest":reservation.request_digest,
             "reservationRecord":reservation.record_path},"authority":"hint-only"});
@@ -1165,13 +1166,15 @@ fn complete_birth(
     Ok(())
 }
 
-fn create(
+pub(crate) fn create(
     root: &Path,
     workspace: &Value,
     name_value: &str,
     storage: &str,
     predicate_path: &Path,
     room_name: Option<&str>,
+    kind: &str,
+    owner: Option<&str>,
 ) -> Result<()> {
     validate_name(name_value)?;
     // `--in ROOM`: the new resource is born in the room a workspace reference
@@ -1182,6 +1185,10 @@ fn create(
     };
     if !matches!(storage, "content" | "declared") {
         return Err("supported resource storage is content or declared".into());
+    }
+    // An account (a realm well, or a holder's purse) is declared storage only.
+    if !matches!((kind, storage), ("object", _) | ("account", "declared")) {
+        return Err("resource kind is object, or account with declared storage".into());
     }
     let context_path = member_path(workspace, "birthContext")?;
     let namespace_root = member_path(workspace, "namespaceRoot")?;
@@ -1196,6 +1203,21 @@ fn create(
     let mut requested_core = json!({"type":"minidregg-workspace-create-request-v1",
         "name":name_value,"storage":storage,"predicate":predicate,"context":context,
         "subject":member(workspace,"subject")?});
+    if kind != "object" {
+        requested_core["kind"] = json!(kind);
+    }
+    // `--owner SUBJECT`: the creator pays and names the cell; the owner and
+    // control grants are held by SUBJECT (a realm founder opening a player's
+    // purse). The reference this workspace keeps is a hint to grants it does
+    // not hold.
+    if let Some(owner) = owner {
+        decimal(owner, "owner subject")?;
+        requested_core["owner"] = json!(owner);
+    }
+    let owner = match owner {
+        Some(owner) => owner.to_owned(),
+        None => member(workspace, "subject")?.to_owned(),
+    };
     if let Some(room) = &room {
         requested_core["room"] = json!(room);
     }
@@ -1246,8 +1268,8 @@ fn create(
     let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
-                "resources":[{"kind":"object","storage":storage,
-                    "target":reservation.ids["target"],"owner":member(workspace,"subject")?,
+                "resources":[{"kind":kind,"storage":storage,
+                    "target":reservation.ids["target"],"owner":owner,
                     "ownerCapability":reservation.ids["ownerCapability"],
                     "controlCapability":reservation.ids["controlCapability"],
                     "predicate":predicate}],
@@ -1489,8 +1511,17 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => Some(os_string(value, "room name")?),
                 None => None,
             };
+            let kind = match args.optional("kind") {
+                Some(value) => os_string(value, "resource kind")?,
+                None => "object".to_owned(),
+            };
+            let owner = match args.optional("owner") {
+                Some(value) => Some(os_string(value, "owner subject")?),
+                None => None,
+            };
             args.finish()?;
-            create(&root, &workspace, &name, &storage, &predicate, room.as_deref())
+            create(&root, &workspace, &name, &storage, &predicate, room.as_deref(), &kind,
+                owner.as_deref())
         }
         "recover" => {
             let attempt = path(args.required("attempt")?);

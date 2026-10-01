@@ -347,6 +347,8 @@ def verbName : SomeVerb → String
   | ⟨.account, .observeAccount⟩ => "observe_account"
   | ⟨.account, .transfer⟩ => "transfer"
   | ⟨.account, .delegateAccount⟩ => "delegate_account"
+  | ⟨.account, .mintAsset⟩ => "mint_asset"
+  | ⟨.account, .burnAsset⟩ => "burn_asset"
   | ⟨.program, .observeProgram⟩ => "observe_program"
   | ⟨.program, .installProgram⟩ => "install_program"
   | ⟨.program, .delegateProgram⟩ => "delegate_program"
@@ -374,6 +376,7 @@ def allVerbs : List SomeVerb :=
   [ ⟨.object, .observeObject⟩, ⟨.object, .mutateObject⟩,
     ⟨.object, .delegateObject⟩, ⟨.account, .observeAccount⟩,
     ⟨.account, .transfer⟩, ⟨.account, .delegateAccount⟩,
+    ⟨.account, .mintAsset⟩, ⟨.account, .burnAsset⟩,
     ⟨.program, .observeProgram⟩, ⟨.program, .installProgram⟩,
     ⟨.program, .delegateProgram⟩, ⟨.program, .installPolicy⟩,
     ⟨.program, .revokeCapability⟩ ]

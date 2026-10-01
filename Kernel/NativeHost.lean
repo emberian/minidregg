@@ -482,6 +482,94 @@ def enrollmentLookup (config : Config) (bytes : List UInt8) : IO Outcome := do
   | .error detail => return .unavailable detail.toUTF8.toList
   | .ok opened => return enrollmentLookupLoaded config opened bytes
 
+/-! ## Realm wells (lane K-WELL): session operations 123–125
+
+123 = signing plan for a `DREGG/WELL/COMMAND/v1` command (`DREGG/WELL/PLAN/v1`),
+124 = detached assembly `pair(plan, sig64)` → `DREGG/WELL/SIGNED/v1` ingress,
+125 = submit (an exact resubmission of an accepted ingress returns its original
+receipt as `replayed`). The well ledger is the operator-local CLI `well-ledger`. -/
+
+def wellAmbient (config : Config) (opened : Opened config) : RealmWellReceiver.Ambient :=
+  ⟨config.federation, logicalHeight config opened.durable, config.tariff.asset⟩
+
+/-- The header the subject signs over this opened image. It discloses no
+decision; a signer key the authority cell does not hold is refused. -/
+def wellPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String RealmWellCodec.SigningPlan := do
+  let command ← need "noncanonical realm well command"
+    (RealmWellCodec.commandCodec.decode commandBytes)
+  let header ← RealmWellReceiver.signingHeader config.deployment config.profile
+    (wellAmbient config opened) opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def wellAssemble (plan : RealmWellCodec.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "realm well signature must be 64 bytes"
+  let header ← need "noncanonical realm well header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (RealmWellCodec.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical realm well plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (RealmWellCodec.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def wellSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← RealmWellReceiver.receiveLoaded config.deployment config.profile
+      (wellAmbient config opened) config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused "realm-well" s!"{repr reason}"
+  | .transactionConflict => return refused "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- One realm well: its asset (= the well account), its realm (the well's
+parent row), the well's balance, every other registered account's nonzero
+balance in the asset, their sum and the asset's total (which conservation
+keeps at zero). -/
+structure WellLedgerRow where
+  asset : Nat
+  realm : Nat
+  well : Int
+  holders : List (Nat × Int)
+  holdersSum : Int
+  total : Int
+
+/-- The operator's local ledger read: every realm well, and the credit asset's
+own well balance. -/
+structure WellLedger where
+  bookRoot : Digest
+  creditAsset : Nat
+  creditWell : Int
+  creditTotal : Int
+  wells : List WellLedgerRow
+
+def wellLedgerLoaded (config : Config) (opened : Opened config) : Except String WellLedger := do
+  let authority ← need "authority unavailable"
+    (CredentialAuthorityDomainReceiver.loadDeployment config.deployment opened.durable.snapshot)
+  let book ← need "book unavailable"
+    (ResourceBirthController.Concrete.observeCell config.deployment opened.directory.directory
+      config.deployment.resourceBookId .resourceBook)
+  let logical := CanonicalResourceKernel.logicalBook book.payload.logical
+  let parent := authority.snapshot.authState.parent
+  let accounts := logical.accounts.sort (· ≤ ·)
+  let wells := accounts.filterMap fun asset => (parent asset).map fun realm =>
+    let holders := (accounts.filter (· ≠ asset)).filterMap fun holder =>
+      let balance := logical.balance holder asset
+      if balance = 0 then none else some (holder, balance)
+    let holdersSum := (holders.map Prod.snd).sum
+    ({ asset, realm, well := logical.balance asset asset, holders, holdersSum,
+       total := logical.balance asset asset + holdersSum } : WellLedgerRow)
+  let credit := config.tariff.asset
+  pure ⟨book.payload.root, credit, logical.balance credit credit, logical.totalAsset credit, wells⟩
+
+def wellLedger (config : Config) : IO (Except String WellLedger) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened => return wellLedgerLoaded config opened
+
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable

@@ -88,6 +88,13 @@ inductive Verb : ResourceKind → Type
   | installPolicy : Verb .program
   /-- Revoking a resource grant is independently scoped management authority. -/
   | revokeCapability : Verb .program
+  /-- Issuing a realm asset from its issuer well (`Kernel.RealmWellReceiver`):
+  the request targets the well account and is admitted under the WELL's law. -/
+  | mintAsset : Verb .account
+  /-- Destroying a held realm asset back into its well: the request targets the
+  debited account and is admitted under that ACCOUNT's law. Distinct from
+  `transfer`, so a holder can delegate consumption without delegating payment. -/
+  | burnAsset : Verb .account
   deriving DecidableEq, Repr
 
 /-- The complete semantic authorization request.  Verifiers receive this value
