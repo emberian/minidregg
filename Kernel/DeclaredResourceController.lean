@@ -1138,10 +1138,10 @@ inductive ReceiveResult where
 /-- The continuation receives the very object admitted for this signed call
 and old durable prefix. It can retain that object through physical readback;
 no second independent historical admission is substituted for it. -/
-def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
+def withAcceptedLoadedFrom {F : Type} [Field F] [DecidableEq F] {R : Type}
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
     (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
-    (durable : Durable) (signed : SignedCommand)
+    (durable : Durable) (directory? : Option (LoadedDirectory durable)) (signed : SignedCommand)
     (acceptedResult : {command : Command} →
       (prepared : PreparedInvocation deployment profile ambient durable command) →
       (shape : PhysicalShape prepared) →
@@ -1154,7 +1154,7 @@ def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
       | .error _ => ordinaryResult .transactionConflict
       | .ok (some recorded) => ordinaryResult (.replayed recorded)
       | .ok none =>
-          match prepare deployment profile ambient durable command with
+          match prepareFrom deployment profile ambient durable directory? command with
           | .error reason => ordinaryResult (.rejected reason)
           | .ok prepared =>
               if shape : PhysicalShape prepared then
@@ -1162,6 +1162,35 @@ def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
                 | .error reason => ordinaryResult (.rejected reason)
                 | .ok accepted => acceptedResult prepared shape accepted
               else ordinaryResult (.rejected .physicalPreparation)
+
+/-- The receiver over the image's own directory, loaded here. A caller holding
+that directory passes it to `withAcceptedLoadedFrom` (`withAcceptedLoaded_eq_from`). -/
+def withAcceptedLoaded {F : Type} [Field F] [DecidableEq F] {R : Type}
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (durable : Durable) (signed : SignedCommand)
+    (acceptedResult : {command : Command} →
+      (prepared : PreparedInvocation deployment profile ambient durable command) →
+      (shape : PhysicalShape prepared) →
+      AcceptedInvocation prepared signed → IO R)
+    (ordinaryResult : ReceiveResult → IO R) : IO R :=
+  withAcceptedLoadedFrom deployment profile ambient native durable (loadDirectory durable) signed
+    acceptedResult ordinaryResult
+
+theorem withAcceptedLoaded_eq_from {F : Type} [Field F] [DecidableEq F] {R : Type}
+    (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)
+    (ambient : Ambient) (native : CredentialSignatureIO.NativeConfig)
+    (durable : Durable) (held : LoadedDirectory durable) (signed : SignedCommand)
+    (acceptedResult : {command : Command} →
+      (prepared : PreparedInvocation deployment profile ambient durable command) →
+      (shape : PhysicalShape prepared) →
+      AcceptedInvocation prepared signed → IO R)
+    (ordinaryResult : ReceiveResult → IO R) :
+    withAcceptedLoaded deployment profile ambient native durable signed acceptedResult ordinaryResult =
+      withAcceptedLoadedFrom deployment profile ambient native durable (some held) signed
+        acceptedResult ordinaryResult := by
+  unfold withAcceptedLoaded
+  rw [LoadedDirectory.load_eq held]
 
 def receiveLoaded {F : Type} [Field F] [DecidableEq F]
     (deployment : Deployment) (profile : CanonicalRuntimeProfile.Profile F)

@@ -538,6 +538,9 @@ structure Settings where
   agentDispatchFixed : Option AgentDispatchFixedSettings := none
   agentLifetimeDispatchFixed : Option AgentLifetimeDispatchFixedSettings := none
   agentLifetimeDispatchServices : Option (List AgentLifetimeDispatchFixedSettings) := none
+  /-- The operator's synchronous run budget in Lean steps (default
+  `NativeHost.defaultNockFSync`, C17's measured 1,000,000). -/
+  nockFSync : Option Nat := none
   deriving FromJson, ToJson
 
 def Settings.config (settings : Settings) : NativeHost.Config where
@@ -559,6 +562,7 @@ def Settings.config (settings : Settings) : NativeHost.Config where
     ⟨tariff.base, tariff.perBirth⟩
   completionCustodianKey := settings.completionCustodianKey.map
     CompletionCustodianKeySettings.bytes
+  nockFSync := settings.nockFSync.getD NativeHost.defaultNockFSync
 
 def Settings.providerMeteringPin (settings : Settings) :
     Except String (Option (Nat × Kernel.ProviderMetering.Tariff)) := do
@@ -773,6 +777,7 @@ def descriptionLoaded (config : NativeHost.Config) : Lean.Json := Id.run do
           "fn-selected-public-release", "application-lifecycle-begin",
           "selected-source-publication"] : List String) ++
          if config.grainBirthTariff.isSome then ["grain-birth"] else [])),
+     ("nockFSync", n config.nockFSync),
      ("jointInvocation", toJson true), ("typedContent", toJson true),
      ("authorizedQueries", toJson true), ("delegation", toJson true)]
 
@@ -818,6 +823,18 @@ def storeBench (config : NativeHost.Config) : IO Unit := do
     for _ in [0:10] do
       if (NativeHost.validateLoaded config durable).toOption.isSome then n := n + 1
     pure n
+  if let .ok opened := NativeHost.validateLoaded config durable then
+    discard <| timed "loadDirectoryFrom (held, same image) x10" do
+      let mut n := 0
+      for _ in [0:10] do
+        if (CredentialAuthorityDomainReceiver.loadDirectoryFrom opened.directory durable).isSome then
+          n := n + 1
+      pure n
+    discard <| timed "validateLoadedFrom (held, same image) x10" do
+      let mut n := 0
+      for _ in [0:10] do
+        if (NativeHost.validateLoadedFrom config opened durable).toOption.isSome then n := n + 1
+      pure n
   discard <| timed "root rebuild x3" do
     let mut r := 0
     for _ in [0:3] do
@@ -910,14 +927,13 @@ def sessionOpened (config : NativeHost.Config)
     IO (NativeHost.Opened config) := do
   return (← sessionCurrent config state).opened
 
-/-- The live directory, for the Nock program reads (ops 117-119). -/
+/-- The live directory, for the Nock program reads (ops 131-137): the session's
+held one (`LoadedDirectory.load_eq`: it is what `loadDirectory` would return),
+never a per-request decode of every stored cell. -/
 def nockDirectory (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config))) :
     IO (Minidregg.Theory.CellRegistry.Directory Nat CanonicalCellRegistry.registry) := do
-  let opened ← sessionOpened config state
-  match CredentialAuthorityDomainReceiver.loadDirectory opened.durable with
-  | some loaded => pure loaded.directory
-  | none => throw (IO.userError "nock: the store directory does not decode")
+  return (← sessionOpened config state).directory.directory
 
 def sessionConfirmed (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -5549,9 +5565,10 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (IO.userError "nock run request is not UTF-8")
                             let (programId, caller, room, targets, values) ← IO.ofExcept
                               (Minidregg.Host.Json.nockRunRequest source)
+                            -- One session read per request: the directory is this image's held one.
                             let opened ← sessionOpened pinnedConfig state
                             let height := NativeHost.logicalHeight pinnedConfig opened.durable
-                            let directory ← nockDirectory pinnedConfig state
+                            let directory := opened.directory.directory
                             let verdict := Minidregg.Kernel.NockRun.dryRun
                               pinnedConfig.deployment.domain directory programId
                               ⟨height, caller, room⟩ targets values

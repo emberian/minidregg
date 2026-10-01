@@ -4,6 +4,9 @@ checkpoint plus suffix replay (`DurableReceiverIO.load`) — and validates it.
 `refresh` asks the store for entries after the session's head: none means the
 tip is current; new entries must continue the log chain, carry a verifying
 head tag, and replay through the shared executor (`DurableReceiverIO.extendFrom`).
+The advanced image is validated incrementally against the session's
+(`validateLoadedFrom`, equal to `validateLoaded`); requests read the session's
+`Opened`, never recompute its directory.
 A failed read, a shrunk log or a refused entry poisons the session.
 
 The walk-provenance families (application lifecycle, dispatch, grain session
@@ -48,7 +51,9 @@ def refresh (config : Config) (session : Session config) :
   | .ok durable =>
       if durable.image.accepted.length = session.durable.image.accepted.length then
         return .ok session
-      match validateLoaded config durable with
+      -- `validateLoadedFrom_eq`: the full validation, re-decoding and
+      -- re-checking only the cells whose bytes the new records moved.
+      match validateLoadedFrom config session.opened durable with
       | .error detail => return .error detail
       | .ok opened => return .ok { session with durable, opened }
 

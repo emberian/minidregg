@@ -40,7 +40,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve jjob1 jjob-money): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jsync m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve jjob1 jjob-money): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -126,7 +126,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOBM J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 JSYNC BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JJOB1 JJOBM J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -163,6 +163,7 @@ TITLE[JPAYE3]="the self-enrollment receiver (own Store)"
 TITLE[JPAY4]="the payment rail through the client with the fixture watcher (own Store)"
 TITLE[JPAY6]="a Book burn funds an AgentGrain purse in one joint turn (own Store; needs GRAIN, TEST_PROVIDER, LAUNCH_GATE, sudo)"
 TITLE[JJOBM]="a job money: escrow, bond and payout as conservation-checked Book turns (own Store)"
+TITLE[JSYNC]="the operator's nockFSync at both poles; the lifetime proofWork meter (own Store)"
 TITLE[J6]="stop/reopen: receipts recovered, exact retry replays"
 TITLE[G]="growth 10/100/500/1000: write<=5s, reopen<=60s at 1000"
 TITLE[J7]="law replaced; newcomer's existing grant still works"
@@ -796,6 +797,7 @@ step_JPAYE3() { hook jpay-e3 "J-PAY-E3: the self-enrollment receiver enrols, ren
 step_JPAY4() { hook jpay4 "J-PAY-4: the payment rail through mini pay with the fixture watcher (lane p4-pay)"; }
 step_JPAY6() { hook jpay6 "J-PAY-6: a Book burn funds an AgentGrain purse in one joint turn (lane p6-pay; hbox: needs GRAIN, TEST_PROVIDER, LAUNCH_GATE and passwordless sudo)"; }
 step_JJOBM() { hook jjob-money "J-JOB-MONEY: fund, claim and settle move Book credit with the job cell escrow and bond equal to the held account, refusals named in the operator log (lane C3 K-JOB-MONEY; ops 160-163)"; }
+step_JSYNC() { hook jsync "nockFSync (default 1,000,000): a 1,000,000-step run admitted, 1,000,010 and 1,000,001 refused overSyncBudget by name, the lifetime proofWork meter refusal named in the operator log (lane hot-path)"; }
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
@@ -833,6 +835,7 @@ run_step KW J5
 run_step JN2 J0
 run_step JN3 J0
 run_step JN5 J0
+run_step JSYNC J0
 run_step M3 J0
 run_step M4 J0
 run_step M5 J0

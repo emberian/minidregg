@@ -22,6 +22,7 @@ custody assumptions of CredentialSignedEnvelopeController. No native reply
 is deserialized as an authorization token.
 -/
 import Kernel.CredentialSignedEnvelopeController
+import Compiler.NativeCoprocess
 
 namespace Minidregg.Compiler.CredentialSignatureIO
 
@@ -62,9 +63,9 @@ def verify (config : NativeConfig) (publicKey frame signature : List UInt8) :
         IO.FS.writeBinFile keyPath publicKey.toByteArray
         IO.FS.writeBinFile framePath frame.toByteArray
         IO.FS.writeBinFile signaturePath signature.toByteArray
-        let output ← IO.Process.output
-          { cmd := config.binary.toString
-            args := #["verify", keyPath.toString, framePath.toString, signaturePath.toString] }
+        -- The binary's long-lived `serve` helper: the one-shot call's exact output.
+        let output ← NativeCoprocess.output config.binary.toString
+          #["verify", keyPath.toString, framePath.toString, signaturePath.toString]
         pure (parseOutput output)
     catch error => pure (.error (.unavailable s!"{error}"))
 

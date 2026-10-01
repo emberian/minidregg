@@ -325,6 +325,148 @@ theorem LoadedDirectory.bytes_exact
       durable.image durable.baseHeight durable.base durable.snapshot durable.resumed
       ⟨identifier⟩ outside).trans loaded.absentDefault |>.symm
 
+/-! ## A held directory is the recomputation; an unchanged row is not decoded again
+
+The Host holds one `LoadedDirectory` per served image (`NativeHost.Opened`).
+These facts let every request read it instead of decoding every stored cell
+again, and let a session advanced by new records decode only the rows whose
+bytes moved. -/
+
+/-- Two loaded directories of one image are equal: `decoded` fixes the
+directory, so the one computed at open or at commit is the one any
+recomputation returns. -/
+theorem LoadedDirectory.unique {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (left right : LoadedDirectory durable) : left = right := by
+  have same : left.directory = right.directory :=
+    Option.some.inj (left.decoded.symm.trans right.decoded)
+  cases left
+  cases right
+  simp only at same
+  subst same
+  rfl
+
+/-- **A held directory is what `loadDirectory` would recompute** on the same image. -/
+theorem LoadedDirectory.load_eq {durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (loaded : LoadedDirectory durable) : loadDirectory durable = some loaded := by
+  cases computed : loadDirectory durable with
+  | some other => exact congrArg some (LoadedDirectory.unique other loaded)
+  | none =>
+      exfalso
+      unfold loadDirectory at computed
+      rw [dif_pos loaded.absentDefault] at computed
+      split at computed
+      · rename_i missing
+        rw [loaded.decoded] at missing
+        cases missing
+      · cases computed
+
+/-- Two images whose canonical bytes agree at an identifier load the same slot there. -/
+theorem LoadedDirectory.slots_eq_of_bytes
+    {first second : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (left : LoadedDirectory first) (right : LoadedDirectory second) (identifier : Nat)
+    (same : first.snapshot.canonicalBytes ⟨identifier⟩ =
+      second.snapshot.canonicalBytes ⟨identifier⟩) :
+    left.directory.slots identifier = right.directory.slots identifier := by
+  have views : LifecycleImage.view registry left.directory identifier =
+      LifecycleImage.view registry right.directory identifier := by
+    have bytes := (left.bytes_exact identifier).trans
+      (same.trans (right.bytes_exact identifier).symm)
+    have decoded := congrArg (LifecycleImage.rawDecode registry) bytes
+    rw [LifecycleImage.rawDecode_bytes, LifecycleImage.rawDecode_bytes] at decoded
+    exact Option.some.inj decoded
+  rw [← LifecycleImage.view_slot registry left.directory identifier, views,
+    LifecycleImage.view_slot]
+
+/-- One directory row of a later image. When the identifier's canonical bytes
+equal the held image's, the held directory's view of it is reused; otherwise the
+bytes are decoded. `decodeRowFrom_eq`: both are what decoding the bytes returns. -/
+def decodeRowFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (identifier : Nat) (bytes : List UInt8) :
+    Option (LifecycleImage registry) :=
+  if prior.snapshot.canonicalBytes ⟨identifier⟩ == bytes then
+    some (LifecycleImage.view registry held.directory identifier)
+  else (LifecycleImage.codec registry).decode bytes
+
+theorem decodeRowFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (identifier : Nat) (bytes : List UInt8) :
+    decodeRowFrom held identifier bytes = (LifecycleImage.codec registry).decode bytes := by
+  unfold decodeRowFrom
+  split
+  next same =>
+    have exact : LifecycleImage.bytes registry
+        (LifecycleImage.view registry held.directory identifier) = bytes :=
+      (held.bytes_exact identifier).trans (beq_iff_eq.mp same)
+    rw [← exact]
+    exact (LifecycleImage.decode_encode registry _).symm
+  next => rfl
+
+def decodeRowsFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) :
+    List (Nat × List UInt8) → Option (DirectoryImage.Rows registry)
+  | [] => some []
+  | (identifier, bytes) :: rest => do
+      let image ← decodeRowFrom held identifier bytes
+      let tail ← decodeRowsFrom held rest
+      some ((identifier, image) :: tail)
+
+theorem decodeRowsFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) :
+    ∀ input : List (Nat × List UInt8),
+      decodeRowsFrom held input = DirectoryImage.decodeRows registry input
+  | [] => rfl
+  | (identifier, bytes) :: rest => by
+      simp only [decodeRowsFrom, DirectoryImage.decodeRows, decodeRowFrom_eq,
+        decodeRowsFrom_eq held rest]
+
+def decodeFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
+    Option (Directory Nat registry) := do
+  let rows ← decodeRowsFrom held input
+  if (rows.map Prod.fst).Nodup then some (DirectoryImage.ofRows registry rows) else none
+
+theorem decodeFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (input : List (Nat × List UInt8)) :
+    decodeFrom held input = DirectoryImage.decode registry input := by
+  simp only [decodeFrom, DirectoryImage.decode, decodeRowsFrom_eq]
+
+/-- `loadDirectory` of a later image, decoding only the rows whose bytes differ
+from `held`'s image (`loadDirectoryFrom_eq`). -/
+def loadDirectoryFrom {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) :
+    Option (LoadedDirectory durable) :=
+  if absentDefault : durable.image.seed.absentBytes = [] then
+    match decoded : decodeFrom held (directoryRows durable) with
+    | none => none
+    | some directory =>
+        some ⟨directory, (decodeFrom_eq held (directoryRows durable)).symm.trans decoded,
+          absentDefault⟩
+  else none
+
+/-- **The incremental load is the full load**: same refusal, same directory. -/
+theorem loadDirectoryFrom_eq {prior : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes}
+    (held : LoadedDirectory prior) (durable : DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes) :
+    loadDirectoryFrom held durable = loadDirectory durable := by
+  cases computed : loadDirectory durable with
+  | some loaded =>
+      cases incremental : loadDirectoryFrom held durable with
+      | some other => exact congrArg some (LoadedDirectory.unique other loaded)
+      | none =>
+          exfalso
+          unfold loadDirectoryFrom at incremental
+          rw [dif_pos loaded.absentDefault] at incremental
+          split at incremental
+          · rename_i missing
+            rw [decodeFrom_eq, loaded.decoded] at missing
+            cases missing
+          · cases incremental
+  | none =>
+      cases incremental : loadDirectoryFrom held durable with
+      | none => rfl
+      | some other =>
+          exfalso
+          rw [LoadedDirectory.load_eq other] at computed
+          cases computed
+
 /-! ## Concrete preparation of the root-issuance batch -/
 
 /-- A grant is ready at the loaded cell when it is a fresh root whose own key
