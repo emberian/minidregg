@@ -24,17 +24,18 @@ umask 077
 for name in HOST MINI STORE VERIFIER JOURNEY_STEP_DIR NOCK_TEMPLATES NOCK_RUN; do
   if [ -z "${!name:-}" ]; then echo "jnock3: $name is required" >&2; exit 2; fi
 done
-DIR="$JOURNEY_STEP_DIR/jnock3"
-if [ -e "$DIR" ]; then echo "jnock3: refusing to reuse $DIR" >&2; exit 2; fi
-mkdir -p "$DIR"
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+. "$HERE/journey.d/lib/shortdir.sh"
+journey_shortdir jnock3   # its Store's socket lives in a short directory, kept as $JOURNEY_STEP_DIR/rt
+DIR=$JOURNEY_D
+mkdir -p "$DIR"
 W="$DIR/world"
 # Program births cost their ~566 KB intent against the owner budget (J-NOCK-2b).
 NEWPARTICIPANT_OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-4000000} \
   sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
   >"$DIR/bootstrap.out" 2>"$DIR/bootstrap.err" || { echo "jnock3: bootstrap failed: $(tail -1 "$DIR/bootstrap.err")" >&2; exit 1; }
 stop() { if [ -s "$W/public/server.pid" ]; then kill "$(cat "$W/public/server.pid")" 2>/dev/null || true; fi; }
-trap stop EXIT
+trap 'stop; journey_shortdir_return' EXIT
 set +e
 python3 - "$DIR" "$W" <<'PY'
 import hashlib, json, os, re, socket, struct, subprocess, sys, time

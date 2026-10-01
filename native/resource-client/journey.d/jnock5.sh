@@ -26,10 +26,11 @@ umask 077
 for name in HOST MINI STORE VERIFIER JOURNEY_STEP_DIR NOCK_DOOR_JAM NOCK_DOOR_FUEL; do
   if [ -z "${!name:-}" ]; then echo "jnock5: $name is required" >&2; exit 2; fi
 done
-DIR="$JOURNEY_STEP_DIR/jnock5"
-if [ -e "$DIR" ]; then echo "jnock5: refusing to reuse $DIR" >&2; exit 2; fi
-mkdir -p "$DIR"
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+. "$HERE/journey.d/lib/shortdir.sh"
+journey_shortdir jnock5   # its Store's socket lives in a short directory, kept as $JOURNEY_STEP_DIR/rt
+DIR=$JOURNEY_D
+mkdir -p "$DIR"
 W="$DIR/world"
 # A hoonc kernel carries the whole stdlib (~574 KB): its birth intent costs that
 # much against the owner budget (J-NOCK-2b).
@@ -37,7 +38,7 @@ NEWPARTICIPANT_OWNER_BUDGET=${NEWPARTICIPANT_OWNER_BUDGET:-4000000} \
   sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
   >"$DIR/bootstrap.out" 2>"$DIR/bootstrap.err" || { echo "jnock5: bootstrap failed: $(tail -1 "$DIR/bootstrap.err")" >&2; exit 1; }
 stop() { if [ -s "$W/public/server.pid" ]; then kill "$(cat "$W/public/server.pid")" 2>/dev/null || true; fi; }
-trap stop EXIT
+trap 'stop; journey_shortdir_return' EXIT
 set +e
 python3 - "$DIR" "$W" <<'PY'
 import hashlib, json, os, re, socket, struct, subprocess, sys, time

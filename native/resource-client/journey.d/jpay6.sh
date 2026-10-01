@@ -63,10 +63,14 @@ export HERMES_STANDIN
 [ -x "$HERMES_STANDIN" ] || { echo "jpay6: $HERMES_STANDIN is required" >&2; exit 2; }
 command -v python3 >/dev/null || { echo "jpay6: python3 is required" >&2; exit 2; }
 python3 -c 'import nacl.signing' 2>/dev/null || { echo "jpay6: PyNaCl is required" >&2; exit 2; }
-DIR="$JOURNEY_STEP_DIR/jpay6"
-if [ -e "$DIR" ]; then echo "jpay6: refusing to reuse $DIR" >&2; exit 2; fi
+# Its Host socket and the grain controller's control, admin and MCP sockets
+# live in a short directory, kept as $JOURNEY_STEP_DIR/rt
+# (journey.d/lib/shortdir.sh); python runs as a child so the copy-back runs.
+. "$REPO/native/resource-client/journey.d/lib/shortdir.sh"
+journey_shortdir jpay6
+DIR=$JOURNEY_D
 mkdir -p "$DIR"
-exec python3 - "$DIR" <<'PY'
+python3 - "$DIR" <<'PY'
 import json, os, signal, socket, struct, subprocess, sys, time
 import nacl.signing
 
