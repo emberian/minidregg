@@ -114,6 +114,23 @@ law like `any [ not (verb == place), subject in {YOU} ]` stops everyone else add
 (`birthRefused`), while their reads keep working. you can't leave a room yourself yet
 (`room leave` says so): ask its founder to kick you.
 
+private rooms. `room new lab --private` makes a room whose words the node stores but cannot
+read: what you say and write in it is sealed on *your* machine under the room key before it
+leaves, and the node only ever holds that key wrapped to each member. so run `mini` on your own
+machine for it (here, in the hosted shell, your key is a file on this box, and so is the room key).
+```
+sam> whoami                                # "encryptionKey": give it to whoever invites you
+mini> room invite i1 lab SAMS-SUBJECT SAMS-ENCRYPTION-KEY   # the grant, and the key wrapped to sam
+mini> room kick k1 lab SAMS-SUBJECT        # revoke + a fresh room key for everyone else, in one line:
+                                           #   sam keeps what he could already read, gets nothing new
+mini> room keys lab                        # the key epochs you hold;  `forget lab` deletes yours
+```
+your keys live in an encrypted file in your workspace: set `MINI_KEYCACHE_PASSPHRASE`. without it
+you see `[sealed under epoch N — you do not hold that key]`. inviting a hosted subject (a friend who
+only uses this shell, or hosted Hermes) into a private room needs `--i-know`: it puts the room key on
+the box. the node still sees who is in the room, who wrote when, and how big each line is (in 64-byte
+steps). details: `deploy/shell/templates/room/private/README.md`.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
