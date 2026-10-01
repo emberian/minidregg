@@ -21,6 +21,21 @@ import Kernel
 import Pred
 import Effects
 import Host
+-- Kernel and policy modules `Minidregg` roots beside the per-directory roots
+-- (none imports Selvage or Assurance; the arithmetization and zkML roots stay research):
+import Kernel.ApplicationDispatchUpper
+import Kernel.ApplicationGrainLaws
+import Kernel.ApplicationLifecycleBeginCheck
+import Kernel.ApplicationLifecycleClaimPolicyCheck
+import Kernel.ApplicationLifecycleClaimReceiver
+import Kernel.ApplicationLifecycleClaimVerified
+import Kernel.ApplicationShareIssueHistorical
+import Kernel.ApplicationSpkProfileProofs
+import Kernel.FnSelectedHistoricalStep
+import Kernel.FnSelectiveReleaseProofs
+import Kernel.Job
+import Compiler.BoundedQuantifiedPolicyAdmission
+import Compiler.DeclaredEffectCellRegistry
 import Host.ApplicationAgentLifetimeDispatchInspection
 import Host.ApplicationAgentLifetimeDispatchPaidInspection
 import Host.ApplicationAgentLifetimeGrantAuthoring

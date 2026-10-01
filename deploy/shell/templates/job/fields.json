@@ -1,0 +1,39 @@
+{
+  "type": "job-fields-v1",
+  "kinds": {
+    "job": {
+      "state": "0",
+      "program": "1",
+      "input": "2",
+      "caller": "3",
+      "callerAcct": "4",
+      "price": "5",
+      "claimBy": "6",
+      "answerBy": "7",
+      "escrow": "8",
+      "provider": "9",
+      "providerAcct": "10",
+      "bond": "11",
+      "output": "12",
+      "steps": "13",
+      "finalAt": "14",
+      "truth": "15"
+    }
+  },
+  "states": {
+    "open": "0",
+    "claimed": "1",
+    "answered": "2",
+    "upheld": "3",
+    "slashed": "4",
+    "void": "5",
+    "closed": "6"
+  },
+  "placeholders": {
+    "CALLER": "the ordering subject; the only subject that may order, void before claimBy, or delegate",
+    "PROGRAM": "the programId; field program is pinned to it",
+    "WINDOW": "the challenge window in clock seconds: finalAt = clock/now + WINDOW on the answer edge",
+    "NEG_WINDOW": "-WINDOW (a canonical decimal; the template cannot negate a placeholder)",
+    "RAN_SLOT": "the slot the kernel projects to 1 on an admitted run claim for PROGRAM: run/program/{PROGRAM} (K-RAN, Pred.ranSlot) on a tree with K-RAN"
+  }
+}
