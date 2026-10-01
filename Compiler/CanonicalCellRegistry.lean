@@ -35,7 +35,7 @@ import Compiler.ResourceBirthCodec
 import Compiler.PolicySourceCell
 import Kernel.PayCell
 import Compiler.StreamCell
-import Kernel.DomainEpoch
+import Kernel.DomainEpochLaw
 import Compiler.NockProgramCodec
 import Kernel.ClockCell
 import Theory.CanonicalResourceBookInvariant

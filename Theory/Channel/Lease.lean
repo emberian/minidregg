@@ -437,34 +437,4 @@ theorem fanoutBytes_smoke :
 end Example
 
 
-/-! ## Axiom audit: every theorem above rests on at most `propext`, `Classical.choice`, `Quot.sound` -/
-
-#assert_axioms Schedule.mem_slots
-#assert_axioms Schedule.headerAt_slot
-#assert_axioms fill_is_cell_shaped
-#assert_axioms Schedule.assemble_length
-#assert_axioms Schedule.assembleAt_header
-#assert_axioms Schedule.assembleAt_holder
-#assert_axioms Schedule.header_is_schedule
-#assert_axioms Schedule.slot_rate_bounded
-#assert_axioms Schedule.slot_positions_exact
-#assert_axioms Schedule.no_lease_no_cell
-#assert_axioms Schedule.holder_cell_assembled
-#assert_axioms Schedule.nonholder_never_source
-#assert_axioms fanout_independent_of_presence
-#assert_axioms Example.class_mismatch_not_live
-#assert_axioms Example.example_sources
-#assert_axioms Example.example_mask
-#assert_axioms Example.header_only_admits_nonholder
-#assert_axioms Example.holder_filter_refuses_nonholder
-#assert_axioms Example.fill_at_unleased_slot_assembled
-#assert_axioms Example.rate_attained
-#assert_axioms Example.fanoutConnected_depends_on_presence
-#assert_axioms Example.fanout_same_order
-#assert_axioms sum_map_const
-#assert_axioms fanoutBytesList_length
-#assert_axioms assembleBytesList_length
-#assert_axioms Example.assembleBytes_smoke
-#assert_axioms Example.fanoutBytes_smoke
-
 end Minidregg.Theory.Channel

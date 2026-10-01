@@ -52,6 +52,8 @@ mod publisher;
 #[cfg(unix)]
 mod relay;
 #[cfg(unix)]
+mod channel;
+#[cfg(unix)]
 mod selected_exchange;
 #[cfg(unix)]
 mod selected_publisher;
@@ -385,10 +387,15 @@ usage:
   mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
-  mini relay --lean-lib LIB.so --class ID --domain D --n N --leases LEASES.txt --ticks K --unix SOCKET --state-dir DIR --out-dir DIR [--tcp 127.0.0.1:PORT] [--witness WITNESS.sock] [--append-ws WS --stream NAME] [--first-epoch E] [--start-delay-ms MS] [--wait-members-ms MS] [--spin-ms MS] [--fault-gap-at-epoch E]
+  mini relay --lean-lib LIB.so --class ID --domain D --n N --leases LEASES.txt --ticks K --unix SOCKET --state-dir DIR --out-dir DIR [--tcp 127.0.0.1:PORT] [--witness WITNESS.sock] [--append-ws WS --stream NAME] [--first-epoch E] [--start-delay-ms MS] [--wait-members-ms MS] [--spin-ms MS] [--fault-gap-at-epoch E] [--fault-drop SLOT:TICK] [--records-dir DIR]
   mini relay-emit --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --slot S --subject ID --key KEY --out MEMBER.csv [--ticks K]
   mini relay-witness --lean-lib LIB.so --unix WITNESS.sock --out WITNESS.csv
   mini relay-key --key SEED-FILE
+  mini channel key ROOM [--home DIR]
+  mini channel join ROOM --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --leases LEASES.txt --key ED25519-SEED --roster ROSTER [--class P1|P1phone] [--ticks K] [--records-dir DIR] [--home DIR]
+  mini channel say ROOM @NAME TEXT... [--home DIR]
+  mini channel tail ROOM [--follow] [--home DIR]
+  mini channel status ROOM [--home DIR]
   mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini reply-consumer-drain-once --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
@@ -449,8 +456,40 @@ impl Args {
                 values.push((OsString::from("--action"), action));
             }
         }
+        // `mini channel ACTION ROOM [@NAME TEXT...]` (CHANNELS.md §9 row 10 spells the verbs this way):
+        // ACTION, ROOM, @NAME and the words of TEXT are positional, up to the first `--` flag; a bare
+        // `--follow` (tail) takes no value.
+        if command == OsStr::new("channel") {
+            let mut positional = Vec::new();
+            while let Some(word) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                positional.push(word);
+            }
+            let mut words = positional.into_iter();
+            if let Some(action) = words.next() {
+                values.push((OsString::from("--action"), action));
+            }
+            if let Some(room) = words.next() {
+                values.push((OsString::from("--room"), room));
+            }
+            if let Some(to) = words.next() {
+                values.push((OsString::from("--to"), to));
+            }
+            let text: Vec<String> = words.map(|w| w.to_string_lossy().into_owned()).collect();
+            if !text.is_empty() {
+                values.push((OsString::from("--text"), OsString::from(text.join(" "))));
+            }
+            if raw.next_if(|next| next == OsStr::new("--follow")).is_some() {
+                let value = raw.next_if(|next| !next.to_string_lossy().starts_with("--")).unwrap_or_else(|| OsString::from("true"));
+                values.push((OsString::from("--follow"), value));
+            }
+        }
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
+            if command == OsStr::new("channel") && flag == OsStr::new("--follow") {
+                let value = raw.next_if(|next| !next.to_string_lossy().starts_with("--")).unwrap_or_else(|| OsString::from("true"));
+                values.push((flag, value));
+                continue;
+            }
             if !rendered.starts_with("--") || rendered.len() == 2 {
                 return Err(format!("unexpected argument {rendered}\n\n{USAGE}"));
             }
@@ -2313,6 +2352,8 @@ fn run(mut args: Args) -> Result<()> {
         "relay-witness" => relay::run_witness(args),
         #[cfg(unix)]
         "relay-key" => relay::run_key(args),
+        #[cfg(unix)]
+        "channel" => channel::run(args),
         "well" => well::run(args),
         "pay" => pay::run(args),
         #[cfg(unix)]

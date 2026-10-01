@@ -14,18 +14,21 @@ re-implements cSHAKE256 framing, the tick root, the record codec or the opening:
 | `minidregg_channel_seal` | `sealBytes` | `sealBytesList_is_sealEpoch`, `relay_pipeline_is_sealEpoch` |
 | `minidregg_channel_commit_absent` | `commitAbsentBytes` | `commitAbsentBytesList_is_commitAbsent` |
 | `minidregg_channel_open` | `openBytes` | `openBytesList_is_openRecord`, `sealed_opening_opens` |
-| `minidregg_channel_topic` | `topicBytes` | `topicBytesList_is_recordAppend` |
+| `minidregg_channel_topic` | `topicBytes` | `topicBytesList_is_recordAppend` (in `Kernel.DomainEpochAudit`) |
 
 `relay_pipeline_is_sealEpoch` is the end-to-end statement: the seal export, fed the `E` outputs of the
 assemble export for one epoch, returns exactly `(sealEpoch …).encode ++ (epochOpening …).encode` for
 the schedule, fill and received cells those byte calls denote. The fill is one PRF stream per tick
 (`pads t`); as a `FillPrf` it reads the stream of the header's tick.
 
-Every theorem is `#assert_axioms`-clean (at most `propext`, `Classical.choice`, `Quot.sound`). No
+Every theorem is `#assert_axioms`-clean (at most `propext`, `Classical.choice`, `Quot.sound`); the pins
+are in `Kernel.DomainEpochAudit`, so this module's import closure — the closure `channel-lib/build.sh`
+links into every relay, member and witness — has no Mathlib. `topicBytesList_is_recordAppend` relates
+the topic export to the kernel's `recordAppend` (`Kernel.DomainEpochLaw`), so it is stated there too. No
 statement evaluates the hash: binding is CH-EPOCH's `Collision` carrier, not restated here.
 -/
 import Kernel.DomainEpoch
-import Theory.AssertAxioms
+import Theory.Channel.Envelope
 
 namespace Minidregg.Kernel.DomainEpochExport
 
@@ -52,8 +55,8 @@ theorem length_flatMap_const {α : Type} {w : Nat} (f : α → List UInt8) (hf :
     ∀ xs : List α, (xs.flatMap f).length = xs.length * w
   | [] => by simp
   | a :: xs => by
-    simp only [List.flatMap_cons, List.length_append, hf a, length_flatMap_const f hf xs, List.length_cons]
-    ring
+    simp only [List.flatMap_cons, List.length_append, hf a, length_flatMap_const f hf xs, List.length_cons,
+      Nat.add_mul, Nat.one_mul] <;> omega
 
 theorem U16.ofNat_val (d : U16) : U16.ofNat d.val = d := Fin.ext (Nat.mod_eq_of_lt d.isLt)
 
@@ -138,8 +141,7 @@ theorem tickOut_length (sched : Schedule) (prf : FillPrf) (e t : Nat) (rx : List
     (tickOut sched prf e t rx).length = sched.n * (sched.profile.C + 1) := by
   have hl := length_flatMap_const Cell.encode (cell_size_exact (P := sched.profile)) (sched.assemble prf e t rx)
   simp only [tickOut, List.length_append, hl, sched.assemble_length, List.length_map,
-    absentMask_length]
-  ring
+    absentMask_length, Nat.mul_add, Nat.mul_one] <;> omega
 
 /-- The root the relay computes over an assemble output's cell part is the assembled vector's root. -/
 theorem tickRoot_of_assemble (sched : Schedule) (prf : FillPrf) (e t : Nat) (rx : List (Submission sched.profile)) :
@@ -263,7 +265,7 @@ theorem sealBytesList_is_sealEpoch (sched : Schedule) (prf : FillPrf) {cid : UIn
       ((List.range sched.profile.E).map fun t => tickOut sched prf e.toNat t (rx t)) =
       (epochMask sched prf e.toNat rx).map bit := by
     simp only [piecesMask, epochMask, List.flatMap_map, List.map_flatMap]
-    apply List.flatMap_congr
+    apply flatMap_congr_mem
     intro t _
     exact List.drop_left' (hcells t)
   have hroots : ((List.range sched.profile.E).map fun t => tickOut sched prf e.toNat t (rx t)).map
@@ -323,7 +325,7 @@ theorem sealBytesList_length {pid : UInt8} {P : Profile} (hp : profileOfId pid =
         rw [Nat.mul_add, Nat.mul_one]; omega
       unfold piecesMask
       rw [List.length_flatMap]
-      rw [List.map_congr_left (fun o ho => hpl o ho), List.map_const', List.sum_replicate, hk, smul_eq_mul]
+      rw [List.map_congr_left (fun o ho => hpl o ho), List.map_const', List.sum_replicate_nat, hk]
     simp only [List.length_append, epochRecord_size, recordOf, List.length_map, hk, openingOf,
       AbsentOpening.encode, List.length_map, hm, (fit 32 salt).property]
   · rename_i h
@@ -363,7 +365,7 @@ theorem relay_pipeline_is_sealEpoch {pid : UInt8} {P : Profile} (hp : profileOfI
     apply tickOut_prf_congr
     intro ρ
     simp only [Schedule.headerAt, U16.ofNat_val_of_lt htE]
-  rw [List.flatMap_congr step]
+  rw [flatMap_congr_mem step]
   have hsched : (bytesSchedule P domain n hn ls).profile = P := rfl
   have hdom : (bytesSchedule P domain n hn ls).domain.val = domain := U16.ofNat_val_of_lt hd
   have := sealBytesList_is_sealEpoch (bytesSchedule P domain n hn ls) (fun h => padPrf P (pads h.tick.val) h)
@@ -434,36 +436,28 @@ def topicBytesList (domain epoch : Nat) : List UInt8 := channelTopic (U16.ofNat 
 def topicBytes (domain : UInt16) (epoch : UInt64) : ByteArray :=
   ⟨(topicBytesList domain.toNat epoch.toNat).toArray⟩
 
-/-- **The topic export is the append's topic** for the record of that domain and epoch. -/
-theorem topicBytesList_is_recordAppend (r : EpochRecord) :
-    topicBytesList r.domain.val r.epoch.toNat = (recordAppend r).topic := by
-  simp [topicBytesList, recordAppend, U16.ofNat_val, UInt64.ofNat_toNat]
+/-! ## §8. The record's tick roots, for a member's own-slot check (CH-CLIENT-1) -/
 
-/-! ## §8. Axiom footprints -/
+/-- `domain 2 | epoch 8 | the E tick roots` of a canonical record, empty otherwise. A member compares
+each root with the one it verified on the signed frame and the vector the frame carried (CHANNELS §4
+step 6; `own_omission_evident`'s `Included`). -/
+def recordRootsBytesList (bytes : List UInt8) : List UInt8 :=
+  match EpochRecord.decode bytes with
+  | none => []
+  | some r => be16 r.domain ++ Minidregg.Pred.HashEqDigest.be 8 r.epoch.toNat ++ r.tickRoots.flatMap Blob.val
 
-#assert_axioms slices_flatMap
-#assert_axioms length_flatMap_const
-#assert_axioms U16.ofNat_val
-#assert_axioms profileBytesList_is_profile
-#assert_axioms profileBytesList_refuses
-#assert_axioms headerBytesList_is_headerAt
-#assert_axioms rootOfCells_vector
-#assert_axioms tickRootBytesList_is_vectorRoot
-#assert_axioms tickRootBytesList_refuses_length
-#assert_axioms tickOut_length
-#assert_axioms tickRoot_of_assemble
-#assert_axioms assembleBytesList_is_tickOut
-#assert_axioms tickOut_prf_congr
-#assert_axioms map_beq_one_bit
-#assert_axioms all_bit_le_one
-#assert_axioms sealBytesList_is_sealEpoch
-#assert_axioms sealBytesList_length
-#assert_axioms sealBytesList_refuses_length
-#assert_axioms relay_pipeline_is_sealEpoch
-#assert_axioms commitAbsentBytesList_is_commitAbsent
-#assert_axioms openBytesList_is_openRecord
-#assert_axioms sealed_opening_opens
-#assert_axioms openBytesList_wrong_length
-#assert_axioms topicBytesList_is_recordAppend
+@[export minidregg_channel_record_roots]
+def recordRootsBytes (record : ByteArray) : ByteArray := ⟨(recordRootsBytesList record.toList).toArray⟩
+
+/-- **The roots export reads the record's own fields** off its canonical encoding. -/
+theorem recordRootsBytesList_encode (r : EpochRecord) :
+    recordRootsBytesList r.encode =
+      be16 r.domain ++ Minidregg.Pred.HashEqDigest.be 8 r.epoch.toNat ++ r.tickRoots.flatMap Blob.val := by
+  simp [recordRootsBytesList, epochRecord_decode_encode]
+
+/-- The refusing pole: bytes that are no record's encoding have no roots. -/
+theorem recordRootsBytesList_refuses {bytes : List UInt8} (h : EpochRecord.decode bytes = none) :
+    recordRootsBytesList bytes = [] := by
+  simp [recordRootsBytesList, h]
 
 end Minidregg.Kernel.DomainEpochExport

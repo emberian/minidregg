@@ -6,13 +6,15 @@
 
 #define MDC_EXPORT __attribute__((visibility("default")))
 
-extern void lean_initialize(void);
+extern void lean_initialize_runtime_module(void);
 extern lean_object *initialize_minidregg_Kernel_DomainEpochExport(uint8_t builtin);
 
-/* As the generated `main` of a Lean executable whose closure uses the Lean API: initialise the
- * runtime and the Lean package, then this module and its imports, then mark the end of initialisation. */
+/* As the generated `main` of a Lean executable whose closure does NOT import `Lean`: initialise the
+ * runtime only, then this module and its imports (which initialise the `Init` modules they reach), then
+ * mark the end of initialisation. The closure is `Init` plus eight package modules (CH-CLIENT-1);
+ * build.sh refuses to link if it ever reaches `Lean`, `Std`, Mathlib or another package again. */
 MDC_EXPORT int mdc_init(void) {
-  lean_initialize();
+  lean_initialize_runtime_module();
   lean_object *res = initialize_minidregg_Kernel_DomainEpochExport(1);
   lean_io_mark_end_initialization();
   if (!lean_io_result_is_ok(res)) {

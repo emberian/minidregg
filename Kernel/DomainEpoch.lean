@@ -29,12 +29,18 @@ Binding is never assumed: every binding statement is "equal, or a collision of t
 cSHAKE256 instance" — `Pred.HashEqDigest.Collision`, the carrier K-HASHEQ's `binds_or_collides`
 already names. Hiding of `absentCommit` is K-HASHEQ's `HashEqHiding` shape (assumed, not proved, used
 by no theorem here).
+
+**Two modules, one namespace.** This one is what a relay, a member and a witness run: the codecs, the
+commitment, the seal, the opening, the tick roots and the omission theorems. It imports `Init`, the
+executable cSHAKE256 core, `Pred.HashEqDigest` and `Theory.Channel` only, so the channel library a
+member's phone loads carries no Mathlib. The kernel's side — `Prev`, `ChannelLaw`/`checkRecord` (an
+author is a `SubjectId`), `admitAppend`, `ChannelStoreLaw` and the in-Store chain — is
+`Kernel.DomainEpochLaw`, under the same names. The `#assert_axioms` pins of both live in
+`Kernel.DomainEpochAudit`.
 -/
-import Compiler.StreamCell
-import Compiler.Sp800185Cshake256
+import Compiler.Sp800185Cshake256Core
 import Pred.HashEqDigest
 import Theory.Channel
-import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.DomainEpoch
 
@@ -42,8 +48,6 @@ open Minidregg.Theory.Channel (Blob fit Profile U16 be16 rd16 rd16_be16 Header C
   fillCell Submission Source profileOfId cell_encode_injective)
 open Minidregg.Pred.HashEqDigest (be ofBE Collision utf8 length_be)
 open Minidregg.Compiler.Sp800185Cshake256 (cshake256Bytes cshake256Bytes_length)
-open Minidregg.Theory.Store (Store)
-open Minidregg.Theory.TypedAuthorization (SubjectId)
 
 set_option autoImplicit false
 
@@ -104,8 +108,9 @@ theorem flat_injective : ∀ {xs ys : List Digest}, xs.flatMap Blob.val = ys.fla
 theorem flat_length {k : Nat} : ∀ xs : List (Blob k), (xs.flatMap Blob.val).length = k * xs.length
   | [] => by simp
   | x :: xs => by
-      simp only [List.flatMap_cons, List.length_append, x.property, flat_length xs, List.length_cons]
-      ring
+      simp only [List.flatMap_cons, List.length_append, x.property, flat_length xs, List.length_cons,
+        Nat.mul_add, Nat.mul_one]
+      omega
 
 /-- `k` 32-byte chunks of a byte string (structural, so it reduces in the kernel). -/
 def chunks : Nat → List UInt8 → List Digest
@@ -170,8 +175,8 @@ theorem epochRecord_size (r : EpochRecord) : r.encode.length = 47 + 32 * r.tickR
 
 theorem epochRecord_parse_encode (r : EpochRecord) : EpochRecord.parse r.encode = r := by
   obtain ⟨d, e, c, n, roots, commit⟩ := r
-  have he : e.toNat < 256 ^ 8 := by have := e.toNat_lt; norm_num at this ⊢; omega
-  have hn : n.toNat < 256 ^ 4 := by have := n.toNat_lt; norm_num at this ⊢; omega
+  have he : e.toNat < 256 ^ 8 := Nat.lt_of_lt_of_eq e.toNat_lt (by decide)
+  have hn : n.toNat < 256 ^ 4 := Nat.lt_of_lt_of_eq n.toNat_lt (by decide)
   have hc := commit.property
   have hfl := flat_length roots
   have hb8 := length_be 8 e.toNat
@@ -191,7 +196,7 @@ theorem epochRecord_parse_encode (r : EpochRecord) : EpochRecord.parse r.encode 
     simp only [List.length_append, hfl, hc]; omega
   have hcls : (be 8 e.toNat ++ c :: (be 4 n.toNat ++ (roots.flatMap Blob.val ++ commit.val)))[8]? =
       some c := by
-    rw [List.getElem?_append_right (by rw [hb8])]; simp [hb8]
+    rw [List.getElem?_append_right (by simp [hb8])]; simp [hb8]
   simp only [EpochRecord.parse, shape]
   simp only [List.getD_cons_zero, List.getD_cons_succ, List.drop_succ_cons, List.drop_zero]
   rw [rd16_be16]
@@ -282,6 +287,15 @@ def AbsentOpening.decode (E n : Nat) (bytes : List UInt8) : Except OpeningRefusa
 theorem bit_injective : Function.Injective bit := by
   intro a b h; cases a <;> cases b <;> first | rfl | (simp [bit] at h)
 
+/-- The mask bytes determine the mask. -/
+theorem map_bit_injective : ∀ {l₁ l₂ : List Bool}, l₁.map bit = l₂.map bit → l₁ = l₂
+  | [], [], _ => rfl
+  | [], _ :: _, h => by simp at h
+  | _ :: _, [], h => by simp at h
+  | _ :: _, _ :: _, h => by
+    simp only [List.map_cons, List.cons.injEq] at h
+    rw [bit_injective h.1, map_bit_injective h.2]
+
 theorem absentOpening_encode_injective : Function.Injective AbsentOpening.encode := by
   intro a b h
   have hl := congrArg List.length h
@@ -290,7 +304,7 @@ theorem absentOpening_encode_injective : Function.Injective AbsentOpening.encode
   obtain ⟨hm, hs⟩ := List.append_inj h (by simp; omega)
   cases a; cases b
   simp only [AbsentOpening.mk.injEq]
-  exact ⟨List.map_injective_iff.mpr bit_injective hm, Blob.ext hs⟩
+  exact ⟨map_bit_injective hm, Blob.ext hs⟩
 
 theorem absentOpening_size (o : AbsentOpening) : o.encode.length = o.mask.length + 32 := by
   simp [AbsentOpening.encode, o.salt.property]
@@ -419,130 +433,6 @@ inductive Refusal where
 def EpochRecord.WellFormed (r : EpochRecord) : Prop :=
   ∃ P, profileOfId r.classId = some P ∧ r.tickRoots.length = P.E ∧ 0 < r.n.toNat ∧ r.n.toNat ≤ 65536
 
-/-- What the previous record of the stream fixes. -/
-structure Prev where
-  domain : U16
-  epoch : UInt64
-  author : SubjectId
-  deriving DecidableEq, Repr
-
-/-- **`ChannelLaw`.** A record is admitted iff it is well-formed and, after a previous record, it is of
-the same domain, its epoch is exactly one more (delta exactly 1), and its author is the previous
-record's (the sequencer; the first record's author is bound by the stream's author law). -/
-def ChannelLaw (prev : Option Prev) (author : SubjectId) (r : EpochRecord) : Prop :=
-  r.WellFormed ∧
-    match prev with
-    | none => True
-    | some p => r.domain = p.domain ∧ r.epoch.toNat = p.epoch.toNat + 1 ∧ author = p.author
-
-def checkShape (r : EpochRecord) : Except Refusal Unit :=
-  match profileOfId r.classId with
-  | none => .error .unknownClass
-  | some P =>
-    if r.tickRoots.length ≠ P.E then .error .rootCount
-    else if r.n.toNat = 0 ∨ 65536 < r.n.toNat then .error .slotCount
-    else .ok ()
-
-def checkLink (prev : Option Prev) (author : SubjectId) (r : EpochRecord) : Except Refusal Unit :=
-  match prev with
-  | none => .ok ()
-  | some p =>
-    if r.domain ≠ p.domain then .error .foreignDomain
-    else if r.epoch.toNat ≤ p.epoch.toNat then .error .epochNotAfter
-    else if p.epoch.toNat + 1 < r.epoch.toNat then .error .epochGap
-    else if author ≠ p.author then .error .foreignAuthor
-    else .ok ()
-
-/-- The law as the kernel decides it, refusal named. -/
-def checkRecord (prev : Option Prev) (author : SubjectId) (r : EpochRecord) : Except Refusal Unit :=
-  match checkShape r with
-  | .error e => .error e
-  | .ok () => checkLink prev author r
-
-theorem checkShape_ok_iff (r : EpochRecord) : checkShape r = .ok () ↔ r.WellFormed := by
-  unfold checkShape EpochRecord.WellFormed
-  split
-  · rename_i h; simp [h]
-  · rename_i P h
-    simp only [h, Option.some.injEq, exists_eq_left']
-    split
-    · rename_i hne; simp [hne]
-    · split
-      · rename_i hn; simp only [reduceCtorEq, false_iff]; omega
-      · rename_i hE hn; simp only [true_iff]; omega
-
-theorem checkLink_ok_iff (prev : Option Prev) (author : SubjectId) (r : EpochRecord) :
-    checkLink prev author r = .ok () ↔
-      match prev with
-      | none => True
-      | some p => r.domain = p.domain ∧ r.epoch.toNat = p.epoch.toNat + 1 ∧ author = p.author := by
-  unfold checkLink
-  split
-  · simp
-  · rename_i p
-    split_ifs <;> simp_all <;> omega
-
-/-- **The kernel's check decides `ChannelLaw`.** -/
-theorem checkRecord_ok_iff (prev : Option Prev) (author : SubjectId) (r : EpochRecord) :
-    checkRecord prev author r = .ok () ↔ ChannelLaw prev author r := by
-  unfold checkRecord ChannelLaw
-  rw [← checkShape_ok_iff, ← checkLink_ok_iff]
-  cases checkShape r with
-  | error e => simp
-  | ok u => cases u; simp
-
-/-! ### Both poles of every clause, in general -/
-
-section Poles
-variable {p : Prev} {author : SubjectId} {r : EpochRecord}
-
-theorem next_record_admitted (wf : r.WellFormed) (dom : r.domain = p.domain)
-    (next : r.epoch.toNat = p.epoch.toNat + 1) (seq : author = p.author) :
-    checkRecord (some p) author r = .ok () :=
-  (checkRecord_ok_iff _ _ _).mpr ⟨wf, dom, next, seq⟩
-
-theorem first_record_admitted (wf : r.WellFormed) : checkRecord none author r = .ok () :=
-  (checkRecord_ok_iff _ _ _).mpr ⟨wf, trivial⟩
-
-theorem shape_refusal_first {e : Refusal} (bad : checkShape r = .error e) (prev : Option Prev) :
-    checkRecord prev author r = .error e := by
-  simp [checkRecord, bad]
-
-/-- **A gap is refused by name**: epoch `prev + 2` (or more). -/
-theorem gap_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
-    (gap : p.epoch.toNat + 1 < r.epoch.toNat) : checkRecord (some p) author r = .error .epochGap := by
-  have := (checkShape_ok_iff r).mpr wf
-  simp only [checkRecord, this, checkLink, dom, ne_eq, not_true_eq_false, if_false]
-  rw [if_neg (by omega), if_pos gap]
-
-/-- **A repeat or an out-of-order record is refused by name**: epoch `≤ prev` (so `prev − 1` too). -/
-theorem out_of_order_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
-    (notAfter : r.epoch.toNat ≤ p.epoch.toNat) : checkRecord (some p) author r = .error .epochNotAfter := by
-  have := (checkShape_ok_iff r).mpr wf
-  simp only [checkRecord, this, checkLink, dom, ne_eq, not_true_eq_false, if_false]
-  rw [if_pos notAfter]
-
-/-- **A record by anyone but the sequencer is refused by name.** -/
-theorem foreign_author_refused (wf : r.WellFormed) (dom : r.domain = p.domain)
-    (next : r.epoch.toNat = p.epoch.toNat + 1) (foreign : author ≠ p.author) :
-    checkRecord (some p) author r = .error .foreignAuthor := by
-  have := (checkShape_ok_iff r).mpr wf
-  simp only [checkRecord, this, checkLink, dom, ne_eq, not_true_eq_false, if_false]
-  rw [if_neg (by omega), if_neg (by omega), if_pos foreign]
-
-theorem foreign_domain_refused (wf : r.WellFormed) (dom : r.domain ≠ p.domain) :
-    checkRecord (some p) author r = .error .foreignDomain := by
-  have := (checkShape_ok_iff r).mpr wf
-  simp only [checkRecord, this, checkLink]
-  rw [if_pos dom]
-
-/-- **A record whose root count is not its class's `E` is refused by name**, whatever else. -/
-theorem root_count_refused {P : Profile} (cls : profileOfId r.classId = some P)
-    (count : r.tickRoots.length ≠ P.E) (prev : Option Prev) :
-    checkRecord prev author r = .error .rootCount :=
-  shape_refusal_first (by simp [checkShape, cls, count]) prev
-
-end Poles
 
 /-! ## §6. The channel topic and the kernel's admission of an append -/
 
@@ -573,7 +463,7 @@ theorem classifyTopic_channelTopic (d : U16) (e : UInt64) :
     classifyTopic (channelTopic d e) = .channel d e := by
   have hm := topicMagic_length
   have hb8 := length_be 8 e.toNat
-  have he : e.toNat < 256 ^ 8 := by have := e.toNat_lt; norm_num at this ⊢; omega
+  have he : e.toNat < 256 ^ 8 := Nat.lt_of_lt_of_eq e.toNat_lt (by decide)
   have hshape : channelTopic d e = topicMagic ++ ((d.val / 256).toUInt8 :: (d.val % 256).toUInt8 :: be 8 e.toNat) := by
     simp [channelTopic, be16]
   have h22 : (channelTopic d e).take 22 = topicMagic := by rw [hshape, List.take_left' hm]
@@ -585,115 +475,14 @@ theorem classifyTopic_channelTopic (d : U16) (e : UInt64) :
     rw [List.getD_eq_getElem?_getD, show (23 : Nat) = 22 + 1 from rfl, ← List.getElem?_drop, hd]; rfl
   have d24 : ((channelTopic d e).drop 24).take 8 = be 8 e.toNat := by
     have : (channelTopic d e).drop 24 = ((channelTopic d e).drop 22).drop 2 := by simp [List.drop_drop]
-    rw [this, hd]; simp [hb8]
+    rw [this, hd]; simp only [List.drop_succ_cons, List.drop_zero]
+    exact List.take_of_length_le (Nat.le_of_eq hb8)
   unfold classifyTopic
   rw [if_pos h22]
   simp only [g22, g23, d24, rd16_be16, ofBE_be _ _ he, UInt64.ofNat_toNat, if_true]
 
 theorem channelTopic_length (d : U16) (e : UInt64) : (channelTopic d e).length = 32 := by
   simp [channelTopic, be16, topicMagic_length]
-
-/-- The stream's last record (the one at `nextSeq − 1`). -/
-def lastRecord (store : Store Minidregg.Compiler.StreamCell.layout) :
-    Option Minidregg.Compiler.StreamCell.StreamRecord :=
-  store (Minidregg.Compiler.StreamCell.address store.support.card)
-
-/-- What the stream's last record fixes for a channel append: `none` for an empty stream. -/
-def prevOf (store : Store Minidregg.Compiler.StreamCell.layout) : Except Refusal (Option Prev) :=
-  match lastRecord store with
-  | none => .ok none
-  | some last =>
-    match classifyTopic last.entry.topic with
-    | .channel d e => .ok (some ⟨d, e, last.author⟩)
-    | _ => .error .kindMismatch
-
-/-- **The kernel's admission of a stream append** (run by `computeTarget` at the append, where the
-payload bytes are). An ordinary topic on an ordinary (or empty) stream is untouched. A channel topic
-must carry the canonical encoding of a record with the topic's (domain, epoch) that satisfies
-`ChannelLaw` against the stream's last record, by `author` (the append's signing subject). -/
-def admitAppend (store : Store Minidregg.Compiler.StreamCell.layout) (author : SubjectId)
-    (request : Minidregg.Compiler.StreamCell.Append) : Except Refusal Unit :=
-  match classifyTopic request.topic with
-  | .malformed => .error .malformedTopic
-  | .ordinary =>
-    match lastRecord store with
-    | none => .ok ()
-    | some last =>
-      match classifyTopic last.entry.topic with
-      | .channel _ _ => .error .kindMismatch
-      | _ => .ok ()
-  | .channel d e =>
-    match prevOf store with
-    | .error reason => .error reason
-    | .ok prev =>
-      match EpochRecord.decode request.payload with
-      | none => .error .malformedRecord
-      | some r =>
-        if r.domain ≠ d ∨ r.epoch ≠ e then .error .topicMismatch
-        else checkRecord prev author r
-
-/-- The append a sequencer makes for a record. -/
-def recordAppend (r : EpochRecord) : Minidregg.Compiler.StreamCell.Append :=
-  ⟨channelTopic r.domain r.epoch, r.encode, none, none⟩
-
-/-- **At the append, the kernel decides `ChannelLaw`** for a sequencer's record. -/
-theorem admitAppend_record (store : Store Minidregg.Compiler.StreamCell.layout) (author : SubjectId)
-    (r : EpochRecord) (prev : Option Prev) (last : prevOf store = .ok prev) :
-    admitAppend store author (recordAppend r) = checkRecord prev author r := by
-  simp [admitAppend, recordAppend, classifyTopic_channelTopic, last, epochRecord_decode_encode]
-
-theorem admitAppend_record_ok_iff (store : Store Minidregg.Compiler.StreamCell.layout) (author : SubjectId)
-    (r : EpochRecord) (prev : Option Prev) (last : prevOf store = .ok prev) :
-    admitAppend store author (recordAppend r) = .ok () ↔ ChannelLaw prev author r := by
-  rw [admitAppend_record store author r prev last, checkRecord_ok_iff]
-
-/-! ## §7. The store law the registry checks on every loaded and final stream cell -/
-
-/-- A stored entry's topic is never a malformed channel topic. -/
-def EntryOk (record : Minidregg.Compiler.StreamCell.StreamRecord) : Prop :=
-  classifyTopic record.entry.topic ≠ .malformed
-
-/-- Consecutive entries: both ordinary, or both channel with the same domain, the next epoch and the
-same author. -/
-def LinkOk (prev cur : Minidregg.Compiler.StreamCell.StreamRecord) : Prop :=
-  match classifyTopic prev.entry.topic, classifyTopic cur.entry.topic with
-  | .channel d e, .channel d' e' => d' = d ∧ e'.toNat = e.toNat + 1 ∧ cur.author = prev.author
-  | .channel _ _, _ => False
-  | _, .channel _ _ => False
-  | _, _ => True
-
-instance (prev cur : Minidregg.Compiler.StreamCell.StreamRecord) : Decidable (LinkOk prev cur) := by
-  unfold LinkOk; split <;> infer_instance
-
-def LinkAt (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Prop :=
-  match store (Minidregg.Compiler.StreamCell.address (k - 1)),
-      store (Minidregg.Compiler.StreamCell.address k) with
-  | some p, some c => LinkOk p c
-  | _, _ => True
-
-instance (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Decidable (LinkAt store k) := by
-  unfold LinkAt; split <;> infer_instance
-
-def EntryAt (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Prop :=
-  match store (Minidregg.Compiler.StreamCell.address k) with
-  | some r => EntryOk r
-  | none => True
-
-instance (store : Store Minidregg.Compiler.StreamCell.layout) (k : Nat) : Decidable (EntryAt store k) := by
-  unfold EntryAt EntryOk; split <;> infer_instance
-
-/-- **`ChannelStoreLaw`**, the registry's stream clause: every entry's topic is well-formed, and
-every entry links to the one before it. On a channel stream that is the chain: one domain, epochs
-consecutive, one author. -/
-def ChannelStoreLaw (store : Store Minidregg.Compiler.StreamCell.layout) : Prop :=
-  ∀ a ∈ store.support, EntryAt store a.2 ∧ LinkAt store a.2
-
-instance (store : Store Minidregg.Compiler.StreamCell.layout) : Decidable (ChannelStoreLaw store) := by
-  unfold ChannelStoreLaw; infer_instance
-
-theorem empty_channel_lawful : ChannelStoreLaw 0 := by
-  intro a member; simp at member
-
 
 /-! ## §8. What a record commits: cells, tick roots, and what each holder can check -/
 
@@ -745,8 +534,8 @@ theorem committed_cells_agree (r : EpochRecord) (v₁ v₂ : Nat → List (Cell 
       Collision (cshake256Bytes tickTag) := by
   by_cases hall : ∀ t < r.tickRoots.length, (v₁ t).map cellDigest = (v₂ t).map cellDigest
   · exact .inl hall
-  · push Not at hall
-    obtain ⟨t, ht, ne⟩ := hall
+  · obtain ⟨t, ht, ne⟩ : ∃ t, t < r.tickRoots.length ∧ (v₁ t).map cellDigest ≠ (v₂ t).map cellDigest :=
+      Classical.byContradiction fun none => hall fun t ht => Classical.byContradiction fun ne => none ⟨t, ht, ne⟩
     have e : vectorRoot (v₁ t) = vectorRoot (v₂ t) := Option.some.inj ((h₁ t ht).symm.trans (h₂ t ht))
     rcases tick_binds e with h | col
     · exact absurd h ne
@@ -760,8 +549,8 @@ theorem committed_cells_agree_cells (r : EpochRecord) (v₁ v₂ : Nat → List 
   rcases committed_cells_agree r v₁ v₂ h₁ h₂ with hd | col
   · by_cases hall : ∀ t < r.tickRoots.length, v₁ t = v₂ t
     · exact .inl hall
-    · push Not at hall
-      obtain ⟨t, ht, ne⟩ := hall
+    · obtain ⟨t, ht, ne⟩ : ∃ t, t < r.tickRoots.length ∧ v₁ t ≠ v₂ t :=
+        Classical.byContradiction fun none => hall fun t ht => Classical.byContradiction fun ne => none ⟨t, ht, ne⟩
       rcases digests_bind (hd t ht) with h | col
       · exact absurd h ne
       · exact .inr (.inr col)
@@ -876,7 +665,10 @@ theorem getElem?_flatMap_range {α : Type} (f : Nat → List α) (n : Nat) (hf :
       | succ m ih => simp [List.range_succ, List.flatMap_append, ih, hf, Nat.succ_mul]
     rw [List.range_succ, List.flatMap_append]
     by_cases htm : t < m
-    · have hlt : t * n + ρ < m * n := by nlinarith
+    · have hlt : t * n + ρ < m * n :=
+        calc t * n + ρ < t * n + n := Nat.add_lt_add_left hρ _
+          _ = (t + 1) * n := (Nat.succ_mul t n).symm
+          _ ≤ m * n := Nat.mul_le_mul_right n htm
       rw [List.getElem?_append_left (by rw [hlen]; exact hlt)]
       exact getElem?_flatMap_range f n hf m t ρ htm hρ
     · have : t = m := by omega
@@ -1132,93 +924,6 @@ theorem equivocation_same_record_refused (verify : Verify) (key : List UInt8) (r
     (s₁ s₂ : List UInt8) : Equivocation.check verify ⟨key, r, r, s₁, s₂⟩ = false := by
   simp [Equivocation.check]
 
-/-- Dense keys are exactly `1 … card`: every position up to the count is present. -/
-theorem dense_present (store : Store Minidregg.Compiler.StreamCell.layout)
-    (dense : Minidregg.Compiler.StreamCell.Dense store) {m : Nat} (h1 : 1 ≤ m)
-    (h2 : m ≤ store.support.card) : Minidregg.Compiler.StreamCell.address m ∈ store.support := by
-  classical
-  let f : Minidregg.Theory.Store.Address Minidregg.Compiler.StreamCell.layout → Nat := fun a => a.2
-  have finj : Set.InjOn f store.support := by
-    intro a _ b _ h
-    obtain ⟨sa, ka⟩ := a; obtain ⟨sb, kb⟩ := b
-    cases sa; cases sb
-    simp only [f] at h; subst h; rfl
-  have hsub : store.support.image f ⊆ Finset.Icc 1 store.support.card := by
-    intro k hk
-    obtain ⟨a, ha, rfl⟩ := Finset.mem_image.mp hk
-    exact Finset.mem_Icc.mpr (dense a ha)
-  have hcard : (Finset.Icc 1 store.support.card).card ≤ (store.support.image f).card := by
-    rw [Finset.card_image_of_injOn finj]; simp
-  have heq := Finset.eq_of_subset_of_card_le hsub hcard
-  have hm : m ∈ store.support.image f := heq ▸ Finset.mem_Icc.mpr ⟨h1, h2⟩
-  obtain ⟨a, ha, hfa⟩ := Finset.mem_image.mp hm
-  obtain ⟨sa, ka⟩ := a
-  cases sa
-  simp only [f] at hfa
-  subst hfa
-  exact ha
-
-theorem mem_support_of_some {store : Store Minidregg.Compiler.StreamCell.layout} {k : Nat}
-    {r : Minidregg.Compiler.StreamCell.StreamRecord} (h : store (Minidregg.Compiler.StreamCell.address k) = some r) :
-    Minidregg.Compiler.StreamCell.address k ∈ store.support :=
-  DFinsupp.mem_support_iff.mpr (by rw [h]; exact Option.some_ne_none r)
-
-/-- **The chain inside one Store.** In a lawful stream, a channel entry `k` places after another is
-exactly `k` epochs later. -/
-theorem channel_epochs_advance (store : Store Minidregg.Compiler.StreamCell.layout)
-    (law : Minidregg.Compiler.StreamCell.StreamLaw store) (chain : ChannelStoreLaw store)
-    {i : Nat} {ri : Minidregg.Compiler.StreamCell.StreamRecord} {di : U16} {ei : UInt64}
-    (hi : store (Minidregg.Compiler.StreamCell.address i) = some ri)
-    (ci : classifyTopic ri.entry.topic = .channel di ei) :
-    ∀ (k : Nat) {rj : Minidregg.Compiler.StreamCell.StreamRecord} {dj : U16} {ej : UInt64},
-      store (Minidregg.Compiler.StreamCell.address (i + k + 1)) = some rj →
-      classifyTopic rj.entry.topic = .channel dj ej → ej.toNat = ei.toNat + (k + 1) := by
-  have hi1 : 1 ≤ i := (law.1 _ (mem_support_of_some hi)).1
-  intro k
-  induction k with
-  | zero =>
-    intro rj dj ej hj cj
-    have link : LinkAt store (i + 0 + 1) := (chain _ (mem_support_of_some hj)).2
-    unfold LinkAt at link
-    rw [show i + 0 + 1 - 1 = i by omega, hj, hi] at link
-    simp only [LinkOk, ci, cj] at link
-    obtain ⟨_, h, _⟩ := link
-    omega
-  | succ k ih =>
-    intro rj dj ej hj cj
-    have link : LinkAt store (i + (k + 1) + 1) := (chain _ (mem_support_of_some hj)).2
-    have hjc : i + (k + 1) + 1 ≤ store.support.card := (law.1 _ (mem_support_of_some hj)).2
-    have hpres := dense_present store law.1 (m := i + k + 1) (by omega) (by omega)
-    have hne : store (Minidregg.Compiler.StreamCell.address (i + k + 1)) ≠ none :=
-      DFinsupp.mem_support_iff.mp hpres
-    obtain ⟨p, hp⟩ := Option.ne_none_iff_exists'.mp hne
-    unfold LinkAt at link
-    rw [show i + (k + 1) + 1 - 1 = i + k + 1 by omega, hj, hp] at link
-    cases cp : classifyTopic p.entry.topic with
-    | channel dp ep =>
-      simp only [LinkOk, cp, cj] at link
-      obtain ⟨_, h, _⟩ := link
-      have := ih hp cp
-      omega
-    | ordinary => simp [LinkOk, cp, cj] at link
-    | malformed => simp [LinkOk, cp, cj] at link
-
-/-- **No equivocation inside one Store.** A lawful stream holds at most one channel entry per epoch:
-two channel entries with the same epoch are the same position. -/
-theorem one_record_per_epoch (store : Store Minidregg.Compiler.StreamCell.layout)
-    (law : Minidregg.Compiler.StreamCell.StreamLaw store) (chain : ChannelStoreLaw store)
-    {i j : Nat} {ri rj : Minidregg.Compiler.StreamCell.StreamRecord} {di dj : U16} {e : UInt64}
-    (hi : store (Minidregg.Compiler.StreamCell.address i) = some ri)
-    (hj : store (Minidregg.Compiler.StreamCell.address j) = some rj)
-    (ci : classifyTopic ri.entry.topic = .channel di e) (cj : classifyTopic rj.entry.topic = .channel dj e) :
-    i = j := by
-  rcases Nat.lt_trichotomy i j with lt | eq | gt
-  · have := channel_epochs_advance store law chain hi ci (j - i - 1) (by rw [show i + (j - i - 1) + 1 = j by omega]; exact hj) cj
-    omega
-  · exact eq
-  · have := channel_epochs_advance store law chain hj cj (i - j - 1) (by rw [show j + (i - j - 1) + 1 = i by omega]; exact hi) ci
-    omega
-
 /-! ## §11. Instances and poles on concrete values -/
 
 namespace Example
@@ -1230,24 +935,12 @@ def zero32 : Digest := ⟨List.replicate 32 0, by decide⟩
 /-- A P1 record of domain 7, `n = 3`, at epoch `e`, with `k` roots. -/
 def record (e : UInt64) (k : Nat) : EpochRecord := ⟨⟨7, by decide⟩, e, 1, 3, List.replicate k zero32, zero32⟩
 
-def sequencer : SubjectId := ⟨10⟩
-def stranger : SubjectId := ⟨11⟩
-def after4 : Prev := ⟨⟨7, by decide⟩, 4, sequencer⟩
-
-theorem first_admitted : checkRecord none sequencer (record 0 16) = .ok () := rfl
-theorem next_admitted : checkRecord (some after4) sequencer (record 5 16) = .ok () := rfl
-theorem gap_refused : checkRecord (some after4) sequencer (record 6 16) = .error .epochGap := rfl
-theorem out_of_order_refused : checkRecord (some after4) sequencer (record 3 16) = .error .epochNotAfter := rfl
-theorem repeat_refused : checkRecord (some after4) sequencer (record 4 16) = .error .epochNotAfter := rfl
-theorem short_refused : checkRecord (some after4) sequencer (record 5 15) = .error .rootCount := rfl
-theorem long_refused : checkRecord (some after4) sequencer (record 5 17) = .error .rootCount := rfl
-theorem stranger_refused : checkRecord (some after4) stranger (record 5 16) = .error .foreignAuthor := rfl
 theorem record_size : (record 5 16).encode.length = 559 := by rw [epochRecord_size]; rfl
 
 theorem opening_wrong_length_refused : openRecord (record 5 16) (List.replicate 79 0) = .error .maskLength := rfl
 theorem opening_long_refused : openRecord (record 5 16) (List.replicate 81 0) = .error .maskLength := rfl
 theorem opening_byte_refused :
-    AbsentOpening.decode 16 3 (2 :: List.replicate 79 0) = .error .maskByte := by decide
+    AbsentOpening.decode 16 3 (2 :: List.replicate 79 0) = .error .maskByte := rfl
 
 /-- Holder 10 (slot 0) is silent at tick 3 of epoch 1; holder 11's cell arrives (`received`). -/
 def rx : Nat → List (Submission sched.profile) := fun t => if t = 3 then received else []
@@ -1357,107 +1050,5 @@ theorem seal_opens : openRecord (sealEpoch sched prf 1 e1 rx zero32) (epochOpeni
 
 end Example
 
-/-! ## §12. Axiom footprints: every theorem rests on at most `propext`, `Classical.choice`, `Quot.sound`
-(no `sorryAx`, no compiler trust, no hash axiom: binding is the `Collision` disjunct). -/
-
-#assert_axioms collision_of
-#assert_axioms ofBE_append
-#assert_axioms ofBE_be
-#assert_axioms flat_injective
-#assert_axioms flat_length
-#assert_axioms chunks_flat
-#assert_axioms epochRecord_size
-#assert_axioms epochRecord_parse_encode
-#assert_axioms epochRecord_decode_encode
-#assert_axioms epochRecord_decode_canonical
-#assert_axioms epochRecord_decode_eq_some_iff
-#assert_axioms epochRecord_encode_injective
-#assert_axioms epochRecord_decode_refuses_length
-#assert_axioms bit_injective
-#assert_axioms absentOpening_encode_injective
-#assert_axioms absentOpening_size
-#assert_axioms absentOpening_decode_encode
-#assert_axioms absentOpening_decode_canonical
-#assert_axioms absentOpening_wrong_length_refused
-#assert_axioms commitAbsent_val
-#assert_axioms opening_binds_with
-#assert_axioms opening_binds
-#assert_axioms lengthHash_opening_binding_fails
-#assert_axioms checkShape_ok_iff
-#assert_axioms checkLink_ok_iff
-#assert_axioms checkRecord_ok_iff
-#assert_axioms next_record_admitted
-#assert_axioms first_record_admitted
-#assert_axioms shape_refusal_first
-#assert_axioms gap_refused
-#assert_axioms out_of_order_refused
-#assert_axioms foreign_author_refused
-#assert_axioms foreign_domain_refused
-#assert_axioms root_count_refused
-#assert_axioms topicMagic_length
-#assert_axioms classifyTopic_channelTopic
-#assert_axioms channelTopic_length
-#assert_axioms admitAppend_record
-#assert_axioms admitAppend_record_ok_iff
-#assert_axioms empty_channel_lawful
-#assert_axioms cell_binds
-#assert_axioms tick_binds
-#assert_axioms digests_bind
-#assert_axioms committed_cells_agree
-#assert_axioms committed_cells_agree_cells
-#assert_axioms shaped_length
-#assert_axioms shaped_header
-#assert_axioms headerAt_injective
-#assert_axioms shaped_mem
-#assert_axioms own_omission_evident
-#assert_axioms flatMap_congr_mem
-#assert_axioms getElem?_flatMap_range
-#assert_axioms absentMask_getElem?
-#assert_axioms absentMask_length
-#assert_axioms epochMask_getElem?
-#assert_axioms epochMask_length
-#assert_axioms assembleAt_fill
-#assert_axioms assemble_getElem?
-#assert_axioms sealEpoch_root
-#assert_axioms assemble_shaped
-#assert_axioms assembled_included
-#assert_axioms absent_position_holds_fill
-#assert_axioms omission_evident
-#assert_axioms seal_depends_only_on_received
-#assert_axioms openRecord_sound
-#assert_axioms openRecord_wrong_length_refused
-#assert_axioms openRecord_epochOpening
-#assert_axioms relay_equivocation_transferable
-#assert_axioms equivocation_check_sound
-#assert_axioms equivocation_unsigned_refused
-#assert_axioms equivocation_same_record_refused
-#assert_axioms dense_present
-#assert_axioms mem_support_of_some
-#assert_axioms channel_epochs_advance
-#assert_axioms one_record_per_epoch
-#assert_axioms Example.first_admitted
-#assert_axioms Example.next_admitted
-#assert_axioms Example.gap_refused
-#assert_axioms Example.out_of_order_refused
-#assert_axioms Example.repeat_refused
-#assert_axioms Example.short_refused
-#assert_axioms Example.long_refused
-#assert_axioms Example.stranger_refused
-#assert_axioms Example.record_size
-#assert_axioms Example.opening_wrong_length_refused
-#assert_axioms Example.opening_long_refused
-#assert_axioms Example.opening_byte_refused
-#assert_axioms Example.silent_slot_marked
-#assert_axioms Example.mine_not_fill
-#assert_axioms Example.omission_evident_instance
-#assert_axioms Example.theirs_included
-#assert_axioms Example.forged_mask_marks_included
-#assert_axioms Example.fill_included_at_absent
-#assert_axioms Example.own_omission_evident_instance
-#assert_axioms Example.unshaped_opens_both
-#assert_axioms Example.committed_cells_agree_instance
-#assert_axioms Example.different_records_different_vectors
-#assert_axioms Example.silent_and_dropped_indistinguishable
-#assert_axioms Example.seal_opens
 
 end Minidregg.Kernel.DomainEpoch

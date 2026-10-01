@@ -10,7 +10,7 @@ included) and `ChannelLaw`'s `foreignAuthor` clause (every record after the firs
 record's author).
 -/
 import Kernel.StreamResource
-import Kernel.DomainEpoch
+import Kernel.DomainEpochLaw
 import Theory.AssertAxioms
 
 namespace Minidregg.Kernel.DomainEpochStream

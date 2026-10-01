@@ -138,8 +138,8 @@ theorem preimage_injective {a b : Opening} (ha : a.Admissible) (hb : b.Admissibl
   obtain ⟨hbl, h⟩ := name_split ab bb h
   obtain ⟨hcm, h⟩ := name_split acm bcm h
   obtain ⟨hx, hr⟩ := List.append_inj h (by simp)
-  have p8 : ((256 ^ 8 : Nat) : Int) = 2 ^ 64 := by norm_num
-  have p32 : ((256 ^ 32 : Nat) : Int) = 2 ^ 256 := by norm_num
+  have p8 : ((256 ^ 8 : Nat) : Int) = 2 ^ 64 := by decide
+  have p32 : ((256 ^ 32 : Nat) : Int) = 2 ^ 256 := by decide
   have hc : a.cell = b.cell :=
     toNat_eq ac0 bc0 (be_injective (toNat_lt ac0 (p8 ▸ ac1)) (toNat_lt bc0 (p8 ▸ bc1)) hcell)
   have hx' : a.value + 2 ^ 255 = b.value + 2 ^ 255 :=
@@ -177,8 +177,9 @@ open Minidregg.Compiler.Sp800185Cshake256 (customizationPrefix cshake256Bytes sq
 /-- The SP 800-185 prefix `bytepad(encode_string("") ‖ encode_string(S), 136)` for this `S`,
 spelled out (`left_encode 136`, `encode_string ""`, `left_encode 160`, the 20 bytes of `S`, 110
 zero bytes). `frame_eq` proves it is the cSHAKE module's own `customizationPrefix`; it is spelled
-out so the evaluator's definition does not reach `Nat.digits` (well-founded, `Classical.choice`),
-which keeps `Pred.eval`'s axiom closure at `[propext, Quot.sound]`. -/
+out so the evaluator's definition stays a literal (the core's `natBytesBE` is structural since
+CH-CLIENT-1 and no longer reaches `Nat.digits`), which keeps `Pred.eval`'s axiom closure at
+`[propext, Quot.sound]`. -/
 def frame : List UInt8 := [1, 136, 1, 0, 1, 160] ++ customization ++ List.replicate 110 0
 
 open Minidregg.Compiler.Sp800185Cshake256 (squeeze32 absorbPadded padForRate) in
@@ -191,10 +192,7 @@ theorem customization_length : customization.length = 20 := by decide
 
 open Minidregg.Compiler.Sp800185Cshake256 in
 theorem frame_eq : customizationPrefix customization = frame := by
-  simp only [customizationPrefix, bytepad, encodeString, leftEncode, customization_length,
-    List.length_nil]
-  norm_num [natBytesBE, frame, customization_length, rateBytes]
-  exact ⟨rfl, rfl, rfl⟩
+  decide
 
 open Minidregg.Compiler.Sp800185Cshake256 in
 /-- The spelled-out sponge **is** the kernel's cSHAKE256 at this customization: one function, not
@@ -218,7 +216,7 @@ theorem binds_or_collides (H : Hash) {a b : Opening} (ha : a.Admissible) (hb : b
   by_cases hab : a = b
   · exact .inl hab
   · refine .inr ⟨a.preimage, b.preimage, fun hp => hab (preimage_injective ha hb hp), ?_⟩
-    simpa [digestWith] using h
+    simpa [digestWith, Int.ofNat_inj] using h
 
 /-! ## §5. The refutable pole: a length hash -/
 
@@ -241,7 +239,7 @@ theorem lengthHash_binding_fails (o : Opening) (value blinder : Int) :
 
 /-- info: 'Minidregg.Pred.HashEqDigest.deployed' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms deployed
-/-- info: 'Minidregg.Pred.HashEqDigest.deployed_eq_cshake256Bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Pred.HashEqDigest.deployed_eq_cshake256Bytes' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms deployed_eq_cshake256Bytes
 /-- info: 'Minidregg.Pred.HashEqDigest.preimage_injective' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms preimage_injective

@@ -4,7 +4,8 @@
 //! The Lean definitions are the implementation. This file does custody and IO only: sockets, clocks,
 //! keys, the fill PRF stream (outside Lean by design, CH-CELL §6), and the client subprocess that appends
 //! each epoch record. Everything with a meaning in the kernel is a call into the Lean library
-//! (`--lean-lib`, built by `scripts/channel-lib.sh` from `Kernel.DomainEpochExport` and its imports):
+//! (`--lean-lib`, built by `channel-lib/build.sh` from `Kernel.DomainEpochExport` and its imports: `Init` and
+//! nine package modules, no Mathlib — 0.56 MB, ~10 ms and ~21 MB to initialise):
 //!
 //! | step | Lean export | definition |
 //! |---|---|---|
@@ -17,6 +18,10 @@
 //! | the epoch record and its opening | `minidregg_channel_seal` | `sealEpoch`, `epochOpening` |
 //! | the append topic | `minidregg_channel_topic` | `channelTopic` |
 //! | the witness's check | `minidregg_channel_open` | `openRecord` |
+//! | a fill's envelope (relay); a member's cell (`mini channel`) | `minidregg_channel_seal_cell` | `envelopeCell` |
+//! | a cell's sealing fields (`mini channel`) | `minidregg_channel_open_cell` | the `Plaintext .x25519` cut |
+//! | the payload capacity at a tick | `minidregg_channel_payload_cap` | `payloadCapAt` |
+//! | a record's tick roots (a member's record check) | `minidregg_channel_record_roots` | `EpochRecord.decode` |
 //!
 //! The wire between a member and the relay (byte-exact; every integer big-endian):
 //!
@@ -72,7 +77,7 @@ const RTLD_GLOBAL: c_int = 0x100;
 type Obj = *mut c_void;
 
 /// The channel exports of `Kernel.DomainEpochExport` and `Theory.Channel`, resolved by `dlsym` from the
-/// library `scripts/channel-lib.sh` links. A missing symbol refuses the run by name; there is no fallback.
+/// library `channel-lib/build.sh` links. A missing symbol refuses the run by name; there is no fallback.
 pub(crate) struct Lean {
     bytes_new: unsafe extern "C" fn(*const u8, usize) -> Obj,
     bytes_len: unsafe extern "C" fn(Obj) -> usize,
@@ -87,6 +92,10 @@ pub(crate) struct Lean {
     seal: unsafe extern "C" fn(u8, u16, u32, u64, Obj, Obj) -> Obj,
     open: unsafe extern "C" fn(Obj, Obj) -> Obj,
     topic: unsafe extern "C" fn(u16, u64) -> Obj,
+    payload_cap: unsafe extern "C" fn(u8, u32) -> Obj,
+    seal_cell: unsafe extern "C" fn(u8, Obj, Obj, Obj, Obj, Obj, Obj, Obj) -> Obj,
+    open_cell: unsafe extern "C" fn(u8, Obj) -> Obj,
+    record_roots: unsafe extern "C" fn(Obj) -> Obj,
 }
 
 unsafe fn sym<T: Copy>(handle: *mut c_void, name: &str) -> Result<T> {
@@ -127,6 +136,10 @@ impl Lean {
                 seal: sym(handle, "minidregg_channel_seal")?,
                 open: sym(handle, "minidregg_channel_open")?,
                 topic: sym(handle, "minidregg_channel_topic")?,
+                payload_cap: sym(handle, "minidregg_channel_payload_cap")?,
+                seal_cell: sym(handle, "minidregg_channel_seal_cell")?,
+                open_cell: sym(handle, "minidregg_channel_open_cell")?,
+                record_roots: sym(handle, "minidregg_channel_record_roots")?,
             })
         }
     }
@@ -193,6 +206,52 @@ impl Lean {
     pub(crate) fn topic(&self, domain: u16, epoch: u64) -> Vec<u8> {
         self.take(unsafe { (self.topic)(domain, epoch) })
     }
+
+    /// The X25519-mode payload capacity of a cell at `tick` (`payloadCapAt`; 195 / 35 at P1).
+    pub(crate) fn payload_cap(&self, pid: u8, tick: u32) -> Result<usize> {
+        let b = self.take(unsafe { (self.payload_cap)(pid, tick) });
+        let b: [u8; 4] = b.try_into().map_err(|_| format!("class {pid}: payload_cap refused"))?;
+        Ok(u32::from_be_bytes(b) as usize)
+    }
+
+    /// A cell from its sealing fields (`envelopeCell`); empty when a field has the wrong length.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn seal_cell(&self, pid: u8, header: &[u8], duty: &[u8], view_tag: u8, frag: &[u8], epk: &[u8], payload: &[u8], tag: &[u8]) -> Vec<u8> {
+        let a = [self.arr(header), self.arr(duty), self.arr(&[view_tag]), self.arr(frag), self.arr(epk), self.arr(payload), self.arr(tag)];
+        self.take(unsafe { (self.seal_cell)(pid, a[0], a[1], a[2], a[3], a[4], a[5], a[6]) })
+    }
+
+    /// A cell's seven fields `header, duty, viewTag, frag, epk, payload, tag`, as the Lean codec cuts
+    /// them (`openCellBytesList`: each `length 2 | bytes`); `None` when the cell is not `C` bytes.
+    pub(crate) fn open_cell(&self, pid: u8, cell: &[u8]) -> Option<CellFields> {
+        let b = self.take(unsafe { (self.open_cell)(pid, self.arr(cell)) });
+        let mut fields = Vec::with_capacity(7);
+        let mut i = 0;
+        while i < b.len() {
+            let n = u16::from_be_bytes([b[i], *b.get(i + 1)?]) as usize;
+            fields.push(b.get(i + 2..i + 2 + n)?.to_vec());
+            i += 2 + n;
+        }
+        let [header, duty, view_tag, frag, epk, payload, tag]: [Vec<u8>; 7] = fields.try_into().ok()?;
+        Some(CellFields { header, duty, view_tag: *view_tag.first()?, frag, epk, payload, tag })
+    }
+
+    /// `domain 2 | epoch 8 | E tick roots` of a canonical epoch record; empty when it is not one.
+    pub(crate) fn record_roots(&self, record: &[u8]) -> Vec<u8> {
+        self.take(unsafe { (self.record_roots)(self.arr(record)) })
+    }
+}
+
+/// A cell cut into its sealing fields by `minidregg_channel_open_cell`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CellFields {
+    pub header: Vec<u8>,
+    pub duty: Vec<u8>,
+    pub view_tag: u8,
+    pub frag: Vec<u8>,
+    pub epk: Vec<u8>,
+    pub payload: Vec<u8>,
+    pub tag: Vec<u8>,
 }
 
 /// A published class, as `minidregg_channel_profile` reports it.
@@ -207,7 +266,7 @@ pub(crate) struct Profile {
 }
 
 impl Profile {
-    fn tick(&self) -> Duration {
+    pub(crate) fn tick(&self) -> Duration {
         Duration::from_micros(1_000_000_000 / self.rate_mhz)
     }
 }
@@ -366,7 +425,7 @@ pub(crate) fn unhex(s: &str) -> Option<Vec<u8>> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()
 }
 
-fn xof(customization: &[u8], parts: &[&[u8]], out: &mut [u8]) {
+pub(crate) fn xof(customization: &[u8], parts: &[&[u8]], out: &mut [u8]) {
     let mut h = CShake256::from_core(CShake256Core::new(customization));
     for p in parts {
         h.update(p);
@@ -394,14 +453,49 @@ pub(crate) fn absent_salt(secret: &[u8; 32], domain: u16, epoch: u64) -> [u8; 32
     s
 }
 
-fn urandom(out: &mut [u8]) -> Result<()> {
+/// The fill of one tick, position-major (`n × (C − 8)` bytes), as `assemble` takes it. Each position's
+/// body is an envelope drawn from `fill_pad`'s stream — duty part, view tag, fragment, payload and tag —
+/// with an X25519 public key (of a scalar drawn from the same stream) where a sealed cell carries its
+/// ephemeral key, laid out by the Lean seal export. A sealed cell's `epk` is a curve point and a raw PRF
+/// string is one only half the time, so without the point a non-recipient could tell a fill from a
+/// sealed cell by a Legendre symbol; with it the two have the same shape (`FillHidden`, CHANNELS §2.4).
+/// Still one value per position: deterministic in (relay secret, domain, epoch, tick, position).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn fill_bodies(lean: &Lean, pid: u8, secret: &[u8; 32], domain: u16, epoch: u64, tick: u32, n: usize, c: usize) -> Result<Vec<u8>> {
+    let body = c - 8;
+    let stream = fill_pad(secret, domain, epoch, tick, n, body + 32);
+    let mut out = Vec::with_capacity(n * body);
+    let mut shape: Option<(usize, usize)> = None;
+    for (rho, s) in stream.chunks(body + 32).enumerate() {
+        let header = lean.header(domain, epoch, tick, rho as u32);
+        let (dl, cap) = match shape {
+            Some(x) => x,
+            None => {
+                let mut probe = header.clone();
+                probe.resize(c, 0);
+                let f = lean.open_cell(pid, &probe).ok_or("open_cell refused a C-byte probe")?;
+                *shape.insert((f.duty.len(), f.payload.len()))
+            }
+        };
+        let scalar: [u8; 32] = s[body..body + 32].try_into().unwrap();
+        let epk = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(scalar));
+        let cell = lean.seal_cell(pid, &header, &s[..dl], s[dl], &s[dl + 1..dl + 5], epk.as_bytes(), &s[dl + 5..dl + 5 + cap], &s[dl + 5 + cap..dl + 21 + cap]);
+        if cell.len() != c {
+            return Err(format!("seal_cell refused the fill at tick {tick} position {rho} ({} bytes)", cell.len()));
+        }
+        out.extend_from_slice(&cell[8..]);
+    }
+    Ok(out)
+}
+
+pub(crate) fn urandom(out: &mut [u8]) -> Result<()> {
     File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(out))
         .map_err(|e| format!("cannot read /dev/urandom: {e}"))
 }
 
 /// A 32-byte secret held in a private file, created on first use.
-fn secret_file(path: &Path) -> Result<[u8; 32]> {
+pub(crate) fn secret_file(path: &Path) -> Result<[u8; 32]> {
     match fs::read(path) {
         Ok(b) if b.len() == 32 => Ok(b.try_into().unwrap()),
         Ok(_) => Err(format!("{} is not 32 bytes", path.display())),
@@ -423,7 +517,7 @@ fn secret_file(path: &Path) -> Result<[u8; 32]> {
 
 // ------------------------------------------------------------------ connections
 
-enum Conn {
+pub(crate) enum Conn {
     Unix(UnixStream),
     Tcp(TcpStream),
 }
@@ -479,7 +573,7 @@ impl Write for Conn {
     }
 }
 
-fn connect(spec: &str) -> Result<Conn> {
+pub(crate) fn connect(spec: &str) -> Result<Conn> {
     if let Some(p) = spec.strip_prefix("unix:") {
         UnixStream::connect(p).map(Conn::Unix).map_err(|e| format!("cannot connect to {spec}: {e}"))
     } else if let Some(a) = spec.strip_prefix("tcp:") {
@@ -615,7 +709,7 @@ fn load1() -> String {
     fs::read_to_string("/proc/loadavg").ok().and_then(|s| s.split_whitespace().next().map(str::to_owned)).unwrap_or_default()
 }
 
-fn sleep_until(t: Instant) {
+pub(crate) fn sleep_until(t: Instant) {
     let now = Instant::now();
     if t > now {
         thread::sleep(t - now);
@@ -639,7 +733,7 @@ fn us(d: Duration) -> u128 {
 }
 
 /// Signed microseconds `a − b`.
-fn diff_us(a: Instant, b: Instant) -> i64 {
+pub(crate) fn diff_us(a: Instant, b: Instant) -> i64 {
     if a >= b {
         (a - b).as_micros() as i64
     } else {
@@ -648,6 +742,15 @@ fn diff_us(a: Instant, b: Instant) -> i64 {
 }
 
 // ------------------------------------------------------------------ the relay
+
+/// Write a sealed record to the members' record directory as `<epoch>.rec` (write, then rename: a
+/// member never reads half a record).
+fn publish_record(dir: &Path, epoch: u64, record: &[u8]) {
+    let tmp = dir.join(format!(".{epoch}.rec.tmp"));
+    if fs::write(&tmp, record).is_ok() {
+        let _ = fs::rename(&tmp, dir.join(format!("{epoch}.rec")));
+    }
+}
 
 /// What the append thread is given once per epoch.
 struct Sealed {
@@ -738,6 +841,17 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
     let start_delay_ms: u64 = args.optional("start-delay-ms").map(|v| v.to_string_lossy().parse()).transpose().map_err(|_| "--start-delay-ms".to_owned())?.unwrap_or(3000);
     let spin = Duration::from_millis(args.optional("spin-ms").map(|v| v.to_string_lossy().parse()).transpose().map_err(|_| "--spin-ms".to_owned())?.unwrap_or(2));
     let wait_members_ms: u64 = args.optional("wait-members-ms").map(|v| v.to_string_lossy().parse()).transpose().map_err(|_| "--wait-members-ms".to_owned())?.unwrap_or(0);
+    // a planted fault for the member's own-slot check: drop slot S's cell at tick K once (`S:K`)
+    let fault_drop: Option<(u32, u64)> = match args.optional("fault-drop") {
+        None => None,
+        Some(v) => {
+            let v = v.to_string_lossy().into_owned();
+            let (a, b) = v.split_once(':').ok_or("--fault-drop wants SLOT:TICK")?;
+            Some((a.parse().map_err(|_| "--fault-drop slot")?, b.parse().map_err(|_| "--fault-drop tick")?))
+        }
+    };
+    // each sealed record, published to members for their own-slot check against the record (§4 step 6)
+    let records_dir = args.optional("records-dir").map(path);
     args.finish()?;
     if append_ws.is_some() != stream.is_some() {
         return Err("--append-ws and --stream go together".into());
@@ -749,6 +863,9 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
     let prof = lean.profile(pid)?;
     fs::create_dir_all(&state).map_err(|e| format!("state dir: {e}"))?;
     fs::create_dir_all(&out).map_err(|e| format!("out dir: {e}"))?;
+    if let Some(d) = &records_dir {
+        fs::create_dir_all(d).map_err(|e| format!("records dir: {e}"))?;
+    }
     let secret = secret_file(&state.join("relay-secret"))?;
     let frame_sk = SigningKey::from_bytes(&secret_file(&state.join("relay-frame-key"))?);
     let leases = parse_leases(&fs::read_to_string(&leases_file).map_err(|e| format!("leases: {e}"))?)?;
@@ -812,6 +929,12 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
         "k,epoch,tick,send_late_us,sends,live,mailbox,fanout_lean_us,send_us,bytes_out,bytes_in,cells_in,absent,wake_late_us,pad_us,assemble_us,root_us,ready_slack_us,missed,seal_us,cpu_us,load1"
     )
     .map_err(|e| e.to_string())?;
+    // the per-(tick, slot) byte log: what crossed the relay's sockets for each slot (the trace test's
+    // relay-side capture; tcpdump needs a capability this box does not grant, and slots ride unix sockets)
+    let mut wire = BufWriter::new(File::create(out.join("wire.csv")).map_err(|e| e.to_string())?);
+    writeln!(wire, "k,slot,route,down_bytes,up_bytes").map_err(|e| e.to_string())?;
+    let slot_of: std::collections::HashMap<u64, u32> = dom.leases.iter().map(|l| (l.holder, l.slot)).collect();
+    let mut up_prev: Vec<u64> = vec![0; n];
     let mut records = BufWriter::new(File::create(out.join("records.csv")).map_err(|e| e.to_string())?);
     writeln!(records, "epoch,sealed_epoch,record_bytes,opening_bytes,record_sha_hex16,witness").map_err(|e| e.to_string())?;
 
@@ -819,7 +942,6 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
     let deadline_lead = Duration::from_millis(prof.delta_relay_ms);
     let e_len = prof.e;
     let msg_len = tick_message_len(n, prof.c);
-    let body = prof.c - 8;
     let mut prev_vector = vec![0u8; n * prof.c];
     let mut prev_root = [0u8; 32];
     let mut epoch_buf: Vec<u8> = Vec::with_capacity(e_len as usize * n * (prof.c + 1));
@@ -874,28 +996,35 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
         msg.extend_from_slice(&sig);
         msg.extend_from_slice(&prev_vector);
         let (mut sends, mut live, mut mailbox, mut bytes_out) = (0u64, 0u64, 0u64, 0u64);
+        let mut wire_rows: Vec<(usize, &str, u64)> = Vec::with_capacity(n);
         let ts = Instant::now();
         {
             let mut s = shared.slots.lock().unwrap();
             for r in routes.chunks(5) {
                 let slot = u32::from_be_bytes(r[0..4].try_into().unwrap()) as usize;
-                let ok = if r[4] == 0 {
+                let (ok, route) = if r[4] == 0 {
                     live += 1;
                     match s.writers.get_mut(slot).and_then(|w| w.as_mut()) {
-                        Some((_, w)) => w.write_all(&msg).is_ok(),
-                        None => discard.write_all(&msg).is_ok(),
+                        Some((_, w)) => (w.write_all(&msg).is_ok(), "live"),
+                        None => (discard.write_all(&msg).is_ok(), "live-gone"),
                     }
                 } else {
                     mailbox += 1;
-                    discard.write_all(&msg).is_ok()
+                    (discard.write_all(&msg).is_ok(), "mailbox")
                 };
                 sends += 1;
                 if ok {
                     bytes_out += msg.len() as u64;
                 }
+                wire_rows.push((slot, route, if ok { msg.len() as u64 } else { 0 }));
             }
         }
         let send_us = us(ts.elapsed());
+        // tick k−1's uplink (collected at its deadline) beside tick k's downlink (the vector of k−1)
+        for (slot, route, down) in wire_rows {
+            let _ = writeln!(wire, "{k},{slot},{route},{down},{}", up_prev.get(slot).copied().unwrap_or(0));
+        }
+        let _ = wire.flush();
 
         // (2) the previous epoch's seal, after this tick's fan-out so it never delays a frame.
         let mut seal_us = 0u128;
@@ -923,6 +1052,9 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
             let digest = <sha2::Sha256 as sha2::Digest>::digest(record);
             let _ = writeln!(records, "{sealed_for},{labelled},{},{},{},{wit}", record.len(), opening.len(), hex(&digest[..8]));
             let _ = records.flush();
+            if let Some(d) = &records_dir {
+                publish_record(d, labelled, record);
+            }
             if let Some((atx, _)) = &appender {
                 let _ = atx.send(Sealed { epoch: labelled, topic, record: record.to_vec() });
             }
@@ -935,6 +1067,23 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
         while let Ok(a) = arrivals.try_recv() {
             pending.push_back(a);
         }
+        let mut up = vec![0u64; n];
+        for a in &pending {
+            if let Some(&sl) = slot_of.get(&a.holder) {
+                if let Some(u) = up.get_mut(sl as usize) {
+                    *u += a.cell.len() as u64;
+                }
+            }
+        }
+        if let Some((fs_, fk)) = fault_drop {
+            if fk == k {
+                if let Some(i) = pending.iter().position(|a| slot_of.get(&a.holder) == Some(&fs_)) {
+                    pending.remove(i);
+                    let _ = writeln!(log.lock().unwrap(), "fault: dropped slot {fs_}'s cell at tick {k} (--fault-drop)");
+                }
+            }
+        }
+        up_prev = up;
         let mut received = Vec::with_capacity(pending.len() * (8 + prof.c));
         let cells_in = pending.len();
         for a in pending.drain(..) {
@@ -942,7 +1091,7 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
             received.extend_from_slice(&a.cell);
         }
         let tp = Instant::now();
-        let pad = fill_pad(&secret, domain, epoch, t, n, body);
+        let pad = fill_bodies(&lean, pid, &secret, domain, epoch, t, n, prof.c)?;
         let pad_us = us(tp.elapsed());
         let ta = Instant::now();
         let out_t = lean.assemble(pid, domain, n as u32, epoch, t, &lease_bytes, &received, &pad);
@@ -1000,6 +1149,9 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
             };
             let digest = <sha2::Sha256 as sha2::Digest>::digest(record);
             let _ = writeln!(records, "{sealed_for},{labelled},{},{},{},{wit}", record.len(), opening.len(), hex(&digest[..8]));
+            if let Some(d) = &records_dir {
+                publish_record(d, labelled, record);
+            }
             if let Some((atx, _)) = &appender {
                 let _ = atx.send(Sealed { epoch: labelled, topic: lean.topic(domain, labelled), record: record.to_vec() });
             }
@@ -1032,7 +1184,7 @@ pub(crate) fn run_relay(mut args: Args) -> Result<()> {
     Ok(())
 }
 
-fn num<T: std::str::FromStr>(args: &mut Args, name: &str) -> Result<T> {
+pub(crate) fn num<T: std::str::FromStr>(args: &mut Args, name: &str) -> Result<T> {
     args.required(name)?.to_string_lossy().parse::<T>().map_err(|_| format!("--{name} is not a number"))
 }
 
@@ -1054,30 +1206,9 @@ pub(crate) fn run_emit(mut args: Args) -> Result<()> {
     args.finish()?;
     let lean = Lean::load(&lib)?;
     let sk = SigningKey::from_bytes(&secret_file(&key_file)?);
-    let mut conn = connect(&spec)?;
-    conn.write_all(&hello_bytes(slot, subject, &sk.verifying_key().to_bytes())).map_err(|e| format!("hello: {e}"))?;
-    let mut nonce = [0u8; 32];
-    conn.read_exact(&mut nonce).map_err(|e| format!("challenge: {e}"))?;
-    conn.write_all(&sk.sign(&hello_signing_bytes(domain, slot, subject, &nonce)).to_bytes()).map_err(|e| format!("auth: {e}"))?;
-    let mut w = [0u8; WELCOME_LEN];
-    conn.read_exact(&mut w).map_err(|e| format!("welcome: {e}"))?;
-    if &w[0..4] != MAGIC {
-        return Err("welcome: bad magic".into());
-    }
-    if w[4] != 0 {
-        return Err(format!("the relay refused slot {slot}: status {}", w[4]));
-    }
-    let pid = w[5];
-    if u16::from_be_bytes([w[6], w[7]]) != domain {
-        return Err("welcome: another domain".into());
-    }
-    let n = u32::from_be_bytes(w[8..12].try_into().unwrap()) as usize;
-    let vk = VerifyingKey::from_bytes(&w[12..44].try_into().unwrap()).map_err(|_| "welcome: bad frame key".to_owned())?;
+    let Joined { mut conn, pid, n, frame_key: vk } = member_join(&spec, domain, slot, subject, &sk)?;
     let prof = lean.profile(pid)?;
     let c = prof.c;
-    if slot as usize >= n {
-        return Err("slot out of range".into());
-    }
     let tick = prof.tick();
     let lead = Duration::from_millis(prof.delta_ms);
     let mut csv = BufWriter::new(File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?);
@@ -1092,15 +1223,8 @@ pub(crate) fn run_emit(mut args: Args) -> Result<()> {
             break;
         }
         let a = Instant::now();
-        let head = parse_frame_head(&buf).ok_or("malformed TICK")?;
-        let sig: [u8; 64] = buf[FRAME_HEAD..FRAME_LEN].try_into().unwrap();
-        let sig_ok = vk.verify(&frame_signing_bytes(&buf[..FRAME_HEAD]), &Signature::from_bytes(&sig)).is_ok();
+        let TickCheck { head, sig_ok, root_ok } = check_tick(&lean, pid, n, &vk, &buf)?;
         let vector = &buf[FRAME_LEN..];
-        let root_ok = if head.k == 0 {
-            head.prev_root == [0u8; 32] && vector.iter().all(|&b| b == 0)
-        } else {
-            lean.tick_root(pid, n as u32, vector) == head.prev_root
-        };
         // the vector is tick k − 1's: my position holds the cell I sent then, or something else (§4 step 6)
         let own = match &sent {
             Some((kk, cell)) if kk + 1 == head.k => {
@@ -1150,6 +1274,61 @@ pub(crate) fn run_emit(mut args: Args) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// A member's side of the handshake (HELLO, CHALLENGE, AUTH, WELCOME): the connection, the domain's
+/// class id, its slot count and the relay's frame key. Shared by `relay-emit` and `channel join`.
+pub(crate) struct Joined {
+    pub conn: Conn,
+    pub pid: u8,
+    pub n: usize,
+    pub frame_key: VerifyingKey,
+}
+
+pub(crate) fn member_join(spec: &str, domain: u16, slot: u32, subject: u64, sk: &SigningKey) -> Result<Joined> {
+    let mut conn = connect(spec)?;
+    conn.write_all(&hello_bytes(slot, subject, &sk.verifying_key().to_bytes())).map_err(|e| format!("hello: {e}"))?;
+    let mut nonce = [0u8; 32];
+    conn.read_exact(&mut nonce).map_err(|e| format!("challenge: {e}"))?;
+    conn.write_all(&sk.sign(&hello_signing_bytes(domain, slot, subject, &nonce)).to_bytes()).map_err(|e| format!("auth: {e}"))?;
+    let mut w = [0u8; WELCOME_LEN];
+    conn.read_exact(&mut w).map_err(|e| format!("welcome: {e}"))?;
+    if &w[0..4] != MAGIC {
+        return Err("welcome: bad magic".into());
+    }
+    if w[4] != 0 {
+        return Err(format!("the relay refused slot {slot}: status {}", w[4]));
+    }
+    if u16::from_be_bytes([w[6], w[7]]) != domain {
+        return Err("welcome: another domain".into());
+    }
+    let n = u32::from_be_bytes(w[8..12].try_into().unwrap()) as usize;
+    if slot as usize >= n {
+        return Err("slot out of range".into());
+    }
+    let frame_key = VerifyingKey::from_bytes(&w[12..44].try_into().unwrap()).map_err(|_| "welcome: bad frame key".to_owned())?;
+    Ok(Joined { conn, pid: w[5], n, frame_key })
+}
+
+/// What a member checks on every TICK before using it: the relay's frame signature, and that the
+/// vector it carries opens the frame's root (Lean `tick_root`; tick 0 carries the all-zero root and vector).
+pub(crate) struct TickCheck {
+    pub head: FrameHead,
+    pub sig_ok: bool,
+    pub root_ok: bool,
+}
+
+pub(crate) fn check_tick(lean: &Lean, pid: u8, n: usize, vk: &VerifyingKey, buf: &[u8]) -> Result<TickCheck> {
+    let head = parse_frame_head(buf).ok_or("malformed TICK")?;
+    let sig: [u8; 64] = buf[FRAME_HEAD..FRAME_LEN].try_into().unwrap();
+    let sig_ok = vk.verify(&frame_signing_bytes(&buf[..FRAME_HEAD]), &Signature::from_bytes(&sig)).is_ok();
+    let vector = &buf[FRAME_LEN..];
+    let root_ok = if head.k == 0 {
+        head.prev_root == [0u8; 32] && vector.iter().all(|&b| b == 0)
+    } else {
+        lean.tick_root(pid, n as u32, vector) == head.prev_root
+    };
+    Ok(TickCheck { head, sig_ok, root_ok })
 }
 
 /// `mini relay-key --key FILE`: the public key of a member's (or the relay's) ed25519 seed file,

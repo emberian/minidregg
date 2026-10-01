@@ -612,42 +612,4 @@ theorem fill_distinguishable_at_duty_tick :
 end Example
 
 
-/-! ## Axiom audit: every theorem above rests on at most `propext`, `Classical.choice`, `Quot.sound` -/
-
-#assert_axioms designEmission_constant
-#assert_axioms designPolicy_fills
-#assert_axioms designPolicy_constantFanout
-#assert_axioms Domain.emitted_header
-#assert_axioms Domain.assembleAt_run
-#assert_axioms Domain.cellObs_ofRaw
-#assert_axioms Domain.posObs_run
-#assert_axioms Domain.tagged_eq_map
-#assert_axioms Domain.emittedObs_traffic_invariant
-#assert_axioms Domain.posObs_traffic_invariant
-#assert_axioms Domain.vector_traffic_invariant
-#assert_axioms Domain.observable_trace_depends_only_on_membership
-#assert_axioms Domain.emittedObs_holder
-#assert_axioms Domain.mem_up
-#assert_axioms Domain.wire_reveals_membership
-#assert_axioms Domain.hdr_isDutyTick
-#assert_axioms Domain.posObs_presence_invariant
-#assert_axioms Domain.member_view_independent_of_presence
-#assert_axioms Example.fit_take_one
-#assert_axioms Example.toy_payloadHidden
-#assert_axioms Example.toy_fillHidden
-#assert_axioms Example.leaky_not_payloadHidden
-#assert_axioms Example.toy_cells_differ
-#assert_axioms Example.toy_traces_equal
-#assert_axioms Example.onDemand_breaks_membership_theorem
-#assert_axioms Example.leaky_breaks_membership_theorem
-#assert_axioms Example.presence_visible_to_wire_relay_operator_witness
-#assert_axioms Example.membership_visible_to_wire
-#assert_axioms Example.relay_sees_presence_change
-#assert_axioms Example.toy_duty_agree
-#assert_axioms Example.member_blind_to_presence_change
-#assert_axioms Example.readable_mask_reveals_presence
-#assert_axioms Example.connected_fanout_reveals_presence
-#assert_axioms Example.no_fill_reveals_presence
-#assert_axioms Example.fill_distinguishable_at_duty_tick
-
 end Minidregg.Theory.Channel
