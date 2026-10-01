@@ -25,7 +25,7 @@ def imports(path):
     return [m for m in re.findall(r"^import\s+(\S+)", open(path, encoding="utf-8").read(), re.M)]
 exe_roots = re.findall(r'^\[\[lean_exe\]\]\s*\nname\s*=\s*"[^"]+"\s*\nroot\s*=\s*"([^"]+)"',
                        open("lakefile.toml").read(), re.M)
-seen, stack = set(), ["Minidregg", "AxiomCensus"] + exe_roots
+seen, stack = set(), ["Minidregg", "AxiomCensus", "Deployed", "AxiomCensusResearch"] + exe_roots
 while stack:
     m = stack.pop()
     if m in seen or m not in mods:

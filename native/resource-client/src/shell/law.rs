@@ -7,7 +7,6 @@
 //! clause := 'sealed' | 'open'                 any [] | all []
 //!         | ('any' | 'all') '[' [clause (',' clause)*] ']'
 //!         | 'not' '(' clause ')'
-//!         | 'witnessed' STRING
 //!         | field ('monotone' | 'writeOnce')
 //!         | slot ('==' value | '<=' value | 'in' '{' value (',' value)* '}')
 //! field  := 'field' N                         resource/field/N/after
@@ -24,6 +23,11 @@
 //! views of one slot; they take only a field's `after` view, because the old
 //! and new views of `before` and `delta` coincide and the atom could never
 //! refuse. The Host renders a refused clause in this same grammar.
+//!
+//! There is no `witnessed` clause: Mini admits by re-execution, and with no
+//! proof system in admission (decision 10-01) the `witnessed` atom compiles to
+//! false, so a law that named it would refuse every write. The grammar refuses
+//! the word instead of offering a clause that can never hold.
 
 use serde_json::{json, Value};
 
@@ -205,13 +209,10 @@ impl Parser {
                 self.expect(")")?;
                 Ok(json!({"type":"not","predicate":inner}))
             }
-            "witnessed" => {
-                self.at += 1;
-                match self.next() {
-                    Some(Tok::Str(id)) => Ok(json!({"type":"witnessed","identifier":id})),
-                    other => Err(format!("witnessed takes a quoted identifier, found {}", show(other.as_ref()))),
-                }
-            }
+            "witnessed" => Err(
+                "witnessed is not a law clause: Mini admits by re-execution and has no proof system, so the clause could never hold"
+                    .into(),
+            ),
             _ => self.atom(),
         }
     }
@@ -354,7 +355,7 @@ mod tests {
         assert_eq!(parse("subject == 7").unwrap(), eq("request/subject", "7"));
         assert_eq!(parse("cost <= 1000").unwrap(), json!({"type":"le","slot":"request/cost","value":"1000"}));
         assert_eq!(parse(r#"slot "account/balance/3" <= 9"#).unwrap(), json!({"type":"le","slot":"account/balance/3","value":"9"}));
-        assert_eq!(parse(r#"witnessed "vk-1""#).unwrap(), json!({"type":"witnessed","identifier":"vk-1"}));
+        assert!(parse(r#"witnessed "vk-1""#).unwrap_err().contains("no proof system"));
     }
 
     #[test]
