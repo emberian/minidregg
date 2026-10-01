@@ -319,7 +319,17 @@ pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Resul
         }
         match cookie.expiry {
             CookieExpiry::None => {}
-            CookieExpiry::Relative(seconds) => rendered.push_str(&format!("; Max-Age={seconds}")),
+            CookieExpiry::Relative(seconds) => {
+                // WebSession's relative expiry is a UInt64; a cookie the app
+                // expires in the past (a deletion) reaches us as a wrapped
+                // negative. Roundcube's `roundcube_sessauth=-del-` arrived as
+                // 18446744073709551556 and went out as a ~585-billion-year
+                // Max-Age, keeping the cookie it meant to delete (SPK-APPS).
+                // No real lifetime exceeds i64::MAX seconds: render it as an
+                // immediate expiry (RFC 6265: Max-Age <= 0 expires now).
+                let seconds = if seconds > i64::MAX as u64 { 0 } else { seconds };
+                rendered.push_str(&format!("; Max-Age={seconds}"))
+            }
             CookieExpiry::Absolute(seconds) => {
                 rendered.push_str(&format!("; Expires={}", cookie_expires(seconds)?))
             }
@@ -495,6 +505,14 @@ mod tests {
         assert!(serialize(&reply, false).is_err());
         reply.set_cookies[0].path = "/".into();
         assert!(serialize(&reply, false).is_ok());
+        reply.set_cookies[0].name = "app_pref".into();
+        reply.set_cookies[0].expiry = CookieExpiry::Relative(3600);
+        let relative = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
+        assert!(relative.contains("; Max-Age=3600"));
+        // A deletion (expiry in the past) wraps the UInt64: expire now.
+        reply.set_cookies[0].expiry = CookieExpiry::Relative(18_446_744_073_709_551_556);
+        let deleted = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
+        assert!(deleted.contains("; Max-Age=0") && !deleted.contains("18446744073709551556"));
     }
 
     #[test]
