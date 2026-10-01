@@ -13,6 +13,9 @@
 #   cold-start     the native Host starts without doing work (scripts/check-host-cold-start.sh:
 #                  peak RSS and CPU of a bare start; a computable nullary def in a module
 #                  the Host links runs at every Host start)
+#   hyp-ledger     scripts/check-hypothesis-ledger.sh over AxiomCensusResearch (built by
+#                  lake-build): no VACUOUS/INCONSISTENT row, no un-allowlisted TOOTHLESS
+#                  assumption, no stale allowlist entry; self-tests its instrument each run
 #   drift          the build changed no tracked file (Lean-emitted descriptors, vectors,
 #                  glue); compared against the tree as it stood before the build
 #   prover-glue    the Lean-emitted prover glue is byte-identical to what its source emits
@@ -40,7 +43,7 @@ mkdir -p "$logdir"
 lib_targets=$(sed -n '/^\[\[lean_lib\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 exe_targets=$(sed -n '/^\[\[lean_exe\]\]/{n;s/^name *= *"\(.*\)"$/\1/p}' lakefile.toml | tr '\n' ' ')
 
-GATES=(hygiene lake-build cold-start drift prover-glue build-closure host-closure import-tiers exports rust-tests journey)
+GATES=(hygiene lake-build cold-start hyp-ledger drift prover-glue build-closure host-closure import-tiers exports rust-tests journey)
 declare -A STATUS SECS LAST
 red=0
 only=${LOCAL_GATES_ONLY:-}
@@ -48,6 +51,7 @@ only=${LOCAL_GATES_ONLY:-}
 g_hygiene()       { bash scripts/check-proof-hygiene.sh && python3 scripts/gen-sheetlaw.py --check; }
 g_lake-build()    { echo "lake build $lib_targets$exe_targets"; "$lake" build $lib_targets $exe_targets; }
 g_cold-start()    { bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host; }
+g_hyp-ledger()    { bash scripts/check-hypothesis-ledger.sh; }
 g_drift() {
   local after; after=$(git diff --binary | git hash-object --stdin)
   if [[ "$tree_before" != "$after" ]]; then
