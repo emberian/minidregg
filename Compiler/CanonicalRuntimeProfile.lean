@@ -69,9 +69,11 @@ before/after/delta plus pair-total deltas only where the actual reads exist.
 Every participant of a joint command is exposed twice, under
 `joint/target/{cell id}/…` and under `joint/index/{i}/…` with `i` its 0-based
 position in the command's target list (`DeclaredResourceController.jointSlots`,
-`joint_index_of_target`); a position the command lacks names no slot. -/
+`joint_index_of_target`); a position the command lacks names no slot.
+The deployment clock's `clock/now`, `clock/day` and `clock/slot`
+(`ClockCell.slots`) come first among the common slots, on old and new alike. -/
 def invocationProjectionVersion : List UInt8 :=
-  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS/v5".toUTF8.toList
+  "DREGG.RUNTIME.JOINT-INVOCATION.EXACT-TARGETS-FINAL-POSTS-CURRENT-SIGNED-READS-CLOCK-SLOTS.TARGET-AND-INDEX-KEYED-JOINT-SLOTS/v6".toUTF8.toList
 
 /-- Typed content edits are source-derived canonical patches; atom payloads
 and exact old records belong to the command, not a host-side blob table. -/
@@ -180,6 +182,8 @@ def sourceComponents : List (List UInt8) :=
    StoreCodec.frame DeclaredEffectCell.wire,
    StoreCodec.frame Kernel.PayCell.wire,
    Kernel.PayCell.idCustomization,
+   StoreCodec.frame Kernel.ClockCell.wire,
+   Kernel.ClockCell.idCustomization,
    StoreCodec.rootCustomization,
    CanonicalResourcePageMaterializer.wireFrame,
    CanonicalResourcePageMaterializer.rootCustomization,

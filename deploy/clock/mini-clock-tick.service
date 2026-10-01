@@ -1,0 +1,19 @@
+# The v1 time source of a Mini deployment's one clock (K-CLOCK).
+#
+# Reads the operator's wall clock and submits one tick through the operator's
+# workspace under the factory control capability. The Host refuses a tick that
+# does not advance the clock, so a delayed or duplicated run cannot move time
+# backwards. This source is the operator's wall clock, trusted as the operator
+# is; PAY's chain observer ticks the same cell with chain time.
+#
+# Install (user units): copy both files to ~/.config/systemd/user/, set the two
+# Environment lines, then `systemctl --user enable --now mini-clock-tick.timer`.
+[Unit]
+Description=Mini clock tick (operator wall clock)
+
+[Service]
+Type=oneshot
+Environment=MINI=/usr/local/bin/mini
+Environment=MINI_CLOCK_WORKSPACE=%h/mini/operator-workspace
+Environment=MINI_CLOCK_CONTROL=53
+ExecStart=/bin/sh -c 'exec "$MINI" clock --action tick --workspace "$MINI_CLOCK_WORKSPACE" --control "$MINI_CLOCK_CONTROL"'

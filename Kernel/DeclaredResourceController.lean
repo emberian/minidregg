@@ -163,6 +163,7 @@ def projectCommonSlots (prepared : PreparedInvocation deployment profile ambient
   let preRoot := match primary with
     | some i => (prepared.targets i).pre.root
     | none => prepared.authority.snapshot.cell.root
+  Kernel.ClockCell.slots prepared.clock.clock ++
   CanonicalRuntimeProfile.requestSlots
       (requestFor prepared.authority.snapshot profile.semantics ambient command selected preRoot) ++
     bytesSlots "command/bytes" 0 (commandCodec.encode source.val)
@@ -213,10 +214,17 @@ theorem participantSlots_unjoint (prepared : PreparedInvocation deployment profi
   unjoint_append _ _ (bytesSlots_unjoint "resource/bytes" 'r' (by decide) (by decide) _ _)
     (targetProjection_unjoint _ _ _)
 
+/-- The clock's common slots (`clock/now`, `clock/day`, `clock/slot`) are not joint keys. -/
+theorem clockSlots_unjoint (clock : Kernel.ClockCell.Clock) : Unjoint (Kernel.ClockCell.slots clock) := by
+  intro p hp
+  simp only [Kernel.ClockCell.slots, List.mem_cons, List.not_mem_nil, or_false] at hp
+  rcases hp with rfl | rfl | rfl <;> dsimp only <;> decide
+
 theorem projectCommonSlots_unjoint (prepared : PreparedInvocation deployment profile ambient durable command)
     (primary : Incidence command) (source : Source command) :
     Unjoint (projectCommonSlots prepared primary source) :=
-  unjoint_append _ _ (requestSlots_unjoint _)
+  unjoint_append _ _
+    (unjoint_append _ _ (clockSlots_unjoint _) (requestSlots_unjoint _))
     (bytesSlots_unjoint "command/bytes" 'c' (by decide) (by decide) _ _)
 
 /-- Every joint key is read from the joint block: nothing local or common can shadow it. -/
@@ -274,6 +282,8 @@ theorem joint_index_absent (prepared : PreparedInvocation deployment profile amb
 #guard_msgs (whitespace := lax) in #print axioms targetProjection_unjoint
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.participantSlots_unjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms participantSlots_unjoint
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.clockSlots_unjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms clockSlots_unjoint
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.projectCommonSlots_unjoint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms projectCommonSlots_unjoint
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.project_joint_get' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -288,6 +298,21 @@ theorem joint_index_absent (prepared : PreparedInvocation deployment profile amb
 #guard_msgs (whitespace := lax) in #print axioms joint_index_absent
 
 end JointIndex
+/-- **`now_slot_exact`.**  Every law judging a resource invocation reads
+`clock/now` as exactly the `now` of the clock cell held by the snapshot the
+record is prepared from (and guarded against, `domainGuards`). -/
+theorem now_slot_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (primary : Incidence command) (source : Source command)
+    (logical : (incidence : Incidence command) → Store ((layout prepared).storeLayout incidence)) :
+    (project prepared primary source logical).get "clock/now" =
+        some (Int.ofNat prepared.clock.clock.now) ∧
+      Kernel.ClockCell.clockOf prepared.clock.cell.logical = some prepared.clock.clock := by
+  refine ⟨?_, prepared.clock.clockExact⟩
+  simp [project, projectWithCommon, projectCommonSlots, Kernel.ClockCell.slots,
+    Minidregg.Pred.State.get]
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.now_slot_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms now_slot_exact
 
 /- The tuple's generic `pre` selector constructs a complete raw leg, including
 the hash of the entire signed command's request. These projections select the
@@ -765,8 +790,12 @@ def sourceGuards (prepared : PreparedInvocation deployment profile ambient durab
   (List.finRange command.targets.length).map fun i =>
     ⟨⟨(prepared.targets i).source.readGuard.1⟩, (prepared.targets i).source.readGuard.2⟩
 
+/-- The domain reads of every invocation: the authority cell and the clock. -/
+def domainGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
+  prepared.authority.readGuards ++ [prepared.clock.readGuard]
+
 def readGuards (prepared : PreparedInvocation deployment profile ambient durable command) : List ReadGuard :=
-  sourceGuards prepared ++ prepared.authority.readGuards.filter fun guard =>
+  sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
     guard.cellId ∉ (writes prepared).map DataWrite.cellId
 
 def PhysicalShape (prepared : PreparedInvocation deployment profile ambient durable command) : Prop :=
@@ -783,7 +812,7 @@ def physicalShapeCheck (prepared : PreparedInvocation deployment profile ambient
   let ws := writes prepared
   let ids := ws.map DataWrite.cellId
   let source := sourceGuards prepared
-  let guards := source ++ prepared.authority.readGuards.filter fun guard => guard.cellId ∉ ids
+  let guards := source ++ (domainGuards prepared).filter fun guard => guard.cellId ∉ ids
   decide ids.Nodup &&
   decide (∀ write ∈ ws, write.expectedPre = durable.snapshot.model.roots write.cellId) &&
   decide (∀ write ∈ ws, ResourceBirthController.Concrete.PhysicalPostLaw deployment write) &&
@@ -881,7 +910,7 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
     (_accepted : AcceptedInvocation prepared signed) (shape : PhysicalShape prepared) :
     DataIntent ResourceBirthCodec.rootBytes :=
   let ws := writes prepared
-  let guards := sourceGuards prepared ++ prepared.authority.readGuards.filter fun guard =>
+  let guards := sourceGuards prepared ++ (domainGuards prepared).filter fun guard =>
     guard.cellId ∉ ws.map DataWrite.cellId
   { transactionId := transactionId prepared.authority.snapshot.domain profile.semantics command
     writes := ws

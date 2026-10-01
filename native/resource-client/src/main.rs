@@ -34,6 +34,7 @@ mod historical_call_receipt;
 #[cfg(unix)]
 mod meter;
 #[cfg(unix)]
+mod clock;
 mod participant_enrollment;
 #[cfg(unix)]
 mod participant_namespace;
@@ -2144,6 +2145,7 @@ fn run(mut args: Args) -> Result<()> {
         "workspace" => workspace::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
+        "clock" => clock::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
         "fleet" => fleet::run(args),
