@@ -1,0 +1,54 @@
+received id=hermes-room-1 bytes=8472
+completion id=hermes-room-1 bytes=8472 stream=false stage=read
+received id=hermes-room-2 bytes=17681
+completion id=hermes-room-2 bytes=17681 stream=false stage=write link-10015619208563495815,link-12799666542996361806,digest-3
+received id=hermes-room-3 bytes=20107
+completion id=hermes-room-3 bytes=20107 stream=false stage=done
+received id=hermes-room-4 bytes=8472
+completion id=hermes-room-4 bytes=8472 stream=false stage=read
+received id=hermes-room-5 bytes=19327
+completion id=hermes-room-5 bytes=19327 stream=false stage=history
+received id=hermes-room-6 bytes=23171
+completion id=hermes-room-6 bytes=23171 stream=false stage=write answer-4
+received id=hermes-room-7 bytes=24878
+completion id=hermes-room-7 bytes=24878 stream=false stage=done
+received id=hermes-room-8 bytes=8472
+completion id=hermes-room-8 bytes=8472 stream=false stage=read
+received id=hermes-room-9 bytes=20942
+completion id=hermes-room-9 bytes=20942 stream=false stage=write edit-6
+received id=hermes-room-10 bytes=21517
+completion id=hermes-room-10 bytes=21517 stream=false stage=report
+received id=hermes-room-11 bytes=22134
+completion id=hermes-room-11 bytes=22134 stream=false stage=done
+received id=hermes-room-12 bytes=8473
+completion id=hermes-room-12 bytes=8473 stream=false stage=read
+received id=hermes-room-13 bytes=22798
+completion id=hermes-room-13 bytes=22798 stream=false stage=history
+received id=hermes-room-14 bytes=23665
+completion id=hermes-room-14 bytes=23665 stream=false stage=write digest-10,answer-10
+received id=hermes-room-15 bytes=25293
+completion id=hermes-room-15 bytes=25293 stream=false stage=out-of-budget
+received id=hermes-room-16 bytes=8473
+completion id=hermes-room-16 bytes=8473 stream=false stage=read
+received id=hermes-room-17 bytes=24425
+completion id=hermes-room-17 bytes=24425 stream=false stage=history
+received id=hermes-room-18 bytes=26681
+completion id=hermes-room-18 bytes=26681 stream=false stage=write link-9877632148810715983,answer-10
+received id=hermes-room-19 bytes=8473
+completion id=hermes-room-19 bytes=8473 stream=false stage=read
+received id=hermes-room-20 bytes=24795
+completion id=hermes-room-20 bytes=24795 stream=false stage=history
+received id=hermes-room-21 bytes=27439
+completion id=hermes-room-21 bytes=27439 stream=false stage=write answer-10
+received id=hermes-room-22 bytes=28545
+completion id=hermes-room-22 bytes=28545 stream=false stage=done
+received id=hermes-room-23 bytes=8473
+transport-error Broken pipe (os error 32)
+received id=hermes-room-24 bytes=8473
+completion id=hermes-room-24 bytes=8473 stream=false stage=read
+received id=hermes-room-25 bytes=26053
+completion id=hermes-room-25 bytes=26053 stream=false stage=history
+received id=hermes-room-26 bytes=26919
+completion id=hermes-room-26 bytes=26919 stream=false stage=write answer-13
+received id=hermes-room-27 bytes=27477
+completion id=hermes-room-27 bytes=27477 stream=false stage=done

@@ -1,0 +1,401 @@
+{
+  "type": "mini-journey-result-v1",
+  "runRoot": "/home/ember/build/j14/r4",
+  "script": "/home/ember/build/mini-datamodel-20260930/p-hermes-room/src/native/resource-client/journey.sh",
+  "inputsSha256": [
+    "4f18fc14d9e1ede21789eaf7f1a2fa8818e9d8dceae0411a06eebca7b690487f  /home/ember/build/mini-datamodel-20260930/p-hermes-room/src/native/resource-client/journey.sh",
+    "d183bec10d165024659517ff4edd3f11b9c2ed4a78e5e503afc2558451cbdc6b  /home/ember/build/mini-datamodel-20260930/p-hermes-room/run/bin/minidregg-host-phr1",
+    "c3f92899005f36e5fccdd3b42e21c7dd491b28ffa00081ac702e72f4087a5a85  /home/ember/build/mini-datamodel-20260930/p-hermes-room/run/bin/mini-phr4",
+    "884b594bd71203b8e785839cc44be104227d16918a168998619321497b73033a  /home/ember/build/mini-datamodel-20260930/c-c2/frun/bin/store-c2a",
+    "71b8d73424920d18aa26f76b8594cc802de640da38c58ef79e3cc9ae1940b753  /home/ember/build/mini-datamodel-20260930/c-c2/frun/bin/verifier",
+    "c3f92899005f36e5fccdd3b42e21c7dd491b28ffa00081ac702e72f4087a5a85  /home/ember/build/mini-datamodel-20260930/p-hermes-room/run/bin/mini-phr4"
+  ],
+  "acceptedRecords": 5,
+  "wallSeconds": "671.929",
+  "machine": {
+    "host": "persvati",
+    "cpus": "24",
+    "loadAverageAtStart": "13.42 17.79 20.14",
+    "loadAverageNow": "16.92 13.03 15.83"
+  },
+  "frontier": "J6",
+  "reachedEnd": false,
+  "steps": [
+    {
+      "id": "J0",
+      "title": "clean start: private single-authority service, one sponsor",
+      "status": "PASS",
+      "wallSeconds": "27.860",
+      "artifact": "/home/ember/build/j14/r4/world/handoff.json",
+      "detail": "service up and a signed read answered in 27.825s"
+    },
+    {
+      "id": "J1",
+      "title": "enroll an independently generated newcomer key",
+      "status": "PASS",
+      "wallSeconds": "4.362",
+      "artifact": "/home/ember/build/j14/r4/world/attempts/newcomer/submit.json",
+      "detail": "subject 10654491313315882087, record 1; key absent from genesis/config; lookup = same receipt"
+    },
+    {
+      "id": "J2",
+      "title": "sponsor creates a resource under a permissive law",
+      "status": "PASS",
+      "wallSeconds": "3.227",
+      "artifact": "/home/ember/build/j14/r4/world/sponsor/attempts/create-shared/outcome.json",
+      "detail": "object 17065472256137816288 under all[], record 2"
+    },
+    {
+      "id": "J3",
+      "title": "sponsor delegates observe+mutate (no control) to newcomer",
+      "status": "PASS",
+      "wallSeconds": "5.554",
+      "artifact": "/home/ember/build/j14/r4/world/sponsor/attempts/grant-newcomer/outcome.json",
+      "detail": "child 15977076559355450227 verbs observe,mutate, record 3"
+    },
+    {
+      "id": "J4",
+      "title": "newcomer signed read, writes field to 1, reads back 1",
+      "status": "PASS",
+      "wallSeconds": "5.585",
+      "artifact": "/home/ember/build/j14/r4/world/newcomer-workspace/attempts/first-action/outcome.json",
+      "detail": "read 0.906s, write 3.415s, readback field 2 = 1, record 4"
+    },
+    {
+      "id": "J5",
+      "title": "a key with no grant: read and write refused",
+      "status": "PASS",
+      "wallSeconds": "19.179",
+      "artifact": "/home/ember/build/j14/r4/steps/J5/refusals.tsv",
+      "detail": "6/6 refused by the Host (enrolled no-grant read x2, propose, crafted submit; unenrolled read, submit); image unchanged; third = record 5"
+    },
+    {
+      "id": "J6",
+      "title": "stop/reopen: receipts recovered, exact retry replays",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "G",
+      "title": "growth 10/100/500/1000: write<=5s, reopen<=60s at 1000",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "J7",
+      "title": "law replaced; newcomer's existing grant still works",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "J8",
+      "title": "deny-all: newcomer refused, sponsor repair refused",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "K4",
+      "title": "one resource holds 32 fields and reads them back",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "KC",
+      "title": "K-CLOCK: the one clock; clock/now in every resource law",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JJ",
+      "title": "a law reads another participant by position (joint/index/i)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "K10",
+      "title": "rooms: born --in R, under R covers R and its chain, outsiders refused at the controller",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "K11",
+      "title": "per-author streams in a room: K writers append with zero re-plans",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "KIX",
+      "title": "the index the world keeps: who, since, and a read at a past height",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "KF",
+      "title": "a scope names fields and bounds each field change per write",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "K12C",
+      "title": "content actions: annotate at a revision, quote and transclude across cells",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "KHQ",
+      "title": "commit-reveal at the kernel: a sealed bid opens only to its commitment",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "KW",
+      "title": "realm wells: mint under the well grant and law, burn by the holder, conservation",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "K10C",
+      "title": "rooms through the shell: the birth gate, re-delegation, the J7 pole, kick, a realm",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "KT",
+      "title": "room templates: a room born with a map (index, wall, notes) from a file of shell lines",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "J17",
+      "title": "a week in the place: credit, pay, the concierge, the window expires outside-validity, renewal, conservation",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "J14",
+      "title": "Hermes as librarian: summon with a budget, links and a digest, asks answered from history, a no-grant edit, out of budget, topup, a restart, dismiss returns the rest",
+      "status": "PASS",
+      "wallSeconds": "598.890",
+      "artifact": "/home/ember/build/j14/r4/steps/J14/j14.tsv",
+      "detail": "J14: 136 rows as expected (/home/ember/build/j14/r4/steps/J14/j14.tsv)"
+    },
+    {
+      "id": "JN2",
+      "title": "a friend Nock program becomes a program cell (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JN3",
+      "title": "the kernel checks a Nock run by re-executing it (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JN5",
+      "title": "a NockApp kernel door refereed by re-execution (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "BD",
+      "title": "plans bind address footprints: disjoint plans commute, overlap refused",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "M3",
+      "title": "newcomer provisions itself and creates, no sponsor step",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "M4",
+      "title": "J1-J8 through the shell over ssh",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "M5",
+      "title": "Hermes does J4 through the client; killed, restarts, resolves",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "M6",
+      "title": "a grain: INSTALL -> START -> reachable over http",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "M7",
+      "title": "candidate built from portable interfaces reproduces hashes",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "M8",
+      "title": "agent fleet: fee'd turns, topic events, heads (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "J12",
+      "title": "two friends co-write a document through the shell, with refusals",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "J12C",
+      "title": "a quote (transclusion) across rooms: four grants, four outcomes",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "J13",
+      "title": "a law refusal names its failing clause (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JCHAT",
+      "title": "friends talk in a room: say, tail, topic, pin, react, the Discord bridge",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAY1",
+      "title": "pay watcher: finalized transfers become Observation records",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAY2",
+      "title": "the pay cell: tariff, deposit book, assignment (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAY3",
+      "title": "observed payments become Book credit; the observer advances the deployment clock (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAYE1",
+      "title": "the pay watcher enrollment index on fixtures",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAYE2",
+      "title": "self-enrollment decision with real signatures; enrollment view (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAYE3",
+      "title": "the self-enrollment receiver (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAY4",
+      "title": "the payment rail through the client with the fixture watcher (own Store)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JPAY6",
+      "title": "a Book burn funds an AgentGrain purse in one joint turn (own Store; needs GRAIN, TEST_PROVIDER, LAUNCH_GATE, sudo)",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    },
+    {
+      "id": "JP2",
+      "title": "a friend's key never touches the box: enroll, use and delegate over the proxy",
+      "status": "SKIPPED",
+      "wallSeconds": "0.000",
+      "artifact": "",
+      "detail": "skipped: not in JOURNEY_ONLY"
+    }
+  ]
+}
