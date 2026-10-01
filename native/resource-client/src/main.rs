@@ -45,6 +45,8 @@ mod prepare_refusal;
 #[cfg(unix)]
 mod publisher;
 #[cfg(unix)]
+mod relay;
+#[cfg(unix)]
 mod selected_exchange;
 #[cfg(unix)]
 mod selected_publisher;
@@ -340,6 +342,10 @@ usage:
   mini origin-outbox-export --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --mini-transaction ID --dir NEW-ATTEMPT
   mini origin-publish --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --carrier R.eml --state-dir PRIVATE-DIR --post-config PRIVATE-POST.json
   mini continuity --host HOST --config CONFIG.json --socket SOCKET --call RESERVE/call.bin --outcome RESERVE/outcome.bin --dir NEW-ATTEMPT
+  mini relay --lean-lib LIB.so --class ID --domain D --n N --leases LEASES.txt --ticks K --unix SOCKET --state-dir DIR --out-dir DIR [--tcp 127.0.0.1:PORT] [--witness WITNESS.sock] [--append-ws WS --stream NAME] [--first-epoch E] [--start-delay-ms MS] [--wait-members-ms MS] [--spin-ms MS] [--fault-gap-at-epoch E]
+  mini relay-emit --lean-lib LIB.so --connect unix:SOCKET|tcp:HOST:PORT --domain D --slot S --subject ID --key KEY --out MEMBER.csv [--ticks K]
+  mini relay-witness --lean-lib LIB.so --unix WITNESS.sock --out WITNESS.csv
+  mini relay-key --key SEED-FILE
   mini meter --host HOST --config CONFIG.json --socket SOCKET --metadata META.json --request REQUEST.bin --response RESPONSE.bin --dir NEW-ATTEMPT
   mini consumer-drain-once --host HOST --config FN-POLL-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
   mini reply-consumer-drain-once --host HOST --config FN-REPLY-CATALOG-CONFIG.json --socket SOCKET --key KEY --state-dir PRIVATE-DIR [--max-pages 16]
@@ -2157,6 +2163,14 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "shell" => shell::run(args),
         "fleet" => fleet::run(args),
+        #[cfg(unix)]
+        "relay" => relay::run_relay(args),
+        #[cfg(unix)]
+        "relay-emit" => relay::run_emit(args),
+        #[cfg(unix)]
+        "relay-witness" => relay::run_witness(args),
+        #[cfg(unix)]
+        "relay-key" => relay::run_key(args),
         "well" => well::run(args),
         #[cfg(unix)]
         "selected-exchange" => {
