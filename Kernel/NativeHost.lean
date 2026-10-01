@@ -173,6 +173,16 @@ def prepareLoaded (config : Config) (opened : Opened config) (draft : Draft) :
         let marker := CapabilityRevocationController.operationMarker config.deployment.domain profile.semantics packed.2
         let signature ← slot prepared.authority.snapshot marker 7 0 ⟨.program, wanted⟩
         pure (.revoke bytes, [signature])
+    | .renounce bytes => do
+        -- The plan reads nothing about the named capability: the signer's key
+        -- record (public) is the only state it consults. The gate runs at
+        -- submission, after the signature verifies.
+        let command ← need "noncanonical renounce command" (CapabilityRenounce.commandCodec.decode bytes)
+        let ambient : CapabilityRenounce.Ambient := ⟨config.federation, height⟩
+        let prepared ← (CapabilityRenounce.prepare config.deployment profile.semantics ambient
+          opened.durable command).mapError (fun reason => s!"renounce preparation: {repr reason}")
+        let signature ← slot prepared.authority.snapshot prepared.marker 9 0 ⟨.program, prepared.request⟩
+        pure (.renounce bytes, [signature])
   pure ⟨config.deployment.domain, profile.semantics, opened.durable.worldRoot,
     height, finalized, slots⟩
 
@@ -491,6 +501,10 @@ def assemble (plan : SigningPlan) (signatures : List (List UInt8)) : Except Stri
       match envelopes with
       | [envelope] => pure (.revoke (CapabilityRevocationReceiver.ingressCodec.encode ⟨bytes, envelope⟩))
       | _ => .error "revocation signing slots mismatch"
+  | .renounce bytes =>
+      match envelopes with
+      | [envelope] => pure (.renounce (CapabilityRenounce.ingressCodec.encode ⟨bytes, envelope⟩))
+      | _ => .error "renounce signing slots mismatch"
 
 /-- The world root after accepted record `index`: at the head it is the served
 image's cached root (one read); an earlier prefix is evaluated from its image
@@ -1060,10 +1074,38 @@ def clockViewLoaded (config : Config) (opened : Opened config) : Except String C
     | .absent => .error "factory unavailable"
   pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, factoryRoot, clock.clock⟩
 
+/-- Who may read a submission's refusal. Every refusal is uniform
+(`publicSubmissionOutcome`) except a renounce's gate refusal, which exists only
+after the signer's signature verified (`CapabilityRenounce.HolderRefusal`) and
+concerns only the signer's own holding. -/
+inductive Disclosure where
+  | uniform
+  | toSigner
+  deriving DecidableEq, Repr
+
+def submitRenounceWith (config : Config) (opened : Opened config) (bytes : List UInt8)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO (Outcome × Disclosure) := do
+  let height := logicalHeight config opened.durable
+  match ← CapabilityRenounce.receiveLoaded config.deployment config.profile.semantics
+      ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => return (← confirm kind receipt.transactionId receipt.eventId, .uniform)
+  | .refusedToHolder reason =>
+      return (refused .operationRejected "renounce" s!"{repr reason}", .toSigner)
+  | .rejected reason => return (refused .operationRejected "renounce" s!"{repr reason}", .uniform)
+  | .transactionConflict =>
+      return (refused .conflict "replay" "transaction identity conflict", .uniform)
+  | .durableRejected reason =>
+      return (refused .operationRejected "durable" s!"{repr reason}", .uniform)
+  | .contention => return (.contention, .uniform)
+  | .unavailable detail => return (.unavailable detail.toUTF8.toList, .uniform)
+  | .uncertain detail => return (.uncertain detail.toUTF8.toList, .uniform)
+
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
   match call with
+  | .renounce bytes => return (← submitRenounceWith config opened bytes confirm).1
   | .revoke bytes =>
       match ← CapabilityRevocationReceiver.receiveLoaded config.deployment config.profile
           ⟨config.federation, height⟩ config.signature config.transport opened.durable bytes with
@@ -1181,15 +1223,33 @@ theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UIn
     publicSubmissionOutcome (.refused reason phase detail leaf) =
       refused .undisclosed "admission" "request refused" := rfl
 
+/-- The submitter's view of a submission: uniform, except a renounce's gate
+refusal to its authenticated signer. -/
+def disclose : Outcome × Disclosure → Outcome
+  | (result, .toSigner) => result
+  | (result, .uniform) => publicSubmissionOutcome result
+
+theorem disclose_uniform (result : Outcome) :
+    disclose (result, .uniform) = publicSubmissionOutcome result := rfl
+
+/-- The one signed-submission path: a renounce is disclosed by its own rule,
+every other call uniformly. -/
+def submitDisclosedWith (config : Config) (opened : Opened config) (call : SignedCall)
+    (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) :
+    IO (Outcome × Disclosure) := do
+  match call with
+  | .renounce bytes => submitRenounceWith config opened bytes confirm
+  | _ => return (← submitLoadedWith config opened call confirm, .uniform)
+
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with
-    | none => pure (refused .malformed "wire" "noncanonical or unsupported native host call")
+    | none => pure (refused .malformed "wire" "noncanonical or unsupported native host call", .uniform)
     | some call =>
         match ← openExisting config with
-        | .error detail => pure (.unavailable detail.toUTF8.toList)
-        | .ok opened => submitLoaded config opened call
-  logOperatorRefusal result
-  return publicSubmissionOutcome result
+        | .error detail => pure (.unavailable detail.toUTF8.toList, .uniform)
+        | .ok opened => submitDisclosedWith config opened call (confirmed config)
+  logOperatorRefusal result.1
+  return disclose result
 
 /-- Lookup is read-only exact-ingress replay. It cannot submit an absent call. -/
 def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) : Outcome :=
@@ -1198,6 +1258,15 @@ def lookupLoaded (config : Config) (opened : Opened config) (call : SignedCall) 
     | none => .uncertain "historical receipt prefix unavailable".toUTF8.toList
     | some receipt => .confirmed .replayed receipt
   match call with
+  | .renounce bytes =>
+      match CapabilityRenounce.decodeIngress bytes with
+      | none => refused .malformed "renounce" "noncanonical ingress"
+      | some ingress =>
+          match CapabilityRenounce.replay config.deployment.domain config.profile.semantics
+              opened.durable ingress with
+          | none => .absent
+          | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+          | some (.ok receipt) => finish receipt.transactionId receipt.eventId
   | .revoke bytes =>
       match CapabilityRevocationReceiver.decodeIngress bytes with
       | none => refused .malformed "revoke" "noncanonical ingress"

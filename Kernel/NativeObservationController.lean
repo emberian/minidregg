@@ -16,6 +16,7 @@ This is a snapshot read, not a timing-noninterference or malicious-host claim.
 import Compiler.NativeObservationCodec
 import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceObservationAdmission
+import Kernel.CapabilityRenounce
 
 namespace Minidregg.Kernel.NativeObservationController
 
@@ -129,6 +130,13 @@ def requiredTargets (context : Context deployment durable) (intent : Intent) :
       -- Observing the resource is separate from exercising its management
       -- grant. The signing plan exposes no stored victim/lineage payload.
       pure [(command.1, command.2.target.value)]
+  | .prepare (.renounce bytes) =>
+      let command ← need .malformed (CapabilityRenounce.commandCodec.decode bytes)
+      require .malformed (command.subject == intent.subject)
+      -- A renounce reads nothing through a grant: its plan consults only the
+      -- signer key record (public), and the holder gate runs after the
+      -- signature verifies (`CapabilityRenounce.admitNative`).
+      pure []
   | .prepare (.install subject _ bytes) =>
       require .malformed (subject == intent.subject)
       let declaration ← need .malformed (PolicyInstallController.decodeDeclaration bytes)

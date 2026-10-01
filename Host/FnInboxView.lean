@@ -146,6 +146,8 @@ private def originJson (bytes : List UInt8) : Except String Json := do
         [("type", toJson "delegate"), ("exactIngressBytes", number ingressBytes.length)])
     | .revoke ingressBytes => pure (Json.mkObj
         [("type", toJson "revoke"), ("exactIngressBytes", number ingressBytes.length)])
+    | .renounce ingressBytes => pure (Json.mkObj
+        [("type", toJson "renounce"), ("exactIngressBytes", number ingressBytes.length)])
   pure <| .mkObj
     [("verification", toJson "decoded carried package; consult original B admission for historical verification"),
      ("domain", number package.domain.value),

@@ -111,8 +111,19 @@ also `room list` (your rooms), `room law lab` (its current law). someone with no
 under lab can't add anything to it: they get `refused: … notRoomMember`. the room's law
 decides who may add things: changing it never revokes anyone's grant (the J7 rule), but a
 law like `any [ not (verb == place), subject in {YOU} ]` stops everyone else adding
-(`birthRefused`), while their reads keep working. you can't leave a room yourself yet
-(`room leave` says so): ask its founder to kick you.
+(`birthRefused`), while their reads keep working.
+
+**leaving a room is yours to do; nobody has to kick you.** `room leave l1 lab`, then
+`submit l1`: you give up your grant under lab, signed with your own key, and no one else's
+permission is asked. everything you handed on from that grant ends with it (the leave says
+which: `ended with it: …`), so if you invited someone with it, they're out too. after that
+your reads of lab are refused `revoked` and you can't add to it. it's permanent: leaving
+twice is refused `alreadyRevoked`, and coming back means the founder invites you again, which
+is a new grant. the same verb works for any grant you hold, room or not: `renounce r1 REF`
+(or `renounce r1 CAPABILITY-NUMBER [object|account|program]`), then `submit r1`. you can only
+give up what's yours: renouncing someone else's grant is refused `notHolder`, and it tells
+you nothing about theirs. an agent you run (Hermes) gives up a grant it was handed the same
+way; giving up authority never needs `--i-know`.
 
 ## how things end
 

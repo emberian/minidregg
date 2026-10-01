@@ -453,6 +453,16 @@ private def revocation (path : String) (json : Lean.Json) : Result (List UInt8) 
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   revocationFor kind path obj
 
+/-- K-RENOUNCE: `{"subject","nonce","kind","capability"}`. -/
+private def renunciation (path : String) (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject path ["subject", "nonce", "kind", "capability"] json
+  let command : CapabilityRenounce.Command :=
+    { subject := ⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩
+      nonce := ← nat (path ++ ".nonce") (← field path "nonce" obj)
+      kind := ← resourceKind (path ++ ".kind") (← field path "kind" obj)
+      capability := ⟨← nat (path ++ ".capability") (← field path "capability" obj)⟩ }
+  pure (CapabilityRenounce.commandCodec.encode command)
+
 private def action (path : String) (json : Lean.Json) : Result Action := do
   let (tag, _) ← tagged path json
   match tag with
@@ -761,6 +771,15 @@ private def draft (path : String) (json : Lean.Json) : Result Draft := do
   | "revoke-source" =>
       let obj ← exactObject path ["type", "command"] json
       pure (.revoke (← revocation (path ++ ".command") (← field path "command" obj)))
+  | "renounce" =>
+      let obj ← exactObject path ["type", "command"] json
+      let bytes ← decodeHex (path ++ ".command") (← field path "command" obj)
+      match CapabilityRenounce.commandCodec.decode bytes with
+      | some value => pure (.renounce (CapabilityRenounce.commandCodec.encode value))
+      | none => failAt (path ++ ".command") "noncanonical renounce command"
+  | "renounce-source" =>
+      let obj ← exactObject path ["type", "command"] json
+      pure (.renounce (← renunciation (path ++ ".command") (← field path "command" obj)))
   | _ => failAt (path ++ ".type") "unknown draft constructor"
 
 private def grant (path : String) (json : Lean.Json) : Result GrantRef := do
@@ -2476,6 +2495,10 @@ def author (kind : String) (json : Lean.Json)
   | "revocation-draft" => do
       let bytes ← revocation "$" json
       pure (draftCodec.encode (.revoke bytes))
+  | "renunciation" => renunciation "$" json
+  | "renunciation-draft" => do
+      let bytes ← renunciation "$" json
+      pure (draftCodec.encode (.renounce bytes))
   | "birth" => draftCodec.encode <$> birth "$" json none deployed
   | "birth-intent" => intentCodec.encode <$> birthIntent "$" json deployed
   | "application-birth" => draftCodec.encode <$> applicationBirth "$" json none deployed
@@ -2577,6 +2600,7 @@ private def draftJson : Draft → Lean.Json
       ("control", decimal control.value), ("declaration", hexJson bytes)]
   | .delegate bytes => .mkObj [("type", "delegate"), ("command", hexJson bytes)]
   | .revoke bytes => .mkObj [("type", "revoke"), ("command", hexJson bytes)]
+  | .renounce bytes => .mkObj [("type", "renounce"), ("command", hexJson bytes)]
 
 /-- The plan's authority footprint as (address, value) pairs, both as canonical
 hex (value `null` = absent): the values the signature binds. -/
