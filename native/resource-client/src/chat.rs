@@ -1407,6 +1407,9 @@ fn tail(session: &Session, room: &Room, count: usize, since: Option<u64>, follow
     let mut held = Held::open(session, room)?;
     held.roster = roster.clone();
     let room_cell = member(&held.grant, "target").map_err(error)?.to_owned();
+    for (_, stream) in &roster.members {
+        held.streams.entry(stream.clone()).or_insert_with(|| (Vec::new(), 1));
+    }
     for e in &feed.feed {
         let slot = held.streams.entry(e.cell.clone()).or_insert_with(|| (Vec::new(), 1));
         slot.0.push(e.clone());
