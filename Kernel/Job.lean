@@ -1008,18 +1008,19 @@ theorem stepsOf_prefix : ∀ (v : Values) (ts : List JobTurn) (s : Values × Job
         · exact .inl rfl
         · exact .inr (sub q hq)⟩
 
-/-- **`settle_requires_match_or_timeout`.** In any accepted history of a job cell from its birth (the
-empty store), every admitted close out of `upheld` (3 → 6) is preceded by the step that entered
+/-- **`settle_requires_match_or_timeout`.** In any accepted history of a job cell from a store with no
+state (a fresh declared cell, `unborn`, before its order), every admitted close out of `upheld` (3 → 6) is preceded by the step that entered
 `upheld`, and that step had the provider's own run on the cell (from 1), or the kernel's truth equal to
 the posted output, or no truth and the clock past `finalAt` (from 2). -/
 theorem settle_requires_match_or_timeout (p : Params) (fr : p.Fresh) (fc : p.RAN_SLOT ≠ "clock/now")
-    (ts : List JobTurn) (acc : Accepted p [] ts) (s : Values × JobTurn) (hs : s ∈ stepsOf [] ts)
+    (v : Values) (unordered : get v F.state = none)
+    (ts : List JobTurn) (acc : Accepted p v ts) (s : Values × JobTurn) (hs : s ∈ stepsOf v ts)
     (closesUpheld : get s.1 F.state = some 3) (_into6 : get s.2.post F.state = some 6) :
-    ∃ u ∈ stepsOf [] ts, UpheldBy u.1 u.2 := by
-  obtain ⟨pre, e, sub⟩ := stepsOf_prefix [] ts s hs
-  have accPre : Accepted p [] pre := fun q hq => acc q (sub q hq)
+    ∃ u ∈ stepsOf v ts, UpheldBy u.1 u.2 := by
+  obtain ⟨pre, e, sub⟩ := stepsOf_prefix v ts s hs
+  have accPre : Accepted p v pre := fun q hq => acc q (sub q hq)
   rw [e] at closesUpheld
-  obtain ⟨u, hu, by_⟩ := reached_upheld p fr fc [] pre accPre (by decide) closesUpheld
+  obtain ⟨u, hu, by_⟩ := reached_upheld p fr fc v pre accPre (by rw [unordered]; simp) closesUpheld
   exact ⟨u, sub u hu, by_⟩
 
 end View
@@ -1034,6 +1035,11 @@ def demo : Params := ⟨7, 42, 600, -600, "run/program/42"⟩
 theorem demo_ranSlot : demo.RAN_SLOT = ranSlot demo.PROGRAM := by decide
 theorem demo_fresh : demo.Fresh := by decide
 theorem demo_ran_not_clock : demo.RAN_SLOT ≠ "clock/now" := by decide
+
+/-- A fresh declared cell, before the order: the kernel births every declared cell holding field 1 of
+its own object at zero (`NativeHostGenesis.declaredCell`; MEASURED on the journey Store, jjob1 r1), so
+the order writes `program` (field 1) from 0. -/
+def unborn : Values := [(1, 0)]
 
 /-- The order: price 100, claimBy 160, answerBy 700, escrow = price, bond 0; input 5; accounts 70. -/
 def ordered : Values :=
@@ -1058,15 +1064,15 @@ def wRan (subject : Int) (now : Int) (post : Values) : JobTurn := ⟨2, subject,
 set_option maxRecDepth 20000
 
 -- order (birth)
-theorem order_admitted : admits demo [] (w 7 100 ordered) = true := by decide
+theorem order_admitted : admits demo unborn (w 7 100 ordered) = true := by decide
 /-- A provider cannot order a job in the caller's name: clause 3. -/
-theorem order_by_stranger_refused : refusalPath demo [] (w 8 100 ordered) = some [3] := by decide
+theorem order_by_stranger_refused : refusalPath demo unborn (w 8 100 ordered) = some [3] := by decide
 /-- An order without a clock is refused (clause 9 fails closed). -/
 theorem order_without_clock_refused :
-    refusalPath demo [] ⟨2, 7, none, none, ordered⟩ = some [9] := by decide
+    refusalPath demo unborn ⟨2, 7, none, none, ordered⟩ = some [9] := by decide
 /-- An order whose escrow is short of its price: clause 11. -/
 theorem order_short_escrow_refused :
-    refusalPath demo [] (w 7 100 (setField ordered 8 50)) = some [11] := by decide
+    refusalPath demo unborn (w 7 100 (setField ordered 8 50)) = some [11] := by decide
 
 -- claim 0 → 1
 theorem claim_admitted : admits demo ordered (w 8 150 claimed) = true := by decide
@@ -1216,9 +1222,9 @@ theorem negated_timeout_fails_open :
 refuses the priceless order. -/
 theorem negated_price_fails_open :
     eval (.not (.le "resource/field/5/after" 0))
-      (jview demo (w 7 100 (ordered.filter (·.1 ≠ 5))) [] [])
-      (jview demo (w 7 100 (ordered.filter (·.1 ≠ 5))) [] (ordered.filter (·.1 ≠ 5))) = true ∧
-    refusalPath demo [] (w 7 100 (ordered.filter (·.1 ≠ 5))) = some [8] := by decide
+      (jview demo (w 7 100 (ordered.filter (·.1 ≠ 5))) unborn unborn)
+      (jview demo (w 7 100 (ordered.filter (·.1 ≠ 5))) unborn (ordered.filter (·.1 ≠ 5))) = true ∧
+    refusalPath demo unborn (w 7 100 (ordered.filter (·.1 ≠ 5))) = some [8] := by decide
 
 end Poles
 

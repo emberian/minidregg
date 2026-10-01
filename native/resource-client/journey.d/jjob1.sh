@@ -86,12 +86,12 @@ attempt() {
 }
 WS_A=$SPONSOR_WS WS_B=$NEWCOMER_WS
 admit() {
-  local job=$1 id=$2 label=$3 ws=$4; shift 4
+  local job=$1 id=$1-$2 label=$3 ws=$4; shift 4
   attempt "$ws" "$id" "$@"; local r=$?
   row "$job" "$label" "admitted" "$([ $r = 0 ] && echo admitted || echo "refused [$(refusal "$ws" "$id" | cut -c1-200)]")" "$r"
 }
 deny() {  # deny JOB ID LABEL CLAUSE WS NAME ACTION...
-  local job=$1 id=$2 label=$3 k=$4 ws=$5; shift 5
+  local job=$1 id=$1-$2 label=$3 k=$4 ws=$5; shift 5
   local want; want=$(clause "$k")
   attempt "$ws" "$id" "$@"; local r=$? why; why=$(refusal "$ws" "$id")
   row "$job" "$label" "refused, clause $k: $want" "$([ $r = 0 ] && echo admitted || echo "[$why]")" \
@@ -125,7 +125,9 @@ done
 N1=$((T + 10)); CB=$((N1 + 60)); AB=$((N1 + 600)); FA=$((N1 + 100))
 tick "$N1"
 row all "tick to N1 = $N1" "now $N1" "now=$(view v1)" "$([ "$(view v1b)" = "$N1" ]; echo $?)"
-ORDER=("$(c 0 0)" "$(c 1 42)" "$(c 2 5)" "$(c 3 "$A")" "$(c 4 70)" "$(c 5 100)" "$(c 6 "$CB")" "$(c 7 "$AB")" \
+# A declared cell is born holding field 1 = 0 (Kernel/NativeHostGenesis.lean `declaredCell`), so the
+# order writes program (field 1) from 0; every other order field is created.
+ORDER=("$(c 0 0)" "$(u 1 0 42)" "$(c 2 5)" "$(c 3 "$A")" "$(c 4 70)" "$(c 5 100)" "$(c 6 "$CB")" "$(c 7 "$AB")" \
   "$(c 8 100)" "$(c 11 0)")
 CLAIM=("$(u 0 0 1)" "$(c 9 "$B")" "$(c 10 80)" "$(u 11 0 100)")
 ANSWER=("$(u 0 1 2)" "$(c 12 77)" "$(c 13 1345)" "$(c 14 "$FA")")
@@ -185,14 +187,24 @@ admit job4 d3-timeout "decide 2 -> 3 by timeout (no truth, now > finalAt)" "$WS_
 deny job5 c-late "B claims after claimBy" 27 "$WS_B" jjob1-5 "${CLAIM[@]}"
 admit job5 v-b "B voids after claimBy" "$WS_B" jjob1-5 "$(u 0 0 5)"
 
-# ---- management: nobody installs a new law on a job, the caller included
-jq -n '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:"jjob1-2",predicate:{type:"all",predicates:[]}}' >"$D/req/install.json"
-run install-propose "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/install.json" --proposal-id jjob1-install
-run install-submit "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jjob1-install/intent.json" \
-  --attempt "$WS_A/attempts/jjob1-install"
-why=$(refusal "$WS_A" install); want=$(clause 0)
-row job2 "A installs permit-all over the job law" "refused, clause 0: $want" "[$why]" \
-  "$(! jq -e '.type == "confirmed"' "$WS_A/attempts/jjob1-install/outcome.json" >/dev/null 2>&1 && [[ "$why" == *"law-denied: $want"* ]]; echo $?)"
+# ---- management: nobody installs a new law on a job, the caller included. The Host does not name
+# the clause of an install refused at admission (`undisclosed: request refused`), so the row pairs
+# the refusal with a control: the same install by A on a cell whose law is `all []` is admitted.
+printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/open.json"
+run create-ctl "$MINI" workspace --action create --dir "$WS_A" --name jjob1-ctl --storage declared --predicate "$D/req/open.json"
+install() {  # install ID NAME -> 0 iff installed
+  jq -n --arg n "$2" '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:$n,predicate:{type:"all",predicates:[]}}' >"$D/req/$1.json"
+  run "$1-propose" "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/$1.json" --proposal-id "jjob1-$1"
+  run "$1-submit" "$MINI" workspace --action submit --dir "$WS_A" --intent "$WS_A/proposals/jjob1-$1/intent.json" \
+    --attempt "$WS_A/attempts/jjob1-$1"
+  jq -e '.type == "confirmed"' "$WS_A/attempts/jjob1-$1/outcome.json" >/dev/null 2>&1
+}
+install install-ctl jjob1-ctl; rctl=$?
+install install-job jjob1-2; rjob=$?
+why=$(refusal "$WS_A" install-job)
+row job2 "A installs all [] over the job law (clause 0: install by nobody); control: the same install on an all [] cell" \
+  "job refused at admission; control installed" "job=[$why] control=$([ $rctl = 0 ] && echo installed || echo "refused [$(refusal "$WS_A" install-ctl)]")" \
+  "$([ $rjob != 0 ] && [ $rctl = 0 ] && [[ "$why" == *admission* ]]; echo $?)"
 
 verdict="J-JOB-1 $([ $PASS = $TOTAL ] && echo PASS || echo FAIL) $PASS/$TOTAL ($(( $(date +%s) - started )) s)"
 echo "$verdict"
