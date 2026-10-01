@@ -150,8 +150,8 @@ show a-html "$SPONSOR_WS" --format html; ok a-html
 missing=""
 for needle in 'role="heading" aria-level="1">Docuverse' '<strong>bold words</strong>' '<em>slanted</em>' \
   '<code>mini serve</code>' '<a class="link" data-target="rtarget">see the target</a>' \
-  '<li class="line struck" data-depth="1"><del>gone soon</del>' '<blockquote class="transclusion snapshot" data-source="rsrc">' \
-  '<p class="quoted">source two</p>' '<aside class="annotation fresh"><span class="author">you</span> <span class="body">check this</span></aside>' \
+  'data-struck="true" data-depth="1"><del>gone soon</del>' '<blockquote class="transclusion snapshot" data-source="rsrc">' \
+  '<p class="quoted">source two</p>' '<aside class="annotation fresh" data-annotation=' 'data-fresh="true"><span class="author">you</span> <span class="body">check this</span></aside>' \
   '<s class="stale"><strong>changed</strong></s>'; do
   grep -qF "$needle" "$D/a-html.out" || missing="$missing [$needle]"
 done

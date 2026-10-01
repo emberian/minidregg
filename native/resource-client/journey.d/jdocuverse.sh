@@ -179,7 +179,7 @@ for part in read annotate; do
   ok J22 amy "publish g-rhea-$part"
 done
 PAPER=$(jq -r .target "$WS/amy/refs/paper.json")
-ok J22 rhea "import paper object $PAPER $(jq -r .observeCapability "$WS/amy/proposals/g-rhea-read/recipient-reference.json") $(jq -r .observeCapability "$WS/amy/proposals/g-rhea-annotate/recipient-reference.json")"
+ok J22 rhea "import paper object $PAPER $(jq -r .capability "$WS/amy/proposals/g-rhea-read/recipient-reference.json") $(jq -r .capability "$WS/amy/proposals/g-rhea-annotate/recipient-reference.json")"
 
 # ------------------------------------------------ writing: notes by push, paper by lines
 ok J21 ben "doc pull notes"

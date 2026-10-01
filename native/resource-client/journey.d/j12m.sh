@@ -132,7 +132,7 @@ grant() { # NAME VERBS-JSON EXTRA-JSON
     --intent "$SPONSOR_WS/proposals/m-$1/intent.json" --attempt "$SPONSOR_WS/attempts/m-$1"; ok "$1-submit"
   run "$1-publish" "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id "m-$1" \
     --attempt "$SPONSOR_WS/attempts/m-$1"; ok "$1-publish"
-  jq -r .observeCapability "$SPONSOR_WS/proposals/m-$1/recipient-reference.json"
+  jq -r .capability "$SPONSOR_WS/proposals/m-$1/recipient-reference.json"
 }
 R_OBSERVE=$(grant grant-r-read '["observe"]' '{}')
 R_ANNOTATE=$(grant grant-r-annotate '["mutate"]' '{"fields":["annotations"]}')
