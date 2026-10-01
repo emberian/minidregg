@@ -2524,13 +2524,15 @@ fn content_page<'a>(view: &'a Value, name: &str) -> Result<&'a Value> {
 /// cell's entries are typed hyperdocument records. An empty stream has no
 /// entries, so `nextSeq` is what tells it from a document.
 fn cell_storage(cell: &Value) -> Result<&'static str> {
+    // A stream read shows its HEAD (nextSeq, count, tail, binding; no
+    // entries: they are their own cells, read with `tail`), FLEET-TOPIC-ON-STREAM.
+    if cell.get("nextSeq").is_some() || cell.get("head").is_some() {
+        return Ok("stream");
+    }
     let entries = cell
         .get("entries")
         .and_then(Value::as_array)
         .ok_or("signed resource view lacks cell entries")?;
-    if cell.get("nextSeq").is_some() {
-        return Ok("stream");
-    }
     if entries.iter().any(|entry| entry.get("key").is_some()) {
         return Ok("declared");
     }
