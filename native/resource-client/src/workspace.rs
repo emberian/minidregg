@@ -521,6 +521,55 @@ fn signed_authority_root(challenge: &Value) -> Result<&str> {
     Ok(root)
 }
 
+/// One K-FIELDS field name: a decimal slot, `balance:N`, `code`, `body` or
+/// `annotations` (the Host's `cellFieldOfName`).
+fn delegation_field(value: &Value) -> Result<Value> {
+    let name = value.as_str().ok_or("delegation field must be a string")?;
+    let ok = matches!(name, "code" | "body" | "annotations")
+        || name
+            .strip_prefix("balance:")
+            .map_or_else(|| decimal(name, "field").is_ok(), |n| decimal(n, "field").is_ok());
+    if !ok {
+        return Err(format!("unknown delegation field {name}").into());
+    }
+    Ok(json!(name))
+}
+
+fn delegation_fields(fields: &Value) -> Result<Value> {
+    let fields = fields
+        .as_array()
+        .ok_or("delegation fields must be an array")?;
+    if fields.is_empty() || fields.len() > 64 {
+        return Err("delegation names 1..64 fields".into());
+    }
+    Ok(Value::Array(
+        fields.iter().map(delegation_field).collect::<Result<Vec<_>>>()?,
+    ))
+}
+
+fn delegation_bounds(bounds: &Value) -> Result<Value> {
+    let bounds = bounds
+        .as_array()
+        .ok_or("delegation maxDelta must be an array")?;
+    if bounds.is_empty() || bounds.len() > 64 {
+        return Err("delegation sets 1..64 maxDelta bounds".into());
+    }
+    let mut out = Vec::new();
+    for bound in bounds {
+        let obj = bound
+            .as_object()
+            .ok_or("maxDelta bound must be an object")?;
+        if obj.len() != 2 {
+            return Err("maxDelta bound has exactly field and max".into());
+        }
+        let field = delegation_field(bound.get("field").ok_or("maxDelta bound lacks field")?)?;
+        let max = member(bound, "max")?;
+        decimal(max, "maxDelta max")?;
+        out.push(json!({"field": field, "max": max}));
+    }
+    Ok(Value::Array(out))
+}
+
 fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
     let actions = actions
         .as_array()
@@ -589,9 +638,11 @@ fn content_actions(actions: &Value) -> Result<Value> {
             "createAtom" => ("createAtom", &["type", "atom", "kind", "payload"]),
             "createDocument" => ("createDocument", &["type", "rootElement", "schema", "body"]),
             "createRun" => ("createRun", &["type", "run", "atoms"]),
+            // An annotation: a link in the `annotations` field (K-FIELDS).
+            "link" => ("link", &["type", "link", "source", "target", "relation"]),
             _ => {
                 return Err(
-                    "workspace content proposal supports local creation actions only".into(),
+                    "workspace content proposal supports local creation and link actions only".into(),
                 )
             }
         };
@@ -665,15 +716,17 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 {
                     return Err("payload may contain only type and actions".into());
                 }
-                let lowered = match member(payload, "type")? {
-                    "scalar" => scalar_actions(&payload["actions"], target)?,
-                    "content" => content_actions(&payload["actions"])?,
+                // The action grammar version: declared actions v1, content
+                // commands v2 (`ContentResource.commandVersion`).
+                let (lowered, schema_version) = match member(payload, "type")? {
+                    "scalar" => (scalar_actions(&payload["actions"], target)?, "1"),
+                    "content" => (content_actions(&payload["actions"])?, "2"),
                     _ => return Err("unsupported workspace payload type".into()),
                 };
                 let capability = member(&reference, "operationCapability")?;
                 let observe = member(&reference, "observeCapability")?;
                 target_rows.push(json!({"kind":kind,"target":target,"capability":capability,
-                    "observeCapability":observe,"schemaVersion":"1",
+                    "observeCapability":observe,"schemaVersion":schema_version,
                     "expectedTargetRoot":root_value,"payload":lowered}));
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }
@@ -722,7 +775,14 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 Some(Value::Bool(value)) => *value,
                 Some(_) => return Err("delegate proposal room must be a boolean".into()),
             };
-            if obj.len() != 6 + usize::from(obj.contains_key("room"))
+            // Optional K-FIELDS narrowing: `"fields": ["1","annotations",...]`
+            // (absent = the parent's fields) and `"maxDelta": [{"field":"7","max":"50"}]`
+            // (absent = the parent's bounds). The Host decides narrowing.
+            let optional_keys = ["room", "fields", "maxDelta"]
+                .iter()
+                .filter(|key| obj.contains_key(**key))
+                .count();
+            if obj.len() != 6 + optional_keys
                 || ["name", "recipient", "verbs", "maxCost"]
                     .iter()
                     .any(|field| !obj.contains_key(*field))
@@ -868,6 +928,23 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 let scope = child.as_object_mut().ok_or("child capability is not an object")?;
                 scope.remove("targets");
                 scope.insert("room".into(), json!(target));
+            }
+            let child_fields = match obj.get("fields") {
+                Some(fields) => Some(delegation_fields(fields)?),
+                None => head.get("fields").cloned(),
+            };
+            let child_bounds = match obj.get("maxDelta") {
+                Some(bounds) => Some(delegation_bounds(bounds)?),
+                None => head.get("maxDelta").cloned(),
+            };
+            {
+                let scope = child.as_object_mut().ok_or("child capability is not an object")?;
+                if let Some(fields) = child_fields {
+                    scope.insert("fields".into(), fields);
+                }
+                if let Some(bounds) = child_bounds {
+                    scope.insert("maxDelta".into(), bounds);
+                }
             }
             delegation = Some(json!({"recipient":recipient,"kind":kind,"target":target,
                 "childCapability":child_id,"reservation":reservation.request_digest,

@@ -574,6 +574,12 @@ def publicSubmissionOutcome : Outcome → Outcome
   | .refused _ _ => refused "admission" "request refused"
   | result => result
 
+/-- The submitter receives the uniform refusal; the operator's own log (this
+process's stderr) keeps the named reason. -/
+def logOperatorRefusal (result : Outcome) : IO Unit := do
+  if let .refused phase detail := result then
+    IO.eprintln s!"host: submission refused (operator log): {String.fromUTF8! ⟨phase.toArray⟩}: {String.fromUTF8! ⟨detail.toArray⟩}"
+
 theorem public_refusal_uniform (phase detail : List UInt8) :
     publicSubmissionOutcome (.refused phase detail) =
       refused "admission" "request refused" := rfl
@@ -585,6 +591,7 @@ def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
         match ← openExisting config with
         | .error detail => pure (.unavailable detail.toUTF8.toList)
         | .ok opened => submitLoaded config opened call
+  logOperatorRefusal result
   return publicSubmissionOutcome result
 
 /-- Lookup is read-only exact-ingress replay. It cannot submit an absent call. -/

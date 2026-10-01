@@ -43,6 +43,7 @@ deriving instance Countable for ResourceId
 deriving instance Countable for Verb
 deriving instance Countable for Holder
 deriving instance Countable for TargetSet
+deriving instance Countable for TypedAuthorization.CellField
 deriving instance Countable for Scope
 deriving instance Countable for Capability
 deriving instance Countable for RevocationKey

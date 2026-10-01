@@ -282,7 +282,7 @@ def rootCapability {F : Type} [Field F]
   parent := none
   issuer := profile.template.issuer
   holder := .subject subject
-  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget⟩
+  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget, none, ∅⟩
   notBefore := config.genesisHeight
   notAfter := config.genesisHeight + profile.template.lifetime
   issuerEpoch := config.issuerEpoch

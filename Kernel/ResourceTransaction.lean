@@ -237,6 +237,10 @@ inductive Reject where
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
   | observationRequired | observationRejected
+  /-- K-FIELDS: the leg changed a field its capability's scope does not name. -/
+  | fieldNotNamed
+  /-- K-FIELDS: a named field moved past a per-field bound (`maxDelta`). -/
+  | maxDeltaExceeded
   deriving Repr
 
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α

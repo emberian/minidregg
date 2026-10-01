@@ -354,6 +354,96 @@ def verifyRead [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
 
 attribute [irreducible] portals
 
+/-! ## Fields (K-FIELDS): a write's footprint against the authorizing scope
+
+A scalar target's fields are its declared state keys' coordinates and its
+values are integers; a content target's fields are `body`/`annotations` and it
+moves no number.  The footprint is computed from the loaded pre-state and the
+computed post-state of the leg, never from the request or the command. -/
+
+def targetField (target : Target) : Address target.layout → CellField := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact fun address => ResourceObservationAdmission.declaredField address.2
+    | content _ => exact fun address => ResourceObservationAdmission.contentField address.1
+
+def targetAmount (target : Target) :
+    (address : Address target.layout) → target.layout.Value address.1 → Int := by
+  cases target with
+  | mk kind id capability version root payload observe =>
+    cases payload with
+    | scalar _ => exact fun _ value => value
+    | content _ => exact fun _ _ => 0
+
+/-- A target's footprint, scanning only the patch's write footprint. -/
+def targetFootprint (target : Target) (patch : Patch target.layout)
+    (pre post : Store target.layout) : Footprint :=
+  ResourceObservationAdmission.footprintOf
+    (ResourceObservationAdmission.changedWithin (Patch.writeFootprint patch) pre post)
+    (targetField target) (targetAmount target) pre post
+
+/-- The footprint of one incidence: a target's write, or nothing for the
+authority read. -/
+def legFootprint (prepared : PreparedInvocation deployment profile ambient durable command) :
+    Incidence command → Option Footprint
+  | some i => some (targetFootprint command.targets[i]
+      (targetPatch prepared.authority.snapshot profile.semantics command command.targets[i]
+        (prepared.targets i).pre)
+      (prepared.targets i).pre.logical (prepared.targets i).post)
+  | none => none
+
+/-- **The leg's footprint is exactly what the write changed**: scanning the
+patch's write footprint finds every changed address of the target cell
+(`Patch.run_frame`), so it equals the whole-cell footprint. -/
+theorem legFootprint_exact (prepared : PreparedInvocation deployment profile ambient durable command)
+    (i : TargetIndex command) :
+    legFootprint prepared (some i) = some (ResourceObservationAdmission.footprint
+      (targetField command.targets[i]) (targetAmount command.targets[i])
+      (prepared.targets i).pre.logical (prepared.targets i).post) := by
+  simp only [legFootprint, targetFootprint, ResourceObservationAdmission.footprint]
+  rw [ResourceObservationAdmission.changedWithin_eq_changed]
+  intro address outside
+  rw [← (prepared.targets i).postExact]
+  exact (Patch.run_frame _ _ address outside).symm
+
+/-- The authorizing capability's scope against a leg's footprint. Refusals
+name the failed coordinate: a field the scope does not name, or a named field
+moved past one of its bounds. -/
+def fieldsCheck {kind : ResourceKind} (capability : Option (Capability kind × Digest)) :
+    Option Footprint → Except Reject Unit
+  | none => .ok ()
+  | some footprint =>
+    match capability with
+    | none => .error .capabilityRejected
+    | some (cap, _) =>
+      if ∀ field ∈ footprint.touched, CellField.NamedBy cap.scope.fields field then
+        if cap.scope.FieldsCover footprint then .ok () else .error .maxDeltaExceeded
+      else .error .fieldNotNamed
+
+theorem fieldsCheck_ok {kind : ResourceKind} {capability : Option (Capability kind × Digest)}
+    {footprint : Footprint} (ok : fieldsCheck capability (some footprint) = .ok ()) :
+    ∃ cap digest, capability = some (cap, digest) ∧ cap.scope.FieldsCover footprint := by
+  unfold fieldsCheck at ok
+  rcases capability with _ | ⟨cap, digest⟩
+  · cases ok
+  · refine ⟨cap, digest, rfl, ?_⟩
+    simp only at ok
+    split at ok
+    · split at ok
+      · assumption
+      · cases ok
+    · cases ok
+
+/-- Pole: a footprint touching a field the scope does not name refuses by name. -/
+theorem fieldsCheck_unnamed {kind : ResourceKind} (cap : Capability kind) (digest : Digest)
+    (footprint : Footprint) (field : CellField) (touched : field ∈ footprint.touched)
+    (unnamed : ¬ CellField.NamedBy cap.scope.fields field) :
+    fieldsCheck (some (cap, digest)) (some footprint) = .error .fieldNotNamed := by
+  unfold fieldsCheck
+  simp only
+  rw [if_neg (fun all => unnamed (all field touched))]
+
 structure CheckedLeg [DecidableEq F]
     (prepared : PreparedInvocation deployment profile ambient durable command)
     (tuple : PreparedTuple (plan prepared)) (incidence : Incidence command) (envelope : List UInt8) where
@@ -362,6 +452,9 @@ structure CheckedLeg [DecidableEq F]
   authorization : Authorized (portals prepared tuple incidence)
     prepared.authority.snapshot.authState (tuple.request incidence).2
   authorized : authorizeLeg prepared tuple incidence receipt = .ok authorization
+  /-- The authorizing capability names every field the leg changed and bounds
+  each change (K-FIELDS). -/
+  fields : fieldsCheck authorization.evidence.capabilityValue (legFootprint prepared incidence) = .ok ()
 
 def verifyAndAuthorizeLeg [DecidableEq F] (native : CredentialSignatureIO.NativeConfig)
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -375,8 +468,27 @@ def verifyAndAuthorizeLeg [DecidableEq F] (native : CredentialSignatureIO.Native
       if exactWire : signature.envelopeBytes = envelope then
         match admitted : authorizeLeg prepared tuple incidence signature with
         | .error reason => return .error reason
-        | .ok authorization => return .ok ⟨signature, exactWire, authorization, admitted⟩
+        | .ok authorization =>
+            match covered : fieldsCheck authorization.evidence.capabilityValue
+                (legFootprint prepared incidence) with
+            | .error reason => return .error reason
+            | .ok () => return .ok ⟨signature, exactWire, authorization, admitted, covered⟩
       else return .error (.signature .sourceBinding)
+
+/-- **An accepted write leg's capability covers its fields.** The capability
+that authorized target `i` names every field the leg changed, and each change
+is within every bound its scope sets. -/
+theorem CheckedLeg.fields_covered [DecidableEq F]
+    {prepared : PreparedInvocation deployment profile ambient durable command}
+    {tuple : PreparedTuple (plan prepared)} {i : TargetIndex command} {envelope : List UInt8}
+    (leg : CheckedLeg prepared tuple (some i) envelope) :
+    ∃ cap digest, leg.authorization.evidence.capabilityValue = some (cap, digest) ∧
+      cap.scope.FieldsCover (ResourceObservationAdmission.footprint
+        (targetField command.targets[i]) (targetAmount command.targets[i])
+        (prepared.targets i).pre.logical (prepared.targets i).post) := by
+  have fields := leg.fields
+  rw [legFootprint_exact] at fields
+  exact fieldsCheck_ok fields
 
 theorem tuple_source_exact
     (prepared : PreparedInvocation deployment profile ambient durable command)
@@ -773,3 +885,11 @@ def receive {F : Type} [Field F] [DecidableEq F]
   | .ok durable => receiveLoaded deployment profile ambient native transport durable signed
 
 end Minidregg.Kernel.DeclaredResourceController
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.fieldsCheck_ok' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.fieldsCheck_ok
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.legFootprint_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.legFootprint_exact
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.fieldsCheck_unnamed' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.fieldsCheck_unnamed
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.CheckedLeg.fields_covered' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.CheckedLeg.fields_covered

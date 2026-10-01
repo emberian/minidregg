@@ -37,7 +37,7 @@ def emptyCapability (kind : ResourceKind) : Capability kind where
   parent := none
   issuer := ⟨0⟩
   holder := .bearer
-  scope := ⟨.explicit ∅, ∅, 0⟩
+  scope := ⟨.explicit ∅, ∅, 0, none, ∅⟩
   notBefore := 0
   notAfter := 0
   issuerEpoch := 0

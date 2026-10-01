@@ -103,7 +103,7 @@ integer codec; the declared roles moved in S2c. -/
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 3⟩
   | .eventHistory => ⟨⟨91002⟩, 2⟩
-  | .authority => ⟨⟨91003⟩, 6⟩
+  | .authority => ⟨⟨91003⟩, 7⟩
   | .declaredObject => ⟨⟨91004⟩, 2⟩
   | .resourceBook => ⟨⟨91005⟩, 3⟩
   | .accountMetadata => ⟨⟨91007⟩, 2⟩

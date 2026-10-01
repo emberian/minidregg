@@ -137,18 +137,77 @@ def targetSetStream (kind : ResourceKind) : StreamCodec (TargetSet kind) where
     | explicit targets => simp [(resourceSetStream kind).decodePrefix_encode]
     | under room => simp [StreamCodec.nat.decodePrefix_encode]
 
+/-- A field's natural label: `slot n ↦ 4n`, `balance a ↦ 4a+1`, and the
+three content/program fields at `2`, `6`, `10`.  Any other label decodes
+provisionally to `slot 0` and is refused by the whole-page re-encoding. -/
+def fieldLabel : CellField → Nat
+  | .slot n => 4 * n
+  | .balance asset => 4 * asset + 1
+  | .code => 2
+  | .body => 6
+  | .annotations => 10
+
+def fieldOfLabel (label : Nat) : CellField :=
+  if label % 4 = 0 then .slot (label / 4)
+  else if label % 4 = 1 then .balance (label / 4)
+  else if label = 2 then .code
+  else if label = 6 then .body
+  else if label = 10 then .annotations
+  else .slot 0
+
+theorem fieldOfLabel_label (field : CellField) : fieldOfLabel (fieldLabel field) = field := by
+  cases field <;> simp [fieldLabel, fieldOfLabel] <;> omega
+
+def fieldSetStream : StreamCodec (Finset CellField) :=
+  labeledSetStream fieldLabel fieldOfLabel fieldOfLabel_label
+
+/-- The JSON name of a field: `"7"` (slot 7), `"balance:3"`, `"code"`,
+`"body"`, `"annotations"`. -/
+def cellFieldName : CellField → String
+  | .slot n => toString n
+  | .balance asset => s!"balance:{asset}"
+  | .code => "code"
+  | .body => "body"
+  | .annotations => "annotations"
+
+def cellFieldOfName (name : String) : Option CellField :=
+  match name with
+  | "code" => some .code
+  | "body" => some .body
+  | "annotations" => some .annotations
+  | _ =>
+    if name.startsWith "balance:" then (name.drop 8).toNat?.map CellField.balance
+    else name.toNat?.map CellField.slot
+
+/-- A per-field bound is labelled by the Cantor pairing of its field label and
+its bound. -/
+def boundLabel (bound : CellField × Nat) : Nat := Nat.pair (fieldLabel bound.1) bound.2
+
+def boundOfLabel (label : Nat) : CellField × Nat :=
+  (fieldOfLabel label.unpair.1, label.unpair.2)
+
+theorem boundOfLabel_label (bound : CellField × Nat) : boundOfLabel (boundLabel bound) = bound := by
+  simp [boundLabel, boundOfLabel, Nat.unpair_pair, fieldOfLabel_label]
+
+def boundSetStream : StreamCodec (Finset (CellField × Nat)) :=
+  labeledSetStream boundLabel boundOfLabel boundOfLabel_label
+
+/-- Scope frame (`stored-capability/v3`): target set, verbs, budget, then the
+named fields (absent = every field) and the per-field bounds. -/
 abbrev ScopeTuple (kind : ResourceKind) :=
-  TargetSet kind × Finset (Verb kind) × Nat
+  TargetSet kind × Finset (Verb kind) × Nat × Option (Finset CellField) × Finset (CellField × Nat)
 
 def scopeTupleStream (kind : ResourceKind) : StreamCodec (ScopeTuple kind) :=
   StreamCodec.product (targetSetStream kind)
-    (StreamCodec.product (verbSetStream kind) StreamCodec.nat)
+    (StreamCodec.product (verbSetStream kind)
+      (StreamCodec.product StreamCodec.nat
+        (StreamCodec.product (StreamCodec.option fieldSetStream) boundSetStream)))
 
 def scopeTuple {kind : ResourceKind} (scope : Scope kind) : ScopeTuple kind :=
-  (scope.targets, scope.verbs, scope.maxCost)
+  (scope.targets, scope.verbs, scope.maxCost, scope.fields, scope.maxDelta)
 
 def scopeOfTuple {kind : ResourceKind} (tuple : ScopeTuple kind) : Scope kind :=
-  ⟨tuple.1, tuple.2.1, tuple.2.2⟩
+  ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1, tuple.2.2.2.2⟩
 
 def scopeStream (kind : ResourceKind) : StreamCodec (Scope kind) :=
   StreamCodec.xmap (scopeTupleStream kind) scopeTuple scopeOfTuple
@@ -241,33 +300,36 @@ def storedCapabilityStream (kind : ResourceKind) :
 /-- An explicit scope survives transport exactly. -/
 theorem scope_explicit_roundtrip (kind : ResourceKind)
     (targets : Finset (ResourceId kind)) (verbs : Finset (Verb kind)) (maxCost : Nat)
+    (fields : Option (Finset CellField)) (bounds : Finset (CellField × Nat))
     (suffix : List UInt8) :
     (scopeStream kind).decodePrefix
-        ((scopeStream kind).encode ⟨.explicit targets, verbs, maxCost⟩ ++ suffix) =
-      some (⟨.explicit targets, verbs, maxCost⟩, suffix) :=
+        ((scopeStream kind).encode ⟨.explicit targets, verbs, maxCost, fields, bounds⟩ ++ suffix) =
+      some (⟨.explicit targets, verbs, maxCost, fields, bounds⟩, suffix) :=
   (scopeStream kind).decodePrefix_encode _ suffix
 
 /-- An `under` scope survives transport exactly. -/
 theorem scope_under_roundtrip (kind : ResourceKind)
-    (room : Nat) (verbs : Finset (Verb kind)) (maxCost : Nat) (suffix : List UInt8) :
+    (room : Nat) (verbs : Finset (Verb kind)) (maxCost : Nat) (fields : Option (Finset CellField)) (bounds : Finset (CellField × Nat))
+    (suffix : List UInt8) :
     (scopeStream kind).decodePrefix
-        ((scopeStream kind).encode ⟨.under room, verbs, maxCost⟩ ++ suffix) =
-      some (⟨.under room, verbs, maxCost⟩, suffix) :=
+        ((scopeStream kind).encode ⟨.under room, verbs, maxCost, fields, bounds⟩ ++ suffix) =
+      some (⟨.under room, verbs, maxCost, fields, bounds⟩, suffix) :=
   (scopeStream kind).decodePrefix_encode _ suffix
 
 /-- The tag byte is the first byte of every scope frame. -/
 theorem scope_frame_tag (kind : ResourceKind) (scope : Scope kind) :
     ((scopeStream kind).encode scope).head? =
       some (match scope.targets with | .explicit _ => 0 | .under _ => 1) := by
-  rcases scope with ⟨targets, verbs, maxCost⟩
+  rcases scope with ⟨targets, verbs, maxCost, fields, bounds⟩
   cases targets <;> rfl
 
 /-- An explicit scope and an `under` scope never share bytes. -/
 theorem scope_explicit_ne_under (kind : ResourceKind)
     (targets : Finset (ResourceId kind)) (room : Nat)
-    (verbs verbs' : Finset (Verb kind)) (maxCost maxCost' : Nat) :
-    (scopeStream kind).encode ⟨.explicit targets, verbs, maxCost⟩ ≠
-      (scopeStream kind).encode ⟨.under room, verbs', maxCost'⟩ := by
+    (verbs verbs' : Finset (Verb kind)) (maxCost maxCost' : Nat)
+    (fields fields' : Option (Finset CellField)) (bounds bounds' : Finset (CellField × Nat)) :
+    (scopeStream kind).encode ⟨.explicit targets, verbs, maxCost, fields, bounds⟩ ≠
+      (scopeStream kind).encode ⟨.under room, verbs', maxCost', fields', bounds'⟩ := by
   intro same
   have heads := congrArg List.head? same
   rw [scope_frame_tag, scope_frame_tag] at heads
@@ -280,6 +342,15 @@ theorem scope_other_tag_refused (kind : ResourceKind) (tag : UInt8)
   simp only [scopeStream, StreamCodec.xmap, scopeTupleStream, StreamCodec.product,
     targetSetStream]
   split <;> simp_all
+
+/-- Two scopes that differ only in their named fields encode differently: a
+`fields` restriction cannot be dropped in transport. -/
+theorem scope_fields_bound {kind : ResourceKind} {left right : Scope kind}
+    (same : (scopeStream kind).encode left = (scopeStream kind).encode right) :
+    left.fields = right.fields ∧ left.maxDelta = right.maxDelta := by
+  have decoded := congrArg (fun bytes => (scopeStream kind).decodePrefix (bytes ++ [])) same
+  simp only [(scopeStream kind).decodePrefix_encode, Option.some.injEq, Prod.mk.injEq] at decoded
+  rw [decoded.1]; exact ⟨rfl, rfl⟩
 
 /-- Origin tags never conflate a strict step with an explicit delegated step. -/
 theorem lineage_origin_tags_separate (kind : ResourceKind) (request : Request kind) :
@@ -323,6 +394,12 @@ instance (kind : ResourceKind) : Repr (StoredCapability kind) where
   reprPrec stored precedence :=
     reprPrec ((storedCapabilityStream kind).encode stored) precedence
 
+/-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.fieldOfLabel_label' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fieldOfLabel_label
+/-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.boundOfLabel_label' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms boundOfLabel_label
+/-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.scope_fields_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scope_fields_bound
 /-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.scope_explicit_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms scope_explicit_roundtrip
 /-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.scope_under_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/

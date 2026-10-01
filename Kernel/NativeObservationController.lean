@@ -447,16 +447,31 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
         else return .error refused
       else return .error refused
 
+/-- A resource view: the cell's own root, the packed cell as the reader's
+scope narrows it, and its narrowed account cut. -/
+abbrev ResourceView := Digest × List UInt8 × List (Nat × Int)
+
 /-- This codec is a read view, not a writable Book/registry payload. -/
-def resourceViewStream : StreamCodec (List UInt8 × List (Nat × Int)) :=
-  StreamCodec.product bytesStream balanceStream
+def resourceViewStream : StreamCodec ResourceView :=
+  StreamCodec.product digestStream (StreamCodec.product bytesStream balanceStream)
 
-/-- Version 3: the viewed bytes are the packed store cell (StoreCodec frames),
-not a page. -/
-def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList
+/-- Version 4 (K-FIELDS): the cell root leads, because the packed cell is the
+cell narrowed to the reader's `Scope.fields` and its own root is not the
+cell's.  Version 3 (the whole packed cell, no root) refuses. -/
+def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList
 
-def resourceViewCodec : IndexedProgram.LawfulCodec (List UInt8 × List (Nat × Int)) :=
+def resourceViewCodec : IndexedProgram.LawfulCodec ResourceView :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
+
+/-- What a reader under `fields` receives of a selected cell: its root, the
+cell with every unnamed field absent, and the named balances. -/
+def resourceView (fields : Option (Finset CellField))
+    (packed : PackedCell CanonicalCellRegistry.registry) (balances : List (Nat × Int)) :
+    ResourceView :=
+  (packed.payload.root,
+    PackedCell.bytes CanonicalCellRegistry.registry
+      (ResourceObservationAdmission.narrowPacked fields packed),
+    ResourceObservationAdmission.narrowBalances fields balances)
 
 def AuthorizedIntent.queryResult
     {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
@@ -467,9 +482,11 @@ def AuthorizedIntent.queryResult
     let grant := intent.grants.get ⟨0, present⟩
     let checked := accepted.grants ⟨0, present⟩
     match query.view with
-    | .resource => some (resourceViewCodec.encode
-        (PackedCell.bytes CanonicalCellRegistry.registry checked.selected.packed,
-          checked.selected.accountBalances))
+    | .resource => do
+        -- The authorizing capability (the one this grant names) narrows the view.
+        let stored ← CredentialAuthorityState.readCapability context.authority.snapshot.cell grant.kind grant.capability
+        some (resourceViewCodec.encode (resourceView stored.head.scope.fields
+          checked.selected.packed checked.selected.accountBalances))
     | .policy => do
         let address := context.authority.snapshot.authState.policyAddress ⟨grant.target⟩
           (context.authority.snapshot.authState.policyRevision ⟨grant.target⟩)
@@ -511,11 +528,24 @@ theorem CheckedGrant.current_generation_and_source
       wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
   ⟨checked.checked.authorization.policyEpochExact, checked.checked.authorization.policyRevisionExact⟩
 
-theorem resourceView_roundtrip (view : List UInt8 × List (Nat × Int)) :
+/-- A version-3 resource view (the whole packed cell, no leading root)
+refuses: its frame is not the v4 frame. -/
+theorem v3_view_refused (payload : List UInt8) :
+    resourceViewCodec.decode ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList ++ payload) =
+      none := by
+  have len : ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList).length =
+      resourceViewFrame.length := by decide +kernel
+  have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList ≠ resourceViewFrame := by
+    decide +kernel
+  simp only [resourceViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
+    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
+  rfl
+
+theorem resourceView_roundtrip (view : ResourceView) :
     resourceViewCodec.decode (resourceViewCodec.encode view) = some view :=
   resourceViewCodec.decode_encode view
 
-theorem resourceView_canonical {bytes : List UInt8} {view : List UInt8 × List (Nat × Int)}
+theorem resourceView_canonical {bytes : List UInt8} {view : ResourceView}
     (decoded : resourceViewCodec.decode bytes = some view) :
     resourceViewCodec.encode view = bytes :=
   NativeHostCodec.framed_canonical _ _ decoded
@@ -548,3 +578,5 @@ theorem challenge_bound {context : Context deployment durable}
 #guard_msgs (whitespace := lax) in #print axioms challenge_bound
 
 end Minidregg.Kernel.NativeObservationController
+/-- info: 'Minidregg.Kernel.NativeObservationController.v3_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.v3_view_refused

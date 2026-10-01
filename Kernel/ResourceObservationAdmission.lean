@@ -353,6 +353,176 @@ theorem controller_signature_alone_refused
     rw [none_stored] at read
     cases read
 
+/-! ## Fields of a cell (K-FIELDS): what a write changed, what a read returns
+
+A declared cell's field is its typed state key's coordinate: `slot n` for
+object field `n`, `balance a` for an account's asset `a`, `code` for a program.
+A content cell has two fields: `annotations` (the links, marks and annotations
+namespaces) and `body` (every other namespace).  Kinds a resource scope never
+reads or writes (authority, Book, event history, policy source) have no fields. -/
+
+def declaredField : EffectDeclaration.StateKey → CellField
+  | .objectField _ field => .slot field.value
+  | .accountBalance _ asset => .balance asset.value
+  | .programCode _ => .code
+
+def contentField : Hyperdocument.Namespace → CellField
+  | .links | .marks | .annotations => .annotations
+  | _ => .body
+
+/-- The field of one address of a registry cell, when the kind has fields. -/
+def fieldOf : (kind : CanonicalCellRegistry.Kind) →
+    Address (CanonicalCellRegistry.layout kind) → Option CellField
+  | .content, address => some (contentField address.1)
+  | .declaredObject, address | .accountMetadata, address | .declaredProgram, address =>
+      some (declaredField address.2)
+  | _, _ => none
+
+/-- A read under `fields` keeps an address exactly when its field is named;
+an address with no field is kept only by a scope naming every field. -/
+def Kept {L : Layout.{0, 0, 0}} (fields : Option (Finset CellField))
+    (field : Address L → Option CellField) (address : Address L) : Prop :=
+  match field address with
+  | some named => CellField.NamedBy fields named
+  | none => fields = none
+
+instance keptDecidable {L : Layout.{0, 0, 0}} (fields : Option (Finset CellField))
+    (field : Address L → Option CellField) (address : Address L) :
+    Decidable (Kept fields field address) := by
+  unfold Kept; split <;> infer_instance
+
+/-- The store a reader under `fields` receives: every other address absent. -/
+def narrowStore {L : Layout.{0, 0, 0}} (fields : Option (Finset CellField))
+    (field : Address L → Option CellField) (store : Store L) : Store L :=
+  DFinsupp.filter (Kept fields field) store
+
+/-- **Observation returns only named fields.**  Every present address of the
+narrowed store is one the scope keeps. -/
+theorem observe_returns_only_named_fields {L : Layout.{0, 0, 0}}
+    {fields : Option (Finset CellField)} {field : Address L → Option CellField}
+    {store : Store L} {address : Address L}
+    (present : narrowStore fields field store address ≠ none) :
+    Kept fields field address := by
+  by_contra dropped
+  exact present (DFinsupp.filter_apply_neg store dropped)
+
+/-- And every kept address is returned unchanged. -/
+theorem observe_returns_named_fields {L : Layout.{0, 0, 0}}
+    {fields : Option (Finset CellField)} {field : Address L → Option CellField}
+    (store : Store L) {address : Address L} (kept : Kept fields field address) :
+    narrowStore fields field store address = store address :=
+  DFinsupp.filter_apply_pos store kept
+
+/-- A scope naming every field reads the whole cell. -/
+theorem narrowStore_all {L : Layout.{0, 0, 0}} (field : Address L → Option CellField)
+    (store : Store L) : narrowStore none field store = store := by
+  refine DFinsupp.ext fun address => observe_returns_named_fields store ?_
+  unfold Kept; split <;> trivial
+
+/-- Pole: a reviewer naming `annotations` keeps a content link and drops the
+body's atoms (any keys). -/
+theorem reviewer_reads_annotations_not_body
+    (link : Hyperdocument.Key .links) (atom : Hyperdocument.Key .atoms)
+    (store : Store (CanonicalCellRegistry.layout .content)) :
+    narrowStore (some {.annotations}) (fieldOf .content) store ⟨.links, link⟩ =
+        store ⟨.links, link⟩ ∧
+      narrowStore (some {.annotations}) (fieldOf .content) store ⟨.atoms, atom⟩ = none :=
+  ⟨observe_returns_named_fields store
+      (show CellField.NamedBy (some {.annotations}) .annotations by decide),
+    DFinsupp.filter_apply_neg store
+      (show ¬ CellField.NamedBy (some {.annotations}) .body by decide)⟩
+
+/-- Pole: a reader naming field 1 of a declared object keeps field 1 and not
+field 2. -/
+theorem reader_reads_field_one_not_two (object : ResourceId .object)
+    (store : Store (CanonicalCellRegistry.layout .declaredObject)) :
+    narrowStore (some {.slot 1}) (fieldOf .declaredObject) store
+        ⟨(), .objectField object ⟨1⟩⟩ = store ⟨(), .objectField object ⟨1⟩⟩ ∧
+      narrowStore (some {.slot 1}) (fieldOf .declaredObject) store
+        ⟨(), .objectField object ⟨2⟩⟩ = none :=
+  ⟨observe_returns_named_fields store
+      (show CellField.NamedBy (some {.slot 1}) (.slot 1) by decide),
+    DFinsupp.filter_apply_neg store
+      (show ¬ CellField.NamedBy (some {.slot 1}) (.slot 2) by decide)⟩
+
+/-- A packed resource cell as a reader under `fields` receives it. -/
+def narrowPacked (fields : Option (Finset CellField))
+    (packed : PackedCell CanonicalCellRegistry.registry) : PackedCell CanonicalCellRegistry.registry :=
+  ⟨packed.kind, materialize _ (narrowStore fields (fieldOf packed.kind) packed.payload.logical)⟩
+
+/-- An account cut as a reader under `fields` receives it: the `balance`
+coordinates the scope names. -/
+def narrowBalances (fields : Option (Finset CellField)) (balances : List (Nat × Int)) :
+    List (Nat × Int) :=
+  balances.filter fun pair => decide (CellField.NamedBy fields (.balance pair.1))
+
+theorem narrowBalances_only_named {fields : Option (Finset CellField)}
+    {balances : List (Nat × Int)} {pair : Nat × Int}
+    (member : pair ∈ narrowBalances fields balances) :
+    CellField.NamedBy fields (.balance pair.1) := by
+  simpa [narrowBalances] using (List.mem_filter.mp member).2
+
+/-- The addresses among `candidates` one write changed. -/
+def changedWithin {L : Layout.{0, 0, 0}} (candidates : Finset (Address L)) (pre post : Store L) :
+    Finset (Address L) :=
+  candidates.filter fun address => pre address ≠ post address
+
+/-- Every address one write changed. -/
+def changed {L : Layout.{0, 0, 0}} (pre post : Store L) : Finset (Address L) :=
+  changedWithin (pre.support ∪ post.support) pre post
+
+theorem mem_changed {L : Layout.{0, 0, 0}} {pre post : Store L} {address : Address L} :
+    address ∈ changed pre post ↔ pre address ≠ post address := by
+  constructor
+  · intro member; exact (Finset.mem_filter.mp member).2
+  · intro different
+    refine Finset.mem_filter.mpr ⟨?_, different⟩
+    by_cases before : pre address = none
+    · exact Finset.mem_union_right _ (DFinsupp.mem_support_iff.mpr (by
+        rw [before] at different; exact fun h => different h.symm))
+    · exact Finset.mem_union_left _ (DFinsupp.mem_support_iff.mpr before)
+
+/-- Any candidate set outside which nothing changed finds exactly the changed
+addresses. The controller's candidates are the patch's write footprint
+(`Patch.run_frame`), so it never scans the whole cell. -/
+theorem changedWithin_eq_changed {L : Layout.{0, 0, 0}} {candidates : Finset (Address L)}
+    {pre post : Store L} (frame : ∀ address, address ∉ candidates → pre address = post address) :
+    changedWithin candidates pre post = changed pre post := by
+  ext address
+  rw [mem_changed]
+  constructor
+  · intro member; exact (Finset.mem_filter.mp member).2
+  · intro different
+    exact Finset.mem_filter.mpr ⟨by_contra fun outside => different (frame address outside),
+      different⟩
+
+/-- What a write changed, field by field, over a set of changed addresses: the
+touched fields, and on each the summed change of its numeric values
+(`amount`; absence counts as `0`). -/
+def footprintOf {L : Layout.{0, 0, 0}} (changedSet : Finset (Address L))
+    (field : Address L → CellField)
+    (amount : (address : Address L) → L.Value address.1 → Int) (pre post : Store L) :
+    Footprint :=
+  let value := fun (store : Store L) (address : Address L) =>
+    match store address with | some v => amount address v | none => 0
+  { touched := changedSet.image field
+    delta := fun named => ∑ address ∈ changedSet.filter (fun a => field a = named),
+      (value post address - value pre address) }
+
+/-- The footprint of a write: `footprintOf` at every changed address. -/
+def footprint {L : Layout.{0, 0, 0}} (field : Address L → CellField)
+    (amount : (address : Address L) → L.Value address.1 → Int) (pre post : Store L) :
+    Footprint :=
+  footprintOf (changed pre post) field amount pre post
+
+/-- A field is touched exactly when some address of it changed. -/
+theorem footprint_touched_exact {L : Layout.{0, 0, 0}} (field : Address L → CellField)
+    (amount : (address : Address L) → L.Value address.1 → Int) (pre post : Store L)
+    (named : CellField) :
+    named ∈ (footprint field amount pre post).touched ↔
+      ∃ address, pre address ≠ post address ∧ field address = named := by
+  simp only [footprint, footprintOf, Finset.mem_image, mem_changed]
+
 end Minidregg.Kernel.ResourceObservationAdmission
 
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.signature_mode_refuted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -367,3 +537,21 @@ end Minidregg.Kernel.ResourceObservationAdmission
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.controller_outsider_refused
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.controller_signature_alone_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.controller_signature_alone_refused
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.observe_returns_only_named_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.observe_returns_only_named_fields
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.observe_returns_named_fields' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.observe_returns_named_fields
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.narrowStore_all' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.narrowStore_all
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.reviewer_reads_annotations_not_body' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.reviewer_reads_annotations_not_body
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.reader_reads_field_one_not_two' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.reader_reads_field_one_not_two
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.mem_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.mem_changed
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.narrowBalances_only_named
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.changedWithin_eq_changed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.changedWithin_eq_changed
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.footprint_touched_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.footprint_touched_exact

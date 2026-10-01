@@ -252,7 +252,7 @@ private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
   parent := none
   issuer := profile.template.issuer
   holder := .subject subject
-  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget⟩
+  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget, none, ∅⟩
   notBefore := height
   notAfter := height + profile.template.lifetime
   issuerEpoch := authority.issuerEpoch profile.template.issuer
