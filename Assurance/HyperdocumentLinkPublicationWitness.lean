@@ -186,8 +186,7 @@ def genesisCapabilityAdmissible :
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := Genesis.principal.selfNotRevoked
@@ -342,8 +341,7 @@ def linkCapabilityAdmissible :
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := Genesis.principal.selfNotRevoked
@@ -639,8 +637,7 @@ def eventCapabilityAdmissible :
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := Genesis.principal.selfNotRevoked
@@ -818,7 +815,7 @@ theorem outside_scope_rejected :
     (linkDeclaration.toRequest config) outsideTarget (by
       simp only [Genesis.capability,
         Minidregg.Theory.HyperdocumentCausalFamily.Witness.capability,
-        Finset.mem_singleton]
+        TargetSet.Covers, Finset.mem_singleton]
       intro equal
       have valueEqual := congrArg ResourceId.value equal
       norm_num [outsideTarget,

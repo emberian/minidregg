@@ -10,6 +10,7 @@ import Compiler.CanonicalAccountView
 import Compiler.ResourceAuthorityProjection
 import Kernel.ContentResource
 import Kernel.DeclaredResourceProjection
+import Theory.RoomAuthorization
 
 namespace Minidregg.Kernel.ResourceObservationAdmission
 
@@ -338,5 +339,141 @@ theorem checked_current_source (prepared : Prepared context profile wanted marke
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_lawDenied
 /-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorizeChecked_leaf_fails' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorizeChecked_leaf_fails
+/-! ## Room confidentiality at the controller (PRIVACY row 8)
+
+The observation portal is the source-capability portal: it has no signature
+and no proof witness, so no signature-mode or proof-mode evidence exists for an
+observation, whoever signs. An admitted observation therefore invokes a
+capability that is admissible for the exact request, and its scope reaches the
+observed cell: `under X` for an `X` on the cell's parent chain, or an explicit
+set naming it. For a cell in a room this is `RoomAuthorization.room_confidentiality`
+at the controller, not a policy default. -/
+
+/-- The signature-mode and proof-mode poles are refuted at this controller:
+its portal has no witness for either. -/
+theorem signature_mode_refuted
+    (prepared : Prepared context profile wanted marker capability contextBytes) :
+    IsEmpty (portal prepared).SignatureWitness ∧ IsEmpty (portal prepared).ProofWitness := by
+  unfold portal policyConfig
+  exact ⟨⟨fun witness => nomatch witness⟩, ⟨fun witness => nomatch witness⟩⟩
+
+/-- **Controller room confidentiality.** Every authorization this controller
+can hold for an observation is capability-mode, the invoked capability is
+admissible for the exact request, and its scope reaches the observed cell only
+through the cell's own parent chain or by naming it. -/
+theorem controller_room_confidentiality
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (authorization : Authorized (portal prepared) context.authority.snapshot.authState wanted) :
+    ∃ cap : Capability kind, ∃ commitment : Digest,
+      authorization.evidence.capabilityValue = some (cap, commitment) ∧
+      cap.Admissible context.authority.snapshot.authState wanted ∧
+      ((∃ room, cap.scope.targets = .under room ∧
+          context.authority.snapshot.authState.parent.Descends wanted.target.value room) ∨
+        ∃ ts, cap.scope.targets = .explicit ts ∧ wanted.target ∈ ts) := by
+  obtain ⟨noSignature, noProof⟩ := signature_mode_refuted prepared
+  match authorization.evidence with
+  | .signature witness _ _ => exact (noSignature.false witness).elim
+  | .proof witness _ => exact (noProof.false witness).elim
+  | .capability cap commitment _ _ _ _ _ semantic _ _ _ _ _ _ _ =>
+      exact ⟨cap, commitment, rfl, semantic,
+        RoomAuthorization.covers_cases semantic.scope.target⟩
+
+/-- The capability an authorization invokes is exactly the stored record at
+the requested capability identifier of the loaded authority cell. -/
+theorem authorize_names_stored
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    {authorization : Authorized (portal prepared) context.authority.snapshot.authState wanted}
+    (accepted : authorize prepared signature = some authorization) :
+    ∃ stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = some stored ∧
+      authorization.evidence.capabilityValue =
+        some (stored.head, storedCapabilityDigest context.authority.snapshot stored) := by
+  revert authorization
+  unfold portal
+  intro authorization accepted
+  unfold authorize authorizeChecked at accepted
+  dsimp only at accepted
+  cases supplied : sourceCapabilityOnlyEvidenceChecked profile.compilerProfile context.authority.snapshot
+      (sourceStore context) marker (step prepared) wanted capability signature with
+  | error reason =>
+    simp [supplied, Except.toOption] at accepted
+  | ok evidence =>
+  cases resolved : (policyConfig prepared).registry.resolve wanted.policyId wanted.policyRevision with
+  | none =>
+    simp [supplied, resolved, Except.toOption] at accepted
+  | some committed =>
+  simp only [supplied, resolved] at accepted
+  split at accepted
+  · simp [Except.toOption] at accepted
+  · rename_i authorized admitted
+    simp only [Except.toOption] at accepted
+    injection accepted with same
+    subst same
+    have someEvidence : sourceCapabilityOnlyEvidence profile.compilerProfile context.authority.snapshot
+        (sourceStore context) marker (step prepared) wanted capability signature = some evidence := by
+      rw [← sourceCapabilityOnlyEvidenceChecked_toOption, supplied]
+      rfl
+    obtain ⟨stored, read, named⟩ := sourceCapabilityOnlyEvidence_names_parent
+      profile.compilerProfile context.authority.snapshot (sourceStore context) marker (step prepared)
+      wanted capability signature someEvidence
+    refine ⟨stored, read, ?_⟩
+    rw [CanonicalPolicyAdmission.admit_preserves_evidence _ _ _ _ _ _ _ _ admitted]
+    exact named
+
+/-- Refusal: an observer — however valid their signature — whose named stored
+capability is not admissible for the request is refused. -/
+theorem controller_refuses_inadmissible
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (noGrant : ∀ stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = some stored →
+      ¬ stored.head.Admissible context.authority.snapshot.authState wanted) :
+    authorize prepared signature = none := by
+  cases accepted : authorize prepared signature with
+  | none => rfl
+  | some authorization =>
+      obtain ⟨stored, read, named⟩ := authorize_names_stored prepared signature accepted
+      obtain ⟨cap, commitment, value, admissible, _⟩ :=
+        controller_room_confidentiality prepared authorization
+      rw [named] at value
+      cases value
+      exact (noGrant stored read admissible).elim
+
+/-- **The outsider pole.** An observation of a cell by someone whose named
+stored capability reaches neither the cell's parent chain nor the cell itself
+is refused, with a valid signature and no matter which capability identifier
+they name. -/
+theorem controller_outsider_refused
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (offRoom : ∀ stored, CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = some stored →
+      (∀ room, stored.head.scope.targets = .under room →
+        ¬ context.authority.snapshot.authState.parent.Descends wanted.target.value room) ∧
+      ∀ ts, stored.head.scope.targets = .explicit ts → wanted.target ∉ ts) :
+    authorize prepared signature = none :=
+  controller_refuses_inadmissible prepared signature fun stored read =>
+    RoomAuthorization.room_confidentiality stored.head (offRoom stored read).1 (offRoom stored read).2
+
+/-- A signature with no stored capability behind it authorizes nothing. -/
+theorem controller_signature_alone_refused
+    (prepared : Prepared context profile wanted marker capability contextBytes)
+    (signature : CredentialSignatureAdmission.CheckedSignature context.authority.snapshot)
+    (none_stored : CredentialAuthorityState.readCapability context.authority.snapshot.cell kind capability = none) :
+    authorize prepared signature = none :=
+  controller_refuses_inadmissible prepared signature fun stored read => by
+    rw [none_stored] at read
+    cases read
 
 end Minidregg.Kernel.ResourceObservationAdmission
+
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.signature_mode_refuted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.signature_mode_refuted
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.controller_room_confidentiality' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.controller_room_confidentiality
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.authorize_names_stored' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.authorize_names_stored
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.controller_refuses_inadmissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.controller_refuses_inadmissible
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.controller_outsider_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.controller_outsider_refused
+/-- info: 'Minidregg.Kernel.ResourceObservationAdmission.controller_signature_alone_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceObservationAdmission.controller_signature_alone_refused

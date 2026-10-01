@@ -5,9 +5,10 @@ DATAMODEL §3.3/§3.9, step B2.  The kernel's durable state is one value:
 
 * `World` is a finite map of cells `Π₀ c : CellId, Option (Cell R)` together
   with a distinguished **system cell**, itself a `Theory.Store` over a fixed
-  layout with three namespaces: `journal : TxId ↦ (height, H(turn))`
-  (append-only), `head : () ↦ (height, logRoot)` (RAM), and
-  `retired : CellId ↦ ()` (append-only).  The indexes and the history chain are
+  layout with four namespaces: `journal : TxId ↦ (height, H(turn))`
+  (append-only), `head : () ↦ (height, logRoot)` (RAM),
+  `retired : CellId ↦ ()` (append-only), and `parent : CellId ↦ CellId`
+  (append-only; the room a cell was born in, K-ROOM).  The indexes and the history chain are
   therefore state, written by the same guarded `Patch` primitive as every cell.
 * `Turn` is deterministic data: a transaction id, the cells it creates, one
   guarded patch per written cell (`Leg`), the cells it retires, and an event.
@@ -19,8 +20,11 @@ DATAMODEL §3.3/§3.9, step B2.  The kernel's durable state is one value:
 
 The system half of every accepted turn is the `sysPatch`: a `read retired c none`
 guard per create, one `allocate journal txId (height, H turn)`, one
-`allocate retired c ()` per retire, and the `head` write that advances the height
-and chains the log root.  Journal freshness, retired-identifier refusal and
+`allocate retired c ()` per retire, the `head` write that advances the height
+and chains the log root, and one `allocate parent c room` per create born in a
+room.  A create's room must be a present cell when the create runs
+(`Reject.missingParent`); the row is written once and never rewritten, so
+`under R` coverage over `World.parentage` only grows (`step_narrows_stable`).  Journal freshness, retired-identifier refusal and
 monotone height are the store's own allocation/write guards, not a second
 checker.
 
@@ -29,6 +33,7 @@ function): its stage-F definition is C1's, its SMT definition D1/E1's.  The
 native store and the host's open/submit path are C2's.
 -/
 import Theory.Store
+import Theory.TypedAuthorization
 
 namespace Minidregg.Kernel.World
 
@@ -90,6 +95,7 @@ inductive SysSpace
   | journal
   | head
   | retired
+  | parent
   deriving DecidableEq, Repr
 
 section System
@@ -101,18 +107,22 @@ variable (TxId D : Type)
   | .journal => TxId
   | .head => Unit
   | .retired => CellId
+  | .parent => CellId
 
 /-- System values: `(height, turn digest)`, `(height, log root)`, presence. -/
 @[reducible] def SysValue : SysSpace → Type
   | .journal => Nat × D
   | .head => Nat × D
   | .retired => Unit
+  | .parent => CellId
 
-/-- The journal and the retired set only grow; the head is overwritten. -/
+/-- The journal, the retired set and the parent rows only grow; the head is
+overwritten. -/
 def sysDiscipline : SysSpace → Discipline
   | .journal => .appendOnly
   | .head => .ram
   | .retired => .appendOnly
+  | .parent => .appendOnly
 
 variable [DecidableEq TxId] [DecidableEq D]
 
@@ -120,11 +130,13 @@ instance sysKeyDecEq : (s : SysSpace) → DecidableEq (SysKey TxId s)
   | .journal => inferInstanceAs (DecidableEq TxId)
   | .head => inferInstanceAs (DecidableEq Unit)
   | .retired => inferInstanceAs (DecidableEq Nat)
+  | .parent => inferInstanceAs (DecidableEq Nat)
 
 instance sysValueDecEq : (s : SysSpace) → DecidableEq (SysValue D s)
   | .journal => inferInstanceAs (DecidableEq (Nat × D))
   | .head => inferInstanceAs (DecidableEq (Nat × D))
   | .retired => inferInstanceAs (DecidableEq Unit)
+  | .parent => inferInstanceAs (DecidableEq Nat)
 
 /-- The system cell's layout. -/
 def sysLayout : Layout.{0, 0, 0} where
@@ -163,6 +175,37 @@ def head (w : World R TxId D) : Option (Nat × D) :=
 def retired (w : World R TxId D) (c : CellId) : Option Unit :=
   w.system ⟨SysSpace.retired, c⟩
 
+/-- The room a cell was born in. -/
+def parent (w : World R TxId D) (c : CellId) : Option CellId :=
+  w.system ⟨SysSpace.parent, c⟩
+
+/-- The cell a system address contributes to the parent rows' support. -/
+def parentKeyAt : Address (sysLayout TxId D) → Finset CellId
+  | ⟨.parent, c⟩ => {c}
+  | _ => ∅
+
+theorem mem_parentKeys (s : Store (sysLayout TxId D)) (c : CellId) :
+    c ∈ s.support.biUnion parentKeyAt ↔ (s ⟨SysSpace.parent, c⟩).isSome = true := by
+  constructor
+  · intro member
+    obtain ⟨⟨space, key⟩, supported, contributes⟩ := Finset.mem_biUnion.mp member
+    cases space <;> simp [parentKeyAt] at contributes
+    have same : c = key := Finset.mem_singleton.mp contributes
+    subst same
+    exact Option.isSome_iff_ne_none.mpr (DFinsupp.mem_support_iff.mp supported)
+  · intro present
+    exact Finset.mem_biUnion.mpr ⟨⟨SysSpace.parent, c⟩,
+      DFinsupp.mem_support_iff.mpr (Option.isSome_iff_ne_none.mp present),
+      Finset.mem_singleton_self c⟩
+
+/-- The system cell's parent projection, the parentage `under R` coverage is
+decided at: the `parent` rows with their finite support. -/
+def parentage (w : World R TxId D) : Theory.TypedAuthorization.Parentage where
+  parentOf c := w.parent c
+  support := w.system.support.biUnion parentKeyAt
+  supported c recorded :=
+    (mem_parentKeys w.system c).mpr (Option.isSome_iff_ne_none.mpr recorded)
+
 /-- Present cells are never retired (the `Directory` invariant, over the
 system cell's `retired` namespace). -/
 def WF (w : World R TxId D) : Prop :=
@@ -179,15 +222,21 @@ structure Leg (R : Registry) where
   patch : Patch (R.layout kind)
 
 /-- The turn record: deterministic data, no post bytes or roots.  Creates run
-first (each at an absent, never-retired id, with the empty store), then the
+first (each at an absent, never-retired id, with the empty store, and in the
+room it names — a cell present when the create runs — if any), then the
 legs (each a guarded patch at the store its cell holds), then the retires
 (each of a present cell whose store is empty). -/
 structure Turn (R : Registry) (TxId Ev : Type) where
   txId : TxId
-  creates : List (CellId × R.Kind)
+  creates : List (CellId × R.Kind × Option CellId)
   legs : List (Leg R)
   retires : List CellId
   event : Ev
+
+/-- The `(cell, room)` rows a turn's creates record. -/
+def Turn.parentRows {R : Registry} {TxId Ev : Type} (t : Turn R TxId Ev) :
+    List (CellId × CellId) :=
+  t.creates.filterMap fun c => c.2.2.map fun room => (c.1, room)
 
 /-- The hash surface history needs: a turn digest and the log chain.  Stage F
 instantiates both with cSHAKE over the turn's canonical bytes (C1). -/
@@ -211,6 +260,7 @@ inductive Reject
   | kindMismatch (cell : CellId)
   | guardFailed (cell : CellId) (index : Nat)
   | retireNonEmpty (cell : CellId)
+  | missingParent (cell : CellId) (room : CellId)
   deriving DecidableEq, Repr
 
 /-- The reason an `Except` refused, if it did. -/
@@ -230,15 +280,24 @@ def sysPatch (t : Turn R TxId Ev) (height : Nat) (logRoot : D) :
     [Op.allocate (L := sysLayout TxId D) SysSpace.journal t.txId (height, H.turnDigest t)] ++
     t.retires.map (fun c => Op.allocate (L := sysLayout TxId D) SysSpace.retired c ()) ++
     [Op.write (L := sysLayout TxId D) SysSpace.head () (height, logRoot)
-      (height + 1, H.chain logRoot (H.turnDigest t))]
+      (height + 1, H.chain logRoot (H.turnDigest t))] ++
+    t.parentRows.map (fun row => Op.allocate (L := sysLayout TxId D) SysSpace.parent row.1 row.2)
 
-/-- Create the listed cells, each at an absent id, with the empty store. -/
-def applyCreates : Cells R → List (CellId × R.Kind) → Except Reject (Cells R)
+/-- A create's room, if it names one, is a present cell. -/
+def roomPresent (cells : Cells R) : Option CellId → Bool
+  | none => true
+  | some room => (cells room).isSome
+
+/-- Create the listed cells, each at an absent id, with the empty store, each
+in a room that is present when it is created (an earlier create of the same
+turn counts). -/
+def applyCreates : Cells R → List (CellId × R.Kind × Option CellId) → Except Reject (Cells R)
   | cells, [] => .ok cells
-  | cells, (c, k) :: rest =>
-      match cells c with
-      | some _ => .error (.cellPresent c)
-      | none => applyCreates (cells.update c (some ⟨k, 0⟩)) rest
+  | cells, (c, k, p) :: rest =>
+      match cells c, roomPresent cells p with
+      | some _, _ => .error (.cellPresent c)
+      | none, false => .error (.missingParent c (p.getD 0))
+      | none, true => applyCreates (cells.update c (some ⟨k, 0⟩)) rest
 
 /-- Apply one leg: the cell is present at the leg's kind and the patch is
 valid from the store it holds. -/
@@ -495,44 +554,79 @@ theorem applyCells_ok {cells cells' : Cells R} {t : Turn R TxId Ev}
 
 /-! ### Creates -/
 
-theorem applyCreates_frame : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind)},
+theorem applyCreates_frame : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
     applyCreates cells cs = .ok cells' → ∀ x, x ∉ cs.map Prod.fst → cells' x = cells x
   | cells, cells', [], h, x, _ => by cases h; rfl
-  | cells, cells', (c, k) :: rest, h, x, hx => by
+  | cells, cells', (c, k, p) :: rest, h, x, hx => by
       unfold applyCreates at h
       split at h
+      · cases h
       · cases h
       · have hxc : x ≠ c := fun e => hx (by simp [e])
         have hxr : x ∉ rest.map Prod.fst := fun m => hx (List.mem_cons_of_mem _ m)
         rw [applyCreates_frame h x hxr, cells_update_ne _ _ hxc]
 
-theorem applyCreates_mem : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind)},
+theorem applyCreates_mem : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
     applyCreates cells cs = .ok cells' → (cs.map Prod.fst).Nodup →
-      ∀ c k, (c, k) ∈ cs → cells c = none ∧ cells' c = some ⟨k, 0⟩
-  | _, _, [], _, _, _, _, m => absurd m (by simp)
-  | cells, cells', (c0, k0) :: rest, h, nd, c, k, m => by
+      ∀ c k p, (c, k, p) ∈ cs → cells c = none ∧ cells' c = some ⟨k, 0⟩
+  | _, _, [], _, _, _, _, _, m => absurd m (by simp)
+  | cells, cells', (c0, k0, p0) :: rest, h, nd, c, k, p, m => by
       unfold applyCreates at h
       split at h
       · cases h
-      · rename_i hc0
+      · cases h
+      · rename_i hc0 _
         simp only [List.map_cons, List.nodup_cons] at nd
         rcases List.mem_cons.mp m with e | m'
         · simp only [Prod.mk.injEq] at e
-          obtain ⟨rfl, rfl⟩ := e
+          obtain ⟨rfl, rfl, rfl⟩ := e
           refine ⟨hc0, ?_⟩
           rw [applyCreates_frame h c nd.1, cells_update_self]
         · have hne : c ≠ c0 := fun e => nd.1 (e ▸ List.mem_map_of_mem (f := Prod.fst) m')
-          obtain ⟨hnone, hpost⟩ := applyCreates_mem h nd.2 c k m'
+          obtain ⟨hnone, hpost⟩ := applyCreates_mem h nd.2 c k p m'
           rw [cells_update_ne _ _ hne] at hnone
           exact ⟨hnone, hpost⟩
 
-theorem applyCreates_present : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind)},
+/-- A create's room was present when the create ran: present before the turn,
+or created by an earlier create of the same turn. -/
+theorem applyCreates_room : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
+    applyCreates cells cs = .ok cells' →
+      ∀ c k room, (c, k, some room) ∈ cs → cells room ≠ none ∨ room ∈ cs.map Prod.fst
+  | _, _, [], _, _, _, _, m => absurd m (by simp)
+  | cells, cells', (c0, k0, p0) :: rest, h, c, k, room, m => by
+      unfold applyCreates at h
+      split at h
+      · cases h
+      · cases h
+      · rename_i _ hp0
+        rcases List.mem_cons.mp m with e | m'
+        · simp only [Prod.mk.injEq] at e
+          obtain ⟨rfl, rfl, rfl⟩ := e
+          simp only [roomPresent, Option.isSome_iff_ne_none] at hp0
+          exact .inl hp0
+        · rcases applyCreates_room h c k room m' with present | later
+          · by_cases e : room = c0
+            · exact .inr (by simp [e])
+            · rw [cells_update_ne _ _ e] at present
+              exact .inl present
+          · exact .inr (List.mem_cons_of_mem _ later)
+
+/-- Refusal pole: a create whose room is absent (and not created earlier in the
+same turn) is refused, naming the cell and the room. -/
+theorem applyCreates_missing_room (cells : Cells R) (c : CellId) (k : R.Kind) (room : CellId)
+    (rest : List (CellId × R.Kind × Option CellId))
+    (fresh : cells c = none) (absent : cells room = none) :
+    applyCreates cells ((c, k, some room) :: rest) = .error (.missingParent c room) := by
+  simp [applyCreates, fresh, roomPresent, absent]
+
+theorem applyCreates_present : ∀ {cells cells' : Cells R} {cs : List (CellId × R.Kind × Option CellId)},
     applyCreates cells cs = .ok cells' → ∀ x, cells' x ≠ none →
       cells x ≠ none ∨ x ∈ cs.map Prod.fst
   | _, _, [], h, x, hx => by cases h; exact .inl hx
-  | cells, cells', (c, k) :: rest, h, x, hx => by
+  | cells, cells', (c, k, p) :: rest, h, x, hx => by
       unfold applyCreates at h
       split at h
+      · cases h
       · cases h
       · rcases applyCreates_present h x hx with p | m
         · by_cases e : x = c
@@ -678,13 +772,13 @@ theorem sys_key_ne {a : SysSpace} {k k' : SysKey TxId a} (h : k ≠ k') :
     (⟨a, k⟩ : Address (sysLayout TxId D)) ≠ ⟨a, k'⟩ :=
   fun e => h (eq_of_heq (Sigma.mk.inj e).2)
 
-theorem run_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × R.Kind)) :
+theorem run_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × R.Kind × Option CellId)) :
     Patch.run s (cs.map (fun c => Op.read (L := sysLayout TxId D) SysSpace.retired c.1 none)) = s := by
   induction cs with
   | nil => rfl
   | cons c rest ih => exact ih
 
-theorem validFrom_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × R.Kind)) :
+theorem validFrom_createReads (s : Store (sysLayout TxId D)) (cs : List (CellId × R.Kind × Option CellId)) :
     Patch.ValidFrom s (cs.map (fun c => Op.read (L := sysLayout TxId D) SysSpace.retired c.1 none)) ↔
       ∀ c ∈ cs, s ⟨SysSpace.retired, c.1⟩ = none := by
   induction cs with
@@ -722,11 +816,80 @@ theorem run_retireAllocs_at (s : Store (sysLayout TxId D)) (rs : List CellId) (c
         · simp only [hr, if_false, List.mem_cons, e, false_or]
           exact Store.set_ne _ _ _ _ (sys_key_ne e)
 
+theorem run_parentAllocs_ne (s : Store (sysLayout TxId D)) (rows : List (CellId × CellId))
+    (a : Address (sysLayout TxId D)) (ha : a.1 ≠ SysSpace.parent) :
+    Patch.run s (rows.map (fun row => Op.allocate (L := sysLayout TxId D) SysSpace.parent row.1 row.2)) a =
+      s a := by
+  induction rows generalizing s with
+  | nil => rfl
+  | cons row rest ih =>
+      show Patch.run (s.set ⟨SysSpace.parent, row.1⟩ (some row.2)) _ a = s a
+      rw [ih]
+      exact Store.set_ne _ _ _ _ (fun e => ha (congrArg Sigma.fst e))
+
+theorem run_parentAllocs_other (s : Store (sysLayout TxId D)) (rows : List (CellId × CellId))
+    (c : CellId) (hc : c ∉ rows.map Prod.fst) :
+    Patch.run s (rows.map (fun row => Op.allocate (L := sysLayout TxId D) SysSpace.parent row.1 row.2))
+        ⟨SysSpace.parent, c⟩ = s ⟨SysSpace.parent, c⟩ := by
+  induction rows generalizing s with
+  | nil => rfl
+  | cons row rest ih =>
+      show Patch.run (s.set ⟨SysSpace.parent, row.1⟩ (some row.2)) _ _ = _
+      simp only [List.map_cons, List.mem_cons, not_or] at hc
+      rw [ih _ hc.2]
+      exact Store.set_ne _ _ _ _ (sys_key_ne (Ne.symm (Ne.symm hc.1)))
+
+theorem run_parentAllocs_mem (s : Store (sysLayout TxId D)) (rows : List (CellId × CellId))
+    (nodup : (rows.map Prod.fst).Nodup) (c room : CellId) (m : (c, room) ∈ rows) :
+    Patch.run s (rows.map (fun row => Op.allocate (L := sysLayout TxId D) SysSpace.parent row.1 row.2))
+        ⟨SysSpace.parent, c⟩ = some room := by
+  induction rows generalizing s with
+  | nil => exact absurd m (by simp)
+  | cons row rest ih =>
+      show Patch.run (s.set ⟨SysSpace.parent, row.1⟩ (some row.2)) _ _ = _
+      simp only [List.map_cons, List.nodup_cons] at nodup
+      rcases List.mem_cons.mp m with e | m'
+      · subst e
+        rw [run_parentAllocs_other _ _ _ nodup.1]
+        exact Store.set_eq _ _ _
+      · exact ih _ nodup.2 m'
+
+theorem parentRows_nodup (t : Turn R TxId Ev) (nodup : (t.creates.map Prod.fst).Nodup) :
+    (t.parentRows.map Prod.fst).Nodup := by
+  unfold Turn.parentRows
+  generalize t.creates = cs at nodup ⊢
+  induction cs with
+  | nil => simp
+  | cons c rest ih =>
+      obtain ⟨c0, k0, p0⟩ := c
+      simp only [List.map_cons, List.nodup_cons] at nodup
+      cases p0 with
+      | none => simpa using ih nodup.2
+      | some room =>
+          simp only [List.filterMap_cons, Option.map_some, List.map_cons, List.nodup_cons]
+          refine ⟨fun member => nodup.1 ?_, ih nodup.2⟩
+          obtain ⟨row, rowMember, rfl⟩ := List.mem_map.mp member
+          obtain ⟨c, cMember, hc⟩ := List.mem_filterMap.mp rowMember
+          obtain ⟨r, _, rfl⟩ := Option.map_eq_some_iff.mp hc
+          exact List.mem_map_of_mem cMember
+
+theorem mem_parentRows {t : Turn R TxId Ev} {c : CellId} {k : R.Kind} {room : CellId}
+    (m : (c, k, some room) ∈ t.creates) : (c, room) ∈ t.parentRows :=
+  List.mem_filterMap.mpr ⟨(c, k, some room), m, rfl⟩
+
+theorem sysPost_parent (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
+    (height : Nat) (logRoot : D) (nodup : (t.creates.map Prod.fst).Nodup)
+    {c : CellId} {k : R.Kind} {room : CellId} (m : (c, k, some room) ∈ t.creates) :
+    Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.parent, c⟩ = some room := by
+  simp only [sysPatch, Patch.run_append]
+  exact run_parentAllocs_mem _ _ (parentRows_nodup t nodup) c room (mem_parentRows m)
+
 theorem sysPost_journal (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
     (height : Nat) (logRoot : D) (x : TxId) :
     Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.journal, x⟩ =
       if x = t.txId then some (height, H.turnDigest t) else s ⟨SysSpace.journal, x⟩ := by
   simp only [sysPatch, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
   rw [op_apply_write, Store.set_ne _ _ _ _ (sys_space_ne (by decide)), op_apply_allocate]
   rw [run_retireAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
   by_cases e : x = t.txId
@@ -738,6 +901,7 @@ theorem sysPost_head (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
     Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.head, ()⟩ =
       some (height + 1, H.chain logRoot (H.turnDigest t)) := by
   simp only [sysPatch, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
   exact Store.set_eq _ _ _
 
 theorem sysPost_retired (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
@@ -745,6 +909,7 @@ theorem sysPost_retired (s : Store (sysLayout TxId D)) (t : Turn R TxId Ev)
     Patch.run s (sysPatch H t height logRoot) ⟨SysSpace.retired, c⟩ =
       if c ∈ t.retires then some () else s ⟨SysSpace.retired, c⟩ := by
   simp only [sysPatch, Patch.run_append, run_createReads, Patch.run_cons, Patch.run_nil]
+  rw [run_parentAllocs_ne _ _ _ (fun e => SysSpace.noConfusion e)]
   rw [op_apply_write, Store.set_ne _ _ _ _ (sys_space_ne (by decide)), op_apply_allocate]
   rw [run_retireAllocs_at]
   by_cases hr : c ∈ t.retires
@@ -756,7 +921,8 @@ theorem sysPatch_valid_creates {s : Store (sysLayout TxId D)} {t : Turn R TxId E
     {height : Nat} {logRoot : D} (hv : Patch.ValidFrom s (sysPatch H t height logRoot)) :
     ∀ c ∈ t.creates, s ⟨SysSpace.retired, c.1⟩ = none := by
   unfold sysPatch at hv
-  rw [List.append_assoc, List.append_assoc, Patch.validFrom_append] at hv
+  simp only [List.append_assoc] at hv
+  rw [Patch.validFrom_append] at hv
   exact (validFrom_createReads s t.creates).1 hv.1
 
 /-- The system patch of a turn with no creates or retires is valid exactly
@@ -766,7 +932,8 @@ theorem sysPatch_valid_plain {s : Store (sysLayout TxId D)} {t : Turn R TxId Ev}
     (hj : s ⟨SysSpace.journal, t.txId⟩ = none)
     (hh : s ⟨SysSpace.head, ()⟩ = some (height, logRoot)) :
     Patch.ValidFrom s (sysPatch H t height logRoot) := by
-  simp only [sysPatch, hc, hr, List.map_nil, List.nil_append]
+  simp only [sysPatch, Turn.parentRows, hc, hr, List.map_nil, List.nil_append,
+    List.filterMap_nil, List.append_nil]
   refine ⟨⟨fun e => Discipline.noConfusion e, hj⟩, ⟨rfl, ?_⟩, trivial⟩
   show (s.set ⟨SysSpace.journal, t.txId⟩ (some (height, H.turnDigest t))) ⟨SysSpace.head, ()⟩ = _
   rw [Store.set_ne _ _ _ _ (sys_space_ne (fun e => SysSpace.noConfusion e)), hh]
@@ -809,13 +976,14 @@ theorem step_leg {w w' : World R TxId D} {t : Turn R TxId Ev}
 
 /-- A create is at an absent, never-retired id. -/
 theorem step_create {w w' : World R TxId D} {t : Turn R TxId Ev}
-    (h : World.step H w t = some w') (c : CellId) (k : R.Kind) (m : (c, k) ∈ t.creates)
+    (h : World.step H w t = some w') (c : CellId) (k : R.Kind) (p : Option CellId)
+    (m : (c, k, p) ∈ t.creates)
     (hl : c ∉ t.legs.map Leg.cell) (hr : c ∉ t.retires) :
     w.cells c = none ∧ w.retired c = none ∧ w'.cells c = some ⟨k, 0⟩ := by
   obtain ⟨⟨_, _, hnd, _⟩, _, _, _, _, hv, hcells, _⟩ := admit_ok H ((step_eq_some H).1 h)
   obtain ⟨c1, c2, h1, h2, h3⟩ := applyCells_ok hcells
-  obtain ⟨hnone, hpost⟩ := applyCreates_mem h1 hnd c k m
-  refine ⟨hnone, sysPatch_valid_creates H hv (c, k) m, ?_⟩
+  obtain ⟨hnone, hpost⟩ := applyCreates_mem h1 hnd c k p m
+  refine ⟨hnone, sysPatch_valid_creates H hv (c, k, p) m, ?_⟩
   rw [applyRetires_frame h3 c hr, applyLegs_frame h2 c hl, hpost]
 
 /-- A retire removes the cell and marks its id retired. -/
@@ -849,8 +1017,48 @@ theorem step_wf {w w' : World R TxId D} {t : Turn R TxId Ev}
   have p1 := applyLegs_present h2 c p2
   rcases applyCreates_present h1 c p1 with p0 | mc
   · exact hwf c p0
-  · obtain ⟨⟨c', k⟩, mem, rfl⟩ := List.mem_map.mp mc
-    exact sysPatch_valid_creates H hv (c', k) mem
+  · obtain ⟨⟨c', k, p⟩, mem, rfl⟩ := List.mem_map.mp mc
+    exact sysPatch_valid_creates H hv (c', k, p) mem
+
+/-- **`birth_parent_recorded` (world).**  A create born in a room records the
+room in the system cell's `parent` rows, in the same accepted turn. -/
+theorem step_parent_recorded {w w' : World R TxId D} {t : Turn R TxId Ev}
+    (h : World.step H w t = some w') {c : CellId} {k : R.Kind} {room : CellId}
+    (m : (c, k, some room) ∈ t.creates) : w'.parent c = some room := by
+  obtain ⟨⟨_, _, hnd, _⟩, height, logRoot, _, _, _, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
+  show w'.system _ = _
+  rw [hsys]
+  exact sysPost_parent H _ t height logRoot hnd m
+
+/-- **`birth_parent_must_exist` (world).**  A create's room was a present cell
+when the create ran: present before the turn, or created earlier in it. -/
+theorem step_parent_exists {w w' : World R TxId D} {t : Turn R TxId Ev}
+    (h : World.step H w t = some w') {c : CellId} {k : R.Kind} {room : CellId}
+    (m : (c, k, some room) ∈ t.creates) :
+    w.cells room ≠ none ∨ room ∈ t.creates.map Prod.fst := by
+  obtain ⟨_, _, _, _, _, _, hcells, _⟩ := admit_ok H ((step_eq_some H).1 h)
+  obtain ⟨c1, c2, h1, _, _⟩ := applyCells_ok hcells
+  exact applyCreates_room h1 c k room m
+
+/-- Parent rows are never rewritten or removed by an accepted turn. -/
+theorem step_parent_stable {w w' : World R TxId D} {t : Turn R TxId Ev}
+    (h : World.step H w t = some w') {c room : CellId} (recorded : w.parent c = some room) :
+    w'.parent c = some room := by
+  obtain ⟨_, height, logRoot, _, _, hv, _, hsys⟩ := admit_ok H ((step_eq_some H).1 h)
+  show w'.system _ = _
+  rw [hsys]
+  exact Patch.appendOnly_present_preserved _ _ ⟨SysSpace.parent, c⟩ room hv rfl
+    (show w.system ⟨SysSpace.parent, c⟩ = some room from recorded)
+
+/-- **`narrows_stable` over the world.**  A delegation's narrowing checked at
+one world's parentage stays a narrowing at every world an accepted turn
+reaches from it. -/
+theorem step_narrows_stable {w w' : World R TxId D} {t : Turn R TxId Ev}
+    (h : World.step H w t = some w') {kind : Theory.TypedAuthorization.ResourceKind}
+    {child parent : Theory.TypedAuthorization.Scope kind}
+    (narrows : child.Narrows parent w.parentage) : child.Narrows parent w'.parentage :=
+  ⟨Theory.TypedAuthorization.TargetSet.narrows_mono (fun _ _ recorded => step_parent_stable H h recorded)
+    narrows.targets, narrows.verbs, narrows.maxCost⟩
 
 /-- Accepted turns carry the invariant along the whole log. -/
 theorem fold_wf {g W : World R TxId D} {log : List (Turn R TxId Ev)}
@@ -1190,7 +1398,12 @@ def leg (c : CellId) (p : Patch toyLayout) : Leg toyR := ⟨c, false, p⟩
 
 def turn (x : Nat) (creates : List (CellId × Bool)) (legs : List (Leg toyR))
     (retires : List CellId := []) : ToyTurn :=
-  ⟨x, creates, legs, retires, ()⟩
+  ⟨x, creates.map (fun c => (c.1, c.2, none)), legs, retires, ()⟩
+
+/-- A turn whose creates each name a room. -/
+def turnIn (x : Nat) (creates : List (CellId × Bool × Option CellId)) (legs : List (Leg toyR)) :
+    ToyTurn :=
+  ⟨x, creates, legs, [], ()⟩
 
 /-- Create cells 0 and 1, each holding key 0. -/
 def t0 : ToyTurn := turn 1 [(0, false), (1, false)] [leg 0 [alloc 0 5], leg 1 [alloc 0 9]]
@@ -1298,6 +1511,43 @@ theorem reject_retiredIdentifier :
     ((World.step toyH w1 tRetire).map fun w =>
       rejectOf (World.admit toyH w (turn 6 [(0, false)] []))) =
       some (some .retiredIdentifier) := by
+  decide +kernel
+
+/-! ### Rooms (K-ROOM): a create names a present room; the row is recorded -/
+
+/-- Cell 5 is created in room 0 and cell 6 in room 5, in one turn: an earlier
+create of the same turn is a present room. -/
+def tRoom : ToyTurn := turnIn 6 [(5, false, some 0), (6, false, some 5)] []
+
+theorem room_create_accepted :
+    ((World.step toyH w1 tRoom).map fun w => (w.parent 5, w.parent 6, w.parent 0)) =
+      some (some 0, some 5, none) := by
+  decide +kernel
+
+/-- `under 0` covers room 0 itself, cell 5 and cell 6 (by the chain 6 → 5 → 0)
+at the world's own parentage; `under 5` does not cover room 0. -/
+theorem room_chain_covers :
+    ((World.step toyH w1 tRoom).map fun w =>
+      (decide ((Theory.TypedAuthorization.TargetSet.under 0 : Theory.TypedAuthorization.TargetSet .object).Covers
+          w.parentage ⟨6⟩),
+        decide ((Theory.TypedAuthorization.TargetSet.under 0 : Theory.TypedAuthorization.TargetSet .object).Covers
+          w.parentage ⟨0⟩),
+        decide ((Theory.TypedAuthorization.TargetSet.under 5 : Theory.TypedAuthorization.TargetSet .object).Covers
+          w.parentage ⟨0⟩))) =
+      some (true, true, false) := by
+  decide +kernel
+
+/-- Refusal pole: a create in an absent room is refused, naming cell and room. -/
+theorem reject_missingParent :
+    rejectOf (World.admit toyH w1 (turnIn 6 [(5, false, some 99)] [])) =
+      some (.missingParent 5 99) := by
+  decide +kernel
+
+/-- Refusal pole: order matters — a create cannot name a room created later in
+the same turn. -/
+theorem reject_room_created_later :
+    rejectOf (World.admit toyH w1 (turnIn 6 [(6, false, some 5), (5, false, some 0)] [])) =
+      some (.missingParent 6 5) := by
   decide +kernel
 
 /-! ### §4.8 no TOCTOU: the guard is checked at the world `step` applies to -/
@@ -1531,4 +1781,26 @@ end Example
 /-- info: 'Minidregg.Kernel.World.Example.nonbinding_root_accepts_tamper' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Example.nonbinding_root_accepts_tamper
 
+/-- info: 'Minidregg.Kernel.World.applyCreates_room' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.applyCreates_room
+/-- info: 'Minidregg.Kernel.World.applyCreates_missing_room' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.applyCreates_missing_room
+/-- info: 'Minidregg.Kernel.World.sysPost_parent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.sysPost_parent
+/-- info: 'Minidregg.Kernel.World.step_parent_recorded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.step_parent_recorded
+/-- info: 'Minidregg.Kernel.World.step_parent_exists' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.step_parent_exists
+/-- info: 'Minidregg.Kernel.World.step_parent_stable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.step_parent_stable
+/-- info: 'Minidregg.Kernel.World.step_narrows_stable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.step_narrows_stable
+/-- info: 'Minidregg.Kernel.World.Example.room_create_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.room_create_accepted
+/-- info: 'Minidregg.Kernel.World.Example.room_chain_covers' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.room_chain_covers
+/-- info: 'Minidregg.Kernel.World.Example.reject_missingParent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.reject_missingParent
+/-- info: 'Minidregg.Kernel.World.Example.reject_room_created_later' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.World.Example.reject_room_created_later
 end Minidregg.Kernel.World

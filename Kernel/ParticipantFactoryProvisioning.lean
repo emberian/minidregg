@@ -149,7 +149,7 @@ def observeCapability (deployment : Deployment) (template : CanonicalRuntimeProf
   parent := none
   issuer := template.issuer
   holder := .subject command.holder
-  scope := ⟨{⟨deployment.factoryId⟩}, {.observeObject}, template.ownerBudget⟩
+  scope := ⟨.explicit {⟨deployment.factoryId⟩}, {.observeObject}, template.ownerBudget⟩
   notBefore := ambient.height
   notAfter := ambient.height + template.lifetime
   issuerEpoch := issuerEpochAt pre template.issuer
@@ -447,7 +447,7 @@ theorem observeCapability_targets_factory (deployment : Deployment)
     (template : CanonicalRuntimeProfile.FactoryTemplate) (pre : Cell AuthorityMaterializer)
     (ambient : Ambient) (command : Command) :
     (observeCapability deployment template pre ambient command).scope.targets =
-      {⟨deployment.factoryId⟩} := rfl
+      .explicit {⟨deployment.factoryId⟩} := rfl
 
 /-- A prepared provisioning always names an enrolled holder. -/
 theorem Prepared.holder_enrolled (prepared : Prepared deployment profile ambient durable command) :

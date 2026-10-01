@@ -53,20 +53,6 @@ theorem existing_capability_not_fresh {M : Materializer} (pre : Cell M)
   rw [present] at absent
   contradiction
 
-theorem scopeNarrows_iff_components {kind : ResourceKind}
-    (child parent : Scope kind) :
-    child.Narrows parent ↔ child.targets ⊆ parent.targets ∧
-      child.verbs ⊆ parent.verbs ∧ child.maxCost ≤ parent.maxCost := by
-  constructor
-  · intro narrowed
-    exact ⟨narrowed.targets, narrowed.verbs, narrowed.maxCost⟩
-  · rintro ⟨targets, verbs, cost⟩
-    exact ⟨targets, verbs, cost⟩
-
-instance scopeNarrowsDecidable {kind : ResourceKind} (child parent : Scope kind) :
-    Decidable (child.Narrows parent) :=
-  decidable_of_iff _ (scopeNarrows_iff_components child parent).symm
-
 def holderNarrowsCheck (child parent : Holder) : Bool :=
   match child, parent with
   | _, .bearer => true
@@ -106,10 +92,10 @@ instance holderNarrowsDecidable (child parent : Holder) :
     (holderNarrowsCheck_iff child parent)
 
 theorem attenuates_iff_components {kind : ResourceKind}
-    (child parent : Capability kind) :
-    child.Attenuates parent ↔
+    (child parent : Capability kind) (parentage : Parentage) :
+    child.Attenuates parent parentage ↔
       child.parent = some parent.id ∧ child.root = parent.root ∧
-      child.issuer = parent.issuer ∧ child.scope.Narrows parent.scope ∧
+      child.issuer = parent.issuer ∧ child.scope.Narrows parent.scope parentage ∧
       parent.notBefore ≤ child.notBefore ∧ child.notAfter ≤ parent.notAfter ∧
       child.issuerEpoch = parent.issuerEpoch ∧ child.policyId = parent.policyId ∧
       child.policyEpoch = parent.policyEpoch ∧
@@ -125,13 +111,13 @@ theorem attenuates_iff_components {kind : ResourceKind}
     exact ⟨parentId, root, issuer, scope, validFrom, validUntil,
       issuerEpoch, policyId, policyEpoch, ancestors, channels⟩
 
-instance attenuatesDecidable {kind : ResourceKind} (child parent : Capability kind) :
-    Decidable (child.Attenuates parent) :=
-  decidable_of_iff _ (attenuates_iff_components child parent).symm
+instance attenuatesDecidable {kind : ResourceKind} (child parent : Capability kind)
+    (parentage : Parentage) : Decidable (child.Attenuates parent parentage) :=
+  decidable_of_iff _ (attenuates_iff_components child parent parentage).symm
 
 theorem strictAttenuates_iff_components {kind : ResourceKind}
-    (child parent : Capability kind) :
-    child.StrictAttenuates parent ↔ child.Attenuates parent ∧
+    (child parent : Capability kind) (parentage : Parentage) :
+    child.StrictAttenuates parent parentage ↔ child.Attenuates parent parentage ∧
       child.holder.Narrows parent.holder := by
   constructor
   · intro edge
@@ -140,30 +126,28 @@ theorem strictAttenuates_iff_components {kind : ResourceKind}
     exact ⟨payload, holder⟩
 
 instance strictAttenuatesDecidable {kind : ResourceKind}
-    (child parent : Capability kind) : Decidable (child.StrictAttenuates parent) :=
-  decidable_of_iff _ (strictAttenuates_iff_components child parent).symm
+    (child parent : Capability kind) (parentage : Parentage) :
+    Decidable (child.StrictAttenuates parent parentage) :=
+  decidable_of_iff _ (strictAttenuates_iff_components child parent parentage).symm
 
-def strictAttenuatesCheck {kind : ResourceKind} (child parent : Capability kind) : Bool :=
-  decide (child.StrictAttenuates parent)
+def strictAttenuatesCheck {kind : ResourceKind} (child parent : Capability kind)
+    (parentage : Parentage) : Bool :=
+  decide (child.StrictAttenuates parent parentage)
 
 theorem strictAttenuatesCheck_iff {kind : ResourceKind}
-    (child parent : Capability kind) :
-    strictAttenuatesCheck child parent = true ↔ child.StrictAttenuates parent := by
+    (child parent : Capability kind) (parentage : Parentage) :
+    strictAttenuatesCheck child parent parentage = true ↔
+      child.StrictAttenuates parent parentage := by
   simp [strictAttenuatesCheck]
 
-/-- Reuse the existing request-scope decision, rather than inventing a
-second delegation-specific notion of which operations a parent permits. -/
-instance scopeCoversDecidable {kind : ResourceKind} (scope : Scope kind)
-    (request : Request kind) : Decidable (scope.Covers request) :=
-  decidable_of_iff (AuthorizationDeclaration.scopeCoversCheck scope request = true)
-    (AuthorizationDeclaration.scopeCoversCheck_eq_true_iff scope request)
-
 theorem delegationShape_iff_components {kind : ResourceKind}
-    (request : Request kind) (child parent : Capability kind) :
-    DelegationShape request child parent ↔
-      child.Attenuates parent ∧ parent.holder = .subject request.subject ∧
+    (request : Request kind) (child parent : Capability kind) (parentage : Parentage) :
+    DelegationShape request child parent parentage ↔
+      child.Attenuates parent parentage ∧ parent.holder = .subject request.subject ∧
       child.holder ≠ .bearer ∧ request.verb = delegateVerb kind ∧
-      child.scope.targets = {request.target} ∧ parent.scope.Covers request ∧
+      (child.scope.targets = .explicit {request.target} ∨
+        child.scope.targets = .under request.target.value) ∧
+      parent.scope.Covers parentage request ∧
       parent.notBefore ≤ request.height ∧ request.height ≤ parent.notAfter ∧
       parent.policyId = request.policyId ∧ parent.policyEpoch = request.policyEpoch := by
   constructor
@@ -177,45 +161,47 @@ theorem delegationShape_iff_components {kind : ResourceKind}
       validFrom, validUntil, policyId, policyEpoch⟩
 
 instance delegationShapeDecidable {kind : ResourceKind}
-    (request : Request kind) (child parent : Capability kind) :
-    Decidable (DelegationShape request child parent) :=
-  decidable_of_iff _ (delegationShape_iff_components request child parent).symm
+    (request : Request kind) (child parent : Capability kind) (parentage : Parentage) :
+    Decidable (DelegationShape request child parent parentage) :=
+  decidable_of_iff _ (delegationShape_iff_components request child parent parentage).symm
 
 def delegationShapeCheck {kind : ResourceKind}
-    (request : Request kind) (child parent : Capability kind) : Bool :=
-  decide (DelegationShape request child parent)
+    (request : Request kind) (child parent : Capability kind) (parentage : Parentage) : Bool :=
+  decide (DelegationShape request child parent parentage)
 
 theorem delegationShapeCheck_iff {kind : ResourceKind}
-    (request : Request kind) (child parent : Capability kind) :
-    delegationShapeCheck request child parent = true ↔ DelegationShape request child parent := by
+    (request : Request kind) (child parent : Capability kind) (parentage : Parentage) :
+    delegationShapeCheck request child parent parentage = true ↔
+      DelegationShape request child parent parentage := by
   simp [delegationShapeCheck]
 
 /-- A delegated edge never interprets ordinary mutation permission as the
 right to give authority to another subject. -/
 theorem delegationShapeCheck_refuses_missing_delegate {kind : ResourceKind}
-    (request : Request kind) (child parent : Capability kind)
+    (request : Request kind) (child parent : Capability kind) (parentage : Parentage)
     (missing : delegateVerb kind ∉ parent.scope.verbs) :
-    delegationShapeCheck request child parent = false := by
-  cases checked : delegationShapeCheck request child parent with
+    delegationShapeCheck request child parent parentage = false := by
+  cases checked : delegationShapeCheck request child parent parentage with
   | false => rfl
   | true =>
-      have shape := (delegationShapeCheck_iff request child parent).mp checked
+      have shape := (delegationShapeCheck_iff request child parent parentage).mp checked
       exact False.elim (missing (shape.delegate ▸ shape.parentScope.verb))
 
 theorem delegationShapeCheck_refuses_bearer {kind : ResourceKind}
-    (request : Request kind) (child parent : Capability kind)
+    (request : Request kind) (child parent : Capability kind) (parentage : Parentage)
     (bearer : child.holder = .bearer) :
-    delegationShapeCheck request child parent = false := by
-  cases checked : delegationShapeCheck request child parent with
+    delegationShapeCheck request child parent parentage = false := by
+  cases checked : delegationShapeCheck request child parent parentage with
   | false => rfl
   | true =>
-      exact False.elim (((delegationShapeCheck_iff request child parent).mp checked).recipient bearer)
+      exact False.elim
+        (((delegationShapeCheck_iff request child parent parentage).mp checked).recipient bearer)
 
-def parentLinkCheck {kind : ResourceKind}
+def parentLinkCheck {kind : ResourceKind} (parentage : Parentage)
     (child : Capability kind) (link : ParentLink kind) : Bool :=
   match link.origin with
-  | .strict => strictAttenuatesCheck child link.parent
-  | .delegated request => delegationShapeCheck request child link.parent
+  | .strict => strictAttenuatesCheck child link.parent parentage
+  | .delegated request => delegationShapeCheck request child link.parent parentage
 
 /-- Every stored parent is opened from the same canonical pre-state, with
 exactly the remaining suffix, including all explicit origin records. -/
@@ -270,14 +256,16 @@ theorem LineageAnchored.of_present_reads_preserved {M N : Materializer}
 infers a delegated edge from a changed holder, and no historical signature is
 rechecked against today's grantor key. Creation authorization is retained by
 the accepted source transition; this pure check validates its stored shape. -/
-def lineageCheckAux {kind : ResourceKind} :
+def lineageCheckAux {kind : ResourceKind} (parentage : Parentage) :
     List (ParentLink kind) → Capability kind → Bool
   | [], head => decide (head.parent = none ∧ head.root = head.id ∧ head.ancestors = ∅)
-  | link :: tail, head => parentLinkCheck head link && lineageCheckAux tail link.parent
+  | link :: tail, head =>
+      parentLinkCheck parentage head link && lineageCheckAux parentage tail link.parent
 
-theorem lineageCheckAux_iff {kind : ResourceKind}
+theorem lineageCheckAux_iff {kind : ResourceKind} (parentage : Parentage)
     (ancestry : List (ParentLink kind)) (head : Capability kind) :
-    lineageCheckAux ancestry head = true ↔ LineageValid ⟨head, ancestry⟩ := by
+    lineageCheckAux parentage ancestry head = true ↔
+      LineageValid parentage ⟨head, ancestry⟩ := by
   induction ancestry generalizing head with
   | nil =>
       simp only [lineageCheckAux, decide_eq_true_eq]
@@ -342,39 +330,43 @@ theorem lineageAnchoredCheck_iff {M : Materializer} (pre : Cell M)
 
 /-- The same mandatory source gate now handles explicit strict and delegated
 origins. Invocation cannot replace it with a head-only check. -/
-def storedLineageCheck {M : Materializer} (pre : Cell M) {kind : ResourceKind}
-    (stored : StoredCapability kind) : Bool :=
-  lineageCheckAux stored.ancestry stored.head && lineageAnchoredCheck pre stored.ancestry
+def storedLineageCheck {M : Materializer} (pre : Cell M) (parentage : Parentage)
+    {kind : ResourceKind} (stored : StoredCapability kind) : Bool :=
+  lineageCheckAux parentage stored.ancestry stored.head &&
+    lineageAnchoredCheck pre stored.ancestry
 
-theorem storedLineageCheck_iff {M : Materializer} (pre : Cell M)
+theorem storedLineageCheck_iff {M : Materializer} (pre : Cell M) (parentage : Parentage)
     {kind : ResourceKind} (stored : StoredCapability kind) :
-    storedLineageCheck pre stored = true ↔ LineageValid stored ∧ LineageAnchored pre stored := by
+    storedLineageCheck pre parentage stored = true ↔
+      LineageValid parentage stored ∧ LineageAnchored pre stored := by
   cases stored
   simp only [storedLineageCheck, Bool.and_eq_true, lineageCheckAux_iff,
     lineageAnchoredCheck_iff, LineageAnchored]
 
 theorem storedLineageCheck_refuses_invalid {M : Materializer} (pre : Cell M)
-    {kind : ResourceKind} (stored : StoredCapability kind) (invalid : ¬LineageValid stored) :
-    storedLineageCheck pre stored = false := by
-  cases checked : storedLineageCheck pre stored with
+    (parentage : Parentage) {kind : ResourceKind} (stored : StoredCapability kind)
+    (invalid : ¬LineageValid parentage stored) :
+    storedLineageCheck pre parentage stored = false := by
+  cases checked : storedLineageCheck pre parentage stored with
   | false => rfl
-  | true => exact False.elim (invalid ((storedLineageCheck_iff pre stored).mp checked).1)
+  | true => exact False.elim (invalid ((storedLineageCheck_iff pre parentage stored).mp checked).1)
 
 theorem storedLineageCheck_refuses_unanchored {M : Materializer} (pre : Cell M)
-    {kind : ResourceKind} (stored : StoredCapability kind) (missing : ¬LineageAnchored pre stored) :
-    storedLineageCheck pre stored = false := by
-  cases checked : storedLineageCheck pre stored with
+    (parentage : Parentage) {kind : ResourceKind} (stored : StoredCapability kind)
+    (missing : ¬LineageAnchored pre stored) :
+    storedLineageCheck pre parentage stored = false := by
+  cases checked : storedLineageCheck pre parentage stored with
   | false => rfl
-  | true => exact False.elim (missing ((storedLineageCheck_iff pre stored).mp checked).2)
+  | true => exact False.elim (missing ((storedLineageCheck_iff pre parentage stored).mp checked).2)
 
 /-- A well-shaped copy of a parent is insufficient when either the parent
 payload or its remaining origin suffix disagrees with canonical storage. -/
 theorem storedLineageCheck_refuses_parent_substitution {M : Materializer}
-    (pre : Cell M) {kind : ResourceKind} (child parent : Capability kind)
+    (pre : Cell M) (parentage : Parentage) {kind : ResourceKind} (child parent : Capability kind)
     (tail : List (ParentLink kind)) (origin : LineageOrigin kind)
     (different : readCapability pre kind parent.id ≠ some ⟨parent, tail⟩) :
-    storedLineageCheck pre ⟨child, ⟨parent, origin⟩ :: tail⟩ = false :=
-  storedLineageCheck_refuses_unanchored pre _
+    storedLineageCheck pre parentage ⟨child, ⟨parent, origin⟩ :: tail⟩ = false :=
+  storedLineageCheck_refuses_unanchored pre parentage _
     (fun anchored => different anchored.parent_exact)
 
 /-- Historical lineage reads only canonical capability records. Current
@@ -397,8 +389,8 @@ theorem storedLineageCheck_congr {M N : Materializer}
     (left : Cell M) (right : Cell N)
     (same : ∀ kind identifier, readCapability left kind identifier =
       readCapability right kind identifier)
-    {kind : ResourceKind} (stored : StoredCapability kind) :
-    storedLineageCheck left stored = storedLineageCheck right stored := by
+    (parentage : Parentage) {kind : ResourceKind} (stored : StoredCapability kind) :
+    storedLineageCheck left parentage stored = storedLineageCheck right parentage stored := by
   simp only [storedLineageCheck, lineageAnchoredCheck_congr left right same]
 
 end Minidregg.Theory.CredentialLineageAdmission

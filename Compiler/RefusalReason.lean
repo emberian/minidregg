@@ -180,6 +180,29 @@ theorem ofSignature_envelope
 
 /-! ## Capability admission, component by component -/
 
+/-- The policy-id half of `TargetSet.RequestLaw`: an explicit capability is
+used only under the law it was issued under; an `under R` capability carries
+no request-law binding (the target's own law is evaluated by the controller). -/
+def requestLawPolicyCheck {kind : ResourceKind} (cap : Capability kind)
+    (request : Request kind) : Bool :=
+  match cap.scope.targets with
+  | .explicit _ => decide (cap.policyId = request.policyId)
+  | .under _ => true
+
+/-- The epoch half of `TargetSet.RequestLaw`. -/
+def requestLawEpochCheck {kind : ResourceKind} (cap : Capability kind)
+    (request : Request kind) : Bool :=
+  match cap.scope.targets with
+  | .explicit _ => decide (cap.policyEpoch = request.policyEpoch)
+  | .under _ => true
+
+theorem requestLaw_checks_iff {kind : ResourceKind} (cap : Capability kind)
+    (request : Request kind) :
+    (requestLawPolicyCheck cap request && requestLawEpochCheck cap request) =
+      decide (cap.scope.targets.RequestLaw cap.policyId cap.policyEpoch request) := by
+  unfold requestLawPolicyCheck requestLawEpochCheck
+  cases cap.scope.targets <;> simp [TargetSet.RequestLaw]
+
 /-- Every component of `Capability.Admissible`, in exactly the order that
 `capabilityAdmissibleCheck` evaluates it, each paired with the reason its
 failure is reported under. Holder and scope come first, so a key that does
@@ -187,11 +210,11 @@ not hold the capability learns only `noGrant`. -/
 def capabilityChecks {kind : ResourceKind} (cap : Capability kind) (state : AuthState)
     (request : Request kind) : List (RefusalReason × Bool) :=
   [(.noGrant, holderCoversCheck cap.holder request.subject),
-   (.noGrant, scopeCoversCheck cap.scope request),
+   (.noGrant, scopeCoversCheck cap.scope state.parent request),
    (.outsideValidity, decide (cap.notBefore ≤ request.height)),
    (.outsideValidity, decide (request.height ≤ cap.notAfter)),
-   (.noGrant, decide (cap.policyId = request.policyId)),
-   (.staleGrant, decide (cap.policyEpoch = request.policyEpoch)),
+   (.noGrant, requestLawPolicyCheck cap request),
+   (.staleGrant, requestLawEpochCheck cap request),
    (.staleGrant, decide (cap.policyEpoch = state.policyEpoch cap.policyId)),
    (.staleGrant, decide (cap.issuerEpoch = state.issuerEpoch cap.issuer)),
    (.revoked, decide (RevocationKey.capability cap.id ∉ state.revoked)),
@@ -217,8 +240,10 @@ reports no reason exactly when `capabilityAdmissibleCheck` accepts. -/
 theorem capabilityRefusal_eq_none_iff {kind : ResourceKind} (cap : Capability kind)
     (state : AuthState) (request : Request kind) :
     capabilityRefusal cap state request = none ↔
-      capabilityAdmissibleCheck cap state request = true :=
-  firstFailure_none_iff (capabilityChecks cap state request)
+      capabilityAdmissibleCheck cap state request = true := by
+  unfold capabilityRefusal
+  rw [firstFailure_none_iff, capabilityAdmissibleCheck, ← requestLaw_checks_iff]
+  simp [capabilityChecks, Bool.and_assoc]
 
 theorem capabilityRefusal_eq_none_iff_admissible {kind : ResourceKind}
     (cap : Capability kind) (state : AuthState) (request : Request kind) :
@@ -251,6 +276,7 @@ def state (revoked : Finset RevocationKey) (policyEpoch : Epoch) : AuthState whe
   policyEpoch := fun _ => policyEpoch
   policyRevision := fun _ => 0
   subjectKeyEpoch := fun _ => 0
+  parent := Parentage.empty
 
 def grant (notAfter : Height) : Capability .object where
   id := ⟨100⟩
@@ -258,7 +284,7 @@ def grant (notAfter : Height) : Capability .object where
   parent := none
   issuer := ⟨1⟩
   holder := .subject owner
-  scope := ⟨{target}, {.observeObject}, 1000⟩
+  scope := ⟨.explicit {target}, {.observeObject}, 1000⟩
   notBefore := 0
   notAfter := notAfter
   issuerEpoch := 0
@@ -319,6 +345,19 @@ open Sample in
 theorem sample_other_target_noGrant :
     capabilityRefusal (grant 50) (state ∅ 0) { read owner 5 with target := ⟨43⟩ } =
       some .noGrant := by decide
+
+open Sample in
+/-- A room grant (`under 7`, issued under law 7) reaches cell 42 born in room 7
+whose request names the cell's own law 42: no request-law binding applies. -/
+theorem sample_room_admitted :
+    capabilityRefusal { grant 50 with scope := ⟨.under 7, {.observeObject}, 1000⟩, policyId := ⟨7⟩ }
+      { state ∅ 0 with parent := Parentage.ofList [(42, 7)] } (read owner 5) = none := by decide
+
+open Sample in
+/-- The same room grant does not reach a cell outside the room: `noGrant`. -/
+theorem sample_room_outside_noGrant :
+    capabilityRefusal { grant 50 with scope := ⟨.under 7, {.observeObject}, 1000⟩, policyId := ⟨7⟩ }
+      { state ∅ 0 with parent := Parentage.ofList [(42, 8)] } (read owner 5) = some .noGrant := by decide
 
 end RefusalReason
 

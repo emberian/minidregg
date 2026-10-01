@@ -185,7 +185,7 @@ def Ready.birth (_ready : Ready domain spec operation) :
     BirthItem CanonicalCellRegistry.registry :=
   ⟨⟨spec.ticket.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
       bornCell ContentResource.initialStore⟩,
-    .object, spec.issuer⟩
+    .object, spec.issuer, none⟩
 
 /-- The initialized physical cell is never a second birth item. It is the
 one source-derived final post chosen by the special issue intent after native
@@ -252,7 +252,7 @@ private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
   parent := none
   issuer := profile.template.issuer
   holder := .subject subject
-  scope := ⟨{⟨target⟩}, verbs, profile.template.ownerBudget⟩
+  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget⟩
   notBefore := height
   notAfter := height + profile.template.lifetime
   issuerEpoch := authority.issuerEpoch profile.template.issuer

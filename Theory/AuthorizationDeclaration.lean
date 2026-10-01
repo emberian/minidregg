@@ -383,14 +383,14 @@ def holderCoversCheck (holder : Holder) (subject : SubjectId) : Bool :=
   cases holder <;> simp [holderCoversCheck, Holder.Covers]
 
 def scopeCoversCheck {kind : ResourceKind} (scope : Scope kind)
-    (request : Request kind) : Bool :=
-  decide (request.target ∈ scope.targets) &&
+    (parentage : Parentage) (request : Request kind) : Bool :=
+  decide (scope.targets.Covers parentage request.target) &&
     (decide (request.verb ∈ scope.verbs) &&
       decide (request.cost ≤ scope.maxCost))
 
 @[simp] theorem scopeCoversCheck_eq_true_iff {kind : ResourceKind}
-    (scope : Scope kind) (request : Request kind) :
-    scopeCoversCheck scope request = true ↔ scope.Covers request := by
+    (scope : Scope kind) (parentage : Parentage) (request : Request kind) :
+    scopeCoversCheck scope parentage request = true ↔ scope.Covers parentage request := by
   simp only [scopeCoversCheck, Bool.and_eq_true, decide_eq_true_eq]
   constructor
   · rintro ⟨target, verb, cost⟩
@@ -424,11 +424,10 @@ the reflection theorem. -/
 def capabilityAdmissibleCheck {kind : ResourceKind} (cap : Capability kind)
     (state : AuthState) (request : Request kind) : Bool :=
   [holderCoversCheck cap.holder request.subject,
-   scopeCoversCheck cap.scope request,
+   scopeCoversCheck cap.scope state.parent request,
    decide (cap.notBefore ≤ request.height),
    decide (request.height ≤ cap.notAfter),
-   decide (cap.policyId = request.policyId),
-   decide (cap.policyEpoch = request.policyEpoch),
+   decide (cap.scope.targets.RequestLaw cap.policyId cap.policyEpoch request),
    decide (cap.policyEpoch = state.policyEpoch cap.policyId),
    decide (cap.issuerEpoch = state.issuerEpoch cap.issuer),
    decide (RevocationKey.capability cap.id ∉ state.revoked),
@@ -439,11 +438,10 @@ theorem Capability.admissible_iff_components {kind : ResourceKind}
     (cap : Capability kind) (state : AuthState) (request : Request kind) :
     cap.Admissible state request ↔
       cap.holder.Covers request.subject ∧
-      cap.scope.Covers request ∧
+      cap.scope.Covers state.parent request ∧
       cap.notBefore ≤ request.height ∧
       request.height ≤ cap.notAfter ∧
-      cap.policyId = request.policyId ∧
-      cap.policyEpoch = request.policyEpoch ∧
+      cap.scope.targets.RequestLaw cap.policyId cap.policyEpoch request ∧
       cap.policyEpoch = state.policyEpoch cap.policyId ∧
       cap.issuerEpoch = state.issuerEpoch cap.issuer ∧
       RevocationKey.capability cap.id ∉ state.revoked ∧
@@ -454,11 +452,11 @@ theorem Capability.admissible_iff_components {kind : ResourceKind}
   constructor
   · intro admitted
     exact ⟨admitted.holder, admitted.scope, admitted.validFrom,
-      admitted.validUntil, admitted.policyId, admitted.policyEpoch,
+      admitted.validUntil, admitted.requestLaw,
       admitted.policyCurrent, admitted.issuerCurrent,
       admitted.selfNotRevoked, admitted.ancestorNotRevoked,
       admitted.channelNotRevoked⟩
-  · rintro ⟨holder, scope, validFrom, validUntil, policyId, policyEpoch,
+  · rintro ⟨holder, scope, validFrom, validUntil, requestLaw,
       policyCurrent, issuerCurrent, selfNotRevoked,
       ancestorNotRevoked, channelNotRevoked⟩
     exact
@@ -466,8 +464,7 @@ theorem Capability.admissible_iff_components {kind : ResourceKind}
         scope := scope
         validFrom := validFrom
         validUntil := validUntil
-        policyId := policyId
-        policyEpoch := policyEpoch
+        requestLaw := requestLaw
         policyCurrent := policyCurrent
         issuerCurrent := issuerCurrent
         selfNotRevoked := selfNotRevoked

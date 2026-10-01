@@ -82,6 +82,7 @@ def planeTag : AuthorityPlane → UInt8
   | .subjectKey => 10
   | .policyRevision => 11
   | .registered => 12
+  | .parent => 13
 
 def planeOfTag : UInt8 → Option AuthorityPlane
   | 0 => some (.capability .object)
@@ -95,11 +96,14 @@ def planeOfTag : UInt8 → Option AuthorityPlane
   | 10 => some .subjectKey
   | 11 => some .policyRevision
   | 12 => some .registered
+  | 13 => some .parent
   | _ => none
 
-/-- Wire v3 (the wave-c merge of lane D2's v2 and lane REG's v2): no
-operation-nullifier plane, tagged-v2 revocation keys (tag 2 = `signingKey`),
-`signing-key-record/v2` without the revoked flag.
+/-- Wire v4: v3 (the wave-c merge of lane D2's v2 and lane REG's v2: no
+operation-nullifier plane, tagged-v2 revocation keys with tag 2 = `signingKey`,
+`signing-key-record/v2` without the revoked flag) plus K-ROOM: capability
+scopes carry a target-set tag (`stored-capability/v2`) and the append-only
+`parent` plane (tag 13, `cell-id/nat ↦ cell-id/nat`) records each cell's room.
 The retired operation-nullifier plane (tag 9, wire v1) refuses to decode:
 operation nullifiers live in the durable consumed set, so an authority cell
 written with them must be re-genesised, never reinterpreted. -/
@@ -129,6 +133,7 @@ def keyStream : (plane : AuthorityPlane) → StreamCodec plane.Key
   | .subjectKey => StreamCodec.product subjectIdStream StreamCodec.nat
   | .revoked => revocationKeyStream
   | .registered => revocationKeyStream
+  | .parent => StreamCodec.nat
 
 def valueStream : (plane : AuthorityPlane) → StreamCodec plane.Value
   | .capability kind => storedCapabilityStream kind
@@ -140,6 +145,7 @@ def valueStream : (plane : AuthorityPlane) → StreamCodec plane.Value
   | .subjectKey => CredentialSigningKeyCodec.keyRecordStream
   | .revoked => unitStream
   | .registered => unitStream
+  | .parent => StreamCodec.nat
 
 def keyCodecId : AuthorityPlane → String
   | .capability _ => "capability-id/nat"
@@ -151,9 +157,10 @@ def keyCodecId : AuthorityPlane → String
   | .subjectKey => "subject-id/nat x nat"
   | .revoked => "revocation-key/tagged-v2"
   | .registered => "revocation-key/tagged-v2"
+  | .parent => "cell-id/nat"
 
 def valueCodecId : AuthorityPlane → String
-  | .capability _ => "stored-capability/v1"
+  | .capability _ => "stored-capability/v2"
   | .issuerEpoch => "nat/base255"
   | .policyEpoch => "nat/base255"
   | .policyRevision => "nat/base255"
@@ -162,15 +169,16 @@ def valueCodecId : AuthorityPlane → String
   | .subjectKey => "signing-key-record/v2"
   | .revoked => "unit/presence"
   | .registered => "unit/presence"
+  | .parent => "cell-id/nat"
 
 def planes : List AuthorityPlane :=
   [.capability .object, .capability .account, .capability .program,
     .issuerEpoch, .policyEpoch, .policyRevision, .policyAddress,
-    .subjectKeyEpoch, .subjectKey, .revoked, .registered]
+    .subjectKeyEpoch, .subjectKey, .revoked, .registered, .parent]
 
 /-- The authority layout on the wire. -/
 def wire : Wire layout where
-  name := "minidregg/credential-authority/v3"
+  name := "minidregg/credential-authority/v4"
   namespaces := planes
   namespaces_complete := by
     intro plane
@@ -309,8 +317,7 @@ theorem owner_admissible :
       scope := demoCapability_admissible.scope
       validFrom := demoCapability_admissible.validFrom
       validUntil := demoCapability_admissible.validUntil
-      policyId := demoCapability_admissible.policyId
-      policyEpoch := demoCapability_admissible.policyEpoch
+      requestLaw := demoCapability_admissible.requestLaw
       policyCurrent := owner_policy_exact.symm
       issuerCurrent := owner_issuer_exact.symm
       selfNotRevoked := ?_
@@ -404,7 +411,41 @@ theorem retired_page_frame_refused (payload : List UInt8) :
     materializer.codec.decode (retiredPageFrame ++ payload) = none := by
   exact decode_other_first_byte wire 76 (retiredPageFrame.drop 1 ++ payload) (by decide)
 
+/-- The `minidregg/credential-authority/v3` header as the current layout type
+can express it: the v3 name and `stored-capability/v1` capability values (scope
+frames without a target-set tag). v3 had no `parent` plane; that only makes the
+real v3 descriptor differ further from `wire`. -/
+def retiredCapabilityWireV1 : Wire layout :=
+  { wire with
+    name := "minidregg/credential-authority/v3"
+    valueCodecId := fun plane =>
+      match plane with
+      | .capability _ => "stored-capability/v1"
+      | other => valueCodecId other }
+
+/-- The retired descriptor is a different descriptor, decided on its bytes. -/
+theorem retired_capability_v1_descriptor_differs :
+    descriptor retiredCapabilityWireV1 ≠ descriptor wire := by
+  decide +kernel
+
+/-- Every authority cell written under the v1 capability codec refuses to
+decode, whatever its payload. The premise is the frame's one cryptographic
+premise instantiated at these two descriptors (which differ,
+`retired_capability_v1_descriptor_differs`): cSHAKE256 separates them. -/
+theorem retired_capability_v1_frame_refused
+    (separated : layoutDigest retiredCapabilityWireV1 ≠ layoutDigest wire)
+    (payload : List UInt8) :
+    materializer.codec.decode (frame retiredCapabilityWireV1 ++ payload) = none :=
+  decode_other_header wire (frame retiredCapabilityWireV1) payload
+    (by rw [frame_length, frame_length])
+    (by simp [frame, separated])
+
 /-! ## Axiom audit -/
+
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v1_descriptor_differs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_capability_v1_descriptor_differs
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v1_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_capability_v1_frame_refused
 
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.unrevoke_rejected_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms unrevoke_rejected_at_cell

@@ -11,7 +11,7 @@ open Minidregg.Host.CapabilityInspection
 private def parent : Capability .object := {
   id := ⟨141⟩, root := ⟨101⟩, parent := some ⟨101⟩, issuer := ⟨17⟩
   holder := .subject ⟨8⟩
-  scope := ⟨{⟨8401⟩}, {.observeObject, .delegateObject}, 9007199254740993⟩
+  scope := ⟨.explicit {⟨8401⟩}, {.observeObject, .delegateObject}, 9007199254740993⟩
   notBefore := 23, notAfter := 99999, issuerEpoch := 7
   policyId := ⟨8401⟩, policyEpoch := 11
   ancestors := {⟨101⟩}, channels := {⟨29⟩, ⟨31⟩} }

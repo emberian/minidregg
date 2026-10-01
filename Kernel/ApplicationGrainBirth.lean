@@ -72,7 +72,7 @@ private def manifestCell (_config : NativeHostGenesis.Config) (_target : Nat) :
 private def birthItem (target : Nat) (owner : SubjectId)
     (cell : PackedCell CanonicalCellRegistry.registry) :
     BirthItem CanonicalCellRegistry.registry :=
-  ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, .object, owner⟩
+  ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, .object, owner, none⟩
 
 def Ready.births (ready : Ready) (config : NativeHostGenesis.Config) :
     List (BirthItem CanonicalCellRegistry.registry) :=

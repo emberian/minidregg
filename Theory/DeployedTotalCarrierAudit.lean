@@ -37,7 +37,7 @@ def emptyCapability (kind : ResourceKind) : Capability kind where
   parent := none
   issuer := ⟨0⟩
   holder := .bearer
-  scope := ⟨∅, ∅, 0⟩
+  scope := ⟨.explicit ∅, ∅, 0⟩
   notBefore := 0
   notAfter := 0
   issuerEpoch := 0
@@ -65,6 +65,7 @@ def totalAuthorityStateOf (marked : Nat -> Bool) :
           publicKey := [], activeFrom := 0, activeUntil := 0 }
   | ⟨.revoked, _⟩ => show Unit from ()
   | ⟨.registered, _⟩ => show Unit from ()
+  | ⟨.parent, _⟩ => show Nat from 0
 
 theorem totalAuthorityStateOf_injective :
     Function.Injective totalAuthorityStateOf := by

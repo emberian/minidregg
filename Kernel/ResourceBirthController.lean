@@ -357,11 +357,55 @@ private instance initialPoliciesBoundDecidable (descriptor : Descriptor Registry
   unfold Descriptor.InitialPoliciesBound
   infer_instance
 
+/-- A room slot is a present cell. -/
+def slotPresent (directory : Directory Nat Registry) (room : Nat) : Bool :=
+  match directory.slots room with
+  | .present _ => true
+  | .absent => false
+
+theorem slotPresent_iff (directory : Directory Nat Registry) (room : Nat) :
+    slotPresent directory room = true ↔ ∃ cell, directory.slots room = .present cell := by
+  unfold slotPresent
+  cases directory.slots room <;> simp
+
+/-- Every room a birth names is a present resource cell of the old directory,
+not one of the deployment's own cells (factory, Book, authority). A born cell
+is fresh, so it is never its own room, and no recorded row can name it. -/
+def ParentsPresent (deployment : Deployment) (directory : Directory Nat Registry)
+    (descriptor : Descriptor Registry) : Prop :=
+  ∀ row ∈ descriptor.parentRows,
+    slotPresent directory row.2 = true ∧
+      row.2 ∉ [deployment.factoryId, deployment.resourceBookId, deployment.authorityCellId]
+
+instance parentsPresentDecidable (deployment : Deployment) (directory : Directory Nat Registry)
+    (descriptor : Descriptor Registry) : Decidable (ParentsPresent deployment directory descriptor) := by
+  unfold ParentsPresent
+  infer_instance
+
+/-- The rooms a birth names, read at their exact old roots: the commit refuses
+if a room changed or was retired after preparation. -/
+def parentGuards (durable : Durable) (descriptor : Descriptor Registry) : List ReadGuard :=
+  (descriptor.parentRows.map Prod.snd).dedup.map fun room =>
+    { cellId := ⟨room⟩, expectedRoot := durable.snapshot.model.roots ⟨room⟩ }
+
+theorem parentGuards_exact (durable : Durable) (descriptor : Descriptor Registry)
+    (guard : ReadGuard) (member : guard ∈ parentGuards durable descriptor) :
+    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+  simp only [parentGuards, List.mem_map] at member
+  obtain ⟨room, _, rfl⟩ := member
+  rfl
+
+theorem parentGuards_cover (durable : Durable) (descriptor : Descriptor Registry)
+    {row : Nat × Nat} (member : row ∈ descriptor.parentRows) :
+    ∃ guard ∈ parentGuards durable descriptor, guard.cellId = ⟨row.2⟩ :=
+  ⟨_, List.mem_map.mpr ⟨row.2, List.mem_dedup.mpr (List.mem_map.mpr ⟨row, member, rfl⟩), rfl⟩, rfl⟩
+
 inductive PreparationReject where
   | deployment
   | compilerProfile
   | identity
   | directory
+  | parent
   | initialPayload
   | initialPolicy
   | factory
@@ -390,6 +434,7 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   profileBound : ProfileBound profile pins
   identityBound : IdentityBound profile deployment descriptor
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
+  parentsPresent : ParentsPresent deployment directory.directory descriptor
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   policiesBound : descriptor.InitialPoliciesBound
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
@@ -429,6 +474,7 @@ structure PreparedPreAuthority (profile : PolicyCompilerProfile F)
   profileBound : ProfileBound profile pins
   identityBound : IdentityBound profile deployment descriptor
   directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
+  parentsPresent : ParentsPresent deployment directory.directory descriptor
   initials : CanonicalCellRegistry.BirthsAdmissible deployment descriptor
   policiesBound : descriptor.InitialPoliciesBound
   factory : ObservedCell deployment directory.directory deployment.factoryId .declaredObject
@@ -442,6 +488,7 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deploy
   let profileBound ← requirePreparation (ProfileBound profile pins) .compilerProfile
   let identityBound ← requirePreparation (IdentityBound profile deployment descriptor) .identity
   let directory ← fromOption (CredentialAuthorityDomainReceiver.loadDirectory durable) .directory
+  let parents ← requirePreparation (ParentsPresent deployment directory.directory descriptor) .parent
   let initials ← requirePreparation
     (CanonicalCellRegistry.BirthsAdmissible deployment descriptor) .initialPayload
   let policiesBound ← requirePreparation descriptor.InitialPoliciesBound .initialPolicy
@@ -452,7 +499,7 @@ def preparePreAuthority (profile : PolicyCompilerProfile F) (deployment : Deploy
   let authority ← fromOption
     (CredentialAuthorityDomainReceiver.loadDeployment deployment durable.snapshot) .authorityDomain
   .ok ⟨valid.down.1, valid.down.2, profileBound.down, identityBound.down, directory,
-    initials.down, policiesBound.down, factory, book, authority⟩
+    parents.down, initials.down, policiesBound.down, factory, book, authority⟩
 
 /-- Common post-authority physical checks. The authority route supplies only
 its already checked physical writes; allocation, conserved Book application,
@@ -511,7 +558,7 @@ def prepareBirth (profile : PolicyCompilerProfile F) (deployment : Deployment) (
     .auxiliaryCreates
   let post ← preparePostAuthority pre grants.writes
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
-    pre.directory, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
+    pre.directory, pre.parentsPresent, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
     post.writesUnique, post.writePreExact, post.finalCells⟩
 
@@ -557,7 +604,7 @@ def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
     {descriptor : Descriptor Registry} {operationMarker : Nat}
     (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
     List ReadGuard :=
-  prepared.pre.authority.readGuards.filter fun guard =>
+  (prepared.pre.authority.readGuards ++ parentGuards durable descriptor).filter fun guard =>
     guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 /-- The user draft has no auxiliary creates; only the initial policy sources are
@@ -595,7 +642,7 @@ def PreparedBirth.writes {deployment : Deployment} {pins : FactoryPins}
 def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) : List ReadGuard :=
-  prepared.authority.readGuards.filter fun guard =>
+  (prepared.authority.readGuards ++ parentGuards durable descriptor).filter fun guard =>
     guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
@@ -697,8 +744,10 @@ theorem PreparedBirth.readGuards_exact {deployment : Deployment} {pins : Factory
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor)
     (guard : ReadGuard) (member : guard ∈ prepared.readGuards) :
-    guard.expectedRoot = durable.snapshot.model.roots guard.cellId :=
-  prepared.authority.readGuards_exact guard (List.mem_filter.mp member).1
+    guard.expectedRoot = durable.snapshot.model.roots guard.cellId := by
+  rcases List.mem_append.mp (List.mem_filter.mp member).1 with authority | room
+  · exact prepared.authority.readGuards_exact guard authority
+  · exact parentGuards_exact durable descriptor guard room
 
 /-- The authority cell's read is covered: it is written under its old root, or
 it remains a read guard. -/
@@ -709,7 +758,47 @@ theorem PreparedBirth.authority_reads_covered {deployment : Deployment} {pins : 
     guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl written
-  · exact Or.inr (List.mem_filter.mpr ⟨member, by simpa using written⟩)
+  · exact Or.inr (List.mem_filter.mpr ⟨List.mem_append_left _ member, by simpa using written⟩)
+
+/-- **`birth_parent_must_exist`.** A prepared birth — the only route to a
+birth's physical writes — names only rooms that are present cells of the image
+it was prepared from, none of them a deployment cell, and each room is a read
+guard at its exact old root unless the birth itself writes it. -/
+theorem birth_parent_must_exist {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room) :
+    (∃ cell, prepared.directory.directory.slots room = .present cell) ∧
+      room ∉ [deployment.factoryId, deployment.resourceBookId, deployment.authorityCellId] ∧
+      (⟨room⟩ ∈ prepared.writes.map DataWrite.cellId ∨
+        ∃ guard ∈ prepared.readGuards, guard.cellId = ⟨room⟩ ∧
+          guard.expectedRoot = durable.snapshot.model.roots ⟨room⟩) := by
+  have row := Descriptor.mem_parentRows member inRoom
+  obtain ⟨present, notDeployment⟩ := prepared.parentsPresent _ row
+  refine ⟨(slotPresent_iff _ _).mp present, notDeployment, ?_⟩
+  obtain ⟨guard, guardMember, guardCell⟩ := parentGuards_cover durable descriptor row
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl (guardCell ▸ written)
+  · refine Or.inr ⟨guard, List.mem_filter.mpr ⟨List.mem_append_right _ guardMember,
+      by simpa using written⟩, guardCell, ?_⟩
+    rw [← guardCell]
+    exact parentGuards_exact durable descriptor guard guardMember
+
+/-- Refusal pole: when the loaded directory has no cell at the named room,
+no birth into that room is prepared. -/
+theorem no_prepared_of_absent_parent {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    {item : BirthItem Registry} (member : item ∈ descriptor.births)
+    {room : Nat} (inRoom : item.parent = some room)
+    (absent : ∀ directory, DirectoryImage.decode Registry
+        (CredentialAuthorityDomainReceiver.directoryRows durable) = some directory →
+      directory.slots room = .absent) :
+    IsEmpty (PreparedBirth profile deployment pins durable descriptor) :=
+  ⟨fun prepared => by
+    obtain ⟨⟨cell, present⟩, _, _⟩ := birth_parent_must_exist prepared member inRoom
+    rw [absent _ prepared.directory.decoded] at present
+    cases present⟩
 
 theorem PreparedBirth.fresh_before {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
@@ -860,4 +949,10 @@ end Concrete
 /-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.no_user_book' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PreparedBirth.no_user_book
 
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.birth_parent_must_exist' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.birth_parent_must_exist
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.no_prepared_of_absent_parent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.no_prepared_of_absent_parent
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.parentGuards_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.parentGuards_exact
 end Minidregg.Kernel.ResourceBirthController

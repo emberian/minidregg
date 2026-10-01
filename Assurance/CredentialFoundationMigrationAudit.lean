@@ -116,7 +116,7 @@ import Theory.CredentialAuthorityEffects
 /-- info: 'Minidregg.Theory.TypedAuthorization.demo_explicit_generation_rotation_revokes' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.demo_explicit_generation_rotation_revokes
 
-/-- info: 'Minidregg.Theory.AuthorizationDeclaration.verify_wrong_policy_revision_rejected' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Theory.AuthorizationDeclaration.verify_wrong_policy_revision_rejected' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.AuthorizationDeclaration.verify_wrong_policy_revision_rejected
 
 /-- info: 'Minidregg.Theory.AuthorizationDeclaration.declaration_requestFields_length' does not depend on any axioms -/

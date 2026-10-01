@@ -103,12 +103,13 @@ to decode. -/
 theorem retired_catalogue_tag : kindAtTag 7 = none := rfl
 
 /-- Store-cell wire versions.  Content, event and authority moved from page
-frames to `StoreCodec` frames; the Book's balance codec became the zigzag
+frames to `StoreCodec` frames; authority v6 tags every capability scope's
+target set (explicit or `under` a room); the Book's balance codec became the zigzag
 integer codec; the declared roles moved in S2c. -/
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 3⟩
   | .eventHistory => ⟨⟨91002⟩, 2⟩
-  | .authority => ⟨⟨91003⟩, 5⟩
+  | .authority => ⟨⟨91003⟩, 6⟩
   | .declaredObject => ⟨⟨91004⟩, 2⟩
   | .resourceBook => ⟨⟨91005⟩, 3⟩
   | .accountMetadata => ⟨⟨91007⟩, 2⟩

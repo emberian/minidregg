@@ -117,11 +117,31 @@ def holderStream : StreamCodec Holder where
     | bearer => rfl
     | subject subject => simp [subjectIdStream.decodePrefix_encode]
 
+/-- Scope targets carry a tag byte: `0` an explicit sorted target set, `1`
+the room cell of an `under` scope. Any other leading byte refuses. -/
+def targetSetStream (kind : ResourceKind) : StreamCodec (TargetSet kind) where
+  encode
+    | .explicit targets => 0 :: (resourceSetStream kind).encode targets
+    | .under room => 1 :: StreamCodec.nat.encode room
+  decodePrefix
+    | 0 :: bytes => do
+        let (targets, suffix) ← (resourceSetStream kind).decodePrefix bytes
+        some (.explicit targets, suffix)
+    | 1 :: bytes => do
+        let (room, suffix) ← StreamCodec.nat.decodePrefix bytes
+        some (.under room, suffix)
+    | _ => none
+  decodePrefix_encode := by
+    intro targets suffix
+    cases targets with
+    | explicit targets => simp [(resourceSetStream kind).decodePrefix_encode]
+    | under room => simp [StreamCodec.nat.decodePrefix_encode]
+
 abbrev ScopeTuple (kind : ResourceKind) :=
-  Finset (ResourceId kind) × Finset (Verb kind) × Nat
+  TargetSet kind × Finset (Verb kind) × Nat
 
 def scopeTupleStream (kind : ResourceKind) : StreamCodec (ScopeTuple kind) :=
-  StreamCodec.product (resourceSetStream kind)
+  StreamCodec.product (targetSetStream kind)
     (StreamCodec.product (verbSetStream kind) StreamCodec.nat)
 
 def scopeTuple {kind : ResourceKind} (scope : Scope kind) : ScopeTuple kind :=
@@ -218,6 +238,49 @@ def storedCapabilityStream (kind : ResourceKind) :
     (fun tuple => ⟨tuple.1, tuple.2⟩)
     (by intro stored; rfl)
 
+/-- An explicit scope survives transport exactly. -/
+theorem scope_explicit_roundtrip (kind : ResourceKind)
+    (targets : Finset (ResourceId kind)) (verbs : Finset (Verb kind)) (maxCost : Nat)
+    (suffix : List UInt8) :
+    (scopeStream kind).decodePrefix
+        ((scopeStream kind).encode ⟨.explicit targets, verbs, maxCost⟩ ++ suffix) =
+      some (⟨.explicit targets, verbs, maxCost⟩, suffix) :=
+  (scopeStream kind).decodePrefix_encode _ suffix
+
+/-- An `under` scope survives transport exactly. -/
+theorem scope_under_roundtrip (kind : ResourceKind)
+    (room : Nat) (verbs : Finset (Verb kind)) (maxCost : Nat) (suffix : List UInt8) :
+    (scopeStream kind).decodePrefix
+        ((scopeStream kind).encode ⟨.under room, verbs, maxCost⟩ ++ suffix) =
+      some (⟨.under room, verbs, maxCost⟩, suffix) :=
+  (scopeStream kind).decodePrefix_encode _ suffix
+
+/-- The tag byte is the first byte of every scope frame. -/
+theorem scope_frame_tag (kind : ResourceKind) (scope : Scope kind) :
+    ((scopeStream kind).encode scope).head? =
+      some (match scope.targets with | .explicit _ => 0 | .under _ => 1) := by
+  rcases scope with ⟨targets, verbs, maxCost⟩
+  cases targets <;> rfl
+
+/-- An explicit scope and an `under` scope never share bytes. -/
+theorem scope_explicit_ne_under (kind : ResourceKind)
+    (targets : Finset (ResourceId kind)) (room : Nat)
+    (verbs verbs' : Finset (Verb kind)) (maxCost maxCost' : Nat) :
+    (scopeStream kind).encode ⟨.explicit targets, verbs, maxCost⟩ ≠
+      (scopeStream kind).encode ⟨.under room, verbs', maxCost'⟩ := by
+  intro same
+  have heads := congrArg List.head? same
+  rw [scope_frame_tag, scope_frame_tag] at heads
+  simp at heads
+
+/-- A scope frame whose tag byte is neither `0` nor `1` refuses. -/
+theorem scope_other_tag_refused (kind : ResourceKind) (tag : UInt8)
+    (zero : tag ≠ 0) (one : tag ≠ 1) (rest : List UInt8) :
+    (scopeStream kind).decodePrefix (tag :: rest) = none := by
+  simp only [scopeStream, StreamCodec.xmap, scopeTupleStream, StreamCodec.product,
+    targetSetStream]
+  split <;> simp_all
+
 /-- Origin tags never conflate a strict step with an explicit delegated step. -/
 theorem lineage_origin_tags_separate (kind : ResourceKind) (request : Request kind) :
     (lineageOriginStream kind).encode .strict ≠
@@ -260,6 +323,14 @@ instance (kind : ResourceKind) : Repr (StoredCapability kind) where
   reprPrec stored precedence :=
     reprPrec ((storedCapabilityStream kind).encode stored) precedence
 
+/-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.scope_explicit_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scope_explicit_roundtrip
+/-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.scope_under_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scope_under_roundtrip
+/-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.scope_explicit_ne_under' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scope_explicit_ne_under
+/-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.scope_other_tag_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms scope_other_tag_refused
 /-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.storedCapability_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms storedCapability_roundtrip
 /-- info: 'Minidregg.Compiler.CredentialAuthorityEntryCodec.storedCapability_encode_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/

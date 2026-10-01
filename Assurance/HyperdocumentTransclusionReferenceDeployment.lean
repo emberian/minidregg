@@ -374,8 +374,7 @@ def capabilityAdmissible :
           Minidregg.Theory.HyperdocumentCausalFamily.Witness.namedCapabilityAdmissible.scope.cost }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := Prior.principal.selfNotRevoked

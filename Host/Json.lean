@@ -314,11 +314,18 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
 
 private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) :
     Result (Capability kind) := do
-  let names := ["id", "root", "parent", "issuer", "holder", "targets", "verbs", "maxCost",
+  -- A scope names its targets either explicitly (`targets`) or as a room
+  -- (`room`); exactly one of the two keys is accepted.
+  let targetKey := if ((← object path json).get? "room").isSome then "room" else "targets"
+  let names := ["id", "root", "parent", "issuer", "holder", targetKey, "verbs", "maxCost",
     "notBefore", "notAfter", "issuerEpoch", "policyId", "policyEpoch", "ancestors", "channels"]
   let obj ← exactObject path names json
-  let targets ← list (path ++ ".targets")
-    (fun p j => ResourceId.mk <$> nat p j) (← field path "targets" obj)
+  let targets : TargetSet kind ← if targetKey = "room" then
+      TargetSet.under <$> nat (path ++ ".room") (← field path "room" obj)
+    else do
+      let explicit ← list (path ++ ".targets")
+        (fun p j => ResourceId.mk <$> nat p j) (← field path "targets" obj)
+      pure (TargetSet.explicit explicit.toFinset)
   let verbs ← list (path ++ ".verbs") (verb kind) (← field path "verbs" obj)
   let ancestors ← list (path ++ ".ancestors")
     (fun p j => CapabilityId.mk <$> nat p j) (← field path "ancestors" obj)
@@ -330,7 +337,7 @@ private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) 
     parent := (← optional (path ++ ".parent") nat (← field path "parent" obj)).map CapabilityId.mk
     issuer := ⟨← nat (path ++ ".issuer") (← field path "issuer" obj)⟩
     holder := ← holder (path ++ ".holder") (← field path "holder" obj)
-    scope := ⟨targets.toFinset, verbs.toFinset,
+    scope := ⟨targets, verbs.toFinset,
       ← nat (path ++ ".maxCost") (← field path "maxCost" obj)⟩
     notBefore := ← nat (path ++ ".notBefore") (← field path "notBefore" obj)
     notAfter := ← nat (path ++ ".notAfter") (← field path "notAfter" obj)
@@ -1211,12 +1218,17 @@ private def birthParts (path : String)
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
+  let roomField := if (raw.get? "room").isSome then ["room"] else []
   let obj ← exactObject path
-    (if storage = "grain" then
+    ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
         (if worker.isSome then grainWorkerFields raw else [])
     else
-      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) json
+      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
+      roomField) json
+  let room ← match obj.get? "room" with
+    | none => pure none
+    | some value => some <$> nat (path ++ ".room") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" do
     throw s!"{path}.storage: expected declared, content or grain"
@@ -1242,14 +1254,18 @@ private def birthParts (path : String)
         (AgentGrain.initialStore target budget)⟩
     else pure (NativeHostGenesis.declaredCell source target (kind = .account))
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
-    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner⟩
+    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room⟩
+  -- A workspace resource's owner holds it as a room: `under target`, the
+  -- resource and everything later born into it.
+  let asRoom {kind : ResourceKind} (cap : Capability kind) : Capability kind :=
+    { cap with scope := { cap.scope with targets := .under target } }
   let ownerGrant : ResourceBirth.AuthorityGrant := match kind with
-    | .object => ⟨.object, ⟨birthRootCapabilityAt profile source height authority
-        ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .object), []⟩⟩
-    | .account => ⟨.account, ⟨birthRootCapabilityAt profile source height authority
-        ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .account), []⟩⟩
-    | .program => ⟨.program, ⟨birthRootCapabilityAt profile source height authority
-        ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program), []⟩⟩
+    | .object => ⟨.object, ⟨asRoom (birthRootCapabilityAt profile source height authority
+        ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .object)), []⟩⟩
+    | .account => ⟨.account, ⟨asRoom (birthRootCapabilityAt profile source height authority
+        ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .account)), []⟩⟩
+    | .program => ⟨.program, ⟨asRoom (birthRootCapabilityAt profile source height authority
+        ownerId owner target (ResourceBirthPolicyController.Concrete.ownerVerbs .program)), []⟩⟩
   let control : Capability .program := birthRootCapabilityAt profile source height authority
     controlId owner target {.installPolicy, .revokeCapability}
   pure ⟨item, ownerGrant, ⟨.program, ⟨control, []⟩⟩,

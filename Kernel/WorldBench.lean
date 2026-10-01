@@ -66,7 +66,7 @@ def readOp (k v : Nat) : Op benchLayout := .read () k (some v)
 /-- Turn `i` of the log. -/
 def benchTurn (i : Nat) : BenchTurn :=
   if i < cells then
-    ⟨i + 1, [(i, ())], [⟨i, (), [allocOp 0 0]⟩], [], ()⟩
+    ⟨i + 1, [(i, (), none)], [⟨i, (), [allocOp 0 0]⟩], [], ()⟩
   else
     let c := i % cells
     let r := i / cells

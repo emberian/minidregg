@@ -64,15 +64,26 @@ abbrev Snapshot := CredentialAuthorityDomain.Snapshot
 
 /-! ## The pure decision -/
 
+/-- The two target forms an owner grant on `account` takes: genesis issues
+`explicit {account}`; a workspace birth issues `under account` (the owner holds
+the cell as a room, K-ROOM). An `under R` grant for a room `R` containing the
+account is not ownership of it: it is governed by `R`'s law, not `account`'s. -/
+def OwnerTargets (targets : TargetSet .account) (account : Nat) : Prop :=
+  targets = .explicit {⟨account⟩} ∨ targets = .under account
+
+instance (targets : TargetSet .account) (account : Nat) :
+    Decidable (OwnerTargets targets account) := by
+  unfold OwnerTargets; infer_instance
+
 /-- The owner-grant fact: the presented account capability is held by
-`subject`, targets exactly `{account}`, and is governed by `account`'s policy
+`subject`, targets `{account}` or `under account`, and is governed by `account`'s policy
 (`ResourceBirth.AuthorityGrant.NativeForBirth` with its holder). -/
 def OwnerGrant (stored : Option (StoredCapability .account)) (subject : SubjectId)
     (account : Nat) : Prop :=
   match stored with
   | none => False
   | some stored =>
-      stored.head.holder = .subject subject ∧ stored.head.scope.targets = {⟨account⟩} ∧
+      stored.head.holder = .subject subject ∧ OwnerTargets stored.head.scope.targets account ∧
         stored.head.policyId.value = account
 
 instance (stored : Option (StoredCapability .account)) (subject : SubjectId) (account : Nat) :
@@ -185,7 +196,7 @@ theorem clock_preserved (store : PayStore) (index account : Nat) :
 /-- An owner capability of `holder` on `account`, as genesis issues it. -/
 def ownerCapability (holder account : Nat) : StoredCapability .account :=
   ⟨{ id := ⟨41⟩, root := ⟨41⟩, parent := none, issuer := ⟨5⟩, holder := .subject ⟨holder⟩
-     scope := ⟨{⟨account⟩}, {.observeAccount, .transfer, .delegateAccount}, 100000⟩
+     scope := ⟨.explicit {⟨account⟩}, {.observeAccount, .transfer, .delegateAccount}, 100000⟩
      notBefore := 10, notAfter := 10010, issuerEpoch := 2, policyId := ⟨account⟩,
      policyEpoch := 0, ancestors := ∅, channels := ∅ }, []⟩
 
@@ -196,6 +207,24 @@ def oneRowStore : PayStore :=
 
 /-- Satisfiable pole: the owner of account 8 is assigned index 0. -/
 theorem owner_assigned : decideAssignment oneRowStore (some (ownerCapability 8 8)) ⟨8⟩ 8 0 = .ok () := by
+  decide +kernel
+
+/-- Satisfiable pole: a workspace-born account's owner holds it `under account`. -/
+theorem room_owner_assigned :
+    decideAssignment oneRowStore
+      (some ⟨{ (ownerCapability 8 8).head with
+        scope := ⟨.under 8, {.observeAccount, .transfer, .delegateAccount}, 100000⟩ }, []⟩)
+      ⟨8⟩ 8 0 = .ok () := by
+  decide +kernel
+
+/-- Refuting pole: a room grant `under 7` governed by room 7's law is not
+ownership of account 8, even when the account was born in room 7. -/
+theorem room_member_not_owner :
+    decideAssignment oneRowStore
+      (some ⟨{ (ownerCapability 8 8).head with
+        scope := ⟨.under 7, {.observeAccount, .transfer, .delegateAccount}, 100000⟩,
+        policyId := ⟨7⟩ }, []⟩)
+      ⟨8⟩ 8 0 = .error .notOwner := by
   decide +kernel
 
 /-- Refuting pole of `assignment_requires_owner`: subject 9 presenting

@@ -611,7 +611,7 @@ noncomputable def mergeCapabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simp [capability, HyperdocumentCausalFamily.Witness.declaration,
+        simp [TargetSet.Covers, capability, HyperdocumentCausalFamily.Witness.declaration,
           HyperdocumentCausalFamily.Witness.intent,
           HyperdocumentOperations.Declaration.toRequest, mergeDeclaration,
           mergeIntent, HyperdocumentMerge.Declaration.toRequest]
@@ -620,8 +620,7 @@ noncomputable def mergeCapabilityAdmissible :
         HyperdocumentMerge.Declaration.toRequest] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := principal.selfNotRevoked
@@ -710,7 +709,7 @@ noncomputable def eventCapabilityAdmissible :
   holder := rfl
   scope :=
     { target := by
-        simp [capability, HyperdocumentCausalFamily.Witness.declaration,
+        simp [TargetSet.Covers, capability, HyperdocumentCausalFamily.Witness.declaration,
           HyperdocumentCausalFamily.Witness.intent,
           HyperdocumentOperations.Declaration.toRequest,
           HyperdocumentMergePublication.derivedEventDeclaration,
@@ -723,8 +722,7 @@ noncomputable def eventCapabilityAdmissible :
         HyperdocumentVersionEffects.Declaration.toRequest] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := principal.selfNotRevoked

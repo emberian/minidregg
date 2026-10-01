@@ -366,7 +366,8 @@ def BatchReady (snapshot : CredentialAuthorityDomain.Snapshot)
     descriptor.GrantIdsDistinct ∧
     (∀ policy ∈ descriptor.initialPolicies, policyFresh snapshot policy) ∧
     snapshot.spent descriptor.authorityNullifier = false ∧
-    (∀ grant ∈ descriptor.grants, GrantReady snapshot grant)
+    (∀ grant ∈ descriptor.grants, GrantReady snapshot grant) ∧
+    (∀ row ∈ descriptor.parentRows, snapshot.cell.logical ⟨.parent, row.1⟩ = none)
 
 instance batchReadyDecidable (snapshot : CredentialAuthorityDomain.Snapshot)
     (descriptor : Descriptor registry) : Decidable (BatchReady snapshot descriptor) := by
@@ -380,10 +381,11 @@ def batchEvidence (snapshot : CredentialAuthorityDomain.Snapshot)
   slotsDistinct := ready.1
   grantIdsDistinct := ready.2.1
   policiesFresh := ready.2.2.1
-  ancestryEmpty := fun grant member => (ready.2.2.2.2 grant member).1
+  ancestryEmpty := fun grant member => (ready.2.2.2.2.1 grant member).1
+  parentsFresh := ready.2.2.2.2.2
   issue := fun grant member => by
     obtain ⟨_, slot, parent, root, ancestors, issuer, policy, unregistered, self, channels⟩ :=
-      ready.2.2.2.2 grant member
+      ready.2.2.2.2.1 grant member
     exact
       { preRootExact := rfl
         slotFresh := slot

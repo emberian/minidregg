@@ -228,7 +228,7 @@ def Ready.birth (_ready : Ready domain spec operation) :
     BirthItem CanonicalCellRegistry.registry :=
   ⟨⟨spec.grant.source.resource, CellSlot.root CanonicalCellRegistry.registry .absent,
       bornCell ContentResource.initialStore⟩,
-    .object, spec.grant.approval.issuer⟩
+    .object, spec.grant.approval.issuer, none⟩
 
 def Ready.initializedCell (ready : Ready domain spec operation) :
     PackedCell CanonicalCellRegistry.registry := bornCell ready.page
@@ -275,7 +275,7 @@ private def rootCapability {F : Type} [Field F] (kind : ResourceKind)
   parent := none
   issuer := profile.template.issuer
   holder := .subject subject
-  scope := ⟨{⟨target⟩}, verbs, profile.template.ownerBudget⟩
+  scope := ⟨.explicit {⟨target⟩}, verbs, profile.template.ownerBudget⟩
   notBefore := height
   notAfter := height + profile.template.lifetime
   issuerEpoch := authority.issuerEpoch profile.template.issuer

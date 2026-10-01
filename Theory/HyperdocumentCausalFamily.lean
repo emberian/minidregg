@@ -315,7 +315,7 @@ def capability : Capability .object where
   issuer := ⟨22⟩
   holder := .subject author.subject
   scope :=
-    { targets := {(declaration.toRequest config).target}
+    { targets := .explicit {(declaration.toRequest config).target}
       verbs := {.mutateObject}
       maxCost := 1 }
   notBefore := 0
@@ -376,15 +376,14 @@ theorem namedCapabilityAdmissible :
       (declaration.toRequest config) where
   holder := rfl
   scope :=
-    { target := by simp [capability]
+    { target := by simp [capability, TargetSet.Covers]
       verb := by simp [capability, declaration,
         HyperdocumentOperations.Declaration.toRequest]
       cost := by simp [capability, declaration, requestEnvelope,
         HyperdocumentOperations.Declaration.toRequest] }
   validFrom := by decide
   validUntil := by decide
-  policyId := rfl
-  policyEpoch := rfl
+  requestLaw := ⟨rfl, rfl⟩
   policyCurrent := rfl
   issuerCurrent := rfl
   selfNotRevoked := principal.selfNotRevoked

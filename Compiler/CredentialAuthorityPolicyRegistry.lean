@@ -171,7 +171,7 @@ def CapabilityBound (snapshot : Snapshot) {kind : ResourceKind}
     (capability : Capability kind) (commitment : Digest) : Prop :=
   ∃ stored, readCapability snapshot.cell kind capability.id = some stored ∧
     stored.head = capability ∧ storedCapabilityDigest snapshot stored = commitment ∧
-    LineageValid stored ∧ LineageAnchored snapshot.cell stored
+    LineageValid snapshot.authState.parent stored ∧ LineageAnchored snapshot.cell stored
 
 def capabilityCheck (snapshot : Snapshot) {kind : ResourceKind}
     (capability : Capability kind) (commitment : Digest) : Bool :=
@@ -179,7 +179,7 @@ def capabilityCheck (snapshot : Snapshot) {kind : ResourceKind}
   | none => false
   | some stored => decide (stored.head = capability ∧
       storedCapabilityDigest snapshot stored = commitment) &&
-      storedLineageCheck snapshot.cell stored
+      storedLineageCheck snapshot.cell snapshot.authState.parent stored
 
 theorem capabilityCheck_iff (snapshot : Snapshot) {kind : ResourceKind}
     (capability : Capability kind) (commitment : Digest) :
@@ -196,17 +196,20 @@ theorem capabilityCheck_eq_of_capability_reads_eq (left right : Snapshot)
     (domain : left.domain = right.domain)
     (same : ∀ readKind identifier, readCapability left.cell readKind identifier =
       readCapability right.cell readKind identifier)
+    (parents : ∀ cell, left.cell.logical ⟨.parent, cell⟩ = right.cell.logical ⟨.parent, cell⟩)
     {kind : ResourceKind} (capability : Capability kind) (commitment : Digest) :
     capabilityCheck left capability commitment =
       capabilityCheck right capability commitment := by
   unfold capabilityCheck
-  rw [same kind capability.id]
+  rw [same kind capability.id, CredentialAuthorityDomain.Snapshot.authState_parent,
+    CredentialAuthorityDomain.Snapshot.authState_parent,
+    CredentialAuthorityState.parentageOf_congr parents]
   cases readCapability right.cell kind capability.id with
   | none => rfl
   | some stored =>
       dsimp only
       rw [storedCapabilityDigest_eq_of_domain_eq left right domain stored,
-        storedLineageCheck_congr left.cell right.cell same stored]
+        storedLineageCheck_congr left.cell right.cell same _ stored]
 
 /-- Policy and capability claims are checked against their own exact source
 coordinates. Policy membership alone never proves capability lookup. -/
@@ -326,7 +329,8 @@ theorem stored_capability_membership (snapshot : Snapshot) {kind : ResourceKind}
 theorem stored_capability_check (snapshot : Snapshot) {kind : ResourceKind}
     (stored : StoredCapability kind)
     (present : readCapability snapshot.cell kind stored.head.id = some stored)
-    (valid : LineageValid stored) (anchored : LineageAnchored snapshot.cell stored) :
+    (valid : LineageValid snapshot.authState.parent stored)
+    (anchored : LineageAnchored snapshot.cell stored) :
     capabilityCheck snapshot stored.head (storedCapabilityDigest snapshot stored) = true :=
   (capabilityCheck_iff snapshot _ _).mpr ⟨stored, present, rfl, rfl, valid, anchored⟩
 
@@ -346,16 +350,16 @@ theorem no_capability_of_wrong_head (snapshot : Snapshot) {kind : ResourceKind}
 theorem no_capability_of_invalid_lineage (snapshot : Snapshot) {kind : ResourceKind}
     (capability : Capability kind) (commitment : Digest) (stored : StoredCapability kind)
     (present : readCapability snapshot.cell kind capability.id = some stored)
-    (invalid : ¬LineageValid stored) :
+    (invalid : ¬LineageValid snapshot.authState.parent stored) :
     capabilityCheck snapshot capability commitment = false := by
-  simp [capabilityCheck, present, storedLineageCheck_refuses_invalid _ _ invalid]
+  simp [capabilityCheck, present, storedLineageCheck_refuses_invalid _ _ _ invalid]
 
 theorem no_capability_of_unanchored_lineage (snapshot : Snapshot) {kind : ResourceKind}
     (capability : Capability kind) (commitment : Digest) (stored : StoredCapability kind)
     (present : readCapability snapshot.cell kind capability.id = some stored)
     (missing : ¬LineageAnchored snapshot.cell stored) :
     capabilityCheck snapshot capability commitment = false := by
-  simp [capabilityCheck, present, storedLineageCheck_refuses_unanchored _ _ missing]
+  simp [capabilityCheck, present, storedLineageCheck_refuses_unanchored _ _ _ missing]
 
 theorem no_membership_of_wrong_root (snapshot : Snapshot) (root address : Digest)
     (wrong : root ≠ snapshot.cell.root) (claim : MembershipClaim) :
