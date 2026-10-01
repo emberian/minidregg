@@ -62,6 +62,16 @@ theorem room_confidentiality {kind : ResourceKind} {state : AuthState}
   · exact offChain room same chain
   · exact notNamed ts named member
 
+/-- Fields are orthogonal to rooms: no field restriction or bound makes a
+write outside the capability's rooms admissible. -/
+theorem room_confidentiality_write {kind : ResourceKind} {state : AuthState}
+    {request : Request kind} {footprint : Footprint} (cap : Capability kind)
+    (offChain : ∀ room, cap.scope.targets = .under room →
+      ¬ state.parent.Descends request.target.value room)
+    (notNamed : ∀ ts, cap.scope.targets = .explicit ts → request.target ∉ ts) :
+    ¬ cap.AdmitsWrite state request footprint :=
+  fun admitted => room_confidentiality cap offChain notNamed admitted.admissible
+
 /-- Every admitted capability with a valid lineage at the current parent
 projection descends from a root (`parent = none`, `root = id`, same root id
 and issuer) whose own target set is `under X` for an `X` on the cell's parent
@@ -320,3 +330,5 @@ theorem invite_cannot_widen :
 #guard_msgs (whitespace := lax) in #print axioms invite_cannot_widen
 
 end Minidregg.Theory.RoomAuthorization
+/-- info: 'Minidregg.Theory.RoomAuthorization.room_confidentiality_write' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.RoomAuthorization.room_confidentiality_write

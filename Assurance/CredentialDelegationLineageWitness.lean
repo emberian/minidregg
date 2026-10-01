@@ -25,7 +25,7 @@ def parent : Capability .object where
   parent := none
   issuer := ⟨70⟩
   holder := .subject alice
-  scope := ⟨.explicit {⟨200⟩, ⟨201⟩}, {.observeObject, .mutateObject, .delegateObject}, 100⟩
+  scope := ⟨.explicit {⟨200⟩, ⟨201⟩}, {.observeObject, .mutateObject, .delegateObject}, 100, none, ∅⟩
   notBefore := 0
   notAfter := 100
   issuerEpoch := 0
@@ -39,7 +39,7 @@ def child : Capability .object :=
     id := ⟨101⟩
     parent := some parent.id
     holder := .subject bob
-    scope := ⟨.explicit {⟨200⟩}, {.observeObject, .mutateObject}, 20⟩
+    scope := ⟨.explicit {⟨200⟩}, {.observeObject, .mutateObject}, 20, none, ∅⟩
     notBefore := 1
     notAfter := 80
     ancestors := {parent.id} }

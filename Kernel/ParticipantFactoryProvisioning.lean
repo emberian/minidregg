@@ -149,7 +149,7 @@ def observeCapability (deployment : Deployment) (template : CanonicalRuntimeProf
   parent := none
   issuer := template.issuer
   holder := .subject command.holder
-  scope := ⟨.explicit {⟨deployment.factoryId⟩}, {.observeObject}, template.ownerBudget⟩
+  scope := ⟨.explicit {⟨deployment.factoryId⟩}, {.observeObject}, template.ownerBudget, none, ∅⟩
   notBefore := ambient.height
   notAfter := ambient.height + template.lifetime
   issuerEpoch := issuerEpochAt pre template.issuer

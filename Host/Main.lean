@@ -1491,6 +1491,7 @@ def dispatchSession (config : NativeHost.Config)
         | some call =>
             NativeHost.submitLoadedWith config session.opened call
               (sessionConfirmed config state)
+      NativeHost.logOperatorRefusal result
       return (2, outcomeCodec.encode (NativeHost.publicSubmissionOutcome result))
   | 3 =>
       let opened ← sessionOpened config state

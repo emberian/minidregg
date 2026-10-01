@@ -498,15 +498,20 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
         else return .error (preAuthentication (.of .malformed))
       else return .error (challengeMismatch expected signed.challenge)
 
+/-- A resource view: the cell's own root, the packed cell as the reader's
+scope narrows it, and its narrowed account cut. -/
+abbrev ResourceView := Digest × List UInt8 × List (Nat × Int)
+
 /-- This codec is a read view, not a writable Book/registry payload. -/
-def resourceViewStream : StreamCodec (List UInt8 × List (Nat × Int)) :=
-  StreamCodec.product bytesStream balanceStream
+def resourceViewStream : StreamCodec ResourceView :=
+  StreamCodec.product digestStream (StreamCodec.product bytesStream balanceStream)
 
-/-- Version 3: the viewed bytes are the packed store cell (StoreCodec frames),
-not a page. -/
-def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList
+/-- Version 4 (K-FIELDS): the cell root leads, because the packed cell is the
+cell narrowed to the reader's `Scope.fields` and its own root is not the
+cell's.  Version 3 (the whole packed cell, no root) refuses. -/
+def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList
 
-def resourceViewCodec : IndexedProgram.LawfulCodec (List UInt8 × List (Nat × Int)) :=
+def resourceViewCodec : IndexedProgram.LawfulCodec ResourceView :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
 
 /-- A stream window: the cell root, its next sequence position, and the
@@ -738,9 +743,30 @@ def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
 
 def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList
 
-/-- `(height, lifecycle bytes)`: the cell's canonical stored bytes at that height. -/
-def atViewCodec : IndexedProgram.LawfulCodec (Nat × List UInt8) :=
-  NativeHostCodec.framed atViewFrame (StreamCodec.product StreamCodec.nat bytesStream)
+/-- `(height, root, lifecycle bytes)`: the cell's root at that height (none
+when it was not live) and its lifecycle bytes, a live cell narrowed to the
+reader's `Scope.fields` exactly as a current read is (K-FIELDS): a reader
+restricted to some fields learns no other field of the cell's past either. -/
+def atViewCodec : IndexedProgram.LawfulCodec (Nat × Option Digest × List UInt8) :=
+  NativeHostCodec.framed atViewFrame
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option digestStream) bytesStream))
+
+/-- The at-height view of stored lifecycle bytes under `fields`. -/
+def atView (fields : Option (Finset CellField)) (bytes : List UInt8) : Option Digest × List UInt8 :=
+  match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry bytes with
+  | some (.live packed) => (some packed.payload.root,
+      ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
+        (.live (ResourceObservationAdmission.narrowPacked fields packed)))
+  | _ => (none, bytes)
+
+/-- The at-height view of a live cell is the cell narrowed exactly as a
+current read narrows it (`resourceView` uses the same `narrowPacked`). -/
+theorem atView_live (fields : Option (Finset CellField)) (packed : PackedCell CanonicalCellRegistry.registry) :
+    atView fields (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry (.live packed)) =
+      (some packed.payload.root, ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
+        (.live (ResourceObservationAdmission.narrowPacked fields packed))) := by
+  unfold atView
+  rw [ResourceBirthCodec.LifecycleImage.rawDecode_bytes]
 
 /-- Every query view, `who`/`since`/`at` included, has the same one-target
 footprint as a current read of that target: the same grant, the same check. -/
@@ -748,6 +774,16 @@ theorem presence_views_share_footprint (context : Context deployment durable)
     (subject : SubjectId) (nonce : Nat) (query : Query) (grants : List GrantRef) :
     requiredTargets context ⟨subject, nonce, .query query, grants⟩ = .ok [(query.kind, query.target)] :=
   rfl
+
+/-- What a reader under `fields` receives of a selected cell: its root, the
+cell with every unnamed field absent, and the named balances. -/
+def resourceView (fields : Option (Finset CellField))
+    (packed : PackedCell CanonicalCellRegistry.registry) (balances : List (Nat × Int)) :
+    ResourceView :=
+  (packed.payload.root,
+    PackedCell.bytes CanonicalCellRegistry.registry
+      (ResourceObservationAdmission.narrowPacked fields packed),
+    ResourceObservationAdmission.narrowBalances fields balances)
 
 /-- The query's view bytes. A history read outside the log window (above the
 current height, or below the retention floor) is `operationRejected`; a query
@@ -766,9 +802,11 @@ def AuthorizedIntent.queryResult
     let reader := CredentialAuthorityState.readCapability context.authority.snapshot.cell
       grant.kind grant.capability
     match query.view with
-    | .resource => pure (resourceViewCodec.encode
-        (PackedCell.bytes CanonicalCellRegistry.registry checked.selected.packed,
-          checked.selected.accountBalances))
+    | .resource => do
+        -- The authorizing capability (the one this grant names) narrows the view.
+        let some stored := reader | throw .malformed
+        pure (resourceViewCodec.encode (resourceView stored.head.scope.fields
+          checked.selected.packed checked.selected.accountBalances))
     | .policy => do
         let address := state.policyAddress ⟨grant.target⟩ (state.policyRevision ⟨grant.target⟩)
         let some source := CanonicalCellRegistry.loadPolicySource deployment.domain
@@ -793,8 +831,9 @@ def AuthorizedIntent.queryResult
         else if height < genesisHeight then
           throw .operationRejected
         else
+          let some stored := reader | throw .malformed
           match atBytes (durable := durable) genesisHeight height query.target with
-          | some bytes => pure (atViewCodec.encode (height, bytes))
+          | some bytes => pure (atViewCodec.encode (height, atView stored.head.scope.fields bytes))
           | none => throw .malformed
     | .tail start count =>
         match checked.selected.packed with
@@ -853,11 +892,24 @@ theorem CheckedGrant.current_generation_and_source
       wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
   ⟨checked.checked.authorization.policyEpochExact, checked.checked.authorization.policyRevisionExact⟩
 
-theorem resourceView_roundtrip (view : List UInt8 × List (Nat × Int)) :
+/-- A version-3 resource view (the whole packed cell, no leading root)
+refuses: its frame is not the v4 frame. -/
+theorem v3_view_refused (payload : List UInt8) :
+    resourceViewCodec.decode ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList ++ payload) =
+      none := by
+  have len : ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList).length =
+      resourceViewFrame.length := by decide +kernel
+  have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList ≠ resourceViewFrame := by
+    decide +kernel
+  simp only [resourceViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
+    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
+  rfl
+
+theorem resourceView_roundtrip (view : ResourceView) :
     resourceViewCodec.decode (resourceViewCodec.encode view) = some view :=
   resourceViewCodec.decode_encode view
 
-theorem resourceView_canonical {bytes : List UInt8} {view : List UInt8 × List (Nat × Int)}
+theorem resourceView_canonical {bytes : List UInt8} {view : ResourceView}
     (decoded : resourceViewCodec.decode bytes = some view) :
     resourceViewCodec.encode view = bytes :=
   NativeHostCodec.framed_canonical _ _ decoded
@@ -890,3 +942,5 @@ theorem challenge_bound {context : Context deployment durable}
 #guard_msgs (whitespace := lax) in #print axioms challenge_bound
 
 end Minidregg.Kernel.NativeObservationController
+/-- info: 'Minidregg.Kernel.NativeObservationController.v3_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.v3_view_refused

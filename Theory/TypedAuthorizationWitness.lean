@@ -284,6 +284,79 @@ theorem authorized_isEmpty_of_staleEpoch :
       token.policyEpochExact
     exact absurd stale (by decide)⟩
 
+/-! ## Fields and per-field bounds (K-FIELDS)
+
+The treasurer holds `capability` with one bound: field 7 (`spent`) moves by at
+most 50 in one write.  The reviewer holds it narrowed to `annotations`. -/
+
+/-- A treasurer: `capability` with `maxDelta = {(slot 7, 50)}`. -/
+def treasurer : Capability .object :=
+  { capability with scope := { capability.scope with maxDelta := {(.slot 7, 50)} } }
+
+/-- A reviewer: `capability` narrowed to the `annotations` field. -/
+def reviewer : Capability .object :=
+  { capability with scope := { capability.scope with fields := some {.annotations} } }
+
+/-- One write that changes field 7 by `amount`. -/
+def spend (amount : Int) : Footprint := ⟨{.slot 7}, fun _ => -amount⟩
+
+def annotate : Footprint := ⟨{.annotations}, fun _ => 0⟩
+def editBody : Footprint := ⟨{.body}, fun _ => 0⟩
+
+/-- Satisfied: the treasurer moves 30. -/
+theorem treasurer_moves_30 : treasurer.AdmitsWrite authState request (spend 30) :=
+  ⟨Capability.admissible_fields_orthogonal _ _ capability_admissible, by decide⟩
+
+/-- Refuted: the treasurer may not move 60 in one write, though the request
+is admissible. -/
+theorem treasurer_refused_60 : ¬ treasurer.AdmitsWrite authState request (spend 60) :=
+  fun admitted => absurd admitted.fields (by decide)
+
+/-- The bound is per write: a second write of 30 is the same admitted write. -/
+theorem treasurer_moves_30_again : treasurer.AdmitsWrite authState request (spend 30) :=
+  treasurer_moves_30
+
+/-- Satisfied: the reviewer annotates. -/
+theorem reviewer_annotates : reviewer.AdmitsWrite authState request annotate :=
+  ⟨Capability.admissible_fields_orthogonal _ _ capability_admissible, by decide⟩
+
+/-- Refuted: the reviewer may not edit the body. -/
+theorem reviewer_cannot_edit : ¬ reviewer.AdmitsWrite authState request editBody :=
+  fun admitted => absurd admitted.fields (by decide)
+
+/-- Refuted: a child naming `{1, 2}` does not narrow a parent naming `{1}`,
+and a child naming every field does not narrow a parent naming some. -/
+theorem fields_widening_refused :
+    ¬ CellField.SetNarrows (some {.slot 1, .slot 2}) (some {.slot 1}) ∧
+      ¬ CellField.SetNarrows none (some {.slot 1}) := by decide
+
+/-- Refuted: a child may not drop or loosen a parent bound. -/
+theorem bound_loosening_refused :
+    ¬ CellField.BoundsNarrow ∅ {(.slot 7, 50)} ∧
+      ¬ CellField.BoundsNarrow {(.slot 7, 60)} {(.slot 7, 50)} := by decide
+
+/-- Satisfied: tightening is narrowing. -/
+theorem bound_tightening_narrows :
+    CellField.SetNarrows (some {.slot 1}) (some {.slot 1, .slot 2}) ∧
+      CellField.BoundsNarrow {(.slot 7, 30)} {(.slot 7, 50)} := by decide
+
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.treasurer_moves_30' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms treasurer_moves_30
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.treasurer_refused_60' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms treasurer_refused_60
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.treasurer_moves_30_again' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms treasurer_moves_30_again
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.reviewer_annotates' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reviewer_annotates
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.reviewer_cannot_edit' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms reviewer_cannot_edit
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.fields_widening_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms fields_widening_refused
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.bound_loosening_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bound_loosening_refused
+/-- info: 'Minidregg.Theory.TypedAuthorizationWitness.bound_tightening_narrows' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms bound_tightening_narrows
+
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.authorized_nonempty' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms authorized_nonempty
 /-- info: 'Minidregg.Theory.TypedAuthorizationWitness.capability_admissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/

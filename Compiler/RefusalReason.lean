@@ -284,7 +284,7 @@ def grant (notAfter : Height) : Capability .object where
   parent := none
   issuer := ⟨1⟩
   holder := .subject owner
-  scope := ⟨.explicit {target}, {.observeObject}, 1000⟩
+  scope := ⟨.explicit {target}, {.observeObject}, 1000, none, ∅⟩
   notBefore := 0
   notAfter := notAfter
   issuerEpoch := 0
@@ -350,13 +350,13 @@ open Sample in
 /-- A room grant (`under 7`, issued under law 7) reaches cell 42 born in room 7
 whose request names the cell's own law 42: no request-law binding applies. -/
 theorem sample_room_admitted :
-    capabilityRefusal { grant 50 with scope := ⟨.under 7, {.observeObject}, 1000⟩, policyId := ⟨7⟩ }
+    capabilityRefusal { grant 50 with scope := ⟨.under 7, {.observeObject}, 1000, none, ∅⟩, policyId := ⟨7⟩ }
       { state ∅ 0 with parent := Parentage.ofList [(42, 7)] } (read owner 5) = none := by decide
 
 open Sample in
 /-- The same room grant does not reach a cell outside the room: `noGrant`. -/
 theorem sample_room_outside_noGrant :
-    capabilityRefusal { grant 50 with scope := ⟨.under 7, {.observeObject}, 1000⟩, policyId := ⟨7⟩ }
+    capabilityRefusal { grant 50 with scope := ⟨.under 7, {.observeObject}, 1000, none, ∅⟩, policyId := ⟨7⟩ }
       { state ∅ 0 with parent := Parentage.ofList [(42, 8)] } (read owner 5) = some .noGrant := by decide
 
 end RefusalReason

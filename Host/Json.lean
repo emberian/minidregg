@@ -317,10 +317,28 @@ private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) 
     Result (Capability kind) := do
   -- A scope names its targets either explicitly (`targets`) or as a room
   -- (`room`); exactly one of the two keys is accepted.
-  let targetKey := if ((← object path json).get? "room").isSome then "room" else "targets"
+  let raw ← object path json
+  let targetKey := if (raw.get? "room").isSome then "room" else "targets"
+  -- K-FIELDS: optional `fields` (absent = every field) and `maxDelta`
+  -- (absent = no per-field bound).
+  let optionalKeys := ["fields", "maxDelta"].filter fun key => (raw.get? key).isSome
   let names := ["id", "root", "parent", "issuer", "holder", targetKey, "verbs", "maxCost",
-    "notBefore", "notAfter", "issuerEpoch", "policyId", "policyEpoch", "ancestors", "channels"]
+    "notBefore", "notAfter", "issuerEpoch", "policyId", "policyEpoch", "ancestors", "channels"] ++
+    optionalKeys
   let obj ← exactObject path names json
+  let cellField := fun (p : String) (j : Lean.Json) => do
+    match CredentialAuthorityEntryCodec.cellFieldOfName (← string p j) with
+    | some named => pure named
+    | none => failAt p "expected a field: decimal slot, balance:N, code, body or annotations"
+  let fields ← match obj.get? "fields" with
+    | none => pure none
+    | some value => some <$> (List.toFinset <$> list (path ++ ".fields") cellField value)
+  let bounds ← match obj.get? "maxDelta" with
+    | none => pure ∅
+    | some value => List.toFinset <$> list (path ++ ".maxDelta") (fun p j => do
+        let bound ← exactObject p ["field", "max"] j
+        pure (← cellField (p ++ ".field") (← field p "field" bound),
+          ← nat (p ++ ".max") (← field p "max" bound))) value
   let targets : TargetSet kind ← if targetKey = "room" then
       TargetSet.under <$> nat (path ++ ".room") (← field path "room" obj)
     else do
@@ -339,7 +357,7 @@ private def capability (kind : ResourceKind) (path : String) (json : Lean.Json) 
     issuer := ⟨← nat (path ++ ".issuer") (← field path "issuer" obj)⟩
     holder := ← holder (path ++ ".holder") (← field path "holder" obj)
     scope := ⟨targets, verbs.toFinset,
-      ← nat (path ++ ".maxCost") (← field path "maxCost" obj)⟩
+      ← nat (path ++ ".maxCost") (← field path "maxCost" obj), fields, bounds⟩
     notBefore := ← nat (path ++ ".notBefore") (← field path "notBefore" obj)
     notAfter := ← nat (path ++ ".notAfter") (← field path "notAfter" obj)
     issuerEpoch := ← nat (path ++ ".issuerEpoch") (← field path "issuerEpoch" obj)
@@ -3078,18 +3096,21 @@ private def streamCellJson (root : Digest) (store : Minidregg.Theory.Store.Store
     ("entries", .arr <| (StreamCell.tail store 1 store.support.card).toArray.map
       fun (k, r) => streamRecordJson k r)]
 
-private def resourceJson (value : List UInt8 × List (Nat × Int)) : Result Lean.Json := do
+/-- `cell.root` is the cell's own root (the view's leading digest); the
+entries are the cell as the reader's scope narrows it. -/
+private def resourceJson (value : NativeObservationController.ResourceView) : Result Lean.Json := do
+  let (root, bytes, balances) := value
   let packed ← match Minidregg.Theory.CellRegistry.PackedCell.decode
-      CanonicalCellRegistry.registry value.1 with
+      CanonicalCellRegistry.registry bytes with
     | some packed => pure packed
     | none => failAt "view-resource.cell" "noncanonical packed cell"
   let view := match packed with
-    | ⟨.content, payload⟩ => contentCellJson payload.root payload.logical
-    | ⟨.declaredObject, payload⟩ => declaredCellJson payload.root payload.logical
-    | ⟨.stream, payload⟩ => streamCellJson payload.root payload.logical
-    | _ => .mkObj [("root", decimal packed.payload.root.value), ("canonical", hexJson value.1)]
+    | ⟨.content, payload⟩ => contentCellJson root payload.logical
+    | ⟨.declaredObject, payload⟩ => declaredCellJson root payload.logical
+    | ⟨.stream, payload⟩ => streamCellJson root payload.logical
+    | _ => .mkObj [("root", decimal root.value), ("canonical", hexJson bytes)]
   pure <| .mkObj [("type", "resource"), ("cell", view),
-    ("balances", .arr <| value.2.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2])]
+    ("balances", .arr <| balances.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2])]
 
 private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCodec α)
     (bytes : List UInt8) : Result α :=
@@ -3365,12 +3386,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
           ("transaction", decimal entry.transaction),
           ("cells", .arr <| entry.cells.toArray.map decimal)])]
   | "view-at" => do
-      let (height, lifecycle) ← decoded "view-at" NativeObservationController.atViewCodec bytes
+      let (height, root, lifecycle) ← decoded "view-at" NativeObservationController.atViewCodec bytes
       match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
       | some .fresh => pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "fresh")]
       | some .retired => pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "retired")]
       | some (.live cell) => do
-          let view ← resourceJson (PackedCell.bytes CanonicalCellRegistry.registry cell, [])
+          let view ← resourceJson (root.getD cell.payload.root,
+            PackedCell.bytes CanonicalCellRegistry.registry cell, [])
           pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "live"),
             ("canonical", hexJson lifecycle), ("resource", view)]
       | none => failAt "view-at" "noncanonical lifecycle bytes"

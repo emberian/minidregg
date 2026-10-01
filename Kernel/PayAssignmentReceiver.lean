@@ -196,7 +196,7 @@ theorem clock_preserved (store : PayStore) (index account : Nat) :
 /-- An owner capability of `holder` on `account`, as genesis issues it. -/
 def ownerCapability (holder account : Nat) : StoredCapability .account :=
   ⟨{ id := ⟨41⟩, root := ⟨41⟩, parent := none, issuer := ⟨5⟩, holder := .subject ⟨holder⟩
-     scope := ⟨.explicit {⟨account⟩}, {.observeAccount, .transfer, .delegateAccount}, 100000⟩
+     scope := ⟨.explicit {⟨account⟩}, {.observeAccount, .transfer, .delegateAccount}, 100000, none, ∅⟩
      notBefore := 10, notAfter := 10010, issuerEpoch := 2, policyId := ⟨account⟩,
      policyEpoch := 0, ancestors := ∅, channels := ∅ }, []⟩
 
@@ -213,7 +213,7 @@ theorem owner_assigned : decideAssignment oneRowStore (some (ownerCapability 8 8
 theorem room_owner_assigned :
     decideAssignment oneRowStore
       (some ⟨{ (ownerCapability 8 8).head with
-        scope := ⟨.under 8, {.observeAccount, .transfer, .delegateAccount}, 100000⟩ }, []⟩)
+        scope := ⟨.under 8, {.observeAccount, .transfer, .delegateAccount}, 100000, none, ∅⟩ }, []⟩)
       ⟨8⟩ 8 0 = .ok () := by
   decide +kernel
 
@@ -222,7 +222,7 @@ ownership of account 8, even when the account was born in room 7. -/
 theorem room_member_not_owner :
     decideAssignment oneRowStore
       (some ⟨{ (ownerCapability 8 8).head with
-        scope := ⟨.under 7, {.observeAccount, .transfer, .delegateAccount}, 100000⟩,
+        scope := ⟨.under 7, {.observeAccount, .transfer, .delegateAccount}, 100000, none, ∅⟩,
         policyId := ⟨7⟩ }, []⟩)
       ⟨8⟩ 8 0 = .error .notOwner := by
   decide +kernel

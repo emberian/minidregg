@@ -1030,6 +1030,12 @@ def publicSubmissionOutcome : Outcome → Outcome
   | .refused .. => refused .undisclosed "admission" "request refused"
   | result => result
 
+/-- The submitter receives the uniform refusal; the operator's own log (this
+process's stderr) keeps the named reason. -/
+def logOperatorRefusal (result : Outcome) : IO Unit := do
+  if let .refused reason phase detail _ := result then
+    IO.eprintln s!"host: submission refused (operator log): {repr reason}: {String.fromUTF8! ⟨phase.toArray⟩}: {String.fromUTF8! ⟨detail.toArray⟩}"
+
 /-- Every blind-submission refusal is the same frame, whatever branch refused
 and whatever reason it named, so a submitter without read authority learns
 nothing from it. Its twin for the signed observation channel is
@@ -1046,6 +1052,7 @@ def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
         match ← openExisting config with
         | .error detail => pure (.unavailable detail.toUTF8.toList)
         | .ok opened => submitLoaded config opened call
+  logOperatorRefusal result
   return publicSubmissionOutcome result
 
 /-- Lookup is read-only exact-ingress replay. It cannot submit an absent call. -/

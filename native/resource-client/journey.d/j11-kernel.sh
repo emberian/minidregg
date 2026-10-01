@@ -178,6 +178,11 @@ submit "$CW" c-into-b
 outcome=$CW/attempts/c-into-b/outcome.json
 if [ "$(cat "$D/c-into-b.rc")" != 0 ] && [ "$(jq -r .type "$outcome" 2>/dev/null)" = refused ]; then
   got=refused; detail="phase=$(jq -r .phase "$outcome" | xxd -r -p) detail=$(jq -r .detail "$outcome" | xxd -r -p)"
+# On final (P-LAW) the Host evaluates the target's law when it prepares the
+# submission and refuses there with the failing clause: law-denied, naming
+# sb's author clause.
+elif host_refused c-into-b && grep -q "law-denied" "$D/c-into-b.err"; then
+  got=refused; detail=$(grep -o "law-denied: [^;]*" "$D/c-into-b.err" | head -1)
 else got="ACCEPTED-or-error"; detail=$(tail -1 "$D/c-into-b.err"); fi
 printf 'c-into-b\texpect=refused\tgot=%s\t%s (same grant admitted c-own-via-room: the author law of sb refuses)\n' \
   "$got" "$detail" >>"$rows"

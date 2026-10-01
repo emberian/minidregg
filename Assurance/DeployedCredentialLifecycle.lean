@@ -278,7 +278,9 @@ theorem strict_edge :
           subst verb
           change Verb.mutateObject ∈ rootScope.verbs
           simp [rootScope]
-        maxCost := by decide }
+        maxCost := by decide
+        fields := CellField.SetNarrows.refl _
+        maxDelta := CellField.BoundsNarrow.refl _ }
   · intro subject covered
     simpa [childCapability, rootCapability, Holder.Covers] using covered
 

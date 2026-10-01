@@ -99,7 +99,8 @@ def planeOfTag : UInt8 → Option AuthorityPlane
   | 13 => some .parent
   | _ => none
 
-/-- Wire v4: v3 (the wave-c merge of lane D2's v2 and lane REG's v2: no
+/-- Wire v5 = v4 with `stored-capability/v3` scopes (K-FIELDS: named fields and
+per-field bounds). Wire v4: v3 (the wave-c merge of lane D2's v2 and lane REG's v2: no
 operation-nullifier plane, tagged-v2 revocation keys with tag 2 = `signingKey`,
 `signing-key-record/v2` without the revoked flag) plus K-ROOM: capability
 scopes carry a target-set tag (`stored-capability/v2`) and the append-only
@@ -160,7 +161,7 @@ def keyCodecId : AuthorityPlane → String
   | .parent => "cell-id/nat"
 
 def valueCodecId : AuthorityPlane → String
-  | .capability _ => "stored-capability/v2"
+  | .capability _ => "stored-capability/v3"
   | .issuerEpoch => "nat/base255"
   | .policyEpoch => "nat/base255"
   | .policyRevision => "nat/base255"
@@ -178,7 +179,7 @@ def planes : List AuthorityPlane :=
 
 /-- The authority layout on the wire. -/
 def wire : Wire layout where
-  name := "minidregg/credential-authority/v4"
+  name := "minidregg/credential-authority/v5"
   namespaces := planes
   namespaces_complete := by
     intro plane
@@ -411,41 +412,40 @@ theorem retired_page_frame_refused (payload : List UInt8) :
     materializer.codec.decode (retiredPageFrame ++ payload) = none := by
   exact decode_other_first_byte wire 76 (retiredPageFrame.drop 1 ++ payload) (by decide)
 
-/-- The `minidregg/credential-authority/v3` header as the current layout type
-can express it: the v3 name and `stored-capability/v1` capability values (scope
-frames without a target-set tag). v3 had no `parent` plane; that only makes the
-real v3 descriptor differ further from `wire`. -/
-def retiredCapabilityWireV1 : Wire layout :=
+/-- The `minidregg/credential-authority/v4` header (K-ROOM): the v4 name and
+`stored-capability/v2` capability values, whose scope frames end at the budget
+(no named fields, no per-field bounds). -/
+def retiredCapabilityWireV2 : Wire layout :=
   { wire with
-    name := "minidregg/credential-authority/v3"
+    name := "minidregg/credential-authority/v4"
     valueCodecId := fun plane =>
       match plane with
-      | .capability _ => "stored-capability/v1"
+      | .capability _ => "stored-capability/v2"
       | other => valueCodecId other }
 
 /-- The retired descriptor is a different descriptor, decided on its bytes. -/
-theorem retired_capability_v1_descriptor_differs :
-    descriptor retiredCapabilityWireV1 ≠ descriptor wire := by
+theorem retired_capability_v2_descriptor_differs :
+    descriptor retiredCapabilityWireV2 ≠ descriptor wire := by
   decide +kernel
 
-/-- Every authority cell written under the v1 capability codec refuses to
-decode, whatever its payload. The premise is the frame's one cryptographic
-premise instantiated at these two descriptors (which differ,
-`retired_capability_v1_descriptor_differs`): cSHAKE256 separates them. -/
-theorem retired_capability_v1_frame_refused
-    (separated : layoutDigest retiredCapabilityWireV1 ≠ layoutDigest wire)
+/-- Every authority cell written under the v4 wire (`stored-capability/v2`)
+refuses to decode, whatever its payload. The premise is the frame's one
+cryptographic premise instantiated at these two descriptors (which differ,
+`retired_capability_v2_descriptor_differs`): cSHAKE256 separates them. -/
+theorem retired_capability_v2_frame_refused
+    (separated : layoutDigest retiredCapabilityWireV2 ≠ layoutDigest wire)
     (payload : List UInt8) :
-    materializer.codec.decode (frame retiredCapabilityWireV1 ++ payload) = none :=
-  decode_other_header wire (frame retiredCapabilityWireV1) payload
+    materializer.codec.decode (frame retiredCapabilityWireV2 ++ payload) = none :=
+  decode_other_header wire (frame retiredCapabilityWireV2) payload
     (by rw [frame_length, frame_length])
     (by simp [frame, separated])
 
 /-! ## Axiom audit -/
 
-/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v1_descriptor_differs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms retired_capability_v1_descriptor_differs
-/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v1_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms retired_capability_v1_frame_refused
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v2_descriptor_differs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_capability_v2_descriptor_differs
+/-- info: 'Minidregg.Compiler.CredentialAuthorityCell.retired_capability_v2_frame_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_capability_v2_frame_refused
 
 /-- info: 'Minidregg.Compiler.CredentialAuthorityCell.unrevoke_rejected_at_cell' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms unrevoke_rejected_at_cell

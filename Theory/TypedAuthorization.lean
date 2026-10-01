@@ -484,11 +484,123 @@ instance requestLawDecidable (targets : TargetSet kind) (policy : PolicyId) (epo
 
 end TargetSet
 
+/-! ## §2a. Fields of a cell, as a scope names them.
+
+A scope may name the FIELDS of the cells it covers and bound the change it may
+make to each.  `fields = none` is every field; `some fs` is exactly `fs`.
+`maxDelta` is a finite set of per-field bounds on the absolute net change one
+admitted write makes to that field (the old Gate's `maxMove`).  Every entry
+for a field applies, so two entries mean the smaller.  The empty set bounds
+nothing.  Bounds are per write (one turn), not cumulative. -/
+
+/-- A field of a cell.  `slot n` is a declared cell's object field `n`
+(`resource/field/n`); `balance a` an account balance coordinate of asset `a`;
+`code` a declared program's code.  A content cell has two fields: `body`
+(documents, atoms, runs, elements, field records, conflicts, transclusions)
+and `annotations` (links, marks, annotation records). -/
+inductive CellField where
+  | slot (n : Nat)
+  | balance (asset : Nat)
+  | code
+  | body
+  | annotations
+  deriving DecidableEq, Repr
+
+/-- `fields` names `field`: every field when absent, membership otherwise. -/
+def CellField.NamedBy (fields : Option (Finset CellField)) (field : CellField) : Prop :=
+  match fields with
+  | none => True
+  | some named => field ∈ named
+
+instance CellField.namedByDecidable (fields : Option (Finset CellField)) (field : CellField) :
+    Decidable (CellField.NamedBy fields field) := by
+  cases fields <;> unfold CellField.NamedBy <;> infer_instance
+
+/-- Field narrowing: anything narrows `none`; `some c` narrows `some p` when
+`c ⊆ p`; `none` (every field) never narrows a named set. -/
+def CellField.SetNarrows (child parent : Option (Finset CellField)) : Prop :=
+  match child, parent with
+  | _, none => True
+  | some c, some p => c ⊆ p
+  | none, some _ => False
+
+instance CellField.setNarrowsDecidable (child parent : Option (Finset CellField)) :
+    Decidable (CellField.SetNarrows child parent) := by
+  cases child <;> cases parent <;> unfold CellField.SetNarrows <;> infer_instance
+
+theorem CellField.SetNarrows.refl (fields : Option (Finset CellField)) :
+    CellField.SetNarrows fields fields := by
+  cases fields <;> simp [CellField.SetNarrows]
+
+theorem CellField.SetNarrows.trans {young middle old : Option (Finset CellField)}
+    (first : CellField.SetNarrows young middle) (second : CellField.SetNarrows middle old) :
+    CellField.SetNarrows young old := by
+  cases young <;> cases middle <;> cases old <;>
+    simp_all [CellField.SetNarrows, Finset.Subset.trans]
+  exact Finset.Subset.trans first second
+
+theorem CellField.namedBy_of_setNarrows {child parent : Option (Finset CellField)}
+    {field : CellField} (narrows : CellField.SetNarrows child parent)
+    (named : CellField.NamedBy child field) : CellField.NamedBy parent field := by
+  cases child <;> cases parent <;> simp_all [CellField.SetNarrows, CellField.NamedBy]
+  exact narrows named
+
+/-- Every parent bound is met by a child bound on the same field that is no
+larger.  A child may add bounds; it may not drop or loosen one. -/
+def CellField.BoundsNarrow (child parent : Finset (CellField × Nat)) : Prop :=
+  ∀ bound ∈ parent, ∃ tighter ∈ child, tighter.1 = bound.1 ∧ tighter.2 ≤ bound.2
+
+instance CellField.boundsNarrowDecidable (child parent : Finset (CellField × Nat)) :
+    Decidable (CellField.BoundsNarrow child parent) := by
+  unfold CellField.BoundsNarrow; infer_instance
+
+theorem CellField.BoundsNarrow.refl (bounds : Finset (CellField × Nat)) :
+    CellField.BoundsNarrow bounds bounds :=
+  fun bound member => ⟨bound, member, rfl, le_rfl⟩
+
+theorem CellField.BoundsNarrow.trans {young middle old : Finset (CellField × Nat)}
+    (first : CellField.BoundsNarrow young middle) (second : CellField.BoundsNarrow middle old) :
+    CellField.BoundsNarrow young old := by
+  intro bound member
+  obtain ⟨mid, midMember, midField, midLe⟩ := second bound member
+  obtain ⟨tight, tightMember, tightField, tightLe⟩ := first mid midMember
+  exact ⟨tight, tightMember, tightField.trans midField, le_trans tightLe midLe⟩
+
+/-- What one write changes, as a scope sees it: the fields it touched and the
+net signed change on each (a non-numeric field changes by `0`).  The kernel
+derives it from the target's committed pre-state and its computed post-state
+(`ResourceObservationAdmission.footprint`), never from a request. -/
+structure Footprint where
+  touched : Finset CellField
+  delta : CellField → Int
+
+/-- Under `bounds`, the net change `delta` on `field` is admitted. -/
+def CellField.WithinBounds (bounds : Finset (CellField × Nat)) (field : CellField) (delta : Int) :
+    Prop :=
+  ∀ bound ∈ bounds, bound.1 = field → delta.natAbs ≤ bound.2
+
+instance CellField.withinBoundsDecidable (bounds : Finset (CellField × Nat)) (field : CellField)
+    (delta : Int) : Decidable (CellField.WithinBounds bounds field delta) := by
+  unfold CellField.WithinBounds; infer_instance
+
+theorem CellField.withinBounds_of_narrows {child parent : Finset (CellField × Nat)}
+    {field : CellField} {delta : Int} (narrows : CellField.BoundsNarrow child parent)
+    (within : CellField.WithinBounds child field delta) :
+    CellField.WithinBounds parent field delta := by
+  intro bound member same
+  obtain ⟨tight, tightMember, tightField, tightLe⟩ := narrows bound member
+  exact le_trans (within tight tightMember (tightField.trans same)) tightLe
+
 /-- A finite, typed authority scope. -/
 structure Scope (kind : ResourceKind) where
   targets : TargetSet kind
   verbs : Finset (Verb kind)
   maxCost : Nat
+  /-- The fields of each covered cell this scope may write and read; `none`
+  is every field. -/
+  fields : Option (Finset CellField) := none
+  /-- Per-field bounds on the absolute net change of one admitted write. -/
+  maxDelta : Finset (CellField × Nat) := ∅
   deriving DecidableEq
 
 structure Scope.Covers {kind : ResourceKind} (scope : Scope kind)
@@ -504,6 +616,8 @@ structure Scope.Narrows {kind : ResourceKind} (child parent : Scope kind)
   targets : child.targets.Narrows parent.targets parentage
   verbs : child.verbs ⊆ parent.verbs
   maxCost : child.maxCost ≤ parent.maxCost
+  fields : CellField.SetNarrows child.fields parent.fields
+  maxDelta : CellField.BoundsNarrow child.maxDelta parent.maxDelta
 
 theorem Scope.covers_iff_components {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) (request : Request kind) :
@@ -522,9 +636,11 @@ theorem Scope.narrows_iff_components {kind : ResourceKind} (child parent : Scope
     (parentage : Parentage) :
     child.Narrows parent parentage ↔
       child.targets.Narrows parent.targets parentage ∧ child.verbs ⊆ parent.verbs ∧
-        child.maxCost ≤ parent.maxCost :=
-  ⟨fun narrows => ⟨narrows.targets, narrows.verbs, narrows.maxCost⟩,
-    fun ⟨targets, verbs, cost⟩ => ⟨targets, verbs, cost⟩⟩
+        child.maxCost ≤ parent.maxCost ∧ CellField.SetNarrows child.fields parent.fields ∧
+          CellField.BoundsNarrow child.maxDelta parent.maxDelta :=
+  ⟨fun narrows => ⟨narrows.targets, narrows.verbs, narrows.maxCost, narrows.fields,
+      narrows.maxDelta⟩,
+    fun ⟨targets, verbs, cost, fields, bounds⟩ => ⟨targets, verbs, cost, fields, bounds⟩⟩
 
 instance Scope.narrowsDecidable {kind : ResourceKind} (child parent : Scope kind)
     (parentage : Parentage) : Decidable (child.Narrows parent parentage) :=
@@ -532,13 +648,15 @@ instance Scope.narrowsDecidable {kind : ResourceKind} (child parent : Scope kind
 
 theorem Scope.Narrows.refl {kind : ResourceKind} (scope : Scope kind)
     (parentage : Parentage) : scope.Narrows scope parentage :=
-  ⟨TargetSet.Narrows.refl _ _, Finset.Subset.refl _, le_rfl⟩
+  ⟨TargetSet.Narrows.refl _ _, Finset.Subset.refl _, le_rfl, CellField.SetNarrows.refl _,
+    CellField.BoundsNarrow.refl _⟩
 
 theorem Scope.Narrows.trans {kind : ResourceKind} {young middle old : Scope kind}
     {parentage : Parentage} (first : young.Narrows middle parentage)
     (second : middle.Narrows old parentage) : young.Narrows old parentage :=
   ⟨first.targets.trans second.targets, Finset.Subset.trans first.verbs second.verbs,
-    le_trans first.maxCost second.maxCost⟩
+    le_trans first.maxCost second.maxCost, first.fields.trans second.fields,
+    first.maxDelta.trans second.maxDelta⟩
 
 theorem Scope.covers_of_narrows {kind : ResourceKind}
     {child parent : Scope kind} {parentage : Parentage} {request : Request kind}
@@ -553,6 +671,56 @@ theorem Scope.covers_mono {kind : ResourceKind} {scope : Scope kind}
     {request : Request kind} (covers : scope.Covers first request) :
     scope.Covers second request :=
   ⟨TargetSet.covers_mono grows covers.target, covers.verb, covers.cost⟩
+
+/-- Every field a write touched is named by the scope, and its net change is
+within every bound the scope sets on it. -/
+def Scope.FieldsCover {kind : ResourceKind} (scope : Scope kind) (footprint : Footprint) : Prop :=
+  ∀ field ∈ footprint.touched, CellField.NamedBy scope.fields field ∧
+    CellField.WithinBounds scope.maxDelta field (footprint.delta field)
+
+instance Scope.fieldsCoverDecidable {kind : ResourceKind} (scope : Scope kind)
+    (footprint : Footprint) : Decidable (scope.FieldsCover footprint) := by
+  unfold Scope.FieldsCover; infer_instance
+
+/-- A write is covered when its request is (target, verb, cost) and every field
+it changed is (names, bounds). -/
+structure Scope.CoversWrite {kind : ResourceKind} (scope : Scope kind)
+    (parentage : Parentage) (request : Request kind) (footprint : Footprint) : Prop where
+  covers : scope.Covers parentage request
+  fields : scope.FieldsCover footprint
+
+/-- Every field a covered write touched is a field the scope names. -/
+theorem fields_cover_write {kind : ResourceKind} {scope : Scope kind}
+    {parentage : Parentage} {request : Request kind} {footprint : Footprint}
+    (covered : scope.CoversWrite parentage request footprint)
+    {field : CellField} (touched : field ∈ footprint.touched) :
+    CellField.NamedBy scope.fields field :=
+  (covered.fields field touched).1
+
+/-- A covered write moves each field by at most every bound the scope sets. -/
+theorem maxDelta_bounds_write {kind : ResourceKind} {scope : Scope kind}
+    {parentage : Parentage} {request : Request kind} {footprint : Footprint}
+    (covered : scope.CoversWrite parentage request footprint)
+    {field : CellField} (touched : field ∈ footprint.touched)
+    {bound : Nat} (bounded : (field, bound) ∈ scope.maxDelta) :
+    (footprint.delta field).natAbs ≤ bound :=
+  (covered.fields field touched).2 _ bounded rfl
+
+/-- Narrowing is monotone on fields: what a child scope admits field by field,
+its parent admits. -/
+theorem narrows_fields_monotone {kind : ResourceKind} {child parent : Scope kind}
+    {parentage : Parentage} {footprint : Footprint}
+    (narrows : child.Narrows parent parentage) (covered : child.FieldsCover footprint) :
+    parent.FieldsCover footprint := fun field touched =>
+  ⟨CellField.namedBy_of_setNarrows narrows.fields (covered field touched).1,
+    CellField.withinBounds_of_narrows narrows.maxDelta (covered field touched).2⟩
+
+theorem Scope.coversWrite_of_narrows {kind : ResourceKind} {child parent : Scope kind}
+    {parentage : Parentage} {request : Request kind} {footprint : Footprint}
+    (narrows : child.Narrows parent parentage)
+    (covered : child.CoversWrite parentage request footprint) :
+    parent.CoversWrite parentage request footprint :=
+  ⟨Scope.covers_of_narrows narrows covered.covers, narrows_fields_monotone narrows covered.fields⟩
 
 /-! ## §3. Capabilities and current committed authorization state. -/
 
@@ -657,7 +825,7 @@ theorem Attenuates.mono {kind : ResourceKind} {child parent : Capability kind}
   { ha with
     scopeNarrows :=
       ⟨TargetSet.narrows_mono grows ha.scopeNarrows.targets, ha.scopeNarrows.verbs,
-        ha.scopeNarrows.maxCost⟩ }
+        ha.scopeNarrows.maxCost, ha.scopeNarrows.fields, ha.scopeNarrows.maxDelta⟩ }
 
 /-- Full semantic monotonicity.  Holder delegation is intentionally explicit:
 the caller must show that the parent holder covers the presented subject.  All
@@ -710,6 +878,39 @@ theorem attenuation_admits_subset {kind : ResourceKind}
   · intro channel hmem
     exact hc.channelNotRevoked channel (ha.channels hmem)
 
+/-- Fields are orthogonal to request admission: re-scoping a capability's
+fields or bounds changes no request it admits.  Fields constrain only what a
+write changes (`AdmitsWrite`) and what a read returns. -/
+theorem admissible_fields_orthogonal {kind : ResourceKind} {cap : Capability kind}
+    {state : AuthState} {request : Request kind}
+    (fields : Option (Finset CellField)) (bounds : Finset (CellField × Nat))
+    (admitted : cap.Admissible state request) :
+    ({ cap with scope := { cap.scope with fields := fields, maxDelta := bounds } } :
+      Capability kind).Admissible state request :=
+  ⟨admitted.holder, ⟨admitted.scope.target, admitted.scope.verb, admitted.scope.cost⟩,
+    admitted.validFrom, admitted.validUntil, admitted.requestLaw, admitted.policyCurrent,
+    admitted.issuerCurrent, admitted.selfNotRevoked, admitted.ancestorNotRevoked,
+    admitted.channelNotRevoked⟩
+
+/-- Admission of one write: the request is admissible and the capability's
+scope covers every field the write changed. -/
+structure AdmitsWrite {kind : ResourceKind} (cap : Capability kind) (state : AuthState)
+    (request : Request kind) (footprint : Footprint) : Prop where
+  admissible : cap.Admissible state request
+  fields : cap.scope.FieldsCover footprint
+
+/-- `attenuation_admits_subset`, field by field: a write a child admits, its
+parent admits, including every named field and every per-field bound. -/
+theorem attenuation_admits_write_subset {kind : ResourceKind}
+    {child parent : Capability kind} {state : AuthState}
+    {request : Request kind} {footprint : Footprint}
+    (ha : child.Attenuates parent state.parent)
+    (hc : child.AdmitsWrite state request footprint)
+    (parentHolder : parent.holder.Covers request.subject) :
+    parent.AdmitsWrite state request footprint :=
+  ⟨attenuation_admits_subset ha hc.admissible parentHolder,
+    narrows_fields_monotone ha.scopeNarrows hc.fields⟩
+
 end Capability
 
 /-- A narrowing checked once stays a narrowing while parents are only ever
@@ -721,7 +922,8 @@ theorem Scope.narrows_stable {kind : ResourceKind} {state₁ state₂ : AuthStat
     (grows : ∀ c p, state₁.parent c = some p → state₂.parent c = some p)
     (narrows : child.Narrows parent state₁.parent) :
     child.Narrows parent state₂.parent :=
-  ⟨TargetSet.narrows_mono grows narrows.targets, narrows.verbs, narrows.maxCost⟩
+  ⟨TargetSet.narrows_mono grows narrows.targets, narrows.verbs, narrows.maxCost,
+    narrows.fields, narrows.maxDelta⟩
 
 /-! ## §4. Explicit verifier portals and request-indexed evidence. -/
 
@@ -1177,3 +1379,19 @@ theorem demo_explicit_generation_rotation_revokes :
 /-- info: 'Minidregg.Theory.TypedAuthorization.Parentage.under_fresh_covers_only_self' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Parentage.under_fresh_covers_only_self
 end Minidregg.Theory.TypedAuthorization
+/-- info: 'Minidregg.Theory.TypedAuthorization.fields_cover_write' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.fields_cover_write
+/-- info: 'Minidregg.Theory.TypedAuthorization.maxDelta_bounds_write' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.maxDelta_bounds_write
+/-- info: 'Minidregg.Theory.TypedAuthorization.narrows_fields_monotone' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.narrows_fields_monotone
+/-- info: 'Minidregg.Theory.TypedAuthorization.Scope.coversWrite_of_narrows' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Scope.coversWrite_of_narrows
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.attenuation_admits_write_subset' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.attenuation_admits_write_subset
+/-- info: 'Minidregg.Theory.TypedAuthorization.Capability.admissible_fields_orthogonal' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.Capability.admissible_fields_orthogonal
+/-- info: 'Minidregg.Theory.TypedAuthorization.CellField.SetNarrows.trans' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.CellField.SetNarrows.trans
+/-- info: 'Minidregg.Theory.TypedAuthorization.CellField.BoundsNarrow.trans' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Theory.TypedAuthorization.CellField.BoundsNarrow.trans

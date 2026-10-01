@@ -32,10 +32,23 @@ private def verbName : {kind : ResourceKind} → Verb kind → Json
   | _, .revokeCapability => "revokeCapability"
   | _, .appendObject => "append"
 
+/-- K-FIELDS: `fields` (sorted names) only when the scope names some, and
+`maxDelta` only when it sets a bound; absent keys are every field / no bound. -/
+def fieldsJson {kind : ResourceKind} (scope : Scope kind) : List (String × Json) :=
+  (match scope.fields with
+    | none => []
+    | some named => [("fields", .arr <| ((named.image fieldLabel).sort (· ≤ ·)).toArray.map
+        fun label => .str (cellFieldName (fieldOfLabel label)))]) ++
+  (if scope.maxDelta = ∅ then [] else
+    [("maxDelta", .arr <| ((scope.maxDelta.image boundLabel).sort (· ≤ ·)).toArray.map
+      fun label =>
+        let bound := boundOfLabel label
+        .mkObj [("field", .str (cellFieldName bound.1)), ("max", decimal bound.2)])])
+
 /-- Every authorable head field comes from the decoded source capability.
 Canonical bytes retain the full ancestry, which is not recreated in JSON. -/
 def headJson {kind : ResourceKind} (cap : Capability kind) : Json := .mkObj
-  [("id", decimal cap.id.value), ("root", decimal cap.root.value),
+  ([("id", decimal cap.id.value), ("root", decimal cap.root.value),
    ("parent", cap.parent.map (fun p => decimal p.value) |>.getD .null),
    ("issuer", decimal cap.issuer.value),
    ("holder", match cap.holder with
@@ -51,7 +64,7 @@ def headJson {kind : ResourceKind} (cap : Capability kind) : Json := .mkObj
    ("issuerEpoch", decimal cap.issuerEpoch), ("policyId", decimal cap.policyId.value),
    ("policyEpoch", decimal cap.policyEpoch),
    ("ancestors", numbers (cap.ancestors.image (·.value))),
-   ("channels", numbers (cap.channels.image (·.value)))]
+   ("channels", numbers (cap.channels.image (·.value)))] ++ fieldsJson cap.scope)
 
 def inspect (kind : ResourceKind) (bytes : List UInt8) : Except String Json := do
   let codec := (storedCapabilityStream kind).toLawful
