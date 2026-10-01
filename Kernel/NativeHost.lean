@@ -650,6 +650,8 @@ structure PayLedger where
   clock : Option PayCell.Clock
   asset : Nat
   well : Int
+  /-- The asset's Book total, well included (conserved by every admitted batch). -/
+  total : Int
   rows : List PayLedgerRow
 
 def payLedgerLoaded (config : Config) (opened : Opened config) : Except String PayLedger := do
@@ -663,12 +665,87 @@ def payLedgerLoaded (config : Config) (opened : Opened config) : Except String P
   let rows := (List.range (PayCell.nextFree store)).filterMap fun index =>
     (PayCell.assignmentAt store index).map fun account => ⟨index, account, logical.balance account asset⟩
   pure ⟨pay.cell.root, PayCell.tariffOf store, PayCell.clockOf store, asset,
-    logical.balance asset asset, rows⟩
+    logical.balance asset asset, logical.totalAsset asset, rows⟩
 
 def payLedger (config : Config) : IO (Except String PayLedger) := do
   match ← openExisting config with
   | .error detail => return .error detail
   | .ok opened => return payLedgerLoaded config opened
+
+/-! ## Purse refill (lane P6): session operations 113–116
+
+The account owner's refill (`DREGG/PAY/REFILL/v1`) has its own
+plan/assembly/submission/lookup quartet; its signed ingress is
+`DREGG/PAY/REFILL/SIGNED/v1`.  The plan is P2's shared `SigningPlan`. -/
+
+def payRefillPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PayCellDomain.SigningPlan := do
+  let command ← need "noncanonical pay refill command"
+    (PurseRefillReceiver.commandCodec.decode commandBytes)
+  let header ← PurseRefillReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def payRefillAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "pay refill signature must be 64 bytes"
+  let header ← need "noncanonical pay refill header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (PurseRefillReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical pay refill plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PurseRefillReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def payRefillSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← PurseRefillReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused "pay-refill" s!"{repr reason}"
+  | .transactionConflict => return refused "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a refill.  Absence never submits. -/
+def payRefillLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    Outcome :=
+  match PurseRefillReceiver.decodeIngress bytes with
+  | none => refused "pay-refill" "noncanonical signed ingress"
+  | some ingress =>
+      match PurseRefillReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-- The operator's local read of one AgentGrain purse (not a socket
+operation): its root and its four coordinates. -/
+structure PayPurse where
+  task : Nat
+  root : Digest
+  state : AgentGrain.State
+
+def payPurseLoaded (config : Config) (opened : Opened config) (task : Nat) :
+    Except String PayPurse := do
+  let .present packed := opened.directory.directory.slots task
+    | .error s!"purse {task} absent"
+  let purse ← need s!"purse {task} is not a declared object"
+    (CanonicalCellRegistry.selectDeclared config.deployment task .object packed)
+  let state ← need s!"purse {task} is not an AgentGrain task"
+    (AgentGrain.readState task purse.logical)
+  pure ⟨task, purse.root, state⟩
+
+def payPurse (config : Config) (task : Nat) : IO (Except String PayPurse) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened => return payPurseLoaded config opened task
 
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do

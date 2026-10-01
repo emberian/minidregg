@@ -33,6 +33,7 @@ mod historical_call_receipt;
 mod meter;
 #[cfg(unix)]
 mod participant_enrollment;
+mod pay_refill;
 #[cfg(unix)]
 mod participant_namespace;
 #[cfg(unix)]
@@ -1979,6 +1980,7 @@ fn run(mut args: Args) -> Result<()> {
         "workspace" => workspace::run(args),
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
+        "pay-refill" => pay_refill::run(args),
         #[cfg(unix)]
         "selected-exchange" => {
             let phase = args.required("phase")?;

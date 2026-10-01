@@ -148,6 +148,13 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
                 !plan.is_empty() && sponsor.len() == 64 && possession.len() == 64
             }),
         [88 | 89, ingress @ ..] => !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME,
+        // PAY P6: the public pay view (P2's op107, empty payload) and the
+        // purse refill quartet. The Host decodes each component canonically.
+        [107] => true,
+        [113 | 115 | 116, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [114, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
         _ => false,
     }
 }

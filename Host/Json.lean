@@ -1003,9 +1003,11 @@ private def grainPolicy (owner : Nat) (worker : Option (List Nat × Int)) : Mini
   | some ([subject], generation) => .all [base, .any [
       .eq "request/subject" (Int.ofNat owner),
       .memberOf "request/verb" [1, 3],
+      AgentGrain.refillPolicy,
       grainWorkerClause subject generation]]
   | some (subjects, generation) => .all [base, .any <|
-      [.eq "request/subject" (Int.ofNat owner), .memberOf "request/verb" [1, 3]] ++
+      [.eq "request/subject" (Int.ofNat owner), .memberOf "request/verb" [1, 3],
+        AgentGrain.refillPolicy] ++
         subjects.map (fun subject => grainWorkerClause subject generation)]
 
 /-- Every named worker in a plural policy gets the same pinned-generation,
@@ -1013,7 +1015,8 @@ no-op witness clause. This is a construction fact, not an IO admission claim. -/
 theorem grainPolicy_plural_worker_clause (owner : Nat) (subjects : List Nat)
     (generation : Int) (subject : Nat) (named : subject ∈ subjects) :
     grainWorkerClause subject generation ∈
-      ([.eq "request/subject" (Int.ofNat owner), .memberOf "request/verb" [1, 3]] ++
+      ([.eq "request/subject" (Int.ofNat owner), .memberOf "request/verb" [1, 3],
+        AgentGrain.refillPolicy] ++
         subjects.map (fun worker => grainWorkerClause worker generation)) := by
   apply List.mem_append.mpr
   right
@@ -1030,6 +1033,7 @@ theorem grainPolicy_singleton_bytes (owner subject : Nat) (generation : Int) :
       (.all [AgentGrain.policy (.eq "request/subject" (Int.ofNat owner)), .any [
         .eq "request/subject" (Int.ofNat owner),
         .memberOf "request/verb" [1, 3],
+        AgentGrain.refillPolicy,
         .all [.eq "request/subject" (Int.ofNat subject),
           AgentGrain.witnessCaveat generation]]]) := rfl
 
@@ -1058,15 +1062,25 @@ theorem grainWorkerClause_wrong_subject (subject caller : Nat) (generation : Int
     Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject,
     Nat.cast_inj, different]
 
+/-- The managed law's refill alternative is the refill edge itself, which
+needs the slot only the purse-refill receiver projects. -/
+private theorem refillPolicy_needs_slot (old new : Minidregg.Pred.State)
+    (noRefill : new.get AgentGrain.refillSlot ≠ some 1) :
+    Minidregg.Pred.evalWith Minidregg.Pred.failClosed AgentGrain.refillPolicy old new = false := by
+  simp [AgentGrain.refillPolicy, Minidregg.Pred.Pred.all, Minidregg.Pred.PredList.ofList,
+    Minidregg.Pred.evalWith, Minidregg.Pred.evalWithAll, noRefill]
+
 /-- For a mutation, no worker can reuse a previous pinned generation, even
 if that worker can observe a newer state. Owner and management branches are
-explicitly excluded by the request subject and verb. -/
+explicitly excluded by the request subject and verb, and the refill edge by
+the absent refill slot (no receiver but the purse refill projects it). -/
 theorem grainPolicy_stale_worker_refused (owner : Nat) (subjects : List Nat)
     (generation actual : Int) (caller : Nat)
     (old new : Minidregg.Pred.State)
     (verb : new.get "request/verb" = some 2)
     (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
     (notOwner : caller ≠ owner)
+    (noRefill : new.get AgentGrain.refillSlot ≠ some 1)
     (before : new.get "resource/field/0/before" = some actual)
     (stale : actual ≠ generation) :
     Minidregg.Pred.eval (grainPolicy owner (some (subjects, generation))) old new = false := by
@@ -1081,18 +1095,18 @@ theorem grainPolicy_stale_worker_refused (owner : Nat) (subjects : List Nat)
   | nil =>
       simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
         Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
-        Nat.cast_inj, notOwner]
+        Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
   | cons first rest =>
       cases rest with
       | nil =>
           have firstFalse := workerFalseWith first (by simp)
           simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
             Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
-            Nat.cast_inj, notOwner, firstFalse]
+            Nat.cast_inj, notOwner, firstFalse, refillPolicy_needs_slot old new noRefill]
       | cons second tail =>
           simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
             Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
-            Nat.cast_inj, notOwner]
+            Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
           intro _
           refine ⟨workerFalseWith first (by simp), workerFalseWith second (by simp), ?_⟩
           intro worker named
@@ -1108,6 +1122,7 @@ theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
     (verb : new.get "request/verb" = some 2)
     (requestSubject : new.get "request/subject" = some (Int.ofNat caller))
     (notOwner : caller ≠ owner)
+    (noRefill : new.get AgentGrain.refillSlot ≠ some 1)
     (unnamed : caller ∉ subjects) :
     Minidregg.Pred.eval (grainPolicy owner (some (subjects, generation))) old new = false := by
   have workerFalseWith : ∀ worker ∈ subjects,
@@ -1123,18 +1138,18 @@ theorem grainPolicy_unnamed_worker_refused (owner : Nat) (subjects : List Nat)
   | nil =>
       simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
         Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
-        Nat.cast_inj, notOwner]
+        Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
   | cons first rest =>
       cases rest with
       | nil =>
           have firstFalse := workerFalseWith first (by simp)
           simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
             Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
-            Nat.cast_inj, notOwner, firstFalse]
+            Nat.cast_inj, notOwner, firstFalse, refillPolicy_needs_slot old new noRefill]
       | cons second tail =>
           simp [grainPolicy, Minidregg.Pred.eval_all, Minidregg.Pred.eval_any,
             Minidregg.Pred.eval, Minidregg.Pred.evalWith, requestSubject, verb,
-            Nat.cast_inj, notOwner]
+            Nat.cast_inj, notOwner, refillPolicy_needs_slot old new noRefill]
           intro _
           refine ⟨workerFalseWith first (by simp), workerFalseWith second (by simp), ?_⟩
           intro worker named
@@ -2183,6 +2198,24 @@ private def payAssign (json : Lean.Json) : Result (List UInt8) := do
       expectedPayRoot := ⟨← nat "$.expectedPayRoot" (← field "$" "expectedPayRoot" obj)⟩ }
   return PayAssignmentReceiver.commandCodec.encode command
 
+/-- The owner's refill: burn `amount` credit from `account` into the purse of
+AgentGrain task `task`, whose leg claims `gain` (the joint turn refuses
+`unbalanced` unless they agree). -/
+private def payRefill (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "capability", "account", "task", "amount", "gain",
+    "nonce", "expectedAuthorityRoot"] json
+  let command : PurseRefillReceiver.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      account := ← nat "$.account" (← field "$" "account" obj)
+      task := ← nat "$.task" (← field "$" "task" obj)
+      amount := ← nat "$.amount" (← field "$" "amount" obj)
+      gain := ← nat "$.gain" (← field "$" "gain" obj)
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      expectedAuthorityRoot := ⟨← nat "$.expectedAuthorityRoot"
+        (← field "$" "expectedAuthorityRoot" obj)⟩ }
+  return PurseRefillReceiver.commandCodec.encode command
+
 /-- A natural number as the pay watcher emits it (a JSON integer) or as the
 Host's own JSON writes it (a canonical unsigned decimal string). -/
 private def natOrNumber (path : String) (json : Lean.Json) : Result Nat :=
@@ -2257,6 +2290,7 @@ def author (kind : String) (json : Lean.Json)
   | "pay-book" => payBook json
   | "pay-assign" => payAssign json
   | "pay-observation" => payObservationCommand json
+  | "pay-refill" => payRefill json
   | "application-spk-launch-descriptor" =>
       (ApplicationSpkLaunchDescriptorAuthoring.author json).map Prod.fst
   | "application-dispatch-request" => dispatchAuthorRequest json
@@ -2462,6 +2496,15 @@ private def payObservationCommandJson (command : PayObservation.Command) : Lean.
    ("heartbeat", .bool command.observations.isEmpty),
    ("observations", .arr (command.observations.map payObservationRecordJson).toArray)]
 
+private def payRefillCommandJson (command : PurseRefillReceiver.Command) : Lean.Json := .mkObj
+  [("type", "pay-refill-v1"),
+   ("canonical", hexJson (PurseRefillReceiver.commandCodec.encode command)),
+   ("subject", decimal command.subject.value), ("capability", decimal command.capability.value),
+   ("account", decimal command.account), ("task", decimal command.task),
+   ("amount", decimal command.amount), ("gain", decimal command.gain),
+   ("nonce", decimal command.nonce),
+   ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value)]
+
 private def payCommandJson (bytes : List UInt8) : Lean.Json :=
   match PayBookReceiver.commandCodec.decode bytes with
   | some command => payBookCommandJson command
@@ -2471,7 +2514,10 @@ private def payCommandJson (bytes : List UInt8) : Lean.Json :=
       | none =>
           match PayObservation.commandCodec.decode bytes with
           | some command => payObservationCommandJson command
-          | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
+          | none =>
+              match PurseRefillReceiver.commandCodec.decode bytes with
+              | some command => payRefillCommandJson command
+              | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
 
 /-- The public pay view: roots to pin, tariff, clock, next free index and the
 published deposit book (index order, lowercase hex). -/
@@ -2502,9 +2548,20 @@ def payLedgerJson (ledger : NativeHost.PayLedger) : Lean.Json := .mkObj
      | some clock => payClockJson clock),
    ("asset", decimal ledger.asset),
    ("well", .str (toString ledger.well)),
+   ("total", .str (toString ledger.total)),
    ("payers", .arr (ledger.rows.map fun row => Lean.Json.mkObj
      [("index", decimal row.index), ("account", decimal row.account),
       ("balance", .str (toString row.balance))]).toArray)]
+
+/-- The operator's local read of one AgentGrain purse. -/
+def payPurseJson (purse : NativeHost.PayPurse) : Lean.Json := .mkObj
+  [("type", "pay-purse-v1"),
+   ("task", decimal purse.task),
+   ("root", decimal purse.root.value),
+   ("generation", .str (toString purse.state.generation)),
+   ("status", .str (toString purse.state.status)),
+   ("remaining", .str (toString purse.state.remaining)),
+   ("reserved", .str (toString purse.state.reserved))]
 
 private def participantKeyCommandJson
     (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj
@@ -3091,6 +3148,14 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ingress.commandBytes
       pure <| .mkObj [("type", "pay-observation-ingress-v1"),
         ("command", payObservationCommandJson command), ("envelope", hexJson ingress.envelope)]
+  | "pay-refill" => payRefillCommandJson <$>
+      decoded "pay-refill" PurseRefillReceiver.commandCodec bytes
+  | "pay-refill-ingress" => do
+      let ingress ← decoded "pay-refill-ingress" PurseRefillReceiver.ingressCodec bytes
+      let command ← decoded "pay-refill-ingress" PurseRefillReceiver.commandCodec
+        ingress.commandBytes
+      pure <| .mkObj [("type", "pay-refill-ingress-v1"),
+        ("command", payRefillCommandJson command), ("envelope", hexJson ingress.envelope)]
   | "pay-plan" => do
       let plan ← decoded "pay-plan" PayCellDomain.signingPlanCodec bytes
       pure <| .mkObj
