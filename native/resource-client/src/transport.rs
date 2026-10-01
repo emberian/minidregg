@@ -183,6 +183,24 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [127, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
         [129] => true,
+        // PAY: the pay cell's signed commands (103 plan, 104 assembly, 105 submit, 106
+        // receipt-only lookup), its public view (107), and the observer's reports (108-111,
+        // the same four shapes). Each command is authorized by its own signature and
+        // capability inside the Host; the socket only bounds the frame. 112 is the public
+        // enrollment view (P3b-1), empty payload like 107.
+        [103 | 108, command @ ..] => !command.is_empty() && command.len() < HOST_MAX_FRAME,
+        [104 | 109, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| signature.len() == 64 && !plan.is_empty())
+        }
+        [105 | 106 | 110 | 111, ingress @ ..] => {
+            !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME
+        }
+        [107 | 112] => true,
+        // PAY P6: the purse refill quartet. The Host decodes each component canonically.
+        [113 | 115 | 116, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [114, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
         _ => false,
     }
 }
@@ -1468,4 +1486,30 @@ mod tests {
         fs::remove_file(lock_path).unwrap();
         fs::remove_dir(directory).unwrap();
     }
+    #[test]
+    fn pay_operations_are_public_and_shape_bounded() {
+        for operation in [103u8, 105, 106, 108, 110, 111] {
+            assert!(allowed_operation(&[operation, 1], false));
+            assert!(!allowed_operation(&[operation], false));
+        }
+        assert!(allowed_operation(&[107], false));
+        assert!(!allowed_operation(&[107, 0], false));
+        for operation in [104u8, 109] {
+            let mut pair = vec![operation, 1, 0, 0, 0, b'P'];
+            pair.extend([7u8; 64]);
+            assert!(allowed_operation(&pair, false));
+            pair.pop();
+            assert!(!allowed_operation(&pair, false));
+            assert!(!allowed_operation(&[operation, 0, 0, 0, 0], false));
+        }
+        assert!(allowed_operation(&[112], false));
+        assert!(!allowed_operation(&[112, 0], false));
+        let oversized = [vec![108u8], vec![1; HOST_MAX_FRAME]].concat();
+        assert!(!allowed_operation(&oversized, false));
+        // The operator socket admits none of them: the pay rail is signed, not custodial.
+        for operation in 103u8..=112 {
+            assert!(!allowed_operator_operation(&[operation, 1]));
+        }
+    }
+
 }

@@ -1,0 +1,12 @@
+{
+  "notAfter": "1000000",
+  "owner": {
+    "publicKey": "7a1cfd5b1013ac4c050877e16b36c13d3e8b6cec73ace9e1f3f03c52fe437ed1",
+    "subject": "21"
+  },
+  "perCall": "64",
+  "perDay": "10",
+  "provider": "openrouter",
+  "runner": "9",
+  "type": "mini-key-grant-v1"
+}

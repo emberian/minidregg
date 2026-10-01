@@ -7,7 +7,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,6 +36,9 @@ mod meter;
 #[cfg(unix)]
 mod clock;
 mod participant_enrollment;
+mod pay_refill;
+#[cfg(unix)]
+mod pay;
 #[cfg(unix)]
 mod participant_namespace;
 #[cfg(unix)]
@@ -57,6 +60,8 @@ mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
 #[cfg(unix)]
+mod keys;
+#[cfg(unix)]
 mod shell;
 #[cfg(unix)]
 mod transport;
@@ -71,6 +76,13 @@ static SOCKET: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(unix)]
 static EXPECTED_HOST_SHA: OnceLock<String> = OnceLock::new();
 static QUIET_WORKER: AtomicBool = AtomicBool::new(false);
+/// The exit status a verb chose besides success (1): 3 = the Host refused, 4 = the Host did
+/// not decide (M4's shell contract). The highest one set wins.
+static EXIT_STATUS: AtomicU8 = AtomicU8::new(0);
+
+fn set_exit(code: u8) {
+    EXIT_STATUS.fetch_max(code, Ordering::Relaxed);
+}
 
 /// The Host's own verdict on the latest request, retained as data at the point
 /// where the Host answered, so a caller (`mini shell`) can tell a Host decision
@@ -258,8 +270,17 @@ const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-hos
 usage:
   mini keygen --secret KEY --public PUBLIC [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
   mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini pay address|status --dir WORKSPACE [--account REF]
+  mini pay book --dir OPERATOR-WORKSPACE --source {"control","book":[ADDRESS...],"tariff":{...}|null}.json
+  mini pay watch-config --dir OBSERVER-WORKSPACE --out CONFIG.json [--min-endpoints N] [--max-pages N] [--page-size N] [--enrol-index I --journal-floor F]
+  mini pay observe --dir OBSERVER-WORKSPACE --capability CAP (--from OBSERVATIONS.json|- [--hold true] | --resume ATTEMPT)
+  mini pay heartbeat --dir OBSERVER-WORKSPACE --capability CAP --slot SLOT --block-time TIME
+  mini pay audit --dir OBSERVER-WORKSPACE [--offline true]
+  mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
+  mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
+  mini key --action set|grant|revoke|ls (--dir WORKSPACE | --pool true) [--provider NAME] [--secret FILE|-] [--runner SUBJECT --per-call TOKENS --per-day CALLS --until HEIGHT] [--providers TABLE] [--credentials ROOT --credentials-key KEY]
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
   mini fleet --action join --sponsor-workspace WORKSPACE --factory-ref NAME --name LABEL --new-key KEY --enroll-dir ATTEMPT --dir NEW-WORKSPACE --fund AMOUNT [--account-name NAME]
   mini fleet --action send|publish --dir WORKSPACE --account NAME --topic TOPIC (--payload TEXT|--payload-hex HEX) [--to ACCOUNT --amount N [--asset ID]]
@@ -372,6 +393,13 @@ impl Args {
             return Err(USAGE.to_owned());
         }
         let mut values = Vec::new();
+        let mut raw = raw.peekable();
+        // `mini pay ACTION ...` (PAY.md §5 spells the verbs this way) is `mini pay --action ACTION ...`.
+        if command == OsStr::new("pay") {
+            if let Some(action) = raw.next_if(|next| !next.to_string_lossy().starts_with("--")) {
+                values.push((OsString::from("--action"), action));
+            }
+        }
         while let Some(flag) = raw.next() {
             let rendered = flag.to_string_lossy();
             if !rendered.starts_with("--") || rendered.len() == 2 {
@@ -886,6 +914,13 @@ fn bootstrap(host: &Path, config: &Path, source: &Path, directory: &Path) -> Res
     host_files(host, &pinned, &[Path::new("bootstrap"), &genesis_bin])?;
     let description = process(host, &pinned, &[OsStr::new("describe")])?;
     write_new(&directory.join("description.json"), &description.stdout)?;
+    // The pay ledger at genesis: the issuer well before any payment, which `mini pay audit`
+    // needs for `-well_now = -well_genesis + credited` (`well_tracks_observed`).
+    host_files(
+        host,
+        &pinned,
+        &[Path::new("pay-ledger"), &directory.join("pay-ledger-genesis.json")],
+    )?;
     println!("{}", pinned.display());
     Ok(())
 }
@@ -2156,8 +2191,11 @@ fn run(mut args: Args) -> Result<()> {
         "clock" => clock::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
+        #[cfg(unix)]
+        "key" => keys::run(args),
         "fleet" => fleet::run(args),
         "well" => well::run(args),
+        "pay" => pay::run(args),
         #[cfg(unix)]
         "selected-exchange" => {
             let phase = args.required("phase")?;
@@ -3144,7 +3182,7 @@ fn run(mut args: Args) -> Result<()> {
 
 fn main() -> ExitCode {
     match Args::parse().and_then(run) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => ExitCode::from(EXIT_STATUS.load(Ordering::Relaxed)),
         Err(error) if error == USAGE => {
             print!("{error}");
             ExitCode::SUCCESS
@@ -3156,7 +3194,7 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("mini: {error}");
-                ExitCode::FAILURE
+                ExitCode::from(EXIT_STATUS.load(Ordering::Relaxed).max(1))
             }
         },
     }

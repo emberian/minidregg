@@ -44,6 +44,9 @@ import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
 import Kernel.RealmWellReceiver
 import Kernel.ClockTickReceiver
+import Kernel.PayObservationReceiver
+import Kernel.PayEnrolReceiver
+import Kernel.PurseRefillReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -742,6 +745,18 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : ClockTickReceiver.AcceptedTick config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ClockTickReceiver.intent accepted)
+  | payObservation {ingress : PayObservationReceiver.DecodedIngress}
+      (accepted : PayObservationReceiver.AcceptedObservation config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (PayObservationReceiver.intent accepted)
+  | payEnrol {ingress : PayEnrolReceiver.DecodedIngress}
+      (accepted : PayEnrolReceiver.AcceptedEnrol config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩ opened.durable ingress) :
+      NativeAdmission config opened (PayEnrolReceiver.intent accepted)
+  | payRefill {ingress : PurseRefillReceiver.DecodedIngress}
+      (accepted : PurseRefillReceiver.AcceptedRefill config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (PurseRefillReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1569,6 +1584,27 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ClockTickReceiver.intent accepted,
           .clockTick accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PayObservationReceiver.decodeIngress bytes then
+    match ← PayObservationReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"pay observation refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨PayObservationReceiver.intent accepted,
+          .payObservation accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PayEnrolReceiver.decodeIngress bytes then
+    match ← PayEnrolReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height, config.tariff⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"pay enrolment refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨PayEnrolReceiver.intent accepted,
+          .payEnrol accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := PurseRefillReceiver.decodeIngress bytes then
+    match ← PurseRefillReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"pay refill refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨PurseRefillReceiver.intent accepted,
+          .payRefill accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

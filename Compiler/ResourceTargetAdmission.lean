@@ -22,13 +22,16 @@ abbrev Registry := CanonicalCellRegistry.registry
 which registry kinds are observable as a resource, and as which kind. The
 match is exhaustive on purpose: a new registry kind does not build until it is
 placed here. A `_ => none` wildcard once made K-STREAM's new kind silently
-unobservable (every read refused, the build green). -/
+unobservable (every read refused, the build green). The pay cell is a program
+resource so that its control grants (`NativeHostGenesis.payControlCapability`)
+can be exercised by the ordinary delegation and revocation receivers; its
+contents are written only by the pay receivers. -/
 def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
   | .content | .declaredObject | .stream => some .object
   | .accountMetadata => some .account
-  | .declaredProgram => some .program
+  | .declaredProgram | .pay => some .program
   -- A Nock program cell is read through ops 131-133 (public), not observed.
-  | .eventHistory | .authority | .resourceBook | .policySource | .pay | .nockProgram | .clock => none
+  | .eventHistory | .authority | .resourceBook | .policySource | .nockProgram | .clock => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (kind : ResourceKind) (target : Nat) (expectedRoot : Digest) where

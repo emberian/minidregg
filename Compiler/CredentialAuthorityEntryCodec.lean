@@ -83,6 +83,7 @@ def verbTag : {kind : ResourceKind} → Verb kind → Nat
   | _, .appendObject => 7
   | _, .mintAsset => 8
   | _, .burnAsset => 9
+  | _, .observePayment => 6
 
 def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .object, 1 => .observeObject
@@ -98,6 +99,7 @@ def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .program, 2 => .installProgram
   | .program, 4 => .installPolicy
   | .program, 5 => .revokeCapability
+  | .program, 6 => .observePayment
   | .program, _ => .delegateProgram
 
 theorem verbOfTag_tag {kind : ResourceKind} (verb : Verb kind) :

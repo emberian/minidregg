@@ -40,11 +40,39 @@ files. Passing this check establishes a library verification result, not
 authorization, revocation freshness, replay prevention, or a Lean proof of
 Ed25519. Those obligations stay with the credential/authority receiving path.
 
+## `verify-sshsig` (PAY §11.3 self-enrollment)
+
+```text
+minidregg-credential-signature-verifier verify-sshsig <public-key-file> <namespace-file> <message-file> <signature-file>
+```
+
+An OpenSSH SSHSIG signature (PROTOCOL.sshsig) by an `ssh-ed25519` key: the
+public key is the raw 32 bytes inside the key blob, the signature is the raw 64
+bytes inside the armoured signature's `string "ssh-ed25519" || string sig`, the
+namespace is non-empty. The binary computes `SHA-512(message)` (the pinned
+`sha2 = 0.10.9` that ed25519-dalek already links) and verifies strictly over
+
+```text
+"SSHSIG" || string namespace || string "" || string "sha512" || string SHA-512(message)
+```
+
+This is the boundary's one hash: Lean has no SHA-512. Every other byte is fixed
+in Lean (`Kernel.PayEnrolMemo.sshsigSignedData`; `sshsig_signed_data_fixture`
+and `tests/sshsig.rs` assert the same bytes). Responses, exit codes and the
+caller's acceptance rule are exactly those of `verify`; an empty namespace or a
+wrong key/signature length is an input error (exit 1).
+
+`tests/sshsig.rs` holds a real vector: `ssh-keygen -t ed25519` and
+`ssh-keygen -Y sign -n dregg-enrol@v1` on persvati over
+`mint || enrolAddress || miniKey`, checked by `ssh-keygen -Y check-novalidate`.
+Only public material is committed; the private key was deleted.
+
 For a bounded build and actual CLI checks, from this directory:
 
 ```sh
 CARGO_BUILD_JOBS=2 cargo build --locked --release --bin minidregg-credential-signature-verifier --example sign-probe
 CARGO_BUILD_JOBS=2 cargo nextest run --locked --release --test protocol -E 'test(protocol_)' --test-threads 2
+CARGO_BUILD_JOBS=2 cargo nextest run --locked --release --test sshsig -E 'test(sshsig_)' --test-threads 2
 ```
 
 The CLI checks include [RFC 8032 section 7.1](https://www.rfc-editor.org/rfc/rfc8032.txt)

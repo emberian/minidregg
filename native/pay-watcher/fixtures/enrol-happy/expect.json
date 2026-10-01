@@ -1,0 +1,14 @@
+{
+  "description": "enrolment payments: a top-level v2 memo, an inner-instruction (CPI) memo, a legacy Memo1 memo, a payment of exactly the journal floor, and alice's memo twice (two observations); plus an ordinary payment to book row 1 whose memo is never read",
+  "exit": 0,
+  "memos": [
+    "memo",
+    "memo",
+    "memo",
+    "memo",
+    "memo",
+    "none"
+  ],
+  "observations": 6,
+  "reasons": []
+}

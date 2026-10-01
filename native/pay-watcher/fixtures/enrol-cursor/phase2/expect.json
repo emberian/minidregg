@@ -1,0 +1,12 @@
+{
+  "cursorAfter": {
+    "3889be3af42884f9d8960e97e53168f5bbc15110fe81b1e21ac905f80f74aa03": "94d1c9ea2c33ea9d63e3bfae403a01959a7ed119d9e42f74c500bef7143e8b78eb6c08bae0c0799869cce205a26d72bc7f78bbddc2bdb4659c7562d07b5675a5"
+  },
+  "description": "the cursor from phase 1: only the enrollment is listed and fetched",
+  "exit": 0,
+  "memos": [
+    "memo"
+  ],
+  "observations": 1,
+  "reasons": []
+}

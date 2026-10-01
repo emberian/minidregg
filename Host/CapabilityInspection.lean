@@ -33,6 +33,7 @@ private def verbName : {kind : ResourceKind} → Verb kind → Json
   | _, .appendObject => "append"
   | _, .mintAsset => "mintAsset"
   | _, .burnAsset => "burnAsset"
+  | _, .observePayment => "observePayment"
 
 /-- K-FIELDS: `fields` (sorted names) only when the scope names some, and
 `maxDelta` only when it sets a bound; absent keys are every field / no bound. -/

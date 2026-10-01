@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # J-PAY-1 (PAY.md §6 row P1): the pay watcher on its fixtures, no network, no keys.
 #
-# For every vector in native/pay-watcher/fixtures/<vector>/ it runs the watcher binary in
+# For every vector in native/pay-watcher/fixtures/<vector>/ (except enrol-*, which are
+# J-PAY-E1's, journey.d/jpay-e1.sh) it runs the watcher binary in
 # fixture mode against the vector's two endpoints and checks the binary's exit code, the
 # observation count, and the SET of event reasons against the vector's expect.json. Then:
 #   happy-64byte  every observation's signature is 128 hex digits (the 64 raw bytes)
@@ -63,6 +64,7 @@ fail_row() { # fail_row NAME WHY
 
 for dir in "$FIX"/*/; do
   v=$(basename "$dir")
+  case $v in enrol-*) continue ;; esac # J-PAY-E1's vectors: journey.d/jpay-e1.sh
   [ -f "$dir/expect.json" ] || continue
   total=$((total + 1))
   out=$D/$v

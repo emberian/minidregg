@@ -98,6 +98,11 @@ inductive Verb : ResourceKind → Type
   debited account and is admitted under that ACCOUNT's law. Distinct from
   `transfer`, so a holder can delegate consumption without delegating payment. -/
   | burnAsset : Verb .account
+  /-- Reporting a finalized external payment to the deployment's pay cell
+  (`Kernel.PayObservationReceiver`).  Distinct from every management verb: an
+  observer can credit observed transfers and advance the chain clock, nothing
+  else. -/
+  | observePayment : Verb .program
   deriving DecidableEq, Repr
 
 /-- The granted verbs that cover a requested verb: the verb itself, and for an

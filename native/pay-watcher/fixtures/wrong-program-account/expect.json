@@ -1,6 +1,7 @@
 {
   "description": "the token account itself is owned by the legacy Tokenkeg program",
   "exit": 3,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "wrongTokenProgram"

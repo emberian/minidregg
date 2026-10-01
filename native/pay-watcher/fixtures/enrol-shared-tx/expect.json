@@ -1,0 +1,10 @@
+{
+  "description": "one transaction pays the enrollment address (index 0) and book row 5: two observations with one signature, the memo on index 0 only",
+  "exit": 0,
+  "memos": [
+    "memo",
+    "none"
+  ],
+  "observations": 2,
+  "reasons": []
+}

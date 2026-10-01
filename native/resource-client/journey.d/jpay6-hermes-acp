@@ -1,0 +1,62 @@
+#!/usr/bin/python3
+# J-PAY-6 stand-in for the upstream `hermes-acp` worker (no Hermes checkout on
+# hbox, as on persvati for M5). It runs as /agent/hermes-acp inside the real
+# bwrap launcher under the real grain-runtime controller, speaks the ACP
+# JSON-RPC the controller drives (initialize, session/new|load,
+# session/prompt), and for each prompt makes exactly ONE OpenAI chat-completions
+# request through the controller's provider gateway, using the generated
+# profile's base_url and one-prompt api_key. It is not inference and holds no
+# provider key; the gateway, the signed reserve/settle and the metering quote
+# are the controller's.
+import http.client, json, sys, time, urllib.parse
+
+def send(message):
+    sys.stdout.write(json.dumps(message) + "\n"); sys.stdout.flush()
+
+def note(line):
+    with open("/workspace/standin.log", "a") as log:
+        log.write(line + "\n")
+
+def profile():
+    base = key = model = None
+    for line in open("/workspace/.hermes/config.yaml"):
+        line = line.strip()
+        if line.startswith("base_url:"): base = line.split(":", 1)[1].strip()
+        elif line.startswith("api_key:"): key = line.split(":", 1)[1].strip()
+        elif line.startswith("default:"): model = line.split(":", 1)[1].strip()
+    return base, key, model
+
+def complete(text):
+    base, key, model = profile()
+    url = urllib.parse.urlsplit(base)
+    body = json.dumps({"model": model, "messages": [{"role": "user", "content": text}],
+                       "stream": True, "stream_options": {"include_usage": True},
+                       "tools": [{"type": "function", "function": {
+                           "name": "mcp__mini_grain__mini_read_resource",
+                           "parameters": {"type": "object"}}}]}).encode()
+    connection = http.client.HTTPConnection(url.hostname, url.port, timeout=900)
+    connection.request("POST", url.path.rstrip("/") + "/chat/completions", body=body,
+                       headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+    response = connection.getresponse()
+    data = response.read()
+    note(f"completion status={response.status} bytes={len(data)}")
+    return response.status
+
+for raw in sys.stdin:
+    message = json.loads(raw)
+    method, ident = message.get("method"), message.get("id")
+    if ident is None:
+        continue
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": ident, "result": {"protocolVersion": 1, "agentCapabilities": {}}})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": ident, "result": {"sessionId": "jpay6-standin"}})
+    elif method == "session/load":
+        send({"jsonrpc": "2.0", "id": ident, "result": {}})
+    elif method == "session/prompt":
+        text = "".join(part.get("text", "") for part in message["params"].get("prompt", []))
+        status = complete(text)
+        time.sleep(2)  # let the bridge/gateway record local delivery before the lease is revoked
+        send({"jsonrpc": "2.0", "id": ident, "result": {"stopReason": "end_turn", "status": status}})
+    else:
+        send({"jsonrpc": "2.0", "id": ident, "error": {"code": -32601, "message": "unsupported"}})

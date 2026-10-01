@@ -71,6 +71,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
+    Verb { name: "pay", usage: "pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini pay --action address|status|audit --dir WS [--account REF]" },
+    Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB|guide]", operation: "local; `help guide` prints the friends' guide" },
     Verb { name: "exit", usage: "exit", operation: "local" },
@@ -634,6 +636,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             arity(&w, 0, 0, u)?;
             Plan::Exit
         }
+        "key" => crate::keys::shell_plan(&session.workspace, &session.home, &w)?,
         "history" => {
             arity(&w, 0, 1, u)?;
             match w.get(1).map(String::as_str) {
@@ -715,6 +718,19 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 }
                 _ => return Err(u.to_owned()),
             }
+        }
+        "pay" => {
+            arity(&w, 1, 2, u)?;
+            let mut flags = vec![flag("action", w[1].clone()), flag("dir", ws())];
+            match (w[1].as_str(), w.get(2)) {
+                ("address" | "status", Some(account)) => {
+                    workspace_name(account, "reference name")?;
+                    flags.push(flag("account", account.clone()));
+                }
+                ("address" | "status" | "audit", None) => {}
+                _ => return Err(u.to_owned()),
+            }
+            client("pay", flags)
         }
         "refs" => {
             arity(&w, 0, 0, u)?;
@@ -1339,6 +1355,8 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("submit" | "publish" | "export", 1) => proposals(),
         ("lookup" | "retry", 1) => attempts(),
         ("history", 1) => vec!["all".into()],
+        ("pay", 1) => ["address", "status", "audit"].map(String::from).to_vec(),
+        ("pay", 2) if w[1] != "audit" => refs(),
         ("init", 1) => keys(),
         ("enroll", 1) => ["plan", "seal", "submit", "lookup"].map(String::from).to_vec(),
         ("enroll", 2) if w[1] != "plan" => enrolled(),
@@ -1515,6 +1533,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let config = absolute(args.required("config")?, "config")?;
     let one = args.optional("line");
     args.finish()?;
+    let _ = crate::keys::STDIN_FREE.set(one.is_some());
     if super::SOCKET.get().is_none() {
         return Err("shell requires --socket (the deployment's public socket)".into());
     }
@@ -1584,6 +1603,27 @@ mod tests {
 
     fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
         items.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn pay_verbs_are_one_client_operation_each() {
+        let s = session();
+        assert_eq!(
+            client(plan(&s, "pay address").unwrap()),
+            ("pay".into(), pairs(&[("action", "address"), ("dir", "/w")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay status account").unwrap()),
+            ("pay".into(), pairs(&[("action", "status"), ("dir", "/w"), ("account", "account")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay audit").unwrap()),
+            ("pay".into(), pairs(&[("action", "audit"), ("dir", "/w")]), vec![])
+        );
+        // observe, book and heartbeat belong to the operator and the watcher, not a friend.
+        for line in ["pay observe", "pay book x", "pay audit x", "pay address ../x", "pay"] {
+            assert!(plan(&s, line).is_err(), "{line}");
+        }
     }
 
     #[test]

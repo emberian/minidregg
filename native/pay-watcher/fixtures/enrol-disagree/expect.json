@@ -1,0 +1,9 @@
+{
+  "description": "for enrol-1 endpoint b reports a memo with eve's ssh key; for enrol-2 b reports the mini key in UPPERCASE: both are disagreements and nothing is emitted",
+  "exit": 3,
+  "memos": [],
+  "observations": 0,
+  "reasons": [
+    "endpointsDisagree"
+  ]
+}

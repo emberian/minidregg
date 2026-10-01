@@ -8,6 +8,10 @@ For the opt-in provider metering probe, append `--metered-usage`: streamed
 responses then include one terminal usage chunk (1 prompt token, 2 completion
 tokens) before `[DONE]`. `--metered-missing-usage` leaves usage out, and
 `--metered-http-422` returns a local 422 error on each completion request.
+`--route-probe` answers every completion with a fixed text reply and logs
+`route-probe bytes=N auth=none|sha256:HEX`: the SHA-256 of the exact
+`Authorization` header value it received (`Bearer TOKEN`), never the value, so
+provider-routing evidence can say which credential a request carried.
 These modes exercise the controller's held-allowance behavior; the default
 fixture remains unchanged. The reported counts are synthetic, not an invoice.
 

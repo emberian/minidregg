@@ -1,0 +1,1 @@
+{"choices":[{"finish_reason":"stop","index":0,"message":{"content":"route probe","role":"assistant"}}],"created":1,"id":"chatcmpl-mini-route-2","model":"shared-model","object":"chat.completion","usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}

@@ -53,6 +53,22 @@ structure FactoryController where
   capabilityId : CapabilityId
   deriving DecidableEq, Repr
 
+/-- The enrolled subject that reports finalized payments to the pay cell
+(`PayObservationReceiver`), the identifier of its `observePayment`
+capability, and the identifier of the factory controller's control
+capability on the pay cell (`payControlCapability`), through which the
+observer is replaced at runtime (`observer_replaceable`), and the identifier
+of the observer's self-enrollment capability on the factory
+(`enrolCapability`, `C_enrol` of PAY §11.4), exercised only through
+`PayEnrolReceiver` under the clause `authority/operation/pay-self-enrol` of
+the confined factory law (`factoryLaw`, `observer_control_confined`). -/
+structure PayObserver where
+  subject : SubjectId
+  capabilityId : CapabilityId
+  controlCapabilityId : CapabilityId
+  enrolCapabilityId : CapabilityId
+  deriving DecidableEq, Repr
+
 structure Config where
   deployment : CanonicalCellRegistry.Deployment
   federation : FederationId
@@ -64,6 +80,10 @@ structure Config where
   enrollments : List Enrollment
   factoryController : FactoryController
   meterAllowance : ResourceCost.Charge
+  /-- The payment observer.  When present, genesis installs the pay cell's law
+  (`payPredicate`) and the observer's capability on the pay cell; when absent,
+  no report is admissible (the pay law is not installed). -/
+  payObserver : Option PayObserver := none
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -111,14 +131,33 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
-    config.factoryController.capabilityId.value],
+    config.factoryController.capabilityId.value] ++
+    (match config.payObserver with
+     | none => []
+     | some observer => [observer.subject.value, observer.capabilityId.value,
+         observer.controlCapabilityId.value, observer.enrolCapabilityId.value]),
    PolicyRecordCodec.encodePred config.factoryPredicate,
    config.enrollments, config.meterAllowance)
 
 def Config.ofWire (wire : ConfigWire) : Option Config := do
-  let [domain, factory, book, authority, federation, base, perBirth, perGrant,
+  let (coordinates, payObserver) ← match wire.1 with
+    | [domain, factory, book, authority, federation, base, perBirth, perGrant,
+        perByte, collector, asset, semantics, issuerEpoch, height, controller,
+        controlCapability] =>
+        some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
+          perByte, collector, asset, semantics, issuerEpoch, height, controller,
+          controlCapability), none)
+    | [domain, factory, book, authority, federation, base, perBirth, perGrant,
+        perByte, collector, asset, semantics, issuerEpoch, height, controller,
+        controlCapability, observer, observerCapability, payControl, enrolCapability] =>
+        some ((domain, factory, book, authority, federation, base, perBirth, perGrant,
+          perByte, collector, asset, semantics, issuerEpoch, height, controller,
+          controlCapability),
+          some (⟨⟨observer⟩, ⟨observerCapability⟩, ⟨payControl⟩, ⟨enrolCapability⟩⟩ : PayObserver))
+    | _ => none
+  let (domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability] := wire.1 | none
+      controlCapability) := coordinates
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -130,12 +169,13 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       factoryPredicate := predicate
       enrollments := wire.2.2.1
       factoryController := ⟨⟨controller⟩, ⟨controlCapability⟩⟩
-      meterAllowance := wire.2.2.2 }
+      meterAllowance := wire.2.2.2
+      payObserver := payObserver }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
-  cases config
-  simp [Config.ofWire, Config.toWire]
+  rcases config with ⟨_, _, _, _, _, _, _, _, _, _, observer⟩
+  cases observer <;> simp [Config.ofWire, Config.toWire]
 
 /-- Version 2: the fourth deployment coordinate is the one authority cell's
 identifier (it was the retired catalogue's). -/
@@ -197,8 +237,13 @@ def Config.Valid {F : Type} [Field F]
   (config.factoryController.capabilityId ::
     config.enrollments.flatMap (fun enrollment =>
       [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
-       enrollment.factoryObserveCapabilityId])).Nodup ∧
+       enrollment.factoryObserveCapabilityId]) ++
+    (config.payObserver.map (·.capabilityId)).toList ++
+    (config.payObserver.map (·.controlCapabilityId)).toList ++
+    (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup ∧
   config.factoryController.subject.value ∈ config.enrollments.map (·.key.subject) ∧
+  (∀ observer ∈ config.payObserver,
+    observer.subject.value ∈ config.enrollments.map (·.key.subject)) ∧
   profile.template.lifetime > 0 ∧
   (∀ enrollment ∈ config.enrollments,
     enrollment.key.algorithm = CredentialSignatureAdmission.ed25519Algorithm ∧
@@ -265,9 +310,30 @@ def policy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (identifier : Nat) (predicate : Minidregg.Pred.Pred) : PolicyRecord :=
   ⟨⟨identifier⟩, 0, config.deployment.domain, profile.semantics, none, predicate⟩
 
+/-- The law slot that only `PayEnrolReceiver` projects (as `1`). -/
+def selfEnrolSlot : String := "authority/operation/pay-self-enrol"
+
+/-- The factory law with the payment observer confined (PAY §11.4): the
+observer is admitted only on a self-enrollment request (the receiver projects
+`selfEnrolSlot = 1`), and every clause of the deployment's own factory law is
+reached only by a request that is neither the observer's nor a
+self-enrollment.  `observer_control_confined`, `self_enrol_only_observer`. -/
+def confinedFactoryLaw (observer : SubjectId) (base : Minidregg.Pred.Pred) : Minidregg.Pred.Pred :=
+  .any [
+    .all [.eq "request/subject" (Int.ofNat observer.value), .eq selfEnrolSlot 1],
+    .all [.not (.eq "request/subject" (Int.ofNat observer.value)), .not (.eq selfEnrolSlot 1),
+      base]]
+
+/-- The factory law genesis installs: the configured one, confined when a
+payment observer is present. -/
+def factoryLaw (config : Config) : Minidregg.Pred.Pred :=
+  match config.payObserver with
+  | none => config.factoryPredicate
+  | some observer => confinedFactoryLaw observer.subject config.factoryPredicate
+
 def factoryPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) : PolicyRecord :=
-  policy profile config config.deployment.factoryId config.factoryPredicate
+  policy profile config config.deployment.factoryId (factoryLaw config)
 
 def accountPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (enrollment : Enrollment) : PolicyRecord :=
@@ -315,9 +381,67 @@ def factoryObserveCapability {F : Type} [Field F]
   rootCapability profile config .object enrollment.factoryObserveCapabilityId
     ⟨enrollment.key.subject⟩ config.deployment.factoryId {.observeObject}
 
+/-- The verb tags the pay cell's controller may exercise: `observeProgram`
+(1, to read the cell's root, which every management plan pins),
+`delegateProgram` (3, to grant a new observer), `installPolicy` (4, to name
+it in the law) and `revokeCapability` (5, to retire the old one). -/
+def payControlVerbTags : List Int :=
+  [Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.observeProgram : Verb .program)),
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.delegateProgram : Verb .program)),
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.installPolicy : Verb .program)),
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.revokeCapability : Verb .program))]
+
+/-- The pay cell's law: the configured observer may only `observePayment`;
+the factory controller may only manage (delegate, install the law, revoke).
+Neither can do the other's part. -/
+def payPredicate (controller : SubjectId) (observer : PayObserver) : Minidregg.Pred.Pred :=
+  .any [
+    .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
+        (Verb.observePayment : Verb .program))),
+      .eq "request/subject" (Int.ofNat observer.subject.value)],
+    .all [.eq "request/subject" (Int.ofNat controller.value),
+      .memberOf "request/verb" payControlVerbTags]]
+
+def payPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) (observer : PayObserver) : PolicyRecord :=
+  policy profile config (Kernel.PayCell.physicalId config.deployment.domain)
+    (payPredicate config.factoryController.subject observer)
+
+/-- The observer's capability: target and policy the pay cell, verb
+`observePayment` only. -/
+def observerCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    Capability .program :=
+  rootCapability profile config .program observer.capabilityId observer.subject
+    (Kernel.PayCell.physicalId config.deployment.domain) {.observePayment}
+
+/-- The factory controller's control of the pay cell (approved by ember
+2026-09-30 20:45): `installPolicy` and `revokeCapability`, plus
+`delegateProgram` and `observePayment`, because the only runtime path that
+grants a capability is delegation and a delegated child carries no verb its
+parent lacks, and `observeProgram`, because every management plan reads the
+target's root under an observation grant.  The pay law (`payPredicate`)
+refuses the controller's own reports. -/
+def payControlCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    Capability .program :=
+  rootCapability profile config .program observer.controlCapabilityId
+    config.factoryController.subject (Kernel.PayCell.physicalId config.deployment.domain)
+    {.observeProgram, .installPolicy, .revokeCapability, .delegateProgram, .observePayment}
+
+/-- `C_enrol` (PAY §11.4): the observer's capability on the factory, verb
+`installPolicy` only.  The scope alone would be the whole factory control;
+the confined factory law (`factoryLaw`) narrows it to self-enrollment. -/
+def enrolCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    Capability .program :=
+  rootCapability profile config .program observer.enrolCapabilityId observer.subject
+    config.deployment.factoryId {.installPolicy}
+
 def policies {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) : List PolicyRecord :=
-  factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config)
+  factoryPolicy profile config :: config.enrollments.map (accountPolicy profile config) ++
+    (config.payObserver.map (payPolicy profile config)).toList
 
 def policyEntries (record : PolicyRecord) : List (Minidregg.Theory.Store.Entry CredentialAuthorityState.layout) :=
   [⟨⟨.policyEpoch, record.policyId⟩, (0 : TypedAuthorization.Epoch)⟩,
@@ -354,7 +478,13 @@ def entries {F : Type} [Field F]
     keyEntries enrollment.key ++
     capabilityEntries (accountCapability profile config enrollment) ++
     capabilityEntries (accountControlCapability profile config enrollment) ++
-    capabilityEntries (factoryObserveCapability profile config enrollment))
+    capabilityEntries (factoryObserveCapability profile config enrollment)) ++
+  config.payObserver.toList.flatMap (fun observer =>
+    capabilityEntries (observerCapability profile config observer)) ++
+  config.payObserver.toList.flatMap (fun observer =>
+    capabilityEntries (payControlCapability profile config observer)) ++
+  config.payObserver.toList.flatMap (fun observer =>
+    capabilityEntries (enrolCapability profile config observer))
 
 /-- The genesis authority store. -/
 def authorityStore {F : Type} [Field F]
@@ -379,12 +509,16 @@ def pins {F : Type} [Field F]
   tariff := config.tariff
 
 /-- A declared cell holding field 1 of its own object, at zero. -/
-def declaredCell (_config : Config) (identifier : Nat) (account : Bool) :
+def declaredPacked (identifier : Nat) (account : Bool) :
     PackedCell CanonicalCellRegistry.registry :=
   let payload := materialize DeclaredEffectCell.materializer
     (StoreCodec.fromEntries
       [⟨(EffectDeclaration.StateKey.objectField ⟨identifier⟩ ⟨1⟩).address, (0 : Int)⟩])
   if account then ⟨.accountMetadata, payload⟩ else ⟨.declaredObject, payload⟩
+
+def declaredCell (_config : Config) (identifier : Nat) (account : Bool) :
+    PackedCell CanonicalCellRegistry.registry :=
+  declaredPacked identifier account
 
 /-- The genesis pay cell: the invalid placeholder tariff, an empty deposit
 book and no assignment (`PayCell.genesisStore`). -/
@@ -545,5 +679,178 @@ def buildBytes {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F
 #guard_msgs (whitespace := lax) in #print axioms genesis_revision
 /-- info: 'Minidregg.Kernel.NativeHostGenesis.v1_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v1_config_refused
+
+/-! ## The pay cell's control (PAY §11.4, observer replacement) -/
+
+/-- **The pay law, exactly**: on any request naming a subject and a verb, it
+admits the observer's `observePayment` (6) and the controller's
+`observeProgram`/`delegateProgram`/`installPolicy`/`revokeCapability`
+(1/3/4/5), and nothing else. -/
+theorem payLaw_eval (controller : SubjectId) (observer : PayObserver)
+    (old new : Minidregg.Pred.State) (subject verb : Nat)
+    (named : new.get "request/subject" = some (Int.ofNat subject))
+    (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
+    Minidregg.Pred.eval (payPredicate controller observer) old new = true ↔
+      (verb = 6 ∧ subject = observer.subject.value) ∨
+        (subject = controller.value ∧ (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)) := by
+  simp only [Minidregg.Pred.eval, payPredicate, Minidregg.Pred.evalWith_any,
+    Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
+    Minidregg.Pred.evalWith, named, verbed, payControlVerbTags,
+    CredentialAuthorityEntryCodec.verbTag, Bool.and_true, Bool.or_false, Bool.or_eq_true,
+    Bool.and_eq_true, decide_eq_true_eq, Option.some.injEq, List.contains_cons,
+    List.contains_nil, beq_iff_eq]
+  simp only [Int.ofNat.injEq]
+
+/-- **The observer is replaceable at runtime** (ember, 2026-09-30 20:45): every
+genesis with an observer also holds the factory controller's control
+capability on the pay cell (delegate, install the law, revoke), and the pay
+law admits exactly the controller's management and the observer's reports.
+The runtime sequence (revoke the old grant; enroll, delegate to and name the
+new observer) is the J-PAY-E2 probe's. -/
+theorem observer_replaceable {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) (observer : PayObserver) (present : config.payObserver = some observer) :
+    capabilityEntry (payControlCapability profile config observer) ∈ entries profile config ∧
+      (payControlCapability profile config observer).holder =
+        .subject config.factoryController.subject ∧
+      (payControlCapability profile config observer).scope.targets =
+        .explicit {⟨Kernel.PayCell.physicalId config.deployment.domain⟩} ∧
+      Verb.installPolicy ∈ (payControlCapability profile config observer).scope.verbs ∧
+      Verb.revokeCapability ∈ (payControlCapability profile config observer).scope.verbs ∧
+      Verb.delegateProgram ∈ (payControlCapability profile config observer).scope.verbs ∧
+      (∀ old new subject verb,
+        new.get "request/subject" = some (Int.ofNat subject) →
+        new.get "request/verb" = some (Int.ofNat verb) →
+        (Minidregg.Pred.eval (payPredicate config.factoryController.subject observer) old new = true ↔
+          (verb = 6 ∧ subject = observer.subject.value) ∨
+            (subject = config.factoryController.subject.value ∧
+              (verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)))) := by
+  refine ⟨?_, rfl, rfl, by simp [payControlCapability, rootCapability],
+    by simp [payControlCapability, rootCapability], by simp [payControlCapability, rootCapability],
+    fun old new subject verb named verbed => payLaw_eval _ _ old new subject verb named verbed⟩
+  simp [entries, present, capabilityEntries]
+
+/-- Refuting pole: the controller's own report is refused by the law when it
+is not the observer. -/
+theorem controller_cannot_report (controller : SubjectId) (observer : PayObserver)
+    (other : controller.value ≠ observer.subject.value) (old new : Minidregg.Pred.State)
+    (named : new.get "request/subject" = some (Int.ofNat controller.value))
+    (verbed : new.get "request/verb" = some (Int.ofNat 6)) :
+    Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
+  have := (payLaw_eval controller observer old new controller.value 6 named verbed).not
+  simp only [Bool.not_eq_true] at this
+  exact this.mpr (by omega)
+
+/-- Refuting pole: the observer cannot install the pay law or revoke. -/
+theorem observer_cannot_manage (controller : SubjectId) (observer : PayObserver)
+    (other : controller.value ≠ observer.subject.value) (old new : Minidregg.Pred.State)
+    (verb : Nat) (management : verb = 1 ∨ verb = 3 ∨ verb = 4 ∨ verb = 5)
+    (named : new.get "request/subject" = some (Int.ofNat observer.subject.value))
+    (verbed : new.get "request/verb" = some (Int.ofNat verb)) :
+    Minidregg.Pred.eval (payPredicate controller observer) old new = false := by
+  have := (payLaw_eval controller observer old new observer.subject.value verb named verbed).not
+  simp only [Bool.not_eq_true] at this
+  exact this.mpr (by omega)
+
+/-! ## The confined factory law (PAY §11.4, P3b-2) -/
+
+/-- **`observer_control_confined`**: under the confined factory law, every
+admitted request whose subject is the observer is a self-enrollment
+(`selfEnrolSlot = 1`).  The observer can do nothing else on the factory: no
+key enrollment, no birth, no provisioning, no policy install. -/
+theorem observer_control_confined (observer : SubjectId) (base : Minidregg.Pred.Pred)
+    (old new : Minidregg.Pred.State)
+    (admitted : Minidregg.Pred.eval (confinedFactoryLaw observer base) old new = true)
+    (byObserver : new.get "request/subject" = some (Int.ofNat observer.value)) :
+    new.get selfEnrolSlot = some 1 := by
+  simp only [Minidregg.Pred.eval, confinedFactoryLaw, Minidregg.Pred.evalWith_any,
+    Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
+    Minidregg.Pred.evalWith, byObserver] at admitted
+  by_cases slot : new.get selfEnrolSlot = some 1
+  · exact slot
+  · simp [slot] at admitted
+
+/-- **`self_enrol_only_observer`**: a self-enrollment request is admitted only
+when its subject is the observer, whatever the deployment's own law says. -/
+theorem self_enrol_only_observer (observer : SubjectId) (base : Minidregg.Pred.Pred)
+    (old new : Minidregg.Pred.State)
+    (admitted : Minidregg.Pred.eval (confinedFactoryLaw observer base) old new = true)
+    (selfEnrol : new.get selfEnrolSlot = some 1) :
+    new.get "request/subject" = some (Int.ofNat observer.value) := by
+  simp only [Minidregg.Pred.eval, confinedFactoryLaw, Minidregg.Pred.evalWith_any,
+    Minidregg.Pred.evalWith_all, List.any_cons, List.all_cons, List.any_nil, List.all_nil,
+    Minidregg.Pred.evalWith, selfEnrol] at admitted
+  by_cases subject : new.get "request/subject" = some (Int.ofNat observer.value)
+  · exact subject
+  · simp at admitted
+    exact admitted
+
+/-- Every request of anyone but the observer that is not a self-enrollment
+meets exactly the deployment's own law. -/
+theorem confined_law_others (observer : SubjectId) (base : Minidregg.Pred.Pred)
+    (old new : Minidregg.Pred.State) (subject : Nat) (other : subject ≠ observer.value)
+    (named : new.get "request/subject" = some (Int.ofNat subject))
+    (ordinary : new.get selfEnrolSlot = none) :
+    Minidregg.Pred.eval (confinedFactoryLaw observer base) old new =
+      Minidregg.Pred.eval base old new := by
+  have distinct : ¬ (some (Int.ofNat subject) = some (Int.ofNat observer.value)) := by
+    intro same
+    exact other (Int.ofNat.inj (Option.some.inj same))
+  simp [Minidregg.Pred.eval, confinedFactoryLaw, Minidregg.Pred.evalWith, named, ordinary]
+  exact fun _ => other
+
+/-- Request states for the poles (observer 30, controller 7, the journeys'
+permit-all base law). -/
+def observerState (slots : List (String × Int)) : Minidregg.Pred.State :=
+  ⟨("request/subject", 30) :: slots⟩
+
+def controllerState (slots : List (String × Int)) : Minidregg.Pred.State :=
+  ⟨("request/subject", 7) :: slots⟩
+
+theorem observer_self_enrol_admitted :
+    Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
+      (observerState [(selfEnrolSlot, 1)]) = true := by decide +kernel
+
+theorem observer_enroll_key_refused :
+    Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
+      (observerState [("authority/operation/enroll-key", 1)]) = false := by decide +kernel
+
+theorem observer_install_refused :
+    Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
+      (observerState [("request/verb", 4)]) = false := by decide +kernel
+
+theorem controller_enroll_key_admitted :
+    Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
+      (controllerState [("authority/operation/enroll-key", 1)]) = true := by decide +kernel
+
+theorem controller_self_enrol_refused :
+    Minidregg.Pred.eval (confinedFactoryLaw ⟨30⟩ (.all [])) ⟨[]⟩
+      (controllerState [(selfEnrolSlot, 1)]) = false := by decide +kernel
+
+/-- Genesis installs the confined law whenever an observer is configured, and
+holds the observer's `C_enrol`: the factory as target, verb `installPolicy` only. -/
+theorem genesis_confines_observer {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) (observer : PayObserver) (present : config.payObserver = some observer) :
+    (factoryPolicy profile config).predicate =
+        confinedFactoryLaw observer.subject config.factoryPredicate ∧
+      capabilityEntry (enrolCapability profile config observer) ∈ entries profile config ∧
+      (enrolCapability profile config observer).holder = .subject observer.subject ∧
+      (enrolCapability profile config observer).scope.targets = .explicit {⟨config.deployment.factoryId⟩} ∧
+      (enrolCapability profile config observer).scope.verbs = {.installPolicy} := by
+  refine ⟨by simp [factoryPolicy, policy, factoryLaw, present], ?_, rfl, rfl, rfl⟩
+  simp [entries, present, capabilityEntries]
+
+#assert_axioms observer_control_confined
+#assert_axioms self_enrol_only_observer
+#assert_axioms confined_law_others
+#assert_axioms observer_self_enrol_admitted
+#assert_axioms observer_enroll_key_refused
+#assert_axioms observer_install_refused
+#assert_axioms controller_enroll_key_admitted
+#assert_axioms controller_self_enrol_refused
+#assert_axioms genesis_confines_observer
+#assert_axioms payLaw_eval
+#assert_axioms observer_replaceable
+#assert_axioms controller_cannot_report
+#assert_axioms observer_cannot_manage
 
 end Minidregg.Kernel.NativeHostGenesis

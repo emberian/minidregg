@@ -117,7 +117,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -135,6 +135,12 @@ TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, c
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
 TITLE[JN3]="the kernel checks a Nock run by re-executing it (own Store)"
 TITLE[JN5]="a NockApp kernel door refereed by re-execution (own Store)"
+TITLE[JPAY3]="observed payments become Book credit; the observer advances the deployment clock (own Store)"
+TITLE[JPAYE1]="the pay watcher enrollment index on fixtures"
+TITLE[JPAYE2]="self-enrollment decision with real signatures; enrollment view (own Store)"
+TITLE[JPAYE3]="the self-enrollment receiver (own Store)"
+TITLE[JPAY4]="the payment rail through the client with the fixture watcher (own Store)"
+TITLE[JPAY6]="a Book burn funds an AgentGrain purse in one joint turn (own Store; needs GRAIN, TEST_PROVIDER, LAUNCH_GATE, sudo)"
 TITLE[J6]="stop/reopen: receipts recovered, exact retry replays"
 TITLE[G]="growth 10/100/500/1000: write<=5s, reopen<=60s at 1000"
 TITLE[J7]="law replaced; newcomer's existing grant still works"
@@ -755,6 +761,12 @@ step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-gran
 step_JN2() { hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN5() { hook jnock5 "J-NOCK-5: the hoonc counter kernel is born as a door, pokes are refereed by re-execution, a stale state and a non-write effect refused (lane n11; needs NOCK_DOOR_JAM, NOCK_DOOR_FUEL)"; }
+step_JPAY3() { hook jpay3 "J-PAY-3: observed payments credit exactly, a heartbeat advances the clock cell slot, a tip behind the clock and the named refusals, the audit identity (lane p3-pay)"; }
+step_JPAYE1() { hook jpay-e1 "J-PAY-E1: the watcher enrollment-index vectors (lane p1b-enroll)"; }
+step_JPAYE2() { hook jpay-e2 "J-PAY-E2: the self-enrollment decision with real signatures, the enrollment view, the observer replaced (lane p3b1)"; }
+step_JPAYE3() { hook jpay-e3 "J-PAY-E3: the self-enrollment receiver enrols, renews and journals (lane p3b2)"; }
+step_JPAY4() { hook jpay4 "J-PAY-4: the payment rail through mini pay with the fixture watcher (lane p4-pay)"; }
+step_JPAY6() { hook jpay6 "J-PAY-6: a Book burn funds an AgentGrain purse in one joint turn (lane p6-pay; hbox: needs GRAIN, TEST_PROVIDER, LAUNCH_GATE and passwordless sudo)"; }
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
@@ -799,6 +811,12 @@ run_step J12C J0
 run_step J13 J0
 run_step JPAY1 J0
 run_step JPAY2 J0
+run_step JPAY3 J0
+run_step JPAYE1 J0
+run_step JPAYE2 J0
+run_step JPAYE3 J0
+run_step JPAY4 J0
+run_step JPAY6 J0
 
 stop_server || echo "journey: could not stop the service cleanly" >&2
 trap - EXIT

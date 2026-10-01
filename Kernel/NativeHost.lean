@@ -1060,6 +1060,245 @@ def clockViewLoaded (config : Config) (opened : Opened config) : Except String C
     | .absent => .error "factory unavailable"
   pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, factoryRoot, clock.clock⟩
 
+/-- Session operation 112 (PAY P3b): the public enrollment view — the hour of
+the deployment clock and every self-enrolled Mini key with its subject, ssh
+blob, lease and book index.  No key is needed; nothing private is in it. -/
+def payEnrolmentViewLoaded (config : Config) (opened : Opened config) :
+    Except String PayCellDomain.EnrolmentView := do
+  let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
+  let clock ← need "clock cell unavailable" (ClockCellDomain.load config.deployment opened.durable.snapshot)
+  pure (PayCellDomain.enrolmentView clock.clock.now pay.cell.logical)
+
+/-! ## Payment observation (lane P3): session operations 108–111
+
+The observer's report (`DREGG/PAY/OBSERVATION/v2`) has its own
+plan/assembly/submission/lookup quartet; its signed ingress is
+`DREGG/PAY/OBSERVATION/SIGNED/v2`. -/
+
+/-- The signing plan for a report on one opened image.  It discloses no
+decision (`PayObservationReceiver.signingHeader`); a signer key the authority
+cell does not hold is refused. -/
+def payObservationPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PayCellDomain.SigningPlan := do
+  let command ← need "noncanonical pay observation command"
+    (PayObservation.commandCodec.decode commandBytes)
+  let header ← PayObservationReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def payObservationAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "pay observation signature must be 64 bytes"
+  let header ← need "noncanonical pay observation header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (PayObservation.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical pay observation plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PayObservation.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def payObservationSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← PayObservationReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "pay-observation" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a report.  Absence never submits. -/
+def payObservationLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    Outcome :=
+  match PayObservationReceiver.decodeIngress bytes with
+  | none => refused .malformed "pay-observation" "noncanonical signed ingress"
+  | some ingress =>
+      match PayObservationReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-! ## Self-enrollment (lane P3b-2): session operations 117–120
+
+The observer's submission of one enrollment-index transfer
+(`DREGG/PAY/SELF-ENROL/v1`) has its own plan/assembly/submission/lookup
+quartet; its signed ingress is `DREGG/PAY/SELF-ENROL/SIGNED/v1`.  (113–116 are
+P6's.)  The plan runs the native verifier on the memo, because the decision
+the observer signs depends on both possession bits. -/
+
+def payEnrolAmbient (config : Config) (opened : Opened config) : PayEnrolReceiver.Ambient :=
+  ⟨config.federation, logicalHeight config opened.durable, config.tariff⟩
+
+def payEnrolPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    IO (Except String PayCellDomain.SigningPlan) := do
+  let some command := PayEnrolReceiver.commandCodec.decode commandBytes
+    | return .error "noncanonical pay enrolment command"
+  match ← PayEnrolReceiver.signingHeader config.deployment config.profile
+      (payEnrolAmbient config opened) opened.durable config.signature command with
+  | .error detail => return .error detail
+  | .ok header =>
+      return .ok ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+        CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def payEnrolAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "pay enrolment signature must be 64 bytes"
+  let header ← need "noncanonical pay enrolment header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (PayEnrolReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical pay enrolment plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PayEnrolReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def payEnrolSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← PayEnrolReceiver.receiveLoaded config.deployment config.profile
+      (payEnrolAmbient config opened) config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "pay-enrol" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of an enrolment submission.  Absence never
+submits. -/
+def payEnrolLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    Outcome :=
+  match PayEnrolReceiver.decodeIngress bytes with
+  | none => refused .malformed "pay-enrol" "noncanonical signed ingress"
+  | some ingress =>
+      match PayEnrolReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-- One assigned deposit index and the Book balance of its payer in the
+tariff's asset. -/
+structure PayLedgerRow where
+  index : Nat
+  account : Nat
+  balance : Int
+
+/-- The operator's local ledger read (not a socket operation: it names the
+assignment map, which the public view withholds): the pay root, tariff and
+the deployment clock (the clock cell's), the issuer well of the tariff asset, and each assigned payer's balance. -/
+structure PayLedger where
+  payRoot : Digest
+  tariff : Option PayTariff.Tariff
+  clock : Option ClockCell.Clock
+  asset : Nat
+  well : Int
+  /-- The asset's Book total, well included (conserved by every admitted batch). -/
+  total : Int
+  rows : List PayLedgerRow
+
+def payLedgerLoaded (config : Config) (opened : Opened config) : Except String PayLedger := do
+  let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
+  let book ← need "book unavailable"
+    (ResourceBirthController.Concrete.observeCell config.deployment opened.directory.directory
+      config.deployment.resourceBookId .resourceBook)
+  let logical := CanonicalResourceKernel.logicalBook book.payload.logical
+  let store := pay.cell.logical
+  let clock := (ClockCellDomain.load config.deployment opened.durable.snapshot).map (·.clock)
+  let asset := ((PayCell.tariffOf store).map PayTariff.Tariff.asset).getD 0
+  let rows := (List.range (PayCell.nextFree store)).filterMap fun index =>
+    (PayCell.assignmentAt store index).map fun account => ⟨index, account, logical.balance account asset⟩
+  pure ⟨pay.cell.root, PayCell.tariffOf store, clock, asset,
+    logical.balance asset asset, logical.totalAsset asset, rows⟩
+
+def payLedger (config : Config) : IO (Except String PayLedger) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened => return payLedgerLoaded config opened
+
+/-! ## Purse refill (lane P6): session operations 113–116
+
+The account owner's refill (`DREGG/PAY/REFILL/v1`) has its own
+plan/assembly/submission/lookup quartet; its signed ingress is
+`DREGG/PAY/REFILL/SIGNED/v1`.  The plan is P2's shared `SigningPlan`. -/
+
+def payRefillPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PayCellDomain.SigningPlan := do
+  let command ← need "noncanonical pay refill command"
+    (PurseRefillReceiver.commandCodec.decode commandBytes)
+  let header ← PurseRefillReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def payRefillAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "pay refill signature must be 64 bytes"
+  let header ← need "noncanonical pay refill header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (PurseRefillReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical pay refill plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (PurseRefillReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def payRefillSubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← PurseRefillReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "pay-refill" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a refill.  Absence never submits. -/
+def payRefillLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    Outcome :=
+  match PurseRefillReceiver.decodeIngress bytes with
+  | none => refused .malformed "pay-refill" "noncanonical signed ingress"
+  | some ingress =>
+      match PurseRefillReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-- The operator's local read of one AgentGrain purse (not a socket
+operation): its root and its four coordinates. -/
+structure PayPurse where
+  task : Nat
+  root : Digest
+  state : AgentGrain.State
+
+def payPurseLoaded (config : Config) (opened : Opened config) (task : Nat) :
+    Except String PayPurse := do
+  let .present packed := opened.directory.directory.slots task
+    | .error s!"purse {task} absent"
+  let purse ← need s!"purse {task} is not a declared object"
+    (CanonicalCellRegistry.selectDeclared config.deployment task .object packed)
+  let state ← need s!"purse {task} is not an AgentGrain task"
+    (AgentGrain.readState task purse.logical)
+  pure ⟨task, purse.root, state⟩
+
+def payPurse (config : Config) (task : Nat) : IO (Except String PayPurse) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened => return payPurseLoaded config opened task
+
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable

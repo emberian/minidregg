@@ -77,7 +77,8 @@ mapfile -t secrets < <(
   for config in "$config_a" "$config_b"; do
     printf '%s\n' "$config"
     jq -r '[.stateDir,.controlSocket,.custodyKey,.toolTask.custodyKey,
-            .providerTask.custodyKey?,.providerTask.providerKeyFile?,.hostConfig]
+            .providerTask.custodyKey?,.providerTask.credentialsRoot?,
+            .providerTask.credentialsKey?,.hostConfig]
            | map(select(. != null)) | .[]' "$config"
   done
 )
@@ -89,7 +90,7 @@ for secret in "${secrets[@]}"; do
 done
 
 mapfile -t key_paths < <(jq -r '[.custodyKey,.toolTask.custodyKey,
-                             .providerTask.custodyKey?,.providerTask.providerKeyFile?]
+                             .providerTask.custodyKey?]
                             | map(select(. != null)) | .[]' "$config_a" "$config_b")
 for ((i=0; i<${#key_paths[@]}; i++)); do
   for ((j=i+1; j<${#key_paths[@]}; j++)); do
