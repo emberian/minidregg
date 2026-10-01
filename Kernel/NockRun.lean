@@ -34,10 +34,10 @@ which computes `[*[lib P] sample]` and slams it. Library nouns are the cue of
 the library cells' jams, used as they are (a library's own libraries are not
 resolved: `libraryNested`).
 
-## The oracle is the export
+## The oracle is the byte entry point
 
-`oracle fuel s f` runs `Theory.Nock.exec` once. `oracle_is_export` proves the
-byte entry point `@[export minidregg_nock_run_jammed]` (`runJammed`) answers the
+`oracle fuel s f` runs `Theory.Nock.exec` once. `oracle_is_runJammed` proves the
+byte entry point `Theory.Nock.runJammed` (what `nock-eval` runs) answers the
 same status, the same steps and the jam of the same product on `jam [s f]`.
 -/
 import Kernel.NockProgramCell
@@ -176,10 +176,9 @@ def oracle (fuel : Nat) (s f : Noun) : Ran :=
   | .crash r => .crash (fuel - r)
   | .exhausted => .exhausted fuel
 
-/-- **The oracle is the export.** `runJammed` (behind `@[export
-minidregg_nock_run_jammed]`) answers the oracle's status and steps on `jam [s f]`,
+/-- **The oracle is the byte entry point.** `runJammed` answers the oracle's status and steps on `jam [s f]`,
 and its output bytes are the jam of the oracle's product. -/
-theorem oracle_is_export (fuel : Nat) (s f : Noun) :
+theorem oracle_is_runJammed (fuel : Nat) (s f : Noun) :
     Nock.runJammed fuel (Noun.jam (.cell s f)) =
       match oracle fuel s f with
       | .ok v k => .ok k (Noun.jam v)
@@ -503,8 +502,8 @@ theorem pole_outputNotWritten :
 
 end Minidregg.Kernel.NockRun
 
-/-- info: 'Minidregg.Kernel.NockRun.oracle_is_export' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.oracle_is_export
+/-- info: 'Minidregg.Kernel.NockRun.oracle_is_runJammed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.oracle_is_runJammed
 /-- info: 'Minidregg.Kernel.NockRun.oracle_ok_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockRun.oracle_ok_step
 /-- info: 'Minidregg.Kernel.NockRun.checkRun_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/

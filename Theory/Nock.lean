@@ -1019,19 +1019,6 @@ theorem runJammed_crash_sound {fuel : Nat} {input : List UInt8} {k : Nat}
     · cases h
   · cases h
 
-/-- C ABI for the host: `[status] ++ steps (8 bytes, little-endian) ++ jam`, status
-`0` ok · `1` crash · `2` exhausted · `3` malformed input. -/
-@[export minidregg_nock_run_jammed]
-def runJammedBytes (fuel : UInt64) (input : ByteArray) : ByteArray :=
-  let le8 (n : Nat) : List UInt8 := (List.range 8).map fun i => (n >>> (8 * i)).toUInt8
-  let out : List UInt8 :=
-    match runJammed fuel.toNat input.toList with
-    | .ok k bs => 0 :: le8 k ++ bs
-    | .crash k => 1 :: le8 k
-    | .exhausted k => 2 :: le8 k
-    | .malformed => 3 :: le8 0
-  ⟨out.toArray⟩
-
 /-! ## Divergence: exhaustion at every fuel -/
 
 /-- `[2 [0 1] 0 1]` on itself: `*[a 2 [0 1] 0 1] = *[a a]`. -/

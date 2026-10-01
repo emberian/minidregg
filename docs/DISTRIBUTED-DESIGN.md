@@ -139,9 +139,9 @@ checks (`decide (isQuorum voters) && ∀ voter, candidate ∈ book voter`); `che
 is the unfolding lemma; `certificate : check = true → Finalized quorums book candidate`
 CONSTRUCTS the certificate the existing theorems consume, so `checked_logs_comparable` and
 `checked_no_conflict` are inherited through the checker, never re-proved. Fail-closed teeth
-per refusal reason, attributable (the other condition still holds). `@[export
-minidregg_finality_check]` on the closed `Fin 3` instance — the symbol exists (Gate.lean §10
-pattern). Residuals: `[FINALITY-GATE-authenticated]` (the same checker over signed votes,
+per refusal reason, attributable (the other condition still holds). The closed `Fin 3`
+instance is decided in Lean; no Rust caller links a finality symbol (an uncalled
+`@[export minidregg_finality_check]` was deleted 2026-10-01). Residuals: `[FINALITY-GATE-authenticated]` (the same checker over signed votes,
 erasing to this one), `[FINALITY-GATE-liveness]`, `[FINALITY-GATE-rust]` (the unverified
 fallback behind an explicit labeled env var is Rust-side), `[FINALITY-GATE-receipt-seam]`.
 

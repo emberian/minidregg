@@ -31,9 +31,6 @@ nothing is exported.  This module is the decider.
   accepted, the thin cert `{0}`, a tampered book (node 1 silent), and a forged
   same-slot candidate are refused -- each by `decide`, each beside the leg that
   still holds.  The inherited safety theorems FIRE on the closed instance.
-* **The export symbol** `minidregg_finality_check` (`checkExport`) is the
-  monomorphic decision a Rust caller links against -- the Gate §10 pattern:
-  the export path EXISTS; marshalling is the rust lane's.
 
 Decidable equality on `Intent`/`Candidate` is derived here (§1): `Charge` is
 a function on the finite `Lane` alphabet, decided pointwise via `Fintype Lane`.
@@ -263,25 +260,6 @@ theorem closed_checked_no_conflict {other : Candidate Nat Nat Nat Nat}
 /-- Two concrete verdicts feeding the inherited theorem. -/
 example : candidate.log.IsPrefix candidate.log ∨ candidate.log.IsPrefix candidate.log :=
   closed_checked_logs_comparable full_accepted
-
-/-! ## §7. The FFI seam -- `@[export]` (the Gate §10 pattern).
-
-The monomorphic decision is a compiled symbol (`minidregg_finality_check`) a
-Rust caller links against; the wire voter list is deduplicated into the
-`Finset` the decider reads.  Handles, codecs, and the labeled-fallback
-discipline are `[FINALITY-GATE-rust]`. -/
-
-@[export minidregg_finality_check]
-def checkExport (voters : List ReplicaNode) : Bool :=
-  check quorums book candidate ⟨voters.toFinset⟩
-
-theorem checkExport_eq (voters : List ReplicaNode) :
-    checkExport voters = check quorums book candidate ⟨voters.toFinset⟩ := rfl
-
-example : checkExport [0, 1] = true := by decide
-example : checkExport [1, 0, 1] = true := by decide
-example : checkExport [1] = false := by decide
-example : checkExport [] = false := by decide
 
 end ClosedInstance
 
