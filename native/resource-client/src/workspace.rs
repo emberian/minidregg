@@ -38,6 +38,9 @@ mod can;
 /// over bytes this workspace holds or reads with its own signed views.
 #[path = "inspect_views.rs"]
 mod inspect_views;
+/// `law check`, the install-time check and `can --any` (C-SAT-2, Host op 150).
+#[path = "lawsat.rs"]
+mod lawsat;
 
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
@@ -3232,7 +3235,12 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some("true") => true,
                 _ => return Err("--all must be true or false".into()),
             };
+            let any = matches!(args.optional("any").as_deref().and_then(OsStr::to_str), Some("true"));
             args.finish()?;
+            if any {
+                let name = name.as_deref().ok_or("can --any needs a name")?;
+                return lawsat::can_any(&root, &workspace, name);
+            }
             can::can(&root, &workspace, name.as_deref(), all)
         }
         "inspect" => {
@@ -3250,6 +3258,11 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             inspect_views::run(&root, &workspace, &view, name.as_deref(), refusals.as_deref(), json_out)
         }
+        "law-check" => {
+            let predicate = path(args.required("predicate")?);
+            args.finish()?;
+            lawsat::law_check(&root, &workspace, &predicate)
+        }
         "propose" => {
             let request = path(args.required("request")?);
             let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
@@ -3257,7 +3270,15 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 .optional("private")
                 .map(|value| os_string(value, "private room"))
                 .transpose()?;
+            let allow = matches!(
+                args.optional("allow-unsatisfiable").as_deref().and_then(OsStr::to_str),
+                Some("true")
+            );
             args.finish()?;
+            let source = bounded_json(&request)?;
+            if source.get("action").and_then(Value::as_str) == Some("install-policy") {
+                lawsat::install_check(&root, &workspace, &source["predicate"], allow)?;
+            }
             propose(&root, &workspace, &request, &proposal_id, room.as_deref())
         }
         "create" => {

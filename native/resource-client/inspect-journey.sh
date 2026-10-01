@@ -455,7 +455,7 @@ BWS=$RUN/homes/newcomer/workspace
 step U 0 newcomer "invoke u1 board write 1 6 5"
 op U "B prepares and signs u1 without submitting (prepare-only)" \
   "$MINI" workspace --action submit --dir "$BWS" --intent "$BWS/proposals/u1/intent.json" --attempt "$BWS/attempts/u1" --prepare-only true
-step U 0 sponsor "law seal2 board sealed"
+step U 0 sponsor "law seal2 board sealed --allow-unsatisfiable"
 step U 0 sponsor "submit seal2"
 step U 3 newcomer "retry u1"
 vstep U newcomer "why --json"

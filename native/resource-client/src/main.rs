@@ -803,6 +803,7 @@ fn socket_process(
         "dry-run" if arguments.len() == 4 => {
             (130, pair(read(1)?, read(2)?)?, Some(arguments[3]))
         }
+        "law-sat" if arguments.len() == 3 => (150, read(1)?, Some(arguments[2])),
         _ => {
             return Err(format!(
                 "{command} is not available through the persistent host session"
@@ -1014,6 +1015,20 @@ pub(crate) fn inspect(host: &Path, config: &Path, kind: &str, input: &Path, outp
         fs::read(output).map_err(|error| format!("cannot read {}: {error}", output.display()))?;
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid host JSON {}: {error}", output.display()))
+}
+
+/// Host op 150 (`law-sat`, C-SAT-2): the Host's satisfiability answer for a
+/// law, from the request bytes alone.
+pub(crate) fn law_sat(host: &Path, config: &Path, input: &Path, output: &Path) -> Result<Value> {
+    process(
+        host,
+        config,
+        &[OsStr::new("law-sat"), input.as_os_str(), output.as_os_str()],
+    )?;
+    let bytes =
+        fs::read(output).map_err(|error| format!("cannot read {}: {error}", output.display()))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid law-sat answer {}: {error}", output.display()))
 }
 
 fn validate_public_inspection(kind: &str, value: &Value, input: Option<&[u8]>) -> Result<()> {

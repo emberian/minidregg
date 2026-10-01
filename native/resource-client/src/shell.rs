@@ -58,7 +58,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "provision", usage: "provision NAME HOLDER FUNDING PREDICATE-JSON|@FILE [FACTORY-REF]", operation: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
     Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
     Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
-    Verb { name: "can", usage: "can [REF] [--all]", operation: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted" },
+    Verb { name: "can", usage: "can [REF] [--all] | can --any REF", operation: "mini workspace --action can [--name REF] [--all true]: each verb my grants cover, prepared and dry-run (Host op 130), never submitted | --any: one write REF's law admits from its current values, as a line to paste, or the clauses that rule every write out (Host op 150)" },
     Verb { name: "inspect", usage: "inspect caps [REF] | inspect law REF | inspect receipt ID | inspect turn ID  [--json]", operation: "mini workspace --action inspect --view caps|law|receipt|turn [--name REF|ID] [--json true]: a Lean view (Host inspect cap-tree|law|receipt|turn) over bytes this workspace holds or reads with its own signed views; turn dry-runs (op 130), nothing is submitted" },
     Verb { name: "why", usage: "why [ATTEMPT] [--json]", operation: "mini workspace --action inspect --view why [--name ATTEMPT] --refusals HOME/refusals: the last refusal held, explained from the Host's own frame (clause, slot values, the request value that passes it)" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
@@ -67,7 +67,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
-    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE", operation: "mini workspace --action propose (action install-policy)" },
+    Verb { name: "law", usage: "law ID REF \"CLAUSE; CLAUSE; …\"|PREDICATE-JSON|@FILE [--allow-unsatisfiable] | law check \"CLAUSE; …\"|PREDICATE-JSON|@FILE|-", operation: "mini workspace --action propose (action install-policy), after asking the Host whether the law can ever pass (op 150): a law no step can satisfy is not proposed, and the reply names the clauses that contradict (--allow-unsatisfiable installs it anyway: `sealed` is such a law on purpose); a law no write can pass is proposed with a warning | check: the same question without installing (- reads the law from standard input)" },
     Verb { name: "submit", usage: "submit ID", operation: "mini workspace --action submit --intent proposals/ID/intent.json --attempt attempts/ID" },
     Verb { name: "lookup", usage: "lookup ID", operation: "mini workspace --action recover --attempt attempts/ID" },
     Verb { name: "retry", usage: "retry ID", operation: "mini retry --attempt attempts/ID --mode submit" },
@@ -943,6 +943,19 @@ fn law_argument(session: &Session, words: &[String]) -> std::result::Result<Valu
     law::parse(&words.join(" ")).map_err(|e| format!("law: {e}"))
 }
 
+/// `law check -`: the law (grammar or JSON) from standard input, to EOF.
+fn law_from_stdin() -> std::result::Result<Value, String> {
+    let mut text = String::new();
+    io::stdin()
+        .take(1 << 20)
+        .read_to_string(&mut text)
+        .map_err(|e| format!("cannot read the law from standard input: {e}"))?;
+    if text.trim_start().starts_with('{') {
+        return serde_json::from_str(&text).map_err(|e| format!("law is not JSON: {e}"));
+    }
+    law::parse(&text).map_err(|e| format!("law: {e}"))
+}
+
 fn request_file(path: PathBuf, value: &Value) -> (PathBuf, Vec<u8>) {
     let mut bytes = serde_json::to_vec(value).expect("JSON values serialise");
     bytes.push(b'\n');
@@ -1495,12 +1508,19 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             for word in &w[1..] {
                 if word == "--all" {
                     flags.push(flag("all", "true"));
+                } else if word == "--any" {
+                    flags.push(flag("any", "true"));
                 } else if flags.iter().any(|(name, _)| name == "name") {
                     return Err(u.to_owned());
                 } else {
                     workspace_name(word, "reference name")?;
                     flags.push(flag("name", word.clone()));
                 }
+            }
+            if flags.iter().any(|(name, _)| name == "any")
+                && !flags.iter().any(|(name, _)| name == "name")
+            {
+                return Err(u.to_owned());
             }
             client("workspace", flags)
         }
@@ -1612,7 +1632,26 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 "name":w[2],"recipient":w[3],"verbs":verbs,"maxCost":w[5]});
             proposal(session, &w[1], &request)
         }
+        "law" if w.get(1).map(String::as_str) == Some("check") => {
+            let law = match &w[2..] {
+                [dash] if dash == "-" => law_from_stdin()?,
+                [] => return Err(u.to_owned()),
+                words => law_argument(session, words)?,
+            };
+            let bytes = serde_json::to_vec(&law).expect("JSON values serialise");
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hasher::write(&mut hasher, &bytes);
+            let name = format!("law-check-{:016x}.json", std::hash::Hasher::finish(&hasher));
+            let path = session.home.join("requests").join(name);
+            Plan::Client {
+                command: "workspace".into(),
+                flags: vec![flag("action", "law-check"), flag("dir", ws()), flag("predicate", path.clone())],
+                writes: vec![request_file(path, &law)],
+            }
+        }
         "law" => {
+            let allow = w.last().is_some_and(|word| word == "--allow-unsatisfiable");
+            let w = if allow { w[..w.len() - 1].to_vec() } else { w };
             if w.len() < 4 {
                 arity(&w, 3, 3, u)?;
             }
@@ -1621,7 +1660,11 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             let predicate = law_argument(session, &w[3..])?;
             let request = json!({"type":"minidregg-workspace-proposal-v1",
                 "action":"install-policy","name":w[2],"predicate":predicate});
-            proposal(session, &w[1], &request)
+            let mut plan = proposal(session, &w[1], &request);
+            if let (true, Plan::Client { flags, .. }) = (allow, &mut plan) {
+                flags.push(flag("allow-unsatisfiable", "true"));
+            }
+            plan
         }
         "submit" => {
             arity(&w, 1, 1, u)?;

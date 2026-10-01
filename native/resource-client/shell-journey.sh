@@ -404,7 +404,7 @@ check J7 "field 2 = 7" is "$(field "$LAST" 2)" 7
 
 # ------------------------------------------------------------- J8
 
-step J8 0 sponsor 'law lockout shared {"type":"any","predicates":[]}'
+step J8 0 sponsor 'law lockout shared {"type":"any","predicates":[]} --allow-unsatisfiable'
 step J8 0 sponsor "submit lockout"
 check J8 "deny-all installed" jq -e '.confirmation == "installed"' "$LAST"
 step J8 3 newcomer "read shared"

@@ -215,6 +215,7 @@ these; everything else is `254 operation unavailable`:
 | 126, 127 | clock tick signing plan / assembly (K-CLOCK) | command / pair: plan, 64-byte signature | `DREGG/CLOCK/PLAN/v1` / ingress |
 | 128 | clock tick submit (refusals name their reason: `clockNotAdvancing`, `capabilityRejected`, ...) | ingress | `OUTCOME/v4` |
 | 129 | public clock view: now, slot and the roots a tick pins | empty | `DREGG/CLOCK/VIEW/v1` |
+| 150 | law-sat (C-SAT-2): does a law admit any step, any write, a write from the cell's current values — `Sat.decide` on the decoded law; reads no Store | `{"type":"minidregg-law-sat-v1","predicate":LAW,"extra":CLAUSE?,"fromHere":BOOL?}` (the predicate JSON `law` proposes and the `policy` view returns) | UTF-8 JSON: `outside` (the leaf, by path) / `unrealizable` (slot) / `witness` (old, new slot lists) / `unsat` (per case: clash or cycle, each constraint with the law clauses it came from) / `unknown` (`reason: cap`, 1024) |
 | 130 | dry run (P-AFFORDANCES): plan as op 1, assemble as op 11, submit as op 2 over a Store writer that never appends — commits nothing, consumes no nullifier | pair: signed observation (as op 1), signature list over the plan op 1 derives | admitted: `SIGNING-PLAN/v4` (the would-be footprint); otherwise byte 255 + `OUTCOME/v4` naming the reason (a plan-time law refusal names its clause) |
 
 `mini serve-operator` serves a separate owner-private socket (same framing,
