@@ -590,11 +590,8 @@ impl Site {
 
     /// The room a reference was born in, from this workspace's retained birth source.
     fn born_in(&self, name: &str) -> Option<String> {
-        let source = self
-            .root
-            .join("sources")
-            .join(format!("create-{name}.current"))
-            .join("source.json");
+        // The birth source `create` retains (sources/create-NAME.json on final).
+        let source = self.root.join("sources").join(format!("create-{name}.json"));
         let value = workspace::bounded_json(&source).ok()?;
         value["birth"]["resources"][0]["room"].as_str().map(str::to_owned)
     }
