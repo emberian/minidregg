@@ -628,6 +628,7 @@ fn join(mut args: Args) -> Result<()> {
                 operation: Some(field(&handoff, "operationCapability")?),
                 control: Some(field(&handoff, "controlCapability")?),
                 provenance: Some(&provenance),
+                room: None,
             },
         )?;
     }

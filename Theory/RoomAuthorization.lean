@@ -276,6 +276,136 @@ theorem invite_cannot_widen :
       ownerCapability roomState.parent := by
   decide
 
+/-! ## What a room capability is bound to — the J7 pole
+
+A capability whose target set is `under R` is bound to:
+* its holder, scope (`under R`, verbs, cost, fields), validity window and lineage
+  (`ancestors`, `channels`): revocation of it or of any ancestor refuses it;
+* its issuer's epoch;
+* the **grant generation of the law it was issued under** — `(policyId, policyEpoch)`,
+  which for a room grant is `R`'s own (`Admissible.policyCurrent`).
+
+It is **not** bound to the content or revision of `R`'s law, nor to the law of the
+cell a request names (`TargetSet.RequestLaw` is `True` for `under`): the controller
+evaluates the target cell's own committed law for each request. So changing `R`'s
+law (an install moves only the selected revision, `GenerationPreserved`) never
+revokes a room grant (`room_cap_survives_law_change`); rotating `R`'s grant
+generation revokes every grant issued under it (`room_cap_revoked_by_generation`);
+and rotating the generation of a cell born in the room leaves room grants reaching
+that cell standing (`room_cap_survives_member_rotation`): a cell born in `R` is
+governed by `R`'s grants, which is what bearing it into `R` (the birth gate,
+`Kernel.RoomBirthGate`) consents to. Revocation is separate: `revokeCapability`
+on the grant or an ancestor (`ancestor_revocation_rejected`). -/
+
+/-- What a law install leaves alone: every grant generation, issuer epoch,
+revocation and parent row. Only the selected revision (and its address and the
+roots) may move. -/
+structure GenerationPreserved (before after : AuthState) : Prop where
+  policyEpoch : after.policyEpoch = before.policyEpoch
+  issuerEpoch : after.issuerEpoch = before.issuerEpoch
+  revoked : after.revoked = before.revoked
+  parent : after.parent = before.parent
+
+/-- **`room_cap_survives_law_change`.** A law change preserves every admission:
+a request admitted before it is admitted after it, naming the new revision. It
+holds for every capability, so in particular for every room grant. -/
+theorem room_cap_survives_law_change {kind : ResourceKind} (cap : Capability kind)
+    {before after : AuthState} (same : GenerationPreserved before after)
+    {request : Request kind} (admitted : cap.Admissible before request)
+    (revision : PolicyRevision) :
+    cap.Admissible after { request with policyRevision := revision } := by
+  obtain ⟨policyEpoch, issuerEpoch, revoked, parent⟩ := same
+  exact
+    { holder := admitted.holder
+      scope := ⟨by rw [parent]; exact admitted.scope.target, admitted.scope.verb,
+        admitted.scope.cost⟩
+      validFrom := admitted.validFrom
+      validUntil := admitted.validUntil
+      requestLaw := admitted.requestLaw
+      policyCurrent := by rw [policyEpoch]; exact admitted.policyCurrent
+      issuerCurrent := by rw [issuerEpoch]; exact admitted.issuerCurrent
+      selfNotRevoked := by rw [revoked]; exact admitted.selfNotRevoked
+      ancestorNotRevoked := by rw [revoked]; exact admitted.ancestorNotRevoked
+      channelNotRevoked := by rw [revoked]; exact admitted.channelNotRevoked }
+
+open Minidregg.Theory.Store in
+/-- Rows to projection: two authority cells that agree on every epoch,
+revocation and parent row project to states with the same grant generation.
+`PolicyInstallController.Installed.generation_rows_preserved` supplies the rows
+for an actual install. -/
+theorem generationPreserved_of_rows {M N : Materializer} (pre : Cell M) (post : Cell N)
+    (rows : ∀ address : Address layout, address.1 ≠ .policyRevision →
+      address.1 ≠ .policyAddress → post.logical address = pre.logical address) :
+    GenerationPreserved (authState pre) (authState post) where
+  policyEpoch := by
+    funext policy
+    simp only [authState_policyEpoch]
+    unfold policyEpochAt
+    rw [rows ⟨.policyEpoch, policy⟩ (by intro h; cases h) (by intro h; cases h)]
+  issuerEpoch := by
+    funext issuer
+    simp only [authState_issuerEpoch]
+    unfold issuerEpochAt
+    rw [rows ⟨.issuerEpoch, issuer⟩ (by intro h; cases h) (by intro h; cases h)]
+  revoked := by
+    ext key
+    change key ∈ revokedKeys post.logical ↔ key ∈ revokedKeys pre.logical
+    rw [mem_revokedKeys_iff, mem_revokedKeys_iff, rows ⟨.revoked, key⟩ (by intro h; cases h) (by intro h; cases h)]
+  parent := parentageOf_congr fun cell => rows ⟨.parent, cell⟩ (by intro h; cases h) (by intro h; cases h)
+
+/-- **`room_cap_revoked_by_generation`.** Rotating the grant generation of the
+law a room grant was issued under (`R`'s) refuses it for every request. -/
+theorem room_cap_revoked_by_generation {kind : ResourceKind} (cap : Capability kind)
+    (state : AuthState) (rotated : cap.policyEpoch ≠ state.policyEpoch cap.policyId)
+    (request : Request kind) : ¬ cap.Admissible state request :=
+  stale_policy_epoch_rejected cap state request rotated
+
+/-- Concrete room grant: `under 7`, issued under room 7's own law at generation 5. -/
+def roomGrant : Capability .object := { memberCapability with policyId := ⟨7⟩ }
+
+/-- Room 7's law moves from revision 11 to 12; nothing else changes. -/
+def reLawedState : AuthState := { roomState with policyRevision := fun _ => 12 }
+
+/-- Room 7's grant generation rotates 5 → 6. -/
+def rotatedRoomState : AuthState :=
+  { roomState with policyEpoch := fun policy => if policy = ⟨7⟩ then 6 else 5 }
+
+/-- Cell 50's own generation rotates 5 → 6 (its owner's grants die). -/
+def rotatedCellState : AuthState :=
+  { roomState with policyEpoch := fun policy => if policy = ⟨50⟩ then 6 else 5 }
+
+/-- Honest pole: the room grant reads cell 50 before the law change... -/
+theorem room_grant_reads : roomGrant.Admissible roomState observeNote :=
+  (capabilityAdmissibleCheck_eq_true_iff _ _ _).mp (by decide)
+
+/-- ...and after it, by the general theorem. -/
+theorem room_grant_reads_after_law_change :
+    roomGrant.Admissible reLawedState { observeNote with policyRevision := 12 } :=
+  room_cap_survives_law_change (before := roomState) (after := reLawedState) roomGrant
+    ⟨rfl, rfl, rfl, rfl⟩ room_grant_reads 12
+
+/-- The same, by evaluation. -/
+theorem room_grant_reads_after_law_change_by_check :
+    capabilityAdmissibleCheck roomGrant reLawedState { observeNote with policyRevision := 12 } =
+      true := by
+  decide
+
+/-- Dishonest pole: after room 7's generation rotates, the room grant is refused,
+whatever generation the request names. -/
+theorem room_grant_refused_after_rotation :
+    capabilityAdmissibleCheck roomGrant rotatedRoomState observeNote = false ∧
+      capabilityAdmissibleCheck roomGrant rotatedRoomState
+        { observeNote with policyEpoch := 6 } = false := by
+  decide
+
+/-- **`room_cap_survives_member_rotation`.** Rotating cell 50's own generation
+leaves the room grant reaching it standing: the request names cell 50's new
+generation, the room grant stays bound to room 7's. -/
+theorem room_cap_survives_member_rotation :
+    capabilityAdmissibleCheck roomGrant rotatedCellState
+      { observeNote with policyId := ⟨50⟩, policyEpoch := 6 } = true := by
+  decide
+
 /-! ## Axiom audit -/
 
 /-- info: 'Minidregg.Theory.TypedAuthorization.Scope.narrows_stable' depends on axioms: [propext, Quot.sound] -/

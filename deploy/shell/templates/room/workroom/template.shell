@@ -1,0 +1,41 @@
+# workroom: a map (index), a wall (stream), notes (a draft the room writes) and tasks (a list that only grows)
+#
+# A room template is the lines you would type, in order, and nothing else.
+# `room new NAME --template workroom` binds $ROOM to NAME and $ME to your
+# subject and runs each line as you; the first line that does not end done
+# stops the rest, and the shell names it. Every `--in $ROOM` birth passes the
+# room's birth gate like any other. By hand it is the same lines:
+#   room template show workroom > workroom.shell
+#   sed -e 's/[$]ROOM/lab2/g' -e 's/[$]ME/YOUR-SUBJECT/g' workroom.shell | mini shell ...
+# Your own template: change a copy, put it in HOME/requests/F, then
+# `room new NAME --template @F`.
+
+# The room. Its law is open: holding a grant under it is the gate for bearing a cell into it.
+room new $ROOM --law open
+
+# The map. Everyone in the room may read it; only you write it, and it only
+# grows (no line edited, none struck). Its links are the room's map.
+doc new $ROOM/index 'any [ not (verb == write), all [ subject == $ME, slot "content/atom-edits" == 0, slot "content/tombstones" == 0 ] ]' --in $ROOM
+
+# What the room says: a stream. An entry, once appended, stays (the store's own discipline).
+create $ROOM/wall stream open --in $ROOM
+
+# A draft anyone holding write in the room appends to and edits.
+doc new $ROOM/notes draft --in $ROOM
+
+# A list that only grows.
+doc new $ROOM/tasks note --in $ROOM
+
+# The map's first line, and its links.
+doc append $ROOM-map $ROOM/index 'workroom $ROOM: wall is what we say, notes is our draft, tasks only grows'
+submit $ROOM-map
+doc link $ROOM-map-wall $ROOM/index $ROOM/wall
+submit $ROOM-map-wall
+doc link $ROOM-map-notes $ROOM/index $ROOM/notes
+submit $ROOM-map-notes
+doc link $ROOM-map-tasks $ROOM/index $ROOM/tasks
+submit $ROOM-map-tasks
+
+# And back: notes points at the map.
+doc link $ROOM-notes-map $ROOM/notes $ROOM/index
+submit $ROOM-notes-map

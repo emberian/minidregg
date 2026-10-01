@@ -320,6 +320,7 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .object, "mutate" => pure .mutateObject
   | .object, "delegate" => pure .delegateObject
   | .object, "append" => pure .appendObject
+  | .object, "place" => pure .placeObject
   | .account, "observe" => pure .observeAccount
   | .account, "transfer" => pure .transfer
   | .account, "delegate" => pure .delegateAccount
@@ -1351,7 +1352,9 @@ private def birthParts (path : String)
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
-  let roomField := if (raw.get? "room").isSome then ["room"] else []
+  -- A room birth names the creator's placing capability (`placement`), the
+  -- birth gate's evidence; a root birth names neither.
+  let roomField := if (raw.get? "room").isSome then ["room", "placement"] else []
   let obj ← exactObject path
     ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
@@ -1364,6 +1367,9 @@ private def birthParts (path : String)
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
+  let placement ← match obj.get? "placement" with
+    | none => pure none
+    | some value => (some ∘ CapabilityId.mk) <$> nat (path ++ ".placement") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
   unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" ∨
       storage = "nock" do
@@ -1405,7 +1411,7 @@ private def birthParts (path : String)
         (AgentGrain.initialStore target budget)⟩
     else pure (NativeHostGenesis.declaredCell source target (kind = .account))
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
-    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room⟩
+    ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room, placement⟩
   -- A workspace resource's owner holds it as a room: `under target`, the
   -- resource and everything later born into it.
   let asRoom {kind : ResourceKind} (cap : Capability kind) : Capability kind :=

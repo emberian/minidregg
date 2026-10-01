@@ -103,12 +103,18 @@ inductive Verb : ResourceKind → Type
   observer can credit observed transfers and advance the chain clock, nothing
   else. -/
   | observePayment : Verb .program
+  /-- Bearing a new cell into a room (`create --in R`): the birth gate
+  (`Kernel.RoomBirthGate`) admits it under a capability covering `R` and `R`'s
+  own law. "May add to the room, may not edit what is in it." `mutateObject`
+  covers it too (`Verb.AllowedBy`). -/
+  | placeObject : Verb .object
   deriving DecidableEq, Repr
 
 /-- The granted verbs that cover a requested verb: the verb itself, and for an
 append also `mutateObject` (whoever may edit an object may append to it). -/
 def Verb.grantors : {kind : ResourceKind} → Verb kind → List (Verb kind)
   | _, .appendObject => [.appendObject, .mutateObject]
+  | _, .placeObject => [.placeObject, .mutateObject]
   | _, verb => [verb]
 
 /-- `verb` is allowed by a granted verb set. -/
@@ -138,7 +144,7 @@ theorem Verb.AllowedBy.mono {kind : ResourceKind} {verb : Verb kind} {small larg
     (verbs : Finset (Verb kind)) : verb.AllowedBy (insert verb verbs) :=
   Verb.AllowedBy.of_mem (Finset.mem_insert_self verb verbs)
 
-/-- Every verb but `appendObject` is allowed exactly by itself. -/
+/-- Every verb but `appendObject` and `placeObject` is allowed exactly by itself. -/
 theorem Verb.allowedBy_iff_mem {kind : ResourceKind} {verb : Verb kind} {verbs : Finset (Verb kind)}
     (notAppend : verb.grantors = [verb]) : verb.AllowedBy verbs ↔ verb ∈ verbs := by
   unfold Verb.AllowedBy
@@ -152,6 +158,19 @@ theorem Verb.append_allowedBy_iff (verbs : Finset (Verb .object)) :
 
 /-- A publish-only grant may not edit. -/
 theorem Verb.append_grant_cannot_mutate : ¬ Verb.mutateObject.AllowedBy {Verb.appendObject} := by
+  simp [Verb.AllowedBy, Verb.grantors]
+
+/-- **Mutate covers place**, and nothing else covers it. -/
+theorem Verb.place_allowedBy_iff (verbs : Finset (Verb .object)) :
+    Verb.placeObject.AllowedBy verbs ↔ Verb.placeObject ∈ verbs ∨ Verb.mutateObject ∈ verbs := by
+  simp [Verb.AllowedBy, Verb.grantors]
+
+/-- A place-only grant may bear cells into the room and may not edit them. -/
+theorem Verb.place_grant_cannot_mutate : ¬ Verb.mutateObject.AllowedBy {Verb.placeObject} := by
+  simp [Verb.AllowedBy, Verb.grantors]
+
+/-- An observe-only grant (a guest) may not bear cells into the room. -/
+theorem Verb.observe_grant_cannot_place : ¬ Verb.placeObject.AllowedBy {Verb.observeObject} := by
   simp [Verb.AllowedBy, Verb.grantors]
 
 /-- info: 'Minidregg.Theory.TypedAuthorization.Verb.append_allowedBy_iff' depends on axioms: [propext, Quot.sound] -/
