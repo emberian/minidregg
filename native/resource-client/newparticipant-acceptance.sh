@@ -41,9 +41,11 @@ NEWCOMER_PUBLIC=$(od -An -tx1 -v "$ROOT/newcomer.pub" | tr -d ' \n')
 [ "$SPONSOR_PUBLIC" != "$NEWCOMER_PUBLIC" ] || { echo 'keys unexpectedly equal' >&2; exit 1; }
 
 # The one genesis template (genesis.sh) from the example params, with this
-# Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS.
+# Store's domain and sponsor subject; it honours EXTRA_GENESIS_ENROLLMENTS and
+# MINI_TAIL_BOUND (the tail bound L, default the example's 256 = 4 x 64).
 jq --argjson domain "$DOMAIN" --argjson subject "$SUBJECT" \
-  '.domain = $domain | .sponsor.subject = $subject' \
+  --argjson tail "${MINI_TAIL_BOUND:-256}" \
+  '.domain = $domain | .sponsor.subject = $subject | .tailBound = $tail' \
   "$HERE/genesis-params.example.json" >"$ROOT/genesis-params.json"
 sh "$HERE/genesis.sh" "$ROOT/genesis-params.json" "$SPONSOR_PUBLIC" \
   "$HOST" "$STORE" "$VERIFIER" "$ROOT"

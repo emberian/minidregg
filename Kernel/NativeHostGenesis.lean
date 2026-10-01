@@ -64,6 +64,10 @@ structure Config where
   enrollments : List Enrollment
   factoryController : FactoryController
   meterAllowance : ResourceCost.Charge
+  /-- `L`: how many heights the node may run past its last certified head
+  (`Kernel.SystemCell`, `Kernel.TailBound`).  The operator's tariff line;
+  written once into the genesis system cell. -/
+  tailBound : Nat
 
 /-- Reuse the policy source's typed postfix language. No Boolean host policy
 or parallel evaluator enters the genesis codec. -/
@@ -111,14 +115,14 @@ def Config.toWire (config : Config) : ConfigWire :=
     config.tariff.perGrant, config.tariff.perInitialPayloadByte,
     config.tariff.collector, config.tariff.asset, config.expectedSemantics.value,
     config.issuerEpoch, config.genesisHeight, config.factoryController.subject.value,
-    config.factoryController.capabilityId.value],
+    config.factoryController.capabilityId.value, config.tailBound],
    PolicyRecordCodec.encodePred config.factoryPredicate,
    config.enrollments, config.meterAllowance)
 
 def Config.ofWire (wire : ConfigWire) : Option Config := do
   let [domain, factory, book, authority, federation, base, perBirth, perGrant,
       perByte, collector, asset, semantics, issuerEpoch, height, controller,
-      controlCapability] := wire.1 | none
+      controlCapability, tailBound] := wire.1 | none
   let predicate ← PolicyRecordCodec.decodePred wire.2.1
   some
     { deployment := ⟨⟨domain⟩, factory, book, authority⟩
@@ -130,16 +134,17 @@ def Config.ofWire (wire : ConfigWire) : Option Config := do
       factoryPredicate := predicate
       enrollments := wire.2.2.1
       factoryController := ⟨⟨controller⟩, ⟨controlCapability⟩⟩
-      meterAllowance := wire.2.2.2 }
+      meterAllowance := wire.2.2.2
+      tailBound := tailBound }
 
 @[simp] theorem Config.ofWire_toWire (config : Config) :
     Config.ofWire config.toWire = some config := by
   cases config
   simp [Config.ofWire, Config.toWire]
 
-/-- Version 2: the fourth deployment coordinate is the one authority cell's
-identifier (it was the retired catalogue's). -/
-def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v2".toUTF8.toList
+/-- Version 3: the scalar list ends with the tail bound `L` (version 2 made the
+fourth deployment coordinate the one authority cell's identifier). -/
+def configFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v3".toUTF8.toList
 
 def configRawCodec : LawfulCodec Config where
   encode config := configFrame ++ configWireStream.encode config.toWire
@@ -166,10 +171,10 @@ theorem config_canonical {bytes : List UInt8} {config : Config}
     configCodec.encode config = bytes :=
   ResourceBirthCodec.strictCodec_canonical configRawCodec accepted
 
-def retiredConfigFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v1".toUTF8.toList
+def retiredConfigFrame : List UInt8 := "DREGG/NATIVE-HOST/GENESIS-SOURCE/v2".toUTF8.toList
 
-/-- A version-1 genesis source (naming a catalogue identifier) refuses. -/
-theorem v1_config_refused (payload : List UInt8) :
+/-- A version-2 genesis source (no tail bound) refuses. -/
+theorem v2_config_refused (payload : List UInt8) :
     configCodec.decode (retiredConfigFrame ++ payload) = none := by
   have lengthExact : configFrame.length = retiredConfigFrame.length := by decide +kernel
   have different : retiredConfigFrame ≠ configFrame := by decide +kernel
@@ -394,6 +399,11 @@ def payCell : PackedCell CanonicalCellRegistry.registry :=
 def clockCell : PackedCell CanonicalCellRegistry.registry :=
   ⟨.clock, materialize Kernel.ClockCell.materializer Kernel.ClockCell.genesisStore⟩
 
+/-- The genesis system cell: nothing certified beyond the seed, under the
+operator's tail bound (`SystemCell.genesisStore`). -/
+def systemCell (config : Config) : PackedCell CanonicalCellRegistry.registry :=
+  ⟨.system, materialize Kernel.SystemCell.materializer (Kernel.SystemCell.genesisStore config.tailBound)⟩
+
 def baseCells {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     List (Nat × PackedCell CanonicalCellRegistry.registry) :=
@@ -408,7 +418,8 @@ def baseCells {F : Type} [Field F]
     (PolicySourceCell.physicalId config.deployment.domain (PolicyRecordCodec.digest record),
       CanonicalCellRegistry.policySourceCell record)) ++
   [(Kernel.PayCell.physicalId config.deployment.domain, payCell),
-   (Kernel.ClockCell.physicalId config.deployment.domain, clockCell)]
+   (Kernel.ClockCell.physicalId config.deployment.domain, clockCell),
+   (Kernel.SystemCell.physicalId config.deployment.domain, systemCell config)]
 
 def physicalCells (cells : List (Nat × PackedCell CanonicalCellRegistry.registry)) :
     List (Digest × List UInt8) :=
@@ -543,7 +554,7 @@ def buildBytes {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F
 
 /-- info: 'Minidregg.Kernel.NativeHostGenesis.genesis_revision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms genesis_revision
-/-- info: 'Minidregg.Kernel.NativeHostGenesis.v1_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v1_config_refused
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.v2_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v2_config_refused
 
 end Minidregg.Kernel.NativeHostGenesis

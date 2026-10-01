@@ -23,6 +23,7 @@ transport and the OS durability floor; no Lean theorem proves those systems.
 The MAC key file's custody is the operator's (`DurableCheckpointCodec`).
 -/
 import Compiler.DurableCheckpointCodec
+import Kernel.TailBound
 
 namespace Minidregg.Compiler.DurableReceiverIO
 
@@ -74,6 +75,11 @@ structure Transport where
   /-- The log chain's start for a seed (the host: `NativeHostCodec.logRoot0`
   of its domain and semantics), so one chain is both MAC'd and rooted. -/
   logStart : Seed → Digest
+  /-- The deployment's system cell, whose tail law judges every new commit
+  (`Kernel.TailBound.gate`).  Every native-host deployment sets it
+  (`NativeHostContext.Config.transport`); `none` is a bare durable log with no
+  system law, which only the durable-protocol probes construct. -/
+  systemCell : Option CellId
 
 structure NativeConfig where
   binary : System.FilePath
@@ -210,9 +216,10 @@ def NativeConfig.readKey (config : NativeConfig) : IO (Except String MacKey) :=
     | none => return .error "checkpoint MAC key must be exactly 32 bytes"
   catch error => pure (.error s!"checkpoint MAC key unavailable: {error}")
 
-def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest) : Transport :=
+def NativeConfig.transport (config : NativeConfig) (logStart : Seed → Digest)
+    (systemCell : CellId) : Transport :=
   ⟨config.read, fun height entry => config.append height entry, config.putCheckpoint,
-    config.initialize, config.readKey, config.checkpointEvery, logStart⟩
+    config.initialize, config.readKey, config.checkpointEvery, logStart, some systemCell⟩
 
 /-- ByteArray's derived equality compares every byte, with no digest premise. -/
 theorem byteArray_beq_exact (left right : List UInt8) :
@@ -546,6 +553,17 @@ private def readBackEntry (transport : Transport) (height : Nat) :
   | .ok none => return .error "durable store is not initialized"
   | .ok (some stored) => return .ok stored.entries.head?
 
+/-- **The tail law on a new commit** (`Kernel.TailBound.gate`): the record
+takes height `loaded.height + 1`, after the chain value `loaded.chain`, and is
+judged on the loaded snapshot.  The receiving loop and the replay walk
+(`NativeHostReplay.advance`) both call exactly this. -/
+def Loaded.judge {rootBytes : List UInt8 → Digest} (transport : Transport)
+    (loaded : Loaded rootBytes) (intent : DataIntent rootBytes) : Except RejectReason Unit :=
+  match transport.systemCell with
+  | none => .ok ()
+  | some systemId =>
+      Kernel.TailBound.gate systemId (loaded.height + 1) loaded.chain loaded.snapshot intent
+
 /-- Publish against the exact image on which the controller admitted the
 operation: append entry `h + 1` only while the head is `h`. One attempt, no
 rebase; a lost response never becomes a refusal. The Bool is whether this
@@ -559,6 +577,8 @@ def receiveLoadedDetailedWithFresh (transport : Transport) (rootBytes : List UIn
   | .inr (.rejected reason) => return (false, .ordinary (.rejected reason))
   | .inr _ => return (false, .ordinary (.unavailable "unexpected complete-schedule outcome"))
   | .inl ready =>
+      if let .error reason := loaded.judge transport intent then
+        return (false, .ordinary (.rejected reason))
       let .ok key ← transport.key
         | return (false, .ordinary (.unavailable "checkpoint MAC key unavailable"))
       let height := loaded.image.accepted.length + 1

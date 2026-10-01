@@ -34,6 +34,7 @@ mod historical_call_receipt;
 #[cfg(unix)]
 mod meter;
 #[cfg(unix)]
+mod checkpoint;
 mod clock;
 mod participant_enrollment;
 #[cfg(unix)]
@@ -2146,6 +2147,7 @@ fn run(mut args: Args) -> Result<()> {
         #[cfg(unix)]
         "enroll" => participant_enrollment::run(args),
         "clock" => clock::run(args),
+        "checkpoint" => checkpoint::run(args),
         #[cfg(unix)]
         "shell" => shell::run(args),
         "fleet" => fleet::run(args),

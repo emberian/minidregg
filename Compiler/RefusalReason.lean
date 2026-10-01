@@ -70,6 +70,10 @@ inductive RefusalReason where
   | conflict
   /-- A blind submission was refused; by design no state-dependent reason is disclosed. -/
   | undisclosed
+  /-- The node is more than its tail bound past its last certified head
+  (`Kernel.TailBound`).  A fact about the public chain head, so it is named
+  even on a blind submission (MR's rule): it says nothing about the request. -/
+  | tailBound
   deriving DecidableEq, Repr, Inhabited
 
 namespace RefusalReason
@@ -88,6 +92,7 @@ def name : RefusalReason → String
   | .operationRejected => "operation-rejected"
   | .conflict => "conflict"
   | .undisclosed => "undisclosed"
+  | .tailBound => "tail-bound"
 
 /-- Fixed friend-facing text. It depends on the reason only. -/
 def describe : RefusalReason → String
@@ -103,10 +108,11 @@ def describe : RefusalReason → String
   | .operationRejected => "the operation was refused by its controller"
   | .conflict => "transaction identity conflict"
   | .undisclosed => "request refused; a blind submission discloses no reason"
+  | .tailBound => "the node is past its tail bound; no write is admitted until the next checkpoint"
 
 def all : List RefusalReason :=
   [.malformed, .unknownKey, .staleRoot, .badSignature, .noGrant, .revoked,
-    .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed]
+    .outsideValidity, .staleGrant, .lawDenied, .operationRejected, .conflict, .undisclosed, .tailBound]
 
 theorem mem_all (reason : RefusalReason) : reason ∈ all := by
   cases reason <;> decide
@@ -131,6 +137,7 @@ def stream : StreamCodec RefusalReason where
     | .operationRejected => [9]
     | .conflict => [10]
     | .undisclosed => [11]
+    | .tailBound => [12]
   decodePrefix
     | 0 :: suffix => some (.malformed, suffix)
     | 1 :: suffix => some (.unknownKey, suffix)
@@ -144,11 +151,12 @@ def stream : StreamCodec RefusalReason where
     | 9 :: suffix => some (.operationRejected, suffix)
     | 10 :: suffix => some (.conflict, suffix)
     | 11 :: suffix => some (.undisclosed, suffix)
+    | 12 :: suffix => some (.tailBound, suffix)
     | _ => none
   decodePrefix_encode := by intro value suffix; cases value <;> rfl
 
 theorem stream_unknown_tag (suffix : List UInt8) :
-    stream.decodePrefix (12 :: suffix) = none := rfl
+    stream.decodePrefix (13 :: suffix) = none := rfl
 
 /-- The signature adapter's typed rejection, named. Key absence, unusable key
 records and a key version that is unregistered or revoked (its standing in the

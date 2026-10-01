@@ -67,6 +67,20 @@ def bootstrap (config : Config) (canonicalImage : List UInt8) : IO (Except Strin
 private def refused (reason : RefusalReason) (phase detail : String) : Outcome :=
   .refused reason phase.toUTF8.toList detail.toUTF8.toList
 
+/-- A refusal at the durable boundary.  The tail bound is named (`tailBound`,
+with the head, the certified height and `L`): it is a fact about the public
+chain head, not about the request.  Every other durable reason is the
+receiver's `operationRejected`. -/
+def durableRefusal : DurableDataIntent.RejectReason → Outcome
+  | .tailBound head certified bound =>
+      refused .tailBound "tail" s!"head {head} certified {certified} bound {bound}"
+  | reason => refused .operationRejected "durable" s!"{repr reason}"
+
+/-- The tail bound's refusal names `tailBound` and the three heights. -/
+theorem durableRefusal_tailBound (head certified bound : Nat) :
+    durableRefusal (.tailBound head certified bound) =
+      refused .tailBound "tail" s!"head {head} certified {certified} bound {bound}" := rfl
+
 private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
@@ -563,7 +577,7 @@ def enrollmentSubmitLoaded (config : Config) (opened : Opened config)
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "enroll-key" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -601,7 +615,7 @@ def provisionSubmitLoaded (config : Config) (opened : Opened config)
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "provision-factory-observe" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -692,7 +706,7 @@ def fleetSubmitLoaded (config : Config) (opened : Opened config)
   | .rejected (.signature (.envelope .staleAuthority)) => return .contention
   | .rejected reason => return refused .operationRejected "fleet-turn" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -865,7 +879,7 @@ def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UIn
     | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-book" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-    | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+    | .durableRejected reason => return durableRefusal reason
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
     | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -875,7 +889,7 @@ def paySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UIn
     | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
     | .rejected reason => return refused .operationRejected "pay-assign" s!"{repr reason}"
     | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-    | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+    | .durableRejected reason => return durableRefusal reason
     | .contention => return .contention
     | .unavailable detail => return .unavailable detail.toUTF8.toList
     | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -949,7 +963,7 @@ def clockSubmitLoaded (config : Config) (opened : Opened config) (bytes : List U
   | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
   | .rejected reason => return refused .operationRejected "clock-tick" s!"{repr reason}"
   | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .durableRejected reason => return durableRefusal reason
   | .contention => return .contention
   | .unavailable detail => return .unavailable detail.toUTF8.toList
   | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -962,6 +976,59 @@ def clockViewLoaded (config : Config) (opened : Opened config) : Except String C
     | .absent => .error "factory unavailable"
   pure ⟨clock.cell.root, opened.authority.snapshot.cell.root, factoryRoot, clock.clock⟩
 
+/-! ## Certify (the checkpoint path)
+
+130 = certify signing plan, 131 = detached assembly, 132 = submit, 133 = public
+system view.  The command is authored by `author certify` from the view's head
+and chain; the signer is any subject the factory law admits in capability mode
+for `authority/operation/certify` (today the operator's ticker). -/
+
+def certifyPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String CertifyReceiver.SigningPlan := do
+  let height := logicalHeight config opened.durable
+  let some command := CertifyReceiver.commandCodec.decode commandBytes
+    | .error "noncanonical certify command"
+  let header ← CertifyReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, height⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def certifyAssemble (plan : CertifyReceiver.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "certify signature must be 64 bytes"
+  let header ← need "noncanonical certify header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  if (CertifyReceiver.commandCodec.decode plan.commandBytes).isSome then
+    pure (CertifyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+  else .error "noncanonical certify plan command"
+
+def certifySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  let ambient := logicalHeight config opened.durable
+  match ← CertifyReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, ambient⟩ config.signature config.transport opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "certify" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return durableRefusal reason
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- The public view of the system cell: its value, the roots a certify pins,
+and the head a certify would name now with that head's chain value.  The head
+and its chain are public (every receipt carries a height and a root). -/
+def certifyViewLoaded (config : Config) (opened : Opened config) :
+    Except String SystemCellDomain.View := do
+  let system ← need "system cell unavailable"
+    (SystemCellDomain.load config.deployment opened.durable.snapshot)
+  let factoryRoot ← match opened.directory.directory.slots config.deployment.factoryId with
+    | .present before => pure before.payload.root
+    | .absent => .error "factory unavailable"
+  pure ⟨system.cell.root, opened.authority.snapshot.cell.root, factoryRoot, system.system,
+    opened.durable.height, opened.durable.chain⟩
+
 def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCall)
     (confirm : DurableReceiverIO.Confirmation → Digest → Digest → IO Outcome) : IO Outcome := do
   let height := logicalHeight config opened.durable
@@ -972,7 +1039,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "revoke" s!"{repr reason}"
       | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+      | .durableRejected reason => return durableRefusal reason
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -982,7 +1049,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "delegate" s!"{repr reason}"
       | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
-      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+      | .durableRejected reason => return durableRefusal reason
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1011,7 +1078,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
           config.transport opened.durable config.federation height bytes with
       | .confirmed kind receipt => confirm kind receipt.transactionId receipt.eventId
       | .rejected reason => return refused .operationRejected "install" s!"{repr reason}"
-      | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+      | .durableRejected reason => return durableRefusal reason
       | .contention => return .contention
       | .unavailable detail => return .unavailable detail.toUTF8.toList
       | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1039,7 +1106,7 @@ def submitLoadedWith (config : Config) (opened : Opened config) (call : SignedCa
                   confirm kind
                     (DeclaredResourceController.transactionId config.deployment.domain config.profile.semantics command)
                     (DeclaredResourceController.invocationEvent config.deployment.domain config.profile.semantics command signed).eventId
-              | .rejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+              | .rejected reason => return durableRefusal reason
               | .contention => return .contention
               | .unavailable detail => return .unavailable detail.toUTF8.toList
               | .uncertain detail => return .uncertain detail.toUTF8.toList
@@ -1065,6 +1132,7 @@ theorem signedRefusal_carries_reason (phase : String) (refusal : Refusal) :
 remain possible). Its preflight/native/semantic refusal therefore exposes no
 state-dependent reason. This is output non-disclosure, not a timing theorem. -/
 def publicSubmissionOutcome : Outcome → Outcome
+  | .refused .tailBound phase detail leaf => .refused .tailBound phase detail leaf
   | .refused .. => refused .undisclosed "admission" "request refused"
   | result => result
 
@@ -1073,9 +1141,10 @@ and whatever reason it named, so a submitter without read authority learns
 nothing from it. Its twin for the signed observation channel is
 `signedRefusal_carries_reason`. -/
 theorem public_refusal_uniform (reason : RefusalReason) (phase detail : List UInt8)
-    (leaf : Option LawLeaf) :
+    (leaf : Option LawLeaf) (notTail : reason ≠ .tailBound) :
     publicSubmissionOutcome (.refused reason phase detail leaf) =
-      refused .undisclosed "admission" "request refused" := rfl
+      refused .undisclosed "admission" "request refused" := by
+  cases reason <;> first | rfl | exact absurd rfl notTail
 
 def submit (config : Config) (bytes : List UInt8) : IO Outcome := do
   let result ← match callCodec.decode bytes with

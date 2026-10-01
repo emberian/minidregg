@@ -41,7 +41,8 @@ private def genesisWithSemantics (semantics : Nat) : Json := object [
   ("issuerEpoch", number 2), ("genesisHeight", number 10),
   ("factoryPredicate", emptyRule), ("enrollments", .arr #[]),
   ("factoryControllerSubject", number 8),
-  ("factoryControllerCapability", number 53), ("meterAllowance", meter)]
+  ("factoryControllerCapability", number 53), ("tailBound", number 256),
+  ("meterAllowance", meter)]
 
 private def genesis : Json := genesisWithSemantics operator.profile.semantics.value
 private def compositeGenesis : Json := genesisWithSemantics grainOperator.profile.semantics.value

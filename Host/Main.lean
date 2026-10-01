@@ -45,7 +45,9 @@ behind a signed account observation, 102=exact receipt by transaction id,
 103=pay command signing plan (either pay family), 104=pay detached assembly,
 105=pay submit, 106=pay receipt-only lookup, 107=public pay-cell view,
 126=clock tick signing plan, 127=clock tick detached assembly,
-128=clock tick submit, 129=public clock view.
+128=clock tick submit, 129=public clock view,
+130=certify signing plan, 131=certify detached assembly, 132=certify submit,
+133=public system view (certified head, tail bound, current head and chain).
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -5263,6 +5265,29 @@ def run (arguments : List String) : IO UInt32 := do
                             let opened ← sessionOpened pinnedConfig state
                             let view ← IO.ofExcept (NativeHost.clockViewLoaded pinnedConfig opened)
                             return ((129 : UInt8), ClockTickReceiver.viewCodec.encode view)
+                        | 130 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let plan ← IO.ofExcept (NativeHost.certifyPlanLoaded pinnedConfig opened payload)
+                            let bytes := CertifyReceiver.signingPlanCodec.encode plan
+                            unless bytes.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "certify plan exceeds host frame bound")
+                            return ((130 : UInt8), bytes)
+                        | 131 =>
+                            let (planBytes, signature) ← splitPair payload
+                            let some plan := CertifyReceiver.signingPlanCodec.decode planBytes
+                              | throw (IO.userError "noncanonical certify plan")
+                            let ingress ← IO.ofExcept (NativeHost.certifyAssemble plan signature)
+                            unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
+                              throw (IO.userError "certify ingress exceeds host frame bound")
+                            return ((131 : UInt8), ingress)
+                        | 132 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let outcome ← NativeHost.certifySubmitLoaded pinnedConfig opened payload
+                            return ((132 : UInt8), outcomeCodec.encode outcome)
+                        | 133 =>
+                            let opened ← sessionOpened pinnedConfig state
+                            let view ← IO.ofExcept (NativeHost.certifyViewLoaded pinnedConfig opened)
+                            return ((133 : UInt8), CertifyReceiver.viewCodec.encode view)
                         | 60 =>
                             let outcome ← fnSelectedPollSubmitSession
                               pinnedConfig state payload

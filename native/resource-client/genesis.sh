@@ -26,7 +26,8 @@ check_params() {
     and ([.domain, .federation, .factoryId, .resourceBookId, .authorityCellId, .issuer,
           .ownerBudget, .lifetime, .tariffBase, .tariffPerBirth, .tariffPerGrant,
           .tariffPerInitialPayloadByte, .collector, .asset, .genesisHeight, .issuerEpoch,
-          .factoryControllerCapability] | all(int))
+          .factoryControllerCapability, .tailBound] | all(int))
+    and .tailBound > 0
     and (.sponsor | [.subject, .keyId, .keyEpoch, .activeFrom, .activeUntil, .accountId,
           .spendCapabilityId, .controlCapabilityId, .factoryObserveCapabilityId,
           .initialBalance] | all(int))
@@ -91,6 +92,7 @@ jq -n --slurpfile p "$params" --arg semantics "$semantics" --arg public "$public
                   accountPredicate: {type: "all", predicates: []}}],
    factoryControllerSubject: ($p.sponsor.subject|s),
    factoryControllerCapability: ($p.factoryControllerCapability|s),
+   tailBound: ($p.tailBound|s),
    meterAllowance: ($p.meterAllowance | map_values(s))}' >"$dir/genesis.json"
 
 if [ -n "${EXTRA_GENESIS_ENROLLMENTS:-}" ]; then

@@ -29,6 +29,7 @@
     "factoryObserveCapabilityId": 54,
     "initialBalance": 100000
   },
+  "tailBound": 256,
   "meterAllowance": {
     "incidences": 10000000,
     "turnBytes": 10000000,

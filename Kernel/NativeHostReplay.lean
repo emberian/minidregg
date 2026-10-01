@@ -43,6 +43,7 @@ import Kernel.FleetTurnReceiver
 import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
 import Kernel.ClockTickReceiver
+import Kernel.CertifyReceiver
 
 namespace Minidregg.Kernel.NativeHostReplay
 
@@ -736,6 +737,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : ClockTickReceiver.AcceptedTick config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ClockTickReceiver.intent accepted)
+  | certify {ingress : CertifyReceiver.DecodedIngress}
+      (accepted : CertifyReceiver.AcceptedCertify config.deployment config.profile
+        ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
+      NativeAdmission config opened (CertifyReceiver.intent accepted)
   | selectiveRelease {ingress : FnSelectiveReleaseIngress.Ingress}
       (accepted : FnSelectiveReleaseAdmission.Accepted config opened ingress) :
       NativeAdmission config opened (accepted.intent config opened ingress)
@@ -1556,6 +1561,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ClockTickReceiver.intent accepted,
           .clockTick accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := CertifyReceiver.decodeIngress bytes then
+    match ← CertifyReceiver.admitDecodedNative config.deployment config.profile
+        ⟨config.federation, height⟩ opened.durable config.signature ingress with
+    | .error reason => return .error s!"certify refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨CertifyReceiver.intent accepted,
+          .certify accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := CapabilityRevocationReceiver.decodeIngress bytes then
     match ← CapabilityRevocationReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with
@@ -2017,10 +2029,32 @@ def advance {config : Config} (opened : Opened config) (derived : Derived config
   let durable := opened.durable
   match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
       durable.withinLog durable.resumed derived.intent with
-  | .inl ready => .ok (durable.extend ready)
+  | .inl ready =>
+      match durable.judge config.transport derived.intent with
+      | .ok () => .ok (durable.extend ready)
+      | .error reason => .error s!"derived durable intent refused: {repr reason}"
   | .inr (.rejected reason) => .error s!"derived durable intent refused: {repr reason}"
   | .inr (.replayed _) => .error "duplicate accepted history entry"
   | .inr _ => .error "derived durable intent did not make one new commit"
+
+/-- Every replayed record passed the deployment's tail law: the walk, a reopen
+and `audit` judge exactly what the receiving loop judged. -/
+theorem advance_judged {config : Config} {opened : Opened config} {derived : Derived config opened}
+    {next : Durable} (advanced : advance opened derived = .ok next) :
+    Kernel.TailBound.gate config.systemCell (opened.durable.height + 1) opened.durable.chain
+      opened.durable.snapshot derived.intent = .ok () := by
+  revert advanced
+  unfold advance
+  simp only
+  split
+  · split
+    · rename_i judged
+      intro _
+      simpa [DurableReceiverIO.Loaded.judge, Config.transport_systemCell] using judged
+    · intro failed
+      cases failed
+  all_goals intro failed; cases failed
+
 
 structure Failure where
   /-- Zero-based failing accepted entry; genesis failures use zero too. -/
@@ -2039,6 +2073,21 @@ def AdmittedStep (config : Config) (before after : Opened config)
       validateLoaded config next = .ok after ∧
       receipt = ⟨derived.intent.transactionId, derived.intent.event.eventId,
         before.durable.image.accepted.length + 1, next.worldRoot⟩
+
+/-- **`tail_bounded`, on the replayed history.**  Every step of the replay walk
+that is not a certify record sits at most `L` heights past the certified height
+it was judged on. -/
+theorem AdmittedStep.tail_bounded {config : Config} {before after : Opened config}
+    {record : DurableReceiver.IntentRecord} {receipt : NativeHostCodec.Receipt}
+    (step : AdmittedStep config before after record receipt) :
+    ∃ derived : Derived config before, recordMatches record derived.intent = true ∧
+      ((∀ write ∈ derived.intent.writes, write.cellId ≠ config.systemCell) →
+        ∃ system, Kernel.TailBound.valueOf
+            (before.durable.snapshot.canonicalBytes config.systemCell) = some system ∧
+          before.durable.height + 1 - system.certifiedHeight ≤ system.tailBound) := by
+  obtain ⟨derived, matched, next, advanced, _, _⟩ := step
+  exact ⟨derived, matched, fun notCertify =>
+    Kernel.TailBound.tail_bounded (advance_judged advanced) notCertify⟩
 
 /-- The ordered semantic history that `walk` actually constructs. -/
 inductive AdmittedReplay (config : Config) : Opened config →
@@ -2469,6 +2518,7 @@ structure ExactReadback (config : Config) {oldTarget : Durable}
   prepared : DurableCheckpoint.prepare old.opened.durable.image old.opened.durable.baseHeight
     old.opened.durable.base old.opened.durable.snapshot old.opened.durable.withinLog
     old.opened.durable.resumed derived.intent = .inl ready
+  judged : old.opened.durable.judge config.transport derived.intent = .ok ()
   appended : DurableReceiverIO.Appended ResourceBirthCodec.rootBytes old.opened.durable
     derived.intent
   after : Opened config
@@ -2487,9 +2537,12 @@ def ExactReadback.ofAppended {config : Config} {oldTarget : Durable}
       old.opened.durable.resumed derived.intent with
   | .inr _ => .error "appended intent no longer prepares at the verified image"
   | .inl ready =>
-      match validated : validateLoaded config (exactCandidate old derived ready) with
-      | .error detail => .error s!"post-image validation: {detail}"
-      | .ok after => .ok ⟨⟨derived, ready, prepared, appended, after, validated⟩, rfl⟩
+      match judged : old.opened.durable.judge config.transport derived.intent with
+      | .error reason => .error s!"appended intent fails the tail law: {repr reason}"
+      | .ok () =>
+        match validated : validateLoaded config (exactCandidate old derived ready) with
+        | .error detail => .error s!"post-image validation: {detail}"
+        | .ok after => .ok ⟨⟨derived, ready, prepared, judged, appended, after, validated⟩, rfl⟩
 
 /-- The verifier-minted old trace plus the same admitted command's exact
 readback gives one new accepted step and its *original-prefix* receipt. -/
@@ -2508,6 +2561,7 @@ def extendExact {config : Config} {oldTarget : Durable}
       unfold advance
       simp only
       rw [readback.prepared]
+      simp only [readback.judged]
       rfl
     exact ⟨readback.derived, matched, target, advanced, readback.validated, rfl⟩
   have exactImage : readback.after.durable.image = target.image :=
@@ -2795,6 +2849,11 @@ def verifyBytes (config : Config) (bytes : List UInt8) : IO (Except Failure (Sig
     match ← verifyLoaded config target with
     | .error failure => return .error failure
     | .ok verified => return .ok ⟨target, verified⟩
+
+/-- info: 'Minidregg.Kernel.NativeHostReplay.advance_judged' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms advance_judged
+/-- info: 'Minidregg.Kernel.NativeHostReplay.AdmittedStep.tail_bounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms AdmittedStep.tail_bounded
 
 end Minidregg.Kernel.NativeHostReplay
 
