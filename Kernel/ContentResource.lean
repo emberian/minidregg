@@ -17,10 +17,16 @@ the registry's `ContentLaw`, which every final cell runs.  Authorization and
 current installed Pred evaluation belong to the enclosing ResourceTransaction
 receiver.
 
-Command grammar v3 (`DREGG/CONTENT/MUTATE` ++ [3]) adds `annotate` and
-`quote`.  Version-1 commands (links carried the retired `ForwardTarget`) and
-version-2 commands (no annotate/quote; atoms without a revision) refuse to
-decode (`retired_command_refused`).
+Command grammar v4 (`DREGG/CONTENT/MUTATE` ++ [4]) adds `unlink`; v3 added
+`annotate` and `quote`.  Version-1 commands (links carried the retired
+`ForwardTarget`), version-2 commands (no annotate/quote; atoms without a
+revision) and version-3 commands (no unlink; the wire's tail sum was one arm
+shorter, so a v3 quote would decode as something else) refuse to decode
+(`retired_command_refused`).
+
+`unlink` retires one live link of the document: the record stays, with
+`tombstonedAt` set to the retiring operation, and the backlink index
+(`Kernel.LinkIndex`) drops it.
 
 `annotate` attaches an annotation record to one atom at the revision the
 annotator read and writes nothing else; `quote` writes an embed element naming
@@ -68,6 +74,8 @@ inductive Action where
   /-- Quote (`snapshot`) or transclude (`live`) a source atom: an embed element
   and a link to the source document. -/
   | quote (element : ElementId) (link : LinkId) (reference : EmbedRef)
+  /-- Retire a live link of this document (`tombstonedAt := operation`). -/
+  | unlink (link : LinkId)
   deriving DecidableEq
 
 abbrev ActionWire := Sum (ElementId × Digest × ElementBody)
@@ -76,7 +84,7 @@ abbrev ActionWire := Sum (ElementId × Digest × ElementBody)
       (Sum (LinkId × Option StableRange × LinkTarget × Digest)
         (Sum (RunId × List AtomId)
           (Sum (AnnotationId × AtomId × OperationId × List UInt8)
-            (ElementId × LinkId × EmbedRef))))))
+            (Sum (ElementId × LinkId × EmbedRef) LinkId))))))
 
 def actionWireStream : StreamCodec ActionWire :=
   StreamCodec.sum
@@ -97,8 +105,10 @@ def actionWireStream : StreamCodec ActionWire :=
               (StreamCodec.product (identifierStream .v1 .annotation)
                 (StreamCodec.product (identifierStream .v1 .atom)
                   (StreamCodec.product (identifierStream .v1 .operationIntent) bytesStream)))
-              (StreamCodec.product (identifierStream .v1 .element)
-                (StreamCodec.product (identifierStream .v1 .link) embedRefStream)))))))
+              (StreamCodec.sum
+                (StreamCodec.product (identifierStream .v1 .element)
+                  (StreamCodec.product (identifierStream .v1 .link) embedRefStream))
+                (identifierStream .v1 .link)))))))
 
 def Action.toWire : Action → ActionWire
   | .createDocument root schema body => .inl (root, schema, body)
@@ -110,7 +120,8 @@ def Action.toWire : Action → ActionWire
   | .annotate annotationId atom revision body =>
       .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body))))))
   | .quote element linkId reference =>
-      .inr (.inr (.inr (.inr (.inr (.inr (element, linkId, reference))))))
+      .inr (.inr (.inr (.inr (.inr (.inr (.inl (element, linkId, reference)))))))
+  | .unlink linkId => .inr (.inr (.inr (.inr (.inr (.inr (.inr linkId))))))
 
 def Action.ofWire : ActionWire → Action
   | .inl (root, schema, body) => .createDocument root schema body
@@ -121,8 +132,9 @@ def Action.ofWire : ActionWire → Action
   | .inr (.inr (.inr (.inr (.inl (runId, atoms))))) => .createRun runId atoms
   | .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body)))))) =>
       .annotate annotationId atom revision body
-  | .inr (.inr (.inr (.inr (.inr (.inr (element, linkId, reference)))))) =>
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inl (element, linkId, reference))))))) =>
       .quote element linkId reference
+  | .inr (.inr (.inr (.inr (.inr (.inr (.inr linkId)))))) => .unlink linkId
 
 @[simp] theorem Action.ofWire_toWire (action : Action) :
     Action.ofWire action.toWire = action := by cases action <;> rfl
@@ -139,7 +151,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 3
+def commandVersion : Nat := 4
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -167,15 +179,15 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- Version-1 and version-2 command frames refuse to decode. -/
-theorem retired_command_refused (version : UInt8) (retired : version = 1 ∨ version = 2)
+/-- Version-1, version-2 and version-3 command frames refuse to decode. -/
+theorem retired_command_refused (version : UInt8) (retired : version = 1 ∨ version = 2 ∨ version = 3)
     (payload : List UInt8) :
     rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
   let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
   have different : oldFrame ≠ commandFrame := by
-    rcases retired with rfl | rfl <;> decide +kernel
+    rcases retired with rfl | rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -188,6 +200,8 @@ inductive Reject where
   | invalidPatch
   | invalidRun
   | invalidSourceRange
+  /-- `unlink` named no live link of this document. -/
+  | unknownLink
   deriving DecidableEq, Repr
 
 /-! ## Lowering actions to guarded operations -/
@@ -214,6 +228,18 @@ def replaceAtom (document : DocumentId) (progress : Progress) (atom : AtomId)
   else
     .ok (progress.1.set ⟨.atoms, atom⟩ (some after),
       progress.2 ++ [.write .atoms atom before after])
+
+/-- Retire a live link of `document`: the exact stored record guards the write,
+and only `tombstonedAt` changes. -/
+def retireLink (document : DocumentId) (operation : OperationId) (progress : Progress)
+    (link : LinkId) : Except Reject Progress :=
+  match (show Option LinkRecord from progress.1 ⟨.links, link⟩) with
+  | none => .error .unknownLink
+  | some before =>
+      if before.sourceDocument = document ∧ before.tombstonedAt = none then
+        .ok (progress.1.set ⟨.links, link⟩ (some { before with tombstonedAt := some operation }),
+          progress.2 ++ [.write .links link before { before with tombstonedAt := some operation }])
+      else .error .unknownLink
 
 /-- Executable membership checker for the canonical stored-point law. -/
 def pointCheck (pre : ContentStore) (document : DocumentId) (point : StablePoint) : Bool :=
@@ -309,6 +335,7 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
   | .quote element link reference => do
       let next ← allocate progress .elements element (quoteElement author operation document reference)
       allocate next .links link (quoteLink author operation document reference)
+  | .unlink link => retireLink document operation progress link
 
 def run (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (pre : ContentStore) (command : Command) : Except Reject Progress :=
@@ -401,6 +428,15 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
           simp only [first, bind, Except.bind] at accepted
           exact allocate_executes pre middle next _ _ _
             (allocate_executes pre progress middle _ _ _ holds first) accepted
+  | unlink link =>
+      simp only [step, retireLink] at accepted
+      split at accepted
+      · cases accepted
+      · rename_i before present
+        split at accepted
+        · cases accepted
+          exact executes_append pre progress _ holds ⟨rfl, present⟩
+        · cases accepted
 
 theorem foldlM_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (pre : ContentStore) (actions : List Action) (progress next : Progress)
@@ -564,6 +600,7 @@ def Action.tag : Action → Nat
   | .createRun .. => 4
   | .annotate .. => 5
   | .quote .. => 6
+  | .unlink .. => 7
 
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
@@ -586,6 +623,7 @@ def project (before after : ContentStore) (command : Command) : List (String × 
    ("content/run-creates", actionCount command 4),
    ("content/annotations", actionCount command 5),
    ("content/quotes", actionCount command 6),
+   ("content/unlinks", actionCount command 7),
    ("content/writes/body", bodyWrites before after),
    ("content/writes/annotations", annotationWrites before after),
    ("content/tombstones", (command.actions.filter fun action => match action with

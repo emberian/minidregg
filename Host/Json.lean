@@ -574,6 +574,9 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
         (← identifier (path ++ ".atom") (← field path "atom" obj))
         (← identifier (path ++ ".revision") (← field path "revision" obj))
         (← decodeHex (path ++ ".body") (← field path "body" obj)))
+  | "unlink" =>
+      let obj ← exactObject path ["type", "link"] json
+      pure (.unlink (← identifier (path ++ ".link") (← field path "link" obj)))
   | "quote" =>
       let obj ← exactObject path ["type", "element", "link", "reference"] json
       pure (.quote (← identifier (path ++ ".element") (← field path "element" obj))
@@ -706,6 +709,8 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
           | "policy", false => pure .policy
           | "capability", false => pure .capability
           | "who", false => pure .who
+          | "backlinks", false => pure .backlinks
+          | "links", false => pure .links
           | "since", true => do pure (.since (← nat (at_ ++ ".height") (← field at_ "height" p)))
           | "at", true => do pure (.atHeight (← nat (at_ ++ ".height") (← field at_ "height" p)))
           | _, _ => failAt (at_ ++ ".view") "unknown query view, or a height on a view that takes none"
@@ -2675,7 +2680,8 @@ private def intentJson (value : Intent) : Lean.Json := .mkObj
        ("target", decimal q.target),
        ("view", match q.view with
          | .resource => "resource" | .policy => "policy" | .capability => "capability"
-         | .who => "who" | .since _ => "since" | .atHeight _ => "at")] : List (String × Lean.Json)) ++
+         | .who => "who" | .since _ => "since" | .atHeight _ => "at"
+         | .backlinks => "backlinks" | .links => "links")] : List (String × Lean.Json)) ++
        (match q.view with | .since h | .atHeight h => [("height", decimal h)] | _ => []))),
    ("grants", .arr <| value.grants.toArray.map fun g => .mkObj
      [("kind", match g.kind with | .object => "object" | .account => "account" | .program => "program"),
@@ -2743,6 +2749,45 @@ private def atomKindJson : Hyperdocument.AtomKind → Lean.Json
 private def optionalOperationJson (value : Option Hyperdocument.OperationId) : Lean.Json :=
   value.map (fun id => decimal id.digest.value) |>.getD .null
 
+private def identifierJson {version : Hyperdocument.CodecVersion} {domain : Hyperdocument.IdDomain}
+    (value : Hyperdocument.Identifier version domain) : Lean.Json :=
+  decimal value.digest.value
+
+private def optionalIdentifierJson {version : Hyperdocument.CodecVersion}
+    {domain : Hyperdocument.IdDomain} :
+    Option (Hyperdocument.Identifier version domain) → Lean.Json
+  | some value => identifierJson value
+  | none => .null
+
+private def deathPolicyJson : Hyperdocument.EndpointDeathPolicy → Lean.Json
+  | .invalidate => "invalidate"
+  | .keepTombstone => "keepTombstone"
+  | .preferPrevious => "preferPrevious"
+  | .preferNext => "preferNext"
+  | .preferPreviousThenNext => "preferPreviousThenNext"
+  | .preferNextThenPrevious => "preferNextThenPrevious"
+
+/-- The inverse spelling of `stablePoint`/`stableRange` above: what a reader of a
+content cell sees is exactly what an author would write. -/
+private def stablePointJson (point : Hyperdocument.StablePoint) : Lean.Json := .mkObj
+  [("run", identifierJson point.run), ("neighbor", optionalIdentifierJson point.neighbor),
+   ("bias", match point.bias with | .before => "before" | .after => "after"),
+   ("death", deathPolicyJson point.death)]
+
+private def stableRangeJson (range : Hyperdocument.StableRange) : Lean.Json := .mkObj
+  [("start", stablePointJson range.start), ("finish", stablePointJson range.finish)]
+
+/-- The inverse spelling of `linkTarget`. A transclusion target is named by its
+id only (its stored reference is not an authoring input). -/
+private def linkTargetJson : Hyperdocument.LinkTarget → Lean.Json
+  | .document target => .mkObj [("type", "document"), ("id", identifierJson target)]
+  | .element target => .mkObj [("type", "element"), ("id", identifierJson target)]
+  | .range document range => .mkObj [("type", "range"), ("document", identifierJson document),
+      ("range", stableRangeJson range)]
+  | .transclusion target _ => .mkObj [("type", "transclusion"), ("id", identifierJson target)]
+  | .external scheme authority path => .mkObj [("type", "external"),
+      ("scheme", hexJson scheme), ("authority", hexJson authority), ("path", hexJson path)]
+
 private def embedRefJson (reference : Hyperdocument.EmbedRef) : Lean.Json :=
   .mkObj [("document", decimal reference.document.digest.value),
     ("atom", decimal reference.atom.digest.value),
@@ -2794,9 +2839,15 @@ private def contentEntryJson (store : ContentResource.ContentStore)
         ("author", principalJson record.author),
         ("fresh", .bool (ContentResource.annotationFresh store record)),
         ("canonical", canonical)]
-  | ⟨⟨.links, identifier⟩, _⟩ =>
+  | ⟨⟨.links, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.LinkId := identifier
-      .mkObj [("type", "link"), ("id", decimal identifier.digest.value), ("canonical", canonical)]
+      let record : Hyperdocument.LinkRecord := record
+      .mkObj [("type", "link"), ("id", decimal identifier.digest.value),
+        ("document", identifierJson record.sourceDocument),
+        ("source", match record.source with | some range => stableRangeJson range | none => .null),
+        ("target", linkTargetJson record.target), ("relation", decimal record.relation.value),
+        ("createdBy", principalJson record.author), ("createdAt", identifierJson record.operation),
+        ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
   | ⟨⟨.atoms, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.AtomId := identifier
       let record : Hyperdocument.AtomRecord := record
@@ -3090,6 +3141,18 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
           pure <| .mkObj [("type", "at"), ("height", decimal height), ("state", "live"),
             ("canonical", hexJson lifecycle), ("resource", view)]
       | none => failAt "view-at" "noncanonical lifecycle bytes"
+  | "view-backlinks" | "view-links" => do
+      let (backward, rows) ← decoded kind NativeObservationController.linkViewCodec bytes
+      unless backward = (kind == "view-backlinks") do
+        failAt kind s!"the bytes are a {if backward then "backlinks" else "links"} view"
+      pure <| .mkObj [("type", if backward then "backlinks" else "links"),
+        ("rows", .arr <| rows.toArray.map fun row => .mkObj
+          [("source", decimal row.source), ("link", decimal row.link),
+           ("anchor", (row.anchor.map decimal).getD .null), ("revision", decimal row.revision),
+           ("height", decimal row.height),
+           ("kind", match row.kind with
+             | 0 => "document" | 1 => "element" | 2 => "range" | 3 => "transclusion" | _ => "external"),
+           ("target", decimal row.target), ("relation", decimal row.relation)])]
   | "view-object-capability" => CapabilityInspection.inspect .object bytes
   | "view-account-capability" => CapabilityInspection.inspect .account bytes
   | "view-program-capability" => CapabilityInspection.inspect .program bytes
@@ -3100,6 +3163,6 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-policy, view-capability, view-who, view-since, or view-at"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-policy, view-capability, view-who, view-since, view-at, view-backlinks, or view-links"
 
 end Minidregg.Host.Json
