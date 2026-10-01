@@ -1,9 +1,11 @@
 /-
 # Kernel.TurnCensus — every live admission is expressible as a `Turn` (T1)
 
-SURPASS §2(b), lane T1.  The Host admits through the 33 constructors of
-`NativeHostReplay.NativeAdmission` (31 on main, `realmWell` and `clockTick`
-on this tip; `final-pay` adds three pay constructors).  T0's census
+SURPASS §2(b), lane T1.  The Host admits through the 37 constructors of
+`NativeHostReplay.NativeAdmission` on `final`: T1's 33 plus `final-pay`'s
+`payObservation`, `payEnrol`, `payRefill` and C3's `jobMoney` (rows added at
+the BRAID-PROOF merge).  `Kernel.TurnCensusCoverage` fails the build when
+`Ctor` and `NativeAdmission` disagree on their constructor names.  T0's census
 (`planning/surpass/t0-receiver-census.md`) lists, per constructor, the cells it
 reads and writes, its nullifiers, its charge and its clock pin.  This module
 writes each constructor's **shape** as a `Turn` over the real `World.admit`,
@@ -40,13 +42,22 @@ T3b's create carries its ROM image (`World.applyCreates`), so each of those
 shapes is now a turn.  `Ctor.turn` writes the ROM birth for each of the six
 (`Ctor.romBirth`), and
 
-* `every_admission_is_turn`: every one of the 33 shapes is accepted, and each
-  of the six carries a nonempty ROM image;
+* `every_admission_is_turn`: every one of the 37 shapes is accepted, and each
+  of the seven ROM-birth receivers (the six above and `payEnrol`, whose enrol
+  branch births the new account's law source) carries a nonempty ROM image;
 * `theList_empty`: the constructors whose shape is refused -- none;
 * `rom_by_leg_refused` (the pole): T3's encoding of the same births -- an
-  empty create plus a leg allocating the ROM row -- is refused for all six, so
-  without the ROM birth the list would be exactly those six
+  empty create plus a leg allocating the ROM row -- is refused for all seven, so
+  without the ROM birth the list would be exactly those seven
   (`theListWithoutRomBirth_eq`).
+
+`payRefill` is a turn, not a meter credit.  T1 and T3 listed it as needing a
+credit to `World.allowance`; the receiver (`PurseRefillReceiver.writes`)
+writes two cells -- the purse, an AgentGrain task object, and the Book's
+`burn` -- and never touches `DataSnapshot.available`, which `allowance`
+models.  Its row is an ordinary two-leg turn.  A turn that credits
+`allowance` (an operator top-up of the deployed meter) is still not
+expressible: task 01a0f740-26b0.
 
 The final `host_submit_is_step` statement for T4 is in
 `Kernel.HostRefinesWorld`'s module doc.  `H := WorldRoot.cshakeHistory encode
@@ -70,6 +81,8 @@ set_option autoImplicit false
 inductive Kind
   | authority | resource | policy | book | stream | ticket | lifecycle | gateway | clock
   | well | content
+  /-- The pay cell (tariff, enrolment, assignment, journal rows). -/
+  | pay
   /-- A policy-source cell: ROM, born with its record (T3b). -/
   | source
   deriving DecidableEq, Repr
@@ -141,18 +154,20 @@ def cClock : CellId := 8
 def cWell : CellId := 9
 def cContent : CellId := 10
 def cRoom : CellId := 11
+def cPay : CellId := 12
 
 def cellOf (k : Kind) (rows : List (Nat × Int)) : Cell R :=
   ⟨k, rows.foldl (fun (s : Store layout) e => s.set ⟨Space.rows, e.1⟩ (some e.2)) 0⟩
 
 def cells0 : Cells R :=
-  ((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
+  (((((((((((((0 : Cells R).update cAuth (some (cellOf .authority [(1, 1)]))).update cRes
     (some (cellOf .resource [(0, 10)]))).update cPolicy (some (cellOf .policy [(0, 1)]))).update
     cBook (some (cellOf .book [(0, 100), (1, 0)]))).update cStream
     (some (cellOf .stream []))).update cTicket (some (cellOf .ticket []))).update cLife
     (some (cellOf .lifecycle [(0, 0)]))).update cGate (some (cellOf .gateway [(0, 1)]))).update
     cClock (some (cellOf .clock [(0, 1000)]))).update cWell (some (cellOf .well [(0, 50)]))).update
-    cContent (some (cellOf .content []))).update cRoom (some (cellOf .resource []))
+    cContent (some (cellOf .content []))).update cRoom (some (cellOf .resource []))).update
+    cPay (some (cellOf .pay [(0, 1)]))
 
 /-- The meter every lane starts with. -/
 def budget : Nat := 10000
@@ -196,6 +211,7 @@ inductive Ctor
   | applicationLifecycleClaim | applicationLifecycleBeginV2 | applicationLifecycleClaimV2
   | applicationLifecycleCompletion | applicationLifecycleBeginV3 | applicationLifecycleClaimV3
   | applicationLifecycleCompletionV2 | fnConsumerNamespace | fnSelectedPoll | fnEmptyPollV2
+  | payObservation | payEnrol | payRefill | jobMoney
   deriving DecidableEq, Repr
 
 def Ctor.all : List Ctor :=
@@ -207,16 +223,18 @@ def Ctor.all : List Ctor :=
     .applicationLifecycleBegin, .applicationLifecycleClaim, .applicationLifecycleBeginV2,
     .applicationLifecycleClaimV2, .applicationLifecycleCompletion, .applicationLifecycleBeginV3,
     .applicationLifecycleClaimV3, .applicationLifecycleCompletionV2, .fnConsumerNamespace,
-    .fnSelectedPoll, .fnEmptyPollV2]
+    .fnSelectedPoll, .fnEmptyPollV2, .payObservation, .payEnrol, .payRefill, .jobMoney]
 
 theorem Ctor.mem_all (c : Ctor) : c ∈ Ctor.all := by cases c <;> decide
 
-theorem Ctor.all_length : Ctor.all.length = 33 := rfl
+theorem Ctor.all_length : Ctor.all.length = 37 := rfl
 
 /-- The capability guard: the authority row the exercised capability lives at. -/
 def capGuard : Leg R := leg cAuth .authority [rd 1 (some 1)]
 /-- The fn gateway pin, read and not written. -/
 def gateGuard : Leg R := leg cGate .gateway [rd 0 (some 1)]
+/-- The pay cell (the tariff) read at its exact root, not written. -/
+def payGuard : Leg R := leg cPay .pay [rd 0 (some 1)]
 
 /-- **`Turn.ofConstructor`**: each receiver's census shape, at representative
 inputs. -/
@@ -276,6 +294,26 @@ def Ctor.turn : Ctor → CTurn
   | .fnConsumerNamespace => mk [] [gateGuard] [132]
   | .fnSelectedPoll => mk [] [gateGuard] [133]
   | .fnEmptyPollV2 => mk [] [gateGuard] [134]
+  -- pay observation: the clock advanced to the tip, the observed transfer
+  -- credited (minted) into the Book; the transfer's and the tip's nullifiers
+  | .payObservation => mk []
+      [payGuard, leg cClock .clock [wr 0 1000 1001], leg cBook .book [wr 1 0 10]] [135, 136]
+  -- pay enrol (enrol branch): the new subject's authority entries, the
+  -- account born with its law's ROM source, the Book (lease to the collector,
+  -- the remainder to the new account), the pay cell's enrolment row, the clock;
+  -- the transfer's, the tip's and the birth identity's nullifiers
+  | .payEnrol => mk [(30, fresh .resource, none), (31, src 7, none)]
+      [leg cAuth .authority [lg 7 1], leg 30 .resource [al 0 0],
+        leg cBook .book [wr 1 0 10, al 3 5], leg cPay .pay [al 1 1],
+        leg cClock .clock [wr 0 1000 1001]] [137, 138, 139]
+  -- pay refill: the Book burn from the owner's account and the purse (a task
+  -- object) written at its signed pre-root -- two cells, no meter credit
+  | .payRefill => mk [] [payGuard, leg cBook .book [wr 0 100 90], leg cRes .resource [wr 0 10 20]]
+      [140]
+  -- job money (fund): the job's money field at its loaded value, the Book
+  -- transfer into the job's held account, registered fresh
+  | .jobMoney => mk [] [payGuard, leg cRes .resource [wr 0 10 11], leg cBook .book [wr 0 100 90, al 4 10]]
+      [141]
 
 /-- Each constructor's negation: the case its receiver must refuse. -/
 def Ctor.negation : Ctor → CTurn
@@ -324,6 +362,20 @@ def Ctor.negation : Ctor → CTurn
   | .fnConsumerNamespace => mk [] [] [132]
   | .fnSelectedPoll => mk [] [gateGuard] [99]
   | .fnEmptyPollV2 => mk [] [leg cGate .gateway [rd 0 (some 0)]] [134]
+  -- a second credit for the same transfer (`second_credit_refused`)
+  | .payObservation => mk []
+      [payGuard, leg cClock .clock [wr 0 1000 1001], leg cBook .book [wr 1 0 10]] [99, 136]
+  -- the tip behind the clock (`tipBehindClock`)
+  | .payEnrol => mk [(30, fresh .resource, none), (31, src 7, none)]
+      [leg cAuth .authority [lg 7 1], leg 30 .resource [al 0 0],
+        leg cBook .book [wr 1 0 10, al 3 5], leg cPay .pay [al 1 1],
+        leg cClock .clock [wr 0 999 1001]] [137, 138, 139]
+  -- the purse moved under the signed pre-root
+  | .payRefill => mk [] [payGuard, leg cBook .book [wr 0 100 90], leg cRes .resource [wr 0 9 20]]
+      [140]
+  -- the tariff changed under the plan (the pay cell's read guard)
+  | .jobMoney => mk [] [leg cPay .pay [rd 0 (some 2)], leg cRes .resource [wr 0 10 11],
+      leg cBook .book [wr 0 100 90, al 4 10]] [141]
 
 /-- The reason each negation is refused with. -/
 def Ctor.refusal : Ctor → Reject
@@ -360,6 +412,10 @@ def Ctor.refusal : Ctor → Reject
   | .fnConsumerNamespace => .emptyTurn
   | .fnSelectedPoll => .nullifierSpent
   | .fnEmptyPollV2 => .guardFailed cGate 0
+  | .payObservation => .nullifierSpent
+  | .payEnrol => .guardFailed cClock 0
+  | .payRefill => .guardFailed cRes 0
+  | .jobMoney => .guardFailed cPay 0
 
 /-! ## The poles -/
 
@@ -400,7 +456,7 @@ theorem no_cell_ctors_nullifier_only :
 /-- The receivers whose accepted intents create a ROM policy-source cell. -/
 def Ctor.romBirth : Ctor → Bool
   | .birth | .grainBirth | .install | .applicationShareIssue | .applicationGrainShareIssue
-  | .applicationAgentLifetimeGrantIssue => true
+  | .applicationAgentLifetimeGrantIssue | .payEnrol => true
   | _ => false
 
 /-- A ROM birth: a create carrying a nonempty, ROM-only image. -/
@@ -425,6 +481,10 @@ def Ctor.romByLeg : Ctor → CTurn
       [leg cTicket .ticket [al 1 1], leg 28 .source [sa 5]] [117]
   | .applicationAgentLifetimeGrantIssue => mk [(29, fresh .source, none)]
       [leg cTicket .ticket [al 3 1], leg 29 .source [sa 6]] [119]
+  | .payEnrol => mk [(30, fresh .resource, none), (31, fresh .source, none)]
+      [leg cAuth .authority [lg 7 1], leg 30 .resource [al 0 0],
+        leg cBook .book [wr 1 0 10, al 3 5], leg cPay .pay [al 1 1],
+        leg cClock .clock [wr 0 1000 1001], leg 31 .source [sa 7]] [137, 138, 139]
   | c => c.turn
 
 /-- The source cell each ROM-birth constructor creates. -/
@@ -435,6 +495,7 @@ def Ctor.sourceCell : Ctor → CellId
   | .applicationShareIssue => 27
   | .applicationGrainShareIssue => 28
   | .applicationAgentLifetimeGrantIssue => 29
+  | .payEnrol => 31
   | _ => 0
 
 /-- **THE LIST**: the constructors whose turn the one transition refuses. -/
@@ -451,7 +512,7 @@ theorem every_admission_is_turn_all :
       (c.romBirth = true → HasRomBirth c.turn = true) := by
   decide +kernel
 
-/-- **`every_admission_is_turn`.**  Each of the 33 admission shapes is
+/-- **`every_admission_is_turn`.**  Each of the 37 admission shapes is
 accepted by the one transition, and each receiver that creates a ROM
 policy-source cell does so by a create carrying its image. -/
 theorem every_admission_is_turn (c : Ctor) :
@@ -467,16 +528,16 @@ theorem rom_by_leg_refused_all :
       rejectOf (World.admit censusH w0 c.romByLeg) = some (.guardFailed c.sourceCell 0) := by
   decide +kernel
 
-/-- **The pole: without the ROM birth, the six are not turns.**  Writing the
+/-- **The pole: without the ROM birth, the seven are not turns.**  Writing the
 source row by a leg after an empty create is the ROM write refusal. -/
 theorem rom_by_leg_refused (c : Ctor) (rom : c.romBirth = true) :
     rejectOf (World.admit censusH w0 c.romByLeg) = some (.guardFailed c.sourceCell 0) :=
   rom_by_leg_refused_all c (Ctor.mem_all c) rom
 
-/-- Without ROM birth THE LIST is exactly the six. -/
+/-- Without ROM birth THE LIST is exactly the seven. -/
 theorem theListWithoutRomBirth_eq :
     theListWithoutRomBirth = [.birth, .grainBirth, .install, .applicationShareIssue,
-      .applicationGrainShareIssue, .applicationAgentLifetimeGrantIssue] := by
+      .applicationGrainShareIssue, .applicationAgentLifetimeGrantIssue, .payEnrol] := by
   decide +kernel
 
 /-! ## `step_conserves`: a Book leg of postings conserves its totals (T9) -/

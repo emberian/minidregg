@@ -34,7 +34,7 @@ produces on the turn `Turn.ofIntent` derives from the admitted intent.
 
 ## THE LIST
 
-Empty.  `TurnCensus.every_admission_is_turn` decides it for all 33 shapes and
+Empty.  `TurnCensus.every_admission_is_turn` decides it for all 37 shapes and
 `TurnCensus.theList_empty`; `TurnCensus.theListWithoutRomBirth_eq` is the pole
 (without ROM birth the list is exactly the six source-creating receivers).
 
@@ -992,17 +992,17 @@ theorem represents_logicalHeight (B : Bridge R D)
 
 end Represent
 
-/-! ## 4. All 33 constructors: the admitted object is the intent -/
+/-! ## 4. All 37 constructors: the admitted object is the intent -/
 
 section Admission
 
 variable {R : Registry} {D : Type} [DecidableEq D]
 
 /-- **`Turn.ofIntent` on the admitted object.**  `NativeAdmission config opened`
-is indexed by the `DataIntent` it admits: each of its 33 constructors carries
+is indexed by the `DataIntent` it admits: each of its 37 constructors carries
 the private receiving object (`AcceptedBirth`, `AcceptedInvocation`, …) whose
 intent is that index.  So the turn of an admission is the turn of its index,
-and one derivation covers all 33 -- there is no per-constructor `ofIntent`. -/
+and one derivation covers all 37 -- there is no per-constructor `ofIntent`. -/
 def Turn.ofAdmission (B : Bridge R D) (H : History R TransactionId StableEvent D)
     (w : World R TransactionId D) {config : NativeHost.Config} {opened : NativeHost.Opened config}
     {intent : DataIntent Minidregg.Compiler.ResourceBirthCodec.rootBytes}
