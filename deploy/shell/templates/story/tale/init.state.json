@@ -1,4 +1,0 @@
-{"type":"minidregg-workspace-proposal-v1","action":"invoke",
- "targets":[{"name":"{STORY}-state","payload":{"type":"scalar","actions":[
-   {"type":"create","key":{"type":"object","field":"0"},"value":"0"},
-   {"type":"create","key":{"type":"object","field":"1"},"value":"0"}]}}]}

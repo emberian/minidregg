@@ -1,16 +1,14 @@
 # Shell templates
 
 These are the files that `mini shell` verbs load without changing them. Lane
-P-STORY builds the story verbs on `story/`, and lane P-HERMES-ROOM builds
+P-STORY built the story verbs on `story/`, and lane P-HERMES-ROOM builds
 `summon`, `ask` and `dismiss` on `hermes/`. Each directory's README gives the
 order in which its verb reads its files.
 
 | verb | reads | contract |
 |---|---|---|
-| `story new NAME --from story/DIR` | `DIR/story.json`, `DIR/scene/*.md`, `DIR/init.state.json`, `DIR/law.management.open*`, `DIR/law.state*`, `DIR/law.scene*` | `story/README.md` |
-| `room invite STORY S player` | `DIR/init.player.json`, `DIR/law.management.open*`, `DIR/law.player*`, `story.json` `grants.player` | `story/README.md` |
-| `look` / `go N` / `take ITEM` | `story.json` `fields`, `items`, `scenes` | `story/README.md` ("The moves, as writes") |
-| `story seal STORY` | `DIR/law.management.sealed*`, plus each cell's `law.*` | `story/README.md` |
+| `story new NAME --from tale\|@FILE` | `story/tale/table` (compiled into `mini`) or `HOME/requests/FILE`; runs `room/story/template.shell` | `story/README.md` |
+| `story seal NAME` / `story invite NAME S` / `look` / `go` / `take` / `act` / `narrate` | the table document; the law each player's cell carries is generated from it (`story/tale/law.player*`, `scripts/gen-storylaw.py`) | `story/README.md` |
 | `summon ROOM as librarian\|runner [--budget N]` (gm: marked for MUD-GM) | `hermes/ROLE/budget.json`, `grants.json`, `program.md` (compiled into `mini`) | `hermes/README.md` |
 | `ask ROOM TEXT` | the room cell's `hermes` field (a signed read) | `hermes/README.md` |
 | `dismiss ROOM` | the summon record `HOME/hermes/ROOM.json` (the grants it made) | `hermes/README.md` |

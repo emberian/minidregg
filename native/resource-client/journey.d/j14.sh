@@ -203,6 +203,7 @@ for f in alice bob hermes; do
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
     install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/j14-$f.key"
+    install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/j14-$f.key.next.pub"  # K-PREROTATE: the record commits to the next key
   ok setup sponsor "enroll plan j14-$f j14-$f.key"
   ok setup sponsor "enroll seal j14-$f"
   ok setup sponsor "enroll submit j14-$f"

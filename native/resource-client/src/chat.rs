@@ -1631,7 +1631,7 @@ pub(crate) fn create_cell(session: &Session, name: &str, storage: &str, law: &Va
 /// `create_cell` with `--room-template T` (`private`: the room key, its keys
 /// cell born in the room, the founder's own wrap).
 fn create_cell_as(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>, template: Option<&str>) -> Result<Value, Done> {
-    let predicate = write_request(session, &format!("chat-law-{name}"), law)?;
+    let predicate = write_request(session, &format!("chat-law-{}", name.replace('/', ".")), law)?;
     let mut flags = vec![
         ("action", os("create")),
         ("dir", os(&session.workspace)),
@@ -1668,7 +1668,7 @@ fn room_grant(session: &Session, room: &str, recipient: &str, verbs: &[String]) 
         .ok_or_else(|| error("the published delegation left no recipient-reference.json"))
 }
 
-fn import_from(session: &Session, name: &str, reference_json: &Value) -> Result<(), Done> {
+pub(crate) fn import_from(session: &Session, name: &str, reference_json: &Value) -> Result<(), Done> {
     let path = session.home.join("inbox").join(format!("{name}.json"));
     private_dirs(&session.home.join("inbox")).map_err(error)?;
     let _ = fs::remove_file(&path);
@@ -1677,7 +1677,7 @@ fn import_from(session: &Session, name: &str, reference_json: &Value) -> Result<
     Ok(())
 }
 
-fn import_stream(session: &Session, name: &str, target: &str, capability: &str) -> Result<(), Done> {
+pub(crate) fn import_stream(session: &Session, name: &str, target: &str, capability: &str) -> Result<(), Done> {
     client(
         "workspace",
         &[

@@ -1,0 +1,16 @@
+# The Lamplighter's House: a story table (`story new NAME --from tale`).
+# One row per line; `#` lines and blank lines are not rows. The grammar is in ../README.md.
+title The Lamplighter's House
+scene 0 The hallway | A hallway, its floorboards the colour of weak tea. Behind you the way you came in has quietly stopped being a way. Ahead, a door stands a hand's width open, and through the gap comes lamplight and the smell of cold iron.
+scene 1 The anteroom | A small square room, lit by one lamp that nobody seems to tend. On a nail beside the lamp hangs a key: long, black, heavier than it looks. To the west, a glass door fogged from the other side. To the north, a narrow stair behind an iron gate with one keyhole.
+scene 2 The glasshouse | Warm air, and green: vines over the panes, a bench worn smooth, a tap that drips in no hurry. The glass door has closed behind you, and from this side it has no handle. It is a good place to stop. This is one of the house's endings.
+scene 3 The landing | The stair ends at a landing barely wide enough to stand on, and at a door that is not locked, only heavy. Behind it something hums, low and patient, like a kettle that has been thinking about boiling for a hundred years.
+scene 4 The lamp room | A round room, windows all the way around, and in the middle a great lamp, unlit. A box of matches on the sill; a logbook open beside it, every page signed. Whoever lights the lamp is the lamplighter now. This is the house's other ending.
+start 0
+end 2
+end 4
+item key 1
+exit 0 north 1
+exit 1 west 2
+exit 1 north 3 needs key
+act 3 open 4
