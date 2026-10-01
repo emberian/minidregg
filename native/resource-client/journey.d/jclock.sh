@@ -11,7 +11,8 @@
 # the law is an ordinary resource law over `clock/now`, judged by the Host.
 #
 # Rows: the genesis clock is 0; a resource whose law is
-# `leSlotsOff field/5/after clock/now 0` (a timestamp may not be ahead of the clock)
+# `any [not (verb 2), leSlotsOff field/5/after clock/now 0]` (a mutate may not write
+# a timestamp ahead of the clock)
 # is created; writing 100 before any tick is refused by the law at admission; the
 # sponsor ticks 100 and the view reads now=100; the byte-identical write is
 # admitted; a tick at 50 and a tick at 100 are refused clockNotAdvancing; the
@@ -43,11 +44,16 @@ row() {  # row NAME EXPECTED OBSERVED OK(0/1)
 }
 # reason NAME: the Host's refusal detail of a clock outcome, decoded from hex.
 reason() { jq -r '.detail // empty' "$D/$1.out" 2>/dev/null | xxd -r -p 2>/dev/null | sed 's/.*Reject\.//'; }
-# refusal NAME: the attempt's retained Host outcome as "phase: detail" (hex-decoded).
+# refusal NAME: the attempt's retained Host outcome as "phase: detail" (hex-decoded), or,
+# when the Host refused before submission (a law refusal at prepare names its clause),
+# "stage: <the Host's refusal line>" from the retained pre-submit refusal.
 refusal() {
-  local o=$SPONSOR_WS/attempts/clock-$1/outcome.json
-  [ -f "$o" ] || return 0
-  printf '%s: %s' "$(jq -r '.phase // empty' "$o" | xxd -r -p)" "$(jq -r '.detail // empty' "$o" | xxd -r -p)"
+  local a=$SPONSOR_WS/attempts/clock-$1
+  if [ -f "$a/outcome.json" ]; then
+    printf '%s: %s' "$(jq -r '.phase // empty' "$a/outcome.json" | xxd -r -p)" "$(jq -r '.detail // empty' "$a/outcome.json" | xxd -r -p)"
+  elif [ -f "$a/pre-submit-refusal.json" ]; then
+    printf '%s: %s' "$(jq -r '.stage // empty' "$a/pre-submit-refusal.json")" "$(grep -m1 '^refused:' "$D/$1-submit.err" 2>/dev/null)"
+  fi
 }
 view() { run "$1" "$MINI" clock --action view --workspace "$SPONSOR_WS"; }
 now_of() { jq -r .now "$D/$1.out" 2>/dev/null; }
@@ -56,10 +62,13 @@ tick() {  # tick NAME WS [--now N]
   run "$name" "$MINI" clock --action tick --workspace "$ws" --control "$CONTROL" "$@"
 }
 REQ=$D/requests; mkdir -p "$REQ"
-# A timestamp field: the value written to field 5 may not be ahead of the clock
-# (field/5/after <= clock/now + 0). The positive slot-to-slot form MUD's laws use
-# (sheet clause 27: `leSlots ... clock/now`); a missing clock slot fails it closed.
-printf '%s\n' '{"type":"leSlotsOff","left":"resource/field/5/after","right":"clock/now","offset":"0"}' >"$REQ/stamp-le-now.json"
+# A timestamp field: a mutate may not write field 5 ahead of the clock
+# (field/5/after <= clock/now + 0), in the shape every MUD sheet clause has:
+# `any [not (verb = 2), positive slot-to-slot atom]`. The verb guard is load-bearing:
+# a signed read is judged by the same law WITHOUT clock slots (K-CLOCK did not give
+# ResourceObservationAdmission the clock), so an unguarded positive clock atom fails
+# closed on every read and the sponsor cannot even observe the resource (run r1).
+printf '%s\n' '{"type":"any","predicates":[{"type":"not","predicate":{"type":"eq","slot":"request/verb","value":"2"}},{"type":"leSlotsOff","left":"resource/field/5/after","right":"clock/now","offset":"0"}]}' >"$REQ/stamp-le-now.json"
 write_req() {  # write_req VALUE : create field 5 of `timed`
   printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","targets":[{"name":"timed","payload":{"type":"scalar","actions":[{"type":"create","key":{"type":"object","field":"5"},"value":"%s"}]}}]}\n' "$1"
 }
@@ -78,12 +87,12 @@ row "genesis clock" "now 0 slot 0" "rc=$(rc v0) now=$(now_of v0) slot=$(jq -r .s
   "$([ "$(rc v0)" = 0 ] && [ "$(now_of v0)" = 0 ] && [ "$(jq -r .slot "$D/v0.out")" = 0 ]; echo $?)"
 
 run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name timed --storage declared --predicate "$REQ/stamp-le-now.json"
-row "create resource under law leSlotsOff field/5/after clock/now 0" "created" "rc=$(rc create)" "$([ "$(rc create)" = 0 ]; echo $?)"
+row "create resource under law any[not verb 2, leSlotsOff field/5/after clock/now 0]" "created" "rc=$(rc create)" "$([ "$(rc create)" = 0 ]; echo $?)"
 
 attempt_write w-early 100; r=$?; why=$(refusal w-early)
-row "create field 5 = 100 at clock 0" "refused at admission (the Host names no reason; row 5 is the same create after the tick)" \
+row "create field 5 = 100 at clock 0" "refused at prepare by the law, naming the clock clause (row 5 is the byte-identical create after the tick)" \
   "admitted=$([ $r = 0 ] && echo yes || echo no) outcome=[$why]" \
-  "$([ $r != 0 ] && [ "$why" = "admission: request refused" ]; echo $?)"
+  "$([ $r != 0 ] && [[ "$why" == 'prepare: refused: law-denied: '*'clock/now'* ]]; echo $?)"
 
 tick t100 "$SPONSOR_WS" --now 100
 view v1
