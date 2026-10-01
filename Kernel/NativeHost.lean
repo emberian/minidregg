@@ -85,12 +85,14 @@ private def birthRejection : ResourceBirthReceiver.Reject → String
   | .malformedIngress => "malformed ingress"
   | .transactionConflict => "transaction identity conflict"
   | .admission reason => s!"admission: {repr reason}"
+  | .durable (.tailBound head certified bound) => s!"head {head} certified {certified} bound {bound}"
   | .durable reason => s!"durable: {repr reason}"
 
 private def birthReason : ResourceBirthReceiver.Reject → RefusalReason
   | .malformedIngress => .malformed
   | .transactionConflict => .conflict
   | .admission _ => .operationRejected
+  | .durable (.tailBound ..) => .tailBound
   | .durable _ => .operationRejected
 
 private def slot (snapshot : CredentialAuthorityDomain.Snapshot) (marker role index : Nat)

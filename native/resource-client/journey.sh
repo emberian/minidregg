@@ -236,14 +236,22 @@ frontier() {
 # The operator's checkpoint timer (deploy/checkpoint), run between steps: certify
 # the head when the uncertified tail is at least JOURNEY_CERTIFY_MIN_TAIL (64), so
 # the journey's Store (L = 256) never reaches its tail bound between certifies.
-# Every certify, and every skip, is logged to $S/certify.log.
+# Every certify, and every skip, is logged to $S/certify.log; a confirmed
+# certify advances LAST_COUNT (the exact-count bookkeeping of the steps).
 journey_certify() {
   [ -n "${SPONSOR_WS:-}" ] && [ -f "$SPONSOR_WS/workspace.json" ] && [ -f "$W/genesis.json" ] || return 0
+  local out=$S/certify-before-$1.json
   printf '== before %s: ' "$1" >>"$S/certify.log"
   "$MINI" checkpoint --action certify --workspace "$SPONSOR_WS" \
     --control "$(jq -r .factoryControllerCapability "$W/genesis.json")" \
-    --min-tail "${JOURNEY_CERTIFY_MIN_TAIL:-64}" >>"$S/certify.log" 2>&1 \
+    --min-tail "${JOURNEY_CERTIFY_MIN_TAIL:-64}" >"$out" 2>>"$S/certify.log" \
     || echo "certify failed (rc $?)" >>"$S/certify.log"
+  cat "$out" >>"$S/certify.log" 2>/dev/null
+  # A confirmed certify is a record the operator added: the steps' exact
+  # acceptedCount bookkeeping (LAST_COUNT) moves past it.
+  if jq -e '.type == "confirmed"' "$out" >/dev/null 2>&1; then
+    LAST_COUNT=$(jq -r .acceptedCount "$out")
+  fi
 }
 
 run_step() {
