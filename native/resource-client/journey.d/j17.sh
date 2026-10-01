@@ -384,11 +384,15 @@ check balances "lab's till = 2*$WEEK + carl's 40" "$((2 * WEEK + 40))" "$(sed -n
 check balances "carl = 50 - 40 - fee($FEE)" "$((50 - 40 - FEE))" "$(credit_of carl)"
 ok balances bob "room status lab"
 cp "$OUT" "$SD/status-after.txt"
+HB=$(room_height lab)
+checkp balances "room status after: the week-2 window (to $((H2 + PERIOD))) has ended by height $HB" \
+  grep -q "my window: ENDED at height $((H2 + PERIOD))" "$OUT"
 
 # ------------------------------------------------ cold audit
 operator audit "stop the Host, cold audit re-admits every record, serve again" restart r2
 check audit "cold audit exit 0" 0 "$(cat "$SD/audit-r2.rc")"
-ok audit bob "read lab"
+named audit bob "read lab" "refused: outside-validity"
+ok audit bob "read lab-guest"
 concierge audit lab "after the cold audit"
 check audit "nothing re-issued" 0 "$(jq '.decisions | length' "$PASS" 2>/dev/null)"
 

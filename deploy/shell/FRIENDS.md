@@ -177,6 +177,23 @@ change. names are yours: `chat name SUBJECT bob` decides what *you* see. a line 
 Discord shows as `bridge via discord NAME#ID: …`: the bridge said it, quoting someone.
 `help chat` has the rest.
 
+## a week in a room
+
+some rooms charge. a room's price is its **tariff** (`tariff lab`: `week` credit buys
+`period` heights of membership); your balance is `credit`. paying is one line:
+
+```
+mini> credit                    # credit 1000  (a signed read of your account)
+mini> pay lab week              # one turn: the week's price to lab's till, marked renew
+mini> room status lab           # picks up the window the room's concierge issued you
+mini> doc new notes --in lab    # a member places cells in the room until the window ends
+```
+the window is a grant with an end height; past it the Host refuses you `outside-validity`
+and `room status` says ENDED. `pay lab week` again renews. a founder runs a room with
+`room new lab --template workroom --concierge SUBJECT`, sets prices with `tariff lab set
+week 100`, renews by hand with `room renew lab SUBJECT`, and funds the concierge with
+`topup lab N`. a room whose week is 0 is free: `pay` files a request instead.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:
@@ -203,7 +220,7 @@ the reason after `refused:`:
 
 ## what not to expect yet
 
-- numbered fields, one scalar action per `invoke`, laws as JSON. no paying yet; chat
+- numbered fields, one scalar action per `invoke`, laws as JSON. paying is for room weeks (above); chat
   rooms are new (`help chat`); docs have no annotations or quotes yet. no uptime promises. IDs are write-once:
   pick a new one per request. `help guide` prints this guide.
 

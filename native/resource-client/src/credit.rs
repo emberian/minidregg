@@ -365,7 +365,11 @@ fn adopt_window(root: &Path, ws: &Value, name: &str, room: &Room, inbox: &Path) 
         if presented.get("operationCapability").and_then(Value::as_str) == Some(capability.as_str()) {
             continue;
         }
-        let (after, places) = window_of(root, ws, &via, &capability)?;
+        // A window that has ended no longer reads (the Host refuses its view
+        // outside-validity): it is not adoptable, whatever the inbox holds.
+        let Ok((after, places)) = window_of(root, ws, &via, &capability) else {
+            continue;
+        };
         if !places {
             continue;
         }
