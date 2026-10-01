@@ -567,6 +567,8 @@ mod tests {
             json!({"type":"eq","slot":"resource/field/1/after","value":id})
         );
         assert!(parse("ran -3").unwrap_err().contains("a program id"));
+    }
+
     /// Commit–reveal of a tuple: the Host's rendering of `Pred.hashEq`
     /// (`Compiler/RefusalReason.lean` `renderClause`) parses to its JSON.
     #[test]
