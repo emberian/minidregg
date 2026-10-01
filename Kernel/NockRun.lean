@@ -79,6 +79,13 @@ inductive Refusal where
   | outputMalformed
   | writeNotInOutput
   | outputNotWritten
+  /-- N11 (`Kernel.NockDoor`): the door's refusals. -/
+  | doorProgram
+  | notDoor
+  | stateMalformed
+  | eventMalformed
+  | doorShape
+  | effectNotWrite
   deriving DecidableEq, Repr
 
 def Refusal.name : Refusal → String
@@ -96,6 +103,12 @@ def Refusal.name : Refusal → String
   | .outputMalformed => "outputMalformed"
   | .writeNotInOutput => "writeNotInOutput"
   | .outputNotWritten => "outputNotWritten"
+  | .doorProgram => "doorProgram"
+  | .notDoor => "notDoor"
+  | .stateMalformed => "stateMalformed"
+  | .eventMalformed => "eventMalformed"
+  | .doorShape => "doorShape"
+  | .effectNotWrite => "effectNotWrite"
 
 /-- One object-field write: field `field` of the command's `target`-th target
 (0-based, the signed target order) becomes `value`. -/
@@ -256,7 +269,8 @@ def dryRun (domain : Digest) (directory : CellRegistry.Directory Nat CanonicalCe
   match CanonicalCellRegistry.loadProgram domain directory id with
   | none => .missingProgram
   | some program =>
-    if (values.map fun v => (v.1, v.2.1)).Nodup then
+    if program.abi.door.isSome then .refused .doorProgram
+    else if (values.map fun v => (v.1, v.2.1)).Nodup then
       match program.abi.libraries.mapM fun library =>
           require .libraryUnknown (CanonicalCellRegistry.loadProgram domain directory library) with
       | .error reason => .refused reason

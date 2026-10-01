@@ -44,7 +44,11 @@ canonical DREGG/NOCK/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
 -> JSON with the kernel's canonical sample jam, 120=Nock run dry run (JSON
 {programId, caller, room, targets, values}) -> JSON with the kernel's sample at
 the Host's logical height, the oracle's verdict, Lean steps, output and decoded
-writes. 117-120 only read the Store.
+writes. 121=NockApp door poke dry run (JSON: programId, the instance's state jam
+atom or null and event number, wire and cause jams) -> JSON with the sample,
+Lean steps, output and the writes a claim names; 122=door peek (JSON with a path
+jam) -> the peek arm's answer; 123=door state (JSON) -> the instance's state now
+(stored, or the booted trap's). 117-123 only read the Store.
 Op34/46/76 success uses a distinct
 committed-permit frame; other submit outcomes carry a strict Outcome.
 The frame limit is FnEvidenceCodec.maxHostFrameBytes. EOF at a
@@ -5262,6 +5266,39 @@ def run (arguments : List String) : IO UInt32 := do
                               ⟨height, caller, room⟩ targets values
                             return ((120 : UInt8), (Minidregg.Host.Json.nockRunJson programId height
                               verdict).compress.toUTF8.toList)
+                        | 121 =>
+                            let some source := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "nock door poke request is not UTF-8")
+                            let (programId, view, wire, cause) ← IO.ofExcept
+                              (Minidregg.Host.Json.nockDoorPokeRequest source)
+                            let directory ← nockDirectory pinnedConfig state
+                            let verdict := match CanonicalCellRegistry.loadProgram
+                                pinnedConfig.deployment.domain directory programId with
+                              | none => .refused .programUnknown
+                              | some program => match program.abi.door with
+                                | none => .refused .notDoor
+                                | some door => Minidregg.Kernel.NockDoor.dryPoke program door view wire cause
+                            return ((121 : UInt8), (Minidregg.Host.Json.nockDoorPokeJson programId
+                              verdict).compress.toUTF8.toList)
+                        | 122 | 123 =>
+                            let some source := String.fromUTF8? payload.toByteArray
+                              | throw (IO.userError "nock door read request is not UTF-8")
+                            let isPeek := operation == 122
+                            let (programId, view, path) ← IO.ofExcept
+                              (Minidregg.Host.Json.nockDoorReadRequest source isPeek)
+                            let directory ← nockDirectory pinnedConfig state
+                            let verdict : Except Minidregg.Kernel.NockRun.Refusal
+                                Minidregg.Kernel.NockRun.Ran :=
+                              match CanonicalCellRegistry.loadProgram
+                                  pinnedConfig.deployment.domain directory programId with
+                              | none => .error .programUnknown
+                              | some program => match program.abi.door with
+                                | none => .error .notDoor
+                                | some door =>
+                                  if isPeek then Minidregg.Kernel.NockDoor.peek program door view path
+                                  else Minidregg.Kernel.NockDoor.stateNow program view
+                            return (operation, (if isPeek then Minidregg.Host.Json.nockDoorPeekJson verdict
+                              else Minidregg.Host.Json.nockDoorStateJson verdict).compress.toUTF8.toList)
                         | 91 =>
                             unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "resource birth request exceeds host frame bound")

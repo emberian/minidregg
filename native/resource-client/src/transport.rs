@@ -86,8 +86,9 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
     match request {
         [0..=11, ..] => true,
         // NOCK K-NOCK-CELL / K-RAN: read-only program check / show / sample /
-        // run dry run (op 120 reads no target cell: values are the caller's).
-        [117..=120, ..] => true,
+        // run dry run (op 120 reads no target cell: values are the caller's);
+        // N11: NockApp door poke dry run / peek / state (121-123, same rule).
+        [117..=123, ..] => true,
         [12 | 14] => true,
         [13 | 15, digits @ ..] => {
             !digits.is_empty()
@@ -1076,7 +1077,10 @@ mod tests {
         assert!(allowed_operation(&[118, b'7'], false));
         assert!(allowed_operation(&[119, b'{', b'}'], false));
         assert!(allowed_operation(&[120, b'{', b'}'], false));
-        assert!(!allowed_operation(&[121, b'{', b'}'], false));
+        assert!(allowed_operation(&[121, b'{', b'}'], false));
+        assert!(allowed_operation(&[122, b'{', b'}'], false));
+        assert!(allowed_operation(&[123, b'{', b'}'], false));
+        assert!(!allowed_operation(&[124, b'{', b'}'], false));
     }
 
     #[test]

@@ -5,6 +5,7 @@ contains a proposed post, raw patch, policy decision, or authority snapshot. -/
 import Kernel.DeclaredResourceScalar
 import Kernel.ContentResource
 import Kernel.NockRun
+import Kernel.NockDoor
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -536,8 +537,27 @@ structure CheckedRun where
 def runContext (ambient : Ambient) (command : Command) : NockProgramCell.Context :=
   ⟨ambient.height, command.subject.value, 0⟩
 
-/-- Load the claimed program and its libraries, build the kernel's sample from
-the loaded pre-states, and re-execute. -/
+/-- The program's own check: a gate re-executes on the kernel's sample
+(`NockRun.checkRun`); a NockApp door (N11) re-executes its poke on target 0's
+stored state and event number (`NockDoor.checkPoke`). -/
+def checkProgram (program : NockProgramCodec.Program) (libraries : List NockProgramCodec.Program)
+    (ambient : Ambient) (command : Command)
+    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (claim : NockRun.RunClaim) (writes : List NockRun.FieldWrite) :
+    Except NockRun.Refusal NockRun.Verdict :=
+  match program.abi.door with
+  | none =>
+    match NockProgramCell.sampleOf program.abi (runContext ambient command)
+        (command.targets.map Target.target) (sampleRead command pre) with
+    | none => .error .sampleUnavailable
+    | some sample => NockRun.checkRun program libraries sample claim writes
+  | some door =>
+    match NockDoor.viewOf door (sampleRead command pre) with
+    | .error e => .error e
+    | .ok view => NockDoor.checkPoke program door view claim writes
+
+/-- Load the claimed program and its libraries and re-execute it against the
+loaded pre-states (`checkProgram`). -/
 def checkClaim (domain : Digest) (directory : Directory Nat Registry) (ambient : Ambient)
     (command : Command) (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
     (claim : NockRun.RunClaim) : Except NockRun.Refusal CheckedRun := do
@@ -545,11 +565,8 @@ def checkClaim (domain : Digest) (directory : Directory Nat Registry) (ambient :
     (CanonicalCellRegistry.loadProgram domain directory claim.programId)
   let libraries ← program.abi.libraries.mapM fun library =>
     NockRun.require .libraryUnknown (CanonicalCellRegistry.loadProgram domain directory library)
-  let sample ← NockRun.require .sampleUnavailable
-    (NockProgramCell.sampleOf program.abi (runContext ambient command)
-      (command.targets.map Target.target) (sampleRead command pre))
   let writes ← NockRun.require .writeNotInOutput (commandWrites command)
-  let verdict ← NockRun.checkRun program libraries sample claim writes
+  let verdict ← checkProgram program libraries ambient command pre claim writes
   pure ⟨claim, program.abi.fuel, verdict⟩
 
 /-- No claim: nothing to check. A claim: `checkClaim`, its refusal named `run`. -/
@@ -620,23 +637,55 @@ theorem checkCommandRun_none {domain : Digest} {directory : Directory Nat Regist
     checkCommandRun domain directory ambient command pre = .ok none := by
   unfold checkCommandRun; rw [unclaimed]
 
+/-- What an accepted `checkProgram` ran: a gate's `checkRun` on the kernel's
+sample, or a door's `checkPoke` on target 0's stored view. -/
+def ProgramAccepted (program : NockProgramCodec.Program) (libraries : List NockProgramCodec.Program)
+    (ambient : Ambient) (command : Command)
+    (pre : (i : Fin command.targets.length) → Store command.targets[i].layout)
+    (claim : NockRun.RunClaim) (writes : List NockRun.FieldWrite) (verdict : NockRun.Verdict) : Prop :=
+  match program.abi.door with
+  | none => ∃ sample, NockProgramCell.sampleOf program.abi (runContext ambient command)
+      (command.targets.map Target.target) (sampleRead command pre) = some sample ∧
+      NockRun.checkRun program libraries sample claim writes = .ok verdict
+  | some door => ∃ view, NockDoor.viewOf door (sampleRead command pre) = .ok view ∧
+      NockDoor.checkPoke program door view claim writes = .ok verdict
+
+theorem checkProgram_sound {program : NockProgramCodec.Program}
+    {libraries : List NockProgramCodec.Program} {ambient : Ambient} {command : Command}
+    {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {claim : NockRun.RunClaim} {writes : List NockRun.FieldWrite} {verdict : NockRun.Verdict}
+    (accepted : checkProgram program libraries ambient command pre claim writes = .ok verdict) :
+    ProgramAccepted program libraries ambient command pre claim writes verdict := by
+  unfold checkProgram at accepted
+  unfold ProgramAccepted
+  split at accepted
+  · split at accepted
+    · cases accepted
+    · rename_i sample hsample
+      exact ⟨sample, hsample, accepted⟩
+  · rename_i door _
+    split at accepted
+    · cases accepted
+    · rename_i view hview
+      exact ⟨view, hview, accepted⟩
+
 /-- **`checkClaim_sound`**: an accepted run check loaded the claimed program
-and its libraries from the directory, built the kernel's own sample from the
-loaded pre-states, and `NockRun.checkRun` accepted the command's writes. -/
+and its libraries from the directory and re-executed it against the loaded
+pre-states: a gate on the kernel's own sample (`NockRun.checkRun`), a door on
+target 0's stored state (`NockDoor.checkPoke`), accepting the command's writes. -/
 theorem checkClaim_sound {domain : Digest} {directory : Directory Nat Registry} {ambient : Ambient}
     {command : Command} {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
     {claim : NockRun.RunClaim} {checked : CheckedRun}
     (accepted : checkClaim domain directory ambient command pre claim = .ok checked) :
-    ∃ program libraries sample writes,
+    ∃ program libraries writes,
       checked.claim = claim ∧
       CanonicalCellRegistry.loadProgram domain directory checked.claim.programId = some program ∧
       program.abi.libraries.mapM (fun library => NockRun.require .libraryUnknown
         (CanonicalCellRegistry.loadProgram domain directory library)) = .ok libraries ∧
-      NockProgramCell.sampleOf program.abi (runContext ambient command)
-        (command.targets.map Target.target) (sampleRead command pre) = some sample ∧
       commandWrites command = some writes ∧
       checked.fuel = program.abi.fuel ∧
-      NockRun.checkRun program libraries sample checked.claim writes = .ok checked.verdict := by
+      ProgramAccepted program libraries ambient command pre checked.claim writes
+        checked.verdict := by
   unfold checkClaim at accepted
   simp only [bind, Except.bind, pure, Except.pure] at accepted
   cases hprog : CanonicalCellRegistry.loadProgram domain directory claim.programId with
@@ -649,21 +698,16 @@ theorem checkClaim_sound {domain : Digest} {directory : Directory Nat Registry} 
     | ok libraries =>
       rw [hlibs] at accepted
       simp only at accepted
-      cases hsample : NockProgramCell.sampleOf program.abi (runContext ambient command)
-          (command.targets.map Target.target) (sampleRead command pre) with
-      | none => simp [hsample] at accepted
-      | some sample =>
-        simp only [hsample, NockRun.require_some] at accepted
-        cases hwrites : commandWrites command with
-        | none => simp [hwrites] at accepted
-        | some writes =>
-          simp only [hwrites, NockRun.require_some] at accepted
-          cases hrun : NockRun.checkRun program libraries sample claim writes with
-          | error e => simp [hrun] at accepted
-          | ok verdict =>
-            simp only [hrun, Except.ok.injEq] at accepted
-            subst accepted
-            exact ⟨program, libraries, sample, writes, rfl, hprog, hlibs, hsample, rfl, rfl, hrun⟩
+      cases hwrites : commandWrites command with
+      | none => simp [hwrites] at accepted
+      | some writes =>
+        simp only [hwrites, NockRun.require_some] at accepted
+        cases hrun : checkProgram program libraries ambient command pre claim writes with
+        | error e => simp [hrun] at accepted
+        | ok verdict =>
+          simp only [hrun, Except.ok.injEq] at accepted
+          subst accepted
+          exact ⟨program, libraries, writes, rfl, hprog, hlibs, rfl, rfl, checkProgram_sound hrun⟩
 
 /-- **`checkCommandRun_sound`**: a checked run in a prepared invocation is the
 command's own claim, accepted by `checkClaim`. -/
@@ -683,7 +727,7 @@ theorem checkCommandRun_sound {domain : Digest} {directory : Directory Nat Regis
     | ok c =>
       simp only [hc, Except.map, Except.mapError, Except.ok.injEq, Option.some.injEq] at accepted
       subst accepted
-      obtain ⟨_, _, _, _, same, -⟩ := checkClaim_sound hc
+      obtain ⟨_, _, _, same, -⟩ := checkClaim_sound hc
       rw [same]
       exact ⟨rfl, hc⟩
 
@@ -701,25 +745,25 @@ theorem checkCommandRun_claimed {domain : Digest} {directory : Directory Nat Reg
 
 /-- **`PreparedInvocation.run_sound`**: a prepared invocation whose command claims
 a run carries that run checked against the kernel's own sample and the loaded
-pre-states, and `NockRun.checkRun` accepted exactly the command's writes. With
-`NockRun.no_accepted_of_output_mismatch` this is the T8 statement at the
-controller: no invocation prepares whose writes differ from the program's. -/
+pre-states, and the program's own check (`checkRun` for a gate, `checkPoke`
+for a door) accepted exactly the command's writes. With
+`NockRun.no_accepted_of_output_mismatch` / `NockDoor.door_poke_sound` this is
+the T8 statement at the controller: no invocation prepares whose writes differ
+from the program's. -/
 theorem PreparedInvocation.run_sound {F : Type} [Field F] {deployment : Deployment}
     {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
     {command : Command} (prepared : PreparedInvocation deployment profile ambient durable command)
     {claim : NockRun.RunClaim} (claimed : command.run = some claim) :
-    ∃ checked program libraries sample writes,
+    ∃ checked program libraries writes,
       prepared.run = some checked ∧ checked.claim = claim ∧
       CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory
         claim.programId = some program ∧
       program.abi.libraries.mapM (fun library => NockRun.require .libraryUnknown
         (CanonicalCellRegistry.loadProgram deployment.domain prepared.directory.directory library)) =
           .ok libraries ∧
-      NockProgramCell.sampleOf program.abi (runContext ambient command)
-        (command.targets.map Target.target)
-        (sampleRead command fun i => (prepared.targets i).pre.logical) = some sample ∧
       commandWrites command = some writes ∧
-      NockRun.checkRun program libraries sample claim writes = .ok checked.verdict := by
+      ProgramAccepted program libraries ambient command (fun i => (prepared.targets i).pre.logical)
+        claim writes checked.verdict := by
   have h := prepared.runChecked
   cases hrun : prepared.run with
   | none => rw [hrun] at h; exact absurd h (checkCommandRun_claimed claimed)
@@ -728,8 +772,8 @@ theorem PreparedInvocation.run_sound {F : Type} [Field F] {deployment : Deployme
     obtain ⟨same, hc⟩ := checkCommandRun_sound h
     rw [claimed] at same
     cases same
-    obtain ⟨program, libraries, sample, writes, -, hp, hl, hs, hw, -, hr⟩ := checkClaim_sound hc
-    exact ⟨checked, program, libraries, sample, writes, rfl, rfl, hp, hl, hs, hw, hr⟩
+    obtain ⟨program, libraries, writes, -, hp, hl, hw, -, hr⟩ := checkClaim_sound hc
+    exact ⟨checked, program, libraries, writes, rfl, rfl, hp, hl, hw, hr⟩
 
 /-- Without a claim, no run slot: the controller projects nothing under `run/`. -/
 theorem PreparedInvocation.run_unclaimed {F : Type} [Field F] {deployment : Deployment}
@@ -744,6 +788,8 @@ end Minidregg.Kernel.DeclaredResourceController
 
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkCommandRun_none' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkCommandRun_none
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.checkProgram_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkProgram_sound
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkClaim_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkClaim_sound
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkCommandRun_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/

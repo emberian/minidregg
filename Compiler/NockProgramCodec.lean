@@ -39,7 +39,8 @@ open Minidregg.Theory.TypedAuthorization
 set_option autoImplicit false
 
 def wireVersion : Nat := 1
-def abiVersion : Nat := 1
+/-- v2: the ABI may name a NockApp kernel `door` (N11). -/
+def abiVersion : Nat := 2
 /-- Tag 11 / schema 91010 are the pay cell's on `p2-pay`; this kind takes the next. -/
 def registryTag : UInt8 := 12
 def schemaId : Nat := 91011
@@ -73,6 +74,17 @@ structure OutputSlot where
   type : SlotType
   deriving DecidableEq, Repr
 
+/-- A NockApp kernel door (NOCK §2.7, N11). The program's jam is the kernel
+trap (booted with `[9 2 0 1]`); `Abi.arm` is the poke axis (NockApp: 23) and
+`peek` the peek axis (NockApp: 22). The door's state (core axis 6) lives as the
+atom of its jam in object field `state` of the command's target 0, its event
+number in field `event`. -/
+structure Door where
+  peek : Nat
+  state : Nat
+  event : Nat
+  deriving DecidableEq, Repr
+
 structure Abi where
   version : Nat
   /-- The arm slammed: 2 for a bare gate (hoonc's trap kicked to its gate). -/
@@ -83,6 +95,8 @@ structure Abi where
   libraries : List Digest
   /-- The fuel bound a run is held to (Lean `Theory.Nock.steps`). -/
   fuel : Nat
+  /-- A NockApp kernel door, or `none` for a gate. -/
+  door : Option Door := none
   deriving DecidableEq, Repr
 
 structure Program where
@@ -110,15 +124,22 @@ def outputSlotStream : StreamCodec OutputSlot :=
     (fun s => (s.key, s.target, s.field, s.type)) (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2⟩)
     (by intro value; cases value; rfl)
 
+def doorStream : StreamCodec Door :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product StreamCodec.nat StreamCodec.nat))
+    (fun d => (d.peek, d.state, d.event)) (fun v => ⟨v.1, v.2.1, v.2.2⟩)
+    (by intro value; cases value; rfl)
+
 def abiStream : StreamCodec Abi :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
       (StreamCodec.product StreamCodec.nat
         (StreamCodec.product (StreamCodec.list sampleSlotStream)
           (StreamCodec.product (StreamCodec.list outputSlotStream)
-            (StreamCodec.product (StreamCodec.list digestStream) StreamCodec.nat)))))
-    (fun a => (a.version, a.arm, a.sample, a.outputs, a.libraries, a.fuel))
-    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2.1, v.2.2.2.2.2⟩)
+            (StreamCodec.product (StreamCodec.list digestStream)
+              (StreamCodec.product StreamCodec.nat (StreamCodec.option doorStream)))))))
+    (fun a => (a.version, a.arm, a.sample, a.outputs, a.libraries, a.fuel, a.door))
+    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2.1, v.2.2.2.2.2.1, v.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def programStream : StreamCodec Program :=
@@ -157,9 +178,9 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
   decode := framedDecode frame stream
   decode_encode := framedDecode_encode frame stream
 
-/-- `DREGG/NOCK/ABI/v1` -/
+/-- `DREGG/NOCK/ABI/v2` -/
 def abiFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 49]
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 50]
 /-- `DREGG/NOCK/PROGRAM/v1` -/
 def programFrame : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
@@ -244,6 +265,16 @@ def Refusal.name : Refusal → String
   | .abiShape => "abiShape"
   | .missingLibrary => "missingLibrary"
 
+/-- A door reads no sample slots and no libraries (its subject is the kernel's
+own `[[trap state] job]`), names a peek arm, and keeps its state and event
+fields apart from each other and from every output write on target 0. -/
+def DoorShape (abi : Abi) (door : Door) : Prop :=
+  0 < door.peek ∧ door.state ≠ door.event ∧ abi.sample = [] ∧ abi.libraries = [] ∧
+    ∀ o ∈ abi.outputs, o.target = 0 → o.field ≠ door.state ∧ o.field ≠ door.event
+
+instance doorShapeDecidable (abi : Abi) (door : Door) : Decidable (DoorShape abi door) := by
+  unfold DoorShape; infer_instance
+
 /-- The key prefix reserved for the target entries of the sample. -/
 def targetPrefix : String := "target/"
 
@@ -251,7 +282,8 @@ def targetPrefix : String := "target/"
 sample key can be mistaken for a target entry, libraries are distinct. -/
 def AbiShape (abi : Abi) : Prop :=
   (abi.sample.map SampleSlot.key).Nodup ∧ (abi.outputs.map OutputSlot.key).Nodup ∧
-    abi.libraries.Nodup ∧ ∀ slot ∈ abi.sample, targetPrefix.isPrefixOf slot.key = false
+    abi.libraries.Nodup ∧ (∀ slot ∈ abi.sample, targetPrefix.isPrefixOf slot.key = false) ∧
+    ∀ door ∈ abi.door, DoorShape abi door
 
 instance abiShapeDecidable (abi : Abi) : Decidable (AbiShape abi) := by
   unfold AbiShape; infer_instance
