@@ -199,7 +199,7 @@ jq -n --arg dir "$out" \
   --arg store "$(sha_of bin/minidregg-link-sqlite-store)" \
   --arg verifier "$(sha_of bin/minidregg-credential-signature-verifier)" \
   --arg candidate "$(sha_of provenance.json)" \
-  '{host: ($dir + "/bin/minidregg-host"), mini: ($dir + "/bin/mini"),
+  '{host: ($dir + "/bin/minidregg-host"), mini: ($dir + "/bin/mini"), shell: ($dir + "/bin/mini"),
     store: ($dir + "/bin/minidregg-link-sqlite-store"),
     verifier: ($dir + "/bin/minidregg-credential-signature-verifier"),
     candidate: ($dir + "/provenance.json"),
