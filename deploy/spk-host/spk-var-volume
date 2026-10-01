@@ -4,39 +4,59 @@
 set -euo pipefail
 
 usage() {
-  echo 'usage: spk-var-volume create RESOURCE_ID APP_UID SIZE_MIB SOURCE_VOLUME_HEX | verify RESOURCE_ID APP_UID SIZE_MIB | attest RESOURCE_ID' >&2
+  echo 'usage: spk-var-volume --root GRAINS_ROOT create STORE RESOURCE_ID APP_UID SIZE_MIB SOURCE_VOLUME_HEX
+       spk-var-volume --root GRAINS_ROOT create-from STORE RESOURCE_ID APP_UID SIZE_MIB SOURCE_VOLUME_HEX IMAGE
+       spk-var-volume --root GRAINS_ROOT verify STORE RESOURCE_ID APP_UID SIZE_MIB
+       spk-var-volume --root GRAINS_ROOT attest STORE RESOURCE_ID' >&2
   exit 2
 }
 
-(( $# == 5 || $# == 4 || $# == 2 )) || usage
-action=$1 resource=$2
-[[ $action == create && $# == 5 || $action == verify && $# == 4 ||
-   $action == attest && $# == 2 ]] || usage
+# Invoked by mini-spk-broker (root) with its configured grains root. Every
+# name is <store>-<resource>: two Stores on one host never share a volume.
+(( $# >= 5 )) && [[ $1 == --root ]] || usage
+root=$2
+shift 2
+action=$1 store=$2 resource=$3
+case $action in
+  create) (( $# == 6 )) || usage ;;
+  create-from) (( $# == 7 )) || usage ;;
+  verify) (( $# == 5 )) || usage ;;
+  attest) (( $# == 3 )) || usage ;;
+  *) usage ;;
+esac
+[[ $root =~ ^/[A-Za-z0-9_./-]+$ && $root != */ && $root != *//* && $root != */./* && $root != */../* ]] || usage
+[[ $store =~ ^[0-9a-f]{16}$ ]] || usage
 [[ $resource =~ ^[1-9][0-9]{0,17}$ ]] || usage
-if [[ $action == create ]]; then
-  volume_id=$5
+if [[ $action == create || $action == create-from ]]; then
+  volume_id=$6
   [[ $volume_id =~ ^[0-9a-f]{64}$ ]] || usage
+fi
+if [[ $action == create-from ]]; then
+  source_image=$7
+  [[ $source_image == "$root/volumes/.import-$store-$resource" ]] || usage
 fi
 (( EUID == 0 )) || { echo 'spk-var-volume requires root' >&2; exit 1; }
 
-config_dir=/etc/minidregg/spk/volumes
-config=$config_dir/$resource.conf
+name=$store-$resource
+config_dir=$root/volumes
+config=$config_dir/$name.conf
 if [[ $action == attest ]]; then
   app_uid=0 size_mib=0
 else
-  app_uid=$3 size_mib=$4
+  app_uid=$4 size_mib=$5
 fi
 
-base=/var/lib/minidregg/spk
-image_dir=$base/images
-mount_dir=$base/vars
-image=$image_dir/$resource.ext4
-target=$mount_dir/$resource
+image_dir=$root/volumes
+mount_dir=$root/vars
+image=$image_dir/$name.ext4
+target=$mount_dir/$name
 
 safe_dir() {
   local path=$1 mode=$2 actual allow_create=${3:-false}
   if [[ ! -e $path && ! -L $path ]]; then
-    [[ $action == create || $allow_create == true ]] || { echo "missing $path" >&2; exit 1; }
+    [[ $action == create || $action == create-from || $allow_create == true ]] || {
+      echo "missing $path" >&2; exit 1;
+    }
     install -d -o root -g root -m "$mode" -- "$path"
   fi
   [[ -d $path && ! -L $path ]] || { echo "unsafe directory $path" >&2; exit 1; }
@@ -45,28 +65,29 @@ safe_dir() {
   [[ $actual == "$mode" ]] || { echo "unexpected mode $path: $actual" >&2; exit 1; }
 }
 
-# Every ancestor of both the private image and the task-traversable mount path
-# is root-owned and not task-writable. The backing file is never put in the jail.
-safe_dir /var 755
-safe_dir /var/lib 755
-safe_dir /var/lib/minidregg 755
-safe_dir "$base" 755
+# Every ancestor of the grains root is root-owned and not group/world
+# writable; below it, the private images and the task-traversable mounts.
+ancestor=
+IFS=/ read -r -a parts <<< "${root#/}"
+for part in "${parts[@]}"; do
+  ancestor=$ancestor/$part
+  [[ -d $ancestor && ! -L $ancestor ]] || { echo "unsafe ancestor $ancestor" >&2; exit 1; }
+  [[ $(stat -c '%u' -- "$ancestor") == 0 ]] || { echo "non-root ancestor $ancestor" >&2; exit 1; }
+  (( ($(stat -c '0%a' -- "$ancestor") & 022) == 0 )) || { echo "writable ancestor $ancestor" >&2; exit 1; }
+done
+safe_dir "$root" 755
 safe_dir "$image_dir" 700
 safe_dir "$mount_dir" 711
-safe_dir /run 755
-safe_dir /run/minidregg 755 true
-safe_dir /run/minidregg/spk 755 true
-safe_dir /run/minidregg/spk/volume-attest 755 true
-handoff_dir=/run/minidregg/spk/volume-attest
-lock=$handoff_dir/$resource.lock
+safe_dir "$root/attest" 755 true
+handoff_dir=$root/attest
+lock=$handoff_dir/$name.lock
 exec 9> "$lock"
 chmod 600 -- "$lock"
 /usr/bin/flock -x 9
-if [[ $action == create || $action == attest ]]; then
+if [[ $action == create || $action == create-from || $action == attest ]]; then
   safe_dir /etc 755
   safe_dir /etc/minidregg 755
   safe_dir /etc/minidregg/spk 700
-  safe_dir "$config_dir" 700
 
   identity=/etc/minidregg/spk/host-identity
   [[ -f $identity && ! -L $identity ]] || { echo 'protected host identity absent' >&2; exit 1; }
@@ -115,18 +136,37 @@ fi
 getent passwd "$app_uid" >/dev/null || { echo 'unknown app UID' >&2; exit 1; }
 bytes=$(( size_mib * 1024 * 1024 ))
 
-if [[ $action == create ]]; then
+if [[ $action == create || $action == create-from ]]; then
   [[ ! -e $config && ! -L $config ]] || { echo 'volume registration already exists' >&2; exit 1; }
   [[ ! -e $image && ! -L $image && ! -e $target && ! -L $target ]] || {
     echo 'resource image or mountpoint already exists; refusing overwrite' >&2; exit 1;
   }
   umask 077
-  image_tmp=$(mktemp "$image_dir/.image.XXXXXXXX")
-  trap 'rm -f -- "$image_tmp"' EXIT
-  chmod 600 -- "$image_tmp"
-  chown root:root -- "$image_tmp"
-  fallocate -l "$bytes" -- "$image_tmp"
-  /usr/sbin/mkfs.ext4 -q -F -- "$image_tmp"
+  if [[ $action == create ]]; then
+    image_tmp=$(mktemp "$image_dir/.image.XXXXXXXX")
+    trap 'rm -f -- "$image_tmp"' EXIT
+    chmod 600 -- "$image_tmp"
+    chown root:root -- "$image_tmp"
+    fallocate -l "$bytes" -- "$image_tmp"
+    /usr/sbin/mkfs.ext4 -q -F -- "$image_tmp"
+  else
+    # An imported image is the broker's own root copy whose SHA-256 it
+    # checked against the signed export; it is still untrusted filesystem
+    # input to the kernel, so it must be a clean ext4 of exactly the class
+    # size before it is ever mounted.
+    image_tmp=$source_image
+    trap 'rm -f -- "$image_tmp"' EXIT
+    [[ -f $image_tmp && ! -L $image_tmp ]] || { echo 'import image missing' >&2; exit 1; }
+    [[ $(stat -c '%u:%a:%s:%h' -- "$image_tmp") == "0:600:$bytes:1" ]] || {
+      echo 'import image identity or size refused' >&2; exit 1;
+    }
+    [[ $(/usr/sbin/blkid -p -s TYPE -o value -- "$image_tmp") == ext4 ]] || {
+      echo 'import image is not ext4' >&2; exit 1;
+    }
+    /usr/sbin/e2fsck -fn -- "$image_tmp" >/dev/null 2>&1 || {
+      echo 'import image fails e2fsck' >&2; exit 1;
+    }
+  fi
   ln -- "$image_tmp" "$image"
   /usr/bin/sync -f "$image_dir"
   rm -- "$image_tmp"
@@ -134,7 +174,9 @@ if [[ $action == create ]]; then
   trap - EXIT
   install -d -o root -g root -m 700 -- "$target"
   /usr/bin/mount -t ext4 -o loop,nosuid,nodev,noatime -- "$image" "$target"
-  chown "$app_uid:$app_uid" -- "$target"
+  app_gid=$(getent passwd "$app_uid" | cut -d: -f4)
+  [[ $app_gid =~ ^[1-9][0-9]{0,9}$ ]] || { echo 'app primary group refused' >&2; exit 1; }
+  chown "$app_uid:$app_gid" -- "$target"
   chmod 700 -- "$target"
 fi
 
@@ -154,7 +196,7 @@ backing=$(/usr/sbin/losetup -n -O BACK-FILE -- "$source_dev")
   echo 'mounted /var is not ext4' >&2; exit 1;
 }
 
-if [[ $action == create ]]; then
+if [[ $action == create || $action == create-from ]]; then
   [[ ! -e $config && ! -L $config ]] || { echo 'volume registration already exists' >&2; exit 1; }
   config_tmp=$(mktemp "$config_dir/.volume.XXXXXXXX")
   trap 'rm -f -- "$config_tmp"' EXIT
@@ -171,7 +213,7 @@ if [[ $action == create ]]; then
 fi
 
 if [[ $action == attest ]]; then
-  handoff=$handoff_dir/$resource.witness
+  handoff=$handoff_dir/$name.witness
 
   collect_witness() {
     local observed_loop observed_backing observed_inode observed_size backing_fs image_uuid
@@ -231,4 +273,4 @@ if [[ $action == attest ]]; then
     echo 'volume witness file identity drift' >&2; exit 1;
   }
 fi
-echo "verified resource=$resource uid=$app_uid size_mib=$size_mib mount=$target"
+echo "verified store=$store resource=$resource uid=$app_uid size_mib=$size_mib mount=$target"

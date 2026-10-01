@@ -37,7 +37,7 @@ use crate::materialize::verify_installed_spk;
 use crate::resident_launch::PreparedResident;
 use crate::resident_launch::SourceBoundLaunch;
 use crate::sandbox::{open_protected_directory, SandboxSpec};
-use crate::volume_custody::read_attested_volume;
+use crate::volume_custody::{read_attested_volume, VolumeSite};
 use minidregg_spk_rpc::decode_bridge_config;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -148,6 +148,8 @@ struct ResidentConfig {
     expected_volume_id: String,
     persistent_var: PathBuf,
     persistent_var_max_bytes: u64,
+    grains_root: PathBuf,
+    store: String,
     deployment_id: String,
     host_id: String,
     bwrap: PathBuf,
@@ -836,8 +838,55 @@ impl ResidentConfig {
 /// This is the systemd ExecStart body for a fresh native START claim. The
 /// stopped unit is installed from operator-reviewed pins; HTTP has no path to
 /// choose a package, task UID, Mini signer, command, or app generation.
+/// The resident never runs as root. Its unit (rendered by the root broker)
+/// names the app UID/GID, grains root and Store; the setid bound is installed
+/// before the operator-written config is read, and the config must agree.
+struct ResidentBound {
+    app_uid: u32,
+    app_gid: u32,
+    grains_root: PathBuf,
+    store: String,
+}
+
+impl ResidentBound {
+    fn from_unit_environment() -> io::Result<Self> {
+        if unsafe { libc::geteuid() } == 0 {
+            return Err(invalid(
+                "resident refuses root: it runs as the Store operator under mini-spk-broker",
+            ));
+        }
+        let var = |name: &str| {
+            std::env::var(name).map_err(|_| invalid("resident unit environment incomplete"))
+        };
+        let id = |name: &str| -> io::Result<u32> {
+            var(name)?
+                .parse::<u32>()
+                .ok()
+                .filter(|value| *value != 0)
+                .ok_or_else(|| invalid("resident unit app id refused"))
+        };
+        Ok(Self {
+            app_uid: id("MINI_SPK_APP_UID")?,
+            app_gid: id("MINI_SPK_APP_GID")?,
+            grains_root: PathBuf::from(var("MINI_SPK_GRAINS_ROOT")?),
+            store: var("MINI_SPK_STORE")?,
+        })
+    }
+}
+
 pub fn run(config_path: &Path) -> io::Result<()> {
+    let bound = ResidentBound::from_unit_environment()?;
+    crate::setid_bound::install(bound.app_uid, bound.app_gid)?;
     let config = ResidentConfig::load(config_path)?;
+    if config.app_uid != bound.app_uid
+        || config.app_gid != bound.app_gid
+        || config.grains_root != bound.grains_root
+        || config.store != bound.store
+    {
+        return Err(invalid(
+            "resident config differs from the broker-rendered unit's app identity",
+        ));
+    }
     let journal = Journal::open(&config.journal_dir)?;
     let operator = PrivateOperator {
         host: config.mini_host.clone(),
@@ -1020,6 +1069,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     // source permit. Preflight it before consuming the one-shot BEGIN, then
     // require its volume ID to equal Mini's exact source projection.
     let volume = read_attested_volume(
+        &VolumeSite::new(&config.grains_root, &config.store)?,
         config.volume_resource,
         config.app_uid,
         config.persistent_var_max_bytes,
@@ -1251,10 +1301,24 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 .map(|listener| (listener, prepared, agent))
         })
         .collect::<io::Result<Vec<_>>>()?;
-    let agent_fds: Vec<_> = agent_routes
+    // The app's exit ends this generation: the resident exits with an error,
+    // the unit fails, and its OnFailure supervisor STOPs this generation and
+    // continues a new one. A generation is never relaunched in place.
+    let app_exit = {
+        let fd = unsafe {
+            libc::syscall(libc::SYS_pidfd_open, resident.child_pid() as libc::pid_t, 0)
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe { <std::os::fd::OwnedFd as std::os::fd::FromRawFd>::from_raw_fd(fd as libc::c_int) }
+    };
+    let mut agent_fds: Vec<_> = agent_routes
         .iter()
         .map(|(listener, _, _)| listener.as_raw_fd())
         .collect();
+    let app_exit_index = agent_fds.len();
+    agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&app_exit));
     PrivateHttpEntrance::serve_many_with_aux(&entrances, &agent_fds, |event| {
         if let Ok((index, request, kind, policy)) = event {
             let entry = &config.entrances[index];
@@ -1280,6 +1344,9 @@ pub fn run(config_path: &Path) -> io::Result<()> {
             Err(index) => index,
             Ok(_) => unreachable!("HTTP branch returned above"),
         };
+        if index == app_exit_index {
+            return Err(invalid("app process exited; this generation ends"));
+        }
         let (listener, prepared, agent) = agent_routes
             .get_mut(index)
             .ok_or_else(|| invalid("resident agent poll index drift"))?;
@@ -1490,6 +1557,8 @@ mod tests {
             "persistentVarMaxBytes": 1048576,
             "deploymentId": "e".repeat(64),
             "hostId": "f".repeat(64),
+            "grainsRoot": "/var/lib/mini/grains",
+            "store": "0123456789abcdef",
             "bwrap": "/usr/bin/bwrap",
             "bwrapSha256": "b".repeat(64),
             "appUid": 1000,

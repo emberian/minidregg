@@ -56,7 +56,9 @@ fn main() {
             }
             Err(error) => {
                 eprintln!("spk-host: grain refused: {error}");
-                std::process::exit(1);
+                // An uncertain record is never retried: the supervisor template
+                // sets RestartPreventExitStatus=3.
+                std::process::exit(if error.to_string().starts_with("UNRESOLVED:") { 3 } else { 1 });
             }
         }
     }

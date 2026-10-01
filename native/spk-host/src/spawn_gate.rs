@@ -234,15 +234,23 @@ unsafe fn child_exec(input: ChildExecInput<'_>) -> ! {
     if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
         fail(write_fd);
     }
-    if libc::geteuid() == 0 {
+    if libc::geteuid() != spec.app_uid || libc::getegid() != spec.app_gid {
+        // Root (the audit harness) or the de-rooted resident, which holds
+        // exactly CAP_SETUID/CAP_SETGID, bounded by `setid_bound` to this
+        // UID/GID pair.
         if libc::setgroups(0, std::ptr::null()) != 0
             || libc::setresgid(spec.app_gid, spec.app_gid, spec.app_gid) != 0
             || libc::setresuid(spec.app_uid, spec.app_uid, spec.app_uid) != 0
         {
             fail(write_fd);
         }
-    } else if libc::geteuid() != spec.app_uid || libc::getegid() != spec.app_gid {
-        fail(write_fd);
+        // A non-root caller keeps its capability sets across a change between
+        // two non-root UIDs; clear all of them so bubblewrap starts with none.
+        if libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0) != 0
+            || !crate::setid_bound::clear_capabilities()
+        {
+            fail(write_fd);
+        }
     }
     if libc::geteuid() != spec.app_uid || libc::getegid() != spec.app_gid {
         fail(write_fd);
@@ -456,8 +464,10 @@ fn spawn_inner(spec: &SpawnSpec, test_mode: bool) -> io::Result<BoundedChild> {
 }
 
 pub(crate) fn spawn_bounded(spec: &SpawnSpec) -> io::Result<BoundedChild> {
-    if unsafe { libc::geteuid() } != 0 {
-        return Err(invalid("production SPK gate must run as root"));
+    if unsafe { libc::geteuid() } != 0 && !crate::setid_bound::holds_setid_capabilities()? {
+        return Err(invalid(
+            "production SPK gate needs root or CAP_SETUID+CAP_SETGID bounded to the app UID",
+        ));
     }
     spawn_inner(spec, false)
 }

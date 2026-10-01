@@ -26,6 +26,8 @@ mod agent_api_server;
 #[cfg(target_os = "linux")]
 mod agent_api_wire;
 #[cfg(target_os = "linux")]
+pub mod broker;
+#[cfg(target_os = "linux")]
 mod claim_descriptor;
 #[cfg(target_os = "linux")]
 mod claim_native;
@@ -59,6 +61,8 @@ pub mod launch_descriptor_native;
 mod lifecycle_selector;
 #[cfg(target_os = "linux")]
 pub mod grain;
+#[cfg(target_os = "linux")]
+mod grain_export;
 #[cfg(target_os = "linux")]
 mod grain_route;
 #[cfg(target_os = "linux")]
@@ -95,6 +99,8 @@ mod rpc_adapter;
 pub mod sandbox;
 #[cfg(target_os = "linux")]
 pub mod seccomp;
+#[cfg(target_os = "linux")]
+mod setid_bound;
 #[cfg(target_os = "linux")]
 mod spawn_gate;
 #[cfg(target_os = "linux")]
