@@ -35,7 +35,10 @@ PSOCK=$RUN/sock/participant/host.sock
 OSOCK=$RUN/sock/operator/host.sock
 PROFILE=$RUN/host/grain-host.json
 EV=$RUN/evidence
-UNIT_PREFIX=mini-grain-$(basename "$RUN")
+UNIT_PREFIX=${UNIT_PREFIX:-mini-grain-$(basename "$RUN")}
+# Resource coordinates: GRAIN_A/GRAIN_B are the two-digit prefixes of the
+# app (NN01), session (NN10) and tickets (NN20, NN30).
+A=${GRAIN_A:-91} B=${GRAIN_B:-92}
 
 fail() { echo "grain journey: $*" >&2; exit 1; }
 now() { date +%s.%N; }
@@ -446,6 +449,36 @@ http_get() (
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
 )
 
+# floor APP: the M11 floor as the running app sees it. Every process in the
+# running generation's unit cgroup is listed with its own /proc status lines
+# (the kernel's view of that process: seccomp mode, NNP, capability sets,
+# uids); the app is the process that is neither the resident nor bwrap.
+floor() (
+  app=$1
+  gen=$("$SPK_HOST" grain status "$PROFILE" "$app" |
+    jq -er '[.runs[] | select(.state == "running")][-1].generation')
+  unit=mini-spk-a$app-g$gen.service
+  cg=$(systemctl show "$unit" --property=ControlGroup --value)
+  [ -n "$cg" ] || { echo "no cgroup for $unit" >&2; exit 1; }
+  found=0
+  for pid in $(cat "/sys/fs/cgroup$cg/cgroup.procs"); do
+    exe=$(readlink "/proc/$pid/exe" 2>/dev/null || echo gone)
+    printf 'pid=%s exe=%s ' "$pid" "$exe"
+    grep -E '^(Uid|NoNewPrivs|Seccomp|Seccomp_filters|CapInh|CapPrm|CapEff|CapBnd|CapAmb):' \
+      "/proc/$pid/status" | tr '\t\n' '  '
+    echo
+    case "$exe" in
+      */spk-host|*/bwrap|gone) ;;
+      *) grep -q '^Seccomp:[[:space:]]*2$' "/proc/$pid/status" &&
+           grep -q '^NoNewPrivs:[[:space:]]*1$' "/proc/$pid/status" &&
+           grep -q '^CapEff:[[:space:]]*0000000000000000$' "/proc/$pid/status" &&
+           found=$((found + 1)) ;;
+    esac
+  done
+  [ "$found" -ge 1 ] || { echo "no app process under the floor in $unit" >&2; exit 1; }
+  echo "floor-held app-processes=$found unit=$unit"
+)
+
 write_profile() {
   [ ! -e "$PROFILE" ] || return 0
   mkdir -p -m 700 "$RUN/host"
@@ -477,38 +510,40 @@ run_phase() {
     services) step services services ;;
     workroom) step workroom workroom_ready ;;
     profile) step profile write_profile ;;
-    birth-a) step birth-a birth_app a 51000 9101 3101 ;;
-    birth-b) step birth-b birth_app b 61000 9201 3201 ;;
+    birth-a) step birth-a birth_app a 51000 ${A}01 3101 ;;
+    birth-b) step birth-b birth_app b 61000 ${B}01 3201 ;;
     install-a) step install-a "$SPK_HOST" grain install "$PROFILE" \
       "$EV/a-app-author/source.json" "$EV/a-app-attempt/outcome.json" "$SPK" ;;
     install-b) step install-b "$SPK_HOST" grain install "$PROFILE" \
       "$EV/b-app-author/source.json" "$EV/b-app-attempt/outcome.json" "$SPK" ;;
-    status-a) step status-a "$SPK_HOST" grain status "$PROFILE" 9101 ;;
-    share-a) step share-a share a 9101 9110 9120 3111 52000 api ;;
-    share-b) step share-b share b 9201 9210 9220 3211 62000 api ;;
-    share-b2) step share-b2 share b 9201 9210 9230 3211 64000 api ;;
-    enroll-b3) step enroll-b3 enroll b 9201 9210 9230 3211 66000 ;;
-    enroll-b4) step enroll-b4 enroll b 9201 9210 9230 3211 67000 ;;
-    start-b2) step start-b2 "$SPK_HOST" grain start "$PROFILE" 9201 ;;
-    enroll-b2) step enroll-b2 enroll b 9201 9210 9230 3211 65000 ;;
-    get-b2) step get-b2 http_get get-b2-body 9201 /v1/health ;;
-    status-b) step status-b "$SPK_HOST" grain status "$PROFILE" 9201 ;;
-    status-a2) step status-a2 "$SPK_HOST" grain status "$PROFILE" 9101 ;;
-    status-b2) step status-b2 "$SPK_HOST" grain status "$PROFILE" 9201 ;;
-    start-b) step start-b "$SPK_HOST" grain start "$PROFILE" 9201 ;;
-    stop-b) step stop-b "$SPK_HOST" grain stop "$PROFILE" 9201 ;;
-    enroll-a) step enroll-a enroll a 9101 9110 9120 3111 53000 ;;
-    enroll-a2) step enroll-a2 enroll a 9101 9110 9120 3111 54000 ;;
-    enroll-b) step enroll-b enroll b 9201 9210 9220 3211 63000 ;;
-    get-a) step get-a http_get get-a-body 9101 /v1/health ;;
-    post-a) step post-a http_post post-a-body 9101 /m6grain "published at generation 2, before STOP" ;;
-    poll-a2) step poll-a2 http_get poll-a2-body 9101 "/m6grain/json?poll=1&since=all" ;;
-    get-a2) step get-a2 http_get get-a2-body 9101 /v1/health ;;
-    get-b) step get-b http_get get-b-body 9201 /v1/health ;;
-    start-a) step start-a "$SPK_HOST" grain start "$PROFILE" 9101 ;;
-    stop-a) step stop-a "$SPK_HOST" grain stop "$PROFILE" 9101 ;;
-    start-a2) step start-a2 "$SPK_HOST" grain start "$PROFILE" 9101 ;;
-    stop-a2) step stop-a2 "$SPK_HOST" grain stop "$PROFILE" 9101 ;;
+    status-a) step status-a "$SPK_HOST" grain status "$PROFILE" ${A}01 ;;
+    share-a) step share-a share a ${A}01 ${A}10 ${A}20 3111 52000 api ;;
+    share-b) step share-b share b ${B}01 ${B}10 ${B}20 3211 62000 api ;;
+    share-b2) step share-b2 share b ${B}01 ${B}10 ${B}30 3211 64000 api ;;
+    enroll-b3) step enroll-b3 enroll b ${B}01 ${B}10 ${B}30 3211 66000 ;;
+    enroll-b4) step enroll-b4 enroll b ${B}01 ${B}10 ${B}30 3211 67000 ;;
+    start-b2) step start-b2 "$SPK_HOST" grain start "$PROFILE" ${B}01 ;;
+    enroll-b2) step enroll-b2 enroll b ${B}01 ${B}10 ${B}30 3211 65000 ;;
+    get-b2) step get-b2 http_get get-b2-body ${B}01 /v1/health ;;
+    status-b) step status-b "$SPK_HOST" grain status "$PROFILE" ${B}01 ;;
+    status-a2) step status-a2 "$SPK_HOST" grain status "$PROFILE" ${A}01 ;;
+    status-b2) step status-b2 "$SPK_HOST" grain status "$PROFILE" ${B}01 ;;
+    start-b) step start-b "$SPK_HOST" grain start "$PROFILE" ${B}01 ;;
+    stop-b) step stop-b "$SPK_HOST" grain stop "$PROFILE" ${B}01 ;;
+    enroll-a) step enroll-a enroll a ${A}01 ${A}10 ${A}20 3111 53000 ;;
+    enroll-a2) step enroll-a2 enroll a ${A}01 ${A}10 ${A}20 3111 54000 ;;
+    enroll-b) step enroll-b enroll b ${B}01 ${B}10 ${B}20 3211 63000 ;;
+    get-a) step get-a http_get get-a-body ${A}01 /v1/health ;;
+    post-a) step post-a http_post post-a-body ${A}01 /m6grain "published at generation 2, before STOP" ;;
+    poll-a2) step poll-a2 http_get poll-a2-body ${A}01 "/m6grain/json?poll=1&since=all" ;;
+    get-a2) step get-a2 http_get get-a2-body ${A}01 /v1/health ;;
+    get-b) step get-b http_get get-b-body ${B}01 /v1/health ;;
+    start-a) step start-a "$SPK_HOST" grain start "$PROFILE" ${A}01 ;;
+    stop-a) step stop-a "$SPK_HOST" grain stop "$PROFILE" ${A}01 ;;
+    start-a2) step start-a2 "$SPK_HOST" grain start "$PROFILE" ${A}01 ;;
+    stop-a2) step stop-a2 "$SPK_HOST" grain stop "$PROFILE" ${A}01 ;;
+    floor-a) step floor-a floor "${A}01" ;;
+    floor-a2) step floor-a2 floor "${A}01" ;;
     *) fail "unknown phase $1" ;;
   esac
 }
@@ -518,6 +553,12 @@ case "$MODE" in
     [ "$#" -ge 1 ] || usage
     for phase in "$@"; do run_phase "$phase"; done ;;
   stop-services) stop_services ;;
+  jspk0)
+    for phase in store services workroom profile birth-a install-a share-a start-a floor-a \
+        enroll-a get-a post-a stop-a start-a2 floor-a2 enroll-a2 get-a2 poll-a2 stop-a2; do
+      run_phase "$phase"
+    done
+    step stop-services stop_services ;;
   all)
     for phase in store services workroom profile birth-a install-a share-a start-a \
         enroll-a get-a post-a stop-a start-a2 enroll-a2 get-a2 poll-a2 birth-b install-b \
