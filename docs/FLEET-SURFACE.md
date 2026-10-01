@@ -69,6 +69,50 @@ Client (`native/resource-client/src/fleet.rs`, `mini fleet --action …`):
 account owned by another admitted subject, funded by one Book posting from
 the sponsor's fee payer under the sponsor's spend grant.
 
+## `mini fleet-sign`: the drop-in for `dregg-client-sign`
+
+A fleet built on Bread's `dregg-client-sign` keeps its harness: `mini
+fleet-sign join|send|transfer` takes the same verbs, the same flags
+(`--profile`, `--topic`, `--to`, `--amount`, `--fund` on join, positional
+payload words) and prints exactly one JSON object with the same keys
+(`joined`/`cell`/`balance`, `sent`/`turn_hash`/`chain_index`/`finality`,
+`transferred`/`committed`). Two verbs are new: `receipt (--turn-hash TX |
+--head)` and `retry --attempt DIR`, the exact resubmission of retained bytes
+(an accepted original answers `replayed` with its original receipt).
+Profiles live under `MINI_FLEET_HOME/profiles/NAME` (key, enrollment,
+workspace). The journey is
+[`native/resource-client/fleet-sign-journey.sh`](../native/resource-client/fleet-sign-journey.sh);
+growth is measured by `fleet-sign-growth.sh`.
+
+**Why a signer, not a gateway for Bread's signed bytes.** A Bread client
+signs `Turn::hash` (`dregg-turn-v3`: BLAKE3 over Bread's agent cell, nonce,
+call forest, computron fee, memo, height deadline and receipt head) with
+Ed25519 and ML-DSA-65. That message names none of what a Mini fleet
+signature binds: the deployment domain, the paying account's law (semantics,
+policy epoch and revision), the spend capability, the signer's key epoch, the
+authority pre-root, a fee equal to the pinned tariff. A second accepted
+signing shape would make admission accept a signature that does not say
+which law it was given under, and would put Bread's turn codec and hash into
+the Host. So the fleet signs Mini's header with Mini's signer.
+
+What a Bread harness sees differently, each refused by name rather than
+ignored: `--node-url http://…` (the profile is pinned to its Host's socket;
+`unix:/ABS/SOCKET` is accepted and checked), `--token`/`--token-file` (no
+bearer), `--accept-tentative` (one commitment level), `--fund` on send or
+transfer (no faucet), a 64-hex `--to` (accounts are the decimal `cell` a join
+printed). `join` runs where the sponsor's workspace is: the sponsor signs the
+admission and the funded birth. `turn_hash` is the Mini transaction id,
+`chain_index` the accepted count, `finality` is `accepted`; there is no
+receipt hash, the four-field receipt is printed as `receipt`.
+
+**Plan-time staleness re-plans.** A fleet turn's signed observation names the
+Host state it read; when another turn commits between observation and plan,
+the Host refuses the plan `stale-root` before anything is signed. The client
+reads that reason from the Host's own decoding of the retained refusal frame
+and re-plans in a fresh attempt, as it does for submit-time `contention`.
+Measured on 100 interleaved turns from three keys: 100 admitted, 6 stale
+plans, 0 submit contentions.
+
 ## What already existed and was reused
 
 - Key admission: `ParticipantKeyEnrollment` (`mini enroll`), sponsor factory
