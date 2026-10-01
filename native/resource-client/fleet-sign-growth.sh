@@ -3,6 +3,10 @@
 # TURNS turns in sequence (sends and transfers alternating) on a fresh Store.
 # At each level in LEVELS the Host is stopped and served again, and the cold
 # reopen is timed to the first answered request (an exact receipt lookup).
+# VERBS=transfer commits transfers only (the fleet-turn cost without one
+# stream's growth); the default alternates sends on ONE topic with transfers.
+# After the last turn one send goes to a fresh topic, as the control for the
+# stream's share of a send.
 #
 # usage: fleet-sign-growth.sh HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY [TURNS] [LEVELS]
 set -eu
@@ -54,7 +58,7 @@ n=1
 while [ "$n" -le "$TURNS" ]; do
   f="$OUT/turns/$n.json"
   t0=$(now)
-  if [ $((n % 2)) -eq 1 ]; then verb=send
+  if [ "${VERBS:-mixed}" != transfer ] && [ $((n % 2)) -eq 1 ]; then verb=send
     "$MINI" fleet-sign send --profile alpha --topic growth "turn $n" >"$f" 2>"$f.stderr"
   else verb=transfer
     "$MINI" fleet-sign transfer --profile alpha --to "$B" --amount 1 >"$f" 2>"$f.stderr"
@@ -76,6 +80,10 @@ while [ "$n" -le "$TURNS" ]; do
   done
   n=$((n + 1))
 done
+t0=$(now)
+"$MINI" fleet-sign send --profile alpha --topic fresh "control" >"$OUT/control-fresh-topic.json" 2>"$OUT/control-fresh-topic.stderr"
+printf 'control-fresh-topic\tsend\t%s\t%s\t%s\n' "$(elapsed "$t0" "$(now)")" \
+  "$(jq -r .replans "$OUT/control-fresh-topic.json")" "$(jq -r .chain_index "$OUT/control-fresh-topic.json")" >>"$T"
 stop_server
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" >"$OUT/binaries.sha256"
 printf '%s\n' "$OUT"

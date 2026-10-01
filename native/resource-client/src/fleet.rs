@@ -295,14 +295,15 @@ fn lookup_exact(agent: &Agent, directory: &Path, ingress: &[u8]) -> Result<Value
     )
 }
 
-/// Did the Host refuse this attempt's plan (op 96) because the signed
-/// observation it was given is no longer current? Read from the Host's own
-/// decoding of the retained refusal frame, never from its text. Nothing was
-/// signed yet, so the attempt is decided and a fresh observation re-plans it.
-fn plan_refused_stale(agent: &Agent, directory: &Path) -> Result<bool> {
+/// The Host's own decoding of this attempt's plan refusal (op 96 answered
+/// 255), or `None` when the plan frame is not a refusal. A `stale-root`
+/// reason means the signed observation it was given is no longer current;
+/// nothing was signed yet, so the attempt is decided and a fresh observation
+/// re-plans it. The reason is read from the decoding, never from the text.
+fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
     let frame = crate::agent_reserve::bounded(&directory.join("plan.frame"), LIMIT)?;
     let [255, body @ ..] = frame.as_slice() else {
-        return Ok(false);
+        return Ok(None);
     };
     retain(&directory.join("plan-refusal.bin"), body)?;
     let outcome = inspect(
@@ -311,8 +312,7 @@ fn plan_refused_stale(agent: &Agent, directory: &Path) -> Result<bool> {
         &directory.join("plan-refusal.bin"),
         &directory.join("plan-refusal.json"),
     )?;
-    Ok(outcome.get("type").and_then(Value::as_str) == Some("refused")
-        && outcome.get("reason").and_then(Value::as_str) == Some("stale-root"))
+    Ok((outcome.get("type").and_then(Value::as_str) == Some("refused")).then_some(outcome))
 }
 
 /// How many times a turn is re-planned after the Host reports contention.
@@ -351,8 +351,8 @@ fn attempt(
     retain_json(&directory.join("account-view.json"), &view)?;
     let plan = match invoke(agent, &directory, "plan", 96, &pair(&signed, &draft_bytes)?) {
         Ok(plan) => plan,
-        Err(error) => {
-            if plan_refused_stale(agent, &directory)? {
+        Err(error) => match plan_refusal(agent, &directory)? {
+            Some(refusal) if refusal.get("reason").and_then(Value::as_str) == Some("stale-root") => {
                 retain_json(
                     &directory.join("superseded.json"),
                     &json!({"format":FORMAT,"reason":"stale-root-at-plan",
@@ -360,8 +360,15 @@ fn attempt(
                 )?;
                 return Ok((directory, None));
             }
-            return Err(error);
-        }
+            Some(refusal) => {
+                return Err(format!(
+                    "fleet {verb} {}; exact refusal retained in {}",
+                    crate::refusal_line(&refusal).unwrap_or(error),
+                    directory.display()
+                ))
+            }
+            None => return Err(error),
+        },
     };
     let plan_view = inspect(agent, "fleet-turn-plan", &directory.join("plan.bin"), &directory.join("plan.json"))?;
     validate_plan(&draft_view, &plan_view, &plan, base)?;
