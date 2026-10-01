@@ -166,7 +166,7 @@ config bound 65,536 + 32).
 | rest | operation payload (< 12,102,760 bytes) |
 
 **Reply** (socket → client): first byte is the echoed operation byte and the
-rest is its result; or `255` followed by a strict `OUTCOME/v1` refusal (below);
+rest is its result; or `255` followed by a strict `OUTCOME/v4` refusal (below);
 or `254` followed by a UTF-8 reason for a socket-level refusal (`config pin
 mismatch`, `host image pin mismatch`, `invalid socket envelope`, `operation
 unavailable on selected socket`, `host frame exceeds bound`). Deadlines: the
@@ -179,25 +179,35 @@ these; everything else is `254 operation unavailable`:
 | op | name | payload | reply payload |
 | --- | --- | --- | --- |
 | 0 | describe | empty | JSON description of the served image |
-| 1 | prepare (authorized) | `OBSERVE-SIGNED/v3` whose intent purpose is a draft | `SIGNING-PLAN/v3` |
-| 2 | submit | `SIGNED-CALL/v3` | `OUTCOME/v1` |
-| 3 | lookup | `SIGNED-CALL/v3` | `OUTCOME/v1` (`absent` if never admitted) |
-| 4 | challenge | `OBSERVE-INTENT/v3` | `OBSERVE-CHALLENGE/v3` |
-| 5 | query (authorized) | `OBSERVE-SIGNED/v3` whose purpose is a query | the view bytes |
+| 1 | prepare (authorized) | `OBSERVE-SIGNED/v5` whose intent purpose is a draft | `SIGNING-PLAN/v4` |
+| 2 | submit | `SIGNED-CALL/v3` | `OUTCOME/v4` |
+| 3 | lookup | `SIGNED-CALL/v3` | `OUTCOME/v4` (`absent` if never admitted) |
+| 4 | challenge | `OBSERVE-INTENT/v3` | `OBSERVE-CHALLENGE/v5` |
+| 5 | query (authorized) | `OBSERVE-SIGNED/v5` whose purpose is a query | the view bytes |
 | 6 | profile | empty | JSON metering/semantics profile |
 | 7 | author | kind frame: u16 LE kind length, UTF-8 kind, UTF-8 JSON source | canonical bytes |
 | 8 | inspect | kind frame with binary input | JSON |
 | 9 | signatures | UTF-8 JSON list of hex signatures | canonical signature list |
-| 10 | observe-assemble | pair: u32 LE length, challenge bytes, signature list | `OBSERVE-SIGNED/v3` |
+| 10 | observe-assemble | pair: u32 LE length, challenge bytes, signature list | `OBSERVE-SIGNED/v5` |
 | 11 | assemble | pair: signing plan, signature list | `SIGNED-CALL/v3` |
 | 12–19 | fn consumer/reply/catalog/outbox, provider continuity and metering | per service | only when the matching optional config section is set; otherwise a refusal |
-| 20, 21 | selected-release submit / lookup | ingress | `OUTCOME/v1` |
-| 28, 29 | application share-issue submit / lookup | ingress | `OUTCOME/v1` |
+| 20, 21 | selected-release submit / lookup | ingress | `OUTCOME/v4` |
+| 28, 29 | application share-issue submit / lookup | ingress | `OUTCOME/v4` |
 | 30, 31 | current application / session birth intent | JSON object ≤ 256 KiB | intent bytes |
 | 86 | participant key enrollment plan | pair: signed factory observation, command | plan |
 | 87 | participant key enrollment assembly | pair: plan, pair(sponsor sig 64 B, possession sig 64 B) | ingress |
-| 88, 89 | participant key enrollment submit / lookup | ingress | `OUTCOME/v1` |
+| 88, 89 | participant key enrollment submit / lookup | ingress | `OUTCOME/v4` |
 | 91 | current resource birth intent | pair: signed observation, JSON source ≤ 256 KiB | intent bytes |
+| 92, 93 | factory-observation provisioning plan / assembly (M3) | pair: signed observation, command / pair: plan, signature | plan / ingress |
+| 94, 95 | factory-observation provisioning submit / lookup | ingress | `OUTCOME/v4` |
+| 96, 97 | fleet turn plan (behind a signed account observation) / assembly (M8) | pair: signed observation, draft / pair: plan, signature | plan / ingress |
+| 98, 99 | fleet turn submit / lookup | ingress | `OUTCOME/v4` |
+| 100 | fleet topic poll since a cursor (behind a signed account observation) | pair: signed observation, JSON request | JSON |
+| 101 | agent fleet head (behind a signed account observation) | signed observation | JSON |
+| 102 | exact receipt by transaction id | canonical decimal | JSON |
+| 103, 104 | pay command signing plan / assembly (P2) | command / pair: plan, 64-byte signature | `DREGG/PAY/PLAN/v1` / ingress |
+| 105, 106 | pay submit (blind: every refusal is `undisclosed`) / lookup | ingress | `OUTCOME/v4` |
+| 107 | public pay-cell view (no assignment map) | empty | `DREGG/PAY/VIEW/v1` |
 
 `mini serve-operator` serves a separate owner-private socket (same framing,
 peer UID must equal the server's) with the lifecycle, dispatch, share-issue,
@@ -237,31 +247,37 @@ Messages (`Compiler/NativeHostCodec.lean`, `Compiler/NativeObservationCodec.lean
 * `DREGG/NATIVE-HOST/DRAFT/v3` — sum of: birth(descriptor bytes, list capability) |
   invoke(command) | install(subject, control capability, declaration) |
   delegate(command) | revoke(command).
-* `DREGG/NATIVE-HOST/SIGNING-PLAN/v3` — domain digest, semantics digest, image
-  boundary digest, height nat, finalized draft, list of slots (role nat, index
-  nat, canonical header bytes). The client signs each header with Ed25519.
-* `DREGG/NATIVE-HOST/OUTCOME/v2` — sum of: confirmed(confirmation, receipt) |
-  refused(reason byte, phase bytes, detail bytes) | contention | absent | unavailable(detail) |
-  uncertain(detail). Confirmation is installed / recoveredAfterUncertainResponse /
-  replayed. Receipt is transaction id, event id, accepted count, image boundary
-  (all digests/nats). The accepted count counts entries through that
-  transaction, not the current tip. The reason is one byte of the closed
-  `RefusalReason` (`Compiler/RefusalReason.lean`); a v1 frame is refused, never
-  reinterpreted. On a Host refusal `mini` prints `refused: <reason>: <text>` and
-  exits 3.
+* `DREGG/NATIVE-HOST/SIGNING-PLAN/v4` — domain digest, semantics digest, world
+  root digest, height nat, finalized draft, list of slots (role nat, index
+  nat, canonical header bytes). The client signs each header with Ed25519. A
+  signed header (v2) carries the plan's authority footprint and `validUntil`
+  height. v3 refuses.
+* `DREGG/NATIVE-HOST/OUTCOME/v4` — sum of: confirmed(confirmation, receipt) |
+  refused(reason byte, phase bytes, detail bytes, optional law clause) |
+  contention | absent | unavailable(detail) | uncertain(detail). Confirmation is
+  installed / recoveredAfterUncertainResponse / replayed. Receipt is
+  transaction id, event id, accepted count, world root (all digests/nats). The
+  accepted count counts entries through that transaction, not the current tip.
+  The reason is one byte of the closed `RefusalReason`
+  (`Compiler/RefusalReason.lean`); a law refusal may also name the failing
+  clause (`LawLeaf`: path, the committed clause as policy-record tokens, the
+  slot's before/after values). v1, v2 and v3 frames are refused, never
+  reinterpreted. On a Host refusal `mini` prints `refused: <reason>: <text>`
+  and exits 3.
 * `DREGG/NATIVE-HOST/OBSERVE-INTENT/v3` — subject, nonce, purpose (query(kind,
   target, view: resource | policy | capability) or prepare(draft)), list of
   grants (kind, target, capability).
-* `DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v3` — intent, domain, semantics,
-  federation, image boundary, height, list of canonical signing headers.
-* `DREGG/NATIVE-HOST/OBSERVE-SIGNED/v3` — challenge, list of 64-byte signatures
-  (one per header).
+* `DREGG/NATIVE-HOST/OBSERVE-CHALLENGE/v5` — intent, domain, semantics,
+  federation, world root, authority root, height, list of canonical signing
+  headers. v4 refuses.
+* `DREGG/NATIVE-HOST/OBSERVE-SIGNED/v5` — challenge, list of 64-byte signatures
+  (one per header). v4 refuses.
 
 A refusal's `phase` is a short source-selected word (`observation`, `prepare`,
 `wire`, `replay`, ...). The client prints it as
-`host refused COMMAND; encoded refusal: <hex of OUTCOME/v1>`. Every
-authorization failure at observation or preparation currently has the same
-detail, `observation refused`.
+`host refused COMMAND; encoded refusal: <hex of OUTCOME/v4>`. Before a
+signature verifies, only `unknown-key` and `stale-root` are named (anything
+else is `undisclosed`); a blind submission's refusal is always `undisclosed`.
 
 ## 5. Host ↔ helper protocols
 
