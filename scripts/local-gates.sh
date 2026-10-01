@@ -11,6 +11,8 @@
 #      build changed any tracked file, the committed copy had drifted from its
 #      Lean source, and the gate fails. Compared against the tree as it stood
 #      before the build, so local uncommitted edits do not trip it.
+#   3c. the native Host starts without doing work (scripts/check-host-cold-start.sh):
+#      a computable nullary def in a module it links runs at every Host start.
 #   4. the build-closure census: every tracked library `.lean` module is
 #      imported from Minidregg.
 #   5. the journey (native/resource-client/journey.sh) when it exists on this
@@ -39,6 +41,10 @@ fi
 
 echo "== gate 3b: the prover glue matches what its Lean source emits now"
 bash scripts/check-prover-glue.sh
+
+echo "== gate 3c: the native Host starts without doing work"
+"$lake" build minidregg-host
+bash scripts/check-host-cold-start.sh .lake/build/bin/minidregg-host
 
 echo "== gate 4/5: every library module is rooted"
 bash scripts/check-build-closure.sh

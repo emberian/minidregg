@@ -387,6 +387,22 @@ private def decodeRecords : List Entry → Except String (List IntentRecord)
 private def chainPrefixes (start : Digest) (records : List IntentRecord) : Array Digest :=
   records.foldl (fun acc record => acc.push (chainStep (acc.back?.getD start) record)) #[start]
 
+private theorem chainPrefixes_foldl_back (start : Digest) :
+    ∀ (records : List IntentRecord) (acc : Array Digest),
+      (records.foldl (fun acc record => acc.push (chainStep (acc.back?.getD start) record))
+          acc).back?.getD start = chainAfter (acc.back?.getD start) records
+  | [], _ => by simp [chainAfter]
+  | record :: rest, acc => by
+      rw [List.foldl_cons, chainPrefixes_foldl_back start rest]
+      simp [chainAfter, Array.back?_push]
+
+/-- The last prefix is the head chain, so `load` hashes the log once, not twice. -/
+private theorem chainPrefixes_back (start : Digest) (records : List IntentRecord) :
+    (chainPrefixes start records).back?.getD start = chainAfter start records := by
+  unfold chainPrefixes
+  rw [chainPrefixes_foldl_back]
+  simp
+
 /-- The single open path. Every check refuses; nothing reinterprets. -/
 def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
     IO (Except String (Loaded rootBytes)) := do
@@ -404,7 +420,7 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
         | .ok records => pure records
       let logStart := transport.logStart seed
       let chains := chainPrefixes logStart records
-      let headChain := chainAfter logStart records
+      let headChain := chains.back?.getD logStart
       let (baseHeight, base) ← match stored.checkpoint with
         | none => pure (0, State.ofSeed seed)
         | some checkpoint =>
@@ -428,7 +444,8 @@ def load (transport : Transport) (rootBytes : List UInt8 → Digest) :
         | none => return .error "durable log suffix does not replay through the canonical executor"
         | some snapshot =>
             return .ok ⟨image, baseHeight, base, snapshot, within, resumed, logStart, headChain,
-              rfl, RootCache.ofEntries (entriesOf image snapshot headChain),
+              chainPrefixes_back logStart records,
+              RootCache.ofEntries (entriesOf image snapshot headChain),
               PresenceIndex.ofRecords image.accepted, rfl⟩
       else return .error "checkpoint beyond the log head"
 

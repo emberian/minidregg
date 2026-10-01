@@ -541,12 +541,18 @@ def spendSystem : ConstraintSystem (ZMod 13) (Fin 11) :=
     0 6 1 [(7, 9), (8, 10)]
 
 /-- **The note-spend, emitted** — the concrete prover-consumable descriptor of the shielded
-spend at the demo parameters. -/
-def spendDescriptor : ConstraintDescriptor (ZMod 13) :=
+spend at the demo parameters.
+
+`noncomputable`: this is a proof subject, and no compiled code consumes it. As a compiled
+nullary `def` it was a module-initialization constant — every process linking this module
+(the native Host among them) flattened all 2,696,666 gates at startup, about 95% of the
+Host's cold start and ~400 MB of its resident set. -/
+noncomputable def spendDescriptor : ConstraintDescriptor (ZMod 13) :=
   emit Fin.val 2 11 spendSystem
 
-/- *Measured, compiled `#eval` — audit notes, not kernel theorems (the flatten of the full
-spend is too large for kernel reduction, honestly said):
+/- *Measured, compiled `#eval` of `emit Fin.val 2 11 spendSystem` (the body above; `emit`
+and `spendSystem` stay computable) — audit notes, not kernel theorems (the flatten of the
+full spend is too large for kernel reduction):
 `spendDescriptor.gates.length = 2696666`, `nWires = 2696677` (= 11 vars + 2696666 aux, one
 per gate — `flatten_covers`' no-dangling-allocations, visible in the arithmetic),
 `zeros.length = 8` (one root per term: 2 bit-booleanities + recomposition + 2 hashes +

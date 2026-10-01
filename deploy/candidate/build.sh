@@ -261,6 +261,9 @@ if [ "$client_only" = 1 ]; then
 fi
 "$out/bin/minidregg-host" >"$out/logs/usage-host.txt" 2>&1 || true
 grep -q '^minidregg-host:' "$out/logs/usage-host.txt" || candidate_die "Host did not print its usage"
+# The Host starts without doing work: every start of `mini serve` pays its initializers.
+"$src/scripts/check-host-cold-start.sh" "$out/bin/minidregg-host" >"$out/logs/host-cold-start.txt" 2>&1 \
+  || { cat "$out/logs/host-cold-start.txt" >&2; candidate_die "Host cold start over budget"; }
 "$out/bin/minidregg-link-sqlite-store" >"$out/logs/usage-store.txt" 2>&1 || true
 grep -q '^usage:' "$out/logs/usage-store.txt" || candidate_die "Store helper did not print its usage"
 "$out/bin/minidregg-credential-signature-verifier" >"$out/logs/usage-verifier.txt" 2>&1 || true

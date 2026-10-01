@@ -694,10 +694,13 @@ example : ¬ descriptorHolds (cse exSharedDescriptor)
 
 `spendDescriptor` (REUSED verbatim from `Emit` §8) at the same `Fin 11` layout. -/
 
-/-- **The note-spend descriptor, CSE'd** — the deployed object of this rung. -/
-def spendDescriptorShared : ConstraintDescriptor (ZMod 13) := cse spendDescriptor
+/-- **The note-spend descriptor, CSE'd** — the deployed object of this rung. `noncomputable`
+for the reason `spendDescriptor` is: compiled, it is a startup constant that flattens and
+CSEs 2,696,666 gates in every process that links it. -/
+noncomputable def spendDescriptorShared : ConstraintDescriptor (ZMod 13) := cse spendDescriptor
 
-/- *Measured, compiled `#eval` — audit notes, not kernel theorems:
+/- *Measured, compiled `#eval` of `cse (emit Fin.val 2 11 spendSystem)` — audit notes, not
+kernel theorems:
 `spendDescriptor.gates.length = 2696666` (`Emit` §8's tree blowup), and
 `spendDescriptorShared.gates.length = 220` — the CSE recovers the DAG, a ≈12,258×
 gate-count reduction (the demo spend's true DAG is 220 nodes; the tree-flatten duplicated
