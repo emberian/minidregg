@@ -389,11 +389,11 @@ fn petname_ok(name: &str) -> Result<(), String> {
 /// (exit code, stderr text). stdout is printed as the verb goes.
 pub(crate) type Done = (i32, String);
 
-fn usage(message: impl Into<String>) -> Done {
+pub(crate) fn usage(message: impl Into<String>) -> Done {
     (EXIT_USAGE, format!("usage: {}\n", message.into()))
 }
 
-fn error(message: impl std::fmt::Display) -> Done {
+pub(crate) fn error(message: impl std::fmt::Display) -> Done {
     (EXIT_CLIENT, format!("error: {message}\n"))
 }
 
@@ -421,7 +421,7 @@ fn chat_dir(session: &Session) -> PathBuf {
     session.home.join("chat")
 }
 
-fn private_dirs(path: &Path) -> Result<(), String> {
+pub(crate) fn private_dirs(path: &Path) -> Result<(), String> {
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -430,7 +430,7 @@ fn private_dirs(path: &Path) -> Result<(), String> {
 }
 
 /// Replace a small private JSON file (write a sibling, rename over).
-fn put_json(path: &Path, value: &Value) -> Result<(), String> {
+pub(crate) fn put_json(path: &Path, value: &Value) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         private_dirs(parent)?;
     }
@@ -442,7 +442,7 @@ fn put_json(path: &Path, value: &Value) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
 }
 
-fn get_json(path: &Path) -> Option<Value> {
+pub(crate) fn get_json(path: &Path) -> Option<Value> {
     serde_json::from_slice(&fs::read(path).ok()?).ok()
 }
 
@@ -509,12 +509,12 @@ fn set_petname(session: &Session, subject: &str, name: &str) -> Result<(), Strin
     put_json(&chat_dir(session).join("petnames.json"), &json!(names))
 }
 
-fn workspace_record(session: &Session) -> Result<Value, String> {
+pub(crate) fn workspace_record(session: &Session) -> Result<Value, String> {
     bounded_json(&session.workspace.join("workspace.json"))
         .map_err(|_| "this session has no workspace yet (init first)".to_owned())
 }
 
-fn reference(session: &Session, name: &str) -> Result<Value, String> {
+pub(crate) fn reference(session: &Session, name: &str) -> Result<Value, String> {
     crate::workspace::reference(&session.workspace, name)
 }
 
@@ -522,7 +522,7 @@ fn reference(session: &Session, name: &str) -> Result<Value, String> {
 
 /// One client operation in a child `mini` (the same binary), so its JSON does
 /// not reach the friend's terminal. Ok: the child's stdout.
-fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String, Done> {
+pub(crate) fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String, Done> {
     let exe = std::env::current_exe().map_err(|e| error(format!("cannot locate the mini client: {e}")))?;
     let mut cmd = Command::new(exe);
     cmd.arg(command);
@@ -543,7 +543,7 @@ fn client(command: &str, flags: &[(&str, OsString)]) -> Result<String, Done> {
     }
 }
 
-fn os(value: impl AsRef<OsStr>) -> OsString {
+pub(crate) fn os(value: impl AsRef<OsStr>) -> OsString {
     value.as_ref().to_owned()
 }
 
@@ -573,7 +573,7 @@ fn backoff(attempt: u32) {
 /// `stale-root` answer at either step is not a decision about the request:
 /// the plan is made again from a fresh signed read (propose), or the same
 /// intent is signed again over a fresh challenge (submit, a new attempt).
-fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
+pub(crate) fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
     private_dirs(&session.home.join("requests")).map_err(error)?;
     let ws = session.workspace.clone();
     let mut resigned = 0u32;
@@ -628,7 +628,7 @@ fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Va
 /// A signed read in this process (no JSON on the terminal). The attempt is
 /// retained under HOME/chat/reads/ROOM/LABEL.NONCE; older reads of the same
 /// label are removed once this one answered, so the newest is always kept.
-fn signed_read(
+pub(crate) fn signed_read(
     session: &Session,
     ws: &Value,
     room: &str,
@@ -1469,8 +1469,8 @@ fn write_request(session: &Session, name: &str, value: &Value) -> Result<PathBuf
     Ok(path)
 }
 
-fn create_cell(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>) -> Result<Value, Done> {
-    let predicate = write_request(session, &format!("chat-law-{name}"), law)?;
+pub(crate) fn create_cell(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>) -> Result<Value, Done> {
+    let predicate = write_request(session, &format!("chat-law-{}", name.replace('/', ".")), law)?;
     let mut flags = vec![
         ("action", os("create")),
         ("dir", os(&session.workspace)),
@@ -1504,7 +1504,7 @@ fn room_grant(session: &Session, room: &str, recipient: &str) -> Result<Value, D
         .ok_or_else(|| error("the published delegation left no recipient-reference.json"))
 }
 
-fn import_from(session: &Session, name: &str, reference_json: &Value) -> Result<(), Done> {
+pub(crate) fn import_from(session: &Session, name: &str, reference_json: &Value) -> Result<(), Done> {
     let path = session.home.join("inbox").join(format!("{name}.json"));
     private_dirs(&session.home.join("inbox")).map_err(error)?;
     let _ = fs::remove_file(&path);
@@ -1513,7 +1513,7 @@ fn import_from(session: &Session, name: &str, reference_json: &Value) -> Result<
     Ok(())
 }
 
-fn import_stream(session: &Session, name: &str, target: &str, capability: &str) -> Result<(), Done> {
+pub(crate) fn import_stream(session: &Session, name: &str, target: &str, capability: &str) -> Result<(), Done> {
     client(
         "workspace",
         &[

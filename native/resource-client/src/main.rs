@@ -65,6 +65,8 @@ mod share_issue_receipt;
 mod chat;
 #[cfg(unix)]
 mod credit;
+#[cfg(unix)]
+mod story;
 mod keys;
 #[cfg(unix)]
 mod shell;
@@ -2306,6 +2308,8 @@ fn run(mut args: Args) -> Result<()> {
         "fleet" => fleet::run(args),
         #[cfg(unix)]
         "credit" => credit::run(args),
+        #[cfg(unix)]
+        "story-law" => story::law_command(args),
         "well" => well::run(args),
         "pay" => pay::run(args),
         #[cfg(unix)]

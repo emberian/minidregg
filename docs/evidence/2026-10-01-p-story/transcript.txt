@@ -1,0 +1,80 @@
+### row 059 (alice) > story seal tale
+story tale sealed: the table cannot be edited or re-lawed by anyone. Each player's cell will carry:
+   0 management                   any [ verb == read, verb == write ]
+   1 mover                        subject == {S}
+   2 turn                         field 1 delta == 1
+   3 exits                        any [ field 0 delta == 0, all [ field 0 before == 0, field 0 == 1 ], all [ field 0 before == 1, field 0 == 2 ], all [ field 0 before == 1, field 0 == 3 ], all [ field 0 before == 3, field 0 == 4 ] ]
+   4 needs key (exit 1 -> 3)      any [ not (all [ field 0 before == 1, field 0 == 3 ]), field 2 before == 1 ]
+   5 here key (scene 1)           any [ field 2 delta == 0, all [ field 0 before == 1, field 0 delta == 0 ] ]
+   6 once key                     any [ field 2 delta == 0, all [ field 2 before == 0, field 2 == 1 ] ]
+   7 progress                     any [ not (field 0 delta == 0), not (field 2 delta == 0) ]
+
+### row 077 (bob) > look
+The Lamplighter's House — The hallway (scene 0, turn 0)
+A hallway, its floorboards the colour of weak tea. Behind you the way you came in has quietly stopped being a way. Ahead, a door stands a hand's width open, and through the gap comes lamplight and the smell of cold iron.
+  go  north      The anteroom
+
+### row 082 (bob) > take key
+refused: law-denied: any [ field 2 delta == 0, all [ field 0 before == 1, field 0 delta == 0 ] ]
+  the table's clause 5: here key (scene 1)
+
+### row 083 (bob) > go 3
+refused: law-denied: any [ field 0 delta == 0, all [ field 0 before == 0, field 0 == 1 ], all [ field 0 before == 1, field 0 == 2 ], all [ field 0 before == 1, field 0 == 3 ], all [ field 0 before == 3, field 0 == 4 ] ]
+  the table's clause 3: exits
+
+### row 084 (bob) > go north
+go north: admitted
+The Lamplighter's House — The anteroom (scene 1, turn 1)
+A small square room, lit by one lamp that nobody seems to tend. On a nail beside the lamp hangs a key: long, black, heavier than it looks. To the west, a glass door fogged from the other side. To the north, a narrow stair behind an iron gate with one keyhole.
+here: key
+  go  west       The glasshouse
+  go  north      The landing (needs key)
+
+### row 085 (bob) > go north
+refused: law-denied: any [ not (all [ field 0 before == 1, field 0 == 3 ]), field 2 before == 1 ]
+  the table's clause 4: needs key (exit 1 -> 3)
+
+### row 086 (bob) > take key
+take key: admitted
+The Lamplighter's House — The anteroom (scene 1, turn 2)
+A small square room, lit by one lamp that nobody seems to tend. On a nail beside the lamp hangs a key: long, black, heavier than it looks. To the west, a glass door fogged from the other side. To the north, a narrow stair behind an iron gate with one keyhole.
+  go  west       The glasshouse
+  go  north      The landing (needs key)
+you carry: key
+
+### row 087 (bob) > take key
+refused: law-denied: any [ not (field 0 delta == 0), not (field 2 delta == 0) ]
+  the table's clause 7: progress
+
+### row 090 (bob) > submit r1
+refused: law-denied: field 1 delta == 1 (value -2) (Host refused prepare, reply byte 255)
+  outcome (decoded by the Host): {"detail":"746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e","explain":"field 1 delta == 1 (value -2)","leaf":{"after":"-2","before":"0","clause":{"predicates":[{"slot":"resource/field/1/delta","type":"eq","value":"1"},{"predicate":{"slot":"request/verb","type":"eq","value":"2"},"type":"not"}],"type":"any"},"path":["2"],"text":"any [ field 1 delta == 1, not (verb == write) ]"},"phase":"70726570617265","reason":"law-denied","type":"refused"}
+
+### row 096 (bob) > submit x1
+refused: law-denied: subject == 14445094260430961023 (value 15179856757932539789) (Host refused prepare, reply byte 255)
+  outcome (decoded by the Host): {"detail":"746865207265736f7572636527732063757272656e74206c61772064656e6965732074686973206f7065726174696f6e","explain":"subject == 14445094260430961023 (value 15179856757932539789)","leaf":{"after":"15179856757932539789","before":"15179856757932539789","clause":{"predicates":[{"slot":"request/subject","type":"eq","value":"14445094260430961023"},{"predicate":{"slot":"request/verb","type":"eq","value":"2"},"type":"not"}],"type":"any"},"path":["1"],"text":"any [ subject == 14445094260430961023, not (verb == write) ]"},"phase":"70726570617265","reason":"law-denied","type":"refused"}
+
+### row 102 (bob) > narrate 'I am the GM now'
+refused: law-denied: any [ not (verb in {write,7}), subject == 15178349363870247997 ]
+
+### row 104 (bob) > look
+The Lamplighter's House — The anteroom (scene 1, turn 2)
+A small square room, lit by one lamp that nobody seems to tend. On a nail beside the lamp hangs a key: long, black, heavier than it looks. To the west, a glass door fogged from the other side. To the north, a narrow stair behind an iron gate with one keyhole.
+  go  west       The glasshouse
+  go  north      The landing (needs key)
+you carry: key
+the GM: h55 the lamp upstairs hums, low and patient
+
+### row 106 (carl) > go west
+go west: admitted
+The Lamplighter's House — The glasshouse (scene 2, turn 2)
+Warm air, and green: vines over the panes, a bench worn smooth, a tap that drips in no hurry. The glass door has closed behind you, and from this side it has no handle. It is a good place to stop. This is one of the house's endings.
+THE END. (This is one of the story's endings; the table has no way on.)
+
+### row 115 (bob) > act open
+act open: admitted
+The Lamplighter's House — The lamp room (scene 4, turn 4)
+A round room, windows all the way around, and in the middle a great lamp, unlit. A box of matches on the sill; a logbook open beside it, every page signed. Whoever lights the lamp is the lamplighter now. This is the house's other ending.
+you carry: key
+THE END. (This is one of the story's endings; the table has no way on.)
+

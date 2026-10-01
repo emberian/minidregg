@@ -9,6 +9,7 @@ Every file here is hand-written. Axiom pins are `#guard_msgs in #print axioms`
 lines written beside each theorem; nothing generates them.
 -/
 import Assurance.CapabilityRevocationAudit
+import Assurance.StoryLaw  -- P-STORY: the story law for every table; no skip, no rewind, never re-lawed (also in Deployed)
 import Assurance.ReceiptClaim  -- OB-3: the receipt Q as a native accumulated claim (the kill-checkpoint)
 import Assurance.SemanticReceiptRelation  -- clean-sheet ReceiptDelta quadratic language → native Selvage AccClaim fold
 import Assurance.SemanticTurnReceipt  -- exact typed request/auth/effects/disclosure wrapper → SemanticReceiptRelation

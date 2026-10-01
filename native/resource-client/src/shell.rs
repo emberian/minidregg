@@ -33,7 +33,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-mod law;
+pub(crate) mod law;
 mod template;
 
 pub(crate) const EXIT_OK: i32 = 0;
@@ -633,6 +633,8 @@ pub(crate) enum Plan {
     Help(Option<String>),
     /// A chat verb (`crate::chat`): it composes several client operations.
     Chat(crate::chat::Line),
+    /// A story verb (`crate::story`): the table, its law, a player's moves.
+    Story(crate::story::Line),
     Exit,
     Nothing,
 }
@@ -878,6 +880,9 @@ fn usage_of(name: &str) -> &'static str {
 pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, String> {
     if let Some(chat) = crate::chat::plan(line) {
         return chat.map(Plan::Chat);
+    }
+    if let Some(story) = crate::story::plan(line) {
+        return story.map(Plan::Story);
     }
     let mut w = words(line)?;
     // `create` and `doc new` may end `--in ROOM`: the new cell is born in the
@@ -1853,14 +1858,15 @@ fn rooms(session: &Session) {
 fn help_text(topic: Option<&str>) -> String {
     match topic {
         Some("chat") => crate::chat::HELP.to_owned(),
-        Some(name) => match VERBS.iter().chain(crate::chat::VERBS).find(|v| v.name == name) {
+        Some("story") => crate::story::HELP.to_owned(),
+        Some(name) => match VERBS.iter().chain(crate::chat::VERBS).chain(crate::story::VERBS).find(|v| v.name == name) {
             Some(v) => format!("{}\n  = {}\n", v.usage, v.operation),
             None => format!("no verb {name}\n"),
         },
         None => {
             let mut text = format!("{HOSTED_CUSTODY_BANNER}\n");
             text.push_str("Every verb is one client operation; the Host decides. Words: 'literal', \"escaped\", {json} or [json], @FILE (HOME/requests/FILE).\n");
-            for v in VERBS.iter().chain(crate::chat::VERBS) {
+            for v in VERBS.iter().chain(crate::chat::VERBS).chain(crate::story::VERBS) {
                 text.push_str(&format!("  {:<10} {}\n", v.name, v.usage));
             }
             text.push_str("Endings on stderr: usage: (2)  error: client (1)  refused: Host (3)  undecided: Host (4).\n");
@@ -1920,6 +1926,10 @@ pub(crate) fn line(session: &Session, text: &str) -> (i32, bool) {
         Ok(Plan::NotHere(text)) => Ending::Client(text),
         Ok(Plan::Chat(chat)) => {
             let (code, text) = crate::chat::run(session, chat);
+            Ending::Rendered(code, text)
+        }
+        Ok(Plan::Story(story)) => {
+            let (code, text) = crate::story::run(session, story);
             Ending::Rendered(code, text)
         }
         Ok(Plan::Export(path)) => match fs::read(&path) {
@@ -1984,7 +1994,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
     let enrolled = || stems(&session.home.join("enroll"), "", |_| false);
     let verb = w[0].as_str();
     let candidates: Vec<String> = match (verb, position) {
-        (_, 0) => VERBS.iter().chain(crate::chat::VERBS).map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
+        (_, 0) => VERBS.iter().chain(crate::chat::VERBS).chain(crate::story::VERBS).map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
         ("read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
         ("lookup" | "retry", 1) => attempts(),

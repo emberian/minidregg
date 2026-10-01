@@ -434,9 +434,9 @@ mod tests {
         );
     }
 
-    /// `deploy/shell/templates/story/tale/law.state` (branch p-templates) with
-    /// `{GM}` = 11: the grammar text and the JSON rendered from it by the
-    /// templates lane agree.
+    /// A state law of the shape p-templates wrote for the first tale (since
+    /// replaced by the story table, P-STORY), with `{GM}` = 11: the grammar
+    /// text and the JSON rendered from it agree.
     #[test]
     fn templates_law_state_agrees() {
         let text = "any [ subject == 11, not (verb == 2) ];\n\
