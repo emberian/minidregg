@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # journey.d/jweb.sh — WEB-ENTRANCE + WEB-2: `mini web`, the read-only loopback
 # hypertext face, on the docuverse braid. Runs after K12C (paper, notes, an
-# annotation; carol and dave), K12T (wall, page with three transclusions; the
-# readers tdave and the late joiner tlate) and K12H (hist, six edits, the third
-# key granted after h2).
+# annotation; carol and dave), K12M (mpaper, marked), K12T (wall, page with
+# three transclusions; the readers tdave and the late joiner tlate) and K12H
+# (hist, six edits, the third key granted after h2).
 #
 # Every page is a signed read under the serving workspace's own key. A document
 # renders through the Host's view-document (the element tree's order,
@@ -32,6 +32,7 @@
 #   transclusion-backlinks   R's /doc/wall backlinks of kind transclusion    -> 3 (page)
 #   d-paper-refused          D's /doc/paper (a reference with no grant)      -> 403 refusal page
 #   d-paper-no-bytes         no paper bytes on D's refusal page; C's has them -> absent:present
+#   marks-render             A's /doc/mpaper: each marked line's rendering = doc-show's; data-marks -> equal:yes
 #   history-matches          A's /doc/hist/history rows = `doc-history` rows -> equal
 #   history-split            the third key's history: content from its grant -> false false true true true true
 #   at-page-equals-show      A's /at/H4/doc/hist order = `doc-show --at H4`  -> equal
@@ -77,6 +78,9 @@ invoke() { # NAME WS RESOURCE ACTIONS-JSON
 }
 rc_word() { [ "$(cat "$D/$1.rc")" = 0 ] && echo installed || echo "rc=$(cat "$D/$1.rc"): $(tail -1 "$D/$1.err" | cut -c1-160)"; }
 attempts() { find "$1/attempts" -mindepth 1 -maxdepth 1 | wc -l; }
+# Signed reads only: an attempt holding a challenge (a local `inspect` render
+# also makes an attempt directory, holding none).
+signed_reads() { find "$1/attempts" -mindepth 2 -maxdepth 2 -name challenge.json | wc -l; }
 renders() { grep -o 'data-transclusion="[0-9]*" data-mode="[a-z]*" data-render="[a-z]*"' "$D/pages/$1" | grep -o 'render="[a-z]*"' | cut -d'"' -f2 | sort | tr '\n' ' ' | sed 's/ $//'; }
 elements() { grep -o '<tr data-element="[0-9]*"' "$D/pages/$1" | cut -d'"' -f2 | tr '\n' ' ' | sed 's/ $//'; }
 show_elements() { jq -r '[.lines[].element] | join(" ")' "$D/$1.out"; }
@@ -148,9 +152,9 @@ subject=$(jq -r .subject "$CW/workspace.json")
 row page-context present "$(grep -q "read as subject <span class=id>$subject</span> at height <span class=id data-height=\"[0-9]*\"" "$D/pages/c-paper.html" && echo present || echo absent)" "subject $subject, $(grep -o 'data-height="[0-9]*"' "$D/pages/c-paper.html")"
 row annotation-stale false "$(grep -o 'data-annotation="7001" data-fresh="[a-z?]*"' "$D/pages/c-paper.html" | grep -o 'fresh="[a-z?]*"' | cut -d'"' -f2)" "R's annotation after A's edit"
 row backlinks-from-index "notes:document" "$(grep -o 'data-backlink="[a-z0-9]*" data-kind="[a-z]*"' "$D/pages/c-paper.html" | sed 's/data-backlink="\([^"]*\)" data-kind="\([^"]*\)"/\1:\2/' | tr '\n' ' ' | sed 's/ $//')" "C's backlinks of paper, one signed index read"
-before=$(attempts "$CW")
+before=$(signed_reads "$CW")
 code=$(get c-notes.html "${URL_C}doc/notes")
-reads=$(( $(attempts "$CW") - before ))
+reads=$(( $(signed_reads "$CW") - before ))
 row link-out "200:present:paper" "$code:$(grep -q 'data-link="9101"' "$D/pages/c-notes.html" && echo present || echo absent):$(grep -o 'data-link="9101"[^>]*>[^<]*<span class=id>[0-9]*</span> -> <a href="[^"]*/doc/[a-z]*">' "$D/pages/c-notes.html" | grep -o '/doc/[a-z]*' | cut -d/ -f3)" "the links view"
 row doc-page-reads 3 "$reads" "signed reads made by one /doc/notes view (notes holds no transclusion)"
 
@@ -171,6 +175,17 @@ row transclusion-backlinks "200:3" "$code:$(grep -c 'data-backlink="page" data-k
 code=$(get d-paper.html "${URL_DV}doc/paper")
 row d-paper-refused "403:refusal" "$code:$(grep -q 'data-refusal' "$D/pages/d-paper.html" && echo refusal || echo none)" "$(grep -o 'refused: [^<]*' "$D/pages/d-paper.html" | head -1)"
 row d-paper-no-bytes "absent:present" "$(grep -q 'the second line' "$D/pages/d-paper.html" && echo present || echo absent):$(grep -q 'the second line' "$D/pages/c-paper.html" && echo present || echo absent)" "no paper bytes on D's refusal page (control: C's page shows them)"
+
+# Marks (K12M's mpaper): each line's rendered marks, as the client's one marks
+# renderer writes them for `doc-show`, and the marks as row attributes.
+code=$(get a-mpaper.html "${URL_A}doc/mpaper")
+run a-show-mpaper "$MINI" workspace --action doc-show --dir "$SPONSOR_WS" --name mpaper
+missing=0; n=0
+while IFS= read -r text; do n=$((n + 1)); grep -qF -- "$text" "$D/pages/a-mpaper.html" || missing=$((missing + 1)); done \
+  < <(jq -r '.lines[] | select(.kind == "atom" and .struck != true and ((.marks // []) | length) > 0) | .rendered' "$D/a-show-mpaper.out" \
+      | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
+row marks-render "200:equal:yes" "$code:$([ "$n" -gt 0 ] && [ "$missing" = 0 ] && echo equal || echo "$missing of $n missing"):$(grep -q 'data-marks="' "$D/pages/a-mpaper.html" && echo yes || echo no)" \
+  "$n marked line(s); $(grep -o 'data-marks="[^"]*"' "$D/pages/a-mpaper.html" | tr '\n' ' ' | cut -c1-120)"
 
 # History, a page at a past height, and a diff (K12H's hist).
 code=$(get a-history.html "${URL_A}doc/hist/history")

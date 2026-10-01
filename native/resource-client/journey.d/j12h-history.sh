@@ -115,8 +115,11 @@ H[6]=$(invoke h-e6 "$SPONSOR_WS" "$(jq -n --arg r "$(jq -r .rootRevision "$D/ctl
 show ctl-6 "$SPONSOR_WS"; ok ctl-6
 
 # Absolute heights: genesis height G = the current read's challenge height - the last log height.
-att=$(grep -o 'workspace read attempt: .*' "$D/ctl-6.err" | tail -1 | cut -d' ' -f4)
-G=$(( $(jq -r .height "$att/challenge.json") - H[6] ))
+# (the newest signed read of A's workspace is ctl-6's host read; doc-show's
+# render attempts hold no challenge)
+challenge=$(ls -t "$SPONSOR_WS"/attempts/*/challenge.json | head -1)
+G=$(( $(jq -r .height "$challenge") - H[6] ))
+[ "$G" -gt 0 ] || { echo "genesis height $G from $challenge is not positive" >&2; exit 1; }
 for i in 1 2 3 4 5 6; do H[$i]=$((G + H[$i])); done
 echo "genesis $G; edit heights ${H[1]} ${H[2]} ${H[3]} ${H[4]} ${H[5]} ${H[6]}; subjects A=$A B=$B C=$C" >&2
 
