@@ -307,6 +307,12 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [114, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
             exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
         }
+        // C3 K-JOB-MONEY: the job-money quartet (fund, claim, settle). Same shape as P6's.
+        // Renumbered at the final merge 131-134 -> 160-163 (131-137 are the Nock block).
+        [160 | 162 | 163, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [161, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
         _ => false,
     }
 }

@@ -242,7 +242,7 @@ book = {"sponsor": str(EMBER), "control": str(FACTORY_CONTROL), "nonce": fresh()
         "tariff": {"version": "2", "asset": "0", "mint": P1_MINT, "tokenProgram": P1_PROGRAM,
                    "decimals": "6", "creditPerAtomic": "1", "maxPerObservation": "100000000000",
                    "minTickSlots": "1", "nodeHourRate": str(NODE_RATE), "enrolIndex": None,
-                   "journalFloor": str(FLOOR)}}
+                   "journalFloor": str(FLOOR), "slashCallerPermille": "500"}}
 r, _ = sign_and_submit(host, "pay-book", book, EMBER, PAY_OPS)
 row("operator installs a 3-row book (row 0 = the enrollment address) + tariff v2", "confirmed",
     show(r), r.get("type") == "confirmed")

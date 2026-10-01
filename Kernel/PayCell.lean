@@ -35,9 +35,10 @@ from `bookAt`.
 
 Wire: the store codec with layout name `DREGG/PAY/CELL/v3` (its frame commits
 to the name and every namespace's codec identifier); the tariff value is
-`DREGG/PAY/TARIFF/v2`.  v3 = P3b-1's enrolment namespaces without P2's in-cell
-clock: namespace tag 3 (the clock) is retired and decodes to nothing. A v1 or
-v2 cell refuses to decode.
+`DREGG/PAY/TARIFF/v3` (C3: `slashCallerPermille`).  v3 = P3b-1's enrolment
+namespaces without P2's in-cell clock: namespace tag 3 (the clock) is retired and
+decodes to nothing. The frame commits to every namespace codec id, so a v1 or
+v2 cell, or one with a v2 tariff, refuses to decode.
 -/
 import Compiler.StoreCodec
 import Kernel.PayTariff
@@ -311,7 +312,7 @@ def wire : Wire layout where
     | .sshIndex => "ssh-ed25519-blob/bytes"
     | .journal => "soltx-nullifier/bytes"
   valueCodecId
-    | .tariff => "DREGG/PAY/TARIFF/v2"
+    | .tariff => "DREGG/PAY/TARIFF/v3"
     | .book => "address32/bytes"
     | .assignment => "account-id/nat"
     | .enrolment => "DREGG/PAY/ENROLMENT/v1"

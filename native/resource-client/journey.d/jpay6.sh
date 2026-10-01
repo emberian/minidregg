@@ -72,7 +72,10 @@ MAX_IN, MAX_OUT = 1000, 100
 ROWS = []
 OPERATOR, TOOL, PROVIDER, FRIEND, STRANGER = 7, 8, 9, 20, 21
 FACTORY_CONTROL = 53
-PARENT, TOOL_TASK, PUBLICATION, PURSE = 7001, 7002, 7003, 7004
+# JPAY6_BASE moves the four ids (and so the controller unit name) off a box's live
+# mini-grain-controller@7001 (persvati keeps one); the default is the historical birth.
+BASE = int(os.environ.get("JPAY6_BASE", "7001"))
+PARENT, TOOL_TASK, PUBLICATION, PURSE = BASE, BASE + 1, BASE + 2, BASE + 3
 FRIEND_BALANCE = 60_000_000
 REFILL = 50_000_000
 SUBJECTS = [OPERATOR, TOOL, PROVIDER, FRIEND, STRANGER]
@@ -119,8 +122,8 @@ operator = {"domain": 8501, "federation": 9, "factoryId": 10, "resourceBookId": 
             "tariffPerInitialPayloadByte": 0, "collector": 99, "asset": 0, "genesisHeight": 10,
             "expectedSeed": 0, "storageBinary": STORE, "storageRoot": path("store"),
             "signatureBinary": VERIFIER,
-            "continuityProviderResourceId": 7004,
-            "providerMetering": {"providerResourceId": 7004, "tariff": {
+            "continuityProviderResourceId": PURSE,
+            "providerMetering": {"providerResourceId": PURSE, "tariff": {
                 "version": "1", "model": MODEL, "inputMicroPerMillion": str(RATE_IN),
                 "outputMicroPerMillion": str(RATE_OUT)}}}
 json.dump(operator, open(path("operator.json"), "w"), indent=1)
@@ -322,14 +325,14 @@ def budget(p): return int(p["remaining"]) + int(p["reserved"])
 
 # ---------------------------------------------------------------- the journey
 started = time.time()
-row("grain birth (parent 7001, tool 7002, publication 7003, provider purse 7004) is the first event",
+row(f"grain birth (parent {PARENT}, tool {TOOL_TASK}, publication {PUBLICATION}, provider purse {PURSE}) is the first event",
     "confirmed installed", f"{born.get('type')} {born.get('confirmation')} exit={sub.returncode}",
     born.get("type") == "confirmed" and born.get("confirmation") == "installed")
 p0 = purse()
 row("the hosted grain's four ordinary delegations (73, 75, 93, 94)", "4 x confirmed installed",
     " ".join(f"{d.get('type')}/{d.get('confirmation')}" for d in delegations),
     all(d.get("type") == "confirmed" for d in delegations))
-row("purse 7004 at birth", "generation 0, status 0, remaining 50, reserved 0",
+row(f"purse {PURSE} at birth", "generation 0, status 0, remaining 50, reserved 0",
     f"g={p0['generation']} s={p0['status']} remaining={p0['remaining']} reserved={p0['reserved']}",
     (p0["generation"], p0["status"], p0["remaining"], p0["reserved"]) == ("0", "0", "50", "0"))
 
@@ -340,7 +343,7 @@ row("refill before a valid tariff (the credit asset is the tariff's)", "refused 
 v = view(host)
 tariff = {"version": "1", "asset": "0", "mint": "85" * 32, "tokenProgram": "06" * 32, "decimals": "6",
           "creditPerAtomic": "1", "maxPerObservation": "2000000000", "minTickSlots": "1500",
-          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000"}
+          "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}
 book_cmd = {"sponsor": str(OPERATOR), "control": str(FACTORY_CONTROL), "nonce": fresh(),
             "expectedFactoryRoot": v["factoryRoot"], "expectedAuthorityRoot": v["authorityRoot"],
             "expectedPayRoot": v["payRoot"], "bookStart": "0", "book": ["16" * 32], "tariff": tariff}
@@ -379,7 +382,7 @@ row("the refused refills moved nothing", "ledger and purse unchanged",
 
 host = Host()
 r, refill_ingress = refill(host, FRIEND, CAPS[FRIEND][0], FRIEND, REFILL, REFILL)
-row("friend refills purse 7004 with 50 000 000 credit", "confirmed", show(r), r.get("type") == "confirmed")
+row(f"friend refills purse {PURSE} with 50 000 000 credit", "confirmed", show(r), r.get("type") == "confirmed")
 op, data = host.call(116, refill_ingress)
 looked = outcome(data) if op == 116 else {"type": "op-failed"}
 row("receipt-only lookup of that refill (op 116)", "confirmed replayed",
@@ -396,7 +399,7 @@ row("Book: friend -50 000 000, well +50 000 000, total (well included) unchanged
     "friend 10000000", f"friend={balance(led1, FRIEND)} well {led0['well']} -> {led1['well']} total {led0['total']} -> {led1['total']}",
     balance(led1, FRIEND) == FRIEND_BALANCE - REFILL and int(led1["well"]) == int(led0["well"]) + REFILL
     and led1["total"] == led0["total"])
-row("purse 7004: remaining +50 000 000, nothing else moved", "remaining 50000050, g 0 s 0 reserved 0",
+row(f"purse {PURSE}: remaining +50 000 000, nothing else moved", "remaining 50000050, g 0 s 0 reserved 0",
     f"g={p2['generation']} s={p2['status']} remaining={p2['remaining']} reserved={p2['reserved']}",
     int(p2["remaining"]) == int(p1["remaining"]) + REFILL and
     (p2["generation"], p2["status"], p2["reserved"]) == (p1["generation"], p1["status"], p1["reserved"]))
@@ -489,10 +492,10 @@ if added:
 prof = json.loads(subprocess.run([MINI, "profile", "--host", HOST, "--config", CONFIG_B],
                                  capture_output=True).stdout or b"{}")
 pin = prof.get("providerMetering") or {}
-row("the Host profile pins the provider tariff in credit for purse 7004",
-    f"providerResourceId 7004, model {MODEL}, {RATE_IN}/{RATE_OUT} per million tokens",
+row(f"the Host profile pins the provider tariff in credit for purse {PURSE}",
+    f"providerResourceId {PURSE}, model {MODEL}, {RATE_IN}/{RATE_OUT} per million tokens",
     f"pin={json.dumps(pin, sort_keys=True)} addedToPinnedConfig={added}",
-    str(pin.get("providerResourceId")) == "7004" and pin.get("model") == MODEL
+    str(pin.get("providerResourceId")) == str(PURSE) and pin.get("model") == MODEL
     and pin.get("inputMicroPerMillion") == str(RATE_IN) and pin.get("outputMicroPerMillion") == str(RATE_OUT))
 runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOCKET,
            "controlSocket": os.path.join(STATE, "control.sock"), "custodyKey": path(f"keys/{OPERATOR}.key"),

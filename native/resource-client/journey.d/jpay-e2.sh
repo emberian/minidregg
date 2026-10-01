@@ -178,7 +178,7 @@ def tariff_json(enrol_index=0, mint=P1_MINT):
     return {"version": "2", "asset": "0", "mint": mint, "tokenProgram": P1_PROGRAM, "decimals": "6",
             "creditPerAtomic": "1", "maxPerObservation": "10000000000", "minTickSlots": "1500",
             "nodeHourRate": str(NODE_RATE),
-            "enrolIndex": None if enrol_index is None else str(enrol_index), "journalFloor": "1000000"}
+            "enrolIndex": None if enrol_index is None else str(enrol_index), "journalFloor": "1000000", "slashCallerPermille": "500"}
 def obs(amount, memo=None, memo_error=None, index=0, mint=P1_MINT, signature="55" * 64):
     return {"index": index, "address": P1_ADDRESS, "signature": signature, "slot": 900,
             "blockTime": 1799999000, "amount": amount, "mint": mint, "tokenProgram": P1_PROGRAM,

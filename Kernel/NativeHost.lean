@@ -1277,6 +1277,88 @@ def payRefillLookupLoaded (config : Config) (opened : Opened config) (bytes : Li
           | some original => .confirmed .replayed original
           | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
 
+/-! ## Job money (lane C3 K-JOB-MONEY): session operations 131–134
+
+Fund, claim and settle (`DREGG/JOB/MONEY/v1`) share one
+plan/assembly/submission/lookup quartet; the signed ingress is
+`DREGG/JOB/MONEY/SIGNED/v1`.  The plan is P2's shared `SigningPlan`. -/
+
+def jobMoneyPlanLoaded (config : Config) (opened : Opened config) (commandBytes : List UInt8) :
+    Except String PayCellDomain.SigningPlan := do
+  let command ← need "noncanonical job money command"
+    (JobMoneyReceiver.commandCodec.decode commandBytes)
+  let header ← JobMoneyReceiver.signingHeader config.deployment config.profile
+    ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command
+  pure ⟨config.deployment.domain, config.profile.semantics, commandBytes,
+    CredentialSignedEnvelopeController.headerCodec.encode header⟩
+
+def jobMoneyAssemble (plan : PayCellDomain.SigningPlan) (signature : List UInt8) :
+    Except String (List UInt8) := do
+  check (decide (signature.length = 64)) "job money signature must be 64 bytes"
+  let header ← need "noncanonical job money header"
+    (CredentialSignedEnvelopeController.headerCodec.decode plan.header)
+  check (JobMoneyReceiver.commandCodec.decode plan.commandBytes).isSome
+    "noncanonical job money plan command"
+  let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode ⟨header, signature⟩
+  pure (JobMoneyReceiver.ingressCodec.encode ⟨plan.commandBytes, envelope⟩)
+
+def jobMoneySubmitLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    IO Outcome := do
+  match ← JobMoneyReceiver.receiveLoaded config.deployment config.profile
+      ⟨config.federation, logicalHeight config opened.durable⟩ config.signature config.transport
+      opened.durable bytes with
+  | .confirmed kind receipt => confirmed config kind receipt.transactionId receipt.eventId
+  | .rejected reason => return refused .operationRejected "job-money" s!"{repr reason}"
+  | .transactionConflict => return refused .conflict "replay" "transaction identity conflict"
+  | .durableRejected reason => return refused .operationRejected "durable" s!"{repr reason}"
+  | .contention => return .contention
+  | .unavailable detail => return .unavailable detail.toUTF8.toList
+  | .uncertain detail => return .uncertain detail.toUTF8.toList
+
+/-- Receipt-only historical lookup of a job-money turn.  Absence never submits. -/
+def jobMoneyLookupLoaded (config : Config) (opened : Opened config) (bytes : List UInt8) :
+    Outcome :=
+  match JobMoneyReceiver.decodeIngress bytes with
+  | none => refused .malformed "job-money" "noncanonical signed ingress"
+  | some ingress =>
+      match JobMoneyReceiver.replay config.deployment.domain config.profile.semantics
+          opened.durable ingress with
+      | none => .absent
+      | some (.error _) => refused .conflict "replay" "transaction identity conflict"
+      | some (.ok receipt) =>
+          match historicalReceipt config opened.durable receipt.transactionId receipt.eventId with
+          | some original => .confirmed .replayed original
+          | none => .uncertain "original receipt prefix unavailable".toUTF8.toList
+
+/-- The operator's local read of one job (not a socket operation): its root,
+its eight money fields, and what the Book's held account for it (the account
+with the job's id) holds in the credit asset. -/
+structure PayJob where
+  job : Nat
+  root : Digest
+  state : JobMoney.Job
+  bookHeld : Int
+
+def payJobLoaded (config : Config) (opened : Opened config) (job : Nat) :
+    Except String PayJob := do
+  let .present packed := opened.directory.directory.slots job
+    | .error s!"job {job} absent"
+  let cell ← need s!"job {job} is not a declared object"
+    (CanonicalCellRegistry.selectDeclared config.deployment job .object packed)
+  let state ← need s!"job {job} has no money fields" (JobMoney.readJob job cell.logical)
+  let pay ← need "pay cell unavailable" (PayCellDomain.load config.deployment opened.durable.snapshot)
+  let book ← need "book unavailable"
+    (ResourceBirthController.Concrete.observeCell config.deployment opened.directory.directory
+      config.deployment.resourceBookId .resourceBook)
+  let asset := ((PayCell.tariffOf pay.cell.logical).map PayTariff.Tariff.asset).getD 0
+  let logical := CanonicalResourceKernel.logicalBook book.payload.logical
+  pure ⟨job, cell.root, state, logical.balance (JobMoney.heldAccount job) asset⟩
+
+def payJob (config : Config) (job : Nat) : IO (Except String PayJob) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened => return payJobLoaded config opened job
+
 /-- The operator's local read of one AgentGrain purse (not a socket
 operation): its root and its four coordinates. -/
 structure PayPurse where

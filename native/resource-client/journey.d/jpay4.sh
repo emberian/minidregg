@@ -266,7 +266,7 @@ json.dump({"control": str(FACTORY_CONTROL),
            "tariff": {"version": "1", "asset": "0", "mint": b58encode(bytes.fromhex(MINT)),
                       "tokenProgram": PROGRAM, "decimals": "6", "creditPerAtomic": str(RATE),
                       "maxPerObservation": str(CAP), "minTickSlots": str(MIN_TICK),
-                      "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000"}},
+                      "nodeHourRate": "5952380", "enrolIndex": None, "journalFloor": "1000000", "slashCallerPermille": "500"}},
           open(path("book.json"), "w"))
 r = mini("pay", "book", "--dir", WS[EMBER], "--source", path("book.json"))
 row("operator installs a 4-row book (base58 and hex rows) and the tariff", r.returncode == 0 and "confirmed" in r.stdout,
