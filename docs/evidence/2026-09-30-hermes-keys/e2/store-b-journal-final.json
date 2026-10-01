@@ -1,0 +1,175 @@
+{
+  "format": "minidregg-grain-runtime-v1",
+  "binding": {
+    "config": {
+      "capability": "71",
+      "commands": [
+        {
+          "args": [
+            "--workspace",
+            "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/work",
+            "--runtime-root",
+            "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/runtime",
+            "--network",
+            "host",
+            "--",
+            "/agent/hermes-acp",
+            "/workspace/acp-ready",
+            "/workspace/acp-release"
+          ],
+          "charge": "1",
+          "name": "hermes-acp",
+          "program": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/launcher/bwrap",
+          "reserve": "3",
+          "systemdScope": true,
+          "wallTimeSeconds": 1500
+        }
+      ],
+      "controlSocket": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/state/control.sock",
+      "custodyKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/boot/controller.key",
+      "cwd": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b",
+      "host": "/home/ember/build/mini-product-20260930/hermes-keys/bin/minidregg-host-p2",
+      "hostConfig": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/boot/deployment/continuity-config.json",
+      "hostSocket": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/session/host.sock",
+      "mini": "/home/ember/build/mini-product-20260930/hermes-keys/bin/mini",
+      "policyControlCapability": "72",
+      "providerTask": {
+        "capability": "101",
+        "charge": "1",
+        "credentialsKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/etc/credentials.key",
+        "credentialsRoot": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/credentials",
+        "custodyKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/boot/provider.key",
+        "gatewayBind": "127.0.0.1:18941",
+        "localFixtureHostNetwork": true,
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 8388608,
+        "metering": false,
+        "model": "shared-model",
+        "onBehalfOf": {
+          "publicKey": "49d8fe93e38d3998d3715cef1721bf5d0c161eec89eda2bec00ecaad7bc1bdef",
+          "subject": "22"
+        },
+        "parentCapability": "75",
+        "parentObserveCapability": "75",
+        "providers": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/etc/providers.json",
+        "queryCapability": "101",
+        "reserve": "3",
+        "subject": "9",
+        "task": "74604",
+        "timeoutSeconds": 120
+      },
+      "queryCapability": "71",
+      "stateDir": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/state",
+      "subject": "7",
+      "task": "74601",
+      "toolTask": {
+        "allowedPublications": [
+          {
+            "capability": "93",
+            "kind": "object",
+            "observeCapability": "93",
+            "target": "74603"
+          }
+        ],
+        "allowedReads": [
+          {
+            "fnInboxSummary": false,
+            "kind": "object",
+            "maxResultBytes": 65536,
+            "name": "publication",
+            "observeCapability": "94",
+            "target": "74603"
+          }
+        ],
+        "capability": "81",
+        "charge": "1",
+        "custodyKey": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/boot/tool.key",
+        "parentCapability": "73",
+        "parentObserveCapability": "73",
+        "queryCapability": "81",
+        "reserve": "2",
+        "subject": "8",
+        "task": "74602"
+      }
+    },
+    "configPath": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/controller.json"
+  },
+  "nextOperationId": 32,
+  "connection": "soft",
+  "pending": null,
+  "toolPending": null,
+  "providerPending": null,
+  "hardReconnectPending": false,
+  "child": null,
+  "settlementDue": null,
+  "parentHold": null,
+  "toolHold": null,
+  "dispatchPending": null,
+  "dispatchHold": null,
+  "dispatchAttempt": null,
+  "applicationApiAttempt": null,
+  "applicationApiHistory": [],
+  "providerHold": null,
+  "providerAttempt": null,
+  "providerSettlement": {
+    "providerAttemptId": 13,
+    "operationId": 25,
+    "operation": "provider settle",
+    "attempt": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/state/attempt-0000000000000025",
+    "charge": "1",
+    "sourceSha256": "765cafc81cbda1127a2ca94c38909290a29533074a8c19ec18f3c2bcd650939b",
+    "callSha256": "cd6c5d6fc1ed1cd21eb8ae90e91813272a61c96e50b4171611d25e037bbac21a",
+    "outcomePath": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/state/attempt-0000000000000025/outcome.json",
+    "outcomeSha256": "60ddfb5718396b7caae025fbcdbd0a03ef4d8eaf9a15a204b4a21cc63690ada7",
+    "receipt": {
+      "transactionId": "90316031302479734677290490377298665846984040548477290262360558248575027679408",
+      "eventId": "79495227400716012933537098202615741934377961984901762943232878270218363188502",
+      "acceptedCount": "11",
+      "imageBoundary": "79956565179850298182484062522181947663600526947229517436580704723107841814040"
+    }
+  },
+  "providerReplays": [
+    {
+      "promptOperationId": 11,
+      "parentGeneration": "1",
+      "requestPath": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/state/provider-0000000000000013.controller-request",
+      "requestBytes": 92,
+      "requestSha256": "a5d0f3c8c0b8f80186245300dec87658244ca6bee231bd33f486becb7e97be8c",
+      "responsePath": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/state/provider-0000000000000013.controller-outcome",
+      "responseBytes": 261,
+      "responseSha256": "8e92ec058ecae2c29d4199f885314e2d6160c834955a9f187a9ade417341d195",
+      "status": 200,
+      "contentType": "application/json",
+      "responseHeadersPath": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/state/provider-0000000000000013.controller-response-headers",
+      "responseHeadersBytes": 91,
+      "responseHeadersSha256": "3c38999e6dd349fb987381dd7db4de0af300e3cdefd2b5cedb2eb5d9361ee782",
+      "meterReportPath": null,
+      "meterReportSha256": null,
+      "meteredCharge": null
+    }
+  ],
+  "foregroundAttempt": null,
+  "foregroundHistory": [],
+  "publicationReceipts": [],
+  "birthNextOrdinal": {},
+  "birthOperation": null,
+  "birthPending": null,
+  "bornResources": [],
+  "workspaceProposals": [],
+  "workspaceAttempt": null,
+  "workspaceBirth": null,
+  "workspaceResolutions": [],
+  "managedLawGeneration": "1",
+  "reconciliationLog": [],
+  "hermesSession": {
+    "id": "acceptance",
+    "workspace": "/home/ember/build/mini-product-20260930/hermes-keys/run/e2/store-b/work",
+    "loadVerified": false,
+    "stateFingerprint": null,
+    "retentionIssue": "upstream did not create state.db after the prompt",
+    "pendingPrompt": false
+  },
+  "priorHermesSessions": [],
+  "promptWitness": null,
+  "unresolvedExternal": []
+}

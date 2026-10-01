@@ -97,3 +97,11 @@ root = "Host.NockEval"
 # over the umbrella). Built by scripts/lane/ub.sh.
 [[lean_lib]]
 name = "AxiomCensus"
+
+# UMBRELLA-SPLIT: the deployed umbrella (no Selvage, no proof-system Assurance)
+# and the research census over the whole tree (`Minidregg`).
+[[lean_lib]]
+name = "Deployed"
+
+[[lean_lib]]
+name = "AxiomCensusResearch"

@@ -47,11 +47,79 @@ fn parse_host_sha256(value: &str) -> Result<[u8; 32], String> {
     Ok(bytes)
 }
 
-fn request_from_envelope<'a>(
+/// Where a client's Host requests go. Every socket argument, workspace pin and
+/// attempt manifest carries one address: an absolute path names the
+/// deployment's unix socket; `ssh:DEST` names the byte proxy reached by
+/// `ssh -T DEST` (`mini socket-proxy` on the far side), whose stdio carries
+/// exactly the frames the unix socket would, one reply per request.
+pub(crate) enum Endpoint<'a> {
+    Unix(&'a Path),
+    Remote(&'a str),
+}
+
+pub(crate) const REMOTE_PREFIX: &str = "ssh:";
+
+/// An ssh destination as `ssh` itself takes it (`user@host`, or a Host alias
+/// from the caller's ssh config). It is passed after `--`, so it can never be
+/// read as an ssh option; ports and identities belong in the ssh config.
+pub(crate) fn remote_destination(destination: &str) -> Result<(), String> {
+    if destination.is_empty()
+        || destination.len() > 255
+        || destination.starts_with('-')
+        || !destination
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'@' | b'%' | b'+'))
+    {
+        return Err("--remote takes one ssh destination: user@host or an ssh config Host alias".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn remote_address(destination: &str) -> Result<std::path::PathBuf, String> {
+    remote_destination(destination)?;
+    Ok(format!("{REMOTE_PREFIX}{destination}").into())
+}
+
+pub(crate) fn endpoint(address: &Path) -> Result<Endpoint<'_>, String> {
+    match address.to_str().and_then(|text| text.strip_prefix(REMOTE_PREFIX)) {
+        Some(destination) => {
+            remote_destination(destination)?;
+            Ok(Endpoint::Remote(destination))
+        }
+        None => Ok(Endpoint::Unix(address)),
+    }
+}
+
+pub(crate) fn is_remote(address: &Path) -> bool {
+    matches!(endpoint(address), Ok(Endpoint::Remote(_)))
+}
+
+/// The form a workspace or attempt manifest pins: a remote address verbatim,
+/// a unix socket as an absolute path.
+pub(crate) fn pinned_address(address: &Path) -> Result<String, String> {
+    match endpoint(address)? {
+        Endpoint::Remote(destination) => Ok(format!("{REMOTE_PREFIX}{destination}")),
+        Endpoint::Unix(path) => {
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                std::env::current_dir()
+                    .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?
+                    .join(path)
+            };
+            path.to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("socket path is not valid UTF-8: {}", path.display()))
+        }
+    }
+}
+
+/// Splits a socket envelope after its config pin: the Host-image pin a
+/// version-2 envelope carries, and the request that follows.
+fn split_envelope<'a>(
     envelope: &'a [u8],
     config: &[u8],
-    host_sha256: &[u8; 32],
-) -> Result<&'a [u8], &'static str> {
+) -> Result<(Option<&'a [u8]>, &'a [u8]), &'static str> {
     if envelope.len() < 5 || !matches!(envelope[0], 1 | 2) {
         return Err("invalid socket envelope");
     }
@@ -62,16 +130,16 @@ fn request_from_envelope<'a>(
     if config_length != config.len() || envelope.get(5..config_end) != Some(config) {
         return Err("config pin mismatch");
     }
-    let request_start = if envelope[0] == 2 {
+    let (pin, request_start) = if envelope[0] == 2 {
         let sha_end = config_end
             .checked_add(32)
             .ok_or("invalid socket envelope")?;
-        if envelope.get(config_end..sha_end) != Some(host_sha256.as_slice()) {
-            return Err("host image pin mismatch");
-        }
-        sha_end
+        (
+            Some(envelope.get(config_end..sha_end).ok_or("invalid socket envelope")?),
+            sha_end,
+        )
     } else {
-        config_end
+        (None, config_end)
     };
     let request = envelope
         .get(request_start..)
@@ -79,7 +147,45 @@ fn request_from_envelope<'a>(
     if request.is_empty() {
         return Err("invalid socket envelope");
     }
+    Ok((pin, request))
+}
+
+fn request_from_envelope<'a>(
+    envelope: &'a [u8],
+    config: &[u8],
+    host_sha256: &[u8; 32],
+) -> Result<&'a [u8], &'static str> {
+    let (pin, request) = split_envelope(envelope, config)?;
+    if pin.is_some_and(|pin| pin != host_sha256.as_slice()) {
+        return Err("host image pin mismatch");
+    }
     Ok(request)
+}
+
+/// What the byte proxy checks before a frame may reach the public socket: the
+/// envelope names the deployment's pinned config, and its request is an
+/// operation the public socket serves. The Host image pin and everything
+/// inside the request are the socket's and the Host's to judge.
+pub(crate) fn public_envelope(
+    envelope: &[u8],
+    config: &[u8],
+    catalog_enabled: bool,
+) -> Result<(), &'static str> {
+    let (_, request) = split_envelope(envelope, config)?;
+    if request.len() > HOST_MAX_FRAME {
+        return Err("host frame exceeds bound");
+    }
+    if !allowed_operation(request, catalog_enabled) {
+        return Err("operation unavailable on selected socket");
+    }
+    Ok(())
+}
+
+pub(crate) fn catalog_enabled(config: &[u8]) -> Result<bool, String> {
+    Ok(serde_json::from_slice::<serde_json::Value>(config)
+        .map_err(|e| format!("invalid operator config JSON: {e}"))?
+        .get("fnReplyCatalog")
+        .is_some_and(serde_json::Value::is_object))
 }
 
 fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
@@ -183,6 +289,24 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
         [127, pair @ ..] if pair.len() < HOST_MAX_FRAME => exact_pair(pair)
             .is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64),
         [129] => true,
+        // PAY: the pay cell's signed commands (103 plan, 104 assembly, 105 submit, 106
+        // receipt-only lookup), its public view (107), and the observer's reports (108-111,
+        // the same four shapes). Each command is authorized by its own signature and
+        // capability inside the Host; the socket only bounds the frame. 112 is the public
+        // enrollment view (P3b-1), empty payload like 107.
+        [103 | 108, command @ ..] => !command.is_empty() && command.len() < HOST_MAX_FRAME,
+        [104 | 109, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| signature.len() == 64 && !plan.is_empty())
+        }
+        [105 | 106 | 110 | 111, ingress @ ..] => {
+            !ingress.is_empty() && ingress.len() < HOST_MAX_FRAME
+        }
+        [107 | 112] => true,
+        // PAY P6: the purse refill quartet. The Host decodes each component canonically.
+        [113 | 115 | 116, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [114, pair @ ..] if pair.len() < HOST_MAX_FRAME => {
+            exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
+        }
         _ => false,
     }
 }
@@ -271,7 +395,7 @@ fn allowed_operator_operation(request: &[u8]) -> bool {
     }
 }
 
-fn read_config(path: &Path) -> Result<Vec<u8>, String> {
+pub(crate) fn read_config(path: &Path) -> Result<Vec<u8>, String> {
     let file = fs::File::open(path)
         .map_err(|e| format!("cannot read host config {}: {e}", path.display()))?;
     let mut bytes = Vec::new();
@@ -284,7 +408,7 @@ fn read_config(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
+pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
     let mut prefix = [0u8; 4];
     let mut read = 0;
     while read < prefix.len() {
@@ -311,7 +435,7 @@ fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>> {
     Ok(Some(frame))
 }
 
-fn write_frame<W: Write>(writer: &mut W, frame: &[u8]) -> io::Result<()> {
+pub(crate) fn write_frame<W: Write>(writer: &mut W, frame: &[u8]) -> io::Result<()> {
     if !(1..=MAX_FRAME).contains(&frame.len()) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -466,7 +590,7 @@ fn clear_stale_socket(path: &Path) -> Result<(), String> {
     }
 }
 
-fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
+pub(crate) fn set_nonblocking<F: AsRawFd>(file: &F) -> io::Result<()> {
     const F_GETFL: i32 = 3;
     const F_SETFL: i32 = 4;
     #[cfg(target_os = "macos")]
@@ -595,11 +719,6 @@ fn invoke_inner(
     if payload.len() >= HOST_MAX_FRAME {
         return Err("host request exceeds frame bound before transmission".to_owned());
     }
-    let mut stream = UnixStream::connect(socket)
-        .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(10)))
-        .map_err(|e| format!("cannot set socket write deadline: {e}"))?;
     let mut frame = Vec::with_capacity(payload.len() + config.len() + 38);
     frame.push(if expected_host_sha256.is_some() { 2 } else { 1 });
     frame.extend_from_slice(&(config.len() as u32).to_le_bytes());
@@ -609,13 +728,10 @@ fn invoke_inner(
     }
     frame.push(operation);
     frame.extend_from_slice(payload);
-    write_frame(&mut stream, &frame).map_err(|e| format!("uncertain host request write: {e}"))?;
-    let reply = read_frame(&mut DeadlinePipe {
-        reader: &mut stream,
-        deadline: Instant::now() + Duration::from_secs(600),
-    })
-    .map_err(|e| format!("uncertain host response read: {e}"))?
-    .ok_or_else(|| "uncertain host response: connection closed".to_owned())?;
+    let reply = match endpoint(socket)? {
+        Endpoint::Unix(path) => exchange_unix(path, &frame)?,
+        Endpoint::Remote(destination) => crate::proxy::exchange(destination, &frame)?,
+    };
     if reply.len() > HOST_MAX_FRAME {
         return Err("uncertain host response exceeds host frame bound".to_owned());
     }
@@ -634,6 +750,48 @@ fn invoke_inner(
     Ok(reply)
 }
 
+/// One framed request on a fresh unix-socket connection and its framed reply.
+/// A failure after the write leaves the request's status uncertain.
+pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, String> {
+    let mut stream = UnixStream::connect(socket)
+        .map_err(|e| format!("cannot connect to {}: {e}", socket.display()))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(10)))
+        .map_err(|e| format!("cannot set socket write deadline: {e}"))?;
+    write_frame(&mut stream, frame).map_err(|e| format!("uncertain host request write: {e}"))?;
+    read_frame(&mut DeadlinePipe {
+        reader: &mut stream,
+        deadline: Instant::now() + Duration::from_secs(600),
+    })
+    .map_err(|e| format!("uncertain host response read: {e}"))?
+    .ok_or_else(|| "uncertain host response: connection closed".to_owned())
+}
+
+/// The stdio transport: one framed request written to a byte pipe that ends at
+/// the proxy, and its framed reply read back. The first exchange on a new ssh
+/// session also waits out the ssh handshake, hence the longer write deadline.
+/// `writer` must be non-blocking.
+pub(crate) fn exchange_stdio<W: Write + AsRawFd, R: Read + AsRawFd>(
+    writer: &mut W,
+    reader: &mut R,
+    frame: &[u8],
+) -> Result<Vec<u8>, String> {
+    write_frame(
+        &mut DeadlinePipeWrite {
+            writer,
+            deadline: Instant::now() + Duration::from_secs(60),
+        },
+        frame,
+    )
+    .map_err(|e| format!("uncertain host request write: {e}"))?;
+    read_frame(&mut DeadlinePipe {
+        reader,
+        deadline: Instant::now() + Duration::from_secs(600),
+    })
+    .map_err(|e| format!("uncertain host response read: {e}"))?
+    .ok_or_else(|| "uncertain host response: proxy closed".to_owned())
+}
+
 /// The socket directory must be owned by this account and inaccessible to
 /// others. This closes the interval between bind and chmod on the socket.
 pub fn serve(socket: &Path, host: &Path, config: &Path) -> Result<(), String> {
@@ -650,12 +808,12 @@ fn serve_with_mode(
     config: &Path,
     operator: bool,
 ) -> Result<(), String> {
+    if is_remote(socket) {
+        return Err("serve binds a unix socket; an ssh: address names a remote proxy".into());
+    }
     let host_sha256 = host_image_sha256(host)?;
     let config_bytes = read_config(config)?;
-    let catalog_enabled = serde_json::from_slice::<serde_json::Value>(&config_bytes)
-        .map_err(|e| format!("invalid operator config JSON: {e}"))?
-        .get("fnReplyCatalog")
-        .is_some_and(serde_json::Value::is_object);
+    let catalog_enabled = catalog_enabled(&config_bytes)?;
     let parent = socket
         .parent()
         .ok_or("socket requires a parent directory")?;
@@ -1468,4 +1626,30 @@ mod tests {
         fs::remove_file(lock_path).unwrap();
         fs::remove_dir(directory).unwrap();
     }
+    #[test]
+    fn pay_operations_are_public_and_shape_bounded() {
+        for operation in [103u8, 105, 106, 108, 110, 111] {
+            assert!(allowed_operation(&[operation, 1], false));
+            assert!(!allowed_operation(&[operation], false));
+        }
+        assert!(allowed_operation(&[107], false));
+        assert!(!allowed_operation(&[107, 0], false));
+        for operation in [104u8, 109] {
+            let mut pair = vec![operation, 1, 0, 0, 0, b'P'];
+            pair.extend([7u8; 64]);
+            assert!(allowed_operation(&pair, false));
+            pair.pop();
+            assert!(!allowed_operation(&pair, false));
+            assert!(!allowed_operation(&[operation, 0, 0, 0, 0], false));
+        }
+        assert!(allowed_operation(&[112], false));
+        assert!(!allowed_operation(&[112, 0], false));
+        let oversized = [vec![108u8], vec![1; HOST_MAX_FRAME]].concat();
+        assert!(!allowed_operation(&oversized, false));
+        // The operator socket admits none of them: the pay rail is signed, not custodial.
+        for operation in 103u8..=112 {
+            assert!(!allowed_operator_operation(&[operation, 1]));
+        }
+    }
+
 }

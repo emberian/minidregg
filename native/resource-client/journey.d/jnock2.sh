@@ -95,6 +95,11 @@ def birth(name, verdict_name):
     retained = os.path.join(WS, "sources", f"create-{name}.current", "reply.frame")
     if "retained encoded Host outcome" in last and os.path.exists(retained):
         last = open(retained, "rb").read().decode("latin1").replace("\xff", " | ")
+    # On final, birth authoring runs in retained generations (create-NAME.auth/gNNNN);
+    # a refused authoring names the generation's reply frame.
+    authored = re.search(r"authoring refused.*retained (\S+reply\.frame)", last)
+    if authored and os.path.exists(authored.group(1)):
+        last = open(authored.group(1), "rb").read().decode("latin1").replace("\xff", " | ")
     m = re.search(r"([0-9a-f]{40,})", last)
     if m:
         last = bytes.fromhex(m.group(1)).decode("latin1").replace("\xff", " | ")

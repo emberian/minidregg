@@ -99,7 +99,7 @@ pub(crate) fn validate_name(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn private_dir(path: &Path) -> Result<()> {
+pub(crate) fn private_dir(path: &Path) -> Result<()> {
     let named = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
     unsafe extern "C" {
@@ -182,6 +182,21 @@ pub(crate) fn member_path(value: &Value, key: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// The workspace's Host image, or the empty path of a remote workspace, which
+/// holds no Host image and names its Host by the pinned `hostSha256` alone
+/// (pinned for this process by `load`).
+pub(crate) fn workspace_host(value: &Value) -> Result<PathBuf> {
+    match value.get("host") {
+        Some(Value::Null) if value.get("socket").and_then(Value::as_str).is_some_and(|socket| {
+            crate::transport::is_remote(Path::new(socket))
+        }) =>
+        {
+            Ok(PathBuf::new())
+        }
+        _ => member_path(value, "host"),
+    }
+}
+
 fn os_string(value: OsString, label: &str) -> Result<String> {
     value
         .into_string()
@@ -225,17 +240,19 @@ pub(crate) fn load(root: &Path) -> Result<Value> {
         return Err("unknown participant workspace version".into());
     }
     decimal(member(&value, "subject")?, "workspace subject")?;
-    let _ = member_path(&value, "host")?;
     let _ = member_path(&value, "config")?;
     let _ = member_path(&value, "key")?;
+    if workspace_host(&value)?.as_os_str().is_empty() {
+        crate::pin_remote_host(member(&value, "hostSha256")?)?;
+    }
     match (value.get("socket").and_then(Value::as_str), SOCKET.get()) {
         (Some(socket), Some(selected)) if Path::new(socket) != selected => {
             return Err("selected socket differs from pinned workspace socket".into());
         }
         (Some(socket), None) => {
             let path = PathBuf::from(socket);
-            if !path.is_absolute() {
-                return Err("workspace socket is not absolute".into());
+            if !path.is_absolute() && !crate::transport::is_remote(&path) {
+                return Err("workspace socket is neither absolute nor a remote address".into());
             }
             SOCKET
                 .set(path)
@@ -253,9 +270,11 @@ pub(crate) struct InitIdentity<'a> {
     pub(crate) enrollment: Option<&'a Path>,
 }
 
+/// `host` is `None` for a remote workspace: it pins the Host's SHA-256 (from
+/// `--host-sha256`) and a remote socket address instead of a Host image.
 pub(crate) fn init(
     root: &Path,
-    host: &Path,
+    host: Option<&Path>,
     config: &Path,
     identity: InitIdentity<'_>,
     birth_context: Option<&Path>,
@@ -313,13 +332,30 @@ pub(crate) fn init(
         .or(key)
         .ok_or("workspace init requires --key or --enrollment")?;
     decimal(subject, "subject")?;
-    let host = absolute(host)?;
+    let socket = SOCKET
+        .get()
+        .map(|socket| crate::transport::pinned_address(socket))
+        .transpose()?;
+    let (host, host_sha) = match host {
+        Some(host) => {
+            let host = absolute(host)?;
+            if !host.is_file() {
+                return Err("workspace Host must exist as a file".into());
+            }
+            (Some(host), None)
+        }
+        None => {
+            if !socket.as_deref().is_some_and(|s| crate::transport::is_remote(Path::new(s))) {
+                return Err("workspace init requires --host, or --remote with --host-sha256".into());
+            }
+            (None, Some(crate::host_image_sha256(Path::new(""))?))
+        }
+    };
     let config = absolute(config)?;
     let key = absolute(key)?;
-    if !host.is_file() || !config.is_file() || !key.is_file() {
-        return Err("workspace Host, config and key must exist as files".into());
+    if !config.is_file() || !key.is_file() {
+        return Err("workspace config and key must exist as files".into());
     }
-    let socket = SOCKET.get().map(|socket| absolute(socket)).transpose()?;
     let context = birth_context.map(absolute).transpose()?;
     if let Some(context) = &context {
         let _ = bounded_json(context)?;
@@ -347,10 +383,13 @@ pub(crate) fn init(
     } else {
         None
     };
-    let value = json!({"type":"minidregg-participant-workspace-v1", "host":host,
+    let mut value = json!({"type":"minidregg-participant-workspace-v1", "host":host,
         "config":config,"key":key,"subject":subject,"socket":socket,
         "birthContext":retained_context,"namespaceRoot":namespace,
         "enrollment":retained_enrollment});
+    if let Some(sha) = host_sha {
+        value["hostSha256"] = json!(sha);
+    }
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(&root.join("workspace.json"), &bytes)?;
@@ -513,7 +552,7 @@ fn read(
     private_file(&source, &bytes)?;
     eprintln!("workspace read attempt: {}", attempt.display());
     query(
-        &member_path(workspace, "host")?,
+        &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         &source,
         OsStr::new("intent"),
@@ -546,7 +585,7 @@ pub(crate) fn signed_view(
         format!("view-{view}")
     };
     let result = query_retained(
-        &member_path(workspace, "host")?,
+        &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         &source,
         OsStr::new("intent"),
@@ -1194,7 +1233,7 @@ fn propose(
     )?;
     private_file(&proposal_dir.join("intent.json"), &intent_bytes)?;
     author(
-        &member_path(workspace, "host")?,
+        &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         OsStr::new("intent"),
         &proposal_dir.join("intent.json"),
@@ -1242,7 +1281,7 @@ fn submit_intent(
     }
     eprintln!("workspace attempt: {}", attempt.display());
     submit(
-        &member_path(workspace, "host")?,
+        &workspace_host(workspace)?,
         &member_path(workspace, "config")?,
         &source,
         OsStr::new(kind),
@@ -1788,7 +1827,7 @@ fn birth(
         .join("sources")
         .join(format!("create-{name_value}.authoring"));
     let attempt = root.join("attempts").join(format!("create-{name_value}"));
-    let host = member_path(workspace, "host")?;
+    let host = workspace_host(workspace)?;
     let config = member_path(workspace, "config")?;
     let author_dir = if attempt.exists() {
         authoring_generations(&authoring)?
@@ -2028,7 +2067,7 @@ fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<
         .ok_or("factory reference lacks a control capability")?;
     let observed = crate::participant_provisioning::observe_grant(
         &crate::participant_provisioning::ObserveGrant {
-            host: &member_path(workspace, "host")?,
+            host: &workspace_host(workspace)?,
             config: &member_path(workspace, "config")?,
             socket: SOCKET
                 .get()
@@ -2101,7 +2140,7 @@ fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &st
     )?;
     let observed = crate::participant_provisioning::observe_lookup(
         &crate::participant_provisioning::ObserveGrant {
-            host: &member_path(workspace, "host")?,
+            host: &workspace_host(workspace)?,
             config: &member_path(workspace, "config")?,
             socket: SOCKET
                 .get()
@@ -2560,7 +2599,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     let action = os_string(args.required("action")?, "workspace action")?;
     let root = absolute(&path(args.required("dir")?))?;
     if action == "init" {
-        let host = path(args.required("host")?);
+        let host = args.optional("host").map(path);
         let config = path(args.required("config")?);
         let key = args.optional("key").map(path);
         let subject = args
@@ -2573,7 +2612,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
         args.finish()?;
         return init(
             &root,
-            &host,
+            host.as_deref(),
             &config,
             InitIdentity {
                 key: key.as_deref(),

@@ -5,7 +5,9 @@ fields are execution generation, status, remaining allowance and unresolved
 reservation, in integer permission micro-units. These are scoped spend
 allowances, not Book balances or $DREGG. Birth does not prove funding; a
 broker must accept only explicitly allocated task resources, never an
-arbitrary caller-authored initial allowance. No field is a policy revision or grant
+arbitrary caller-authored initial allowance. The one funded increase is the
+`refill` edge: `Kernel.PurseRefill` burns Book credit 1:1 into `remaining`
+in the same turn, so one micro-unit is one credit. No field is a policy revision or grant
 revocation generation. A stopped status proves admission fencing, not that
 an external process or provider actually stopped. -/
 import Kernel.DeclaredFields
@@ -122,11 +124,39 @@ def transitionPolicy : Pred := .all [
     ([ (1,0), (2,0), (3,5), (4,5), (0,6), (1,6), (2,6), (3,7), (4,7), (5,7) ].map
       fun p => edge p.1 p.2 1 [unchangedBudget]))]
 
+/-- The slot only the purse-refill receiver (`Kernel.PurseRefillReceiver`)
+projects, after it has decided the joint turn: the payer's owner grant, the
+Book burn admitted at the loaded Book, and the joint credit delta balanced.
+No other receiver projects a slot of this name (READ: the generic declared
+receiver projects `request/*`, `target/policyId`, `command/bytes/*`,
+`resource/*` and `joint/target/*`). -/
+def refillSlot : String := "authority/operation/purse-refill"
+
+/-- The `refill` edge (PAY §2.7). Only the remaining allowance grows, by a
+positive amount; generation, status and the (zero) reservation are unchanged;
+the task is paused or attached without an outstanding reservation (0, 1, 2).
+It is a separate branch of `policy`, not of `transitionPolicy`: every
+transition the generic receiver can reach is still budget-nonincreasing
+(`accepted_budget_nonincrease`), and the only budget increase is this edge,
+which requires `refillSlot`. -/
+def refillPolicy : Pred := .all [
+  .eq refillSlot 1,
+  .memberOf "resource/field/1/before" [0,1,2],
+  .eq "resource/field/1/delta" 0,
+  .eq "resource/field/0/delta" 0,
+  .eq "resource/field/3/before" 0,
+  .eq "resource/field/3/delta" 0,
+  .not (.le "resource/field/2/delta" 0),
+  nonnegative "resource/field/0/before", nonnegative "resource/field/2/before"]
+
 /-- Management is deliberately lockable. The caller may supply an explicit
 management rule; it governs policy installation and capability revocation, never mutation.
-Ordinary observation/delegation still require the native capability checker. -/
+Ordinary observation/delegation still require the native capability checker.
+The refill branch carries no subject or verb test: whoever burns their own
+credit may fund the purse; the burn is authorized on the payer's account. -/
 def policy (management : Pred := .any []) : Pred := .any [
   .all [.eq "request/verb" 2, transitionPolicy],
+  refillPolicy,
   .memberOf "request/verb" [1,3],
   .all [.memberOf "request/verb" [4,5], management]]
 
@@ -186,6 +216,9 @@ inductive Operation where
   | disconnect
   | interrupt
   | cancel
+  /-- Admitted only by the purse-refill receiver, in one joint turn with the
+  Book burn of the same amount (`Kernel.PurseRefill`). -/
+  | refill (amount : Int)
   deriving DecidableEq, Repr
 
 def Operation.after (operation : Operation) (s : State) : State :=
@@ -200,6 +233,7 @@ def Operation.after (operation : Operation) (s : State) : State :=
   | .cancel => { s with
       generation := s.generation + 1
       status := (if s.status = 3 ∨ s.status = 4 ∨ s.status = 5 then 7 else 6) }
+  | .refill amount => { s with remaining := s.remaining + amount }
 
 theorem input_witness_exact (s : State) : Operation.input.after s = s := rfl
 
@@ -408,5 +442,107 @@ theorem hard_reserved_settlement_general (g r h charge : Int)
       (settle (interrupt ⟨g,3,r,h⟩) charge) = true := by
   simpa [interrupt] using
     interrupted_reserved_settlement_general g r h charge hg hr hh hc0 hch
+
+/-! ## The refill edge (PAY §2.7, lane P6) -/
+
+/-- The refill branch as the purse-refill receiver evaluates it: the slot it
+alone projects, then the task's exact four-coordinate projection. -/
+def refillAccepts (before after : State) : Bool :=
+  eval refillPolicy ⟨[]⟩ ⟨(refillSlot, 1) :: slots before after⟩
+
+theorem refill_after (s : State) (amount : Int) :
+    (Operation.refill amount).after s = { s with remaining := s.remaining + amount } := rfl
+
+set_option maxHeartbeats 1600000 in
+/-- What an accepted refill edge is: generation, status and the zero
+reservation unchanged, the remaining allowance strictly larger, and no
+reservation outstanding (status 0, 1 or 2). -/
+theorem refill_accepted_exact (before after : State)
+    (accepted : refillAccepts before after = true) :
+    after.generation = before.generation ∧ after.status = before.status ∧
+      before.reserved = 0 ∧ after.reserved = 0 ∧ before.remaining < after.remaining ∧
+      (before.status = 0 ∨ before.status = 1 ∨ before.status = 2) := by
+  unfold refillAccepts refillPolicy at accepted
+  rw [eval_all] at accepted
+  simp only [List.all_cons, List.all_nil, Bool.and_true, Bool.and_eq_true] at accepted
+  obtain ⟨_, sb, sd, gd, rb, rd, up, _, _⟩ := accepted
+  simp [eval, evalWith, Minidregg.Pred.State.get, slots, State.coordinates, refillSlot,
+    DeclaredResourceProjection.scalarSlots, DeclaredResourceProjection.get,
+    DeclaredResourceProjection.fieldName, DeclaredResourceProjection.pairName,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] at sb
+  simp [eval, evalWith, Minidregg.Pred.State.get, slots, State.coordinates, refillSlot,
+    DeclaredResourceProjection.scalarSlots, DeclaredResourceProjection.get,
+    DeclaredResourceProjection.fieldName, DeclaredResourceProjection.pairName,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] at sd
+  simp [eval, evalWith, Minidregg.Pred.State.get, slots, State.coordinates, refillSlot,
+    DeclaredResourceProjection.scalarSlots, DeclaredResourceProjection.get,
+    DeclaredResourceProjection.fieldName, DeclaredResourceProjection.pairName,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] at gd
+  simp [eval, evalWith, Minidregg.Pred.State.get, slots, State.coordinates, refillSlot,
+    DeclaredResourceProjection.scalarSlots, DeclaredResourceProjection.get,
+    DeclaredResourceProjection.fieldName, DeclaredResourceProjection.pairName,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] at rb
+  simp [eval, evalWith, Minidregg.Pred.State.get, slots, State.coordinates, refillSlot,
+    DeclaredResourceProjection.scalarSlots, DeclaredResourceProjection.get,
+    DeclaredResourceProjection.fieldName, DeclaredResourceProjection.pairName,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] at rd
+  rw [eval_not, Bool.not_eq_true'] at up
+  simp [eval, evalWith, Minidregg.Pred.State.get, slots, State.coordinates, refillSlot,
+    DeclaredResourceProjection.scalarSlots, DeclaredResourceProjection.get,
+    DeclaredResourceProjection.fieldName, DeclaredResourceProjection.pairName,
+    Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] at up
+  omega
+
+/-- Satisfiable pole, general: every positive refill of a task holding no
+reservation, paused or attached, is accepted by the edge. -/
+theorem refill_edge_accepted (s : State) (amount : Int)
+    (hg : 0 ≤ s.generation) (hr : 0 ≤ s.remaining) (hres : s.reserved = 0)
+    (hs : s.status = 0 ∨ s.status = 1 ∨ s.status = 2) (positive : 0 < amount) :
+    refillAccepts s ((Operation.refill amount).after s) = true := by
+  rcases s with ⟨g, status, r, h⟩
+  dsimp at hg hr hres hs
+  subst hres
+  rcases hs with hs | hs | hs <;> subst status <;>
+    simp [refillAccepts, refillPolicy, refill_after, nonnegative, refillSlot,
+      slots, State.coordinates, DeclaredResourceProjection.scalarSlots,
+      DeclaredResourceProjection.get, DeclaredResourceProjection.fieldName,
+      DeclaredResourceProjection.pairName, eval, evalWith, Pred.all,
+      PredList.ofList, evalWithAll, Minidregg.Pred.State.get,
+      Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString] <;>
+    omega
+
+/-- **Without the refill slot, no mutation the policy admits increases the
+task's allowance.** A verb-2 request admitted by `policy` whose projection does
+not carry `refillSlot = 1` satisfies `transitionPolicy`, whose first conjunct
+is `resource/pair/2/3/delta ≤ 0`. -/
+theorem policy_mutation_nonincrease_without_refill (management : Pred)
+    (old st : Minidregg.Pred.State)
+    (accepted : eval (policy management) old st = true)
+    (mutation : st.get "request/verb" = some 2)
+    (noRefill : st.get refillSlot ≠ some 1) :
+    ∃ d, st.get "resource/pair/2/3/delta" = some d ∧ d ≤ 0 := by
+  unfold policy at accepted
+  rw [eval_any] at accepted
+  obtain ⟨branch, member, holds⟩ := List.any_eq_true.mp accepted
+  simp only [List.mem_cons, List.mem_nil_iff, or_false] at member
+  rcases member with rfl | rfl | rfl | rfl
+  · rw [eval_all] at holds
+    have t := (List.all_eq_true.mp holds) transitionPolicy (by simp)
+    unfold transitionPolicy at t
+    rw [eval_all] at t
+    have b := (List.all_eq_true.mp t) (.le "resource/pair/2/3/delta" 0) (by simp)
+    simp only [eval, evalWith] at b
+    cases h : st.get "resource/pair/2/3/delta" with
+    | none => simp [h] at b
+    | some d => exact ⟨d, rfl, by simpa [h] using b⟩
+  · unfold refillPolicy at holds
+    rw [eval_all] at holds
+    have r := (List.all_eq_true.mp holds) (.eq refillSlot 1) (by simp)
+    simp only [eval, evalWith, decide_eq_true_eq] at r
+    exact absurd r noRefill
+  · simp [eval, evalWith, mutation] at holds
+  · rw [eval_all] at holds
+    have v := (List.all_eq_true.mp holds) (.memberOf "request/verb" [4,5]) (by simp)
+    simp [eval, evalWith, mutation] at v
 
 end Minidregg.Kernel.AgentGrain

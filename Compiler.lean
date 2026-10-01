@@ -3,6 +3,7 @@
 -/
 import Compiler.Placeholder  -- carve marker: syntactic-leaf IR, fold_unique, seqDescr, descriptor + codec
 import Compiler.ResourceTargetAdmission
+import Compiler.PayEnrolSignatureIO  -- PAY P3b-1: the memo's two possession checks through the pinned native verifier (Ed25519 + SSHSIG)
 import Compiler.ResourceAuthorityProjection
 import Compiler.CanonicalAccountView
 import Compiler.CanonicalAccountViewAudit

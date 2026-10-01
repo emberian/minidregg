@@ -71,7 +71,7 @@ fi
 rg -q 'exposed by worker mount' "$scratch/work-refusal.out"
 echo 'PASS workspace containing controller state refused before launch'
 printf 'probe-only' > "$scratch/work/provider.key"
-for provider_var in MINI_GRAIN_PROVIDER_CUSTODY_KEY MINI_GRAIN_PROVIDER_KEY_FILE; do
+for provider_var in MINI_GRAIN_PROVIDER_CUSTODY_KEY MINI_GRAIN_CREDENTIALS_ROOT MINI_GRAIN_CREDENTIALS_KEY; do
   if env "$provider_var=$scratch/work/provider.key" MINI_GRAIN_UNIT="mini-grain-t${task}-o6" \
     "$launcher" --workspace "$scratch/work" --runtime-root "$scratch/runtime" \
     --network none -- /agent/probe-socket client /run/mini-grain.sock \

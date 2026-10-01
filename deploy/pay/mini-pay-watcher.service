@@ -1,0 +1,25 @@
+[Unit]
+Description=Mini PAY watcher tick (finalized Solana transfers -> one observation report)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=mini
+Group=mini
+Slice=mini.slice
+EnvironmentFile=/etc/mini/pay/watcher.env
+EnvironmentFile=/etc/mini/pay/rpc.env
+ExecStart=/opt/mini/bin/mini-pay-watcher
+StateDirectory=mini/pay
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mini
+ProtectHome=yes
+LimitCORE=0
+TasksMax=32
+MemoryMax=512M
+TimeoutStartSec=300s

@@ -1,0 +1,11 @@
+{
+  "description": "an enrollment older than three dust transfers, with pageSize 2 and maxPages 1: an ordinary row would stop after one page; the enrollment index pages to the end and finds it",
+  "exit": 0,
+  "memos": [
+    "memo"
+  ],
+  "observations": 1,
+  "reasons": [
+    "belowJournalFloor"
+  ]
+}

@@ -1,0 +1,34 @@
+store-b purse before: 50/0
+store-b b1: http=200 code=- upstream=sha256:05518a73ba7201be70b7341af2149d5e039f7bfa3b313879657b3b049fbc769b purse=49/0 PASS
+store-b b2-after-revoke: http=403 code=no-credential upstream=- purse=49/0 PASS
+store-a purse before: 50/0
+store-a a1: http=200 code=- upstream=sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2 purse=49/0 PASS
+store-a a2: http=200 code=- upstream=sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2 purse=48/0 PASS
+store-a a3-over-per-call: http=403 code=per-call-cap upstream=- purse=48/0 PASS
+store-a a4: http=200 code=- upstream=sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2 purse=47/0 PASS
+store-a a5-over-per-day: http=403 code=per-day-cap upstream=- purse=47/0 PASS
+store-a a6-after-regrant: http=200 code=- upstream=sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2 purse=46/0 PASS
+store-a a7-grant-expired: http=403 code=grant-expired upstream=- purse=46/0 PASS
+store-c purse before: 50/0
+store-c c1-user-row-no-key: http=403 code=no-credential upstream=- purse=50/0 PASS
+store-c c2-pool: http=200 code=- upstream=sha256:8d08b75cd6e7154a40a619dd8ccb2d1ee3cc4b55287577df9f9687db03f0ad2c purse=30/0 PASS
+store-c c3-homelab: http=200 code=- upstream=homelab:none purse=10/0 PASS
+note: store-c c4-pool-out-of-credit left provider state for reconciliation
+store-c c4-pool-out-of-credit: http=402 code=no-credit upstream=- purse=10/0 PASS
+files_with_a_fake_token	0
+user_journal_lines_with_a_fake_token	0
+store    step                   caller  row         http  code           upstream_auth                                                            expected_auth                                                            purse_after  expected_purse  verdict
+store-b  b1                     B       openrouter  200   -              sha256:05518a73ba7201be70b7341af2149d5e039f7bfa3b313879657b3b049fbc769b  sha256:05518a73ba7201be70b7341af2149d5e039f7bfa3b313879657b3b049fbc769b  49/0         49/0            PASS
+store-b  b2-after-revoke        B       openrouter  403   no-credential  -                                                                        -                                                                        49/0         49/0            PASS
+store-a  a1                     A       openrouter  200   -              sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  49/0         49/0            PASS
+store-a  a2                     A       openrouter  200   -              sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  48/0         48/0            PASS
+store-a  a3-over-per-call       A       openrouter  403   per-call-cap   -                                                                        -                                                                        48/0         48/0            PASS
+store-a  a4                     A       openrouter  200   -              sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  47/0         47/0            PASS
+store-a  a5-over-per-day        A       openrouter  403   per-day-cap    -                                                                        -                                                                        47/0         47/0            PASS
+store-a  a6-after-regrant       A       openrouter  200   -              sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  sha256:35c1782b9aa6cf95d33505d2b85993417631199d047e3b673b37f754179243f2  46/0         46/0            PASS
+store-a  a7-grant-expired       A       openrouter  403   grant-expired  -                                                                        -                                                                        46/0         46/0            PASS
+store-c  c1-user-row-no-key     C       openrouter  403   no-credential  -                                                                        -                                                                        50/0         50/0            PASS
+store-c  c2-pool                C       pool        200   -              sha256:8d08b75cd6e7154a40a619dd8ccb2d1ee3cc4b55287577df9f9687db03f0ad2c  sha256:8d08b75cd6e7154a40a619dd8ccb2d1ee3cc4b55287577df9f9687db03f0ad2c  30/0         30/0            PASS
+store-c  c3-homelab             C       homelab     200   -              homelab:none                                                             homelab:none                                                             10/0         10/0            PASS
+store-c  c4-pool-out-of-credit  C       pool        402   no-credit      -                                                                        -                                                                        10/0         10/0            PASS
+HERMES_KEYS_EVIDENCE_PASS

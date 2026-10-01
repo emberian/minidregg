@@ -1,0 +1,13 @@
+Running as unit: mini-grain-t74601-o11.service; invocation ID: 4f9831dc5298409984e133512ed46b05
+provider attempt 13: permitted provider=openrouter credential=user:21 endpoint=http://127.0.0.1:18931/v1/chat/completions
+provider attempt 30: permitted provider=openrouter credential=user:21 endpoint=http://127.0.0.1:18931/v1/chat/completions
+provider request refused: provider-refused:per-call-cap
+provider attempt 48: permitted provider=openrouter credential=user:21 endpoint=http://127.0.0.1:18931/v1/chat/completions
+provider request refused: provider-refused:per-day-cap
+provider attempt 66: permitted provider=openrouter credential=user:21 endpoint=http://127.0.0.1:18931/v1/chat/completions
+provider request refused: provider-refused:grant-expired
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 4min 4.065s
+CPU time consumed: 927ms
+Memory peak: 2.9M (swap: 0B)

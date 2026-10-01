@@ -6,6 +6,7 @@
     "meta": {
       "err": null,
       "fee": 5000,
+      "innerInstructions": [],
       "loadedAddresses": {
         "readonly": [],
         "writable": []
@@ -70,6 +71,26 @@
             "signer": false,
             "source": "transaction",
             "writable": true
+          }
+        ],
+        "instructions": [
+          {
+            "parsed": {
+              "info": {
+                "authority": "GnfJDPjJzugZ7c2F9hGiMRBUB5KDtnrDZqZTJV6dG4k9",
+                "destination": "FPMt4UZ5mEG3YPjErjsfz8ok3HPrKekx7fVns8G3brFP",
+                "mint": "9xkU49fBixt9jfgvsHquwoA6HBLriYgVsaqa6RaPKuQU",
+                "source": "5S1kXqgZhTxke1ugT2xK5LW2scXbF5mtpkMBdRQFVyFZ",
+                "tokenAmount": {
+                  "amount": "0",
+                  "decimals": 6
+                }
+              },
+              "type": "transferChecked"
+            },
+            "program": "spl-token-2022",
+            "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+            "stackHeight": null
           }
         ]
       },

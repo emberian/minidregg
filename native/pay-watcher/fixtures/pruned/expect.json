@@ -1,6 +1,7 @@
 {
   "description": "a listed finalized signature whose getTransaction result is null",
   "exit": 3,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "prunedTransaction"

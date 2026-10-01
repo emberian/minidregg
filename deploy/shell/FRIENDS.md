@@ -32,6 +32,31 @@ ssh -i ~/.ssh/mini mini@2.28.141.27 'read notes'       # one verb; exit code is 
 ssh -T -i ~/.ssh/mini mini@2.28.141.27 < steps.mini    # a script, one verb per line, stops at the first failure
 ```
 
+### keeping your key on your own machine (`mini --remote`)
+
+the hosted shell above is a convenience: your Mini key lives in your session home on the
+box, so the box's operator (root and the `mini` user) could read it and sign as you. if you
+would rather it never leave your machine, use **proxy mode**: you run the same `mini`
+locally and the box only relays its frames (it keeps what you store, not your key).
+
+1. get `mini` for your machine from the candidate (Linux x86-64 `bin/mini`, macOS arm64
+   `bin/clients/aarch64-apple-darwin/mini`) and check its SHA-256 against `SHA256SUMS`.
+2. put `Host mini-box` with your ssh key in `~/.ssh/config`, and ask me for a **proxy**
+   key line (`mode=proxy`) instead of a shell one.
+3. the three commands:
+
+```
+mini join --key ~/.mini/me.key
+    # prints your Mini public key (64 hex): send it to me
+mini --remote mini-box join --key ~/.mini/me.key --sponsor-plan offer.json --dir ~/.mini/box
+    # offer.json is what i send back; you sign possession and it prints a signature: send it
+mini --remote mini-box join --key ~/.mini/me.key --welcome welcome.json --dir ~/.mini/box
+    # welcome.json is my second reply; this makes your workspace
+```
+
+from then on `mini --remote mini-box shell --workspace ~/.mini/box/workspace --home ~/.mini/home`
+is the same shell as the hosted one, every verb below, running on your machine.
+
 ## your first 10 minutes
 
 ```
@@ -90,8 +115,8 @@ mini> submit p2                           # refused if someone changed line 1 si
 mini> doc link p3 index paper             # a link from index to paper; `doc backlinks paper` finds it
 mini> board new tasks                     # tasks 0 and 1: `board add`, `board take`, `board move … todo doing`
 ```
-share a doc the same way as `notes` (delegate, publish, export/import). a page holds 16
-entries (lines and links), so docs are short for now.
+share a doc the same way as `notes` (delegate, publish, export/import). a doc lives in one
+content cell with no fixed size; its lines are ordered by their atom ids.
 
 ## how things end
 

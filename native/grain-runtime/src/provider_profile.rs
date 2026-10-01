@@ -51,31 +51,6 @@ pub fn require_worker_mcp_timeout(home: &Path, worker_wall_seconds: u64) -> Resu
 
 const MARKER: &str = "# mini-grain-generated-provider-v1\n";
 
-pub fn private_key(path: &Path, state_dir: &Path) -> Result<String, String> {
-    if path.parent() != Some(state_dir) {
-        return Err("provider key must be directly inside private controller state".into());
-    }
-    let meta = fs::symlink_metadata(path).map_err(|e| format!("provider key metadata: {e}"))?;
-    if !meta.file_type().is_file()
-        || meta.file_type().is_symlink()
-        || meta.uid() != unsafe { libc::geteuid() }
-        || meta.permissions().mode() & 0o077 != 0
-        || meta.len() == 0
-        || meta.len() > 4097
-    {
-        return Err("provider key must be an owned private regular file under 4097 bytes".into());
-    }
-    let value = fs::read_to_string(path).map_err(|e| format!("provider key read: {e}"))?;
-    let value = value.strip_suffix('\n').unwrap_or(&value);
-    if value.is_empty()
-        || value.len() > 4096
-        || value.bytes().any(|byte| !(0x21..=0x7e).contains(&byte))
-    {
-        return Err("provider key has unsupported encoding".into());
-    }
-    Ok(value.to_owned())
-}
-
 pub fn random_token() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     File::open("/dev/urandom")

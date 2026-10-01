@@ -1,0 +1,10 @@
+Running as unit: mini-grain-t74601-o11.service
+provider request refused: provider-refused:no-credential
+provider attempt 14: permitted provider=pool credential=pool endpoint=http://127.0.0.1:18931/v1/chat/completions
+provider attempt 31: permitted provider=homelab credential=none endpoint=http://127.0.0.1:18932/v1/chat/completions
+provider request refused: provider reserve refused by Mini: {"detail":"726571756573742072656675736564","phase":"61646d697373696f6e","reason":"undisclosed","type":"refused"}
+Finished with result: success
+Main processes terminated with: code=exited, status=0/SUCCESS
+Service runtime: 2min 26.792s
+CPU time consumed: 581ms
+Memory peak: 2.8M (swap: 0B)

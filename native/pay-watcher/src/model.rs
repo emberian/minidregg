@@ -34,6 +34,15 @@ pub enum Reason {
     NoTokenAccount,
     PageBound,
     IgnoredReceiptName,
+    /// An enrollment-index credit under `enrol.journalFloor`: never submitted (PAY.md §11.7).
+    BelowJournalFloor,
+    // notes: an observation WAS emitted, or state was kept; this journals why
+    /// An enrollment observation whose transaction carries two or more memo instructions.
+    MemoUnbound,
+    /// An enrollment observation whose one memo is not UTF-8 or is over `MEMO_MAX` bytes.
+    MemoInvalid,
+    /// The enrollment cursor did not advance: the endpoints listed the account differently.
+    CursorHeld,
 }
 
 impl Reason {
@@ -59,6 +68,10 @@ impl Reason {
             Reason::NoTokenAccount => "noTokenAccount",
             Reason::PageBound => "pageBound",
             Reason::IgnoredReceiptName => "ignoredReceiptName",
+            Reason::BelowJournalFloor => "belowJournalFloor",
+            Reason::MemoUnbound => "memoUnbound",
+            Reason::MemoInvalid => "memoInvalid",
+            Reason::CursorHeld => "cursorHeld",
         }
     }
 
@@ -78,6 +91,36 @@ impl Reason {
                 | Reason::PrunedTransaction
                 | Reason::EndpointsDisagree
         )
+    }
+
+    /// A note about an emitted observation or kept state, not a decision to withhold one.
+    pub fn is_note(self) -> bool {
+        matches!(self, Reason::MemoUnbound | Reason::MemoInvalid | Reason::CursorHeld)
+    }
+}
+
+/// Why an enrollment observation carries `memo: null` although its transaction had memos.
+/// (No memo instruction at all is `memo: null, memoError: null`: the kernel's `memoMissing`.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MemoError {
+    /// Two or more memo instructions: which one binds is not the watcher's to choose.
+    Unbound,
+    /// One memo, but not UTF-8 or longer than [`crate::memo::MEMO_MAX`] bytes.
+    Invalid,
+}
+
+impl MemoError {
+    pub fn name(self) -> &'static str {
+        match self {
+            MemoError::Unbound => "memoUnbound",
+            MemoError::Invalid => "memoInvalid",
+        }
+    }
+    pub fn reason(self) -> Reason {
+        match self {
+            MemoError::Unbound => Reason::MemoUnbound,
+            MemoError::Invalid => Reason::MemoInvalid,
+        }
     }
 }
 
@@ -115,6 +158,10 @@ pub struct Clock {
 
 /// One PAY.md §2.4 `Observation`: a finalized transfer that added `amount` atomic units of
 /// `mint` to token accounts owned by book `address`.
+///
+/// `memo`/`memo_error` (PAY.md §11.9) are read for the ENROLLMENT index only: `memo` is the raw
+/// bytes of the transaction's one memo instruction; the kernel parses them. Both are `None` for
+/// every other index, and for an enrollment payment with no memo instruction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Observation {
     pub index: u64,
@@ -125,6 +172,8 @@ pub struct Observation {
     pub amount: u64,
     pub mint: Key,
     pub token_program: Key,
+    pub memo: Option<Vec<u8>>,
+    pub memo_error: Option<MemoError>,
 }
 
 impl Observation {
@@ -138,6 +187,8 @@ impl Observation {
             "amount": self.amount,
             "mint": hex(&self.mint),
             "tokenProgram": hex(&self.token_program),
+            "memo": self.memo.as_ref().map(|m| hex(m)),
+            "memoError": self.memo_error.map(MemoError::name),
         })
     }
 }
@@ -146,9 +197,10 @@ impl Observation {
 pub enum EventKind {
     Refused,
     Skipped,
+    Noted,
 }
 
-/// Everything the run decided not to emit, and why.
+/// Everything the run decided not to emit, and why; and notes about what it did emit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
     pub kind: EventKind,
@@ -171,6 +223,8 @@ impl Event {
         Event {
             kind: if reason.is_refusal() {
                 EventKind::Refused
+            } else if reason.is_note() {
+                EventKind::Noted
             } else {
                 EventKind::Skipped
             },
@@ -184,7 +238,7 @@ impl Event {
 
     pub fn to_json(&self) -> Value {
         json!({
-            "kind": match self.kind { EventKind::Refused => "refused", EventKind::Skipped => "skipped" },
+            "kind": match self.kind { EventKind::Refused => "refused", EventKind::Skipped => "skipped", EventKind::Noted => "noted" },
             "reason": self.reason.name(),
             "index": self.index,
             "signature": self.signature.as_ref().map(|s| hex(s)),

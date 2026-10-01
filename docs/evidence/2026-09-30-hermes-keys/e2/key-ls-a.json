@@ -1,0 +1,20 @@
+{
+  "credentials": [
+    {
+      "grants": [
+        {
+          "notAfter": "1000000",
+          "perCall": "64",
+          "perDay": "3",
+          "runner": "9"
+        }
+      ],
+      "provider": "openrouter"
+    }
+  ],
+  "owner": {
+    "publicKey": "7a1cfd5b1013ac4c050877e16b36c13d3e8b6cec73ace9e1f3f03c52fe437ed1",
+    "subject": "21"
+  },
+  "type": "mini-provider-credentials-list-v1"
+}

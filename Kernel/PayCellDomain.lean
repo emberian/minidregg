@@ -110,6 +110,11 @@ theorem Loaded.root_exact {deployment : CanonicalCellRegistry.Deployment} {physi
   rw [← loaded.observed]
   exact physical.coherent _
 
+/-- The pay cell as a read dependency (a reader that does not write it). -/
+def Loaded.readGuard {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
+    (_loaded : Loaded deployment physical) : ReadGuard :=
+  { cellId := cellIdOf deployment, expectedRoot := physical.model.roots (cellIdOf deployment) }
+
 /-- The post cell, written at the pinned identifier and guarded at the
 snapshot's root of that same cell. -/
 def Loaded.write {deployment : CanonicalCellRegistry.Deployment} {physical : PhysicalSnapshot}
@@ -190,11 +195,124 @@ def viewStream : StreamCodec View :=
 def viewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec View :=
   PayTariff.framed "DREGG/PAY/VIEW/v2".toUTF8.toList viewStream
 
+/-! ## The public enrollment view (PAY §11.5; socket op 112)
+
+What the box's root timer `mini-roster-sync` reads to render proxy login
+lines: the chain hour and, per self-enrolled Mini key, its derived subject,
+the key, the 51-byte ssh blob, its lease expiry (an hour) and its book index.
+No account and no amount of an enrolled key.  An entry is live iff
+`hour < leaseUntil`.
+
+v2 (P3b-2) adds the journal: every enrollment-index payment the receiver
+decided NOT to enroll or renew, keyed by its transfer's nullifier bytes
+(`"soltx:" ‖ signature ‖ address`) with its index, amount, slot, reason and
+memo field.  The chain already discloses all of it; the box's operator comps
+these by hand, and the watcher's client sees each one as decided. -/
+structure EnrolmentEntry where
+  subject : Nat
+  miniKey : List UInt8
+  sshBlob : List UInt8
+  leaseUntil : Option Nat
+  index : Option Nat
+  deriving DecidableEq, Repr
+
+structure EnrolmentView where
+  hour : Nat
+  entries : List EnrolmentEntry
+  journal : List (List UInt8 × PayCell.Unattributed)
+  deriving DecidableEq, Repr
+
+/-- Every enrolment row, in the store codec's canonical order. -/
+def enrolments (store : PayCell.PayStore) : List (List UInt8 × PayCell.EnrolRecord) :=
+  (StoreCodec.sortedSupport PayCell.wire store).filterMap fun
+    | ⟨.enrolment, miniKey⟩ => (PayCell.enrolmentAt store miniKey).map (miniKey, ·)
+    | _ => none
+
+/-- Every journal row, in the store codec's canonical order. -/
+def journals (store : PayCell.PayStore) : List (List UInt8 × PayCell.Unattributed) :=
+  (StoreCodec.sortedSupport PayCell.wire store).filterMap fun
+    | ⟨.journal, key⟩ => (PayCell.journalAt store key).map (key, ·)
+    | _ => none
+
+/-- The public enrollment view at deployment time `now` (the clock cell's). -/
+def enrolmentView (now : Nat) (store : PayCell.PayStore) : EnrolmentView :=
+  ⟨PayCell.hourOf now,
+    (enrolments store).map (fun (miniKey, record) =>
+      ⟨PayEnrolMemo.subjectOf miniKey, miniKey, record.sshBlob, some record.leaseUntil, record.index⟩),
+    journals store⟩
+
+def enrolmentEntryStream : StreamCodec EnrolmentEntry :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product bytesStream
+        (StreamCodec.product bytesStream
+          (StreamCodec.product (StreamCodec.option StreamCodec.nat)
+            (StreamCodec.option StreamCodec.nat)))))
+    (fun entry => (entry.subject, entry.miniKey, entry.sshBlob, entry.leaseUntil, entry.index))
+    (fun (subject, miniKey, sshBlob, lease, index) => ⟨subject, miniKey, sshBlob, lease, index⟩)
+    (by intro entry; cases entry; rfl)
+
+def enrolmentViewStream : StreamCodec EnrolmentView :=
+  StreamCodec.xmap (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product (StreamCodec.list enrolmentEntryStream)
+        (StreamCodec.list (StreamCodec.product bytesStream PayCell.unattributedStream))))
+    (fun view => (view.hour, view.entries, view.journal))
+    (fun (hour, entries, journal) => ⟨hour, entries, journal⟩)
+    (by intro view; cases view; rfl)
+
+def enrolmentViewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec EnrolmentView :=
+  PayTariff.framed "DREGG/PAY/ENROLMENT-VIEW/v3".toUTF8.toList enrolmentViewStream
+
+theorem enrolmentView_roundtrip (view : EnrolmentView) :
+    enrolmentViewCodec.decode (enrolmentViewCodec.encode view) = some view :=
+  enrolmentViewCodec.decode_encode view
+
+/-- **The view lists exactly the enrolled keys**: a (key, record) pair is
+listed iff it is the key's enrolment row. -/
+theorem mem_enrolments (store : PayCell.PayStore) (miniKey : List UInt8)
+    (record : PayCell.EnrolRecord) :
+    (miniKey, record) ∈ enrolments store ↔ PayCell.enrolmentAt store miniKey = some record := by
+  unfold enrolments
+  rw [List.mem_filterMap]
+  constructor
+  · rintro ⟨address, _, found⟩
+    rcases address with ⟨space, key⟩
+    cases space <;> simp at found
+    obtain ⟨present, same⟩ := found
+    cases same
+    exact present
+  · intro present
+    refine ⟨⟨.enrolment, miniKey⟩, ?_, by simp [present]⟩
+    rw [StoreCodec.mem_sortedSupport]
+    change PayCell.enrolmentAt store miniKey ≠ none
+    simp [present]
+
+/-- **The view's journal lists exactly the journal rows.** -/
+theorem mem_journals (store : PayCell.PayStore) (key : List UInt8) (row : PayCell.Unattributed) :
+    (key, row) ∈ journals store ↔ PayCell.journalAt store key = some row := by
+  unfold journals
+  rw [List.mem_filterMap]
+  constructor
+  · rintro ⟨address, _, found⟩
+    rcases address with ⟨space, key'⟩
+    cases space <;> simp at found
+    obtain ⟨present, same⟩ := found
+    cases same
+    exact present
+  · intro present
+    refine ⟨⟨.journal, key⟩, ?_, by simp [present]⟩
+    rw [StoreCodec.mem_sortedSupport]
+    change PayCell.journalAt store key ≠ none
+    simp [present]
+
+#assert_axioms mem_journals
 #assert_axioms decodeCell_bytes
 #assert_axioms decodeCell_canonical
 #assert_axioms load_exact
 #assert_axioms load_refuses
 #assert_axioms Loaded.root_exact
 #assert_axioms Loaded.write_pre_is_loaded_root
+#assert_axioms enrolmentView_roundtrip
+#assert_axioms mem_enrolments
 
 end Minidregg.Kernel.PayCellDomain

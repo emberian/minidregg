@@ -53,7 +53,8 @@ that can find the versioned one) for the Store helper.
 | path | what |
 | --- | --- |
 | `OUT/bin/minidregg-host` | Lean-authored native Host, built by `scripts/build-native-host.sh` (bounded, serialized Lean compiler; seat directory `OUT/work/host-cycle`) |
-| `OUT/bin/mini` | client (`native/resource-client`) |
+| `OUT/bin/mini` | client (`native/resource-client`); also the Linux x86-64 friend client (`provenance.json` `.clients["x86_64-unknown-linux-gnu"]`) |
+| `OUT/bin/clients/TARGET/mini` | friend clients for each target in `MINI_CLIENT_TARGETS` (default `aarch64-apple-darwin`, cross-linked with `zig cc -target aarch64-macos`, ad-hoc signed by the linker; `zig` is then required). Hashed in `provenance.json` `.clients`, `SHA256SUMS`, and `manifest.json` `.clients` (absolute paths). `MINI_CLIENT_TARGETS=` builds none. `--client-only` builds only `bin/mini` and these, writes `provenance.json` of type `minidregg-client-provenance-v1` and `SHA256SUMS`, and no manifest |
 | `OUT/bin/minidregg-link-sqlite-store` | Store helper (`native/hyperdocument-link-sqlite-store`) |
 | `OUT/bin/minidregg-credential-signature-verifier` | Ed25519 verifier helper (`native/credential-signature-verifier`) |
 | `OUT/run.sh`, `OUT/lib.sh`, `OUT/genesis.sh`, `OUT/INTERFACES.md`, `OUT/genesis-params.example.json` | operator scripts and documents, copied from the same archive; `genesis.sh` and the example params come from `native/resource-client/`, the one genesis template the acceptance fixture also uses |
@@ -67,7 +68,10 @@ that can find the versioned one) for the Store helper.
 Rust binaries are built with `--remap-path-prefix` for the source tree
 (`/minidregg`) and `$CARGO_HOME` (`/cargo`), so their bytes do not depend on
 where the operator unpacked the source or keeps the registry. The Host's bytes
-do not contain build paths.
+do not contain build paths. The macOS client additionally maps `OUT` out of its
+C objects and links with `-Wl,-S`, because the Mach-O UUID is computed over the
+linker's output while it still names each object by path; two builds in
+different `OUT` directories give identical bytes (measured).
 
 **`manifest.json`** is the format `native/resource-client/journey.sh` reads:
 absolute paths plus SHA-256 pins, one entry per role, and `candidate` naming

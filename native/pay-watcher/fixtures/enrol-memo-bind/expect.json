@@ -1,0 +1,19 @@
+{
+  "description": "the memo binding: two memos, a note plus a memo, a top-level plus an inner memo (memoUnbound); non-UTF-8 bytes as base58 `data`, 567 bytes (memoInvalid); 566 bytes, a v2 memo and prose (one UTF-8 memo: emitted byte-exact, the kernel refuses the grammar)",
+  "exit": 0,
+  "memos": [
+    "memoUnbound",
+    "memoUnbound",
+    "memoUnbound",
+    "memoInvalid",
+    "memoInvalid",
+    "memo",
+    "memo",
+    "memo"
+  ],
+  "observations": 8,
+  "reasons": [
+    "memoInvalid",
+    "memoUnbound"
+  ]
+}

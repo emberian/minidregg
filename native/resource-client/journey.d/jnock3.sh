@@ -170,8 +170,11 @@ rc, last = submit("human", scalar([write(IRON, 1, 3), write(WOOD, 1, 2), write(S
 # the product line). The run check passed at prepare (no claim, nothing to check);
 # the identical writes WITH forge's claim are admitted below, so what refused this
 # is the law's `ran forge` leaf.
+# On final (P-LAW) the Host evaluates the target law when it prepares the
+# submission and refuses there, naming the failing clause: `ran <forge>`.
 row("a direct write (no run claim) is refused by the law (uniform admission refusal)",
-    rc != 0 and last == "outcome refused | admission | request refused", f"rc={rc} last={last[:200]}")
+    rc != 0 and (last == "outcome refused | admission | request refused"
+                 or ("law-denied" in last and "ran " in last)), f"rc={rc} last={last[:200]}")
 
 # 4. op 134: the kernel's sample and the Lean steps; nock-run computes the output on it
 def dry(program, values):

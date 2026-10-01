@@ -1,6 +1,7 @@
 {
   "description": "a transaction touches the watched account and adds nothing",
   "exit": 0,
+  "memos": [],
   "observations": 0,
   "reasons": [
     "zeroDelta"

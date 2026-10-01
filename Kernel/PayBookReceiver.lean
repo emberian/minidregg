@@ -83,11 +83,18 @@ inductive Reject where
   | malformedIngress | directoryUnavailable | authorityUnavailable | factoryUnavailable
   | payUnavailable | staleAuthority | stalePay
   | emptyChange | malformedAddress | bookIndexPresent | bookGap
-  | tariffInvalid | tariffVersionNotIncreasing
+  | tariffInvalid | tariffVersionNotIncreasing | enrolIndexUnassigned
   | replayedMarker | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
   deriving DecidableEq, Repr
+
+/-- A tariff that turns self-enrollment on names an index already assigned
+(to the enrollment float, PAY §11.2); `none` is always ready. -/
+def enrolReady (store : PayStore) (next : Tariff) : Bool :=
+  match next.enrolIndex with
+  | none => true
+  | some index => (assignmentAt store index).isSome
 
 def decideTariff (store : PayStore) : Option Tariff → Except Reject (Option (Tariff × Tariff))
   | none => .ok none
@@ -96,7 +103,9 @@ def decideTariff (store : PayStore) : Option Tariff → Except Reject (Option (T
       | none => .error .payUnavailable
       | some current =>
           if next.valid then
-            if current.version < next.version then .ok (some (current, next))
+            if current.version < next.version then
+              if enrolReady store next then .ok (some (current, next))
+              else .error .enrolIndexUnassigned
             else .error .tariffVersionNotIncreasing
           else .error .tariffInvalid
 
@@ -122,7 +131,7 @@ def decideChange (store : PayStore) (bookStart : Nat) (book : List Address32)
 theorem decideTariff_some (store : PayStore) (next : Tariff)
     (pair : Option (Tariff × Tariff)) (accepted : decideTariff store (some next) = .ok pair) :
     ∃ current, tariffOf store = some current ∧ current.version < next.version ∧
-      next.valid ∧ pair = some (current, next) := by
+      next.valid ∧ enrolReady store next = true ∧ pair = some (current, next) := by
   unfold decideTariff at accepted
   cases present : tariffOf store with
   | none => simp [present] at accepted
@@ -130,8 +139,10 @@ theorem decideTariff_some (store : PayStore) (next : Tariff)
       simp only [present] at accepted
       by_cases valid : next.valid
       · by_cases newer : current.version < next.version
-        · simp only [valid, newer, if_true, Except.ok.injEq] at accepted
-          exact ⟨current, rfl, newer, valid, accepted.symm⟩
+        · by_cases ready : enrolReady store next = true
+          · simp only [valid, newer, ready, if_true, Except.ok.injEq] at accepted
+            exact ⟨current, rfl, newer, valid, ready, accepted.symm⟩
+          · simp [valid, newer, ready] at accepted
         · simp [valid, newer] at accepted
       · simp [valid] at accepted
 
@@ -162,8 +173,10 @@ theorem tariff_version_monotone (store : PayStore) (bookStart : Nat) (book : Lis
     (next : Tariff) (plan : Plan)
     (accepted : decideChange store bookStart book (some next) = .ok plan) :
     ∃ current, tariffOf store = some current ∧ current.version < next.version ∧
-      next.valid ∧ plan.tariff = some (current, next) :=
-  decideTariff_some store next plan.tariff (decideChange_ok store bookStart book _ plan accepted).1
+      next.valid ∧ plan.tariff = some (current, next) := by
+  obtain ⟨current, present, newer, valid, _, pair⟩ :=
+    decideTariff_some store next plan.tariff (decideChange_ok store bookStart book _ plan accepted).1
+  exact ⟨current, present, newer, valid, pair⟩
 
 /-- Refuting pole: a valid tariff whose version is not larger than the
 current one is refused. -/

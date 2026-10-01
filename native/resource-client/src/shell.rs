@@ -12,6 +12,7 @@
 //!   WORKSPACE            the `mini workspace` directory this session operates
 //!   HOME/keys/           keys made by `keygen`
 //!   HOME/enroll/NAME/    enrollment attempts this session sponsors
+//!   HOME/keys/NAME.pub   a newcomer's public key, when they keep the secret
 //!   HOME/requests/       proposal requests and predicates spelled by the shell
 //!   HOME/inbox/          delegated references received with `import`
 //!   HOME/refusals/       exact Host refusal frames and the Host's decoding
@@ -52,7 +53,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home and subject" },
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub" },
     Verb { name: "init", usage: "init KEYFILE SUBJECT", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace" },
-    Verb { name: "enroll", usage: "enroll plan NAME KEYFILE [FACTORY-REF] | enroll seal|submit|lookup NAME", operation: "mini enroll --action plan|seal|submit|lookup --dir HOME/enroll/NAME" },
+    Verb { name: "enroll", usage: "enroll plan NAME KEYFILE|PUBLIC-KEY-HEX [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
+    Verb { name: "provision", usage: "provision NAME HOLDER FUNDING PREDICATE-JSON|@FILE [FACTORY-REF]", operation: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
     Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
     Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
@@ -71,6 +73,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
+    Verb { name: "pay", usage: "pay address [ACCOUNT-REF] | pay status [ACCOUNT-REF] | pay audit", operation: "mini pay --action address|status|audit --dir WS [--account REF]" },
+    Verb { name: "key", usage: crate::keys::SHELL_USAGE, operation: "mini key --action set|grant|revoke|ls --dir WORKSPACE (provider keys in hosted custody)" },
     Verb { name: "history", usage: "history [all]", operation: "local: retained attempts and their last Host outcome" },
     Verb { name: "help", usage: "help [VERB|guide]", operation: "local; `help guide` prints the friends' guide" },
     Verb { name: "exit", usage: "exit", operation: "local" },
@@ -354,6 +358,16 @@ fn session_file(value: &str, label: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Exactly `length` bytes spelled as lowercase or uppercase hex.
+fn hex_bytes(word: &str, length: usize) -> Option<Vec<u8>> {
+    if word.len() != 2 * length || !word.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    (0..length)
+        .map(|i| u8::from_str_radix(&word[2 * i..2 * i + 2], 16).ok())
+        .collect()
+}
+
 fn decimal(value: &str, label: &str) -> std::result::Result<(), String> {
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
         return Err(format!("{label} must be a decimal number"));
@@ -634,6 +648,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             arity(&w, 0, 0, u)?;
             Plan::Exit
         }
+        "key" => crate::keys::shell_plan(&session.workspace, &session.home, &w)?,
         "history" => {
             arity(&w, 0, 1, u)?;
             match w.get(1).map(String::as_str) {
@@ -665,19 +680,21 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     context.display()
                 )));
             }
-            client(
-                "workspace",
-                vec![
-                    flag("action", "init"),
-                    flag("host", session.host.clone()),
-                    flag("config", session.config.clone()),
-                    flag("key", session.home.join("keys").join(&w[1])),
-                    flag("subject", w[2].clone()),
-                    flag("birth-context", context),
-                    flag("namespace-root", session.home.join("namespace")),
-                    flag("dir", ws()),
-                ],
-            )
+            let mut flags = vec![flag("action", "init")];
+            // A remote session has no Host image; the process already pins
+            // the Host digest, which init records.
+            if !session.host.as_os_str().is_empty() {
+                flags.push(flag("host", session.host.clone()));
+            }
+            flags.extend([
+                flag("config", session.config.clone()),
+                flag("key", session.home.join("keys").join(&w[1])),
+                flag("subject", w[2].clone()),
+                flag("birth-context", context),
+                flag("namespace-root", session.home.join("namespace")),
+                flag("dir", ws()),
+            ]);
+            client("workspace", flags)
         }
         "enroll" => {
             let Some(action) = w.get(1) else {
@@ -687,22 +704,57 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 "plan" => {
                     arity(&w, 3, 4, u)?;
                     workspace_name(&w[2], "enrollment name")?;
-                    session_file(&w[3], "key file")?;
                     let factory = w.get(4).cloned().unwrap_or_else(|| "factory".into());
                     workspace_name(&factory, "factory reference")?;
-                    client(
-                        "enroll",
-                        vec![
-                            flag("action", "plan"),
-                            flag("sponsor-workspace", ws()),
-                            flag("factory-ref", factory),
-                            flag("name", w[2].clone()),
-                            flag("new-key", session.home.join("keys").join(&w[3])),
-                            flag("dir", session.home.join("enroll").join(&w[2])),
-                        ],
-                    )
+                    let mut flags = vec![
+                        flag("action", "plan"),
+                        flag("sponsor-workspace", ws()),
+                        flag("factory-ref", factory),
+                        flag("name", w[2].clone()),
+                    ];
+                    let mut writes = vec![];
+                    if let Some(public) = hex_bytes(&w[3], 32) {
+                        // The newcomer keeps the secret; only the public key
+                        // enters this session home.
+                        let path = session.home.join("keys").join(format!("{}.pub", w[2]));
+                        flags.push(flag("new-public-key", path.clone()));
+                        writes.push((path, public));
+                    } else {
+                        session_file(&w[3], "key file")?;
+                        flags.push(flag("new-key", session.home.join("keys").join(&w[3])));
+                    }
+                    flags.push(flag("dir", session.home.join("enroll").join(&w[2])));
+                    Plan::Client { command: "enroll".into(), flags, writes }
                 }
-                "seal" | "submit" | "lookup" => {
+                "seal" if w.len() == 4 => {
+                    workspace_name(&w[2], "enrollment name")?;
+                    let signature = hex_bytes(&w[3], 64)
+                        .ok_or("the possession signature is 128 hex digits (from the newcomer's mini join)")?;
+                    let path = session.home.join("requests").join(format!("{}.possession", w[2]));
+                    Plan::Client {
+                        command: "enroll".into(),
+                        flags: vec![
+                            flag("action", "seal"),
+                            flag("dir", session.home.join("enroll").join(&w[2])),
+                            flag("possession-signature", path.clone()),
+                        ],
+                        writes: vec![(path, signature)],
+                    }
+                }
+                "welcome" => {
+                    arity(&w, 2, 2, u)?;
+                    workspace_name(&w[2], "enrollment name")?;
+                    let mut flags = vec![
+                        flag("action", "welcome"),
+                        flag("dir", session.home.join("enroll").join(&w[2])),
+                    ];
+                    let context = ws().join("provisions").join(&w[2]).join("birth-context.json");
+                    if context.is_file() {
+                        flags.push(flag("birth-context", context));
+                    }
+                    client("enroll", flags)
+                }
+                "seal" | "submit" | "lookup" | "offer" => {
                     arity(&w, 2, 2, u)?;
                     workspace_name(&w[2], "enrollment name")?;
                     client(
@@ -714,6 +766,42 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                     )
                 }
                 _ => return Err(u.to_owned()),
+            }
+        }
+        "pay" => {
+            arity(&w, 1, 2, u)?;
+            let mut flags = vec![flag("action", w[1].clone()), flag("dir", ws())];
+            match (w[1].as_str(), w.get(2)) {
+                ("address" | "status", Some(account)) => {
+                    workspace_name(account, "reference name")?;
+                    flags.push(flag("account", account.clone()));
+                }
+                ("address" | "status" | "audit", None) => {}
+                _ => return Err(u.to_owned()),
+            }
+            client("pay", flags)
+        }
+        "provision" => {
+            arity(&w, 4, 5, u)?;
+            workspace_name(&w[1], "provision name")?;
+            decimal(&w[2], "holder subject")?;
+            decimal(&w[3], "funding")?;
+            let predicate = json_argument(session, &w[4], "account predicate")?;
+            let factory = w.get(5).cloned().unwrap_or_else(|| "factory".into());
+            workspace_name(&factory, "factory reference")?;
+            let path = session.home.join("requests").join(format!("provision-{}.json", w[1]));
+            Plan::Client {
+                command: "workspace".into(),
+                flags: vec![
+                    flag("action", "provision"),
+                    flag("dir", ws()),
+                    flag("name", w[1].clone()),
+                    flag("holder", w[2].clone()),
+                    flag("funding", w[3].clone()),
+                    flag("account-predicate", path.clone()),
+                    flag("factory-ref", factory),
+                ],
+                writes: vec![request_file(path, &predicate)],
             }
         }
         "refs" => {
@@ -1339,8 +1427,10 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
         ("submit" | "publish" | "export", 1) => proposals(),
         ("lookup" | "retry", 1) => attempts(),
         ("history", 1) => vec!["all".into()],
+        ("pay", 1) => ["address", "status", "audit"].map(String::from).to_vec(),
+        ("pay", 2) if w[1] != "audit" => refs(),
         ("init", 1) => keys(),
-        ("enroll", 1) => ["plan", "seal", "submit", "lookup"].map(String::from).to_vec(),
+        ("enroll", 1) => ["plan", "offer", "seal", "submit", "lookup", "welcome"].map(String::from).to_vec(),
         ("enroll", 2) if w[1] != "plan" => enrolled(),
         ("enroll", 3) if w[1] == "plan" => keys(),
         ("invoke" | "delegate" | "law", 2) => refs(),
@@ -1511,12 +1601,29 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
     };
     let workspace = absolute(args.required("workspace")?, "workspace")?;
     let home = absolute(args.required("home")?, "home")?;
-    let host = absolute(args.required("host")?, "host")?;
-    let config = absolute(args.required("config")?, "config")?;
+    let host = args.optional("host").map(|h| absolute(h, "host")).transpose()?;
+    let config = args.optional("config").map(|c| absolute(c, "config")).transpose()?;
     let one = args.optional("line");
     args.finish()?;
+    let _ = crate::keys::STDIN_FREE.set(one.is_some());
+    // A session over a workspace that already pins its Host takes host,
+    // config and socket from that pin (a remote workspace from `mini join`
+    // pins no Host image, only its digest).
+    let (host, config) = match (host, config) {
+        (Some(host), Some(config)) => (host, config),
+        (None, config) if super::SOCKET.get().is_none_or(|s| super::transport::is_remote(s)) => {
+            let pin = super::workspace::load(&workspace)?;
+            let pinned = super::workspace::workspace_host(&pin)?;
+            let config = match config {
+                Some(config) => config,
+                None => super::workspace::member_path(&pin, "config")?,
+            };
+            (pinned, config)
+        }
+        _ => return Err("shell takes --host and --config, or a remote workspace that pins them".into()),
+    };
     if super::SOCKET.get().is_none() {
-        return Err("shell requires --socket (the deployment's public socket)".into());
+        return Err("shell requires --socket (the deployment's public socket) or --remote".into());
     }
     private_dir(&home)?;
     let session = Session { workspace, home, host, config };
@@ -1587,6 +1694,27 @@ mod tests {
     }
 
     #[test]
+    fn pay_verbs_are_one_client_operation_each() {
+        let s = session();
+        assert_eq!(
+            client(plan(&s, "pay address").unwrap()),
+            ("pay".into(), pairs(&[("action", "address"), ("dir", "/w")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay status account").unwrap()),
+            ("pay".into(), pairs(&[("action", "status"), ("dir", "/w"), ("account", "account")]), vec![])
+        );
+        assert_eq!(
+            client(plan(&s, "pay audit").unwrap()),
+            ("pay".into(), pairs(&[("action", "audit"), ("dir", "/w")]), vec![])
+        );
+        // observe, book and heartbeat belong to the operator and the watcher, not a friend.
+        for line in ["pay observe", "pay book x", "pay audit x", "pay address ../x", "pay"] {
+            assert!(plan(&s, line).is_err(), "{line}");
+        }
+    }
+
+    #[test]
     fn words_split_quote_and_keep_json_whole() {
         assert_eq!(words("  read   shared ").unwrap(), ["read", "shared"]);
         assert_eq!(words("a 'b c' \"d \\\"e\\\"\" f'g h'").unwrap(), ["a", "b c", "d \"e\"", "fg h"]);
@@ -1654,6 +1782,64 @@ mod tests {
                 ("observe-capability", "11"),
             ])
         );
+    }
+
+    #[test]
+    fn a_public_key_enrollment_never_names_a_newcomer_secret() {
+        let s = session();
+        let public = "ab".repeat(32);
+        let plan_line = format!("enroll plan alice {public}");
+        let Plan::Client { command, flags, writes } = plan(&s, &plan_line).unwrap() else {
+            panic!("not a client plan")
+        };
+        assert_eq!(command, "enroll");
+        let flags: Vec<(String, String)> =
+            flags.into_iter().map(|(k, v)| (k, v.into_string().unwrap())).collect();
+        assert_eq!(
+            flags,
+            pairs(&[
+                ("action", "plan"),
+                ("sponsor-workspace", "/w"),
+                ("factory-ref", "factory"),
+                ("name", "alice"),
+                ("new-public-key", "/h/keys/alice.pub"),
+                ("dir", "/h/enroll/alice"),
+            ])
+        );
+        assert!(!flags.iter().any(|(k, _)| k == "new-key"));
+        assert_eq!(writes, vec![(PathBuf::from("/h/keys/alice.pub"), vec![0xab; 32])]);
+
+        let signature = "0f".repeat(64);
+        let Plan::Client { flags, writes, .. } = plan(&s, &format!("enroll seal alice {signature}")).unwrap() else {
+            panic!("not a client plan")
+        };
+        assert!(flags.contains(&flag("possession-signature", "/h/requests/alice.possession")));
+        assert_eq!(writes, vec![(PathBuf::from("/h/requests/alice.possession"), vec![0x0f; 64])]);
+        assert!(plan(&s, "enroll seal alice 0f0f").is_err(), "a short signature is refused");
+        assert_eq!(
+            client(plan(&s, "enroll offer alice").unwrap()).1,
+            pairs(&[("action", "offer"), ("dir", "/h/enroll/alice")])
+        );
+        assert_eq!(
+            client(plan(&s, "enroll welcome alice").unwrap()).1,
+            pairs(&[("action", "welcome"), ("dir", "/h/enroll/alice")])
+        );
+        let (command, flags, writes) =
+            client(plan(&s, r#"provision alice 42 1000 {"type":"all","predicates":[]}"#).unwrap());
+        assert_eq!(command, "workspace");
+        assert_eq!(
+            flags,
+            pairs(&[
+                ("action", "provision"),
+                ("dir", "/w"),
+                ("name", "alice"),
+                ("holder", "42"),
+                ("funding", "1000"),
+                ("account-predicate", "/h/requests/provision-alice.json"),
+                ("factory-ref", "factory"),
+            ])
+        );
+        assert_eq!(writes[0].1, "{\"predicates\":[],\"type\":\"all\"}\n");
     }
 
     #[test]
