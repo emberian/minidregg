@@ -1399,7 +1399,7 @@ theorem AcceptedBirth.birth_under_room_requires_grant {height : Height}
       cap.holder.Covers accepted.descriptor.creator ∧
       cap.Admissible accepted.prepared.authority.snapshot.authState
         (RoomBirthGate.placeRequest pins accepted.prepared.authority.snapshot.authState
-          (RoomBirthGate.roomRoot durable room) accepted.prepared.gateHeight
+          (RoomBirthGate.roomRoot accepted.prepared.directory.directory room) accepted.prepared.gateHeight
           accepted.descriptor room) :=
   let ⟨placement, cap, named, stored, holder, admissible, _⟩ :=
     accepted.prepared.birth_under_room_requires_grant member inRoom

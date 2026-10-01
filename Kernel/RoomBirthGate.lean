@@ -35,6 +35,7 @@ open Minidregg.Compiler
 open Minidregg.Theory
 open Minidregg.Theory.TypedAuthorization
 open Minidregg.Theory.ResourceBirth
+open Minidregg.Theory.CellRegistry
 open Minidregg.Theory.CredentialAuthorityState (readCapability)
 
 set_option autoImplicit false
@@ -157,8 +158,12 @@ def lawOf (directory : CredentialAuthorityDomainReceiver.LoadedDirectory durable
       (ResourceObservationAdmission.sourceStore ⟨directory, authority⟩)).resolve ⟨room⟩
       (authority.snapshot.authState.policyRevision ⟨room⟩)).map (·.record.predicate)
 
-/-- The room's current root. -/
-def roomRoot (durable : Durable) (room : Nat) : Digest := durable.snapshot.model.roots ⟨room⟩
+/-- The room cell's current root, as the loaded directory holds it (the zero
+digest when the slot is absent; `checkRoom` then refuses `notARoom`). -/
+def roomRoot (directory : Directory Nat Registry) (room : Nat) : Digest :=
+  match directory.slots room with
+  | .present cell => cell.payload.root
+  | .absent => ⟨0⟩
 
 /-- The law's view of the room for the placement request. -/
 def viewOf {room : Nat} {root : Digest}
@@ -176,10 +181,10 @@ def checkRoom (pins : FactoryPins)
     (height : Height) (descriptor : Descriptor Registry) (room : Nat) (placement : CapabilityId) :
     Except Refusal Unit :=
   match ResourceTargetAdmission.observe deployment directory.directory .object room
-      (roomRoot durable room) with
+      (roomRoot directory.directory room) with
   | none => .error (.notARoom room)
   | some observed =>
-      let request := placeRequest pins authority.snapshot.authState (roomRoot durable room)
+      let request := placeRequest pins authority.snapshot.authState (roomRoot directory.directory room)
         height descriptor room
       decideRoom room (storedAt authority placement) authority.snapshot.authState request
         (lawOf directory authority room) (viewOf request observed)
@@ -245,14 +250,14 @@ theorem birth_under_room_requires_grant {pins : FactoryPins}
     ∃ placement cap, item.placement = some placement ∧ storedAt authority placement = some cap ∧
       cap.holder.Covers descriptor.creator ∧
       cap.Admissible authority.snapshot.authState
-        (placeRequest pins authority.snapshot.authState (roomRoot durable room) height descriptor room) ∧
+        (placeRequest pins authority.snapshot.authState (roomRoot directory.directory room) height descriptor room) ∧
       ∃ observed : ResourceTargetAdmission.Observed deployment directory.directory .object room
-          (roomRoot durable room),
+          (roomRoot directory.directory room),
         ∃ law, lawOf directory authority room = some law ∧
           Minidregg.Pred.eval law
-            (viewOf (placeRequest pins authority.snapshot.authState (roomRoot durable room)
+            (viewOf (placeRequest pins authority.snapshot.authState (roomRoot directory.directory room)
               height descriptor room) observed)
-            (viewOf (placeRequest pins authority.snapshot.authState (roomRoot durable room)
+            (viewOf (placeRequest pins authority.snapshot.authState (roomRoot directory.directory room)
               height descriptor room) observed) = true := by
   have passed := admitted item member
   cases placed : item.placement with

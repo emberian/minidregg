@@ -239,7 +239,7 @@ ok redeleg dave "read lab"
 ok redeleg dave "doc new dnotes --in lab"
 ok redeleg alice "room members lab"
 check redeleg "room members lists alice, bob and dave" \
-  jq -e --arg a "$A" --arg b "$B" --arg d "$D" '[.[]? // .members[]? | .subject] as $s
+  jq -e --arg a "$A" --arg b "$B" --arg d "$D" '[.members[].subject] as $s
     | ($s | index($a)) and ($s | index($b)) and ($s | index($d))' "$OUT"
 check redeleg "the journey newcomer's workspace has no shared namespace root" \
   jq -e '.namespaceRoot == null' "$NEWCOMER_WS/workspace.json"
@@ -257,7 +257,7 @@ raw redeleg newcomer "submits the re-delegation" ok \
     --intent "$NEWCOMER_WS/proposals/k10c-nc/intent.json" --attempt "$NEWCOMER_WS/attempts/k10c-nc"
 
 # ------------------------------------------------ the J7 pole
-ok J7 alice "law l1 lab field 1 <= 100"
+ok J7 alice "law l1 lab any [ not (verb == write), field 1 <= 100 ]"
 ok J7 alice "submit l1"
 ok J7 bob "read lab"
 ok J7 bob "doc new notes2 --in lab"
@@ -276,7 +276,7 @@ named kick bob "doc new notes4 --in lab" notRoomMember
 ok kick alice "read lab"
 ok kick alice "room members lab"
 check kick "room members no longer lists bob or dave" \
-  jq -e --arg b "$B" --arg d "$D" '[.[]? // .members[]? | .subject] as $s
+  jq -e --arg b "$B" --arg d "$D" '[.members[].subject] as $s
     | (($s | index($b)) | not) and (($s | index($d)) | not)' "$OUT"
 fails kick bob "room leave lab" 1 "K-RENOUNCE"
 

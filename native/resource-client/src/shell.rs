@@ -2256,6 +2256,11 @@ mod tests {
         let (_, flags, _) = client(plan(&s, "create c1 declared {} --in lab").unwrap());
         assert_eq!(flags.last().unwrap(), &("in".to_owned(), "lab".to_owned()));
         assert!(plan(&s, "doc new notes --in ../lab").is_err());
+        // A placement law names 64-bit subjects.
+        let (_, request) = request_of(plan(&s,
+            "law l2 lab any [ not (verb == place), subject in {15893985203478182741} ]").unwrap());
+        assert_eq!(request["predicate"]["predicates"][0]["predicate"]["value"], "10");
+        assert_eq!(request["predicate"]["predicates"][1]["values"], json!(["15893985203478182741"]));
         assert!(matches!(plan(&s, "room leave lab").unwrap(), Plan::NotHere(t) if t.contains("K-RENOUNCE")));
         for bad in ["room", "room new", "room new lab --template castle", "room new lab --referee 9",
             "room new lab --bogus 1", "room invite i1 lab", "room invite i1 lab x",

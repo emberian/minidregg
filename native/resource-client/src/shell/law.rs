@@ -40,7 +40,7 @@ const VERBS: [(&str, i64); 7] = [
 #[derive(Debug, Clone, PartialEq)]
 enum Tok {
     Word(String),
-    Int(i64),
+    Int(i128),
     Str(String),
     Punct(&'static str),
 }
@@ -97,7 +97,7 @@ fn tokens(text: &str) -> Result<Vec<Tok>, String> {
                 i += 1;
             }
             let digits: String = chars[start..i].iter().collect();
-            let value = digits.parse::<i64>().map_err(|_| format!("`{digits}` is not an integer"))?;
+            let value = digits.parse::<i128>().map_err(|_| format!("`{digits}` is not an integer"))?;
             out.push(Tok::Int(value));
             continue;
         }
@@ -152,7 +152,7 @@ impl Parser {
             Err(format!("expected `{p}`, found {}", show(self.peek())))
         }
     }
-    fn nat(&mut self, what: &str) -> Result<i64, String> {
+    fn nat(&mut self, what: &str) -> Result<i128, String> {
         match self.next() {
             Some(Tok::Int(n)) if n >= 0 => Ok(n),
             other => Err(format!("expected {what} (a number), found {}", show(other.as_ref()))),
@@ -271,7 +271,7 @@ impl Parser {
                 .iter()
                 .find(|(name, _)| *name == w)
                 .map(|(_, tag)| tag.to_string())
-                .ok_or_else(|| format!("unknown verb `{w}` (read, write, delegate, install, revoke)")),
+                .ok_or_else(|| format!("unknown verb `{w}` (read, write, delegate, install, revoke, append, place)")),
             other => Err(format!("expected a number, found {}", show(other.as_ref()))),
         }
     }

@@ -86,16 +86,16 @@ theorem birth_under_room_requires_grant_at {profile : CanonicalPolicyAdmission.P
       cap.holder.Covers descriptor.creator ∧
       cap.Admissible birth.authority.snapshot.authState
         (RoomBirthGate.placeRequest pins birth.authority.snapshot.authState
-          (RoomBirthGate.roomRoot durable room) height descriptor room) ∧
+          (RoomBirthGate.roomRoot birth.directory.directory room) height descriptor room) ∧
       ∃ observed : ResourceTargetAdmission.Observed deployment birth.directory.directory
-          .object room (RoomBirthGate.roomRoot durable room),
+          .object room (RoomBirthGate.roomRoot birth.directory.directory room),
         ∃ law, RoomBirthGate.lawOf birth.directory birth.authority room = some law ∧
           Minidregg.Pred.eval law
             (RoomBirthGate.viewOf (RoomBirthGate.placeRequest pins
-              birth.authority.snapshot.authState (RoomBirthGate.roomRoot durable room)
+              birth.authority.snapshot.authState (RoomBirthGate.roomRoot birth.directory.directory room)
               height descriptor room) observed)
             (RoomBirthGate.viewOf (RoomBirthGate.placeRequest pins
-              birth.authority.snapshot.authState (RoomBirthGate.roomRoot durable room)
+              birth.authority.snapshot.authState (RoomBirthGate.roomRoot birth.directory.directory room)
               height descriptor room) observed) = true := by
   have exact := prepareBirth_gateHeight prepared
   have granted := birth.birth_under_room_requires_grant member inRoom

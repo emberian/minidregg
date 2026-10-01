@@ -820,16 +820,16 @@ theorem PreparedBirth.birth_under_room_requires_grant {deployment : Deployment}
       cap.holder.Covers descriptor.creator ∧
       cap.Admissible prepared.authority.snapshot.authState
         (RoomBirthGate.placeRequest pins prepared.authority.snapshot.authState
-          (RoomBirthGate.roomRoot durable room) prepared.gateHeight descriptor room) ∧
+          (RoomBirthGate.roomRoot prepared.directory.directory room) prepared.gateHeight descriptor room) ∧
       ∃ observed : ResourceTargetAdmission.Observed deployment prepared.directory.directory
-          .object room (RoomBirthGate.roomRoot durable room),
+          .object room (RoomBirthGate.roomRoot prepared.directory.directory room),
         ∃ law, RoomBirthGate.lawOf prepared.directory prepared.authority room = some law ∧
           Minidregg.Pred.eval law
             (RoomBirthGate.viewOf (RoomBirthGate.placeRequest pins
-              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot durable room)
+              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot prepared.directory.directory room)
               prepared.gateHeight descriptor room) observed)
             (RoomBirthGate.viewOf (RoomBirthGate.placeRequest pins
-              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot durable room)
+              prepared.authority.snapshot.authState (RoomBirthGate.roomRoot prepared.directory.directory room)
               prepared.gateHeight descriptor room) observed) = true :=
   RoomBirthGate.birth_under_room_requires_grant prepared.rooms member inRoom
 
@@ -844,7 +844,7 @@ theorem PreparedPreAuthority.birth_under_room_requires_grant {deployment : Deplo
       cap.holder.Covers descriptor.creator ∧
       cap.Admissible prepared.authority.snapshot.authState
         (RoomBirthGate.placeRequest pins prepared.authority.snapshot.authState
-          (RoomBirthGate.roomRoot durable room) prepared.gateHeight descriptor room) :=
+          (RoomBirthGate.roomRoot prepared.directory.directory room) prepared.gateHeight descriptor room) :=
   let ⟨placement, cap, named, stored, holder, admissible, _⟩ :=
     RoomBirthGate.birth_under_room_requires_grant prepared.rooms member inRoom
   ⟨placement, cap, named, stored, holder, admissible⟩
