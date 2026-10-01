@@ -9,6 +9,8 @@
 //!         | 'not' '(' clause ')'
 //!         | field ('monotone' | 'writeOnce')
 //!         | slot ('==' value | '<=' value | 'in' '{' value (',' value)* '}')
+//!         | slot '==' slot                    eqSlots: both present and equal
+//!         | slot '<=' slot ['+' integer]      leSlots / leSlotsOff: new[a] <= new[b] (+ k)
 //! field  := 'field' N                         resource/field/N/after
 //! slot   := field ['before' | 'after' | 'delta']
 //!         | 'pair' A ',' B 'delta'            resource/pair/A/B/delta
@@ -28,6 +30,12 @@
 //! proof system in admission (decision 10-01) the `witnessed` atom compiles to
 //! false, so a law that named it would refuse every write. The grammar refuses
 //! the word instead of offering a clause that can never hold.
+//!
+//! The slot-to-slot atoms (`eqSlots`, `leSlots`, `leSlotsOff`) are spelled the way
+//! the Host renders them (`Compiler/RefusalReason.lean` `renderClause`):
+//! `field 7 before <= slot "clock/now"`, `field 14 <= slot "clock/now" + -1`.
+//! A slot-pair atom is false when either slot is absent, so `field 15 == field 15`
+//! is "field 15 is present" (the job law, `deploy/shell/templates/job/law.job.shell`).
 
 use serde_json::{json, Value};
 
@@ -57,7 +65,7 @@ fn tokens(text: &str) -> Result<Vec<Tok>, String> {
             i += 2;
             continue;
         }
-        if let Some(p) = ["[", "]", "(", ")", "{", "}", ",", ";"].into_iter().find(|p| p.starts_with(c)) {
+        if let Some(p) = ["[", "]", "(", ")", "{", "}", ",", ";", "+"].into_iter().find(|p| p.starts_with(c)) {
             out.push(Tok::Punct(p));
             i += 1;
             continue;
@@ -217,6 +225,11 @@ impl Parser {
         }
     }
 
+    /// Whether the next token starts a slot (the right side of a slot-to-slot atom).
+    fn at_slot(&self) -> bool {
+        matches!(self.peek(), Some(Tok::Word(w)) if matches!(w.as_str(), "field" | "pair" | "subject" | "verb" | "cost" | "slot"))
+    }
+
     /// The slot a clause reads, and whether it is a field's `after` view.
     fn slot(&mut self) -> Result<(String, bool), String> {
         match self.next() {
@@ -289,6 +302,20 @@ impl Parser {
                     ));
                 }
                 Ok(json!({"type":op,"slot":slot}))
+            }
+            "==" | "<=" if self.at_slot() => {
+                let (right, _) = self.slot()?;
+                if op == "==" {
+                    return Ok(json!({"type":"eqSlots","left":slot,"right":right}));
+                }
+                if !self.is("+") {
+                    return Ok(json!({"type":"leSlots","left":slot,"right":right}));
+                }
+                self.at += 1;
+                match self.next() {
+                    Some(Tok::Int(k)) => Ok(json!({"type":"leSlotsOff","left":slot,"right":right,"offset":k.to_string()})),
+                    other => Err(format!("after `+` expected an integer offset, found {}", show(other.as_ref()))),
+                }
             }
             "==" => Ok(json!({"type":"eq","slot":slot,"value":self.value(&slot)?})),
             "<=" => Ok(json!({"type":"le","slot":slot,"value":self.value(&slot)?})),
@@ -424,6 +451,61 @@ mod tests {
                 ]),
             ])
         );
+    }
+
+    /// The slot-to-slot atoms, in the Host's rendering (`renderClause`).
+    #[test]
+    fn slot_pair_atoms() {
+        assert_eq!(
+            parse("field 15 == field 12").unwrap(),
+            json!({"type":"eqSlots","left":"resource/field/15/after","right":"resource/field/12/after"})
+        );
+        assert_eq!(
+            parse(r#"slot "clock/now" <= field 6"#).unwrap(),
+            json!({"type":"leSlots","left":"clock/now","right":"resource/field/6/after"})
+        );
+        assert_eq!(
+            parse(r#"field 14 <= slot "clock/now" + -1"#).unwrap(),
+            json!({"type":"leSlotsOff","left":"resource/field/14/after","right":"clock/now","offset":"-1"})
+        );
+        assert_eq!(
+            parse(r#"field 14 <= slot "clock/now" + 600"#).unwrap(),
+            json!({"type":"leSlotsOff","left":"resource/field/14/after","right":"clock/now","offset":"600"})
+        );
+        assert_eq!(
+            parse("subject == field 9").unwrap(),
+            json!({"type":"eqSlots","left":"request/subject","right":"resource/field/9/after"})
+        );
+        assert_eq!(
+            parse("field 0 before == field 0 before").unwrap(),
+            json!({"type":"eqSlots","left":"resource/field/0/before","right":"resource/field/0/before"})
+        );
+        assert!(parse(r#"field 14 <= slot "clock/now" + x"#).unwrap_err().contains("integer offset"));
+        assert!(parse("field 14 == field 2 + 1").unwrap_err().contains("expected `;`"));
+    }
+
+    /// The job law (COMPUTE §2.3, `Kernel/Job.lean`): the shell grammar text
+    /// `law.job.shell` (the Host's rendering of every clause, written by
+    /// `scripts/gen-joblaw.py`) parses to exactly `law.job.json`, both with the
+    /// same placeholder binding.
+    #[test]
+    fn job_law_grammar_is_the_template_json() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../deploy/shell/templates/job/");
+        let bind = |s: String| {
+            s.replace("{CALLER}", "7")
+                .replace("{PROGRAM}", "42")
+                .replace("{NEG_WINDOW}", "-600")
+                .replace("{WINDOW}", "600")
+                .replace("{RAN_SLOT}", "run/program/42")
+        };
+        let file = std::fs::read_to_string(format!("{dir}law.job.shell")).expect("law.job.shell");
+        let text = bind(file.lines().filter(|l| !l.starts_with("--")).collect::<Vec<_>>().join("\n"));
+        let json: Value =
+            serde_json::from_str(&bind(std::fs::read_to_string(format!("{dir}law.job.json")).expect("law.job.json")))
+                .expect("law.job.json parses");
+        let parsed = parse(&text).expect("the job law parses");
+        assert_eq!(parsed["predicates"].as_array().map(Vec::len), Some(44));
+        assert_eq!(parsed, json);
     }
 
     /// `deploy/shell/templates/story/tale/law.state` (branch p-templates) with
