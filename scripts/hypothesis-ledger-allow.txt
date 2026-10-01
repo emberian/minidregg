@@ -1,0 +1,75 @@
+# scripts/hypothesis-ledger-allow.txt -- TOOTHLESS assumptions known on 2026-10-01 (tree final 7961b345).
+# Format: <family> <reason>. A RATCHET, not a pardon: every line is an open finding with its cv task;
+# an entry whose family gains both named poles (or is proved/refuted) FAILS the gate until deleted;
+# a new toothless assumption fails the gate; VACUOUS/INCONSISTENT rows can never be allowed.
+# poles column: which named instances exist today (sat = satisfying, ref = refuting, cond = only conditional ones).
+Minidregg.Selvage.PrefixMeasurable  [42 consumers; poles: sat] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.FoldDistancePreserving  [12 consumers; poles: cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldPoseidon2Rom.romConstructionTarget  [7 consumers; poles: none] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Kernel.ReplicatedSettlementFinality.PrefixDiscipline  [6 consumers; poles: sat/cond] deployment refinement/discipline premise (satisfied by closed instances; refuting instance missing); task 01a0f802-02f0
+Minidregg.Kernel.DurableDataIntent.ImplementationRefinement  [6 consumers; poles: sat/cond] deployment refinement/discipline premise (satisfied by closed instances; refuting instance missing); task 01a0f802-02f0
+Minidregg.Selvage.PolishchukSpielman  [6 consumers; poles: none] research hypothesis (BCIKS L4.4); Z-PS refutes or discharges; task 01a0f802-0329
+Minidregg.Theory.CredentialAuthorityState.LineageValid  [5 consumers; poles: sat/cond] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Theory.CellState.PairBindingPremise  [5 consumers; poles: cond] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Selvage.FoldCommitScheme.MsisHardEx  [5 consumers; poles: sat/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldBcsCrossings.PaddedLazyEagerAgreeOffCollision  [5 consumers; poles: none] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Compiler.IsFoldHom  [5 consumers; poles: sat] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldBcsCrossings.PaddedLazyFunctionSampling  [4 consumers; poles: none] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldBcsRunSchedule.PaddedEagerFreshRun  [4 consumers; poles: cond] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldBcsCrossings.PaddedRpRfSwitch  [4 consumers; poles: sat] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.QueryAgreementAmplifies  [4 consumers; poles: none] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.ConstructionReturnsLastRate  [3 consumers; poles: cond] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.WHIRConjecture412  [3 consumers; poles: sat/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Kernel.CredentialSignedEnvelopeController.SignatureCompletion  [3 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Compiler.DeclaredActionAir.CodesBounded  [3 consumers; poles: none] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Assurance.Tower256LogupControllerAdmission.ControllerGameSecurity  [3 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Selvage.FoldRoundBound  [3 consumers; poles: ref/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.HaboeckTheorem2  [3 consumers; poles: none] research hypothesis (Haboeck Thm 2, Johnson regime); task 01a0f802-0329
+Minidregg.Selvage.MultiAffine  [3 consumers; poles: sat] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Theory.AuthMap.WF  [3 consumers; poles: sat/cond] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Compiler.Tower256CshakeMerkleBinding.MerkleCollisionFree  [3 consumers; poles: none] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Assurance.HyperdocumentFinalizedDomainCrawler.PagePairBinding  [3 consumers; poles: sat/cond] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Compiler.CredentialAuthorityPolicyRegistry.Example.RootPairBinding  [3 consumers; poles: none] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Kernel.GrainResourceBirthPolicyController.SourceBound  [3 consumers; poles: none] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldBcsRunSchedule.PaddedEagerLastRateRun  [3 consumers; poles: cond] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldBcsCrossings.PaddedDeferredIdealExact  [3 consumers; poles: cond] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Assurance.RawHistorySecurityPrices.ExactRootAttribution  [2 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Compiler.GrainResourceBirthController.SourceShape  [2 consumers; poles: cond] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Selvage.accRbrKnowledgeSoundBcsShifted  [2 consumers; poles: ref/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Assurance.RawHistorySecurityPrices.ExactReceiptCoinRealization  [2 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Assurance.ReleaseGateRouting.BindingGate  [2 consumers; poles: sat] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Selvage.FreshIdealExecution  [2 consumers; poles: sat] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Kernel.DurableCommitProtocol.ImplementationRefinement  [2 consumers; poles: sat/cond] deployment refinement/discipline premise (satisfied by closed instances; refuting instance missing); task 01a0f802-02f0
+Minidregg.Assurance.SemanticHistoryAccumulator.VerifiedHistoryHead.FoldRecommitment  [2 consumers; poles: cond] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Selvage.AllowedWithoutReplacementFallingPremise  [2 consumers; poles: cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Compiler.AuthenticatedColumnPlan.CommitmentScheme.PositionBinding  [2 consumers; poles: sat/cond] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Theory.SemanticEffectFamily.Postcondition  [2 consumers; poles: sat/cond] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Selvage.BaseFoldBcsCrossings.Poseidon2PermutationIdeal  [2 consumers; poles: sat] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.OpeningScheme.PositionEquivocation  [2 consumers; poles: ref] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Assurance.ReleaseGateRouting.PublicOnly  [2 consumers; poles: sat] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Assurance.Tower256LogupControllerAdmission.AdmittedLookup  [2 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Theory.AuthMap.PrefixFree  [2 consumers; poles: sat/cond] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Theory.AdditiveProximityGap  [1 consumers; poles: sat/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Kernel.FramedWalRefinement.FrameCodec.RoundTrips  [1 consumers; poles: sat/cond] deployment refinement/discipline premise (satisfied by closed instances; refuting instance missing); task 01a0f802-02f0
+Minidregg.Selvage.WorkPrefixMeasurable  [1 consumers; poles: none] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Assurance.Ext6GateProofControllerAdmission.ReductionLaws  [1 consumers; poles: sat/cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Selvage.HaboeckErrorEnvelope  [1 consumers; poles: none] research hypothesis (Haboeck error envelope); task 01a0f802-0329
+Minidregg.Selvage.IdealFreshAt  [1 consumers; poles: cond] ROM/sponge-indifferentiability ledger seam (Selvage research); task 01a0f802-02f0
+Minidregg.Theory.Bignum.ValidRadix  [1 consumers; poles: none] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Theory.PolicyInstall.PreparedPatch  [1 consumers; poles: cond] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Compiler.Logup256ReceiptClause.Tower256ClausePremises  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Compiler.CommittedTerminalFactoredProver.FactoredProverHonest  [1 consumers; poles: none] closed Prop bound as premise: prove or refute; task 01a0f802-033d
+Minidregg.Selvage.adaptiveIncrement_sound_via_log  [1 consumers; poles: ref/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Selvage.OracleLogProgramLinked  [1 consumers; poles: ref] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Pred.HashEqHiding  [1 consumers; poles: none] computational hiding premise (cSHAKE256 commit), no model of feasibility; task 01a0f802-0303
+Minidregg.Assurance.SemanticHistoryRecursiveAir.SecurityEvidence  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Selvage.FsKnowledgeSoundRO  [1 consumers; poles: sat/cond] proof-system soundness/proximity premise (Selvage research); task 01a0f802-02f0
+Minidregg.Compiler.PayEnrolSignatureIO.SshsigRefinement  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Assurance.SemanticHistoryBcsGame.HistoryBcsBad  [1 consumers; poles: none] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Assurance.HyperdocumentLinkPageDurableWeld.ContentPairSecurityCeiling  [1 consumers; poles: cond] commitment binding/collision premise or event; task 01a0f802-02f0
+Minidregg.Assurance.RawHistoryBcsOpenings.RawHistoryBcsTranscript.ColumnsExact  [1 consumers; poles: cond] both poles exist but only conditionally (honestTranscript_columnsExact / equivocalTranscript_not_columnsExact carry code hypotheses); name one closed instance each; task 01a0f802-02f0
+Minidregg.Assurance.ZkmlMatmulSuccinctChecker.OpeningsHold  [1 consumers; poles: none] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Theory.RevocationConsensus.CrossVatSound  [1 consumers; poles: sat] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
+Minidregg.Assurance.HyperdocumentTransclusionReferenceDeployment.SecurityEvidence  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Compiler.CredentialSignatureAdmission.NativeIORefinement  [1 consumers; poles: cond] security-evidence/refinement bundle over an opaque verifier or backend; task 01a0f802-02f0
+Minidregg.Compiler.NextgenLightClientPublicInputs.PublicPrefixBound  [1 consumers; poles: none] predicate over data/parameters admitted to the tier by its doc or parameter shape; a negative example is owed; task 01a0f802-02f0
