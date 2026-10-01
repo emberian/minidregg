@@ -40,10 +40,12 @@ REFUSAL_TAG=44524547472f4e41544956452d484f53542f4f5554434f4d45
 run() { local name=$1; shift; "$@" >"$D/$name.out" 2>"$D/$name.err"; echo $? >"$D/$name.rc"; }
 host_refused() { [ "$(cat "$D/$1.rc")" != 0 ] && grep -q "encoded refusal: $REFUSAL_TAG" "$D/$1.err"; }
 submit_refused() { jq -e '.type == "refused"' "$1" >/dev/null 2>&1; }
-OPLOG=$JOURNEY_WORLD/public/serve.log
-oplog_lines() { local n; n=$(grep -c "submission refused (operator log)" "$OPLOG" 2>/dev/null); echo "${n:-0}"; }
+# The service's stderr: the journey and its hooks restart `mini serve` into
+# fresh serve*.log files (J6, K11), so the operator log is all of them, oldest first.
+oplog() { local f; for f in $(ls -tr "$JOURNEY_WORLD"/public/serve*.log 2>/dev/null); do cat "$f"; done; }
+oplog_lines() { local n; n=$(oplog | grep -c "submission refused (operator log)"); echo "${n:-0}"; }
 # The operator-log line a submission added, if any (since line count $1).
-oplog_since() { grep "submission refused (operator log)" "$OPLOG" 2>/dev/null | tail -n +$(($1 + 1)) | tail -1 | cut -c1-220; }
+oplog_since() { oplog | grep "submission refused (operator log)" | tail -n +$(($1 + 1)) | tail -1 | cut -c1-220; }
 refusal_text() {
   grep -o 'encoded refusal: [0-9a-f]*' "$D/$1.err" | tail -1 | cut -d' ' -f3 | xxd -r -p 2>/dev/null \
     | tr -c '[:print:]' ' ' | tr -s ' ' | cut -c1-200
