@@ -904,7 +904,7 @@ fn author(host: &Path, config: &Path, kind: &OsStr, input: &Path, output: &Path)
     Ok(())
 }
 
-fn inspect(host: &Path, config: &Path, kind: &str, input: &Path, output: &Path) -> Result<Value> {
+pub(crate) fn inspect(host: &Path, config: &Path, kind: &str, input: &Path, output: &Path) -> Result<Value> {
     process(
         host,
         config,
@@ -1304,6 +1304,25 @@ pub(crate) fn host_decided<T>(result: Result<T>) -> Result<std::result::Result<T
     }
 }
 
+/// `host_decided`, keeping a refused frame's exact bytes at `path` first, so
+/// `why` (K-INSPECT-VIEWS) can explain the refusal from the Host's own frame.
+pub(crate) fn host_decided_keeping<T>(
+    result: Result<T>,
+    path: &Path,
+) -> Result<std::result::Result<T, String>> {
+    if result.is_err() {
+        if let Some(decision) = take_host_decision() {
+            if let HostDecision::RefusedFrame { encoded, .. } = &decision {
+                if !path.exists() {
+                    create_private(path, encoded)?;
+                }
+            }
+            note_host_decision(decision);
+        }
+    }
+    host_decided(result)
+}
+
 /// P-AFFORDANCES: the Host's judgement of one intent, without submitting it.
 /// Plans it exactly as `submit` does (observe, op 1), signs the plan, and asks
 /// the Host to dry-run that plan (op 130: assemble and submit over a Store
@@ -1330,23 +1349,23 @@ pub(crate) fn dry_run(
     write_manifest(directory, host, &retained_config, "dry-run")?;
     let signing = read_secret(key)?;
     take_host_decision();
-    let observed = match host_decided(authorize_observation(
+    let observed = match host_decided_keeping(authorize_observation(
         host,
         &retained_config,
         &retained_intent,
         intent_kind,
         &signing,
         directory,
-    ))? {
+    ), &directory.join("refusal.frame"))? {
         Ok(observed) => observed,
         Err(line) => return Ok(Some(line)),
     };
     let plan_bin = directory.join("plan.bin");
-    if let Err(line) = host_decided(host_files(
+    if let Err(line) = host_decided_keeping(host_files(
         host,
         &retained_config,
         &[Path::new("prepare"), &observed.signed, &plan_bin],
-    ))? {
+    ), &directory.join("refusal.frame"))? {
         return Ok(Some(line));
     }
     let presentation = inspect(
@@ -1365,7 +1384,7 @@ pub(crate) fn dry_run(
         &directory.join("transaction-signatures.json"),
         &signatures_bin,
     )?;
-    match host_decided(host_files(
+    match host_decided_keeping(host_files(
         host,
         &retained_config,
         &[
@@ -1374,7 +1393,7 @@ pub(crate) fn dry_run(
             &signatures_bin,
             &directory.join("dry-run-plan.bin"),
         ],
-    ))? {
+    ), &directory.join("refusal.frame"))? {
         Ok(()) => Ok(None),
         Err(line) => Ok(Some(line)),
     }

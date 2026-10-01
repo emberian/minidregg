@@ -6,6 +6,7 @@ their canonical codecs. All unbounded integers are decimal strings.
 import Kernel.NativeHost
 import Host.BirthRuntimeProfile
 import Host.CapabilityInspection
+import Host.InspectRender
 import Kernel.NativeHostGenesis
 import Kernel.AgentGrain
 import Kernel.CapabilityRevocationController
@@ -3293,7 +3294,13 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, or view-capability"
+  -- K-INSPECT-VIEWS: renderers over bytes the client holds (Host/InspectRender).
+  | "cap-tree" => InspectRender.capTreeView bytes
+  | "law" => InspectRender.lawView bytes
+  | "why" => InspectRender.whyView bytes
+  | "turn" => InspectRender.turnView "turn" bytes
+  | "receipt" => InspectRender.turnView "receipt" bytes
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, view-capability, cap-tree, law, why, turn, or receipt"
 
 private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),

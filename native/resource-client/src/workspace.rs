@@ -27,6 +27,11 @@ pub(crate) mod private;
 #[path = "can.rs"]
 mod can;
 
+/// `inspect caps|law|receipt|turn`, `why` (K-INSPECT-VIEWS): Lean renderers
+/// over bytes this workspace holds or reads with its own signed views.
+#[path = "inspect_views.rs"]
+mod inspect_views;
+
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
         || value.len() > 39
@@ -2423,6 +2428,21 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             };
             args.finish()?;
             can::can(&root, &workspace, name.as_deref(), all)
+        }
+        "inspect" => {
+            let view = os_string(args.required("view")?, "inspect view")?;
+            let name = args
+                .optional("name")
+                .map(|value| os_string(value, "inspect name"))
+                .transpose()?;
+            let refusals = args.optional("refusals").map(path);
+            let json_out = match args.optional("json").as_deref().and_then(OsStr::to_str) {
+                None | Some("false") => false,
+                Some("true") => true,
+                _ => return Err("--json must be true or false".into()),
+            };
+            args.finish()?;
+            inspect_views::run(&root, &workspace, &view, name.as_deref(), refusals.as_deref(), json_out)
         }
         "propose" => {
             let request = path(args.required("request")?);
