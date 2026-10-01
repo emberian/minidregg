@@ -606,7 +606,7 @@ theorem rootOf_eq_exhibits_collision (S : Scheme Key V Dg) {w w' : World R TxId 
 /-- **Checkpoint soundness at the world root (§4.4).**  `Kernel.World.resume_sound`
 with the root supplied and its `binds` premise discharged by the carrier. -/
 theorem resume_sound_rootOf {Ev : Type} (H : History R TxId Ev D) (S : Scheme Key V Dg)
-    (g W_h : World R TxId D) (log : List (Turn R TxId Ev)) (c : Checkpoint R TxId D Dg)
+    (g W_h : World R TxId D) (log : List (Turn R TxId Ev D)) (c : Checkpoint R TxId D Dg)
     (prefixed : fold H g (log.take c.height) = some W_h)
     (honestRoot : c.root = rootOf cellRoot sysRoot S W_h)
     (carrier : RootBinding cellRoot sysRoot S c.world W_h)
@@ -692,19 +692,24 @@ def chainDigest (acc turn : Digest) : Digest :=
 /-- The history surface `Kernel.World` handed on, at the deployed hash: the
 turn digest is cSHAKE over the turn's canonical bytes; the chain links it to
 the previous log root. -/
-def cshakeHistory {R : Registry} {TxId Ev : Type} (encode : Turn R TxId Ev → List UInt8)
-    (logRoot0 : Digest) : History R TxId Ev Digest where
+def cshakeHistory {R : Registry} {TxId Ev : Type} (encode : Turn R TxId Ev Digest → List UInt8)
+    (logRoot0 : Digest) (legBytes : Leg R → Nat) (imageBytes : Cell R → Nat) :
+    History R TxId Ev Digest where
   turnDigest t := turnDigestOfBytes (encode t)
   chain := chainDigest
   logRoot0 := logRoot0
+  legBytes := legBytes
+  imageBytes := imageBytes
 
 /-- `classify_conflict`'s `separates` premise at the deployed history: two turns
 with different canonical bytes, where the hash binds that one pair. -/
 theorem cshakeHistory_separates {R : Registry} {TxId Ev : Type}
-    (encode : Turn R TxId Ev → List UInt8) (logRoot0 : Digest) {t t' : Turn R TxId Ev}
+    (encode : Turn R TxId Ev Digest → List UInt8) (logRoot0 : Digest) (legBytes : Leg R → Nat)
+    (imageBytes : Cell R → Nat) {t t' : Turn R TxId Ev Digest}
     (hne : encode t ≠ encode t')
     (binds : turnDigestOfBytes (encode t) = turnDigestOfBytes (encode t') → encode t = encode t') :
-    (cshakeHistory encode logRoot0).turnDigest t ≠ (cshakeHistory encode logRoot0).turnDigest t' :=
+    (cshakeHistory encode logRoot0 legBytes imageBytes).turnDigest t ≠
+      (cshakeHistory encode logRoot0 legBytes imageBytes).turnDigest t' :=
   fun h => hne (binds h)
 
 end History
