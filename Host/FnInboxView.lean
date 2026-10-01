@@ -58,6 +58,7 @@ private def keyJson : Minidregg.Theory.EffectDeclaration.StateKey → Json
   | .accountBalance account resource => .mkObj
       [("type", toJson "account"), ("resource", number account.value),
        ("field", number resource.value)]
+  | .blinding => .mkObj [("type", "blinding")]
   | .programCode program => .mkObj
       [("type", toJson "program"), ("resource", number program.value)]
 

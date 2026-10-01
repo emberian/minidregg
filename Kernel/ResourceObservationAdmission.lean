@@ -475,6 +475,10 @@ def declaredField : EffectDeclaration.StateKey → CellField
   | .objectField _ field => .slot field.value
   | .accountBalance _ asset => .balance asset.value
   | .programCode _ => .code
+  -- No write reaches the blinding (`writableKeyCheck` refuses it), so no
+  -- footprint touches it; `fieldOf` gives it no field and `narrowPacked`
+  -- erases it for every reader.
+  | .blinding => .code
 
 def contentField : Hyperdocument.Namespace → CellField
   | .links | .marks | .annotations => .annotations
@@ -483,9 +487,14 @@ def contentField : Hyperdocument.Namespace → CellField
 /-- The field of one address of a registry cell, when the kind has fields. -/
 def fieldOf : (kind : CanonicalCellRegistry.Kind) →
     Address (CanonicalCellRegistry.layout kind) → Option CellField
-  | .content, address => some (contentField address.1)
+  | .content, address =>
+      match address.1 with
+      | .blinding => none
+      | space => some (contentField space)
   | .declaredObject, address | .accountMetadata, address | .declaredProgram, address =>
-      some (declaredField address.2)
+      match address.2 with
+      | .blinding => none
+      | key => some (declaredField key)
   -- A stream's entries are its body: a scope naming fields reads and appends a
   -- stream only when it names `body`.
   | .stream, _ => some .body
@@ -560,10 +569,39 @@ theorem reader_reads_field_one_not_two (object : ResourceId .object)
     DFinsupp.filter_apply_neg store
       (show ¬ CellField.NamedBy (some {.slot 1}) (.slot 2) by decide)⟩
 
-/-- A packed resource cell as a reader under `fields` receives it. -/
+/-- What a reader under `fields` is shown of a cell of `kind`: a kept address
+that is not the cell's hiding key.  The blinding is visible to no reader, the
+owner included (K-NARROW-HIDE). -/
+def Visible (fields : Option (Finset CellField)) (kind : CanonicalCellRegistry.Kind)
+    (address : Address (CanonicalCellRegistry.layout kind)) : Prop :=
+  Kept fields (fieldOf kind) address ∧ CanonicalCellRegistry.isBlinding kind address = false
+
+instance visibleDecidable (fields : Option (Finset CellField)) (kind : CanonicalCellRegistry.Kind)
+    (address : Address (CanonicalCellRegistry.layout kind)) : Decidable (Visible fields kind address) := by
+  unfold Visible; infer_instance
+
+/-- A packed resource cell as a reader under `fields` receives it: the named
+fields, never the blinding. -/
 def narrowPacked (fields : Option (Finset CellField))
     (packed : PackedCell CanonicalCellRegistry.registry) : PackedCell CanonicalCellRegistry.registry :=
-  ⟨packed.kind, materialize _ (narrowStore fields (fieldOf packed.kind) packed.payload.logical)⟩
+  ⟨packed.kind, materialize _ (DFinsupp.filter (Visible fields packed.kind) packed.payload.logical)⟩
+
+/-- Every address a reader receives is one its scope keeps. -/
+theorem narrowPacked_only_kept {fields : Option (Finset CellField)}
+    {packed : PackedCell CanonicalCellRegistry.registry}
+    {address : Address (CanonicalCellRegistry.layout packed.kind)}
+    (present : (narrowPacked fields packed).payload.logical address ≠ none) :
+    Kept fields (fieldOf packed.kind) address := by
+  by_contra dropped
+  exact present (DFinsupp.filter_apply_neg _ (fun visible => dropped visible.1))
+
+/-- No reader receives the hiding key. -/
+theorem narrowPacked_erases_blinding (fields : Option (Finset CellField))
+    (packed : PackedCell CanonicalCellRegistry.registry)
+    {address : Address (CanonicalCellRegistry.layout packed.kind)}
+    (key : CanonicalCellRegistry.isBlinding packed.kind address = true) :
+    (narrowPacked fields packed).payload.logical address = none :=
+  DFinsupp.filter_apply_neg _ (fun visible => by simp [visible.2] at key)
 
 /-- An account cut as a reader under `fields` receives it: the `balance`
 coordinates the scope names. -/

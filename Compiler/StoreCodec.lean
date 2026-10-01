@@ -28,7 +28,7 @@ representation, for every layout at once:
 
 ```
 frame W = "DREGG/STORE"  (11 bytes, UTF-8)
-       ++ [1]            (store-encoding version)
+       ++ [2]            (store-encoding version)
        ++ layoutDigest W (32 bytes)
 layoutDigest W = cSHAKE256(customization "DREGG.STORE.LAYOUT/v1", descriptor W)
 descriptor W   = bytes(name)
@@ -36,6 +36,7 @@ descriptor W   = bytes(name)
               ++ for each namespace, in W.namespaces order:
                    bytes(namespace tag bytes) ++ [discipline byte]
                    ++ bytes(key codec id) ++ bytes(value codec id)
+              ++ option(bytes(blinding address))
 ```
 
 (`bytes(x)` is the length-prefixed `bytesStream`, `nat` the base-255 natural,
@@ -54,10 +55,10 @@ layout as far as the frame knows.  The id is the pin; changing a codec means
 changing its id.  Distinct descriptors give distinct digests only up to a
 cSHAKE256 collision; that is the frame's one cryptographic premise.
 
-The cell root is `cSHAKE256("DREGG.STORE.ROOT/v1", encode W s)`.  Because the
-hashed bytes begin with the layout digest, roots of different layouts are
-domain-separated by the frame; a per-kind root customization would pin the
-same fact twice.
+The cell root is over salted per-entry leaves, after the frame
+(`saltedRoot`, "The hiding root" below).  Because the hashed bytes begin with
+the layout digest, roots of different layouts are domain-separated by the
+frame; a per-kind root customization would pin the same fact twice.
 
 This file proves round-trip, injectivity and canonicity GENERALLY, for every
 layout and every store; the worked instances at the end are evaluated
@@ -65,6 +66,7 @@ witnesses, not the proofs.
 -/
 import Compiler.FiniteDependentMapCodec
 import Compiler.Sp800185Cshake256
+import Compiler.Sp800185Kmac256
 import Theory.CellState
 import Mathlib.Data.List.Lex
 import Mathlib.Data.Finset.Sort
@@ -108,6 +110,11 @@ structure Wire (L : Layout.{0, 0, 0}) where
   valueStream : (space : L.Namespace) → StreamCodec (L.Value space)
   keyCodecId : L.Namespace → String
   valueCodecId : L.Namespace → String
+  /-- The cell's hiding key, when the layout carries one: the one reserved
+  address whose value bytes key every entry's salt (`blindingKey`).  A layout
+  without it roots its entries with empty salts, which hide nothing; a
+  narrowed reader of such a cell is refused (`NativeObservationController`). -/
+  blinding : Option (Address L) := none
 
 /-- The empty codec of `Unit`: a single-namespace layout's namespace, or a
 presence-only value, contributes no bytes. -/
@@ -125,21 +132,31 @@ def disciplineByte : Discipline → UInt8
   | .ram => 1
   | .appendOnly => 2
 
+/-! ## Addresses and their byte order -/
+
+def addressStream : StreamCodec (Address L) :=
+  FiniteDependentMapCodec.entryStream W.namespaceStream W.keyStream
+
 abbrev NamespaceDescriptor := List UInt8 × UInt8 × List UInt8 × List UInt8
-abbrev LayoutDescriptor := List UInt8 × List NamespaceDescriptor
+abbrev LayoutDescriptor := List UInt8 × List NamespaceDescriptor × Option (List UInt8)
 
 def layoutDescriptorStream : StreamCodec LayoutDescriptor :=
   StreamCodec.product bytesStream
-    (StreamCodec.list (StreamCodec.product bytesStream
-      (StreamCodec.product StreamCodec.byte
-        (StreamCodec.product bytesStream bytesStream))))
+    (StreamCodec.product
+      (StreamCodec.list (StreamCodec.product bytesStream
+        (StreamCodec.product StreamCodec.byte
+          (StreamCodec.product bytesStream bytesStream))))
+      (StreamCodec.option bytesStream))
 
 def namespaceDescriptor (space : L.Namespace) : NamespaceDescriptor :=
   (W.namespaceStream.encode space, disciplineByte (L.discipline space),
     (W.keyCodecId space).toUTF8.toList, (W.valueCodecId space).toUTF8.toList)
 
+/-- The descriptor commits to the blinding address too: which entry keys the
+salts is part of what a root means. -/
 def layoutDescriptor : LayoutDescriptor :=
-  (W.name.toUTF8.toList, W.namespaces.map (namespaceDescriptor W))
+  (W.name.toUTF8.toList, W.namespaces.map (namespaceDescriptor W),
+    W.blinding.map (addressStream W).encode)
 
 def descriptor : List UInt8 :=
   layoutDescriptorStream.encode (layoutDescriptor W)
@@ -160,7 +177,9 @@ theorem layoutDigest_length : (layoutDigest W).length = 32 :=
 /-- `"DREGG/STORE"` in UTF-8. -/
 def magic : List UInt8 := [68, 82, 69, 71, 71, 47, 83, 84, 79, 82, 69]
 
-def storeVersion : UInt8 := 1
+/-- Version 2 (K-NARROW-HIDE): the root is over salted per-entry leaves and the
+layout descriptor names the blinding address.  Version-1 bytes refuse. -/
+def storeVersion : UInt8 := 2
 
 def frame : List UInt8 := magic ++ storeVersion :: layoutDigest W
 
@@ -169,10 +188,6 @@ theorem magic_length : magic.length = 11 := rfl
 theorem frame_length : (frame W).length = 44 := by
   simp [frame, magic_length, layoutDigest_length]
 
-/-! ## Addresses and their byte order -/
-
-def addressStream : StreamCodec (Address L) :=
-  FiniteDependentMapCodec.entryStream W.namespaceStream W.keyStream
 
 def entryStream : StreamCodec (Entry L) :=
   FiniteDependentMapCodec.entryStream (addressStream W)
@@ -553,12 +568,132 @@ theorem decode_other_layout {L' : Layout.{0, 0, 0}} (W' : Wire L') (store : Stor
   · rw [frame_length, frame_length]
   · simp [frame, otherLayout]
 
-/-! ## Root and materializer -/
+/-! ## The hiding root (K-NARROW-HIDE)
 
-def rootCustomization : List UInt8 := "DREGG.STORE.ROOT/v1".toUTF8.toList
+The root commits to each entry separately, through a salted leaf, so that a
+reader may be handed some entries with their salts and only the LEAVES of the
+others, and still recompute the root (`Compiler.StoreHiding`).
 
-def rootBytes (bytes : List UInt8) : Digest :=
-  (Sp800185Cshake256.hash rootCustomization bytes).digest
+```
+blindingKey s = value bytes at W.blinding, when present       (the cell's hiding key)
+salt k e      = KMAC256(k, e, 256, "DREGG.STORE.SALT/v1")   (k present; [] otherwise)
+opening s e   = (salt (blindingKey s) (entryBytes e), entryBytes e)
+leaf o        = cSHAKE256("DREGG.STORE.LEAF/v1", bytes(o.salt) ++ o.entry)
+root s        = cSHAKE256("DREGG.STORE.ROOT/v2", frame ++ leaf₁ ++ … ++ leafₙ)
+```
+
+in canonical entry order.  Every leaf is 32 bytes, so the leaf sequence is
+recoverable from the preimage; `root_binds_salted_entries` (below) is
+`encode_injective` restated: equal roots mean equal stores unless cSHAKE256
+collides at the root or at one leaf.  A salt is a function of the cell's key
+and the entry's own canonical bytes, so the owner who holds the key recomputes
+every opening without storing salts, and a reader who once held the salt of
+`(address, v)` learns nothing about the salt of `(address, v')`.  The price of
+that determinism: an entry that returns to an earlier value returns to its
+earlier leaf.
+
+What the salts hide, and from whom: the host stores the key (it must, to
+serve openings and recompute roots), so this hides uncovered entries from
+OTHER READERS and from holders of receipts and roots, not from the operator.
+Hiding from the operator is the private-cell envelope's job. -/
+
+/-- The cell's hiding key: the canonical value bytes at the wire's blinding
+address, when the layout has one and the store holds it. -/
+def blindingKey (store : Store L) : Option (List UInt8) :=
+  W.blinding.bind fun address => (store address).map (W.valueStream address.1).encode
+
+/-- The canonical bytes of one entry: its address bytes, then its value bytes. -/
+def entryBytes (entry : Entry L) : List UInt8 :=
+  (entryStream W).encode entry
+
+theorem entryBytes_injective : Function.Injective (entryBytes W) :=
+  streamEncode_injective (entryStream W)
+
+end Store
+
+def saltCustomization : List UInt8 := "DREGG.STORE.SALT/v1".toUTF8.toList
+def leafCustomization : List UInt8 := "DREGG.STORE.LEAF/v1".toUTF8.toList
+def rootCustomization : List UInt8 := "DREGG.STORE.ROOT/v2".toUTF8.toList
+/-- Bytes that are not a canonical store of the layout have a root under a
+separate domain; `rootOf` never reaches it (`materializer_rootOf`). -/
+def undecodableCustomization : List UInt8 := "DREGG.STORE.ROOT/undecodable".toUTF8.toList
+
+/-- An entry's salt under the cell key: KMAC256 keyed by the blinding bytes over
+the entry's canonical bytes.  No key, no salt. -/
+def salt (key : Option (List UInt8)) (entry : List UInt8) : List UInt8 :=
+  match key with
+  | none => []
+  | some key => Sp800185Cshake256.kmac256Bytes key saltCustomization entry
+
+/-- What opens one leaf: the salt and the canonical entry bytes.  They are
+disclosed together or not at all. -/
+structure Opening where
+  salt : List UInt8
+  entry : List UInt8
+  deriving DecidableEq, Repr
+
+def Opening.preimage (opening : Opening) : List UInt8 :=
+  bytesStream.encode opening.salt ++ opening.entry
+
+def Opening.leaf (opening : Opening) : List UInt8 :=
+  Sp800185Cshake256.cshake256Bytes leafCustomization opening.preimage
+
+theorem Opening.leaf_length (opening : Opening) : opening.leaf.length = 32 := by
+  simp [Opening.leaf]
+
+/-- The leaf preimage determines the opening: the salt is length-prefixed. -/
+theorem Opening.preimage_injective : Function.Injective Opening.preimage := by
+  intro left right same
+  have decoded := bytesStream.decodePrefix_encode left.salt left.entry
+  have decodedRight := bytesStream.decodePrefix_encode right.salt right.entry
+  unfold Opening.preimage at same
+  rw [same, decodedRight] at decoded
+  obtain ⟨saltSame, entrySame⟩ := Prod.mk.inj (Option.some.inj decoded)
+  cases left
+  cases right
+  simp_all
+
+/-- A cSHAKE256 collision between two distinct leaf preimages. -/
+structure LeafCollision (left right : Opening) : Prop where
+  different : left ≠ right
+  leavesEqual : left.leaf = right.leaf
+
+section Root
+
+variable {L : Layout.{0, 0, 0}} (W : Wire L)
+
+def opening (store : Store L) (entry : Entry L) : Opening :=
+  ⟨salt (blindingKey W store) (entryBytes W entry), entryBytes W entry⟩
+
+/-- The cell's leaves, in canonical entry order. -/
+def leaves (store : Store L) : List (List UInt8) :=
+  (entries W store).map fun entry => (opening W store entry).leaf
+
+/-- The root of a frame and a leaf sequence: what a reader recomputes. -/
+def rootOfLeaves (leafList : List (List UInt8)) : Digest :=
+  (Sp800185Cshake256.hash rootCustomization (frame W ++ leafList.flatten)).digest
+
+def rootPreimage (store : Store L) : List UInt8 :=
+  frame W ++ (leaves W store).flatten
+
+/-- **The cell root.** -/
+def saltedRoot (store : Store L) : Digest :=
+  rootOfLeaves W (leaves W store)
+
+theorem saltedRoot_eq (store : Store L) :
+    saltedRoot W store = (Sp800185Cshake256.hash rootCustomization (rootPreimage W store)).digest :=
+  rfl
+
+/-- The materializer's byte-level root: the salted root of the store the
+payload denotes.  It reads the payload after the 44-byte frame with the lax
+decoder and never compares the frame: the frame holds a cSHAKE256 layout digest,
+and a definition whose unfolding compares it would make the kernel evaluate
+Keccak wherever it unfolds a concrete root.  Irreducible for the elaborator for
+the same reason; proofs go through `materializer_rootOf` and `rootOf_eq_rootBytes`. -/
+@[irreducible] def rootBytes (bytes : List UInt8) : Digest :=
+  match (payloadStream W).toLawful.decode (bytes.drop 44) with
+  | some store => saltedRoot W store
+  | none => (Sp800185Cshake256.hash undecodableCustomization bytes).digest
 
 def codec : LawfulCodec (Store L) where
   encode := encode W
@@ -567,9 +702,117 @@ def codec : LawfulCodec (Store L) where
 
 def materializer : Materializer L Digest where
   codec := codec W
-  rootBytes := rootBytes
+  rootBytes := rootBytes W
 
-end Store
+/-- The root of every materialized store is its salted root. -/
+theorem materializer_rootOf (store : Store L) :
+    (materializer W).rootOf store = saltedRoot W store := by
+  have payload : (encode W store).drop 44 = (payloadStream W).encode store := by
+    rw [encode, ← frame_length W, List.drop_left]
+  have lax : (payloadStream W).toLawful.decode ((payloadStream W).encode store) = some store :=
+    (payloadStream W).toLawful.decode_encode store
+  simp only [Minidregg.Theory.CellState.Materializer.rootOf, materializer, codec]
+  unfold rootBytes
+  rw [payload, lax]
+
+/-- The materialized root is the byte-level root of the encoding, for every
+wire.  Instantiate this (and `materializer_rootOf`) at a concrete wire rather
+than asking the kernel to unfold a concrete root. -/
+theorem rootOf_eq_rootBytes (store : Store L) :
+    (materializer W).rootOf store = rootBytes W (encode W store) :=
+  rfl
+
+/-! ### Binding -/
+
+/-- A cSHAKE256 collision at the root preimage of two stores. -/
+structure RootCollision (left right : Store L) : Prop where
+  different : rootPreimage W left ≠ rootPreimage W right
+  rootsEqual : saltedRoot W left = saltedRoot W right
+
+/-- **`encode_injective` restated over salted entries.**  The openings of a
+store, in order, determine it: the salt rides along, the entry bytes decide. -/
+theorem openings_determine_store {left right : Store L}
+    (same : (entries W left).map (opening W left) = (entries W right).map (opening W right)) :
+    left = right := by
+  have entriesSame : (entries W left).map (entryBytes W) = (entries W right).map (entryBytes W) := by
+    have mapped := congrArg (List.map Opening.entry) same
+    simpa [List.map_map, Function.comp_def, opening] using mapped
+  have equal : entries W left = entries W right :=
+    (List.map_injective_iff.mpr (entryBytes_injective W)) entriesSame
+  rw [← fromEntries_entries W left, ← fromEntries_entries W right, equal]
+
+private theorem flatten_inj_of_width {width : Nat} (positive : 0 < width) :
+    ∀ (left right : List (List UInt8)), (∀ part ∈ left, part.length = width) →
+      (∀ part ∈ right, part.length = width) → left.flatten = right.flatten → left = right
+  | [], [], _, _, _ => rfl
+  | [], part :: rest, _, wide, same => by
+      have : part.length = width := wide part (by simp)
+      have empty : (part ++ rest.flatten) = [] := by simpa using same.symm
+      have : part = [] := (List.append_eq_nil_iff.mp empty).1
+      subst this
+      simp at *
+      omega
+  | part :: rest, [], wide, _, same => by
+      have : part.length = width := wide part (by simp)
+      have empty : (part ++ rest.flatten) = [] := by simpa using same
+      have : part = [] := (List.append_eq_nil_iff.mp empty).1
+      subst this
+      simp at *
+      omega
+  | first :: rest, first' :: rest', wide, wide', same => by
+      simp only [List.flatten_cons] at same
+      have lengths : first.length = first'.length := by
+        rw [wide first (by simp), wide' first' (by simp)]
+      obtain ⟨heads, tails⟩ := List.append_inj same lengths
+      rw [heads, flatten_inj_of_width positive rest rest'
+        (fun part member => wide part (by simp [member]))
+        (fun part member => wide' part (by simp [member])) tails]
+
+private theorem map_leaf_eq {left right : List Opening}
+    (same : left.map Opening.leaf = right.map Opening.leaf) :
+    left = right ∨ ∃ first ∈ left, ∃ second ∈ right, LeafCollision first second := by
+  induction left generalizing right with
+  | nil =>
+      cases right with
+      | nil => exact .inl rfl
+      | cons _ _ => simp at same
+  | cons head rest induction =>
+      cases right with
+      | nil => simp at same
+      | cons head' rest' =>
+          simp only [List.map_cons, List.cons.injEq] at same
+          by_cases heads : head = head'
+          · rcases induction same.2 with tails | ⟨first, firstMember, second, secondMember, hit⟩
+            · exact .inl (by rw [heads, tails])
+            · exact .inr ⟨first, by simp [firstMember], second, by simp [secondMember], hit⟩
+          · exact .inr ⟨head, by simp, head', by simp, ⟨heads, same.1⟩⟩
+
+/-- **The root binds the salted entries.**  Two stores with equal roots are
+equal, unless cSHAKE256 collides at the root preimage or at one leaf. -/
+theorem root_binds_salted_entries {left right : Store L}
+    (same : saltedRoot W left = saltedRoot W right) :
+    left = right ∨ RootCollision W left right ∨
+      ∃ first ∈ (entries W left).map (opening W left),
+        ∃ second ∈ (entries W right).map (opening W right), LeafCollision first second := by
+  by_cases preimages : rootPreimage W left = rootPreimage W right
+  · have flat : (leaves W left).flatten = (leaves W right).flatten :=
+      List.append_cancel_left preimages
+    have leafLists : leaves W left = leaves W right :=
+      flatten_inj_of_width (width := 32) (by decide) _ _
+        (by intro part member; unfold leaves at member
+            obtain ⟨_, _, rfl⟩ := List.mem_map.mp member; exact Opening.leaf_length _)
+        (by intro part member; unfold leaves at member
+            obtain ⟨_, _, rfl⟩ := List.mem_map.mp member; exact Opening.leaf_length _)
+        flat
+    have mapped : ((entries W left).map (opening W left)).map Opening.leaf =
+        ((entries W right).map (opening W right)).map Opening.leaf := by
+      simpa [leaves, List.map_map, Function.comp_def] using leafLists
+    rcases map_leaf_eq mapped with openings | collision
+    · exact .inl (openings_determine_store W openings)
+    · exact .inr (.inr collision)
+  · exact .inr (.inl ⟨preimages, same⟩)
+
+end Root
 
 /-! ## Worked instance: a two-namespace layout -/
 
@@ -806,6 +1049,14 @@ end Capacity
 #guard_msgs (whitespace := lax) in #print axioms decode_other_layout
 /-- info: 'Minidregg.Compiler.StoreCodec.decode_other_version' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms decode_other_version
+/-- info: 'Minidregg.Compiler.StoreCodec.root_binds_salted_entries' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms root_binds_salted_entries
+/-- info: 'Minidregg.Compiler.StoreCodec.openings_determine_store' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms openings_determine_store
+/-- info: 'Minidregg.Compiler.StoreCodec.materializer_rootOf' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms materializer_rootOf
+/-- info: 'Minidregg.Compiler.StoreCodec.Opening.preimage_injective' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Opening.preimage_injective
 /-- info: 'Minidregg.Compiler.StoreCodec.capacity_unbounded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms capacity_unbounded
 /-- info: 'Minidregg.Compiler.StoreCodec.Worked.store32_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/

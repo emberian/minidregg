@@ -147,10 +147,11 @@ def stateKeyCode : StateKey → Nat × Nat × Nat
   | .objectField object field => (0, object.value, field.value)
   | .accountBalance account resource => (1, account.value, resource.value)
   | .programCode program => (2, program.value, 0)
+  | .blinding => (3, 0, 0)
 
 open Minidregg.Theory.EffectDeclaration in
 theorem stateKeyCode_injective : Function.Injective stateKeyCode := by
-  rintro (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩) (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩) same <;>
+  rintro (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩ | _) (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩ | _) same <;>
     simp_all [stateKeyCode]
 
 open Minidregg.Theory.EffectDeclaration in

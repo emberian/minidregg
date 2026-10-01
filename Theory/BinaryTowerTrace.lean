@@ -3,9 +3,9 @@
 induction discharges the Fan–Paar tower basis, and with it the ENTIRE
 Fan–Paar recursion [BTOWER-fanpaar].
 
-Builds on `Theory.BinaryTowerFanPaar` (`fpGen`, the recursion relations, and
-the reductions of [BTOWER-fanpaar-gen] / [BTOWER-mult-full] to the basis
-residual).
+Builds on `Theory.BinaryTowerFanPaar` (`fpGen`, the recursion relations, the
+generation step `fpGen_adjoin_succ`, and the statements [BTOWER-fanpaar-basis] /
+[BTOWER-fanpaar-gen] / [BTOWER-mult-full] this file closes).
 
 ## The argument (Wiedemann 1988)
 
@@ -28,8 +28,7 @@ the embedded subfield from the Fan–Paar generator:
     2^(k+2)-term sum folds to embed(Tr(fpGen k)) = embed 1 = 1.
 
 Hence fpGen k ∉ range(embed k) for ALL k (`fpGen_not_mem_range_all`) — the ONE
-∀ that was [BTOWER-fanpaar-basis] — and by the reductions already landed in
-`Theory.BinaryTowerFanPaar`:
+∀ that was [BTOWER-fanpaar-basis] — and from it:
 
 * `fanPaarTowerBasis_holds` — [BTOWER-fanpaar-basis] CLOSED;
 * `fanPaarGeneration_holds` — [BTOWER-fanpaar-gen] CLOSED;
@@ -313,21 +312,24 @@ theorem fanPaarTowerBasis_holds : FanPaarTowerBasis := fpGen_not_mem_range_all
 
 /-- **[BTOWER-fanpaar-gen] CLOSED**: every Fan–Paar generator generates its
 level over GF(2). -/
-theorem fanPaarGeneration_holds : FanPaarGeneration :=
-  fanPaarGeneration_of_towerBasis fanPaarTowerBasis_holds
+theorem fanPaarGeneration_holds : FanPaarGeneration := by
+  intro k
+  induction k with
+  | zero => exact fpGen_adjoin_zero
+  | succ k ih => exact fpGen_adjoin_succ (fpGen_not_mem_range_all (k + 1)) ih
 
 /-- **[BTOWER-mult-full] CLOSED**: the Fan–Paar packing T_k × T_k ≃ T_{k+1}
 is a bijection at EVERY level — the recursive fast tower multiply
 (`towerMul`, 3 sub-multiplies per level) is total all the way down. -/
 theorem towerMulFull_holds : TowerMulFull :=
-  towerMulFull_of_towerBasis fanPaarTowerBasis_holds
+  fun k => towerPack_bijective (fpGen_not_mem_range_all k)
 
 /-- **[BTOWER-fanpaar] CLOSED: `FanPaarRecursion` HOLDS** — the generator
 sequence with the base and step relations, each generator generating its
 level. The binary tower carries the fast Fan–Paar/Wiedemann arithmetic,
 unconditionally. -/
 theorem fanPaarRecursion_holds : FanPaarRecursion :=
-  fanPaarRecursion_of_towerBasis fanPaarTowerBasis_holds
+  ⟨fpGen, fpGen_base, fpGen_step, fanPaarGeneration_holds⟩
 
 /-! ### Keystones at the concrete bottom -/
 
