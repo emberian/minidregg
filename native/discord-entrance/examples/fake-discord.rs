@@ -9,6 +9,10 @@
 //!   signature byte after signing. `ping` sends type 1.
 //! * `api`: the webhook API. Accepts the follow-up `PATCH /api/v10/webhooks/APP/TOKEN/messages/@original`
 //!   and channel-webhook `POST /api/webhooks/ID/TOKEN`, and records each body under DIR.
+//!   It also keeps one channel, 701 (`DIR/channel-701.json`): a webhook post appears there
+//!   as a message with `webhook_id`; `POST /fake/channels/701/messages` adds a person's
+//!   message; `GET /api/v10/channels/701/messages?after=ID` answers Discord's shape (newest
+//!   first) to `Authorization: Bot fake-bot-token` and 401 otherwise.
 //!
 //! ```text
 //! fake-discord keygen SECRET_FILE                       # prints the public key hex
@@ -121,8 +125,45 @@ fn main() {
                     ("PATCH", ["api", "v10", "webhooks", _app, token, "messages", "@original"]) => {
                         format!("{dir}/followup-{token}.json")
                     }
-                    ("POST", ["api", "webhooks", _id, token]) => {
+                    ("POST", ["api", "webhooks", id, token]) => {
+                        // A webhook post shows up in the channel as a message from that webhook.
+                        let content = serde_json::from_slice::<serde_json::Value>(&req.body)
+                            .ok()
+                            .and_then(|v| v.get("content").and_then(|c| c.as_str()).map(str::to_owned))
+                            .unwrap_or_default();
+                        channel_append(dir, json!({"content": content, "webhook_id": id,
+                            "author": {"id": id, "username": "mirror", "bot": true}}));
                         format!("{dir}/channel-{token}-{}.json", now_s_nanos())
+                    }
+                    ("POST", ["fake", "channels", "701", "messages"]) => {
+                        // A person typing in the channel (the test's hand).
+                        match serde_json::from_slice::<serde_json::Value>(&req.body) {
+                            Ok(message) => channel_append(dir, message),
+                            Err(_) => {
+                                let _ = write_response(&mut stream, 400, "Bad Request", "text/plain", b"not json\n");
+                                continue;
+                            }
+                        }
+                        format!("{dir}/human-{}.json", now_s_nanos())
+                    }
+                    ("GET", ["api", "v10", "channels", "701", "messages"]) => {
+                        let bot = req.headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("authorization") && v == "Bot fake-bot-token");
+                        if !bot {
+                            let _ = write_response(&mut stream, 401, "Unauthorized", "application/json", b"{\"message\":\"401: Unauthorized\"}");
+                            continue;
+                        }
+                        let after = req.query.split('&').find_map(|kv| kv.strip_prefix("after=")).and_then(|a| a.parse::<u64>().ok()).unwrap_or(0);
+                        let all = channel_read(dir);
+                        let mut newer: Vec<serde_json::Value> = all
+                            .into_iter()
+                            .filter(|m| m.get("id").and_then(|i| i.as_str()).and_then(|i| i.parse::<u64>().ok()).is_some_and(|i| i > after))
+                            .collect();
+                        newer.reverse(); // Discord answers newest first
+                        newer.truncate(50);
+                        let body = serde_json::to_vec(&newer).unwrap_or_default();
+                        let _ = std::fs::write(format!("{dir}/channel-read-{}.json", now_s_nanos()), &body);
+                        let _ = write_response(&mut stream, 200, "OK", "application/json", &body);
+                        continue;
                     }
                     _ => {
                         let _ = write_response(&mut stream, 404, "Not Found", "text/plain", b"no such route\n");
@@ -141,6 +182,22 @@ fn main() {
         }
         _ => die("usage: keygen FILE | ping ADDR SECRET | interact ADDR SECRET APP USER ID TOKEN COMMAND [--line L|--line-file F] [--corrupt-signature] | api ADDR DIR"),
     }
+}
+
+/// The fake channel 701: a JSON array of messages, oldest first, ids from 1000.
+fn channel_read(dir: &str) -> Vec<serde_json::Value> {
+    std::fs::read(format!("{dir}/channel-701.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn channel_append(dir: &str, mut message: serde_json::Value) {
+    let mut all = channel_read(dir);
+    message["id"] = json!((1000 + all.len()).to_string());
+    message["channel_id"] = json!("701");
+    all.push(message);
+    let _ = std::fs::write(format!("{dir}/channel-701.json"), serde_json::to_vec(&all).unwrap_or_default());
 }
 
 fn now_s_nanos() -> u128 {

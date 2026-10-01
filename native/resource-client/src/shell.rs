@@ -532,6 +532,8 @@ pub(crate) enum Plan {
     Text(String),
     History { all: bool },
     Help(Option<String>),
+    /// A chat verb (`crate::chat`): it composes several client operations.
+    Chat(crate::chat::Line),
     Exit,
     Nothing,
 }
@@ -775,6 +777,9 @@ fn usage_of(name: &str) -> &'static str {
 /// Map one line to one client operation. Pure: reads nothing but `@FILE`
 /// arguments and writes nothing.
 pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, String> {
+    if let Some(chat) = crate::chat::plan(line) {
+        return chat.map(Plan::Chat);
+    }
     let mut w = words(line)?;
     // `create` and `doc new` may end `--in ROOM`: the new cell is born in the
     // room a reference names (the Host's birth gate decides).
@@ -1332,6 +1337,8 @@ pub(crate) enum Ending {
         decoded: Option<std::result::Result<Value, String>>,
         evidence: Option<PathBuf>,
     },
+    /// A chat verb's own ending: (exit code, stderr text).
+    Rendered(i32, String),
 }
 
 fn hex_text(value: Option<&Value>) -> String {
@@ -1378,6 +1385,7 @@ pub(crate) fn render(ending: &Ending) -> (i32, String) {
         Ending::Done => (EXIT_OK, String::new()),
         Ending::Usage(message) => (EXIT_USAGE, format!("usage: {message}\n")),
         Ending::Client(message) => (EXIT_CLIENT, format!("error: {message}\n")),
+        Ending::Rendered(code, text) => (*code, text.clone()),
         Ending::Host { client, decision, decoded, evidence } => {
             let mut text = String::new();
             let code = match decision {
@@ -1672,14 +1680,15 @@ fn rooms(session: &Session) {
 
 fn help_text(topic: Option<&str>) -> String {
     match topic {
-        Some(name) => match VERBS.iter().find(|v| v.name == name) {
+        Some("chat") => crate::chat::HELP.to_owned(),
+        Some(name) => match VERBS.iter().chain(crate::chat::VERBS).find(|v| v.name == name) {
             Some(v) => format!("{}\n  = {}\n", v.usage, v.operation),
             None => format!("no verb {name}\n"),
         },
         None => {
             let mut text = format!("{HOSTED_CUSTODY_BANNER}\n");
             text.push_str("Every verb is one client operation; the Host decides. Words: 'literal', \"escaped\", {json} or [json], @FILE (HOME/requests/FILE).\n");
-            for v in VERBS {
+            for v in VERBS.iter().chain(crate::chat::VERBS) {
                 text.push_str(&format!("  {:<10} {}\n", v.name, v.usage));
             }
             text.push_str("Endings on stderr: usage: (2)  error: client (1)  refused: Host (3)  undecided: Host (4).\n");
@@ -1737,6 +1746,10 @@ pub(crate) fn line(session: &Session, text: &str) -> (i32, bool) {
             )),
         },
         Ok(Plan::NotHere(text)) => Ending::Client(text),
+        Ok(Plan::Chat(chat)) => {
+            let (code, text) = crate::chat::run(session, chat);
+            Ending::Rendered(code, text)
+        }
         Ok(Plan::Export(path)) => match fs::read(&path) {
             Ok(bytes) => {
                 let value: std::result::Result<Value, _> = serde_json::from_slice(&bytes);
@@ -1799,7 +1812,7 @@ pub(crate) fn complete(session: &Session, prefix: &str) -> Vec<String> {
     let enrolled = || stems(&session.home.join("enroll"), "", |_| false);
     let verb = w[0].as_str();
     let candidates: Vec<String> = match (verb, position) {
-        (_, 0) => VERBS.iter().map(|v| v.name.to_owned()).collect(),
+        (_, 0) => VERBS.iter().chain(crate::chat::VERBS).map(|v| v.name.to_owned()).chain(["unpin".to_owned()]).collect(),
         ("read" | "describe", 1) => refs(),
         ("submit" | "publish" | "export", 1) => proposals(),
         ("lookup" | "retry", 1) => attempts(),
@@ -2422,7 +2435,7 @@ mod tests {
         fs::write(ws.join("refs").join("factory.json"), b"{}").unwrap();
         let s = Session { workspace: ws, home: root.join("h"), host: "/x".into(), config: "/y".into() };
         assert_eq!(complete(&s, "su"), ["submit"]);
-        assert_eq!(complete(&s, "re"), ["refs", "read", "retry", "revoke"]);
+        assert_eq!(complete(&s, "re"), ["refs", "read", "retry", "revoke", "react"]);
         assert_eq!(complete(&s, "doc show "), ["factory", "shared"]);
         assert_eq!(complete(&s, "doc link x shared f"), ["factory"]);
         assert_eq!(complete(&s, "board m"), ["move"]);

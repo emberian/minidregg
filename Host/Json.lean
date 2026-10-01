@@ -3608,6 +3608,25 @@ private def streamRecordJson (sequence : Nat) (record : StreamCell.StreamRecord)
     ("ref", record.entry.ref.map (fun r => Lean.Json.mkObj
       [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null)]
 
+/-- A tail entry with its text. The reader's own check, over the bytes it holds:
+`payload` is shown only when it reproduces the digest the cell committed
+(`payloadState` "verified"); a payload the view did not carry is "absent", and
+one that does not reproduce the digest is "mismatch" and is not shown. -/
+private def streamTailEntryJson (sequence : Nat) (record : StreamCell.StreamRecord)
+    (payload : Option (List UInt8)) : Lean.Json :=
+  let (state, shown) : String × Lean.Json := match payload with
+    | none => ("absent", .null)
+    | some bytes =>
+        if StreamCell.payloadDigest bytes = record.entry.payloadDigest then ("verified", hexJson bytes)
+        else ("mismatch", .null)
+  .mkObj [("sequence", decimal sequence), ("author", decimal record.author.value),
+    ("height", decimal record.height), ("transaction", decimal record.transaction.value),
+    ("topic", hexJson record.entry.topic), ("payloadDigest", decimal record.entry.payloadDigest.value),
+    ("to", record.entry.recipient.map (fun s => decimal s.value) |>.getD .null),
+    ("ref", record.entry.ref.map (fun r => Lean.Json.mkObj
+      [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null),
+    ("payload", shown), ("payloadState", .str state)]
+
 private def streamCellJson (root : Digest) (store : Minidregg.Theory.Store.Store StreamCell.layout) : Lean.Json :=
   .mkObj [("root", decimal root.value), ("nextSeq", decimal (StreamCell.nextSeq store)),
     ("entries", .arr <| (StreamCell.tail store 1 store.support.card).toArray.map
@@ -4024,7 +4043,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "view-tail" => do
       let (root, next, entries) ← decoded "view-tail" NativeObservationController.tailViewCodec bytes
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
-        ("entries", .arr <| entries.toArray.map fun (k, r) => streamRecordJson k r)]
+        ("entries", .arr <| entries.toArray.map fun (k, r, p) => streamTailEntryJson k r p)]
   | "view-quotes" => quotesJson bytes
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with

@@ -15,6 +15,7 @@ order in which its verb reads its files.
 | `dismiss ROOM` | `hermes/ROLE/grants.json` (the grants to revoke) | `hermes/README.md` |
 | `room new NAME --template workroom\|social\|story` | `room/T/template.shell` (compiled into `mini`; `room template show T` prints it) | `room/README.md` |
 | `room welcome NAME SUBJECT --template social` | `room/social/member.shell` | `room/README.md` |
+| `chat new ROOM` / `chat invite ROOM S` | `room/chat/law.author.json` (compiled into `mini`; `@SUBJECT` = the founder, or S) | `room/chat/README.md` |
 
 `law.X` is the §2.6 one-line grammar. `law.X.json` is the same predicate as
 `Pred` JSON, which `law ID REF @FILE` installs today: shell.rs wraps it as

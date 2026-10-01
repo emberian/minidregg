@@ -54,6 +54,73 @@ impl Poster {
         result
     }
 
+    /// GET `url` with extra headers; returns (status, body). Header values carry secrets
+    /// (a bot token), so they reach curl in the config on stdin, never argv. The response
+    /// goes to a private spool file (created exclusively, 0600), read back bounded, removed.
+    pub fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<(u16, Vec<u8>), String> {
+        if !is_plain_url(url) {
+            return Err("refusing a URL with characters outside plain ASCII".into());
+        }
+        for (name, value) in headers {
+            if name.is_empty()
+                || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                || !value.bytes().all(|b| (b.is_ascii_graphic() || b == b' ') && b != b'"' && b != b'\\')
+            {
+                return Err(format!("refusing header {name}: characters outside plain ASCII"));
+            }
+        }
+        let seq = SPOOL_SEQ.fetch_add(1, Ordering::Relaxed);
+        let path = self.spool.join(format!("get-{}-{seq}.json", std::process::id()));
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("spool {}: {e}", path.display()))?;
+        let result = self.run_get(url, headers, &path);
+        let body = std::fs::File::open(&path).and_then(|f| {
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::Read::take(f, 1 << 20), &mut buf).map(|_| buf)
+        });
+        let _ = std::fs::remove_file(&path);
+        let code = result?;
+        Ok((code, body.map_err(|e| format!("spool read: {e}"))?))
+    }
+
+    fn run_get(&self, url: &str, headers: &[(&str, &str)], output: &std::path::Path) -> Result<u16, String> {
+        let mut child = Command::new(&self.curl)
+            .arg("--disable")
+            .args(["--silent", "--show-error", "--max-time"])
+            .arg(self.max_time_s.to_string())
+            .args(["--request", "GET", "--output"])
+            .arg(output)
+            .args(["--write-out", "%{http_code}", "--config", "-"])
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("spawn curl: {e}"))?;
+        {
+            let mut stdin = child.stdin.take().ok_or("curl stdin")?;
+            let mut config = format!("url = \"{url}\"\n");
+            for (name, value) in headers {
+                config.push_str(&format!("header = \"{name}: {value}\"\n"));
+            }
+            stdin.write_all(config.as_bytes()).map_err(|e| format!("curl config: {e}"))?;
+        }
+        let out = child.wait_with_output().map_err(|e| format!("curl: {e}"))?;
+        let code = String::from_utf8_lossy(&out.stdout).trim().parse::<u16>().unwrap_or(0);
+        if !out.status.success() || code == 0 {
+            return Err(format!(
+                "curl failed ({}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        Ok(code)
+    }
+
     fn run_curl(&self, method: &str, url: &str, body: &std::path::Path) -> Result<u16, String> {
         let mut child = Command::new(&self.curl)
             .arg("--disable")

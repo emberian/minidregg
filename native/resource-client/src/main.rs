@@ -62,6 +62,7 @@ mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
 #[cfg(unix)]
+mod chat;
 mod keys;
 #[cfg(unix)]
 mod shell;
