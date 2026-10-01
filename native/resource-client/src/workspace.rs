@@ -659,11 +659,12 @@ fn scalar_actions(actions: &Value, target: &str) -> Result<Value> {
     Ok(json!({"type":"scalar","actions":lowered}))
 }
 
-/// Check content actions against the Host's content grammar. A raw `content`
-/// payload may only create; `editAtom` and `link` name existing records and
-/// other pages, so only the `document` lowering, which takes them from signed
-/// views, may produce them (`from_signed_views`).
-fn content_actions(actions: &Value, from_signed_views: bool) -> Result<Value> {
+/// Check content actions against the Host's content grammar. Every action the
+/// grammar has may be proposed directly (the Host checks an edit's `before` and
+/// an annotation's `revision` against the stored atom). A payload `sealed`
+/// under `--private` may only create: an edit, link, annotation or quote would
+/// carry its bytes in plaintext into a sealed room.
+fn content_actions(actions: &Value, sealed: bool) -> Result<Value> {
     let actions = actions
         .as_array()
         .ok_or("content actions must be an array")?;
@@ -678,7 +679,7 @@ fn content_actions(actions: &Value, from_signed_views: bool) -> Result<Value> {
             "createAtom" => ("createAtom", &["type", "atom", "kind", "payload"]),
             "createDocument" => ("createDocument", &["type", "rootElement", "schema", "body"]),
             "createRun" => ("createRun", &["type", "run", "atoms"]),
-            "editAtom" if from_signed_views => (
+            "editAtom" => (
                 "editAtom",
                 &["type", "atom", "before", "kind", "payload", "tombstone"],
             ),
@@ -691,6 +692,9 @@ fn content_actions(actions: &Value, from_signed_views: bool) -> Result<Value> {
             "quote" => ("quote", &["type", "element", "link", "reference"]),
             _ => return Err("unknown workspace content action".into()),
         };
+        if sealed && !matches!(tag, "createAtom" | "createDocument" | "createRun") {
+            return Err(format!("--private seals creation actions only; {tag} would carry plaintext"));
+        }
         if obj.len() != fields.len() || fields.iter().any(|field| !obj.contains_key(*field)) {
             return Err(format!("{tag} has unexpected fields"));
         }
@@ -856,7 +860,7 @@ fn propose(
                         ("scalar", None) => scalar_actions(&payload["actions"], target)?,
                         ("content", None) => content_actions(&payload["actions"], false)?,
                         ("content", Some((room, key))) => private::seal_content(
-                            content_actions(&payload["actions"], false)?,
+                            content_actions(&payload["actions"], true)?,
                             room,
                             target,
                             key,
@@ -864,7 +868,7 @@ fn propose(
                         ("document", None) => content_actions(
                             &document_actions(root, workspace, local_name, &view,
                                 member(&challenge, "height")?, &payload["actions"])?,
-                            true,
+                            false,
                         )?,
                         ("scalar" | "document", Some(_)) => {
                             return Err("--private seals content payloads only".into())
@@ -2133,9 +2137,12 @@ fn atom_text(atom: &Value) -> String {
 
 /// The exact `AtomRecord` an `editAtom` names as `before`: the Host's atom
 /// entry without its address and canonical bytes.
+/// The atom record an `editAtom.before` names, exactly as the signed view spelled
+/// it (K-CONTENT: the record carries its `revision`, so an edit or annotation
+/// made from a stale read is refused `staleAtom`).
 fn atom_record(atom: &Value) -> Result<Value> {
     let mut record = serde_json::Map::new();
-    for key in ["document", "kind", "payload", "createdBy", "createdAt", "tombstonedAt"] {
+    for key in ["document", "kind", "payload", "createdBy", "createdAt", "revision", "tombstonedAt"] {
         record.insert(
             key.to_owned(),
             atom.get(key)
@@ -2684,7 +2691,7 @@ mod tests {
         json!({"type":"atom","id":id,"document":"900","kind":{"type":"text"},
             "payload":hex(text.as_bytes()),
             "createdBy":{"subject":by,"capabilityKind":"object","capability":"31"},
-            "createdAt":"55","tombstonedAt":null,"canonical":"00"})
+            "createdAt":"55","revision":"56","tombstonedAt":null,"canonical":"00"})
     }
 
     fn page(entries: Vec<Value>) -> Value {
@@ -2708,13 +2715,15 @@ mod tests {
     }
 
     #[test]
-    fn edits_and_links_come_only_from_the_document_lowering() {
+    fn sealed_content_only_creates() {
         let edit = json!([{"type":"editAtom","atom":"1","before":{},"kind":{"type":"text"},
             "payload":"61","tombstone":false}]);
-        assert!(content_actions(&edit, true).is_ok());
-        assert!(content_actions(&edit, false).is_err());
-        assert!(content_actions(&json!([{"type":"transclude","id":"1"}]), true).is_err());
-        assert!(content_actions(&json!([{"type":"editAtom","atom":"1"}]), true).is_err());
+        assert!(content_actions(&edit, false).is_ok());
+        assert!(content_actions(&edit, true).is_err());
+        assert!(content_actions(&json!([{"type":"createAtom","atom":"1","kind":{"type":"text"},
+            "payload":"61"}]), true).is_ok());
+        assert!(content_actions(&json!([{"type":"transclude","id":"1"}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"editAtom","atom":"1"}]), false).is_err());
     }
 
     #[test]
@@ -2733,7 +2742,7 @@ mod tests {
         assert_eq!(lowered[0]["type"], "createAtom");
         assert_eq!(lowered[0]["payload"], "6869");
         assert_eq!(lowered[0]["kind"], json!({"type":"text"}));
-        assert!(content_actions(&lowered, true).is_ok());
+        assert!(content_actions(&lowered, false).is_ok());
         // An edit names the line as this workspace last read it.
         let edit = json!([{"type":"edit","line":"2","text":"better"}]);
         assert!(document_actions(&root, &workspace, "paper", &current, "9", &edit)
@@ -2748,7 +2757,7 @@ mod tests {
         assert_eq!(lowered[0]["before"]["payload"], hex(b"old second"));
         assert_eq!(lowered[0]["before"]["createdBy"]["subject"], "1103");
         assert!(lowered[0]["before"].get("id").is_none() && lowered[0]["before"].get("canonical").is_none());
-        assert!(content_actions(&lowered, true).is_ok());
+        assert!(content_actions(&lowered, false).is_ok());
         let past = json!([{"type":"edit","line":"3","text":"x"}]);
         assert!(document_actions(&root, &workspace, "paper", &current, "9", &past)
             .unwrap_err()

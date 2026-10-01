@@ -817,7 +817,9 @@ pub(crate) fn seal_content(lowered: Value, room: &str, cell: &str, key: &RoomKey
                     );
                 }
             }
-            _ => {}
+            Some("createRun") => {}
+            // Defense in depth: workspace.rs admits only creation under --private.
+            other => return Err(format!("--private seals creation actions only, not {other:?}")),
         }
     }
     Ok(lowered)
