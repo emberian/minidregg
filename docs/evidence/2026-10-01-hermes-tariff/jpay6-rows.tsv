@@ -1,0 +1,41 @@
+verdict	step	expected	observed
+PASS	grain birth (parent 7111, tool 7112, publication 7113, provider purse 7114) is the first event	confirmed installed	confirmed installed exit=0
+PASS	the hosted grain's four ordinary delegations (73, 75, 93, 94)	4 x confirmed installed	confirmed/installed confirmed/installed confirmed/installed confirmed/installed
+PASS	purse 7114 at birth	generation 0, status 0, remaining 50, reserved 0	g=0 s=0 remaining=50 reserved=0
+PASS	refill before a valid tariff (the credit asset is the tariff's)	refused undisclosed (built to hit tariffInvalid)	refused undisclosed request refused
+PASS	operator installs a one-row book and a tariff (credit asset 0)	confirmed	confirmed
+PASS	friend takes index 0 for account 20	confirmed	confirmed
+PASS	ledger before any refill	friend 60000000, purse 50	friend=60000000 well=-60000400 total=0 purse=50
+PASS	a purse leg claiming 60 000 000 with a 50 000 000 burn	refused undisclosed (built to hit unbalanced (the joint commit))	refused undisclosed request refused
+PASS	a stranger (subject 21, its own capability) burns the friend's account	refused undisclosed (built to hit notOwner)	refused undisclosed request refused
+PASS	a stranger presents the friend's capability	refused undisclosed (built to hit notOwner)	refused undisclosed request refused
+PASS	a zero refill	refused undisclosed (built to hit zeroAmount)	refused undisclosed request refused
+PASS	a refill of a declared object that is not an AgentGrain purse	refused undisclosed (built to hit purseUnreadable)	refused undisclosed request refused
+PASS	the refused refills moved nothing	ledger and purse unchanged	friend=60000000 well=-60000400 purse root equal=True
+PASS	friend refills purse 7114 with 50 000 000 credit	confirmed	confirmed
+PASS	receipt-only lookup of that refill (op 116)	confirmed replayed	confirmed replayed
+PASS	the same signed refill submitted again	confirmed replayed (no second burn)	confirmed replayed
+PASS	Book: friend -50 000 000, well +50 000 000, total (well included) unchanged	friend 10000000	friend=10000000 well -60000400 -> -10000400 total 0 -> 0
+PASS	purse 7114: remaining +50 000 000, nothing else moved	remaining 50000050, g 0 s 0 reserved 0	g=0 s=0 remaining=50000050 reserved=0
+PASS	the joint delta at the credit coordinate	Book circulating -50000000 + purse +50000000 = 0	book=-50000000 purse=50000000
+PASS	refill 20 000 000 with a 10 000 000 balance	refused undisclosed (built to hit bookRefused)	refused undisclosed request refused
+PASS	the Host profile pins the per-route provider tariff in credit for purse 7114	providerResourceId 7114, model mini-hermes-protocol-fixture, user fee 5; pool fee 7 + 20000000/40000000 per million tokens; homelab fee 3	pin={"model": "mini-hermes-protocol-fixture", "providerResourceId": "7114", "routes": {"homelab": {"inputMicroPerMillion": "0", "outputMicroPerMillion": "0", "perOp": "3"}, "pool": {"inputMicroPerMillion": "20000000", "outputMicroPerMillion": "40000000", "perOp": "7"}, "user": {"perOp": "5"}}, "tariffDigest": "103274589119549348471792825875766312565361082416452967511192950889866652034105", "tariffVersion": "1"} addedToPinnedConfig=[]
+PASS	controller attaches under the managed worker law this Host authors (refill arm re-emitted)	connection soft	connection=soft
+PASS	purse 7114 was born a provider purse: route field 0 under the Host's per-route law	route 0, reserved 0	route=0 reserved=0
+PASS	a call on the friend's own key (user route) debits exactly the per-operation fee	remaining -5, reserved 0, route 0; upstream saw the friend's bearer	remaining 50000050 -> 50000045 reserved=0 route=0 upstream_auth=sha256:91b474c6aa7c2... friend=sha256:91b474c6aa7c2...
+PASS	a call with no payer (the friend revoked; the user row is first) is refused before any reserve	worker got 403; purse unchanged (no hold, no fee); no upstream request; no pool fallthrough	standin=['status=403'] remaining 50000045 -> 50000045 reserved=0 g 2 -> 2 upstream_requests=1
+PASS	a pool call reserves from the refilled purse and settles the metered tariff	remaining -107 (fee 7 + 1 in + 2 out tokens at 20000000/40000000), reserved 0; upstream saw the pool bearer	remaining 50000045 -> 49999938 reserved=0 route=0 upstream_requests=2 upstream_auth=sha256:e252b9b500d53...
+PASS	the worker received the provider's answer through the gateway	status=200	status=200 bytes=775
+PASS	controller SIGKILLed after the send boundary; systemd restarted it (Restart=on-failure)	NRestarts >= 1, new MainPID	killed=4171343 now=43732 NRestarts=1
+PASS	the owner reconnects to the fenced task	attach refused: attach-time recovery keeps the provider hold fenced	grain-runtime: provider reservation remains held after fence
+PASS	recovery records the provider attempt as uncertain and keeps the hold	sendStarted true, outcome null, hold reserveConfirmed, connection fenced	sendStarted=True outcome=None hold=30000/True connection=fenced note=['provider request 75 crossed durable send boundary before controller restart; upstream result uncertain']
+PASS	the purse still holds the uncertain attempt's reservation	reserved 30000	g=6 s=5 remaining=49969938 reserved=30000
+PASS	NO second provider send (the provider's own request log, 30 s after recovery)	3 requests (one per sent prompt: user, pool, the uncertain pool call)	upstream_requests=3
+PASS	the uncertain call's hold records the pool route	route 2 (pool) while held	route=2 s=5 reserved=30000
+PASS	settling the pool hold while naming the user route	refused by name at authoring: route-mismatch; hold unchanged	author-refused exit=1 | ['minidregg-host: $.grain.operation.route: route-mismatch: the settle names another route than the purse recorded at reserve'] reserved=30000 route=2
+PASS	settling the pool hold from a forged before.route = user	refused at prepare by the receiver's old-value guard on field 4 (the recorded route); hold unchanged	refused: operation-rejected: invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.scalar (Minidregg.Kernel.DeclaredResourceScalar.Reject.g reserved=30000 route=2
+PASS	settling the pool hold for the user fee (5 < pool fee 7)	refused at prepare by the purse's route law (law-denied); hold unchanged	refused: law-denied: any [ verb in {read,delegate,install,re ... pool clause: True reserved=30000 route=2
+PASS	a refill while the purse holds the uncertain reservation	refused undisclosed (built to hit purseRefused (the edge needs reserved = 0))	refused undisclosed request refused
+PASS	ledger identity on this Store: -well_h = -well_0 + credited - burned into purses	-well_h = 60000400 + 0 - 50000000	-well_h=10000400 -well_0=60000400 friend=10000000
+PASS	purse_never_mints on this Store: budget_h <= budget_0 + sum burns; the gap is the user fee plus the metered pool charge	budget 50 + 50000000 - 5 - 107	budget_h=49999938 remaining=49969938 reserved=30000
+PASS	operator audit re-admits every record (NativeHostReplay, incl. the refill)	exit 0	exit=0 audited 29 accepted records: every signed ingress re-admitted at its original prefix

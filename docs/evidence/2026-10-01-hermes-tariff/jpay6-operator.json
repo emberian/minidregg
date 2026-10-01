@@ -1,0 +1,44 @@
+{
+ "domain": 8501,
+ "federation": 9,
+ "factoryId": 10,
+ "resourceBookId": 11,
+ "authorityCellId": 12,
+ "issuer": 5,
+ "ownerBudget": 100000,
+ "lifetime": 10000,
+ "tariffBase": 3,
+ "tariffPerBirth": 2,
+ "tariffPerGrant": 1,
+ "tariffPerInitialPayloadByte": 0,
+ "collector": 99,
+ "asset": 0,
+ "genesisHeight": 10,
+ "expectedSeed": 0,
+ "storageBinary": "/home/ember/build/mini-datamodel-20260930/hermes-tariff/hrun/bin3/store",
+ "storageRoot": "/home/ember/build/htr/j6-062652/jpay6/store",
+ "signatureBinary": "/home/ember/build/mini-datamodel-20260930/hermes-tariff/hrun/bin3/verifier",
+ "continuityProviderResourceId": 7114,
+ "providerMetering": {
+  "providerResourceId": 7114,
+  "tariff": {
+   "version": "1",
+   "model": "mini-hermes-protocol-fixture",
+   "routes": {
+    "user": {
+     "perOp": "5"
+    },
+    "pool": {
+     "perOp": "7",
+     "inputMicroPerMillion": "20000000",
+     "outputMicroPerMillion": "40000000"
+    },
+    "homelab": {
+     "perOp": "3",
+     "inputMicroPerMillion": "0",
+     "outputMicroPerMillion": "0"
+    }
+   }
+  }
+ }
+}

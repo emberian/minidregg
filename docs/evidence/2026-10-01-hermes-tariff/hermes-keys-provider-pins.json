@@ -1,0 +1,25 @@
+{
+  "continuityProviderResourceId": 74604,
+  "providerMetering": {
+    "providerResourceId": 74604,
+    "tariff": {
+      "version": "1",
+      "model": "shared-model",
+      "routes": {
+        "user": {
+          "perOp": "1"
+        },
+        "pool": {
+          "perOp": "19",
+          "inputMicroPerMillion": "1",
+          "outputMicroPerMillion": "1"
+        },
+        "homelab": {
+          "perOp": "20",
+          "inputMicroPerMillion": "0",
+          "outputMicroPerMillion": "0"
+        }
+      }
+    }
+  }
+}

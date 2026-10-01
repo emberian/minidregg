@@ -8,6 +8,7 @@ import Host.BirthRuntimeProfile
 import Host.CapabilityInspection
 import Kernel.NativeHostGenesis
 import Kernel.AgentGrain
+import Kernel.ProviderRoute
 import Kernel.CapabilityRevocationController
 import Kernel.ContentResource
 import Kernel.ApplicationGrainBirth
@@ -1372,10 +1373,15 @@ private theorem birthRootCapability_time_window {kind : ResourceKind}
       height + profile.template.lifetime := by
   constructor <;> rfl
 
+/-- A grain birth at a target the Host pins as a provider service is a
+provider purse: its law carries the pinned per-route fees and its store the
+route field. The schedule comes from the Host's own pinned tariff, never from
+the birth request. -/
 private def birthParts (path : String)
     (profile : CanonicalRuntimeProfile.Profile NativeHostProfile.Field)
     (source : NativeHostGenesis.Config) (height : Nat) (json : Lean.Json)
-    (authority : Option AuthState := none) : Result BirthParts := do
+    (authority : Option AuthState := none)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result BirthParts := do
   let raw ← object path json
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
@@ -1416,8 +1422,11 @@ private def birthParts (path : String)
     (← nat (path ++ ".ownerCapability") (← field path "ownerCapability" obj))
   let controlId := CapabilityId.mk
     (← nat (path ++ ".controlCapability") (← field path "controlCapability" obj))
+  let schedule := if storage = "grain" then providerRoutes.lookup target else none
   let rulePredicate ← if storage = "grain" then
-      pure (grainPolicy owner.value worker)
+      pure <| match schedule with
+        | some routes => ProviderRoute.policy routes (grainPolicy owner.value worker)
+        | none => grainPolicy owner.value worker
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
@@ -1430,7 +1439,8 @@ private def birthParts (path : String)
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
-        (AgentGrain.initialStore target budget)⟩
+        (if schedule.isSome then ProviderRoute.initialStore target budget
+         else AgentGrain.initialStore target budget)⟩
     else pure (NativeHostGenesis.declaredCell source target (kind = .account))
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
     ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room⟩
@@ -1457,7 +1467,8 @@ private def birth (path : String) (json : Lean.Json)
     (grainBirthTariff : Option NativeHost.GrainBirthTariffPin := none)
     (deployed : Option NativeHost.Config := none)
     (currentHeight : Option Nat := none)
-    (authority : Option AuthState := none) : Result Draft := do
+    (authority : Option AuthState := none)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result Draft := do
   let raw ← object path json
   let obj ← exactObject path (["genesis", "template", "creator", "nonce", "resources",
     "sourceCapabilities", "funding", "feePayer"] ++
@@ -1506,7 +1517,8 @@ private def birth (path : String) (json : Lean.Json)
   let creator := SubjectId.mk (← nat (path ++ ".creator") (← field path "creator" obj))
   let nonce ← nat (path ++ ".nonce") (← field path "nonce" obj)
   let parts ← list (path ++ ".resources")
-    (fun itemPath value => birthParts itemPath profile source height value authority)
+    (fun itemPath value => birthParts itemPath profile source height value authority
+      providerRoutes)
     (← field path "resources" obj)
   let movements ← list (path ++ ".funding") funding (← field path "funding" obj)
   let payer ← nat (path ++ ".feePayer") (← field path "feePayer" obj)
@@ -1738,15 +1750,19 @@ def grainBirthFrom (path sourceField : String) (json : Lean.Json)
 
 /-- Existing content-family composite. -/
 private def grainBirth (path : String) (json : Lean.Json)
-    (deployed : Option NativeHost.Config := none) : Result Draft :=
-  grainBirthFrom path "birth" json (fun path source tariff => birth path source tariff deployed)
+    (deployed : Option NativeHost.Config := none)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result Draft :=
+  grainBirthFrom path "birth" json (fun path source tariff =>
+    birth path source tariff deployed none none providerRoutes)
 
 private def grainBirthIntent (path : String) (json : Lean.Json)
-    (deployed : Option NativeHost.Config := none) : Result Intent := do
+    (deployed : Option NativeHost.Config := none)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result Intent := do
   let obj ← exactObject path ["subject", "nonce", "grainBirth", "grants"] json
   pure ⟨⟨← nat (path ++ ".subject") (← field path "subject" obj)⟩,
     ← nat (path ++ ".nonce") (← field path "nonce" obj),
-    .prepare (← grainBirth (path ++ ".grainBirth") (← field path "grainBirth" obj) deployed),
+    .prepare (← grainBirth (path ++ ".grainBirth") (← field path "grainBirth" obj) deployed
+      providerRoutes),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
 def grainBirthIntentFrom (path intentField sourceField : String) (json : Lean.Json)
@@ -1778,8 +1794,10 @@ def birthIntentFrom (path : String) (json : Lean.Json)
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
 private def birthIntent (path : String) (json : Lean.Json)
-    (deployed : Option NativeHost.Config := none) : Result Intent :=
-  birthIntentFrom path json (fun birthPath source => birth birthPath source none deployed)
+    (deployed : Option NativeHost.Config := none)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result Intent :=
+  birthIntentFrom path json (fun birthPath source =>
+    birth birthPath source none deployed none none providerRoutes)
 
 private def applicationBirthIntent (path : String) (json : Lean.Json)
     (deployed : Option NativeHost.Config := none) : Result Intent := do
@@ -1799,37 +1817,66 @@ private def applicationSessionBirthIntent (path : String) (json : Lean.Json)
       (← field path "applicationSessionBirth" obj) none deployed),
     ← list (path ++ ".grants") grant (← field path "grants" obj)⟩
 
+/-- A grain transition. A provider purse's `before` carries its fifth
+coordinate, `route`; its reserve names the route the call takes and its settle
+names the route it is charged by, which must be the one the purse recorded.
+The command then writes all five coordinates, so the receiver compares the
+recorded route against the durable store as well. The third component is the
+route after the transition (provider purses only). -/
 private def grainSource (path : String) (json : Lean.Json) :
-    Result (DeclaredResourceController.Command × AgentGrain.State) := do
+    Result (DeclaredResourceController.Command × AgentGrain.State × Option Int) := do
   let obj ← object path json
   for key in obj.foldl (init := []) (fun names key _ => key :: names) do
     unless ["task", "subject", "capability",
       "schemaVersion", "expectedTargetRoot", "context", "before", "operation",
       "publications", "observeCapability", "parentWitness"].contains key do
       throw s!"{path}: unknown field {key}"
-  let stateObj ← exactObject (path ++ ".before") ["generation", "status", "remaining", "reserved"]
+  let beforeRaw ← object (path ++ ".before") (← field path "before" obj)
+  let routed := (beforeRaw.get? "route").isSome
+  let stateObj ← exactObject (path ++ ".before")
+    (["generation", "status", "remaining", "reserved"] ++ (if routed then ["route"] else []))
     (← field path "before" obj)
   let state : AgentGrain.State := ⟨← int (path ++ ".before.generation") (← field (path ++ ".before") "generation" stateObj),
     ← int (path ++ ".before.status") (← field (path ++ ".before") "status" stateObj),
     ← int (path ++ ".before.remaining") (← field (path ++ ".before") "remaining" stateObj),
     ← int (path ++ ".before.reserved") (← field (path ++ ".before") "reserved" stateObj)⟩
+  let routeBefore ← if routed then
+      some <$> int (path ++ ".before.route") (← field (path ++ ".before") "route" stateObj)
+    else pure none
   let operationJson ← field path "operation" obj
   let (tag, _) ← tagged (path ++ ".operation") operationJson
-  let operation ← match tag with
-    | "input" => exactObject (path ++ ".operation") ["type"] operationJson *> pure .input
+  let (operation, routeCode) ← (match tag with
+    | "input" => exactObject (path ++ ".operation") ["type"] operationJson *>
+        pure (AgentGrain.Operation.input, routeBefore.getD 0)
     | "attach" | "mode" => do
         let op ← exactObject (path ++ ".operation") ["type", "soft"] operationJson
         let soft ← bool (path ++ ".operation.soft") (← field (path ++ ".operation") "soft" op)
-        pure <| if tag = "attach" then AgentGrain.Operation.attach soft else .mode soft
+        pure (if tag = "attach" then AgentGrain.Operation.attach soft else .mode soft,
+          routeBefore.getD 0)
     | "reserve" | "settle" => do
         let name := if tag = "reserve" then "amount" else "charge"
-        let op ← exactObject (path ++ ".operation") ["type", name] operationJson
+        let op ← exactObject (path ++ ".operation")
+          (["type", name] ++ (if routed then ["route"] else [])) operationJson
         let value ← int (path ++ ".operation." ++ name) (← field (path ++ ".operation") name op)
-        pure <| if tag = "reserve" then .reserve value else .settle value
-    | "disconnect" => exactObject (path ++ ".operation") ["type"] operationJson *> pure .disconnect
-    | "interrupt" => exactObject (path ++ ".operation") ["type"] operationJson *> pure .interrupt
-    | "cancel" => exactObject (path ++ ".operation") ["type"] operationJson *> pure .cancel
-    | _ => failAt (path ++ ".operation.type") "unknown grain operation"
+        let route ← if routed then do
+            let named ← string (path ++ ".operation.route") (← field (path ++ ".operation") "route" op)
+            match ProviderMetering.Route.ofName? named with
+            | some route => pure route.code
+            | none => failAt (path ++ ".operation.route") "expected user, pool or homelab"
+          else pure 0
+        if tag = "settle" ∧ routed ∧ some route ≠ routeBefore then
+          failAt (path ++ ".operation.route")
+            "route-mismatch: the settle names another route than the purse recorded at reserve"
+        pure (if tag = "reserve" then AgentGrain.Operation.reserve value
+          else AgentGrain.Operation.settle value, route)
+    | "disconnect" => exactObject (path ++ ".operation") ["type"] operationJson *>
+        pure (AgentGrain.Operation.disconnect, routeBefore.getD 0)
+    | "interrupt" => exactObject (path ++ ".operation") ["type"] operationJson *>
+        pure (AgentGrain.Operation.interrupt, routeBefore.getD 0)
+    | "cancel" => exactObject (path ++ ".operation") ["type"] operationJson *>
+        pure (AgentGrain.Operation.cancel, routeBefore.getD 0)
+    | _ => failAt (path ++ ".operation.type") "unknown grain operation" :
+      Result (AgentGrain.Operation × Int))
   let task ← nat (path ++ ".task") (← field path "task" obj)
   let contextObj ← exactObject (path ++ ".context") ["operationId", "payload"]
     (← field path "context" obj)
@@ -1884,9 +1931,19 @@ private def grainSource (path : String) (json : Lean.Json) :
               (← field parentBeforePath "reserved" parentBeforeObj)⟩
         pure <| (AgentGrain.Operation.input).target parentTask parentCapability
           parentRoot parentBefore (some parentObserve) :: publications
-  let command := operation.command subject (AgentGrain.contextNonce contextBytes)
-    task capability targetRoot state publications observeCapability
-  pure (command, operation.after state)
+  match routeBefore with
+  | none =>
+      let command := operation.command subject (AgentGrain.contextNonce contextBytes)
+        task capability targetRoot state publications observeCapability
+      pure (command, operation.after state, none)
+  | some recorded =>
+      let before : ProviderRoute.State := ⟨state, recorded⟩
+      let after := ProviderRoute.after operation routeCode before
+      let command : DeclaredResourceController.Command :=
+        { subject := subject, nonce := AgentGrain.contextNonce contextBytes,
+          targets := ProviderRoute.target operation routeCode task capability targetRoot before
+            observeCapability :: publications }
+      pure (command, after.grain, some after.route)
 
 /-- Wrap a source-authored grain transition in the ordinary prepare intent. -/
 private def grainIntent (path : String) (json : Lean.Json) : Result Intent := do
@@ -1900,7 +1957,8 @@ private def grainIntent (path : String) (json : Lean.Json) : Result Intent := do
 /-- Re-pin a worker's no-op witness to a newly attached generation through
 the ordinary signed policy-install receiver. The caller supplies the observed
 current head and authority root; neither is trusted without native checks. -/
-private def grainPolicyInstallIntent (path : String) (json : Lean.Json) : Result Intent := do
+private def grainPolicyInstallIntent (path : String) (json : Lean.Json)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result Intent := do
   let raw ← object path json
   let some worker ← grainWorker path raw
     | failAt path "worker subject and generation required"
@@ -1917,7 +1975,9 @@ private def grainPolicyInstallIntent (path : String) (json : Lean.Json) : Result
     ⟨⟨task⟩, version + 1,
       ⟨← nat (path ++ ".domain") (← field path "domain" obj)⟩,
       ⟨← nat (path ++ ".semantics") (← field path "semantics" obj)⟩,
-      some address, grainPolicy owner (some worker)⟩
+      some address, match providerRoutes.lookup task with
+        | some routes => ProviderRoute.policy routes (grainPolicy owner (some worker))
+        | none => grainPolicy owner (some worker)⟩
   let declaration : PolicyInstallController.Declaration :=
     ⟨⟨← nat (path ++ ".expectedPreRoot") (← field path "expectedPreRoot" obj)⟩,
       some ⟨version, address⟩,
@@ -2572,7 +2632,8 @@ private def payEnrolCommand (json : Lean.Json) : Result (List UInt8) := do
 
 /-- Author JSON into source-owned canonical bytes. -/
 def author (kind : String) (json : Lean.Json)
-    (deployed : Option NativeHost.Config := none) : Result (List UInt8) :=
+    (deployed : Option NativeHost.Config := none)
+    (providerRoutes : List (Nat × ProviderMetering.Schedule) := []) : Result (List UInt8) :=
   match kind with
   | "application-lifecycle-resident-begin" => residentBegin json
   | "application-lifecycle-completion-report" => completionReport json
@@ -2616,12 +2677,21 @@ def author (kind : String) (json : Lean.Json)
   | "application-session-enrollment-request" => sessionEnrollmentRequest json
   | "predicate" => NativeHostGenesis.predicateStream.encode <$> predicate "$" json
   | "grain-policy" => do
+      -- With `task`, the policy a birth at that task installs: a provider
+      -- purse's (the Host's pinned per-route fees) when the Host pins one.
       let raw ← object "$" json
       let worker ← grainWorker "$" raw
       let obj ← exactObject "$" (["owner"] ++
+        (if (raw.get? "task").isSome then ["task"] else []) ++
         if worker.isSome then grainWorkerFields raw else []) json
       let owner ← nat "$.owner" (← field "$" "owner" obj)
-      pure (NativeHostGenesis.predicateStream.encode (grainPolicy owner worker))
+      let task ← match obj.get? "task" with
+        | some value => some <$> nat "$.task" value
+        | none => pure none
+      let policy := match task.bind (fun t => providerRoutes.lookup t) with
+        | some routes => ProviderRoute.policy routes (grainPolicy owner worker)
+        | none => grainPolicy owner worker
+      pure (NativeHostGenesis.predicateStream.encode policy)
   | "grain-caveat" => do
       let obj ← exactObject "$" ["generation"] json
       let generation ← int "$.generation" (← field "$" "generation" obj)
@@ -2637,8 +2707,8 @@ def author (kind : String) (json : Lean.Json)
   | "revocation-draft" => do
       let bytes ← revocation "$" json
       pure (draftCodec.encode (.revoke bytes))
-  | "birth" => draftCodec.encode <$> birth "$" json none deployed
-  | "birth-intent" => intentCodec.encode <$> birthIntent "$" json deployed
+  | "birth" => draftCodec.encode <$> birth "$" json none deployed none none providerRoutes
+  | "birth-intent" => intentCodec.encode <$> birthIntent "$" json deployed providerRoutes
   | "application-birth" => draftCodec.encode <$> applicationBirth "$" json none deployed
   | "application-birth-intent" => intentCodec.encode <$> applicationBirthIntent "$" json deployed
   | "application-session-birth" => draftCodec.encode <$> applicationSessionBirth "$" json none deployed
@@ -2648,8 +2718,9 @@ def author (kind : String) (json : Lean.Json)
       intentCodec.encode <$> applicationSessionGrainBirthIntent "$" json deployed
   | "application-permission-schema" => do
       pure (← ApplicationPermissionSchemaAuthoring.author json).1
-  | "grain-birth" => draftCodec.encode <$> grainBirth "$" json deployed
+  | "grain-birth" => draftCodec.encode <$> grainBirth "$" json deployed providerRoutes
   | "grain-birth-intent" => intentCodec.encode <$> grainBirthIntent "$" json deployed
+      providerRoutes
   | "content" => ContentResource.commandCodec.encode <$> contentCommand "$" json
   | "resource" | "joint" => DeclaredResourceController.commandCodec.encode <$> command "$" json
   | "joint-draft" => do
@@ -2659,7 +2730,8 @@ def author (kind : String) (json : Lean.Json)
       let source ← grainSource "$" json
       pure (DeclaredResourceController.commandCodec.encode source.1)
   | "grain-intent" => intentCodec.encode <$> grainIntent "$" json
-  | "grain-policy-install-intent" => intentCodec.encode <$> grainPolicyInstallIntent "$" json
+  | "grain-policy-install-intent" =>
+      intentCodec.encode <$> grainPolicyInstallIntent "$" json providerRoutes
   | "draft" => draftCodec.encode <$> draft "$" json
   | "intent" => intentCodec.encode <$> intent "$" json
   | "genesis" => NativeHostGenesis.configCodec.encode <$> genesis "$" json
@@ -2705,12 +2777,12 @@ machine; admission remains the receiver's decision. -/
 def derive (kind : String) (json : Lean.Json) : Result Lean.Json :=
   match kind with
   | "grain" => do
-      let source ← grainSource "$" json
-      let state := source.2
-      pure <| .mkObj [("generation", signedDecimal state.generation),
+      let (command, state, route) ← grainSource "$" json
+      pure <| .mkObj ([("generation", signedDecimal state.generation),
         ("status", signedDecimal state.status), ("remaining", signedDecimal state.remaining),
-        ("reserved", signedDecimal state.reserved),
-        ("command", hexJson (DeclaredResourceController.commandCodec.encode source.1))]
+        ("reserved", signedDecimal state.reserved)] ++
+        (match route with | some code => [("route", signedDecimal code)] | none => []) ++
+        [("command", hexJson (DeclaredResourceController.commandCodec.encode command))])
   | _ => failAt "kind" "expected grain"
 
 /-- Detached Ed25519 signatures use the sole strict list-of-bytes codec. -/
@@ -3471,9 +3543,12 @@ private def declaredCellJson (root : Digest)
   | some task => match AgentGrain.readState task store with
     | none => .mkObj base
     | some state => .mkObj <| base ++ [("grain", .mkObj
-        [("task", decimal task), ("generation", signedDecimal state.generation),
+        ([("task", decimal task), ("generation", signedDecimal state.generation),
          ("status", signedDecimal state.status), ("remaining", signedDecimal state.remaining),
-         ("reserved", signedDecimal state.reserved)])]
+         ("reserved", signedDecimal state.reserved)] ++
+         (match DeclaredFields.read task ProviderRoute.routeField store with
+          | some route => [("route", signedDecimal route)]
+          | none => [])))]
 
 private def principalJson (value : Hyperdocument.PrincipalRef) : Lean.Json := .mkObj
   [("subject", decimal value.subject.value),

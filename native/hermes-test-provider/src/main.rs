@@ -893,13 +893,13 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
     let mut body = vec![0; size];
     reader.read_exact(&mut body).map_err(|e| e.to_string())?;
     let request: Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+    // Which bearer arrived, as a digest: the log names the credential a
+    // request carried without ever holding its value.
+    let auth = match &authorization {
+        None => "none".to_owned(),
+        Some(value) => format!("sha256:{}", sha256_hex(value.as_bytes())),
+    };
     if matches!(mode, Mode::RouteProbe) {
-        // Which bearer arrived, as a digest: the log names the credential a
-        // request carried without ever holding its value.
-        let auth = match &authorization {
-            None => "none".to_owned(),
-            Some(value) => format!("sha256:{}", sha256_hex(value.as_bytes())),
-        };
         let id = format!("chatcmpl-mini-route-{}", RESPONSE_ID.fetch_add(1, Ordering::Relaxed));
         let body = json!({"id":id,"object":"chat.completion","created":1,"model":request.get("model"),
             "choices":[{"index":0,"message":{"role":"assistant","content":"route probe"},"finish_reason":"stop"}],
@@ -964,7 +964,10 @@ fn serve_one(mut stream: TcpStream, log: &Path, mode: Mode, receipt_path: Option
         let body = response.to_string();
         write_http(&mut stream, "200 OK", "application/json", body.as_bytes()).map_err(|e| e.to_string())?;
     }
-    log_event(log, &format!("completion bytes={size} stream={streaming} stage={stage}"))
+    // A metered fixture also names the bearer it was paid with (as a digest),
+    // so a journey can prove which payer a route used.
+    let paid = if matches!(mode, Mode::MeteredUsage) { format!(" auth={auth}") } else { String::new() };
+    log_event(log, &format!("completion bytes={size} stream={streaming} stage={stage}{paid}"))
         .map_err(|e| e.to_string())?;
     Ok(())
 }

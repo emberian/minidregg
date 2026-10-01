@@ -194,6 +194,23 @@ if [ -n "$PROFILE" ]; then
     "$EVIDENCE/operator.json" >"$EVIDENCE/operator-profiled.json"
   mv "$EVIDENCE/operator-profiled.json" "$EVIDENCE/operator.json"
 fi
+# OPERATOR_PROVIDER_PINS (a JSON file, non-profiled provider bootstraps only)
+# adds the Host's provider pins before genesis, so the provider purse is born
+# under the per-route tariff it names (HERMES-TARIFF): exactly
+# {continuityProviderResourceId, providerMetering}, both naming the provider task.
+if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
+  [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ] && [ -z "$PROFILE" ] || {
+    echo 'OPERATOR_PROVIDER_PINS requires PROVIDER_BOOTSTRAP=1 and no profile' >&2; exit 2;
+  }
+  jq -e --arg p "$PROVIDER_TASK" 'type == "object" and
+    ((keys | sort) == ["continuityProviderResourceId","providerMetering"]) and
+    (.providerMetering.providerResourceId | tostring) == $p and
+    (.continuityProviderResourceId | tostring) == $p' "$OPERATOR_PROVIDER_PINS" >/dev/null ||
+    { echo 'OPERATOR_PROVIDER_PINS is invalid' >&2; exit 2; }
+  jq --slurpfile pins "$OPERATOR_PROVIDER_PINS" '. + $pins[0]' \
+    "$EVIDENCE/operator.json" >"$EVIDENCE/operator-pinned.json"
+  mv "$EVIDENCE/operator-pinned.json" "$EVIDENCE/operator.json"
+fi
 "$HOST" "$EVIDENCE/operator.json" profile >"$EVIDENCE/operator-profile.json"
 SEMANTICS=$(decimal "$EVIDENCE/operator-profile.json" semantics)
 cat >"$EVIDENCE/genesis.json" <<EOF
@@ -298,9 +315,17 @@ query_task tool-born 8 "$TOOL_TASK" 81 "$EVIDENCE/tool.key" 30002
 query_task publication-born 7 "$PUBLICATION_TARGET" 91 "$EVIDENCE/controller.key" 30009
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
   query_task provider-born 9 "$PROVIDER_TASK" 101 "$EVIDENCE/provider.key" 30010
-  jq -e --arg task "$PROVIDER_TASK" --arg remaining "$PROVIDER_BUDGET" \
-    '.cell.grain == {task:$task,generation:"0",status:"0",
-      remaining:$remaining,reserved:"0"}' "$EVIDENCE/provider-born/view.json" >/dev/null
+  # A purse born under the Host's per-route provider tariff carries its route
+  # field (0: no call in flight).
+  if [ -n "${OPERATOR_PROVIDER_PINS:-}" ]; then
+    jq -e --arg task "$PROVIDER_TASK" --arg remaining "$PROVIDER_BUDGET" \
+      '.cell.grain == {task:$task,generation:"0",status:"0",
+        remaining:$remaining,reserved:"0",route:"0"}' "$EVIDENCE/provider-born/view.json" >/dev/null
+  else
+    jq -e --arg task "$PROVIDER_TASK" --arg remaining "$PROVIDER_BUDGET" \
+      '.cell.grain == {task:$task,generation:"0",status:"0",
+        remaining:$remaining,reserved:"0"}' "$EVIDENCE/provider-born/view.json" >/dev/null
+  fi
 fi
 jq -e --arg task "$CONTROLLER_TASK" \
   '.cell.grain == {task:$task,generation:"0",status:"0",remaining:"100",reserved:"0"}' \
@@ -331,7 +356,10 @@ for name in $grain_names; do
         >"$EVIDENCE/$name-policy-source.json"
     fi
   else
-    jq -n --arg owner "$owner" '{owner:$owner}' >"$EVIDENCE/$name-policy-source.json"
+    # `task` makes the Host author the policy that task's birth installed
+    # (a provider purse's route law when the Host pins a provider tariff).
+    jq -n --arg owner "$owner" --arg task "$task" '{owner:$owner,task:$task}' \
+      >"$EVIDENCE/$name-policy-source.json"
   fi
   "$MINI" author --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
     --kind grain-policy --input "$EVIDENCE/$name-policy-source.json" \
