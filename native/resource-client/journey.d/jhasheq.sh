@@ -3,7 +3,7 @@
 # sealed-bid rows), on the journey's fresh Store, after J4 (the newcomer B holds a workspace).
 #
 # Three cells under the sealed-bid law (deploy/shell/templates/market/sealed/law.json):
-# field 2 = commit, 3 = value, 4 = blinder (field 1 is written at birth). While
+# field 2 = commit, 3 = value, 4 = blinder (the only fields a bid declares). While
 # request/height <= D-1 a write must keep field 2 write-once and fields 3, 4 at 0; from height D
 # a write must keep field 2 unchanged and satisfy hashEq(field 3, field 4, field 2): commit = cSHAKE256("DREGG.PRED.HASHEQ/v1";
 # cell ‖ names ‖ value ‖ blinder). Commitments are computed here by an independent cSHAKE256
@@ -143,18 +143,19 @@ PY
 hits() { echo "$1" | tr ' ' '\n' | grep "^$2:" | tr ',' '\n' | grep -o '=[0-9]*' | tr -d = | awk '{s+=$1} END {print s+0}'; }
 
 # --- the cells ---------------------------------------------------------------------------------
-create() { # NAME LAW
-  "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "$1" --storage declared --predicate "$2" \
+create() { # NAME LAW FIELDS
+  "$MINI" workspace --action create --dir "$SPONSOR_WS" --name "$1" --storage declared --predicate "$2" --fields "$3" \
     >"$D/create-$1.out" 2>"$D/create-$1.err"; echo $? >"$D/create-$1.rc"; must_ok "create-$1"
   LAST=$(jq -r .acceptedCount "$SPONSOR_WS/attempts/create-$1/outcome.json")
 }
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
-create filler "$D/req/permit-all.json"
+# The filler pads records to the deadline, one fresh field per record (fields 10, 11, ...).
+create filler "$D/req/permit-all.json" 10-99
 # Records before the reveal phase: 3 creates, 1 delegation, 3 commits = 7; D leaves 2 fillers.
 CLOSE=$(( $(next_height) + 7 + 2 ))
 sed -e "s/{FOUNDER}/$SPONSOR_SUBJECT/g" -e "s/{LAST_SEALED_HEIGHT}/$((CLOSE - 1))/g" "$TEMPLATE" >"$D/req/law.json"
 jq -e . "$D/req/law.json" >/dev/null || { echo "law template did not render" >&2; exit 1; }
-for c in bid-a bid-b bid-c; do create "$c" "$D/req/law.json"; done
+for c in bid-a bid-b bid-c; do create "$c" "$D/req/law.json" 2-4; done
 A_CELL=$(jq -r .target "$SPONSOR_WS/refs/bid-a.json")
 B_CELL=$(jq -r .target "$SPONSOR_WS/refs/bid-b.json")
 C_CELL=$(jq -r .target "$SPONSOR_WS/refs/bid-c.json")

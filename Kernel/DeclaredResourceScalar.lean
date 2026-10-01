@@ -221,6 +221,9 @@ inductive Reject where
   | staleAuthority
   | inadmissibleAction
   | guardRejected (index : Nat)
+  /-- K-FIELD-CLOSURE: the write changed field `field`, which the cell did not
+  declare at birth (`FieldClosure.check`). -/
+  | undeclaredField (field : Nat)
   | invalidPost
   | authorityUnavailable
   | directoryUnavailable
@@ -264,6 +267,8 @@ structure CellMode (pre : EffectCell) (command : Command) (post : Store effectLa
   ordinary : command.kind ≠ .account
   actionsPresent : command.actions ≠ []
   admitted : command.declaration.Admitted
+  /-- Every field the write changed is one the cell declares (K-FIELD-CLOSURE). -/
+  closed : FieldClosure.check command.target pre.logical post = none
   postLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target post
   semanticsExact : CanonicalActionResult pre command post
 
@@ -313,6 +318,11 @@ def prepareCell (snapshot : AuthoritySnapshot)
               | .rejected (.disabledOperation index) => .error (.guardRejected index)
               | .accepted validated =>
                   let post := Patch.run pre.logical (cellPatch command)
+                  -- K-FIELD-CLOSURE: a field the cell did not declare is refused by
+                  -- name here, before any law is evaluated.
+                  match closed : FieldClosure.check command.target pre.logical post with
+                  | some field => .error (.undeclaredField field)
+                  | none =>
                   if postLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind
                       command.target post then
                     let semantic : CanonicalActionResult pre command post :=
@@ -321,7 +331,7 @@ def prepareCell (snapshot : AuthoritySnapshot)
                     .ok ⟨post,
                       { preStateBound := rfl
                         modeEvidence :=
-                          ⟨preLaw, root, version, ordinary, nonempty, admitted, postLaw,
+                          ⟨preLaw, root, version, ordinary, nonempty, admitted, closed, postLaw,
                             semantic⟩
                         validated := validated
                         postcondition := ⟨rfl, semantic, postLaw⟩ }⟩
@@ -339,6 +349,79 @@ theorem PreparedCell.action_semantics_exact
     (prepared : PreparedCell snapshot semantics ambient pre command) :
     CanonicalActionResult pre command prepared.post :=
   prepared.candidate.postcondition.2.1
+
+/-! ## K-FIELD-CLOSURE at the scalar receiver
+
+Invoke's and grain birth's scalar targets are computed here
+(`ResourceTransaction.computeTarget`), and preparation precedes every policy
+evaluation (`DeclaredResourceController.authorizeLeg`), so a refusal here is
+a refusal whatever the target's law says. -/
+
+/-- **An accepted write changes only declared fields.** -/
+theorem PreparedCell.changes_only_declared
+    {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
+    {pre : EffectCell} {command : Command}
+    (prepared : PreparedCell snapshot semantics ambient pre command) (n : Nat)
+    (changed : DeclaredResourceProjection.get (DeclaredResourceProjection.values command.target pre.logical) n ≠
+      DeclaredResourceProjection.get (DeclaredResourceProjection.values command.target prepared.post) n) :
+    FieldClosure.declaredIn command.target pre.logical n = true :=
+  (FieldClosure.firstUndeclared_none_iff _ _ _).mp prepared.candidate.modeEvidence.closed n changed
+
+/-- **An accepted write leaves the cell's declaration as it was.** -/
+theorem PreparedCell.declaration_fixed
+    {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
+    {pre : EffectCell} {command : Command}
+    (prepared : PreparedCell snapshot semantics ambient pre command) (n : Nat) :
+    FieldClosure.declaredIn command.target prepared.post n =
+      FieldClosure.declaredIn command.target pre.logical n := by
+  obtain ⟨admitted, _, post⟩ := (command.declaration.run_eq_some_iff _ _).mp
+    prepared.action_semantics_exact
+  rw [post]
+  exact FieldClosure.admitted_preserves_declared _ admitted _ _ n
+
+/-- **`undeclared_field_refused`.** A write that changes a field its cell did not
+declare is refused at preparation, naming the field, whatever the target's law
+says: every earlier stage passing, the computed post naming `field` is enough. -/
+theorem undeclared_field_refused
+    {snapshot : AuthoritySnapshot} {semantics : Digest} {ambient : Ambient}
+    {pre : EffectCell} {command : Command}
+    (ordinary : command.kind ≠ .account) (version : command.schemaVersion = 1)
+    (nonempty : command.actions ≠ []) (root : command.expectedTargetRoot = pre.root)
+    (preLaw : CanonicalCellRegistry.DeclaredCellLaw command.kind command.target pre.logical)
+    (admitted : command.declaration.admissionCheck = true)
+    {validated : CellState.ValidatedPatch DeclaredEffectCell.materializer pre pre.root
+      (cellPatch command)}
+    (accepted : validate DeclaredEffectCell.materializer pre pre.root (cellPatch command) =
+      .accepted validated)
+    {field : Nat}
+    (named : FieldClosure.check command.target pre.logical
+      (Patch.run pre.logical (cellPatch command)) = some field) :
+    prepareCell snapshot semantics ambient pre command = .error (.undeclaredField field) := by
+  unfold prepareCell
+  rw [dif_pos ordinary, dif_pos version, dif_pos nonempty, dif_pos root, dif_pos preLaw,
+    dif_pos admitted]
+  split
+  · rename_i heq; rw [accepted] at heq; cases heq
+  · rename_i heq; rw [accepted] at heq; cases heq
+  · rename_i heq
+    rw [accepted] at heq
+    cases heq
+    dsimp only
+    split
+    · rename_i found heq2
+      rw [named] at heq2
+      cases heq2
+      rfl
+    · rename_i heq2
+      rw [named] at heq2
+      cases heq2
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceScalar.PreparedCell.changes_only_declared' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedCell.changes_only_declared
+/-- info: 'Minidregg.Kernel.DeclaredResourceScalar.PreparedCell.declaration_fixed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms PreparedCell.declaration_fixed
+/-- info: 'Minidregg.Kernel.DeclaredResourceScalar.undeclared_field_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms undeclared_field_refused
 
 
 end Minidregg.Kernel.DeclaredResourceScalar

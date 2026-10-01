@@ -141,16 +141,19 @@ theorem sparse_store_countable {L : Layout.{0, 0, 0}}
   inferInstance
 
 open Minidregg.Theory.EffectDeclaration in
-/-- A first-order code for the three state-key constructors: `StateKey` is
+/-- A first-order code for the state-key constructors: `StateKey` is
 countable, and Lean does not derive that. -/
 def stateKeyCode : StateKey → Nat × Nat × Nat
   | .objectField object field => (0, object.value, field.value)
   | .accountBalance account resource => (1, account.value, resource.value)
   | .programCode program => (2, program.value, 0)
+  | .fieldDeclared object field => (3, object.value, field.value)
+  | .fieldsOpen object => (4, object.value, 0)
 
 open Minidregg.Theory.EffectDeclaration in
 theorem stateKeyCode_injective : Function.Injective stateKeyCode := by
-  rintro (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩) (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩) same <;>
+  rintro (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩)
+    (⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩ | ⟨⟨_⟩, ⟨_⟩⟩ | ⟨⟨_⟩⟩) same <;>
     simp_all [stateKeyCode]
 
 open Minidregg.Theory.EffectDeclaration in

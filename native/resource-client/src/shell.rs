@@ -57,7 +57,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
     Verb { name: "describe", usage: "describe REF", operation: "mini workspace --action describe --name REF" },
     Verb { name: "import", usage: "import NAME REFERENCE-JSON|@FILE | import NAME KIND TARGET OBSERVE [OPERATION|- [CONTROL]]", operation: "mini workspace --action import (--from-ref | --kind --target --observe-capability)" },
-    Verb { name: "create", usage: "create NAME STORAGE PREDICATE-JSON|@FILE", operation: "mini workspace --action create" },
+    Verb { name: "create", usage: "create NAME STORAGE PREDICATE-JSON|@FILE [FIELDS|open]", operation: "mini workspace --action create (--fields: the fields a declared cell may hold)" },
     Verb { name: "propose", usage: "propose ID REQUEST-JSON|@FILE", operation: "mini workspace --action propose --proposal-id ID" },
     Verb { name: "invoke", usage: "invoke ID REF create FIELD VALUE | invoke ID REF write FIELD VALUE EXPECTED", operation: "mini workspace --action propose (action invoke, one scalar action)" },
     Verb { name: "delegate", usage: "delegate ID REF RECIPIENT VERB[,VERB...] MAX-COST", operation: "mini workspace --action propose (action delegate)" },
@@ -104,12 +104,11 @@ fn document_law(template: &str) -> Option<Value> {
 }
 
 /// The board law (PLACE §2.2): task `n` has its state in field `2n+2`
-/// (0 todo, 1 doing, 2 done) and its owner in field `2n+3`. Field 1 is not a
-/// task's: every declared object is born holding field 1 = 0
-/// (`NativeHostGenesis.declaredCell`). A state never goes backwards (a present
-/// delta is never negative; a field created in this turn has no delta) and an
-/// owner, once taken, is never replaced. A declared page holds four entries
-/// today, so only task 0 fits; the law also names task 1 for when it does.
+/// (0 todo, 1 doing, 2 done) and its owner in field `2n+3`. A state never
+/// goes backwards (a present delta is never negative; a field created in this
+/// turn has no delta) and an owner, once taken, is never replaced. The law
+/// names tasks 0 and 1, and `board new` declares exactly their fields (2-5,
+/// K-FIELD-CLOSURE), so the Host refuses any other field by name.
 fn board_law() -> Value {
     let mut clauses = vec![json!({"type":"eq","slot":"request/verb","value":"2"})];
     for task in 0..2u32 {
@@ -583,6 +582,8 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                             flag("name", w[2].clone()),
                             flag("storage", "declared"),
                             flag("predicate", path.clone()),
+                            // The board law governs tasks 0 and 1: fields 2-5, no other.
+                            flag("fields", "2-5"),
                         ],
                         writes: vec![request_file(path, &board_law())],
                     }
@@ -770,21 +771,24 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             }
         }
         "create" => {
-            arity(&w, 3, 3, u)?;
+            arity(&w, 3, 4, u)?;
             workspace_name(&w[1], "resource name")?;
             let predicate = json_argument(session, &w[3], "predicate")?;
             let path = session.home.join("requests").join(format!("create-{}.json", w[1]));
-            Plan::Client {
-                command: "workspace".into(),
-                flags: vec![
-                    flag("action", "create"),
-                    flag("dir", ws()),
-                    flag("name", w[1].clone()),
-                    flag("storage", w[2].clone()),
-                    flag("predicate", path.clone()),
-                ],
-                writes: vec![request_file(path, &predicate)],
+            let mut flags = vec![
+                flag("action", "create"),
+                flag("dir", ws()),
+                flag("name", w[1].clone()),
+                flag("storage", w[2].clone()),
+                flag("predicate", path.clone()),
+            ];
+            // `create NAME declared LAW FIELDS`: the fields the cell may hold
+            // (`0-3,7` or `open`); without it a declared cell holds none.
+            if let Some(fields) = w.get(4) {
+                crate::workspace::parse_fields(fields)?;
+                flags.push(flag("fields", fields.clone()));
             }
+            Plan::Client { command: "workspace".into(), flags, writes: vec![request_file(path, &predicate)] }
         }
         "propose" => {
             arity(&w, 2, 2, u)?;

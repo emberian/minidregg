@@ -40,6 +40,10 @@ PASS=0 TOTAL=0
 A=$SPONSOR_SUBJECT B=$NEWCOMER_SUBJECT
 CONTROL=$(jq -r .factoryControllerCapability "$JOURNEY_WORLD/genesis.json")
 RAN=resource/field/16/after
+# A job cell declares its sixteen fields (K-FIELD-CLOSURE) and, on this tree, field 16: the run slot's
+# hand-set stand-in. With K-RAN the stand-in goes and so does field 16 (FIELDS=0-15); until then the
+# law does not freeze field 16, so a closed job here still admits a write to it.
+FIELDS=0-16
 bind() { sed -e "s/{CALLER}/$A/g" -e 's/{PROGRAM}/42/g' -e 's/{NEG_WINDOW}/-100/g' -e 's/{WINDOW}/100/g' \
   -e "s#{RAN_SLOT}#$RAN#g"; }
 bind <"$TPL/law.job.json" >"$D/req/law.json"
@@ -97,6 +101,13 @@ deny() {  # deny JOB ID LABEL CLAUSE WS NAME ACTION...
   row "$job" "$label" "refused, clause $k: $want" "$([ $r = 0 ] && echo admitted || echo "[$why]")" \
     "$([ $r != 0 ] && [[ "$why" == *"law-denied: $want"* ]]; echo $?)"
 }
+# undeclared JOB ID LABEL FIELD WS NAME ACTION...: refused by the field closure, naming FIELD.
+undeclared() {
+  local job=$1 id=$1-$2 label=$3 f=$4 ws=$5; shift 5
+  attempt "$ws" "$id" "$@"; local r=$? why; why=$(refusal "$ws" "$id")
+  row "$job" "$label" "refused: undeclaredField $f" "$([ $r = 0 ] && echo admitted || echo "[$(printf '%s' "$why" | cut -c1-240)]")" \
+    "$([ $r != 0 ] && [[ "$why" == *"undeclaredField $f"* ]]; echo $?)"
+}
 view() { run "$1" "$MINI" clock --action view --workspace "$WS_A"; jq -r .now "$D/$1.out"; }
 tick() { run "tick-$1" "$MINI" clock --action tick --workspace "$WS_A" --control "$CONTROL" --now "$1"; }
 started=$(date +%s)
@@ -106,7 +117,8 @@ T=$(view v0)
 [[ $T =~ ^[0-9]+$ ]] || { echo "jjob1: no clock view: $(tail -1 "$D/v0.err")" >&2; exit 1; }
 for j in 1 2 3 4 5 6; do
   n=jjob1-$j
-  run "create-$j" "$MINI" workspace --action create --dir "$WS_A" --name "$n" --storage declared --predicate "$D/req/law.json"
+  run "create-$j" "$MINI" workspace --action create --dir "$WS_A" --name "$n" --storage declared --predicate "$D/req/law.json" \
+    --fields "$FIELDS"
   row "job$j" "A creates $n under the 44-clause job law" "created" "rc=$(cat "$D/create-$j.rc")" "$(cat "$D/create-$j.rc")"
   jq -n --arg r "$B" --arg n "$n" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,
     recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/grant-$j.json"
@@ -125,9 +137,9 @@ done
 N1=$((T + 10)); CB=$((N1 + 60)); AB=$((N1 + 600)); FA=$((N1 + 100))
 tick "$N1"
 row all "tick to N1 = $N1" "now $N1" "now=$(view v1)" "$([ "$(view v1b)" = "$N1" ]; echo $?)"
-# A declared cell is born holding field 1 = 0 (Kernel/NativeHostGenesis.lean `declaredCell`), so the
-# order writes program (field 1) from 0; every other order field is created.
-ORDER=("$(c 0 0)" "$(u 1 0 42)" "$(c 2 5)" "$(c 3 "$A")" "$(c 4 70)" "$(c 5 100)" "$(c 6 "$CB")" "$(c 7 "$AB")" \
+# A declared cell is born holding no field, only its declaration (K-FIELD-CLOSURE,
+# Kernel/NativeHostGenesis.lean `declaredCell`), so the order creates every field it writes.
+ORDER=("$(c 0 0)" "$(c 1 42)" "$(c 2 5)" "$(c 3 "$A")" "$(c 4 70)" "$(c 5 100)" "$(c 6 "$CB")" "$(c 7 "$AB")" \
   "$(c 8 100)" "$(c 11 0)")
 CLAIM=("$(u 0 0 1)" "$(c 9 "$B")" "$(c 10 80)" "$(u 11 0 100)")
 ANSWER=("$(u 0 1 2)" "$(c 12 77)" "$(c 13 1345)" "$(c 14 "$FA")")
@@ -152,6 +164,9 @@ admit job1 d3 "decide -> 3 (truth = output)" "$WS_B" jjob1-1 "$(u 0 2 3)"
 deny job1 close-bond "close 3 -> 6 keeping the bond" 43 "$WS_B" jjob1-1 "$(u 0 3 6)" "$(u 8 100 0)"
 admit job1 close "close 3 -> 6, escrow 0, bond 0" "$WS_B" jjob1-1 "$(u 0 3 6)" "$(u 8 100 0)" "$(u 11 100 0)"
 deny job1 reopen "re-open the closed job (6 -> 3)" 2 "$WS_A" jjob1-1 "$(u 0 6 3)"
+# K-FIELD-CLOSURE: the law freezes every field the job declares, but a Pred cannot say "no other
+# field"; the kernel refuses a write that creates an undeclared one BY NAME, before the law runs.
+undeclared job1 new-field "B creates field 20 on the closed job (the law alone would admit it)" 20 "$WS_B" jjob1-1 "$(c 20 1)"
 
 # ---- job3: void
 admit job3 o-a "order" "$WS_A" jjob1-3 "${ORDER[@]}"

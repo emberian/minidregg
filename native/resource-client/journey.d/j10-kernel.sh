@@ -60,8 +60,9 @@ printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
 # The room and a note born in it.
 run create-lab "$MINI" workspace --action create --dir "$SPONSOR_WS" --name lab --storage declared \
   --predicate "$D/req/permit-all.json"; ok create-lab
+# The note holds fields 7 and 8 (KIX, journey.d/j10-index.sh, writes them; K-FIELD-CLOSURE).
 run create-note "$MINI" workspace --action create --dir "$SPONSOR_WS" --name note --storage declared \
-  --predicate "$D/req/permit-all.json" --in lab; ok create-note
+  --predicate "$D/req/permit-all.json" --in lab --fields 7,8; ok create-note
 run create-outside "$MINI" workspace --action create --dir "$SPONSOR_WS" --name outside --storage declared \
   --predicate "$D/req/permit-all.json"; ok create-outside
 lab=$(jq -r .target "$SPONSOR_WS/refs/lab.json")

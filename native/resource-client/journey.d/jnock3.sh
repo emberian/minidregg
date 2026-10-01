@@ -145,7 +145,7 @@ for name, jam, fuel in [("forge", forge, 1000000), ("melt", melt, 1000000), ("fo
 
 # 2. the inventory cell, filled under all[], then the law `ran forge`
 r = mini("--action", "create", "--dir", WS, "--name", "inv", "--storage", "declared",
-    "--predicate", path("permit-all.json"))
+    "--predicate", path("permit-all.json"), "--fields", "%d-%d" % (IRON, SWORD))
 INV = json.load(open(os.path.join(WS, "refs", "inv.json")))["target"] if r.returncode == 0 else None
 rc, last = submit("fill", scalar([create(IRON, 3), create(WOOD, 2), create(SWORD, 0)]))
 # Every mutation must be forge's checked product; observation and the other verbs stay open.
