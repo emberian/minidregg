@@ -22,6 +22,7 @@
 set -eu
 umask 077
 SURVEY_PASS=${SURVEY_PASS:-all}
+ALL_ACCESS='{"type":"allAccess"}'
 [ "$#" -ge 2 ] || { sed -n '2,20p' "$0" >&2; exit 2; }
 RUN=$1 APPS=$2
 shift 2
@@ -119,6 +120,10 @@ while IFS="$tab" read -r letter prefix name spk class kind getp postm postp post
   export "GRAIN_$U=$prefix" "SPK_$U=$spk" "CLASS_$U=$class" "KIND_$U=$kind" "GET_PATH_$U=$getp"
   [ "$postp" = - ] || export "POST_PATH_$U=$postp" "POST_METHOD_$U=$postm" "POST_TYPE_$U=$postt" "POST_BODY_$U=$postb"
   [ "$pollp" = - ] || export "POLL_PATH_$U=$pollp"
+  # The grain owner holds every permission (Sandstorm's owner semantics);
+  # role 0 is an app's first declared role, which can be view-only (Davros)
+  # or absent (Roundcube, Gogs declare no roles).
+  export "ROLE_BASIS_$U=${SURVEY_ROLE_BASIS:-$ALL_ACCESS}"
   app=${prefix}01
   if [ "$SURVEY_PASS" != 2 ]; then
   record "$name" package INFO - "$(sha256sum "$spk" | cut -c1-32) $(stat -c %s "$spk")B class=$class kind=$kind app=$app"
@@ -157,6 +162,8 @@ while IFS="$tab" read -r letter prefix name spk class kind getp postm postp post
     http_verdict "$name" "get-${letter}2"
   fi
   metrics "$name" "$app" g2
-  phase "$name" "stop-${letter}2" || :
+  # SURVEY_FINAL_STOP=0 leaves the continued generation serving (the
+  # operator stops it later); each Mini STOP costs minutes of Host replay.
+  [ "${SURVEY_FINAL_STOP:-1}" = 0 ] || phase "$name" "stop-${letter}2" || :
 done <"$APPS"
 echo "$OUT"

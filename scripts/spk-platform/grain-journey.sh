@@ -55,7 +55,8 @@ state_paths
 # installs it from an export. Per instance, SPK_X names its package (default
 # SPK) and KIND_X its owner session kind (api: bearer token; web: browser
 # cookie); GET_PATH_X, POST_PATH_X/POST_BODY_X/POST_TYPE_X/POST_METHOD_X and
-# POLL_PATH_X name the get/post/poll requests (defaults: sntfy's).
+# POLL_PATH_X name the get/post/poll requests (defaults: sntfy's);
+# ROLE_BASIS_X the owner's role basis (default role 0).
 A=${GRAIN_A:-91} B=${GRAIN_B:-92} C=${GRAIN_C:-93} D=${GRAIN_D:-94} E=${GRAIN_E:-95}
 F=${GRAIN_F:-96} G=${GRAIN_G:-97} H=${GRAIN_H:-98} I=${GRAIN_I:-99}
 
@@ -319,7 +320,7 @@ share() (
   if [ ! -s "$T/issue/receipt-anchor.json" ]; then
     grain_op "$label-ticket-$ticket-reserve" 8 7902 81 "$WR/tool.key" "$((nonce + 400))" \
       '{"type":"reserve","amount":"3"}'
-    jq -n --arg app "$app" --arg session "$session" --arg descriptor "$descriptor" \
+    jq -n --argjson basis "$ROLE_BASIS" --arg app "$app" --arg session "$session" --arg descriptor "$descriptor" \
       --arg ticket "$ticket" --arg kind "$kind" --arg appcap "$appcap" \
       --arg scap "$cap" --arg tcap "$((cap + ticket % 100))" --arg nonce "$((nonce + 500))" \
       --arg pversion "$pversion" --arg schema "$schema" --arg version "$version" \
@@ -331,7 +332,7 @@ share() (
           participant:{session:$session,descriptorResource:$descriptor,kind:$kind,
             subject:"8",origin:{type:"human"},sessionCapability:$scap,
             appObserveCapability:$appcap,ticketObserveCapability:(($tcap|tonumber)+2|tostring)},
-          ceiling:{basis:{type:"role",id:"0"},added:[],removed:[],
+          ceiling:{basis:$basis,added:[],removed:[],
             roleSchemaRoot:$schema,roleVersion:$version},issueNonce:$nonce},
         issuer:"8",appDelegateCapability:$appcap,ticketOwnerCapability:$tcap,
         ticketControlCapability:(($tcap|tonumber)+1|tostring)},
@@ -403,9 +404,11 @@ enroll() (
   sview=$EV/$label-session-$nonce/view.json
   sgen=$(jq -er '[.cell.entries[] | select(.key.field == "2")][0].value' "$sview")
   status=$(jq -er '[.cell.entries[] | select(.key.field == "3")][0].value' "$sview")
-  if [ "$status" = 5 ]; then
+  # Session status is a (kind, status) tag: web 0-3, api 4-7; active is 1 or 5
+  # (Kernel/ApplicationGrainSession.tag). Closing writes active -> closed.
+  if [ "$status" = 5 ] || [ "$status" = 1 ]; then
     jq -n --arg s "$session" --arg c "$cap" --arg n "$((nonce + 2))" --arg g "$sgen" \
-      --arg g1 "$((sgen + 1))" --slurpfile read "$sview" \
+      --arg g1 "$((sgen + 1))" --arg st "$status" --arg st1 "$((status + 1))" --slurpfile read "$sview" \
       --slurpfile challenge "$EV/$label-session-$nonce/challenge.json" '
       {subject:"8",nonce:$n,grants:[{kind:"object",target:$s,capability:$c}],
        purpose:{type:"prepare",draft:{type:"invoke",command:{subject:"8",nonce:$n,
@@ -413,7 +416,7 @@ enroll() (
            schemaVersion:"1",expectedTargetRoot:$read[0].cell.root,
            payload:{type:"scalar",actions:[
              {type:"write",key:{type:"object",resource:$s,field:"2"},expected:$g,value:$g1},
-             {type:"write",key:{type:"object",resource:$s,field:"3"},expected:"5",value:"6"}]}}]}}}}' \
+             {type:"write",key:{type:"object",resource:$s,field:"3"},expected:$st,value:$st1}]}}]}}}}' \
       >"$EV/$label-close-g$gen-intent.json"
     "$MINI" submit --host "$HOST" --config "$CONFIG" --socket "$PSOCK" \
       --intent "$EV/$label-close-g$gen-intent.json" --key "$WR/tool.key" \
@@ -421,11 +424,11 @@ enroll() (
     confirmed "$EV/$label-close-g$gen-attempt/outcome.json"
   fi
   count=$(jq -er .receipt.acceptedCount "$EV/$label-ticket-$ticket/issue/receipt-anchor.json")
-  jq -n --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
+  jq -n --argjson basis "$ROLE_BASIS" --arg index "$((count - 1))" --arg ticket "$ticket" --arg pkg "$((app + 1))" \
     --arg dcap "$((cap + 2))" --arg scap "$cap" --arg mcap "$pkgcap" \
     --arg schema "$schema" --arg version "$version" --arg nonce "$((nonce + 3))" '
     {issueIndex:$index,ticketResource:$ticket,packageManifest:$pkg,
-     role:{basis:{type:"role",id:"0"},added:[],removed:[],
+     role:{basis:$basis,added:[],removed:[],
        roleSchemaRoot:$schema,roleVersion:$version},
      descriptorCapability:$dcap,sessionObserveCapability:$scap,
      descriptorObserveCapability:$dcap,manifestObserveCapability:$mcap,nonce:$nonce}' \
@@ -582,6 +585,11 @@ run_phase() {
   eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
   eval "postm=\${POST_METHOD_$upper:-POST} pollp=\${POLL_PATH_$upper:-'/m6grain/json?poll=1&since=all'}"
   eval "postb=\${POST_BODY_$upper:-'published by $letter before STOP'}"
+  # The owner's role basis in the share ceiling and the enrollment: role 0
+  # (sntfy's only role) unless ROLE_BASIS_X says otherwise, e.g.
+  # {"type":"allAccess"} for a package that declares no roles.
+  eval "ROLE_BASIS=\${ROLE_BASIS_$upper:-'{\"type\":\"role\",\"id\":\"0\"}'}"
+  export ROLE_BASIS
   # NONCE_BASE_X moves an instance's nonces when its coordinates are reused
   # after a refused attempt consumed some (every signed nonce is a nullifier).
   eval "base=\${NONCE_BASE_$upper:-$((40000 + i * 10000))}"

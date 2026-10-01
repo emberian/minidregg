@@ -76,8 +76,11 @@ fn add(headers: &mut String, name: &str, value: &str) -> io::Result<()> {
 }
 
 fn content_disposition(value: &str) -> io::Result<String> {
-    if value.is_empty() || value.len() > 1024 || value.chars().any(char::is_control) {
-        return Err(invalid("WebSession download name refused"));
+    if value.len() > 1024 {
+        return Err(invalid("WebSession download name refused: longer than 1024 bytes"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(invalid("WebSession download name refused: control character"));
     }
     let mut encoded = String::new();
     for byte in value.bytes() {
@@ -207,7 +210,12 @@ pub(crate) fn serialize(response: &WebResponse, head_request: bool) -> io::Resul
                 add(&mut headers, "ETag", &etag(tag)?)?;
             }
             if !matches!(*status, 204 | 304) {
-                if let Some(name) = download_name {
+                // An empty download name is what sandstorm-http-bridge sends
+                // for a bare `Content-Disposition: attachment`; Sandstorm's
+                // shell treats it as no disposition (a falsy name), and so
+                // does this proxy. Measured: Davros's WebDAV GET of a file
+                // answered 503 on the refusal (SPK-APPS 2026-10-01).
+                if let Some(name) = download_name.as_deref().filter(|name| !name.is_empty()) {
                     add(
                         &mut headers,
                         "Content-Disposition",
@@ -445,6 +453,17 @@ mod tests {
         };
         let download = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
         assert!(download.contains("filename*=UTF-8''report%20%E4%BD%A0%E5%A5%BD.txt"));
+        // A bare `attachment` arrives as an empty name: no disposition, as
+        // Sandstorm's shell does; a control character is still refused.
+        if let WebResult::Content { download_name, .. } = &mut reply.result {
+            *download_name = Some(String::new());
+        }
+        let bare = String::from_utf8(serialize(&reply, false).unwrap()).unwrap();
+        assert!(bare.starts_with("HTTP/1.1 200") && !bare.contains("Content-Disposition"));
+        if let WebResult::Content { download_name, .. } = &mut reply.result {
+            *download_name = Some("a\r\nSet-Cookie: x=y".into());
+        }
+        assert!(serialize(&reply, false).is_err());
     }
 
     #[test]
