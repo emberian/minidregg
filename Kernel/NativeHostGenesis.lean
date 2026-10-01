@@ -765,7 +765,7 @@ every other request to the deployment's own law (`factory_law_others`).  No
 genesis capability of the factory controller carries `tickClock`, and the
 clock law refuses the controller (`tick_requires_clock_capability`). -/
 
-theorem tickVerbTag_eq : tickVerbTag = 7 := rfl
+theorem tickVerbTag_eq : tickVerbTag = 11 := rfl
 
 /-- The clock law, decided: a request is admitted exactly when its verb is
 `tickClock` and its subject is a ticker. -/
@@ -900,11 +900,11 @@ def requestState (subject verb : Nat) : Minidregg.Pred.State :=
 def poleTickers : List ClockTicker := [⟨⟨70⟩, ⟨71⟩⟩]
 
 theorem ticker_tick_admitted :
-    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 70 7) = true := by
+    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 70 11) = true := by
   decide +kernel
 
 theorem sponsor_tick_refused :
-    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 7 7) = false := by
+    Minidregg.Pred.eval (clockPredicate poleTickers) ⟨[]⟩ (requestState 7 11) = false := by
   decide +kernel
 
 theorem ticker_install_refused :

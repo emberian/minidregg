@@ -386,7 +386,7 @@ craft() {  # craft SOURCE_INTENT SUBJECT [AUTHORITY_ROOT] > out
 
 step_J0() {
   ARTIFACT=$W/handoff.json
-  call bootstrap env NEWPARTICIPANT_CLOCK_OBSERVER=30 \
+  call bootstrap env NEWPARTICIPANT_CLOCK_OBSERVER=31 \
     sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
     || fail "bootstrap exit $(cat "$SD/bootstrap.rc"): $(tail -1 "$SD/bootstrap.err")" || return
   jq -e '.type == "minidregg-newparticipant-fixture-v1"' "$W/handoff.json" >/dev/null \

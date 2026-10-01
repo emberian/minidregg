@@ -24,7 +24,7 @@
 # birth (the factory law confines it); a signed READ under a positive clock law
 # (`any [verb = 2, leSlotsOff field/1/after clock/now 0]`) is refused before
 # the tick and admitted after it, naming the clock it was judged at; the
-# observer (a second ticker, subject 30) ticks with a chain slot; the wall-clock
+# observer (a second ticker, subject 31; 30 is the pay observer) ticks with a chain slot; the wall-clock
 # tick; a tick whose reply is lost resolves as `replayed` on the next run; 200
 # ephemeral ticks leave no attempt dir and 200 journal lines; 20 ephemeral reads
 # leave no attempt dir and 20 journal lines.
