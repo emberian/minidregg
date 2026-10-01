@@ -31,6 +31,10 @@
 #             next read prints the marker for epoch 0 again (not re-learned).
 #   hosted    dave is listed as a hosted subject: his invite is refused without
 #             --i-know and says why; with --i-know it is written.
+#   chat      alice founds a private CHAT room (`chat new pc --private`), invites
+#             carl with his encryption key; both `say`; the signed say holds no
+#             plaintext; carl and alice `tail` each other's lines (P-CHAT wired to
+#             seal_for_room / open_in_room); the final Store scan counts them too.
 #   restart   the Host restarts; `audit` re-admits the Store; alice still opens.
 #
 # Hook contract: journey.sh (executed). Last stdout line: the row table. Last
@@ -431,6 +435,29 @@ expectgot keys "and still opens epoch 1" "$T_A1" "$(jq -r '.entries[1].private.t
 ok keys carl "room keys lab"
 expectgot keys "carl's cache: held [1], forgotten [0]" '[1]/[0]' "$(jq -c .held "$OUT")/$(jq -c .forgotten "$OUT")"
 
+# ------------------------------------------------ chat in a private room (P-CHAT x PRIVATE-ROOMS)
+# `chat new --private` births the chat room as a private room; `say` seals every
+# entry under the room key (empty kernel topic); `tail` opens what this reader
+# holds a key for. The text is on no wire and in no Store byte.
+T_CA="PRIVATE-ECHO alice says this in pc"
+T_CC="PRIVATE-FOXTROT carl answers in pc"
+ok chat alice "chat new pc --private"
+check chat "pc's reference is a private room naming its keys cell" \
+  jq -e '.private.keys | test("^[0-9]+$")' "$WS/alice/refs/pc.json"
+ok chat alice "chat invite pc $C carl --enc ${ENC[carl]}"
+INV_PC=$(grep '^chat join pc ' "$OUT" | tail -1)
+ok chat carl "$INV_PC"
+ok chat alice "say $T_CA"
+SAY_A=$(ls -td "$WS/alice/proposals"/say-* | head -1)
+check chat "alice's signed say (the wire) holds no plaintext, raw or hex (and it landed: a sealed append refuses a kernel topic)" \
+  sh -c "! grep -rq 'PRIVATE-ECHO' \"\$1\" && ! grep -rq \"\$(printf PRIVATE-ECHO | xxd -p)\" \"\$1\"" _ "$SAY_A"
+ok chat carl "say $T_CC"
+ok chat carl "tail --json -n 100"
+check chat "carl (a member holding the wrap) reads both private lines in the merged feed" \
+  sh -c "grep -q 'PRIVATE-ECHO' \"\$1\" && grep -q 'PRIVATE-FOXTROT' \"\$1\"" _ "$OUT"
+ok chat alice "tail"
+check chat "alice reads carl's private line" grep -q 'PRIVATE-FOXTROT' "$OUT"
+
 # ------------------------------------------------ a hosted subject (B6)
 echo "$D  # dave stands in for hosted Hermes: his key is a session-home file" >"$MINI_HOSTED_SUBJECTS"
 fails hosted alice "room invite i-dave lab $D ${ENC[dave]}" 1 "hosted subject"
@@ -460,9 +487,9 @@ check restart "audit re-admitted the Store (exit 0)" test "$(cat "$SD/audit-r1.r
 tail_of alice sa
 expectgot restart "alice still opens epoch 1 after the restart" "$T_A1" "$(jq -r '.entries[1].private.text' "$OUT")"
 raw restart bob "bob is still refused" "revoked" "$MINI" workspace --action tail --dir "$WS/bob" --name sa --from 1 --count 16
-SCAN=$(python3 "$SD/scan.py" "$W/store" "$T_A0" "$T_B0" "$T_A1" "$T_PUB")
+SCAN=$(python3 "$SD/scan.py" "$W/store" "$T_A0" "$T_B0" "$T_A1" "$T_PUB" "$T_CA" "$T_CC")
 echo "$SCAN" >"$SD/store-scan-2.txt"
 expectgot restart "after everything, the Store holds no private line in any encoding" 0 \
-  "$(( $(total_hits PRIVATE-ALPHA) + $(total_hits PRIVATE-BRAVO) + $(total_hits PRIVATE-DELTA) ))"
+  "$(( $(total_hits PRIVATE-ALPHA) + $(total_hits PRIVATE-BRAVO) + $(total_hits PRIVATE-DELTA) + $(total_hits PRIVATE-ECHO) + $(total_hits PRIVATE-FOXTROT) ))"
 
 finish

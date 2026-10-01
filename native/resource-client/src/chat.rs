@@ -69,7 +69,7 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "topic", usage: "topic [TEXT]", operation: "show the room topic, or append {\"type\":\"topic\"} (the founder's counts)" },
     Verb { name: "pin", usage: "pin N | unpin", operation: "append {\"type\":\"pin\"} with ref = entry #N, or {\"type\":\"unpin\"} (the founder's count)" },
     Verb { name: "react", usage: "react N EMOJI", operation: "append {\"type\":\"react\",\"emoji\":EMOJI} with ref = entry #N" },
-    Verb { name: "chat", usage: "chat new ROOM | chat invite ROOM SUBJECT [NAME] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
+    Verb { name: "chat", usage: "chat new ROOM [--private] | chat invite ROOM SUBJECT [NAME] [--enc ENC-PUB|@FILE] | chat join ROOM INVITE-JSON|@FILE | chat enter ROOM | chat rooms | chat name SUBJECT NAME", operation: "the room template: a founder-written roster cell, one stream per member born by the founder; `help chat`" },
 ];
 
 pub(crate) const HELP: &str = "\
@@ -94,6 +94,9 @@ A room's founder:
   chat new commons                create the room, its roster and your stream
   chat invite commons SUBJECT bob grant bob the room, birth bob's stream (you pay), add bob
                                   to the roster; prints the invitation to give bob
+  chat new den --private          a private room (K-ROOM's keys cell; needs MINI_KEYCACHE_PASSPHRASE):
+                                  every say is sealed under the room key; the Host stores ciphertext
+  chat invite den SUBJECT bob --enc HEX   wrap the room key for bob too (bob's `whoami` prints HEX)
 A member:
   chat join commons INVITATION    take the invitation (JSON, or @FILE in requests/)
 
@@ -145,8 +148,8 @@ pub(crate) enum Line {
     Pin(u64),
     Unpin,
     React { number: u64, emoji: String },
-    New(String),
-    Invite { room: String, subject: String, name: Option<String> },
+    New { room: String, private: bool },
+    Invite { room: String, subject: String, name: Option<String>, enc: Option<String> },
     Join { room: String, invitation: String },
     Enter(String),
     Rooms,
@@ -345,9 +348,19 @@ fn parse_tail(rest: &str) -> Result<Line, String> {
 }
 
 fn parse_chat(rest: &str) -> Result<Line, String> {
-    let words: Vec<&str> = rest.split_whitespace().collect();
+    let mut words: Vec<&str> = rest.split_whitespace().collect();
+    // `--enc ENC-PUB|@FILE` (chat invite into a private room): taken out first.
+    let mut enc = None;
+    if words.first() == Some(&"invite") {
+        if let Some(i) = words.iter().position(|w| *w == "--enc") {
+            let value = words.get(i + 1).ok_or("--enc names the invitee's encryption key (64 hex digits, or @FILE)")?;
+            enc = Some((*value).to_owned());
+            words.drain(i..i + 2);
+        }
+    }
     match words.as_slice() {
-        ["new", room] => ref_name(room, "room name").map(|()| Line::New((*room).to_owned())),
+        ["new", room] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: false }),
+        ["new", room, "--private"] => ref_name(room, "room name").map(|()| Line::New { room: (*room).to_owned(), private: true }),
         ["invite", room, subject] | ["invite", room, subject, _] => {
             ref_name(room, "room name")?;
             decimal(subject, "subject")?;
@@ -355,7 +368,7 @@ fn parse_chat(rest: &str) -> Result<Line, String> {
             if let Some(n) = &name {
                 petname_ok(n)?;
             }
-            Ok(Line::Invite { room: (*room).to_owned(), subject: (*subject).to_owned(), name })
+            Ok(Line::Invite { room: (*room).to_owned(), subject: (*subject).to_owned(), name, enc })
         }
         ["join", room, ..] if words.len() >= 3 => {
             ref_name(room, "room name")?;
@@ -574,6 +587,13 @@ fn backoff(attempt: u32) {
 /// the plan is made again from a fresh signed read (propose), or the same
 /// intent is signed again over a fresh challenge (submit, a new attempt).
 fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Value, Done> {
+    propose_submit_in(session, prefix, request, None)
+}
+
+/// `propose_submit`, sealed under the private room `sealed` (PRIVATE-ROOMS:
+/// `workspace propose --private ROOM` seals every append's text under the
+/// room's current key, bound to the stream and the sequence it read).
+fn propose_submit_in(session: &Session, prefix: &str, request: &Value, sealed: Option<&str>) -> Result<Value, Done> {
     private_dirs(&session.home.join("requests")).map_err(error)?;
     let ws = session.workspace.clone();
     let mut resigned = 0u32;
@@ -584,10 +604,11 @@ fn propose_submit(session: &Session, prefix: &str, request: &Value) -> Result<Va
         let mut bytes = serde_json::to_vec(request).expect("JSON values serialise");
         bytes.push(b'\n');
         private_file(&path, &bytes).map_err(error)?;
-        match client(
-            "workspace",
-            &[("action", os("propose")), ("dir", os(&ws)), ("request", os(&path)), ("proposal-id", os(&id))],
-        ) {
+        let mut flags = vec![("action", os("propose")), ("dir", os(&ws)), ("request", os(&path)), ("proposal-id", os(&id))];
+        if let Some(room) = sealed {
+            flags.push(("private", os(room)));
+        }
+        match client("workspace", &flags) {
             Ok(_) => break id,
             Err(done) if stale_root(&done) && tries + 1 < FRESH_CHALLENGES => {
                 tries += 1;
@@ -908,9 +929,62 @@ fn read_room(session: &Session, room: &Room) -> Result<(Feed, Roster, Vec<String
     Ok((feed, held.roster, missing))
 }
 
+/// Whether this session's reference for `room` is a private room's (PRIVATE-ROOMS).
+fn room_is_private(session: &Session, room: &str) -> bool {
+    reference(session, room).is_ok_and(|r| r.get("private").is_some())
+}
+
+/// The keys a reader of a private room opens with: (room id, the synced ring,
+/// or none without a cache passphrase). `None` for a public room.
+type RoomKeys = Option<(String, Option<crate::workspace::private::Keyring>)>;
+
+fn room_keys(session: &Session, room: &Room) -> Result<RoomKeys, Done> {
+    if !room_is_private(session, &room.name) {
+        return Ok(None);
+    }
+    let ws = workspace_record(session).map_err(error)?;
+    let keys = crate::workspace::roomkey::reader_keys(&session.workspace, &ws, &room.name).map_err(error)?;
+    Ok(Some(keys))
+}
+
+/// Open every sealed entry of one stream-tail view in place: the payload
+/// becomes the opened text (the typed JSON the author sealed); an entry this
+/// reader holds no key for becomes the sealed marker; a refusal is printed as
+/// one; plaintext posted into a private room is shown marked `[unsealed]`.
+fn open_sealed(view: &mut Value, keys: &RoomKeys, stream: &str) {
+    let Some((room_id, ring)) = keys else { return };
+    let Some(entries) = view.get_mut("entries").and_then(Value::as_array_mut) else { return };
+    for e in entries {
+        if e.get("payloadState").and_then(Value::as_str) != Some("verified") {
+            continue;
+        }
+        let Some(bytes) = e.get("payload").and_then(Value::as_str).and_then(unhex) else { continue };
+        let sequence = e.get("sequence").and_then(Value::as_str).unwrap_or("").to_owned();
+        let note = crate::workspace::roomkey::open_in_room(ring.as_ref(), room_id, stream, &sequence, &bytes);
+        let shown = match &note {
+            Value::String(marker) => marker.clone(),
+            v if v.get("text").and_then(Value::as_str).is_some() => v["text"].as_str().unwrap_or_default().to_owned(),
+            v if v.get("unsealed").is_some() => {
+                let plain = v["unsealed"].as_str().unwrap_or_default();
+                match serde_json::from_str::<Value>(plain) {
+                    Ok(mut typed) if typed.get("text").and_then(Value::as_str).is_some() => {
+                        typed["text"] = json!(format!("[unsealed] {}", typed["text"].as_str().unwrap_or_default()));
+                        typed.to_string()
+                    }
+                    _ => format!("[unsealed] {plain}"),
+                }
+            }
+            v => format!("[refused: {}]", v.get("refused").map(Value::to_string).unwrap_or_default()),
+        };
+        e["payload"] = json!(crate::hex(shown.as_bytes()));
+        e["sealed"] = json!(true);
+    }
+}
+
 /// What a reader holds of a room between signed reads: the roster, and per
 /// stream the entries read so far and the next sequence to ask for.
 struct Held {
+    keys: RoomKeys,
     ws: Value,
     grant: Value,
     capability: String,
@@ -924,7 +998,8 @@ impl Held {
         let ws = workspace_record(session).map_err(error)?;
         let grant = reference(session, &room.grant).map_err(error)?;
         let capability = member(&grant, "observeCapability").map_err(error)?.to_owned();
-        Ok(Held { ws, grant, capability, roster: Roster { founder: None, members: Vec::new() }, streams: BTreeMap::new(), missing: BTreeMap::new() })
+        let keys = room_keys(session, room)?;
+        Ok(Held { keys, ws, grant, capability, roster: Roster { founder: None, members: Vec::new() }, streams: BTreeMap::new(), missing: BTreeMap::new() })
     }
 
     fn roster(&mut self, session: &Session, room: &Room) -> Result<(), Done> {
@@ -946,7 +1021,8 @@ impl Held {
             let label = if full { format!("s{stream}-p{start}") } else { format!("s{stream}-f") };
             match signed_read(session, &self.ws, &room.name, &label, &synthetic, "tail",
                 &[("start", start.to_string()), ("count", WINDOW.to_string())]) {
-                Ok(view) => {
+                Ok(mut view) => {
+                    open_sealed(&mut view, &self.keys, stream);
                     entries.extend(entries_of(&view, stream, subject));
                     let next = view.get("nextSeq").and_then(Value::as_str).and_then(|v| v.parse::<u64>().ok()).unwrap_or(start);
                     self.missing.remove(stream);
@@ -999,6 +1075,7 @@ fn read_held(session: &Session, room: &Room) -> Result<(Feed, Roster, Vec<String
     };
     let roster_bin = latest("roster").ok_or_else(|| error(format!("this session holds no read of {}; tail it first", room.name)))?;
     let roster = roster_of(&render("view-resource", &roster_bin)?);
+    let keys = room_keys(session, room)?;
     let mut entries = Vec::new();
     let mut missing = Vec::new();
     for (subject, stream) in &roster.members {
@@ -1006,7 +1083,8 @@ fn read_held(session: &Session, room: &Room) -> Result<(Feed, Roster, Vec<String
         let mut any = false;
         while let Some(bin) = latest(&format!("s{stream}-p{start}")) {
             any = true;
-            let view = render("view-tail", &bin)?;
+            let mut view = render("view-tail", &bin)?;
+            open_sealed(&mut view, &keys, stream);
             entries.extend(entries_of(&view, stream, subject));
             start += WINDOW;
         }
@@ -1213,6 +1291,11 @@ fn append(session: &Session, room: &Room, payload: Value, to: Option<String>, re
     if text.len() > MAX_PAYLOAD {
         return Err(usage(format!("the entry is {} bytes; the limit is {MAX_PAYLOAD}", text.len())));
     }
+    // A private room's entries are sealed; the kernel topic is plaintext the
+    // operator reads, so a sealed append carries none (a topic entry's text is
+    // inside the sealed payload already).
+    let sealed = room_is_private(session, &room.name).then(|| room.name.clone());
+    let topic = if sealed.is_some() { String::new() } else { topic };
     let mut append = json!({"type":"append","topic":topic_field(&topic),"text":text});
     if let Some(to) = to {
         append["to"] = json!(to);
@@ -1224,7 +1307,7 @@ fn append(session: &Session, room: &Room, payload: Value, to: Option<String>, re
         "targets":[{"name":stream,"payload":append}]});
     let mut replanned = 0u64;
     loop {
-        match propose_submit(session, "say", &request) {
+        match propose_submit_in(session, "say", &request, sealed.as_deref()) {
             Err((EXIT_REFUSED, text)) if text.contains("staleTarget") && replanned < 3 => {
                 replanned += 1;
                 backoff(replanned as u32);
@@ -1326,8 +1409,8 @@ fn run_inner(session: &Session, line: Line) -> Result<(), Done> {
             .map_err(error)?;
             tail(session, &room, count, since, follow, as_json, held)
         }
-        Line::New(name) => chat_new(session, &name),
-        Line::Invite { room, subject, name } => chat_invite(session, &room, &subject, name.as_deref()),
+        Line::New { room, private } => chat_new(session, &room, private),
+        Line::Invite { room, subject, name, enc } => chat_invite(session, &room, &subject, name.as_deref(), enc.as_deref()),
         Line::Join { room, invitation } => chat_join(session, &room, &invitation),
         Line::Enter(name) => {
             load_room(session, &name).map_err(error)?;
@@ -1470,6 +1553,12 @@ fn write_request(session: &Session, name: &str, value: &Value) -> Result<PathBuf
 }
 
 fn create_cell(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>) -> Result<Value, Done> {
+    create_cell_as(session, name, storage, law, room, owner, None)
+}
+
+/// `create_cell` with `--room-template T` (`private`: the room key, its keys
+/// cell born in the room, the founder's own wrap).
+fn create_cell_as(session: &Session, name: &str, storage: &str, law: &Value, room: Option<&str>, owner: Option<&str>, template: Option<&str>) -> Result<Value, Done> {
     let predicate = write_request(session, &format!("chat-law-{name}"), law)?;
     let mut flags = vec![
         ("action", os("create")),
@@ -1483,6 +1572,9 @@ fn create_cell(session: &Session, name: &str, storage: &str, law: &Value, room: 
     }
     if let Some(owner) = owner {
         flags.push(("owner", os(owner)));
+    }
+    if let Some(template) = template {
+        flags.push(("room-template", os(template)));
     }
     client("workspace", &flags)?;
     reference(session, name).map_err(error)
@@ -1545,14 +1637,18 @@ fn me(session: &Session) -> Result<String, Done> {
     Ok(member(&ws, "subject").map_err(error)?.to_owned())
 }
 
-fn chat_new(session: &Session, name: &str) -> Result<(), Done> {
+fn chat_new(session: &Session, name: &str, private: bool) -> Result<(), Done> {
     if room_path(session, name).exists() {
         return Err(usage(format!("this session already has a room {name}")));
     }
     let me = me(session)?;
     let law = author_law(&me);
-    create_cell(session, name, "declared", &law, None, None)?;
-    println!("room {name}: created (only you write its roster)");
+    create_cell_as(session, name, "declared", &law, None, None, private.then_some("private"))?;
+    if private {
+        println!("room {name}: created private (only you write its roster; every say is sealed under the room key)");
+    } else {
+        println!("room {name}: created (only you write its roster)");
+    }
     let stream_name = format!("{name}-me");
     let stream = create_cell(session, &stream_name, "stream", &law, Some(name), None)?;
     let stream_target = member(&stream, "target").map_err(error)?.to_owned();
@@ -1570,8 +1666,24 @@ fn chat_new(session: &Session, name: &str) -> Result<(), Done> {
     Ok(())
 }
 
-fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&str>) -> Result<(), Done> {
+fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&str>, enc: Option<&str>) -> Result<(), Done> {
     let room = load_room(session, name).map_err(error)?;
+    let private = room_is_private(session, name);
+    let enc = match (private, enc) {
+        (false, None) => None,
+        (false, Some(_)) => return Err(usage(format!("{name} is not a private room: --enc is a private room's"))),
+        (true, None) => {
+            return Err(usage(format!("{name} is private: name the invitee's encryption key (--enc HEX, or @FILE in HOME/requests; their `whoami` prints it)")))
+        }
+        (true, Some(value)) => Some(match value.strip_prefix('@') {
+            Some(file) if !file.is_empty() && !file.contains('/') && !file.starts_with('.') => {
+                let p = session.home.join("requests").join(file);
+                fs::read_to_string(&p).map_err(|e| error(format!("cannot read {}: {e}", p.display())))?.trim().to_owned()
+            }
+            Some(_) => return Err(usage("@FILE is a plain file name in HOME/requests")),
+            None => value.to_owned(),
+        }),
+    };
     let me = me(session)?;
     let ws = workspace_record(session).map_err(error)?;
     let grant = reference(session, &room.grant).map_err(error)?;
@@ -1588,6 +1700,23 @@ fn chat_invite(session: &Session, name: &str, subject: &str, petname: Option<&st
     let stream = create_cell(session, &stream_name, "stream", &author_law(subject), Some(name), Some(subject))?;
     let stream_target = member(&stream, "target").map_err(error)?.to_owned();
     roster_write(session, name, &[(slot, subject), (slot + 1, &stream_target)])?;
+    if let Some(enc) = &enc {
+        // The room key, wrapped to the invitee's encryption key, in one write
+        // to the keys cell (only the founder writes it).
+        let id = fresh_id("wrap")?;
+        client(
+            "workspace",
+            &[
+                ("action", os("room-key")),
+                ("op", os("invite")),
+                ("dir", os(&session.workspace)),
+                ("name", os(name)),
+                ("member", os(subject)),
+                ("enc-pub", os(enc)),
+                ("proposal-id", os(&id)),
+            ],
+        )?;
+    }
     if let Some(p) = petname {
         set_petname(session, subject, p).map_err(error)?;
     }
@@ -1697,10 +1826,15 @@ mod tests {
         assert_eq!(plan("unpin").unwrap().unwrap(), Line::Unpin);
         assert_eq!(plan("react 3 👍").unwrap().unwrap(), Line::React { number: 3, emoji: "👍".into() });
         assert!(plan("react 3 two words").unwrap().is_err());
-        assert_eq!(plan("chat new commons").unwrap().unwrap(), Line::New("commons".into()));
+        assert_eq!(plan("chat new commons").unwrap().unwrap(), Line::New { room: "commons".into(), private: false });
+        assert_eq!(plan("chat new den --private").unwrap().unwrap(), Line::New { room: "den".into(), private: true });
         assert_eq!(
             plan("chat invite commons 1234 bob").unwrap().unwrap(),
-            Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()) }
+            Line::Invite { room: "commons".into(), subject: "1234".into(), name: Some("bob".into()), enc: None }
+        );
+        assert_eq!(
+            plan("chat invite den 1234 --enc ab12 bob").unwrap().unwrap(),
+            Line::Invite { room: "den".into(), subject: "1234".into(), name: Some("bob".into()), enc: Some("ab12".into()) }
         );
         assert_eq!(
             plan(r#"chat join commons {"a": "b c"}"#).unwrap().unwrap(),
