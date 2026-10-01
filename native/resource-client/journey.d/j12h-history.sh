@@ -21,7 +21,7 @@
 #   diff-agrees-show     jq diff (incl. moves) of the two --at tables = Lean diff -> equal
 #   diff-h5-h6-moves     Lean diff h5→h6: the move's seams                 -> moved 1001, moved 1003
 #   diff-moves-agree     jq diff of the --at h5 / h6 tables = Lean diff   -> equal
-#   c-at-h2              C (granted after h2) --at h2                      -> refused (did not cover)
+#   c-at-h2              C (granted after h2) --at h2                      -> refused (no-grant)
 #   c-at-h3              C --at h3                                         -> read, = control h3
 #   c-history-split      C's history: rows h1,h2 carry no content; h3..h6 do -> exact
 #   restart-identical    stop+start the service; history and --at h4 again -> byte-identical
@@ -155,8 +155,10 @@ row diff-moves-agree "$(lean_diff diff-56)" "$(jq_diff at-5 at-6)" "jq diff of s
 
 # coverage at the asked height
 show c-at-2 "$TW" "${H[2]}"
-if [ "$(cat "$D/c-at-2.rc")" != 0 ] && reason c-at-2 | grep -q "did not cover"; then g=refused; else g="rc=$(cat "$D/c-at-2.rc")"; fi
-row c-at-h2 refused "$g" "$(reason c-at-2 | grep -o "history read refused.*" | cut -c1-120)"
+# atCovered refuses a grant that did not stand at h with the named reason no-grant
+# (the Host's own decoding, `refused: no-grant: ...`), never a text to match.
+if [ "$(cat "$D/c-at-2.rc")" != 0 ] && grep -q "refused: no-grant: " "$D/c-at-2.err"; then g=refused; else g="rc=$(cat "$D/c-at-2.rc")"; fi
+row c-at-h2 refused "$g" "$(grep -o "refused: no-grant: [^;(]*" "$D/c-at-2.err" | head -1)"
 show c-at-3 "$TW" "${H[3]}"
 if [ "$(cat "$D/c-at-3.rc")" = 0 ] && [ "$(table c-at-3)" = "$(table ctl-3)" ]; then g=equal; else g=differ; fi
 row c-at-h3 equal "$g" "C reads h3 = A's control at h3"
