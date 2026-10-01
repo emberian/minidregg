@@ -1,6 +1,7 @@
 # The import closure of Host.Main (the minidregg-host exe root), one module per line.
 # Written by scripts/check-host-closure.sh --update REASON; compared by local-gates.
 # updated 2026-10-01: first pin (lane GATES, 2026-10-01, at a2ac159b + SheetLaw/ItemLaw moved to Assurance)  [counts: Minidregg 0 1, Theory 46 83, Kernel 220 273, Pred 4 8, Effects 0 3, Compiler 70 148, Selvage 12 151, Assurance 0 126, Host 44 53, AxiomCensus 0 1]
+# updated 2026-10-01: BRAID-HOST: the final pay/C3 receivers (PayEnrol*, PayObservation*, PurseRefill*, JobMoney*), hermes-tariff ProviderRoute, host-malformed Host.RequestRefusal, p-affordances Host.DryRun, hot-path Compiler.NativeCoprocess enter; UMBRELLA-SPLIT dropped no Host module (0 left)  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 72 150, Selvage 12 151, Assurance 0 126, Host 46 55, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -42,12 +43,14 @@ Compiler.HyperdocumentCell
 Compiler.HyperdocumentCodec
 Compiler.IntStream
 Compiler.MinidreggV1Artifact
+Compiler.NativeCoprocess
 Compiler.NativeHostCodec
 Compiler.NativeHostProfile
 Compiler.NativeKernelPlan
 Compiler.NativeObservationCodec
 Compiler.NockProgramCodec
 Compiler.NoteSpend
+Compiler.PayEnrolSignatureIO
 Compiler.PlanFootprintCodec
 Compiler.PolicyRecordCodec
 Compiler.PolicySourceCell
@@ -102,6 +105,7 @@ Host.ApplicationSpkLaunchDescriptorAuthoring
 Host.BirthRuntimeProfile
 Host.CapabilityInspection
 Host.CurrentResourceBirthAuthoring
+Host.DryRun
 Host.FnConsumerFrontierPlan
 Host.FnConsumerNamespacePlan
 Host.FnInboxView
@@ -115,6 +119,7 @@ Host.GrainOriginSource
 Host.Json
 Host.Main
 Host.ProviderUsage
+Host.RequestRefusal
 Kernel.AgentGrain
 Kernel.ApplicationAgentLifetimeDispatchCore
 Kernel.ApplicationAgentLifetimeDispatchCurrent
@@ -295,6 +300,8 @@ Kernel.GrainResourceBirthReceiver
 Kernel.GrainResourceBirthTransaction
 Kernel.HyperdocumentEventLog
 Kernel.HyperdocumentIndexSync
+Kernel.JobMoney
+Kernel.JobMoneyReceiver
 Kernel.JointSlots
 Kernel.MultiCellHyperedge
 Kernel.NativeHistorySelection
@@ -317,12 +324,21 @@ Kernel.PayAssignmentReceiver
 Kernel.PayBookReceiver
 Kernel.PayCell
 Kernel.PayCellDomain
+Kernel.PayEnrolDecision
+Kernel.PayEnrolMemo
+Kernel.PayEnrolReceiver
+Kernel.PayObservation
+Kernel.PayObservationProofs
+Kernel.PayObservationReceiver
 Kernel.PayTariff
 Kernel.PhysicalResourceReadGuard
 Kernel.PolicyInstallController
 Kernel.PolicyInstallReceiver
 Kernel.PresenceIndex
 Kernel.ProviderMetering
+Kernel.ProviderRoute
+Kernel.PurseRefill
+Kernel.PurseRefillReceiver
 Kernel.RealmWellReceiver
 Kernel.ResourceBirthController
 Kernel.ResourceBirthPolicyController
