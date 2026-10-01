@@ -39,7 +39,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x jserve): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -125,7 +125,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J12X J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J12X J4 JSERVE J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 if [ -n "${JOURNEY_STEPS:-}" ]; then
   SELECTED=()
   for id in "${STEPS[@]}"; do
@@ -143,6 +143,7 @@ TITLE[J2]="sponsor creates a resource under a permissive law"
 TITLE[J3]="sponsor delegates observe+mutate (no control) to newcomer"
 TITLE[J12X]="malformed requests refused by name; the same Host answers on; a killed Host is restarted"
 TITLE[J4]="newcomer signed read, writes field to 1, reads back 1"
+TITLE[JSERVE]="a hostile client (trickle, long request, 50 silent, route-mismatch through op 7) stalls no honest read and stops nothing"
 TITLE[J5]="a key with no grant: read and write refused"
 TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refused at the controller"
 TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
@@ -768,6 +769,7 @@ hook() {
 step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
 step_KC() { hook jclock "the one clock ticks forward only, under a capability, and a law over clock/now admits after the tick and refuses before (MUD item 3, K-CLOCK)"; }
 step_J12X() { hook j12x "each malformed request (number for a decimal string, missing/extra field, negative index, NaN, truncated, non-UTF-8, 100k nesting, 10 MB, bad frames) is refused by name by the same Host process, which answers on; a Host killed by PID is restarted under the same socket (lane host-malformed)"; }
+step_JSERVE() { hook jserve "under each attack (3 bytes then silence; a long Host request; 50 silent connections; the J-PAY-6 route-mismatch intent through op 7) the newcomer signed read is answered (< 2 s where the Host is free), every refusal is named, the same Host answers on, and the malformed table still holds (lane serve-robust)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
@@ -807,6 +809,7 @@ run_step J2 J0
 run_step J3 J1 J2
 run_step J12X J3
 run_step J4 J3
+run_step JSERVE J4
 run_step J5 J4
 run_step J6 J4
 run_step G J4
