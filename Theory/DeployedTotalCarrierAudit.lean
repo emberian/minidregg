@@ -96,7 +96,7 @@ def baseRange : StableRange := ⟨basePoint, basePoint⟩
 def baseDocumentRecord : DocumentRecord :=
   ⟨baseIdentifier, baseDigest, basePrincipal, baseIdentifier⟩
 def baseAtomRecord : AtomRecord :=
-  ⟨baseIdentifier, .text, [], basePrincipal, baseIdentifier, none⟩
+  ⟨baseIdentifier, .text, [], basePrincipal, baseIdentifier, baseIdentifier, none⟩
 def baseRunRecord : RunRecord :=
   ⟨baseIdentifier, [], basePrincipal, baseIdentifier, none⟩
 def baseElementRecord : ElementRecord :=
@@ -123,7 +123,7 @@ def baseTransclusionRecord : TransclusionRecord :=
   ⟨baseIdentifier, baseReference, basePrincipal, baseIdentifier, baseDigest,
     none⟩
 def baseAnnotationRecord : AnnotationRecord :=
-  ⟨baseIdentifier, none, baseIdentifier, basePrincipal, baseIdentifier,
+  ⟨baseIdentifier, .document, .reference baseIdentifier, basePrincipal, baseIdentifier,
     baseDigest, none⟩
 
 /-- Two visibly distinct mark values, with every non-discriminating field held

@@ -223,20 +223,21 @@ def atomRecordStream : StreamCodec AtomRecord :=
         (StreamCodec.product bytesStream
           (StreamCodec.product principalRefStream
             (StreamCodec.product (identifierStream .v1 .operationIntent)
-              (StreamCodec.option (identifierStream .v1 .operationIntent)))))))
+              (StreamCodec.product (identifierStream .v1 .operationIntent)
+                (StreamCodec.option (identifierStream .v1 .operationIntent))))))))
     (fun value => (value.document, value.kind, value.payload, value.createdBy,
-      value.createdAt, value.tombstonedAt))
+      value.createdAt, value.revision, value.tombstonedAt))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; rfl)
 
 def embedRefStream : StreamCodec EmbedRef :=
   StreamCodec.xmap
     (StreamCodec.product (identifierStream .v1 .document)
-      (StreamCodec.product (StreamCodec.option (identifierStream .v1 .element))
-        (StreamCodec.option (identifierStream .v1 .versionEvent))))
-    (fun value => (value.document, value.element, value.snapshot))
-    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2⟩)
+      (StreamCodec.product (identifierStream .v1 .atom)
+        (StreamCodec.product (identifierStream .v1 .operationIntent) transclusionModeStream)))
+    (fun value => (value.document, value.atom, value.revision, value.mode))
+    (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
     (by intro value; rfl)
 
 /-! ## Stored stable ranges

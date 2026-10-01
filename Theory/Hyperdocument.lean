@@ -273,12 +273,17 @@ inductive AtomKind where
   | inlineObject (schema : Digest)
   deriving DecidableEq, Repr
 
+/-- `revision` is the operation that last wrote the atom: its creation, then
+each edit.  It is the atom's version: an annotation or quote names the
+revision it read, and a later write moves it, so a pin goes stale by
+comparison, with no copy or digest of the bytes stored beside the pin. -/
 structure AtomRecord where
   document : DocumentId
   kind : AtomKind
   payload : List UInt8
   createdBy : PrincipalRef
   createdAt : OperationId
+  revision : OperationId
   tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
@@ -290,12 +295,21 @@ structure RunRecord where
   tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
-/-- An embed is a typed document reference.  Fetch and disclosure semantics are
-deliberately absent from this P0 representation. -/
+inductive TransclusionMode where
+  | snapshot
+  | live
+  deriving DecidableEq, Repr
+
+/-- An embed names one atom of a source document at the revision its author
+read.  It stores no source bytes: a reader sees the quoted bytes only through
+its own read of the source (`ContentResource.renderQuote`).  `snapshot` (a
+quote) shows the bytes only while the source atom is still at `revision`;
+`live` (a transclusion) shows the current bytes and says whether they moved. -/
 structure EmbedRef where
   document : DocumentId
-  element : Option ElementId
-  snapshot : Option VersionEventId
+  atom : AtomId
+  revision : OperationId
+  mode : TransclusionMode
   deriving DecidableEq, Repr
 
 inductive ElementBody where
@@ -419,11 +433,6 @@ structure ConflictRecord where
   recordedAt : OperationId
   deriving DecidableEq
 
-inductive TransclusionMode where
-  | snapshot
-  | live
-  deriving DecidableEq, Repr
-
 /-- First-order identity of the exact source version named by a transclusion.
 The object, receipt/history entry, and semantic state/value roots are distinct;
 none can be reconstructed from a URI or from another root by convention. -/
@@ -518,10 +527,24 @@ structure MarkRecord where
   tombstonedAt : Option OperationId
   deriving DecidableEq, Repr
 
+/-- What an annotation is attached to: the whole document, a stable range, or
+one atom at the revision the annotator read (stale once the atom moves). -/
+inductive AnnotationAnchor where
+  | document
+  | range (range : StableRange)
+  | atom (atom : AtomId) (revision : OperationId)
+  deriving DecidableEq, Repr
+
+/-- An annotation's content: bytes held in the annotation, or another document. -/
+inductive AnnotationBody where
+  | inline (bytes : List UInt8)
+  | reference (document : DocumentId)
+  deriving DecidableEq, Repr
+
 structure AnnotationRecord where
   document : DocumentId
-  range : Option StableRange
-  body : DocumentId
+  anchor : AnnotationAnchor
+  body : AnnotationBody
   author : PrincipalRef
   operation : OperationId
   visibilityPolicy : Digest

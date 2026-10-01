@@ -32,7 +32,7 @@ def refusalOf : Except Reject Progress → Option Reject
   | .ok _ => none
   | .error reason => some reason
 
-def original : AtomRecord := ⟨document, .text, [0, 104, 105, 255], author, operation, none⟩
+def original : AtomRecord := ⟨document, .text, [0, 104, 105, 255], author, operation, operation, none⟩
 def create : Command := ⟨[.createAtom atom .text original.payload]⟩
 def created : ContentStore := postOf (run author operation document empty create)
 
@@ -97,7 +97,7 @@ def seventeenAtoms : Command :=
 theorem seventeen_atoms_accepted :
     refusalOf (run author nextOperation document created seventeenAtoms) = none ∧
       Hyperdocument.lookup (postOf (run author nextOperation document created seventeenAtoms))
-        .atoms ⟨⟨216⟩⟩ = some ⟨document, .text, [9], author, nextOperation, none⟩ := by
+        .atoms ⟨⟨216⟩⟩ = some ⟨document, .text, [9], author, nextOperation, nextOperation, none⟩ := by
   decide
 
 /-- An earlier successful insertion is not returned when a later action fails. -/

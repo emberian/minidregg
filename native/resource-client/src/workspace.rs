@@ -182,10 +182,10 @@ fn os_string(value: OsString, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} must be UTF-8"))
 }
 
-/// `Kernel/ContentResource.commandVersion`: content commands mutate the
-/// hyperdocument store cell directly (v2); v1 commands lowered to the deleted
-/// content page and are refused (`unsupportedVersion`).
-const CONTENT_COMMAND_VERSION: &str = "2";
+/// `Kernel/ContentResource.commandVersion`: the content command grammar v3
+/// (K-CONTENT: editAtom by revision, annotate, quote); v1 and v2 frames are
+/// refused (`retired_command_refused`).
+const CONTENT_COMMAND_VERSION: &str = "3";
 /// The declared scalar command version (`Kernel/DeclaredResourceScalar`).
 const SCALAR_COMMAND_VERSION: &str = "1";
 
@@ -684,11 +684,12 @@ fn content_actions(actions: &Value, from_signed_views: bool) -> Result<Value> {
             ),
             // A link; an annotation is a link in the `annotations` field (K-FIELDS).
             "link" => ("link", &["type", "link", "source", "target", "relation"]),
-            _ => {
-                return Err(
-                    "workspace content proposal supports local creation and link actions only".into(),
-                )
-            }
+            "annotate" => (
+                "annotate",
+                &["type", "annotation", "atom", "revision", "body"],
+            ),
+            "quote" => ("quote", &["type", "element", "link", "reference"]),
+            _ => return Err("unknown workspace content action".into()),
         };
         if obj.len() != fields.len() || fields.iter().any(|field| !obj.contains_key(*field)) {
             return Err(format!("{tag} has unexpected fields"));
@@ -874,7 +875,7 @@ fn propose(
                 let capability = member(&reference, "operationCapability")?;
                 let observe = member(&reference, "observeCapability")?;
                 // The command version the Host checks per payload: a content
-                // command is `ContentResource.commandVersion` (2, the store
+                // command is `ContentResource.commandVersion` (3, the store
                 // cell); a scalar command is 1.
                 let schema_version = match lowered.get("type").and_then(Value::as_str) {
                     Some("content") => CONTENT_COMMAND_VERSION,
@@ -3007,9 +3008,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(lowered["actions"][0]["key"]["resource"], "123");
-        assert!(content_actions(&json!([{"type":"link","link":"1","source":null,
-            "target":{"type":"document","id":"2"},
-            "relation":"0"}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"tombstoneDocument","document":"1"}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"annotate","annotation":"1","atom":"2",
+            "revision":"3","body":"00","extra":"4"}]), false).is_err());
+        assert!(content_actions(&json!([{"type":"annotate","annotation":"1","atom":"2",
+            "revision":"3","body":"00"}]), false).is_ok());
     }
 
     #[test]

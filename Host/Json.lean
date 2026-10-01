@@ -488,6 +488,19 @@ private def atomKind (path : String) (json : Lean.Json) : Result Hyperdocument.A
       pure (.inlineObject ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩)
   | _ => failAt (path ++ ".type") "expected text or inlineObject"
 
+private def transclusionMode (path : String) (json : Lean.Json) :
+    Result Hyperdocument.TransclusionMode := do
+  match ← string path json with
+  | "snapshot" => pure .snapshot | "live" => pure .live
+  | _ => failAt path "expected snapshot or live"
+
+private def embedRef (path : String) (json : Lean.Json) : Result Hyperdocument.EmbedRef := do
+  let obj ← exactObject path ["document", "atom", "revision", "mode"] json
+  pure ⟨← identifier (path ++ ".document") (← field path "document" obj),
+    ← identifier (path ++ ".atom") (← field path "atom" obj),
+    ← identifier (path ++ ".revision") (← field path "revision" obj),
+    ← transclusionMode (path ++ ".mode") (← field path "mode" obj)⟩
+
 private def elementBody (path : String) (json : Lean.Json) : Result Hyperdocument.ElementBody := do
   let (tag, _) ← tagged path json
   match tag with
@@ -499,10 +512,8 @@ private def elementBody (path : String) (json : Lean.Json) : Result Hyperdocumen
       else
         pure (.runs (← list (path ++ ".runs") identifier (← field path "runs" obj)))
   | "embed" =>
-      let obj ← exactObject path ["type", "document", "element", "snapshot"] json
-      pure (.embed ⟨← identifier (path ++ ".document") (← field path "document" obj),
-        ← optional (path ++ ".element") identifier (← field path "element" obj),
-        ← optional (path ++ ".snapshot") identifier (← field path "snapshot" obj)⟩)
+      let obj ← exactObject path ["type", "reference"] json
+      pure (.embed (← embedRef (path ++ ".reference") (← field path "reference" obj)))
   | "opaque" =>
       let obj ← exactObject path ["type", "schema", "payload"] json
       pure (.opaque ⟨← nat (path ++ ".schema") (← field path "schema" obj)⟩
@@ -510,12 +521,14 @@ private def elementBody (path : String) (json : Lean.Json) : Result Hyperdocumen
   | _ => failAt (path ++ ".type") "unknown element body"
 
 private def atomRecord (path : String) (json : Lean.Json) : Result Hyperdocument.AtomRecord := do
-  let obj ← exactObject path ["document", "kind", "payload", "createdBy", "createdAt", "tombstonedAt"] json
+  let obj ← exactObject path ["document", "kind", "payload", "createdBy", "createdAt", "revision",
+    "tombstonedAt"] json
   pure ⟨← identifier (path ++ ".document") (← field path "document" obj),
     ← atomKind (path ++ ".kind") (← field path "kind" obj),
     ← decodeHex (path ++ ".payload") (← field path "payload" obj),
     ← principal (path ++ ".createdBy") (← field path "createdBy" obj),
     ← identifier (path ++ ".createdAt") (← field path "createdAt" obj),
+    ← identifier (path ++ ".revision") (← field path "revision" obj),
     ← optional (path ++ ".tombstonedAt") identifier (← field path "tombstonedAt" obj)⟩
 
 private def anchorBias (path : String) (json : Lean.Json) : Result Hyperdocument.AnchorBias := do
@@ -595,6 +608,17 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
         (← optional (path ++ ".source") stableRange (← field path "source" obj))
         (← linkTarget (path ++ ".target") (← field path "target" obj))
         ⟨← nat (path ++ ".relation") (← field path "relation" obj)⟩)
+  | "annotate" =>
+      let obj ← exactObject path ["type", "annotation", "atom", "revision", "body"] json
+      pure (.annotate (← identifier (path ++ ".annotation") (← field path "annotation" obj))
+        (← identifier (path ++ ".atom") (← field path "atom" obj))
+        (← identifier (path ++ ".revision") (← field path "revision" obj))
+        (← decodeHex (path ++ ".body") (← field path "body" obj)))
+  | "quote" =>
+      let obj ← exactObject path ["type", "element", "link", "reference"] json
+      pure (.quote (← identifier (path ++ ".element") (← field path "element" obj))
+        (← identifier (path ++ ".link") (← field path "link" obj))
+        (← embedRef (path ++ ".reference") (← field path "reference" obj)))
   | _ => failAt (path ++ ".type") "unknown content action"
 
 private def contentCommand (path : String) (json : Lean.Json) : Result ContentResource.Command := do
@@ -3016,19 +3040,38 @@ private def linkTargetJson : Hyperdocument.LinkTarget → Lean.Json
   | .external scheme authority path => .mkObj [("type", "external"),
       ("scheme", hexJson scheme), ("authority", hexJson authority), ("path", hexJson path)]
 
+private def embedRefJson (reference : Hyperdocument.EmbedRef) : Lean.Json :=
+  .mkObj [("document", decimal reference.document.digest.value),
+    ("atom", decimal reference.atom.digest.value),
+    ("revision", decimal reference.revision.digest.value),
+    ("mode", match reference.mode with | .snapshot => "snapshot" | .live => "live")]
+
 private def elementBodyJson : Hyperdocument.ElementBody → Lean.Json
   | .container children => .mkObj [("type", "container"),
-      ("children", .arr <| children.toArray.map identifierJson)]
-  | .runs runs => .mkObj [("type", "runs"), ("runs", .arr <| runs.toArray.map identifierJson)]
-  | .embed reference => .mkObj [("type", "embed"), ("document", identifierJson reference.document),
-      ("element", optionalIdentifierJson reference.element),
-      ("snapshot", optionalIdentifierJson reference.snapshot)]
+      ("children", .arr <| children.toArray.map fun child => decimal child.digest.value)]
+  | .runs runs => .mkObj [("type", "runs"),
+      ("runs", .arr <| runs.toArray.map fun run => decimal run.digest.value)]
+  | .embed reference => .mkObj [("type", "embed"), ("reference", embedRefJson reference)]
   | .opaque schema payload => .mkObj [("type", "opaque"), ("schema", decimal schema.value),
       ("payload", hexJson payload)]
 
-/-- One entry of a content cell. Documents, elements, links, atoms and runs are
-spelled out; every entry carries its canonical `StoreCodec` entry bytes. -/
-private def contentEntryJson (entry : Minidregg.Theory.Store.Entry Hyperdocument.layout) : Lean.Json :=
+private def annotationAnchorJson : Hyperdocument.AnnotationAnchor → Lean.Json
+  | .document => .mkObj [("type", "document")]
+  | .range _ => .mkObj [("type", "range")]
+  | .atom atom revision => .mkObj [("type", "atom"), ("atom", decimal atom.digest.value),
+      ("revision", decimal revision.digest.value)]
+
+private def annotationBodyJson : Hyperdocument.AnnotationBody → Lean.Json
+  | .inline bytes => .mkObj [("type", "inline"), ("bytes", hexJson bytes)]
+  | .reference document => .mkObj [("type", "reference"),
+      ("document", decimal document.digest.value)]
+
+/-- One entry of a content cell. Documents, elements, links, atoms, runs and
+annotations are spelled out (an annotation with `fresh`: is its atom still at
+the anchored revision in this same cell); every entry carries its canonical
+`StoreCodec` entry bytes. -/
+private def contentEntryJson (store : ContentResource.ContentStore)
+    (entry : Minidregg.Theory.Store.Entry Hyperdocument.layout) : Lean.Json :=
   let canonical := hexJson ((StoreCodec.entryStream HyperdocumentCell.contentWire).encode entry)
   match entry with
   | ⟨⟨.documents, identifier⟩, record⟩ =>
@@ -3046,6 +3089,14 @@ private def contentEntryJson (entry : Minidregg.Theory.Store.Entry Hyperdocument
         ("body", elementBodyJson record.body), ("createdBy", principalJson record.createdBy),
         ("createdAt", identifierJson record.createdAt),
         ("tombstonedAt", optionalIdentifierJson record.tombstonedAt), ("canonical", canonical)]
+  | ⟨⟨.annotations, identifier⟩, record⟩ =>
+      let identifier : Hyperdocument.AnnotationId := identifier
+      let record : Hyperdocument.AnnotationRecord := record
+      .mkObj [("type", "annotation"), ("id", decimal identifier.digest.value),
+        ("anchor", annotationAnchorJson record.anchor), ("body", annotationBodyJson record.body),
+        ("author", principalJson record.author),
+        ("fresh", .bool (ContentResource.annotationFresh store record)),
+        ("canonical", canonical)]
   | ⟨⟨.links, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.LinkId := identifier
       let record : Hyperdocument.LinkRecord := record
@@ -3063,6 +3114,7 @@ private def contentEntryJson (entry : Minidregg.Theory.Store.Entry Hyperdocument
         ("kind", atomKindJson record.kind), ("payload", hexJson record.payload),
         ("createdBy", principalJson record.createdBy),
         ("createdAt", decimal record.createdAt.digest.value),
+        ("revision", decimal record.revision.digest.value),
         ("tombstonedAt", optionalOperationJson record.tombstonedAt),
         ("canonical", canonical)]
   | ⟨⟨.runs, identifier⟩, record⟩ =>
@@ -3081,7 +3133,7 @@ private def contentEntryJson (entry : Minidregg.Theory.Store.Entry Hyperdocument
 private def contentCellJson (root : Digest) (store : ContentResource.ContentStore) : Lean.Json :=
   .mkObj [("root", decimal root.value),
     ("entries", .arr <| (StoreCodec.entries HyperdocumentCell.contentWire store).toArray.map
-      contentEntryJson)]
+      (contentEntryJson store))]
 
 private def streamRecordJson (sequence : Nat) (record : StreamCell.StreamRecord) : Lean.Json :=
   .mkObj [("sequence", decimal sequence), ("author", decimal record.author.value),
@@ -3117,6 +3169,52 @@ private def decoded {α : Type} (path : String) (codec : IndexedProgram.LawfulCo
   match codec.decode bytes with
   | some value => pure value
   | none => failAt path "noncanonical or wrong-family binary input"
+
+/-- The content store inside one signed resource view. -/
+private def contentOfView (path : String) (bytes : List UInt8) :
+    Result ContentResource.ContentStore := do
+  let value ← decoded path NativeObservationController.resourceViewCodec bytes
+  match Minidregg.Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.2.1 with
+  | some ⟨.content, payload⟩ => pure payload.logical
+  | _ => failAt path "not a content cell"
+
+private def quoteViewJson : ContentResource.QuoteView → Lean.Json
+  | .unavailable => .mkObj [("view", "unavailable")]
+  | .stale => .mkObj [("view", "stale")]
+  | .quoted bytes revised => .mkObj [("view", "quoted"), ("bytes", hexJson bytes),
+      ("revised", .bool revised)]
+
+/-- `view-quotes`: every embed of the host view rendered by
+`ContentResource.renderQuote` against the source views the reader itself
+obtained.  Input: `{"host": HEX, "sources": [{"target": DEC, "view": HEX}]}`,
+each HEX a signed `view-resource` binary.  An embed whose source document has
+no supplied view renders `unavailable`. -/
+private def quotesJson (bytes : List UInt8) : Result Lean.Json := do
+  let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with
+    | some text => pure text | none => failAt "view-quotes" "input is not UTF-8"
+  let json ← match Lean.Json.parse text with
+    | .ok json => pure json | .error message => failAt "view-quotes" message
+  let obj ← exactObject "$" ["host", "sources"] json
+  let host ← contentOfView "$.host" (← decodeHex "$.host" (← field "$" "host" obj))
+  let sources ← list "$.sources" (fun path entry => do
+      let source ← exactObject path ["target", "view"] entry
+      let target ← nat (path ++ ".target") (← field path "target" source)
+      let store ← contentOfView (path ++ ".view") (← decodeHex (path ++ ".view") (← field path "view" source))
+      pure (ContentResource.documentOf target, store)) (← field "$" "sources" obj)
+  let quotes := (StoreCodec.entries HyperdocumentCell.contentWire host).filterMap fun entry =>
+    match entry with
+    | ⟨⟨.elements, identifier⟩, record⟩ =>
+        let identifier : Hyperdocument.ElementId := identifier
+        let record : Hyperdocument.ElementRecord := record
+        match record.body with
+        | .embed reference =>
+            let source := (sources.find? (fun pair => pair.1 = reference.document)).map Prod.snd
+            some (.mkObj [("element", decimal identifier.digest.value),
+              ("reference", embedRefJson reference),
+              ("render", quoteViewJson (ContentResource.renderQuote source reference))])
+        | _ => none
+    | _ => none
+  pure <| .mkObj [("type", "quotes"), ("quotes", .arr quotes.toArray)]
 
 private def launchPhysicalReportJson
     (report : ApplicationLifecycleCompletionV2Report.Report) : Result Lean.Json := do
@@ -3366,6 +3464,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let (root, next, entries) ← decoded "view-tail" NativeObservationController.tailViewCodec bytes
       pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
         ("entries", .arr <| entries.toArray.map fun (k, r) => streamRecordJson k r)]
+  | "view-quotes" => quotesJson bytes
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"
@@ -3406,7 +3505,7 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-policy, view-capability, view-who, view-since, or view-at"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-tail, view-policy, view-capability, view-who, view-since, or view-at"
 
 private def fleetReceiptJson (receipt : Receipt) : Lean.Json := .mkObj
   [("transactionId", decimal receipt.transactionId.value), ("eventId", decimal receipt.eventId.value),

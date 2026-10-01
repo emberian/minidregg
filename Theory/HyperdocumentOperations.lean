@@ -154,6 +154,7 @@ def editAtomRecord (operation : OperationId)
           { payload.before with
             kind := payload.kind
             payload := payload.payload
+            revision := operation
             tombstonedAt :=
               if payload.tombstone then some operation
               else payload.before.tombstonedAt }
@@ -223,8 +224,10 @@ def markWrites (operation : OperationId) (author : PrincipalRef)
 def annotationRecord (operation : OperationId) (author : PrincipalRef)
     (payload : AnnotatePayload) : AnnotationRecord :=
   { document := payload.document
-    range := payload.range
-    body := payload.body
+    anchor := match payload.range with
+      | none => .document
+      | some range => .range range
+    body := .reference payload.body
     author := author
     operation := operation
     visibilityPolicy := payload.visibilityPolicy

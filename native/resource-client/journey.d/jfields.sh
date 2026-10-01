@@ -165,23 +165,23 @@ got=$(delegate "$BW" narrow-1 ledger "$SPONSOR_SUBJECT" '["observe"]' '{"fields"
 record r-redelegates-1 installed "$got" "$(tail -1 "$D/narrow-1.err" | cut -c1-160)"
 
 # ---- paper (content): fields {annotations}  (PLACE J12d)
-run create-paper "$MINI" workspace --action create --dir "$SPONSOR_WS" --name paper --storage content --predicate "$P"
+run create-paper "$MINI" workspace --action create --dir "$SPONSOR_WS" --name fpaper --storage content --predicate "$P"
 must create-paper
-content paper '{"type":"createAtom","atom":"501","kind":{"type":"text"},"payload":"68656c6c6f"}' >"$D/req/p-atom.json"
+content fpaper '{"type":"createAtom","atom":"501","kind":{"type":"text"},"payload":"68656c6c6f"}' >"$D/req/p-atom.json"
 [ "$(invoke "$SPONSOR_WS" p-init "$D/req/p-atom.json")" = installed ] || { echo "paper init failed: $(tail -1 "$D/p-init.err")" >&2; exit 1; }
-[ "$(delegate "$SPONSOR_WS" give-reviewer paper "$NEWCOMER_SUBJECT" '["observe","mutate"]' '{"fields":["annotations"]}')" = installed ] \
+[ "$(delegate "$SPONSOR_WS" give-reviewer fpaper "$NEWCOMER_SUBJECT" '["observe","mutate"]' '{"fields":["annotations"]}')" = installed ] \
   || { echo "reviewer delegation failed: $(tail -1 "$D/give-reviewer.err")" >&2; exit 1; }
-run rv-import "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name paper \
+run rv-import "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name fpaper \
   --from-ref "$SPONSOR_WS/proposals/give-reviewer/recipient-reference.json"; must rv-import
-content paper '{"type":"link","link":"601","source":null,"target":{"type":"external","scheme":"6874747073","authority":"6578616d706c65","path":"2f"},"relation":"1"}' >"$D/req/rv-link.json"
+content fpaper '{"type":"link","link":"601","source":null,"target":{"type":"external","scheme":"6874747073","authority":"6578616d706c65","path":"2f"},"relation":"1"}' >"$D/req/rv-link.json"
 row_invoke rv-annotates installed "$NEWCOMER_WS" "$D/req/rv-link.json"
-content paper '{"type":"createAtom","atom":"502","kind":{"type":"text"},"payload":"6564697473"}' >"$D/req/rv-atom.json"
+content fpaper '{"type":"createAtom","atom":"502","kind":{"type":"text"},"payload":"6564697473"}' >"$D/req/rv-atom.json"
 row_invoke rv-edits-body refused "$NEWCOMER_WS" "$D/req/rv-atom.json" fieldNotNamed
-run rv-reads "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name paper
+run rv-reads "$MINI" workspace --action read --dir "$NEWCOMER_WS" --name fpaper
 types=$(jq -r '[.cell.entries[]?.type] | sort | unique | join(",")' "$D/rv-reads.out" 2>/dev/null)
 [ "$(cat "$D/rv-reads.rc")" = 0 ] && [ "$types" = link ] && got=read || got=wrong
 record rv-reads read "$got" "entry types: $types"
-run a-reads-paper "$MINI" workspace --action read --dir "$SPONSOR_WS" --name paper
+run a-reads-paper "$MINI" workspace --action read --dir "$SPONSOR_WS" --name fpaper
 atypes=$(jq -r '[.cell.entries[]?.type] | sort | unique | join(",")' "$D/a-reads-paper.out" 2>/dev/null)
 [ "$(cat "$D/a-reads-paper.rc")" = 0 ] && [ "$atypes" = atom,link ] && got=read || got=wrong
 record a-reads-paper read "$got" "entry types: $atypes"
