@@ -14,6 +14,7 @@ import Theory.GuardedAdvice  -- eager hole shape, typed late advice, total verif
 import Theory.ReactiveReceipt  -- authoritative receipt deltas, dependency-local reactive projections, atomic rejection, and witness-cursor snapshots
 import Theory.ReactiveController  -- Lean-owned guarded-hole/reactive control derives Pending/Reject/CommitIntent from data-only host observations; physical CAS remains external
 import Theory.Store  -- the one typed sparse store and guarded patch: layouts with ROM/RAM/append-only disciplines, `run` as the free-monoid action, prefix validity, syntactic footprints, and the one frame law
+import Theory.StoreNormalize  -- the normal form of a guarded patch: fuse each operation with the next at its address, keep every guard that can fail; under validity the write footprint is exactly the changed addresses
 import Theory.CellState  -- canonical cells over `Theory.Store`: materialization with the root a function of the logical store, and validated patches (quoted pre-root + prefix validity)
 import Theory.CellStateWitness  -- ANTI-VACUITY: two closed layouts with concrete lawful codecs whose patches reach `ValidatedPatch` through `validate`, plus stale-root, stale-guard and allocate-over-present rejections computed
 import Theory.TypedAuthorizationWitness  -- ANTI-VACUITY: a built portal/state/request that reaches `Authorized`, with the policy gate and the epoch equation shown load-bearing as refutations (evidence exists; authority does not follow)
