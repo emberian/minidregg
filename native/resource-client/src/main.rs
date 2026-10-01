@@ -257,7 +257,10 @@ const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-hos
 
 usage:
   mini keygen --secret KEY --public PUBLIC [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
-  mini workspace --action init|import|list|describe|read|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini enc-public --secret KEY
+  mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
+  mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
+  mini workspace --action room-key --op found|sync|invite|rotate|kick|list|open|forget --dir WORKSPACE --name ROOM [op options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action seal|submit|lookup --dir ATTEMPT
   mini shell --socket SOCKET --host HOST --config CONFIG.json --workspace WORKSPACE --home SESSION-HOME [--line LINE]
@@ -2474,6 +2477,43 @@ fn run(mut args: Args) -> Result<()> {
             io::stdout()
                 .write_all(&output.stdout)
                 .map_err(|e| format!("cannot print host output: {e}"))
+        }
+        // The X25519 public key a private room's inviter wraps the room key to,
+        // derived from the same seed the signing key file holds.
+        "enc-public" => {
+            if socket_argument.is_some() {
+                return Err("enc-public does not use a host socket".to_owned());
+            }
+            let secret = path(args.required("secret")?);
+            args.finish()?;
+            println!("{}", workspace::roomkey::enc_public_hex(&secret)?);
+            Ok(())
+        }
+        // D3 (b): the sponsor opens a friend's escrowed seed (written by
+        // `keygen --escrow-to-sponsor`) into a new key file, which signs as the
+        // friend. Only the sponsor's X25519 key opens it, bound to the subject.
+        "escrow-recover" => {
+            if socket_argument.is_some() {
+                return Err("escrow-recover does not use a host socket".to_owned());
+            }
+            let escrow = path(args.required("escrow")?);
+            let sponsor = path(args.required("sponsor-secret")?);
+            let subject = args.required("subject")?;
+            let secret = path(args.required("secret")?);
+            args.finish()?;
+            let subject = subject.to_str().ok_or("--subject must be UTF-8")?.to_owned();
+            let wrapped = workspace::private::Wrapped::from_bytes(
+                &fs::read(&escrow).map_err(|e| format!("cannot read {}: {e}", escrow.display()))?,
+            )?;
+            let sponsor_secret =
+                workspace::private::derive_enc_key(&*workspace::roomkey::seed_of(&sponsor)?);
+            let seed = workspace::private::recover_escrowed_seed(&subject, &sponsor_secret, &wrapped)?;
+            if secret.exists() {
+                return Err(format!("refusing to replace {}", secret.display()));
+            }
+            create_private(&secret, &seed[..])?;
+            println!("{}", hex(&SigningKey::from_bytes(&seed).verifying_key().to_bytes()));
+            Ok(())
         }
         "keygen" => {
             // Refuse a socket named for this command; a session (`mini shell`)

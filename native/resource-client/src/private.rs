@@ -1,21 +1,23 @@
-//! `PrivateEnvelope/v1`: a content-cell value the operator stores and cannot read.
+//! `PrivateEnvelope/v2`: a value the operator stores and cannot read.
 //!
 //! The kernel sees an atom `inlineObject(PRIVATE schema)` whose payload is the
-//! envelope bytes; content laws are computed from counts and byte sizes only
-//! (`Kernel/ContentResource.lean`, `project`), so nothing here is checked by the
-//! host. Members hold the room key; the operator holds ciphertext, the epoch, the
-//! commitment and a 64-byte size class. Design: PRIVACY.md §3.1; operator view and
-//! key-loss policy: `docs/PRIVATE-CELL.md`.
+//! envelope bytes, or a stream entry whose payload is the envelope bytes; content
+//! laws are computed from counts and byte sizes only (`Kernel/ContentResource.lean`,
+//! `project`), so nothing here is checked by the host. Members hold the room key;
+//! the operator holds ciphertext, the epoch, the commitment and a size class: every
+//! envelope is a whole number of 64-byte blocks (`envelope_len`). Design:
+//! PRIVACY.md §3.1, §3.6; operator view and key-loss policy: `docs/PRIVATE-CELL.md`.
+//!
+//! v1 -> v2 (lane PRIVATE-ROOMS): v1 padded the value to 64 bytes inside a 133-byte
+//! overhead, so envelopes were 133 + 64k bytes. v2 pads so the WHOLE envelope is a
+//! multiple of 64 (what the operator measures on the wire); a v1 frame refuses.
 //!
 //! Every derivation is cSHAKE256 with its own customization string, every input
 //! length-prefixed. One secret per friend: the 32-byte seed `keygen` writes signs
 //! (Ed25519, as before) and, through `derive_enc_key`, decrypts (X25519).
 //!
-//! Only `seal_content`/`open_view` and the cache loader are reachable from the
-//! binary today (the `--private ROOM` hook in `workspace`). Wrap, rekey, cache
-//! save, enc-key derivation and escrow are exercised by the tests and consumed by
-//! row 7 (the room-key verbs); that lane deletes the allowance below.
-#![cfg_attr(not(test), allow(dead_code))]
+//! The room-key protocol that hands these keys out (wraps in the room's `keys`
+//! cell, rotation on a kick, the cache sync) is `roomkey.rs`.
 
 use crate::{hex, Result};
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -32,11 +34,10 @@ use std::path::Path;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::{Zeroize, Zeroizing};
 
-pub(crate) const ENVELOPE_FRAME: &[u8] = b"DREGG/PRIVATE-CELL/v1";
-const WRAP_FRAME: &[u8] = b"DREGG/PRIVATE-WRAP/v1";
+pub(crate) const ENVELOPE_FRAME: &[u8] = b"DREGG/PRIVATE-CELL/v2";
+pub(crate) const WRAP_FRAME: &[u8] = b"DREGG/PRIVATE-WRAP/v1";
 const ESCROW_FRAME: &[u8] = b"DREGG/SEED-ESCROW/v1";
-const CACHE_FRAME: &[u8] = b"DREGG/PRIVATE-KEYCACHE/v1";
-const KEYS_RECORD: &str = "DREGG/PRIVATE-KEYS/v1";
+const CACHE_FRAME: &[u8] = b"DREGG/PRIVATE-KEYCACHE/v2";
 const COMMIT_LABEL: &[u8] = b"DREGG.PRIVATE-CELL.COMMIT/v1";
 const SCHEMA_LABEL: &[u8] = b"DREGG.PRIVATE-CELL.SCHEMA/v1";
 const ENC_LABEL: &[u8] = b"DREGG.CLIENT.ENC/v1";
@@ -50,7 +51,9 @@ const TAG: usize = 16;
 const KEY: usize = 32;
 const MAX_PLAINTEXT: usize = 1 << 20;
 const HEADER: usize = ENVELOPE_FRAME.len() + 4 + 32 + NONCE;
-const WRAPPED_LEN: usize = 32 + NONCE + KEY + TAG;
+/// Everything in an envelope but the padded value: header, blinder, length, tag.
+const OVERHEAD: usize = HEADER + BLINDER + LENGTH + TAG;
+pub(crate) const WRAPPED_LEN: usize = 32 + NONCE + KEY + TAG;
 const SALT: usize = 16;
 /// Argon2id, RFC 9106 §4 second recommendation minus lanes: 64 MiB, 3 passes, 1 lane.
 const ARGON_MEMORY_KIB: u32 = 64 * 1024;
@@ -123,8 +126,13 @@ pub(crate) struct Place<'a> {
 /// The kernel schema digest of a private atom: cSHAKE256 of the frame, as the
 /// unsigned big-endian integer the host's decimal `Digest` carries.
 pub(crate) fn schema_decimal() -> String {
+    schema_decimal_of(ENVELOPE_FRAME)
+}
+
+/// The schema digest of an atom whose payload is framed by `frame`.
+pub(crate) fn schema_decimal_of(frame: &[u8]) -> String {
     let mut digits = Vec::new();
-    let mut value = cshake(SCHEMA_LABEL, &[ENVELOPE_FRAME]).to_vec();
+    let mut value = cshake(SCHEMA_LABEL, &[frame]).to_vec();
     while value.iter().any(|byte| *byte != 0) {
         let mut remainder = 0u32;
         for byte in value.iter_mut() {
@@ -158,13 +166,13 @@ impl RoomKey {
         })
     }
 
-    /// Kick = revoke (kernel) + `rotate` + `KeysRecord::for_members` of the rest.
-    pub(crate) fn rotate(&self) -> Result<Self> {
-        Self::generate(
-            self.epoch
-                .checked_add(1)
-                .ok_or("room-key epoch exhausted")?,
-        )
+    pub(crate) fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
+    #[cfg(test)]
+    pub(crate) fn bytes(&self) -> [u8; KEY] {
+        *self.key
     }
 
     fn from_parts(epoch: u32, key: [u8; KEY]) -> Self {
@@ -177,9 +185,12 @@ impl RoomKey {
 
 /// Every room key this client holds, by room id and epoch. Old epochs are kept:
 /// a member who is later removed still opens what was sealed while it belonged.
+/// `forgotten` records epochs this client deleted on purpose, so a sync of the
+/// room's keys cell does not unwrap them again.
 #[derive(Default)]
 pub(crate) struct Keyring {
     rooms: BTreeMap<String, BTreeMap<u32, Zeroizing<[u8; KEY]>>>,
+    forgotten: BTreeMap<String, std::collections::BTreeSet<u32>>,
 }
 
 impl Keyring {
@@ -200,26 +211,60 @@ impl Keyring {
         Some(RoomKey::from_parts(*epoch, **key))
     }
 
-    /// Crypto-shred one epoch locally (PRIVACY §3.6 `forget`).
+    /// The epochs held for `room`, ascending.
+    pub(crate) fn epochs(&self, room: &str) -> Vec<u32> {
+        self.rooms.get(room).map(|e| e.keys().copied().collect()).unwrap_or_default()
+    }
+
+    /// Delete one epoch locally and remember it as forgotten (PRIVACY §3.6 `forget`).
     pub(crate) fn forget(&mut self, room: &str, epoch: u32) -> bool {
-        self.rooms
+        let held = self
+            .rooms
             .get_mut(room)
-            .is_some_and(|epochs| epochs.remove(&epoch).is_some())
+            .is_some_and(|epochs| epochs.remove(&epoch).is_some());
+        if held {
+            self.forgotten.entry(room.to_owned()).or_default().insert(epoch);
+        }
+        held
+    }
+
+    pub(crate) fn is_forgotten(&self, room: &str, epoch: u32) -> bool {
+        self.forgotten.get(room).is_some_and(|e| e.contains(&epoch))
+    }
+
+    pub(crate) fn forgotten(&self, room: &str) -> Vec<u32> {
+        self.forgotten.get(room).map(|e| e.iter().copied().collect()).unwrap_or_default()
     }
 }
 
 // ---------------------------------------------------------------- envelope
 
-/// The padded length of a value: the smallest positive multiple of 64 that holds
-/// it. Values of 0..=64 bytes are one class, 65..=128 the next.
-pub(crate) fn padded_len(len: usize) -> usize {
-    len.max(1).div_ceil(BUCKET) * BUCKET
+/// The length of the envelope that carries a `len`-byte value: the smallest
+/// multiple of 64 that holds the value and the 133-byte overhead. Values of
+/// 0..=59 bytes are one class (192), 60..=123 the next (256), and so on.
+pub(crate) fn envelope_len(len: usize) -> usize {
+    (OVERHEAD + len).div_ceil(BUCKET) * BUCKET
 }
 
-pub(crate) fn pad64(value: &[u8]) -> Vec<u8> {
+/// The zero-padded value region inside the ciphertext for a `len`-byte value.
+pub(crate) fn padded_len(len: usize) -> usize {
+    envelope_len(len) - OVERHEAD
+}
+
+/// The largest value an envelope of at most `limit` bytes can carry.
+pub(crate) fn max_value_within(limit: usize) -> usize {
+    (limit / BUCKET * BUCKET).saturating_sub(OVERHEAD)
+}
+
+fn pad(value: &[u8]) -> Vec<u8> {
     let mut padded = value.to_vec();
     padded.resize(padded_len(value.len()), 0);
     padded
+}
+
+/// What a reader without the epoch's key is shown: never a guess.
+pub(crate) fn sealed_marker(epoch: u32) -> String {
+    format!("[sealed under epoch {epoch} — you do not hold that key]")
 }
 
 fn place_parts<'a>(place: &Place<'a>) -> [&'a [u8]; 3] {
@@ -288,7 +333,7 @@ fn seal_committed(
     ));
     inner.extend_from_slice(&blinder);
     inner.extend_from_slice(&(value.len() as u32).to_be_bytes());
-    inner.extend_from_slice(&pad64(value));
+    inner.extend_from_slice(&pad(value));
     let nonce = random::<NONCE>()?;
     let ct = aead(&key.key)
         .encrypt(
@@ -341,11 +386,14 @@ pub(crate) fn open(
     {
         return Err("private envelope has non-canonical padding".into());
     }
-    let value = padded[..len].to_vec();
-    if commitment(place, envelope.epoch, &blinder, &value) != envelope.commit {
+    let opened = Opened {
+        value: padded[..len].to_vec(),
+        blinder,
+    };
+    if !verify_commit(place, envelope.epoch, &opened, &envelope.commit) {
         return Err("private envelope commitment does not match its plaintext".into());
     }
-    Ok(Opened { value, blinder })
+    Ok(opened)
 }
 
 /// A law or referee holding an opening checks it with this (K-PRED-HASHEQ later).
@@ -373,9 +421,7 @@ impl PrivateEnvelope {
         let body = bytes
             .strip_prefix(ENVELOPE_FRAME)
             .ok_or("not a DREGG/PRIVATE-CELL/v1 envelope")?;
-        let ct_len = bytes.len().saturating_sub(HEADER);
-        let min_ct = BLINDER + LENGTH + BUCKET + TAG;
-        if bytes.len() < HEADER + min_ct || (ct_len - min_ct) % BUCKET != 0 {
+        if bytes.len() < envelope_len(0) || bytes.len() % BUCKET != 0 {
             return Err("private envelope has an invalid length".into());
         }
         Ok(Self {
@@ -546,122 +592,6 @@ pub(crate) fn recover_escrowed_seed(
     open_from(ESCROW_FRAME, &[subject.as_bytes()], sponsor, wrapped)
 }
 
-// ---------------------------------------------------------------- R/keys
-
-/// The `R/keys` record for one epoch: one wrap per current member, as JSON bytes
-/// for a content atom under R. A member missing from the list has no key for it.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct KeysRecord {
-    pub(crate) room: String,
-    pub(crate) epoch: u32,
-    pub(crate) wrapped: Vec<(String, Wrapped)>,
-}
-
-impl KeysRecord {
-    pub(crate) fn for_members(
-        room: &str,
-        key: &RoomKey,
-        members: &[(&str, PublicKey)],
-    ) -> Result<Self> {
-        let mut wrapped = Vec::with_capacity(members.len());
-        for (member, public) in members {
-            wrapped.push((
-                member.to_string(),
-                wrap_room_key(room, member, public, key)?,
-            ));
-        }
-        wrapped.sort_by(|left, right| left.0.cmp(&right.0));
-        if wrapped.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-            return Err("duplicate member in room-key record".into());
-        }
-        Ok(Self {
-            room: room.to_owned(),
-            epoch: key.epoch,
-            wrapped,
-        })
-    }
-
-    pub(crate) fn open_for(&self, member: &str, secret: &StaticSecret) -> Result<RoomKey> {
-        let (_, wrap) = self
-            .wrapped
-            .iter()
-            .find(|(id, _)| id == member)
-            .ok_or_else(|| format!("no key for epoch {}: {member} has no wrap", self.epoch))?;
-        unwrap_room_key(&self.room, self.epoch, member, secret, wrap)
-    }
-
-    pub(crate) fn to_bytes(&self) -> Vec<u8> {
-        let wrapped: Vec<Value> = self
-            .wrapped
-            .iter()
-            .map(|(member, wrap)| json!({"member": member, "wrap": hex(&wrap.to_bytes())}))
-            .collect();
-        serde_json::to_vec(&json!({"type": KEYS_RECORD, "room": self.room,
-            "epoch": self.epoch.to_string(), "wrapped": wrapped}))
-        .expect("keys record serializes")
-    }
-
-    pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let value: Value =
-            serde_json::from_slice(bytes).map_err(|e| format!("keys record: {e}"))?;
-        let object = value.as_object().ok_or("keys record must be an object")?;
-        if object.len() != 4 || object.get("type").and_then(Value::as_str) != Some(KEYS_RECORD) {
-            return Err("not a DREGG/PRIVATE-KEYS/v1 record".into());
-        }
-        let text = |key: &str| {
-            object
-                .get(key)
-                .and_then(Value::as_str)
-                .ok_or(format!("keys record lacks {key}"))
-        };
-        let epoch_text = text("epoch")?;
-        let epoch: u32 = epoch_text.parse().map_err(|_| "keys record epoch")?;
-        if epoch.to_string() != epoch_text {
-            return Err("keys record epoch must be canonical decimal".into());
-        }
-        let mut wrapped = Vec::new();
-        for entry in object
-            .get("wrapped")
-            .and_then(Value::as_array)
-            .ok_or("keys record lacks wrapped")?
-        {
-            let entry = entry
-                .as_object()
-                .filter(|e| e.len() == 2)
-                .ok_or("wrap entry has unexpected fields")?;
-            let member = entry
-                .get("member")
-                .and_then(Value::as_str)
-                .ok_or("wrap entry lacks member")?;
-            let wrap = entry
-                .get("wrap")
-                .and_then(Value::as_str)
-                .ok_or("wrap entry lacks wrap")?;
-            wrapped.push((member.to_owned(), Wrapped::from_bytes(&decode_hex(wrap)?)?));
-        }
-        if wrapped.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
-            return Err("keys record members must be strictly sorted".into());
-        }
-        Ok(Self {
-            room: text("room")?.to_owned(),
-            epoch,
-            wrapped,
-        })
-    }
-}
-
-/// Kick: a fresh key at `epoch + 1` wrapped for `remaining` only. The kernel half
-/// (revoke the capability, bump `epoch` under R's law) is not this module's.
-pub(crate) fn rekey(
-    room: &str,
-    current: &RoomKey,
-    remaining: &[(&str, PublicKey)],
-) -> Result<(RoomKey, KeysRecord)> {
-    let next = current.rotate()?;
-    let record = KeysRecord::for_members(room, &next, remaining)?;
-    Ok((next, record))
-}
-
 // ---------------------------------------------------------------- key cache
 
 fn passphrase_key(passphrase: &[u8], salt: &[u8; SALT]) -> Result<Zeroizing<[u8; KEY]>> {
@@ -688,8 +618,14 @@ pub(crate) fn save_cache(path: &Path, passphrase: &[u8], keys: &Keyring) -> Resu
             .collect();
         rooms.insert(room.clone(), Value::Object(epochs));
     }
-    let plain =
-        Zeroizing::new(serde_json::to_vec(&json!({"rooms": rooms})).map_err(|e| e.to_string())?);
+    let forgotten: Map<String, Value> = keys
+        .forgotten
+        .iter()
+        .map(|(room, epochs)| (room.clone(), json!(epochs.iter().map(u32::to_string).collect::<Vec<_>>())))
+        .collect();
+    let plain = Zeroizing::new(
+        serde_json::to_vec(&json!({"rooms": rooms, "forgotten": forgotten})).map_err(|e| e.to_string())?,
+    );
     let salt = random::<SALT>()?;
     let nonce = random::<NONCE>()?;
     let header = [CACHE_FRAME, &salt, &nonce].concat();
@@ -727,7 +663,7 @@ pub(crate) fn load_cache(path: &Path, passphrase: &[u8]) -> Result<Keyring> {
         || bytes.len() < header_len + TAG
         || !bytes.starts_with(CACHE_FRAME)
     {
-        return Err("not a DREGG/PRIVATE-KEYCACHE/v1 file".into());
+        return Err("not a DREGG/PRIVATE-KEYCACHE/v2 file".into());
     }
     let salt: [u8; SALT] = fixed(&bytes[CACHE_FRAME.len()..CACHE_FRAME.len() + SALT], "salt")?;
     let nonce = &bytes[CACHE_FRAME.len() + SALT..header_len];
@@ -758,6 +694,19 @@ pub(crate) fn load_cache(path: &Path, passphrase: &[u8]) -> Result<Keyring> {
             let key = fixed::<KEY>(&raw, "room key")?;
             raw.zeroize();
             keys.insert(room, &RoomKey::from_parts(epoch, key));
+        }
+    }
+    for (room, epochs) in value
+        .get("forgotten")
+        .and_then(Value::as_object)
+        .ok_or("key cache lacks forgotten")?
+    {
+        for epoch in epochs.as_array().ok_or("key cache forgotten epochs must be a list")? {
+            let epoch: u32 = epoch
+                .as_str()
+                .and_then(|e| e.parse().ok())
+                .ok_or("key cache forgotten epoch")?;
+            keys.forgotten.entry(room.clone()).or_default().insert(epoch);
         }
     }
     Ok(keys)
@@ -827,7 +776,8 @@ pub(crate) fn seal_content(lowered: Value, room: &str, cell: &str, key: &RoomKey
 
 /// `workspace read --private ROOM`: annotate every private atom in a signed view.
 /// With the epoch key: `private: {epoch, commit, text|hex}`. Without it:
-/// `private: "[private: epoch N, commit …]"`. A failed open is annotated, not hidden.
+/// `private: "[sealed under epoch N — you do not hold that key]"`. A failed open
+/// is annotated, not hidden.
 pub(crate) fn open_view(view: &mut Value, room: &str, cell: &str, keys: Option<&Keyring>) -> usize {
     let schema = schema_decimal();
     let mut count = 0;
@@ -884,11 +834,7 @@ fn private_note(
         Ok(envelope) => envelope,
         Err(error) => return json!({"refused": error}),
     };
-    let label = format!(
-        "[private: epoch {}, commit {}]",
-        envelope.epoch,
-        hex(&envelope.commit)
-    );
+    let label = sealed_marker(envelope.epoch);
     let Some(keys) = keys else {
         return Value::String(label);
     };
@@ -914,16 +860,6 @@ fn private_note(
         Err(error) if error.starts_with("no key for epoch") => Value::String(label),
         Err(error) => json!({"refused": error, "label": label}),
     }
-}
-
-/// The key cache of a workspace, opened with `MINI_KEYCACHE_PASSPHRASE`. Absent
-/// passphrase: `None` (reads print labels; writes refuse). Wrong passphrase: error.
-pub(crate) fn workspace_keys(root: &Path) -> Result<Option<Keyring>> {
-    let Some(passphrase) = std::env::var_os(KEYCACHE_PASSPHRASE_ENV) else {
-        return Ok(None);
-    };
-    let passphrase = Zeroizing::new(passphrase.into_encoded_bytes());
-    load_cache(&root.join("private").join("keys.cache"), &passphrase).map(Some)
 }
 
 #[cfg(test)]
@@ -1031,19 +967,22 @@ mod tests {
     }
 
     #[test]
-    fn pad64_hides_length_within_64_byte_classes() {
+    fn every_envelope_is_whole_64_byte_blocks_and_hides_length_within_a_class() {
         let key = RoomKey::generate(0).unwrap();
         let size = |n: usize| seal(&key, &PLACE, &vec![b'a'; n]).unwrap().to_bytes().len();
-        let first = size(1);
-        for n in 0..=64 {
-            assert_eq!(size(n), first, "length {n}");
+        for n in 0..=600 {
+            assert_eq!(size(n) % 64, 0, "length {n}");
+            assert_eq!(size(n), envelope_len(n), "length {n}");
         }
-        assert_eq!(size(65), first + 64);
-        assert_eq!(size(128), first + 64);
-        assert_eq!(size(129), first + 128);
-        assert_eq!(pad64(b"abc").len(), 64);
-        assert_eq!(pad64(&[1; 64]).len(), 64);
-        assert_eq!(pad64(&[1; 65]).len(), 128);
+        for n in 0..=59 {
+            assert_eq!(size(n), 192, "length {n}");
+        }
+        assert_eq!(size(60), 256);
+        assert_eq!(size(123), 256);
+        assert_eq!(size(124), 320);
+        assert_eq!(max_value_within(4096), 3963);
+        assert_eq!(envelope_len(3963), 4096);
+        assert_eq!(envelope_len(3964), 4160);
     }
 
     #[test]
@@ -1053,7 +992,7 @@ mod tests {
         assert!(PrivateEnvelope::from_bytes(&bytes[..bytes.len() - 1]).is_err());
         assert!(PrivateEnvelope::from_bytes(&[bytes.clone(), vec![0]].concat()).is_err());
         let mut frame = bytes;
-        frame[20] = b'2';
+        frame[20] = b'1';
         assert!(PrivateEnvelope::from_bytes(&frame)
             .err()
             .unwrap()
@@ -1064,23 +1003,18 @@ mod tests {
     fn wrap_opens_for_its_member_and_not_another() {
         let s = enc_public(&[1; 32]);
         let key = RoomKey::generate(3).unwrap();
-        let record = KeysRecord::for_members("71", &key, &[("11", s)]).unwrap();
-        let parsed = KeysRecord::from_bytes(&record.to_bytes()).unwrap();
-        assert_eq!(parsed, record);
-        let opened = parsed.open_for("11", &derive_enc_key(&[1; 32])).unwrap();
+        let wrap = Wrapped::from_bytes(&wrap_room_key("71", "11", &s, &key).unwrap().to_bytes())
+            .unwrap();
+        let opened = unwrap_room_key("71", 3, "11", &derive_enc_key(&[1; 32]), &wrap).unwrap();
         assert_eq!((opened.epoch, *opened.key), (3, *key.key));
-        let wrap = &parsed.wrapped[0].1;
-        let wrong = unwrap_room_key("71", 3, "11", &derive_enc_key(&[2; 32]), wrap);
+        let wrong = unwrap_room_key("71", 3, "11", &derive_enc_key(&[2; 32]), &wrap);
         assert!(wrong.err().unwrap().contains("does not open"));
-        let relabelled = unwrap_room_key("71", 3, "12", &derive_enc_key(&[1; 32]), wrap);
+        let relabelled = unwrap_room_key("71", 3, "12", &derive_enc_key(&[1; 32]), &wrap);
         assert!(relabelled.is_err(), "a wrap is bound to its member id");
-        let other_epoch = unwrap_room_key("71", 4, "11", &derive_enc_key(&[1; 32]), wrap);
+        let other_epoch = unwrap_room_key("71", 4, "11", &derive_enc_key(&[1; 32]), &wrap);
         assert!(other_epoch.is_err(), "a wrap is bound to its epoch");
-        assert!(parsed
-            .open_for("12", &derive_enc_key(&[2; 32]))
-            .err()
-            .unwrap()
-            .contains("no key for epoch 3"));
+        let other_room = unwrap_room_key("70", 3, "11", &derive_enc_key(&[1; 32]), &wrap);
+        assert!(other_room.is_err(), "a wrap is bound to its room");
     }
 
     #[test]
@@ -1091,38 +1025,6 @@ mod tests {
             .err()
             .unwrap()
             .contains("low-order"));
-    }
-
-    #[test]
-    fn rotation_opens_new_epoch_not_old_and_kicked_keeps_the_past() {
-        let (a_seed, b_seed) = ([1u8; 32], [2u8; 32]);
-        let members = [("11", enc_public(&a_seed)), ("12", enc_public(&b_seed))];
-        let e0 = RoomKey::generate(0).unwrap();
-        let r0 = KeysRecord::for_members("71", &e0, &members).unwrap();
-        let old = seal(&e0, &PLACE, b"before the kick").unwrap();
-        let (e1, r1) = rekey("71", &e0, &members[..1]).unwrap();
-        assert_eq!(e1.epoch, 1);
-        let new = seal(&e1, &PLACE, b"after the kick").unwrap();
-
-        let mut b = Keyring::default();
-        b.insert("71", &r0.open_for("12", &derive_enc_key(&b_seed)).unwrap());
-        assert!(r1
-            .open_for("12", &derive_enc_key(&b_seed))
-            .err()
-            .unwrap()
-            .contains("no key for epoch 1"));
-        assert_eq!(open(&b, &PLACE, &old).unwrap().value, b"before the kick");
-        assert_eq!(open(&b, &PLACE, &new).err().unwrap(), "no key for epoch 1");
-
-        let mut a = Keyring::default();
-        a.insert("71", &r1.open_for("11", &derive_enc_key(&a_seed)).unwrap());
-        assert_eq!(open(&a, &PLACE, &old).err().unwrap(), "no key for epoch 0");
-        a.insert("71", &r0.open_for("11", &derive_enc_key(&a_seed)).unwrap());
-        assert_eq!(open(&a, &PLACE, &new).unwrap().value, b"after the kick");
-        assert_eq!(open(&a, &PLACE, &old).unwrap().value, b"before the kick");
-        assert_eq!(a.latest("71").unwrap().epoch, 1);
-        assert!(a.forget("71", 0));
-        assert_eq!(open(&a, &PLACE, &old).err().unwrap(), "no key for epoch 0");
     }
 
     #[test]
@@ -1153,7 +1055,7 @@ mod tests {
         let dir = scratch("cache");
         let path = dir.join("keys.cache");
         let e0 = RoomKey::generate(0).unwrap();
-        let e1 = e0.rotate().unwrap();
+        let e1 = RoomKey::generate(1).unwrap();
         let mut keys = ring(&e0);
         keys.insert(PLACE.room, &e1);
         save_cache(&path, b"correct horse", &keys).unwrap();
@@ -1202,7 +1104,7 @@ mod tests {
         let mut without = view.clone();
         assert_eq!(open_view(&mut without, "71", "72", None), 1);
         let label = without["cell"]["entries"][0]["private"].as_str().unwrap();
-        assert!(label.starts_with("[private: epoch 2, commit "), "{label}");
+        assert_eq!(label, "[sealed under epoch 2 — you do not hold that key]");
         let mut with = view.clone();
         open_view(&mut with, "71", "72", Some(&ring(&key)));
         assert_eq!(

@@ -19,10 +19,15 @@ const MAX_RECORD: u64 = 256 * 1024;
 /// A Nock program birth carries the program (jam + ABI) as hex in its source.
 const MAX_PROGRAM_SOURCE: u64 = 4 * 1024 * 1024;
 
-/// Client-side private-cell codec (`PrivateEnvelope/v1`); hooked into `propose`
-/// and `read` by `--private ROOM`. See `docs/PRIVATE-CELL.md`.
+/// Client-side private-cell codec (`PrivateEnvelope/v2`); hooked into `propose`,
+/// `read` and `tail` by `--private ROOM` (or a reference born in a private room).
+/// See `docs/PRIVATE-CELL.md`.
 #[path = "private.rs"]
 pub(crate) mod private;
+/// The room-key protocol of a private room: wraps in the room's keys cell,
+/// rotation on a kick, the cache sync, sealing stream entries.
+#[path = "roomkey.rs"]
+pub(crate) mod roomkey;
 
 pub(crate) fn decimal(value: &str, field: &str) -> Result<()> {
     if value.is_empty()
@@ -487,7 +492,13 @@ fn import_delegated(root: &Path, workspace: &Value, name: &str, source: &Path) -
             provenance: Some(source),
             room: (value.get("room") == Some(&json!(true))).then_some("member"),
         },
-    )
+    )?;
+    if let Some(private) = value.get("private") {
+        let mut imported = reference(root, name)?;
+        imported["private"] = private.clone();
+        roomkey::rewrite_reference(root, name, &imported)?;
+    }
+    Ok(())
 }
 
 fn list(root: &Path) -> Result<()> {
@@ -777,22 +788,10 @@ fn stream_append(payload: &Value) -> Result<Value> {
         "payload":to_hex(text.as_bytes()),"to":to,"ref":reference}))
 }
 
-/// The room named by a workspace reference, and its latest key from the cache.
-fn private_room(root: &Path, room: &str) -> Result<(String, private::RoomKey)> {
-    let room_id = member(&reference(root, room)?, "target")?.to_owned();
-    let keys = private::workspace_keys(root)?
-        .ok_or("--private needs the key cache: set MINI_KEYCACHE_PASSPHRASE")?;
-    let key = keys
-        .latest(&room_id)
-        .ok_or_else(|| format!("no room key for {room} in the key cache"))?;
-    Ok((room_id, key))
-}
-
 fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str) -> Result<()> {
-    let room_id = member(&reference(root, room)?, "target")?.to_owned();
+    let (room_id, keys) = roomkey::reader_keys(root, workspace, room)?;
     let reference = reference(root, resource_name)?;
     let (mut view, _, _) = signed_view(root, workspace, &reference, "resource")?;
-    let keys = private::workspace_keys(root)?;
     let count = private::open_view(
         &mut view,
         &room_id,
@@ -807,6 +806,14 @@ fn read_private(root: &Path, workspace: &Value, resource_name: &str, room: &str)
     Ok(())
 }
 
+/// The private room a target is sealed under: the proposal's `--private ROOM`,
+/// or the room its reference was born in (`sealedIn`).
+fn sealing_room(explicit: Option<&str>, reference: &Value) -> Option<String> {
+    explicit
+        .map(str::to_owned)
+        .or_else(|| reference.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
+}
+
 fn propose(
     root: &Path,
     workspace: &Value,
@@ -819,13 +826,12 @@ fn propose(
     if member(&request, "type")? != "minidregg-workspace-proposal-v1" {
         return Err("unknown workspace proposal version".into());
     }
-    let sealing = match private_room_name {
-        Some(_) if member(&request, "action")? != "invoke" => {
-            return Err("--private applies to invoke proposals only".into())
-        }
-        Some(room) => Some(private_room(root, room)?),
-        None => None,
-    };
+    if private_room_name.is_some() && member(&request, "action")? != "invoke" {
+        return Err("--private applies to invoke proposals only".into());
+    }
+    // One sync per private room this proposal seals under.
+    let mut room_keys: std::collections::BTreeMap<String, (String, private::RoomKey)> =
+        std::collections::BTreeMap::new();
     let nonce = random_nonce()?;
     let mut delegation = None::<Value>;
     let intent = match member(&request, "action")? {
@@ -898,11 +904,37 @@ fn propose(
                 let payload_obj = payload
                     .as_object()
                     .ok_or("target payload must be an object")?;
-                let lowered = if member(payload, "type")? == "append" {
-                    if sealing.is_some() {
-                        return Err("--private seals content payloads only".into());
+                let sealing = match sealing_room(private_room_name, &reference) {
+                    None => None,
+                    Some(room) => {
+                        if !room_keys.contains_key(&room) {
+                            let key = roomkey::current_key(root, workspace, &room)?;
+                            room_keys.insert(room.clone(), key);
+                        }
+                        let (room_id, key) = room_keys.get(&room).expect("inserted");
+                        Some((room_id.as_str(), key))
                     }
-                    stream_append(payload)?
+                };
+                let lowered = if member(payload, "type")? == "append" {
+                    let mut lowered = stream_append(payload)?;
+                    if let Some((room, key)) = &sealing {
+                        // The topic is a kernel field the operator reads: a sealed
+                        // entry carries none (put it inside the sealed text).
+                        if !member(payload, "topic")?.is_empty() {
+                            return Err("a topic is plaintext the operator reads: a sealed append has an empty topic".into());
+                        }
+                        let sequence = view
+                            .get("cell")
+                            .and_then(|page| page.get("nextSeq"))
+                            .and_then(Value::as_str)
+                            .ok_or("signed stream view lacks nextSeq")?;
+                        field_decimal(sequence, "stream nextSeq")?;
+                        let plain = zeroize::Zeroizing::new(member(payload, "text")?.as_bytes().to_vec());
+                        lowered["payload"] = json!(hex(&roomkey::seal_for_room(
+                            key, room, target, sequence, &plain
+                        )?));
+                    }
+                    lowered
                 } else {
                     if payload_obj.len() != 2
                         || !payload_obj.contains_key("type")
@@ -924,8 +956,20 @@ fn propose(
                                 member(&challenge, "height")?, &payload["actions"])?,
                             false,
                         )?,
-                        ("scalar" | "document", Some(_)) => {
-                            return Err("--private seals content payloads only".into())
+                        // A doc in a private room: an append is sealed; an edit or
+                        // a link would carry plaintext and refuses.
+                        ("document", Some((room, key))) => private::seal_content(
+                            content_actions(
+                                &document_actions(root, workspace, local_name, &view,
+                                    member(&challenge, "height")?, &payload["actions"])?,
+                                true,
+                            )?,
+                            room,
+                            target,
+                            key,
+                        )?,
+                        ("scalar", Some(_)) => {
+                            return Err("--private seals content and stream payloads only".into())
                         }
                         _ => return Err("unsupported workspace payload type".into()),
                     }
@@ -1436,6 +1480,12 @@ fn publish_delegation(root: &Path, proposal_id: &str, attempt: &Path) -> Result<
     // reference says so, and `room list` shows it.
     if child.get("room").is_some() {
         value["room"] = json!(true);
+        // A private room's invite tells the invitee where the wraps are.
+        if let Ok(room) = reference(root, member(delegation, "name")?) {
+            if let Some(private) = room.get("private") {
+                value["private"] = private.clone();
+            }
+        }
     }
     let path = proposal_dir.join("recipient-reference.json");
     if path.exists() {
@@ -1942,6 +1992,25 @@ pub(crate) fn create(
     room_template: Option<&str>,
 ) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
+    // A private room's key goes into the encrypted cache: refuse before the
+    // birth, not after it.
+    if room_template == Some("private") {
+        if std::env::var_os(private::KEYCACHE_PASSPHRASE_ENV).is_none() {
+            return Err(format!(
+                "a private room's keys live in this workspace's encrypted key cache: set {}",
+                private::KEYCACHE_PASSPHRASE_ENV
+            ));
+        }
+        roomkey::keys_name(name_value)?;
+    }
+    // A cell born in a private room is sealed under it by default.
+    let sealed_in = match room {
+        Some(parent) => reference(root, parent)?
+            .get("private")
+            .is_some()
+            .then(|| parent.to_owned()),
+        None => None,
+    };
     // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
     // canonical DREGG/NOCK/PROGRAM/v1 bytes and, when admissible, its cell id.
     let program = match program_path {
@@ -1979,8 +2048,16 @@ pub(crate) fn create(
         },
     )?;
     let program_cell = program.as_ref().and_then(|(_, cell)| cell.as_deref());
-    complete_birth(root, name_value, &source, &receipt, &reservation, program_cell, room_template)
-        .map(|_| ())
+    let mut born =
+        complete_birth(root, name_value, &source, &receipt, &reservation, program_cell, room_template)?;
+    if let Some(parent) = sealed_in {
+        born["sealedIn"] = json!(parent);
+        roomkey::rewrite_reference(root, name_value, &born)?;
+    }
+    if room_template == Some("private") {
+        roomkey::found(root, workspace, name_value)?;
+    }
+    Ok(())
 }
 
 /// A declared account the sponsor births for another admitted subject, funded
@@ -2713,8 +2790,110 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             let name = os_string(args.required("name")?, "reference name")?;
             let start = os_string(args.required("from")?, "tail start")?;
             let count = os_string(args.required("count")?, "tail count")?;
+            let room = args
+                .optional("private")
+                .map(|value| os_string(value, "private room"))
+                .transpose()?;
             args.finish()?;
-            read(&root, &workspace, &name, "tail", Some((&start, &count)))
+            let room = room.or_else(|| {
+                reference(&root, &name)
+                    .ok()
+                    .and_then(|r| r.get("sealedIn").and_then(Value::as_str).map(str::to_owned))
+            });
+            match room {
+                Some(room) => roomkey::tail(&root, &workspace, &name, &start, &count, &room),
+                None => read(&root, &workspace, &name, "tail", Some((&start, &count))),
+            }
+        }
+        // The room-key protocol of a private room (`roomkey.rs`).
+        "room-key" => {
+            let op = os_string(args.required("op")?, "room-key op")?;
+            let name = os_string(args.required("name")?, "room name")?;
+            let flag = |args: &mut Args, key: &str| -> Result<bool> {
+                match args.optional(key).as_deref() {
+                    None => Ok(false),
+                    Some(value) if value == OsStr::new("true") => Ok(true),
+                    Some(value) if value == OsStr::new("false") => Ok(false),
+                    _ => Err(format!("--{key} must be true or false")),
+                }
+            };
+            match op.as_str() {
+                "found" => {
+                    args.finish()?;
+                    roomkey::found(&root, &workspace, &name)
+                }
+                "sync" => {
+                    args.finish()?;
+                    let synced = roomkey::sync(&root, &workspace, &name)?;
+                    println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-sync-v1",
+                        "room":name,"epoch":synced.epoch(),"learned":synced.learned,
+                        "held":synced.ring.epochs(&synced.room)})).map_err(|e| e.to_string())?);
+                    Ok(())
+                }
+                "invite" => {
+                    let member_subject = os_string(args.required("member")?, "invitee")?;
+                    let enc = os_string(args.required("enc-pub")?, "invitee encryption key")?;
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    let request = args.optional("request").map(path);
+                    let past = flag(&mut args, "past")?;
+                    let i_know = flag(&mut args, "i-know")?;
+                    args.finish()?;
+                    roomkey::check_invitee(&member_subject, i_know)?;
+                    // The grant: K-ROOM's delegation proposal, spelled by the
+                    // caller and proposed here (submit and publish as ever).
+                    if let Some(request) = request {
+                        let value = roomkey::request(&request)?;
+                        if member(&value, "action")? != "delegate"
+                            || member(&value, "name")? != name
+                            || member(&value, "recipient")? != member_subject
+                        {
+                            return Err("the invite request must delegate this room to this invitee".into());
+                        }
+                        propose(&root, &workspace, &request, &proposal_id, None)?;
+                    }
+                    roomkey::invite(&root, &workspace, &name, &member_subject, &enc, past, i_know,
+                        &format!("{proposal_id}-keys"))
+                }
+                "rotate" => {
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    let drop = args
+                        .optional("drop")
+                        .map(|value| os_string(value, "dropped member"))
+                        .transpose()?;
+                    args.finish()?;
+                    roomkey::rotate(&root, &workspace, &name, drop.as_deref(), &proposal_id)
+                }
+                "kick" => {
+                    let subject = os_string(args.required("member")?, "kicked member")?;
+                    let proposal_id = os_string(args.required("proposal-id")?, "proposal ID")?;
+                    args.finish()?;
+                    roomkey::kick(&root, &workspace, &name, &subject, &proposal_id)
+                }
+                "list" => {
+                    args.finish()?;
+                    roomkey::list(&root, &name)
+                }
+                "open" => {
+                    let stream = os_string(args.required("stream")?, "stream cell")?;
+                    let sequence = os_string(args.required("sequence")?, "sequence")?;
+                    let payload = os_string(args.required("payload")?, "payload hex")?;
+                    args.finish()?;
+                    roomkey::open_local(&root, &name, &stream, &sequence, &payload)
+                }
+                "forget" => {
+                    let epoch = args
+                        .optional("epoch")
+                        .map(|value| {
+                            os_string(value, "epoch")?
+                                .parse::<u32>()
+                                .map_err(|_| "--epoch is a decimal epoch".to_owned())
+                        })
+                        .transpose()?;
+                    args.finish()?;
+                    roomkey::forget(&root, &name, epoch)
+                }
+                _ => Err("room-key --op is found, sync, invite, rotate, kick, list, open or forget".into()),
+            }
         }
         "submit" => {
             let source = path(args.required("intent")?);
