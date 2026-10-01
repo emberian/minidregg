@@ -26,8 +26,12 @@ theorem: a cell's sealed body is reduced to `Sealing.observe`, and
   holder's sealed body — stands for "a PRF stream is indistinguishable from an AEAD ciphertext".
 
 Both are satisfiable (`Example.toy_payloadHidden`, `Example.toy_fillHidden`, on a sealing whose
-observation is NOT constant) and both are load-bearing (`Example.leaky_breaks_membership_theorem`,
-`Example.fill_distinguishable_at_duty_tick`).
+observation is NOT constant) and both are refutable on a concrete instance: the payload half by a
+sealing that shows the payload byte (`Example.leaky_not_payloadHidden`, and the membership theorem
+fails on it, `Example.leaky_breaks_membership_theorem`), the fill half by the all-zero fill against the
+toy sealing (`Example.zeroFill_not_fillHidden`, and the presence theorem fails on it,
+`Example.zeroFill_breaks_presence_theorem`). `Example.fill_distinguishable_at_duty_tick` is the
+separate pole of the duty-tick premise.
 -/
 import Theory.Channel.Lease
 
@@ -492,6 +496,15 @@ theorem leaky_not_payloadHidden : ¬ PayloadHidden leakySeal := by
   revert this
   decide +kernel
 
+/-- **The fill half is refutable.** The all-zero fill (`Example.prf`, Lease.lean's example fill)
+against `toySeal`: at a regular tick on slot 1 the holder's sealed body opens with the slot marker `1`,
+the fill's body with `0`, and a non-recipient reads the first byte. -/
+theorem zeroFill_not_fillHidden : ¬ FillHidden toySeal Example.prf := by
+  intro h
+  have := h 11 (sched.headerAt 0 1 1) none (by decide +kernel)
+  revert this
+  decide +kernel
+
 /-- The channel: `sched` (P1, slot 0 → subject 10, slot 1 → subject 11, slot 2 unleased),
 the toy sealing, the toy fill, the design's emission rule. -/
 def toy : Domain Nat (List UInt8) :=
@@ -499,7 +512,17 @@ def toy : Domain Nat (List UInt8) :=
 
 def leaky : Domain Nat (List UInt8) := { toy with S := leakySeal }
 
+/-- `toy` with the all-zero fill: everything else (schedule, sealing, emission) unchanged. -/
+def zeroFill : Domain Nat (List UInt8) := { toy with prf := Example.prf }
+
 def onDemand : Domain Nat (List UInt8) := { toy with em := fun m => m.map fun _ => 700 }
+
+/-- **`ConstantEmission` is refutable**: `onDemand`'s rule is silent on padding (`designEmission_constant`
+is the satisfying pole). -/
+theorem onDemand_not_constantEmission : ¬ ConstantEmission onDemand.em := by
+  rintro ⟨off, h⟩
+  have silent : onDemand.em none = some off := h none
+  simp [onDemand] at silent
 
 /-- Slot 0 is held by subject 12 instead of 10: a different membership. -/
 def otherMembers : Domain Nat (List UInt8) :=
@@ -609,6 +632,16 @@ theorem fill_distinguishable_at_duty_tick :
     trace (toy.memberTick designPolicy chatty allOn 2) 2 ≠ trace (toy.memberTick designPolicy chatty slot1OffDuty 2) 2 := by
   decide +kernel
 
+/-- **Without `FillHidden`, `member_view_independent_of_presence` fails.** On `zeroFill` every other
+premise of the theorem holds — the design policy fills, hides the mask and fans out to every slot,
+and presence agrees at duty ticks — yet member 2 (a non-recipient) reads slot 1's absence at the
+regular tick 1: the fill observes `[0]` where the holder's sealed padding observes `[1]`. -/
+theorem zeroFill_breaks_presence_theorem :
+    zeroFill.PresenceAgreesAtDutyTicks allOn slot1OffRegular ∧
+      trace (zeroFill.memberTick designPolicy chatty allOn 2) 2 ≠
+        trace (zeroFill.memberTick designPolicy chatty slot1OffRegular 2) 2 :=
+  ⟨toy_duty_agree, by decide +kernel⟩
+
 end Example
 
 
@@ -649,5 +682,8 @@ end Example
 #assert_axioms Example.connected_fanout_reveals_presence
 #assert_axioms Example.no_fill_reveals_presence
 #assert_axioms Example.fill_distinguishable_at_duty_tick
+#assert_axioms Example.zeroFill_not_fillHidden
+#assert_axioms Example.onDemand_not_constantEmission
+#assert_axioms Example.zeroFill_breaks_presence_theorem
 
 end Minidregg.Theory.Channel

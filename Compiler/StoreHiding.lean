@@ -18,8 +18,10 @@ only).  The reader recomputes every opened leaf and then the root
   when its bytes are.
 * `sealed_item_is_keyed_leaf` / `commitment_hides` — a sealed item is the leaf
   under the cell's key, which the reader does not hold; that it hides the entry
-  is the named premise `SaltedLeafHiding` on KMAC256 + cSHAKE256, assumed and
-  not proved (`hiding_at_equality_is_a_collision`: it cannot be read at `=`).
+  is the named premise `SaltedLeafHiding deployedLeafScheme` on KMAC256 +
+  cSHAKE256, assumed and not proved (`hiding_at_equality_is_a_collision`: it
+  cannot be read at `=`); its poles sit at toy schemes
+  (`constLeafScheme_hiding`, `identityLeafScheme_not_hiding`).
 * `change_detection_only_via_root` — what a narrowed reader STILL learns: a
   write to a sealed entry leaves every opened item unchanged, and moves the
   root unless cSHAKE256 collides.  That an uncovered entry changed, and where
@@ -148,9 +150,28 @@ theorem salt_disclosed_iff_value_disclosed (store : Store L) (entry : Entry L) :
 
 /-! ## Hiding: a named premise -/
 
-/-- The leaf of an entry under a cell key. -/
+/-- A salted-leaf scheme: the salt of an entry under a cell key, and the hash
+of the salted preimage (`Opening.preimage`: the length-prefixed salt, then the
+entry bytes).  The hiding premise below is stated over a scheme so that its
+poles can be exhibited at toy schemes; the deployed one is
+`deployedLeafScheme`. -/
+structure LeafScheme where
+  salt : List UInt8 → List UInt8 → List UInt8
+  hash : List UInt8 → List UInt8
+
+/-- The leaf of an entry under a cell key, in a scheme. -/
+def LeafScheme.leaf (scheme : LeafScheme) (key entry : List UInt8) : List UInt8 :=
+  scheme.hash (Opening.mk (scheme.salt key entry) entry).preimage
+
+/-- The deployed scheme: the KMAC256 salt of `StoreCodec.salt` and the
+cSHAKE256 leaf of `Opening.leaf`. -/
+def deployedLeafScheme : LeafScheme where
+  salt key entry := StoreCodec.salt (some key) entry
+  hash := Sp800185Cshake256.cshake256Bytes StoreCodec.leafCustomization
+
+/-- The leaf of an entry under a cell key, in the deployed scheme. -/
 def keyedLeaf (key entry : List UInt8) : List UInt8 :=
-  (Opening.mk (salt (some key) entry) entry).leaf
+  deployedLeafScheme.leaf key entry
 
 /-- What a reader receives for a sealed entry of a blinded cell is the leaf
 under the cell's key — a key it does not hold. -/
@@ -158,24 +179,29 @@ theorem sealed_item_is_keyed_leaf {store : Store L} {key : List UInt8}
     (blinded : blindingKey W store = some key) {entry : Entry L} (hidden : ¬ visible entry.1) :
     itemOf W visible store entry = .inr (keyedLeaf key (entryBytes W entry)) := by
   rw [sealed_item_exact W visible store hidden]
-  simp [opening, blinded, keyedLeaf]
+  simp only [opening, blinded, keyedLeaf, LeafScheme.leaf, deployedLeafScheme, Opening.leaf]
 
 end View
 
-/-- **The hiding premise, assumed and not proved.**  As a function of an
-unknown cell key, the leaf of one entry is indistinguishable from the leaf of
-any other.  Under the PRF security of KMAC256 the salt is a fresh uniform
+/-- **The hiding premise, assumed and not proved at `deployedLeafScheme`.**
+As a function of an unknown cell key, the leaf of one entry is
+indistinguishable from the leaf of any other.  Under the PRF security of KMAC256 the salt is a fresh uniform
 32-byte value per entry, and under the random-oracle reading of cSHAKE256 the
 leaf of a uniform salt reveals nothing of the entry; a q-query distinguisher's
 advantage is about q/2^256.  This tree has no model of feasible computation, so
-the premise is a schema over the indistinguishability relation; it is
-discharged nowhere.  The multi-entry form (one key salts every entry of a
+the premise is a schema over the scheme and the indistinguishability relation;
+at the deployed scheme it is discharged nowhere.  Its poles, at the one
+relation this tree decides (equality) and at toy schemes:
+`constLeafScheme_hiding` satisfies it, `identityLeafScheme_not_hiding` refutes
+it.  At equality a satisfying scheme is necessarily a colliding one
+(`hiding_at_equality_is_a_collision`), which is why the deployed reading is
+meaningful only at a computational relation.  The multi-entry form (one key salts every entry of a
 cell, and a reader holds the salts of its opened entries) is the PRF's
 multi-query security over distinct entry bytes, also not formalized. -/
-def SaltedLeafHiding
+def SaltedLeafHiding (scheme : LeafScheme)
     (Indistinguishable : (List UInt8 → List UInt8) → (List UInt8 → List UInt8) → Prop) : Prop :=
   ∀ entry entry' : List UInt8,
-    Indistinguishable (fun key => keyedLeaf key entry) (fun key => keyedLeaf key entry')
+    Indistinguishable (fun key => scheme.leaf key entry) (fun key => scheme.leaf key entry')
 
 /-- **The commitment hides, reduced to the premise.**  The item a reader
 receives for a sealed entry of a blinded cell is `keyedLeaf` under the cell
@@ -183,7 +209,7 @@ key (`sealed_item_is_keyed_leaf`); under `SaltedLeafHiding` it is
 indistinguishable from the item any other entry would give. -/
 theorem commitment_hides
     (Indistinguishable : (List UInt8 → List UInt8) → (List UInt8 → List UInt8) → Prop)
-    (premise : SaltedLeafHiding Indistinguishable)
+    (premise : SaltedLeafHiding deployedLeafScheme Indistinguishable)
     {L : Layout.{0, 0, 0}} (W : Wire L) (entry entry' : Entry L) :
     Indistinguishable (fun key => keyedLeaf key (entryBytes W entry))
       (fun key => keyedLeaf key (entryBytes W entry')) :=
@@ -191,10 +217,35 @@ theorem commitment_hides
 
 /-- The premise cannot be read at `=`: equality of the two keyed leaves would
 be a cSHAKE256 collision between two distinct leaf preimages, at every key. -/
-theorem hiding_at_equality_is_a_collision (premise : SaltedLeafHiding (· = ·))
+theorem hiding_at_equality_is_a_collision
+    (premise : SaltedLeafHiding deployedLeafScheme (· = ·))
     (key : List UInt8) {entry entry' : List UInt8} (different : entry ≠ entry') :
     LeafCollision ⟨salt (some key) entry, entry⟩ ⟨salt (some key) entry', entry'⟩ :=
   ⟨fun same => different (congrArg Opening.entry same), congrFun (premise entry entry') key⟩
+
+/-- A toy scheme whose leaf ignores the entry: no salt, a constant hash. -/
+def constLeafScheme : LeafScheme where
+  salt _ _ := []
+  hash _ := List.replicate 32 0
+
+/-- **Satisfiable** (toy scheme): a constant leaf hides every entry at the
+strongest relation, equality. -/
+theorem constLeafScheme_hiding : SaltedLeafHiding constLeafScheme (· = ·) :=
+  fun _ _ => rfl
+
+/-- A toy scheme whose "hash" is the identity: the leaf is the salted preimage
+itself, so it carries the entry bytes. -/
+def identityLeafScheme : LeafScheme where
+  salt _ _ := []
+  hash := id
+
+/-- **Refutable** (toy scheme): under the identity hash the leaves of entries
+`[0]` and `[1]` differ at the empty key. -/
+theorem identityLeafScheme_not_hiding : ¬ SaltedLeafHiding identityLeafScheme (· = ·) := by
+  intro premise
+  have same := congrFun (premise [0] [1]) []
+  revert same
+  decide +kernel
 
 /-! ## What a narrowed reader still learns -/
 
@@ -291,6 +342,10 @@ end Change
 #guard_msgs (whitespace := lax) in #print axioms commitment_hides
 /-- info: 'Minidregg.Compiler.StoreHiding.hiding_at_equality_is_a_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms hiding_at_equality_is_a_collision
+/-- info: 'Minidregg.Compiler.StoreHiding.constLeafScheme_hiding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms constLeafScheme_hiding
+/-- info: 'Minidregg.Compiler.StoreHiding.identityLeafScheme_not_hiding' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms identityLeafScheme_not_hiding
 /-- info: 'Minidregg.Compiler.StoreHiding.change_detection_only_via_root' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms change_detection_only_via_root
 

@@ -320,9 +320,9 @@ law says: with opaque leaves it could never have been a FAITHFUL one.
    two guard leaves that the executor (`opaqueRun`, a genuine fold, so folds DO
    exist — the obstruction is faithfulness, not existence) SEPARATES.
    `NoFaithfulSyntacticReading`: no decoding of any countable-target fold recovers
-   the executor — "no compositional second reading" verbatim. Face 1 ⟹ face 2 is
-   PROVED below (`conflation_blocks_decode`); the keystone conjoins both, so its
-   TODO realizer is the one cardinality argument for face 1.
+   the executor — "no compositional second reading" verbatim. Face 1 is PROVED
+   below by Cantor (`opaqueConflation_proved`) and face 2 from it
+   (`noFaithfulSyntacticReading_proved`); the keystone conjoins both.
 4. Stated at `σ := ℕ`, `δ : Type 0` — the minimal universe where the phenomenon
    lives; descriptor types are `Type 0` in practice, and nothing in the argument
    uses more.
@@ -410,8 +410,8 @@ ATLAS keystone fields (obligation, statement-first):
   diagonal argument. If the guard-leaf reading were injective, composing it with
   a countable target's injection into `ℕ` and the characteristic-function injection
   `Set ℕ → (ℕ → Bool)` would contradict `Function.cantor_injective`.
-  Non-injectivity is exactly `OpaqueConflation`, and `conflation_blocks_decode`
-  finishes `NoFaithfulSyntacticReading`.
+  Non-injectivity is exactly `OpaqueConflation`, and
+  `noFaithfulSyntacticReading_proved` finishes `NoFaithfulSyntacticReading`.
 * teeth: rules out every "compile the closure-carrying IR to descriptors" design —
   the exact shape breadstuffs shipped (`RecStmt.guard` closures) and then had to
   prove uncompilable-as-a-fold (`compile_not_a_seq_hom`). Teeth exercised NOW at a
@@ -424,18 +424,6 @@ def N3_opaque_payloads_forbid_second_reading : Prop :=
   OpaqueConflation ∧ NoFaithfulSyntacticReading
 
 #check N3_opaque_payloads_forbid_second_reading
-
-/-- **Face 1 implies face 2** (proved glue — the keystone's realizer TODO reduces
-to the cardinality face): a decoding that recovered the executor would make
-`fold alg` injective on guard leaves, which conflation forbids. -/
-theorem conflation_blocks_decode :
-    OpaqueConflation → NoFaithfulSyntacticReading := by
-  intro hC δ _ alg decode hdec
-  obtain ⟨φ, ψ, hne, heq⟩ := hC δ alg
-  apply hne
-  calc φ = decode (fold alg (guardT φ)) := (congrFun hdec (guardT φ)).symm
-    _ = decode (fold alg (guardT ψ)) := by rw [heq]
-    _ = ψ := congrFun hdec (guardT ψ)
 
 /-- **The cardinality face is realized.** A countable target supplies an injection
 into `ℕ`. Were its guard-leaf fold injective, composing those maps with the
@@ -466,12 +454,23 @@ theorem opaqueConflation_proved : OpaqueConflation := by
   obtain ⟨φ, ψ, heq, hne⟩ := Function.not_injective_iff.mp hnot
   exact ⟨φ, ψ, hne, heq⟩
 
+/-- **Face 2 holds.** A decoding that recovered the executor would make
+`fold alg` injective on guard leaves, which the conflation of face 1
+(`opaqueConflation_proved`) forbids. -/
+theorem noFaithfulSyntacticReading_proved : NoFaithfulSyntacticReading := by
+  intro δ _ alg decode hdec
+  obtain ⟨φ, ψ, hne, heq⟩ := opaqueConflation_proved δ alg
+  apply hne
+  calc φ = decode (fold alg (guardT φ)) := (congrFun hdec (guardT φ)).symm
+    _ = decode (fold alg (guardT ψ)) := by rw [heq]
+    _ = ψ := congrFun hdec (guardT ψ)
+
 /-- **[N3-converse], discharged.** Cantor forces conflation for every countable
 compositional target, and that conflation rules out every decoder recovering the
 opaque executor. -/
 theorem N3_opaque_payloads_forbid_second_reading_proved :
     N3_opaque_payloads_forbid_second_reading :=
-  ⟨opaqueConflation_proved, conflation_blocks_decode opaqueConflation_proved⟩
+  ⟨opaqueConflation_proved, noFaithfulSyntacticReading_proved⟩
 
 /-- Premise-inhabitation witness: a countable-target algebra exists (the constant
 descriptor — every term compiles to `0`). -/
