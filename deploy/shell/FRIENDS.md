@@ -118,6 +118,26 @@ mini> board new tasks                     # tasks 0 and 1: `board add`, `board t
 share a doc the same way as `notes` (delegate, publish, export/import). a doc lives in one
 content cell with no fixed size; its lines are ordered by their atom ids.
 
+what can you do here? ask before you try:
+```
+mini> can paper                  # each verb your grants cover on paper, asked of the Host, never sent
+paper  object 1121…  held: delegate, mutate, observe
+  read      admitted   [signed resource read]
+  write     admitted   [append one line]
+  edit      admitted   [line 1 to its own text]
+  …
+mini> can board                  # under a law that only lets field 2 grow:
+  write     admitted   [field 2: 1 -> 2 (up)]
+  write     law-denied: field 2 monotone (before 1, after 0)   [field 2: 1 -> 0 (down)]
+mini> can                        # every resource you have a reference to
+mini> can paper --all            # also the verbs you don't hold, as noGrant
+```
+for each verb, `can` builds the smallest real request (the bracket says which), signs it,
+and has the Host judge it exactly as it would judge a submit, then throws it away: nothing
+is written, no attempt is used up, and `history` doesn't change. a verb you hold no grant
+for isn't listed. a revoked grant lists nothing. a locked resource answers
+`law-denied: sealed` for every verb.
+
 ## how things end
 
 stdout is the answer. when a verb fails, stderr's last line starts with who decided:

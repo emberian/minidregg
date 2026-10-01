@@ -278,6 +278,9 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
         }
         [98 | 99 | 101, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        // P-AFFORDANCES dry run: one signed observation (as op 1) and one
+        // signature list. The Host re-plans, assembles and commits nothing.
+        [130, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         [102, digits @ ..] => {
             !digits.is_empty()
                 && digits.len() <= 80
@@ -853,42 +856,124 @@ fn serve_with_mode(
     let _guard = SocketGuard(socket, socket_metadata.dev(), socket_metadata.ino());
     fs::set_permissions(socket, fs::Permissions::from_mode(0o600))
         .map_err(|e| format!("cannot protect socket {}: {e}", socket.display()))?;
-    let child = Command::new(host)
-        .arg(&pinned_config)
-        .arg("stdio")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot start host {}: {e}", host.display()))?;
-    struct HostGuard(std::process::Child);
-    impl Drop for HostGuard {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
+    let mut start = || {
+        let mut command = Command::new(host);
+        command.arg(&pinned_config).arg("stdio");
+        HostProcess::start(&mut command, &host.display().to_string())
+    };
+    eprintln!("mini: serving {}", socket.display());
+    supervise(
+        &listener,
+        operator,
+        &config_bytes,
+        &host_sha256,
+        catalog_enabled,
+        &mut start,
+    )
+}
+
+/// One running Host and its two pipes. Dropping it kills and reaps the process.
+struct HostProcess {
+    child: std::process::Child,
+    input: std::process::ChildStdin,
+    output: std::process::ChildStdout,
+}
+
+impl HostProcess {
+    fn start(command: &mut Command, name: &str) -> Result<Self, String> {
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot start host {name}: {e}"))?;
+        let input = child.stdin.take().ok_or("host stdin unavailable")?;
+        let output = child.stdout.take().ok_or("host stdout unavailable")?;
+        let process = HostProcess {
+            child,
+            input,
+            output,
+        };
+        set_nonblocking(&process.input).map_err(|e| format!("cannot bound host input pipe: {e}"))?;
+        eprintln!("mini: host process {}", process.child.id());
+        Ok(process)
     }
-    let mut host_guard = HostGuard(child);
-    let mut input = host_guard.0.stdin.take().ok_or("host stdin unavailable")?;
-    let mut output = host_guard
-        .0
-        .stdout
-        .take()
-        .ok_or("host stdout unavailable")?;
-    set_nonblocking(&input).map_err(|e| format!("cannot bound host input pipe: {e}"))?;
-    eprintln!(
-        "mini: serving {} with host process {}",
-        socket.display(),
-        host_guard.0.id()
-    );
+
+    fn exited(&mut self) -> bool {
+        !matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// One request and its reply. Any error leaves the request's status
+    /// uncertain: it may have been admitted before the Host stopped answering.
+    fn exchange(&mut self, request: &[u8]) -> Result<Vec<u8>, String> {
+        write_frame(
+            &mut DeadlinePipeWrite {
+                writer: &mut self.input,
+                deadline: Instant::now() + Duration::from_secs(30),
+            },
+            request,
+        )
+        .map_err(|e| format!("host request write: {e}"))?;
+        let reply = read_frame(&mut DeadlinePipe {
+            reader: &mut self.output,
+            deadline: Instant::now() + Duration::from_secs(600),
+        })
+        .map_err(|e| format!("host response read: {e}"))?
+        .ok_or("host closed during request")?;
+        if reply.len() > HOST_MAX_FRAME {
+            return Err("host response exceeds bounded native frame".to_owned());
+        }
+        Ok(reply)
+    }
+}
+
+impl Drop for HostProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// The accept loop. Nothing a client sends ends it: a bad envelope is refused
+/// (254) or dropped, and a Host that stops answering is replaced. A request in
+/// flight when its Host stopped gets no reply, which the client reports as an
+/// uncertain status (`invoke`). Only a Host that cannot be started at all ends
+/// the service.
+fn supervise(
+    listener: &UnixListener,
+    operator: bool,
+    config_bytes: &[u8],
+    host_sha256: &[u8; 32],
+    catalog_enabled: bool,
+    start: &mut dyn FnMut() -> Result<HostProcess, String>,
+) -> Result<(), String> {
+    let mut process = start()?;
     for accepted in listener.incoming() {
-        let mut stream = accepted.map_err(|e| format!("socket accept failed: {e}"))?;
-        if operator && peer_uid(&stream)? != effective_uid() {
-            let _ = write_frame(&mut stream, b"\xfeoperator peer UID mismatch");
+        let mut stream = match accepted {
+            Ok(stream) => stream,
+            Err(e) => {
+                eprintln!("mini: socket accept failed: {e}");
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+        };
+        if operator {
+            match peer_uid(&stream) {
+                Ok(uid) if uid == effective_uid() => {}
+                Ok(_) => {
+                    let _ = write_frame(&mut stream, b"\xfeoperator peer UID mismatch");
+                    continue;
+                }
+                Err(e) => {
+                    eprintln!("mini: {e}");
+                    let _ = write_frame(&mut stream, b"\xfeoperator peer credential unavailable");
+                    continue;
+                }
+            }
+        }
+        if let Err(e) = stream.set_write_timeout(Some(Duration::from_secs(10))) {
+            eprintln!("mini: cannot set client write deadline: {e}");
             continue;
         }
-        stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
-            .map_err(|e| format!("cannot set client write deadline: {e}"))?;
         let envelope = match read_frame(&mut DeadlinePipe {
             reader: &mut stream,
             deadline: Instant::now() + Duration::from_secs(10),
@@ -900,7 +985,7 @@ fn serve_with_mode(
                 continue;
             }
         };
-        let request = match request_from_envelope(&envelope, &config_bytes, &host_sha256) {
+        let request = match request_from_envelope(&envelope, config_bytes, host_sha256) {
             Ok(request) => request,
             Err(reason) => {
                 let mut refusal = vec![254];
@@ -921,25 +1006,26 @@ fn serve_with_mode(
             let _ = write_frame(&mut stream, b"\xfeoperation unavailable on selected socket");
             continue;
         }
-        write_frame(
-            &mut DeadlinePipeWrite {
-                writer: &mut input,
-                deadline: Instant::now() + Duration::from_secs(30),
-            },
-            request,
-        )
-        .map_err(|e| format!("host request status uncertain: {e}"))?;
-        let reply = read_frame(&mut DeadlinePipe {
-            reader: &mut output,
-            deadline: Instant::now() + Duration::from_secs(600),
-        })
-        .map_err(|e| format!("host request status uncertain: {e}"))?
-        .ok_or_else(|| "host closed during request; status uncertain".to_owned())?;
-        if reply.len() > HOST_MAX_FRAME {
-            return Err("host response exceeds bounded native frame; status uncertain".to_owned());
+        if process.exited() {
+            eprintln!("mini: host process {} exited between requests; restarting", process.child.id());
+            drop(process);
+            process = start()?;
         }
-        if let Err(error) = write_frame(&mut stream, &reply) {
-            eprintln!("mini: client lost host reply; status uncertain: {error}");
+        match process.exchange(request) {
+            Ok(reply) => {
+                if let Err(error) = write_frame(&mut stream, &reply) {
+                    eprintln!("mini: client lost host reply; status uncertain: {error}");
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "mini: host process {}: {error}; status uncertain; restarting",
+                    process.child.id()
+                );
+                drop(stream);
+                drop(process);
+                process = start()?;
+            }
         }
     }
     Ok(())
@@ -1163,6 +1249,49 @@ mod tests {
         fs::remove_file(socket).unwrap();
         fs::remove_file(config).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    /// A Host that stops mid-request costs that request a certain answer and
+    /// nothing else: the socket stays, and the next request reaches a fresh Host.
+    #[test]
+    fn supervisor_outlives_a_host_that_exits_mid_request() {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-supervise-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let socket = directory.join("test.sock");
+        let config = directory.join("config.json");
+        fs::write(&config, b"config").unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        // Answers each frame with its own operation byte; op 9 exits instead.
+        let script = r#"while n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \n'); [ -n "$n" ]; do
+  op=$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' \n')
+  [ "$n" -gt 1 ] && dd bs=1 count=$((n - 1)) of=/dev/null 2>/dev/null
+  [ "$op" = 9 ] && exit 3
+  printf '\001\000\000\000'; printf "\\$(printf %03o "$op")"
+done"#;
+        let starts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = starts.clone();
+        thread::spawn(move || {
+            let mut start = || {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                HostProcess::start(Command::new("/bin/sh").arg("-c").arg(script), "fake")
+            };
+            let _ = supervise(&listener, false, b"config", &[0; 32], false, &mut start);
+        });
+        assert_eq!(invoke(&socket, &config, 3, &[1, 2]).unwrap(), vec![3]);
+        assert!(invoke(&socket, &config, 9, &[])
+            .unwrap_err()
+            .contains("uncertain"));
+        assert_eq!(invoke(&socket, &config, 3, &[]).unwrap(), vec![3]);
+        assert_eq!(invoke(&socket, &config, 5, &[7]).unwrap(), vec![5]);
+        assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]

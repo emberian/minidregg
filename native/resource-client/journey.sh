@@ -11,6 +11,8 @@
 #
 # Steps, in execution order (the bake-off order: growth runs between J6 and J7):
 #   J0-J8  the tree-neutral journey, claudesplosion/bakeoff/BAKEOFF.md
+#   J12X   host-malformed: malformed requests are refused by name and the service
+#          survives (journey.d/j12x.sh, on this Store, between J3 and J4)
 #   G      growth at 10/100/500/1000 accepted records; pass = write median
 #          <= 5 s and cold reopen <= 60 s at 1000 (list item 1)
 #   K4     one resource holds 32 fields and reads them back (list item 2)
@@ -23,6 +25,7 @@
 #   BD     c-bind: plan footprints commute/overlap (journey.d/bind.sh, on this Store)
 #   M8     agent fleet (journey.d/m8.sh -> fleet-journey.sh, its own Store)
 #   J13    P-LAW: a law refusal names its clause (journey.d/j13.sh -> law-leaf-journey.sh, its own Store)
+#   J12A   P-AFFORDANCES: `can NAME`, each held verb dry-run (journey.d/j12a.sh -> affordances-journey.sh, its own Store)
 #   JPAY1  PAY P1: the pay watcher over fixtures (journey.d/jpay1.sh)
 #   JPAY2  PAY P2: the pay cell (journey.d/jpay2.sh, its own Store)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
@@ -36,7 +39,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12c j13 jpay1 jpay2 jpriv2): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12c j13 j12a jpay1 jpay2 jpriv2 j12x): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -53,7 +56,10 @@
 # Tunables: JOURNEY_ONLY (space-separated step ids; others SKIPPED); JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
-# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule).
+# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule);
+# JOURNEY_STEPS (default: every step) runs only the named steps, in this
+# script's order; the frontier is computed over those alone. A step whose
+# dependency is not selected is blocked, so a subset must carry its deps.
 # Requires: Linux (/proc-free, but GNU date +%N, setsid, timeout), bash, jq, sha256sum.
 
 set -u
@@ -119,12 +125,23 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J12X J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 J12A JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+if [ -n "${JOURNEY_STEPS:-}" ]; then
+  SELECTED=()
+  for id in "${STEPS[@]}"; do
+    case " $JOURNEY_STEPS " in *" $id "*) SELECTED+=("$id");; esac
+  done
+  for id in $JOURNEY_STEPS; do
+    case " ${STEPS[*]} " in *" $id "*) ;; *) echo "journey: JOURNEY_STEPS names unknown step $id" >&2; exit 2;; esac
+  done
+  STEPS=("${SELECTED[@]}")
+fi
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
 TITLE[J2]="sponsor creates a resource under a permissive law"
 TITLE[J3]="sponsor delegates observe+mutate (no control) to newcomer"
+TITLE[J12X]="malformed requests refused by name; the same Host answers on; a killed Host is restarted"
 TITLE[J4]="newcomer signed read, writes field to 1, reads back 1"
 TITLE[J5]="a key with no grant: read and write refused"
 TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refused at the controller"
@@ -159,6 +176,7 @@ TITLE[M8]="agent fleet: fee'd turns, topic events, heads (own Store)"
 TITLE[J12]="two friends co-write a document through the shell, with refusals"
 TITLE[J12C]="a quote (transclusion) across rooms: four grants, four outcomes"
 TITLE[J13]="a law refusal names its failing clause (own Store)"
+TITLE[J12A]="can NAME: each held verb dry-run, nothing committed (own Store)"
 TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
@@ -253,6 +271,7 @@ frontier() {
 run_step() {
   local id=$1; shift
   local dep t0 t1 rc
+  case " ${STEPS[*]} " in *" $id "*) ;; *) return 0;; esac
   SD=$S/$id; mkdir -p -m 700 "$SD"
   DETAIL=""; ARTIFACT=""
   # JOURNEY_ONLY="ID ..." runs only those steps; the rest are SKIPPED (never
@@ -748,6 +767,7 @@ hook() {
 }
 step_JJ() { hook jjoint "a law on one participant reads joint/index/1/... of a two-target command, and is refused when position 1 is absent or holds a different cell (lane K-JOINT-INDEX)"; }
 step_KC() { hook jclock "the one clock ticks forward only, under a capability, and a law over clock/now admits after the tick and refuses before (MUD item 3, K-CLOCK)"; }
+step_J12X() { hook j12x "each malformed request (number for a decimal string, missing/extra field, negative index, NaN, truncated, non-UTF-8, 100k nesting, 10 MB, bad frames) is refused by name by the same Host process, which answers on; a Host killed by PID is restarted under the same socket (lane host-malformed)"; }
 step_M3() { hook m3 "a key generated outside the sponsor's workspace provisions itself and creates a resource with no sponsor step and no operator edit (list item 3, lane m3-provision)"; }
 step_M4() { hook m4 "J1-J8 run from an ssh session through the shell over the client contract (list item 4, lane m4-shell)" shell; }
 step_M5() { hook m5 "Hermes performs J4 through the client contract on this Store, is killed mid-attempt, restarts, and the attempt resolves performed/refused/uncertain (list item 5, lane m5-hermes)" hermes; }
@@ -773,6 +793,7 @@ step_JPAY6() { hook jpay6 "J-PAY-6: a Book burn funds an AgentGrain purse in one
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
+step_J12A() { hook j12a "affordances-journey.sh: can NAME lists the verbs my grants cover, each prepared and dry-run (Host op 130) with the clause on a law refusal; root, height and audit unchanged around every can (lane p-affordances, J12A)" shell; }
 step_JPAY1() { hook jpay1 "finalized Solana transfers in fixtures become Observation records; disagreement and failed transactions refused (lane p1-watcher, J-PAY-1)"; }
 step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row book, assignments, refusals (uniform), lookup, reopen, audit (lane p2-pay, J-PAY-2)"; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
@@ -784,6 +805,7 @@ run_step J0
 run_step J1 J0
 run_step J2 J0
 run_step J3 J1 J2
+run_step J12X J3
 run_step J4 J3
 run_step J5 J4
 run_step J6 J4
@@ -813,6 +835,7 @@ run_step BD J2
 run_step J12 J0
 run_step J12C J0
 run_step J13 J0
+run_step J12A J0
 run_step JPAY1 J0
 run_step JPAY2 J0
 run_step JPAY3 J0

@@ -122,6 +122,8 @@ import Host.ApplicationAgentLifetimeDispatchPaidInspection
 import Host.ApplicationLifecycleClaimInspection
 import Host.ApplicationLifecycleCompletionOperator
 import Host.ApplicationLifecycleBeginOperator
+import Host.DryRun
+import Host.RequestRefusal
 import Host.ApplicationLifecycleLaunchBeginAuthoring
 import Host.ApplicationLifecycleLaunchBeginInspection
 import Host.ApplicationLifecycleLaunchClaimAuthoring
@@ -854,28 +856,6 @@ def failure (reason : RefusalReason) (phase detail : String) : List UInt8 :=
 def refusalFrame (phase : String) (refusal : Refusal) : List UInt8 :=
   outcomeCodec.encode (NativeHost.refusalOutcome phase refusal)
 
-def dispatch (config : NativeHost.Config) (operation : UInt8) (payload : List UInt8) :
-    IO (UInt8 × List UInt8) := do
-  match operation with
-  | 0 =>
-      unless payload.isEmpty do throw (IO.userError "describe does not accept a payload")
-      pure (0, (← description config).compress.toUTF8.toList)
-  | 1 =>
-      match ← NativeHost.prepare config payload with
-      | .ok plan => pure (1, signingPlanCodec.encode plan)
-      | .error detail => pure (255, refusalFrame "prepare" detail)
-  | 2 => pure (2, outcomeCodec.encode (← NativeHost.submit config payload))
-  | 3 => pure (3, outcomeCodec.encode (← NativeHost.lookup config payload))
-  | 4 =>
-      match ← NativeHost.challenge config payload with
-      | .ok challenge => pure (4, NativeObservationCodec.challengeCodec.encode challenge)
-      | .error detail => pure (255, refusalFrame "observation" detail)
-  | 5 =>
-      match ← NativeHost.query config payload with
-      | .ok view => pure (5, view)
-      | .error detail => pure (255, refusalFrame "observation" detail)
-  | _ => throw (IO.userError "unsupported native host operation")
-
 /-- Session state is poisoned on any physical read, chain, tag or replay
 failure. A new process must reopen from the MAC'd checkpoint before serving. -/
 def phaseTrace (label : String) (started : Nat) : IO Unit := do
@@ -1461,11 +1441,11 @@ def applicationCurrentBirthIntentSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (application : Bool) (payload : List UInt8) : IO (List UInt8) := do
   unless payload.length ≤ FnEvidenceCodec.maxHostFrameBytes do
-    throw (IO.userError "application birth request exceeds host frame bound")
+    throw (RequestRefusal.malformed "application birth request exceeds host frame bound")
   let opened ← sessionOpened config state
   let some text := String.fromUTF8? payload.toByteArray
-    | throw (IO.userError "application birth request is not UTF-8")
-  let json ← IO.ofExcept (Minidregg.Host.Json.parse text)
+    | throw (RequestRefusal.malformed "application birth request is not UTF-8")
+  let json ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
   if application then
     IO.ofExcept <| Minidregg.Host.ApplicationCurrentBirthAuthoring.applicationIntentLoaded
       config opened json
@@ -1474,25 +1454,25 @@ def applicationCurrentBirthIntentSession (config : NativeHost.Config)
       config opened json
 
 def splitKind (payload : List UInt8) : IO (String × List UInt8) := do
-  unless payload.length ≥ 2 do throw (IO.userError "short native host kind frame")
+  unless payload.length ≥ 2 do throw (RequestRefusal.malformed "short native host kind frame")
   let width := payload[0]!.toNat + 256 * payload[1]!.toNat
   unless width > 0 && width ≤ payload.length - 2 do
-    throw (IO.userError "invalid native host kind length")
+    throw (RequestRefusal.malformed "invalid native host kind length")
   let some kind := String.fromUTF8? (payload.drop 2 |>.take width).toByteArray
-    | throw (IO.userError "native host kind is not UTF-8")
+    | throw (RequestRefusal.malformed "native host kind is not UTF-8")
   return (kind, payload.drop (2 + width))
 
 def splitPair (payload : List UInt8) : IO (List UInt8 × List UInt8) := do
-  unless payload.length ≥ 4 do throw (IO.userError "short native host pair frame")
+  unless payload.length ≥ 4 do throw (RequestRefusal.malformed "short native host pair frame")
   let width := payload[0]!.toNat + 256 * payload[1]!.toNat +
     65536 * payload[2]!.toNat + 16777216 * payload[3]!.toNat
-  unless width ≤ payload.length - 4 do throw (IO.userError "invalid native host pair length")
+  unless width ≤ payload.length - 4 do throw (RequestRefusal.malformed "invalid native host pair length")
   return ((payload.drop 4).take width, payload.drop (4 + width))
 
 def decodeSignatures (bytes : List UInt8) : IO (List (List UInt8)) := do
   let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
   let some signatures := signaturesCodec.decode bytes
-    | throw (IO.userError "noncanonical signature list")
+    | throw (RequestRefusal.malformed "noncanonical signature list")
   return signatures
 
 /-- The live protocol keeps exact source-owned authoring and inspection in
@@ -1504,7 +1484,7 @@ def dispatchSession (config : NativeHost.Config)
     (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
   match operation with
   | 0 =>
-      unless payload.isEmpty do throw (IO.userError "describe does not accept a payload")
+      unless payload.isEmpty do throw (RequestRefusal.malformed "describe does not accept a payload")
       discard <| sessionOpened config state
       return (0, (descriptionLoaded config).compress.toUTF8.toList)
   | 1 =>
@@ -1545,37 +1525,46 @@ def dispatchSession (config : NativeHost.Config)
       | .ok view => return (5, view)
       | .error detail => return (255, refusalFrame "observation" detail)
   | 6 =>
-      unless payload.isEmpty do throw (IO.userError "profile does not accept a payload")
+      unless payload.isEmpty do throw (RequestRefusal.malformed "profile does not accept a payload")
       return (6, meteringProfile.compress.toUTF8.toList)
   | 7 =>
       let (kind, source) ← splitKind payload
       let some text := String.fromUTF8? source.toByteArray
-        | throw (IO.userError "native host author source is not UTF-8")
-      let value ← IO.ofExcept (Minidregg.Host.Json.parse text)
-      return (7, ← IO.ofExcept (Minidregg.Host.Json.author kind value (some config)))
+        | throw (RequestRefusal.malformed "native host author source is not UTF-8")
+      let value ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
+      return (7, ← RequestRefusal.clientBytes (Minidregg.Host.Json.author kind value (some config)))
   | 8 =>
       let (kind, source) ← splitKind payload
-      let value ← IO.ofExcept (inspectHost kind source)
+      let value ← RequestRefusal.clientBytes (inspectHost kind source)
       return (8, value.compress.toUTF8.toList)
   | 9 =>
       let some text := String.fromUTF8? payload.toByteArray
-        | throw (IO.userError "native host signatures source is not UTF-8")
-      let value ← IO.ofExcept (Minidregg.Host.Json.parse text)
-      return (9, ← IO.ofExcept (Minidregg.Host.Json.signatures value))
+        | throw (RequestRefusal.malformed "native host signatures source is not UTF-8")
+      let value ← RequestRefusal.clientBytes (Minidregg.Host.Json.parse text)
+      return (9, ← RequestRefusal.clientBytes (Minidregg.Host.Json.signatures value))
   | 10 =>
       let (challengeBytes, signaturesBytes) ← splitPair payload
       let some challenge := NativeObservationCodec.challengeCodec.decode challengeBytes
-        | throw (IO.userError "noncanonical observation challenge")
+        | throw (RequestRefusal.malformed "noncanonical observation challenge")
       let signatures ← decodeSignatures signaturesBytes
-      let signed ← IO.ofExcept (NativeObservationCodec.assemble challenge signatures)
+      let signed ← RequestRefusal.clientBytes (NativeObservationCodec.assemble challenge signatures)
       return (10, NativeObservationCodec.signedCodec.encode signed)
   | 11 =>
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := signingPlanCodec.decode planBytes
-        | throw (IO.userError "noncanonical signing plan")
+        | throw (RequestRefusal.malformed "noncanonical signing plan")
       let signatures ← decodeSignatures signaturesBytes
-      let call ← IO.ofExcept (NativeHost.assemble plan signatures)
+      let call ← RequestRefusal.clientBytes (NativeHost.assemble plan signatures)
       return (11, callCodec.encode call)
+  | 130 =>
+      -- Dry run (P-AFFORDANCES): plan as op 1, assemble as op 11, submit as op 2
+      -- over a Store writer that never appends (`Host.DryRun`). Commits nothing.
+      let (observation, signaturesBytes) ← splitPair payload
+      let signatures ← decodeSignatures signaturesBytes
+      let session ← sessionCurrent config state
+      match ← DryRun.dryRunLoaded config session.opened observation signatures with
+      | .admitted plan => return (130, signingPlanCodec.encode plan)
+      | .stopped outcome => return (255, outcomeCodec.encode outcome)
   | 20 =>
       return (20, outcomeCodec.encode
         (← selectedReleaseSubmitSession config state payload))
@@ -1614,9 +1603,9 @@ def dispatchSession (config : NativeHost.Config)
   | 37 =>
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationDispatchAuthoring.planCodec.decode planBytes
-        | throw (IO.userError "noncanonical dispatch authoring plan")
+        | throw (RequestRefusal.malformed "noncanonical dispatch authoring plan")
       let signatures ← decodeSignatures signaturesBytes
-      let ingress ← IO.ofExcept (ApplicationDispatchAuthoring.assemble plan signatures)
+      let ingress ← RequestRefusal.clientBytes (ApplicationDispatchAuthoring.assemble plan signatures)
       return (37, ingress)
   | 38 =>
       return (38, outcomeCodec.encode
@@ -1640,7 +1629,7 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
   match operation with
   | 58 =>
       let some request := ApplicationDispatchAgentPaidAuthoring.requestCodec.decode payload
-        | throw (IO.userError "noncanonical agent reserve author request")
+        | throw (RequestRefusal.malformed "noncanonical agent reserve author request")
       unless request.matchesFixed approved do
         throw (IO.userError "agent reserve request differs from operator pin")
       let session ← sessionWalked config state
@@ -1654,7 +1643,7 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
   | 59 =>
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationDispatchAgentPaidAuthoring.reservePlanCodec.decode planBytes
-        | throw (IO.userError "noncanonical agent reserve plan")
+        | throw (RequestRefusal.malformed "noncanonical agent reserve plan")
       unless plan.request.matchesFixed approved do
         throw (IO.userError "agent reserve plan differs from operator pin")
       let signatures ← decodeSignatures signaturesBytes
@@ -1662,7 +1651,7 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
         ApplicationDispatchAgentPaidAuthoring.assembleReserve plan signatures
       let some (domain, semantics, command) :=
           DeclaredResourceController.decodeSignedBytes signed
-        | throw (IO.userError "noncanonical agent reserve signed ingress")
+        | throw (RequestRefusal.malformed "noncanonical agent reserve signed ingress")
       unless domain == config.deployment.domain &&
           semantics == config.profile.semantics do
         throw (IO.userError "agent reserve signed ingress differs from pinned profile")
@@ -1672,7 +1661,7 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
       return (59, callBytes)
   | 48 =>
       let some request := ApplicationDispatchAgentPaidAuthoring.paidRequestCodec.decode payload
-        | throw (IO.userError "noncanonical paid agent dispatch author request")
+        | throw (RequestRefusal.malformed "noncanonical paid agent dispatch author request")
       unless request.fixed.matchesFixed approved do
         throw (IO.userError "paid agent request differs from operator pin")
       let session ← sessionWalked config state
@@ -1686,7 +1675,7 @@ def agentDispatchAuthorSession (config : NativeHost.Config)
   | 49 =>
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationDispatchAgentPaidAuthoring.paidPlanCodec.decode planBytes
-        | throw (IO.userError "noncanonical paid agent dispatch plan")
+        | throw (RequestRefusal.malformed "noncanonical paid agent dispatch plan")
       unless plan.request.fixed.matchesFixed approved do
         throw (IO.userError "paid agent plan differs from operator pin")
       let (appBytes, payerBytes) ← splitPair signaturesBytes
@@ -1716,7 +1705,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
   match operation with
   | 80 =>
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.requestCodec.decode payload
-        | throw (IO.userError "noncanonical lifetime reserve request")
+        | throw (RequestRefusal.malformed "noncanonical lifetime reserve request")
       requireOneLifetimeDispatchPin approved request.matchesFixed
       let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
@@ -1730,14 +1719,14 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.reservePlanCodec.decode
           planBytes
-        | throw (IO.userError "noncanonical lifetime reserve plan")
+        | throw (RequestRefusal.malformed "noncanonical lifetime reserve plan")
       requireOneLifetimeDispatchPin approved plan.request.matchesFixed
       let signatures ← decodeSignatures signaturesBytes
       let signed ← IO.ofExcept <|
         ApplicationAgentLifetimeDispatchPaidAuthoring.assembleReserve plan signatures
       let some (domain, semantics, command) :=
           DeclaredResourceController.decodeSignedBytes signed
-        | throw (IO.userError "noncanonical lifetime reserve signed ingress")
+        | throw (RequestRefusal.malformed "noncanonical lifetime reserve signed ingress")
       unless domain == config.deployment.domain &&
           semantics == config.profile.semantics do
         throw (IO.userError "lifetime reserve signed ingress differs from pinned profile")
@@ -1748,7 +1737,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
   | 78 =>
       let some request := ApplicationAgentLifetimeDispatchPaidAuthoring.paidRequestCodec.decode
           payload
-        | throw (IO.userError "noncanonical lifetime paid dispatch request")
+        | throw (RequestRefusal.malformed "noncanonical lifetime paid dispatch request")
       requireOneLifetimeDispatchPin approved request.fixed.matchesFixed
       let session ← sessionWalked config state
       let plan ← IO.ofExcept <|
@@ -1761,7 +1750,7 @@ def agentLifetimeDispatchAuthorSession (config : NativeHost.Config)
   | 79 =>
       let (planBytes, signaturesBytes) ← splitPair payload
       let some plan := ApplicationAgentLifetimeDispatchPaidAuthoring.paidPlanCodec.decode planBytes
-        | throw (IO.userError "noncanonical lifetime paid dispatch plan")
+        | throw (RequestRefusal.malformed "noncanonical lifetime paid dispatch plan")
       requireOneLifetimeDispatchPin approved plan.request.fixed.matchesFixed
       let (appBytes, grantAndPayer) ← splitPair signaturesBytes
       let (grantSignature, payerBytes) ← splitPair grantAndPayer
@@ -1958,21 +1947,56 @@ def dispatchLifecycleClaimSubmitSession (config : NativeHost.Config)
       writeSessionFrame output 26 <| outcomeCodec.encode <|
         NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
 
-partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : IO Unit := do
-  let first ← input.read 1
-  if first.isEmpty then return
-  let lengthWire ← readExactly input 4 first
-  let length := frameLength lengthWire
-  if length == 0 || length > maxFrame then throw (IO.userError "invalid native host frame length")
-  let frame ← readExactly input length
-  let (operation, payload) ← match frame.toList with
-    | [] => throw (IO.userError "empty native host frame")
-    | operation :: payload => dispatch config operation payload
-  let response := (operation :: payload).toByteArray
-  if response.size > maxFrame then throw (IO.userError "native host response exceeds frame budget")
-  output.write (lengthBytes response.size ++ response)
-  output.flush
-  serve config input output
+/-- Read and discard `count` bytes in bounded chunks: an over-length frame is
+skipped without buffering it, so the next frame starts where it should. -/
+partial def discardExactly (input : IO.FS.Stream) (count : Nat) : IO Unit := do
+  if count == 0 then return
+  let chunk ← input.read (min count 65536).toUSize
+  if chunk.isEmpty then throw (IO.userError "truncated native host frame")
+  discardExactly input (count - chunk.size)
+
+/-- One request. Every frame is answered: by its handler, or — when the handler
+throws — by `RequestRefusal.frame` under operation 255, and the loop goes on.
+The process ends only on end of input, a truncated frame (the supervisor's pipe
+closed), a poisoned session (Store integrity: a new process must reopen from the
+MAC'd checkpoint; the request is answered `unavailable` first), or a handler
+that threw after its reply already left (a second frame would desynchronise
+the pipe). `mini serve` restarts the Host in the last three cases. -/
+def serveFrame (config : NativeHost.Config)
+    (state : IO.Ref (Option (NativeHostSession.Session config)))
+    (meteringProfile : Lean.Json)
+    (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
+    (operation : UInt8) (payload : List UInt8) (output : IO.FS.Stream) : IO Unit := do
+  let wrote ← IO.mkRef false
+  let tracked : IO.FS.Stream :=
+    { output with write := fun bytes => do wrote.set true; output.write bytes }
+  try
+    if operation == 34 then
+      dispatchApplicationSubmitSession config state payload tracked
+    else if operation == 46 then
+      dispatchAgentSubmitSession config state payload tracked
+    else if operation == 76 then
+      dispatchAgentLifetimeSubmitSession config state payload tracked
+    else if operation == 26 then
+      dispatchLifecycleClaimSubmitSession config state payload tracked
+    else
+      let started ← IO.monoMsNow
+      let (responseOperation, responsePayload) ←
+        dispatchSession config state meteringProfile fnDispatch operation payload
+      writeSessionFrame tracked responseOperation responsePayload
+      if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
+        IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
+  catch error =>
+    if ← wrote.get then
+      throw (IO.userError s!"op {operation} failed after its reply was written: {error}")
+    if (← state.get).isNone then
+      writeSessionFrame output 255 <| outcomeCodec.encode <|
+        .unavailable "host session reopening".toUTF8.toList
+      throw (IO.userError s!"op {operation}: native host session invalidated: {error}")
+    IO.eprintln s!"minidregg-host: op {operation} refused: {error}"
+    writeSessionFrame output 255 (RequestRefusal.frame operation error)
+  if (← state.get).isNone then
+    throw (IO.userError s!"op {operation}: native host session invalidated")
 
 partial def serveSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
@@ -1983,26 +2007,18 @@ partial def serveSession (config : NativeHost.Config)
   if first.isEmpty then return
   let lengthWire ← readExactly input 4 first
   let length := frameLength lengthWire
-  if length == 0 || length > maxFrame then throw (IO.userError "invalid native host frame length")
-  let frame ← readExactly input length
-  let (operation, payload) ← match frame.toList with
-    | [] => throw (IO.userError "empty native host frame")
-    | operation :: payload => pure (operation, payload)
-  if operation == 34 then
-    dispatchApplicationSubmitSession config state payload output
-  else if operation == 46 then
-    dispatchAgentSubmitSession config state payload output
-  else if operation == 76 then
-    dispatchAgentLifetimeSubmitSession config state payload output
-  else if operation == 26 then
-    dispatchLifecycleClaimSubmitSession config state payload output
+  if length == 0 then
+    writeSessionFrame output 255 (RequestRefusal.frame 255
+      (RequestRefusal.malformed "empty native host frame"))
+  else if length > maxFrame then
+    discardExactly input length
+    writeSessionFrame output 255 (RequestRefusal.frame 255
+      (RequestRefusal.malformed "native host frame exceeds frame bound"))
   else
-    let started ← IO.monoMsNow
-    let (responseOperation, responsePayload) ←
-      dispatchSession config state meteringProfile fnDispatch operation payload
-    writeSessionFrame output responseOperation responsePayload
-    if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
-      IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
+    match (← readExactly input length).toList with
+    | [] => pure ()
+    | operation :: payload =>
+        serveFrame config state meteringProfile fnDispatch operation payload output
   serveSession config state meteringProfile fnDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
@@ -5203,7 +5219,7 @@ def run (arguments : List String) : IO UInt32 := do
                         | 97 =>
                             let (planBytes, signature) ← splitPair payload
                             let some plan := FleetTurn.signingPlanCodec.decode planBytes
-                              | throw (IO.userError "noncanonical fleet turn plan")
+                              | throw (RequestRefusal.malformed "noncanonical fleet turn plan")
                             let ingress ← IO.ofExcept (NativeHost.fleetAssemble plan signature)
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "fleet turn ingress exceeds host frame bound")
@@ -5258,7 +5274,7 @@ def run (arguments : List String) : IO UInt32 := do
                         | 104 =>
                             let (planBytes, signature) ← splitPair payload
                             let some plan := PayCellDomain.signingPlanCodec.decode planBytes
-                              | throw (IO.userError "noncanonical pay plan")
+                              | throw (RequestRefusal.malformed "noncanonical pay plan")
                             let ingress ← IO.ofExcept (NativeHost.payAssemble plan signature)
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "pay ingress exceeds host frame bound")
@@ -5427,7 +5443,7 @@ def run (arguments : List String) : IO UInt32 := do
                               | return ((255 : UInt8), failure .operationRejected "fn-frontier-plan"
                                   "fn consumer service is not configured")
                             let some releaseKey := fnFrontierPlanRequestCodec.decode payload
-                              | throw (IO.userError "noncanonical fn frontier plan request")
+                              | throw (RequestRefusal.malformed "noncanonical fn frontier plan request")
                             let plan ← fnFrontierPrepareSession pinnedConfig state
                               service releaseKey
                             let bytes := FnConsumerFrontierPlan.planCodec.encode plan
@@ -5440,7 +5456,7 @@ def run (arguments : List String) : IO UInt32 := do
                                   "fn consumer service is not configured")
                             let (planBytes, signature) ← splitPair payload
                             let some plan := FnConsumerFrontierPlan.planCodec.decode planBytes
-                              | throw (IO.userError "noncanonical fn frontier signing plan")
+                              | throw (RequestRefusal.malformed "noncanonical fn frontier signing plan")
                             let releaseKey := plan.selected.map
                               (fun spec => spec.evidence.releaseKey)
                             let current ← fnFrontierPrepareSession pinnedConfig state
@@ -5564,7 +5580,7 @@ def run (arguments : List String) : IO UInt32 := do
                         | 33 =>
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationShareIssueAuthoring.planCodec.decode planBytes
-                              | throw (IO.userError "noncanonical share issue signing plan")
+                              | throw (RequestRefusal.malformed "noncanonical share issue signing plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
                               ApplicationShareIssueAuthoring.assemble plan signatures
@@ -5583,7 +5599,7 @@ def run (arguments : List String) : IO UInt32 := do
                         | 57 =>
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationShareIssueGrainAuthoring.planCodec.decode planBytes
-                              | throw (IO.userError "noncanonical grain share issue signing plan")
+                              | throw (RequestRefusal.malformed "noncanonical grain share issue signing plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
                               ApplicationShareIssueGrainAuthoring.assemble plan signatures
@@ -5627,7 +5643,7 @@ def run (arguments : List String) : IO UInt32 := do
                                   "fn consumer service is not configured")
                             let (planBytes, gatewaySignature) ← splitPair payload
                             let some plan := FnConsumerNamespacePlan.planCodec.decode planBytes
-                              | throw (IO.userError "noncanonical fn namespace plan")
+                              | throw (RequestRefusal.malformed "noncanonical fn namespace plan")
                             let (scope, binding) ← fnNamespaceLocalZero pinnedConfig selected
                             unless plan.spec.consumerNamespace.scope == scope &&
                                 plan.spec.consumerNamespace.controlBinding == binding do
@@ -5658,7 +5674,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationLifecycleCompletionOperator.planCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical lifecycle completion plan")
+                              | throw (RequestRefusal.malformed "noncanonical lifecycle completion plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
                               ApplicationLifecycleCompletionOperator.assemble plan signatures
@@ -5683,7 +5699,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationLifecycleBeginOperator.planCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical resident BEGIN plan")
+                              | throw (RequestRefusal.malformed "noncanonical resident BEGIN plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
                               ApplicationLifecycleBeginOperator.assemble plan signatures
@@ -5708,7 +5724,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationLifecycleClaimOperator.planCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical lifecycle claim plan")
+                              | throw (RequestRefusal.malformed "noncanonical lifecycle claim plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
                               ApplicationLifecycleClaimOperator.assemble plan signatures
@@ -5756,7 +5772,7 @@ def run (arguments : List String) : IO UInt32 := do
                                   planBytes then
                               IO.ofExcept <|
                                 ApplicationLifecycleLaunchBeginAuthoring.assemble plan signatures
-                            else throw (IO.userError "noncanonical launch BEGIN plan")
+                            else throw (RequestRefusal.malformed "noncanonical launch BEGIN plan")
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
                               throw (IO.userError "launch BEGIN ingress exceeds host frame bound")
                             return ((67 : UInt8), ingress)
@@ -5778,7 +5794,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationLifecycleLaunchClaimAuthoring.planCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical launch claim plan")
+                              | throw (RequestRefusal.malformed "noncanonical launch claim plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
                               ApplicationLifecycleLaunchClaimAuthoring.assemble plan signatures
@@ -5803,7 +5819,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationLifecycleLaunchCompletionAuthoring.planCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical launch completion plan")
+                              | throw (RequestRefusal.malformed "noncanonical launch completion plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let ingress ← IO.ofExcept <|
                               ApplicationLifecycleLaunchCompletionAuthoring.assemble plan signatures
@@ -5823,7 +5839,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationAgentLifetimeGrantAuthoring.planCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical agent lifetime grant plan")
+                              | throw (RequestRefusal.malformed "noncanonical agent lifetime grant plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let session ← sessionWalked pinnedConfig state
                             let ingress ← IO.ofExcept <|
@@ -5845,7 +5861,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, signaturesBytes) ← splitPair payload
                             let some plan := ApplicationGrainSessionEnrollmentAuthoring.planCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical session enrollment plan")
+                              | throw (RequestRefusal.malformed "noncanonical session enrollment plan")
                             let signatures ← decodeSignatures signaturesBytes
                             let session ← sessionWalked pinnedConfig state
                             let ingress ← IO.ofExcept <|
@@ -5871,7 +5887,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (sponsorSignature, possessionSignature) ← splitPair signaturesBytes
                             let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical participant enrollment plan")
+                              | throw (RequestRefusal.malformed "noncanonical participant enrollment plan")
                             let ingress ← IO.ofExcept (NativeHost.enrollmentAssemble plan
                               sponsorSignature possessionSignature)
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
@@ -5893,7 +5909,7 @@ def run (arguments : List String) : IO UInt32 := do
                             let (planBytes, sponsorSignature) ← splitPair payload
                             let some plan := ParticipantFactoryProvisioning.signingPlanCodec.decode
                                 planBytes
-                              | throw (IO.userError "noncanonical participant provisioning plan")
+                              | throw (RequestRefusal.malformed "noncanonical participant provisioning plan")
                             let ingress ← IO.ofExcept (NativeHost.provisionAssemble plan
                               sponsorSignature)
                             unless ingress.length ≤ FnEvidenceCodec.maxHostFrameBytes do
@@ -5994,7 +6010,7 @@ def run (arguments : List String) : IO UInt32 := do
       | "enroll-key-assemble", [planPath, sponsorPath, possessionPath, output] =>
           let planBytes ← readBoundedBytes planPath maxFrame
           let some plan := ParticipantKeyEnrollment.signingPlanCodec.decode planBytes
-            | throw (IO.userError "noncanonical participant enrollment plan")
+            | throw (RequestRefusal.malformed "noncanonical participant enrollment plan")
           let sponsor ← readBoundedBytes sponsorPath 64
           let possession ← readBoundedBytes possessionPath 64
           let ingress ← IO.ofExcept (NativeHost.enrollmentAssemble plan sponsor possession)
@@ -6027,7 +6043,7 @@ def run (arguments : List String) : IO UInt32 := do
       | "application-share-issue-assemble", [planPath, signaturesPath, output] =>
           let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let some plan := ApplicationShareIssueAuthoring.planCodec.decode planBytes
-            | throw (IO.userError "noncanonical share issue signing plan")
+            | throw (RequestRefusal.malformed "noncanonical share issue signing plan")
           let signatures ← decodeSignatures
             (← readBoundedBytes signaturesPath FnEvidenceCodec.maxHostFrameBytes)
           let ingress ← IO.ofExcept <|
@@ -6049,7 +6065,7 @@ def run (arguments : List String) : IO UInt32 := do
       | "application-grain-share-issue-assemble", [planPath, signaturesPath, output] =>
           let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let some plan := ApplicationShareIssueGrainAuthoring.planCodec.decode planBytes
-            | throw (IO.userError "noncanonical grain share issue signing plan")
+            | throw (RequestRefusal.malformed "noncanonical grain share issue signing plan")
           let signatures ← decodeSignatures
             (← readBoundedBytes signaturesPath FnEvidenceCodec.maxHostFrameBytes)
           let ingress ← IO.ofExcept <|
@@ -6064,10 +6080,10 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "observe-assemble", [challengePath, signaturesPath, output] =>
           let some challenge := NativeObservationCodec.challengeCodec.decode (← readBytes challengePath)
-            | throw (IO.userError "noncanonical observation challenge")
+            | throw (RequestRefusal.malformed "noncanonical observation challenge")
           let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
           let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
-            | throw (IO.userError "noncanonical signature list")
+            | throw (RequestRefusal.malformed "noncanonical signature list")
           let signed ← IO.ofExcept (NativeObservationCodec.assemble challenge signatures)
           writeBytes output (NativeObservationCodec.signedCodec.encode signed)
           pure 0
@@ -6076,16 +6092,27 @@ def run (arguments : List String) : IO UInt32 := do
           pure 0
       | "assemble", [planPath, signaturesPath, output] =>
           let some plan := signingPlanCodec.decode (← readBytes planPath)
-            | throw (IO.userError "noncanonical signing plan")
+            | throw (RequestRefusal.malformed "noncanonical signing plan")
           let signaturesCodec := ResourceBirthCodec.strictCodec (StreamCodec.list bytesStream).toLawful
           let some signatures := signaturesCodec.decode (← readBytes signaturesPath)
-            | throw (IO.userError "noncanonical signature list")
+            | throw (RequestRefusal.malformed "noncanonical signature list")
           let call ← IO.ofExcept (NativeHost.assemble plan signatures)
           writeBytes output (callCodec.encode call)
           pure 0
       | "submit", [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.submit config (← readBytes input)))
           pure 0
+      | "dry-run", [observationPath, signaturesPath, output] =>
+          let signatures ← decodeSignatures (← readBytes signaturesPath)
+          let opened ← IO.ofExcept (← NativeHost.openExisting config)
+          match ← DryRun.dryRunLoaded config opened (← readBytes observationPath) signatures with
+          | .admitted plan =>
+              writeBytes output (signingPlanCodec.encode plan)
+              pure 0
+          | .stopped outcome =>
+              writeBytes output (outcomeCodec.encode outcome)
+              IO.eprintln "dry run stopped; the outcome frame is in the output file"
+              pure 3
       | "lookup", [input, output] =>
           writeBytes output (outcomeCodec.encode (← NativeHost.lookup config (← readBytes input)))
           pure 0
@@ -6151,7 +6178,7 @@ def run (arguments : List String) : IO UInt32 := do
           withPinnedSignature config fun pinnedConfig => do
             let bytes ← readBoundedBytes input maxFrame
             let some ingress := ApplicationLifecycleCompletionV2Ingress.codec.decode bytes
-              | throw (IO.userError "noncanonical launch-bound v2 completion ingress")
+              | throw (RequestRefusal.malformed "noncanonical launch-bound v2 completion ingress")
             let session ← IO.ofExcept (← NativeHostSession.startWalked pinnedConfig)
             let result ← NativeHostReplay.admitCompletionV2Verified session.verified ingress
             let (status, detail) := match result with
@@ -6316,7 +6343,7 @@ def run (arguments : List String) : IO UInt32 := do
           selectedFnNewPaths [cursorPath, reportPath, sourcePath]
           let bytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
           let some plan := FnConsumerFrontierPlan.planCodec.decode bytes
-            | throw (IO.userError "noncanonical fn frontier signing plan")
+            | throw (RequestRefusal.malformed "noncanonical fn frontier signing plan")
           let _ ← IO.ofExcept plan.proposal
           writeBytes cursorPath plan.cursorBytes
           writeBytes reportPath plan.reportBytes
@@ -6349,7 +6376,7 @@ def run (arguments : List String) : IO UInt32 := do
                 | throw (IO.userError "fn frontier service is not configured")
               let planBytes ← readBoundedBytes planPath FnEvidenceCodec.maxHostFrameBytes
               let some plan := FnConsumerFrontierPlan.planCodec.decode planBytes
-                | throw (IO.userError "noncanonical fn frontier signing plan")
+                | throw (RequestRefusal.malformed "noncanonical fn frontier signing plan")
               let signature ← readBoundedBytes signaturePath 64
               let releaseKey := plan.selected.map (fun spec => spec.evidence.releaseKey)
               let session ← IO.ofExcept (← NativeHostSession.start pinnedConfig)
