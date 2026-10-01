@@ -100,9 +100,37 @@ private partial def duplicateScan : List Char → List ScanFrame → Result Unit
           duplicateScan suffix []
       | _, _ => duplicateScan rest stack
 
+/-- The deepest `[`/`{` nesting outside string literals. Tail recursive, so it
+runs in constant stack on any input. -/
+def nestingDepth (source : List Char) : Nat :=
+  go source false false 0 0
+where
+  go : List Char → (inString escaped : Bool) → (depth deepest : Nat) → Nat
+    | [], _, _, _, deepest => deepest
+    | _ :: rest, true, true, depth, deepest => go rest true false depth deepest
+    | '\\' :: rest, true, false, depth, deepest => go rest true true depth deepest
+    | '"' :: rest, true, false, depth, deepest => go rest false false depth deepest
+    | _ :: rest, true, false, depth, deepest => go rest true false depth deepest
+    | '"' :: rest, false, _, depth, deepest => go rest true false depth deepest
+    | '[' :: rest, false, _, depth, deepest => go rest false false (depth + 1) (max deepest (depth + 1))
+    | '{' :: rest, false, _, depth, deepest => go rest false false (depth + 1) (max deepest (depth + 1))
+    | ']' :: rest, false, _, depth, deepest => go rest false false (depth - 1) deepest
+    | '}' :: rest, false, _, depth, deepest => go rest false false (depth - 1) deepest
+    | _ :: rest, false, _, depth, deepest => go rest false false depth deepest
+
+/-- No request this Host authors from nests deeper than this. The bound runs
+before either recursive parser sees the text: Lean's JSON parser recurses once
+per level, so unbounded nesting is a stack exhaustion, not a refusal. -/
+def maxNesting : Nat := 64
+
+theorem nestingDepth_flat : nestingDepth "{\"a\":[\"[{\"]}".toList = 2 := by decide
+#assert_axioms nestingDepth_flat
+
 /-- Parse JSON without Lean's usual duplicate-key overwrite. Main must use
 this boundary before calling `author` or `signatures`. -/
 def parse (source : String) : Result Lean.Json := do
+  unless nestingDepth source.toList ≤ maxNesting do
+    throw s!"$: JSON nesting deeper than {maxNesting}"
   duplicateScan source.toList []
   Lean.Json.parse source
 
