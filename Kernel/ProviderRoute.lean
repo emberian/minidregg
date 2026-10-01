@@ -275,8 +275,19 @@ theorem reads_projection (task : Nat) (before after : State) :
     DeclaredResourceProjection.pairName, Minidregg.Pred.State.get,
     Nat.repr_eq_ofList_toDigits, Nat.toDigits, Nat.toDigitsCore, Nat.digitChar, toString]
 
+/-- A grain status that holds a reservation. -/
 def IsHeld (status : Int) : Prop := status = 3 ∨ status = 4 ∨ status = 5 ∨ status = 7
+/-- A grain status that holds no reservation. -/
 def IsFree (status : Int) : Prop := status = 0 ∨ status = 1 ∨ status = 2 ∨ status = 6
+
+/-! The two status classes are disjoint and each has both poles: the route law's case split
+reads a real distinction, not a constant. -/
+theorem isHeld_three : IsHeld 3 := Or.inl rfl
+theorem not_isHeld_zero : ¬ IsHeld 0 := by simp only [IsHeld]; omega
+theorem isFree_zero : IsFree 0 := Or.inl rfl
+theorem not_isFree_three : ¬ IsFree 3 := by simp only [IsFree]; omega
+theorem not_isHeld_and_isFree (status : Int) : ¬ (IsHeld status ∧ IsFree status) := by
+  unfold IsHeld IsFree; omega
 
 /-- The route law, read as arithmetic over the projected values. -/
 theorem transition_law {schedule : Schedule} {old st : Minidregg.Pred.State}
@@ -556,6 +567,11 @@ theorem fixture_interrupted_pool :
 #assert_axioms installed_route_law
 #assert_axioms reads_projection
 #assert_axioms transition_law
+#assert_axioms isHeld_three
+#assert_axioms not_isHeld_zero
+#assert_axioms isFree_zero
+#assert_axioms not_isFree_three
+#assert_axioms not_isHeld_and_isFree
 #assert_axioms none_route_reserves_nothing
 #assert_axioms user_route_charges_per_op_only
 #assert_axioms user_route_holds_per_op
