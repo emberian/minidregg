@@ -26,12 +26,108 @@ the xz library can allocate an entire block before writing to the bounded
 sink. The cgroup is therefore part of the ingest boundary. A killed or failed
 unit is not an installed package.
 
-The planned direct `mini-spk@RESOURCE.service` runs under one locked app UID and
-starts `spk-host` as MainPID. The host creates an AF_UNIX stream socketpair in
-that service, keeps the supervisor end for `native/spk-rpc`, and gives the
-packaged bridge the other end on fd 3 through bubblewrap. The app, bridge and
-its localhost database live in that service's cgroup. AgentGrain workers have
-different units; a Hermes hard disconnect does not stop the shared app.
+## Who runs what: the operator, the broker, the resident, the app
+
+`spk-host grain` runs as the Store operator (`mini`), never as root, and
+refuses root. Every root-only step is one typed request to **`mini-spk-broker`**
+(`native/spk-host/src/broker.rs`), a root service on
+`/run/mini-spk-broker.sock` (`0660 root:<operator group>`) that answers only
+the operator UID (`SO_PEERCRED`) and logs every request with the peer's
+pid/uid/gid to `GRAINS/broker/broker.log` and its journal. Its verbs are the
+whole surface; an unknown verb or field refuses at decode:
+
+| verb | what root does |
+|---|---|
+| `init-store {store}` | creates `GRAINS/<store>` (operator 0700) and reports the host identity |
+| `place {store, app}` | allocates the app UID from the broker's own pool (the operator never names a UID) |
+| `set-cgroup {store, app, class}` | records the size class and renders `<prefix>-grains-s<store>a<app>.slice` |
+| `ingest {store, app, sha256}` | copies the Store's staged SPK into the inbox and runs `spk-ingest` |
+| `mount-volume {store, app, volumeId, importSha256?}` | creates once (`spk-var-volume create` / `create-from`), then attests |
+| `unmount {store, app}` | unmounts a volume none of whose units is active |
+| `install-unit {store, app, generation}` | renders `mini-spk-a<app>-g<gen>.service` from the broker's template |
+| `start {unit}` / `stop {unit}` | only units this broker installed; `stop` resets a failed unit to inactive |
+| `export-volume {store, app}` | copies a stopped app's image (fs frozen during the copy) to `GRAINS/<store>/exports/` |
+| `backup {}` | `mini-spk-broker backup` into `GRAINS/backups/<time>/` |
+
+The client passes parameters, never unit text, paths or UIDs. Every path the
+broker touches is below its grains root, whose ancestors must be root-owned and
+not group/world writable; operator files it reads (a staged SPK, an import
+image, a resident config's existence) are opened by an `O_NOFOLLOW` walk that
+requires operator ownership. Store keys are 16 lowercase hex; app ids and
+generations are canonical decimals.
+
+**Names carry the Store.** Volumes, mounts, witnesses and slices are named
+`<store>-<app>` / `s<store>a<app>`, where `<store>` is the first 16 hex of the
+SHA-256 of the Store's pinned genesis config (unique per Store: it carries the
+Store's random completion custodian key). Two Stores on one host never adopt
+each other's `/var`. The resident unit name is **not** the broker's to choose:
+Mini pins it (`Kernel/ApplicationLifecycleResidentProfile.processIdentity` =
+`mini-spk-a<app>-g<gen>.service`) and signs it into every lifecycle BEGIN, so
+two Stores with the same app id would collide on it; the broker records which
+Store installed each unit and **refuses** another Store's claim with a reason
+naming the owner. K-SPK puts the deployment id into `processIdentity`.
+
+**The resident unit** (rendered per generation, runtime, not enabled):
+`User=`/`Group=` the operator, `Slice=` the app's class slice,
+`AmbientCapabilities=CAP_SETUID CAP_SETGID` (and the same bounding set),
+`NoNewPrivileges=yes`, `ProtectSystem=strict` with write access to the Store's
+grain state and the app's `/var` mount only, `ProtectHome`, `PrivateTmp`,
+`KillMode=control-group`, `OnFailure=<prefix>-spk-supervisor@<store>-<app>`, and
+`Environment=` the broker-chosen app UID/GID, grains root and Store key. The
+resident's first act is to install a seccomp filter on every thread
+(`setid_bound.rs`): `setresuid`/`setresgid` only with all three ids equal to
+that app UID/GID, `setgroups` only empty, every other set*id call `EPERM`, x32
+numbers and a foreign arch killed. A compromised resident (the fd-3 Cap'n Proto
+parser reads app bytes) therefore cannot become root or another grain; it is
+the operator. Why not a per-app resident UID: the resident authors Mini
+lifecycle writes as the host's management subject through the operator socket,
+which Mini requires to be owned by the caller (`PrivateOperator`); a per-grain
+resident UID would need that socket opened to every grain, or the management
+key split per grain (K-SPK). The descriptors survive the UID switch because the
+gate child `dup2`s 3/4/5/6 and the output pipe **before** `setresgid`/
+`setresuid`; file descriptors are not re-checked against the new UID, and 4/5
+are `O_PATH` opens, so the app UID needs no permission on the image ancestors.
+After the switch the child clears ambient, permitted, effective and
+inheritable capabilities, then `execveat`s the pinned bwrap.
+
+**The supervisor.** A generation is one START claim; it is never relaunched in
+place (the resident journal refuses a second launch without fd 3). The resident
+exits when its app exits (a pidfd on the bwrap child is in its poll set), so a
+crashed app or a killed resident fails the unit, whose `OnFailure=` starts
+`<prefix>-spk-supervisor@<store>-<app>.service` (`Type=oneshot`,
+`Restart=on-failure`, `RestartSec=30`, `StartLimitBurst=3` per 30 min,
+`RestartPreventExitStatus=3`). It runs `spk-host grain supervise`: the dead
+generation is STOPped through Mini (the exact-unit audit accepts a dead
+incarnation: same InvocationID, no cgroup, MainPID 0, failed/inactive), and a
+continue-START of the next generation follows on the same `/var`. An uncertain
+record exits 3 and is never retried. A START that failed after its claim
+(phase 9) calls Mini's `reconcileFailedStart`, whose receiver K-SPK owns; until
+it lands the call refuses with that reason and the app stays claimed.
+
+**Size classes** (`broker::CLASSES`; the kernel will pin the class in the app
+birth descriptor, K-SPK): S = `MemoryMax=512M`, `CPUWeight=50`, `TasksMax=256`,
+`IOWeight=50`, 512 MiB `/var`; M = `1G`, `100`, `512`, `100`, 1 GiB `/var`.
+`MemorySwapMax=0`. The class slices sit in `<prefix>-grains.slice`; with
+`mini.slice` at 3 GB, two class-S grains plus the Store fit, or one class M.
+
+**Backups and export.** `mini-spk-broker backup CONFIG OUT` (root, called by
+`mini-backup`) copies every registered volume with its filesystem frozen for
+the copy: a running app's image is captured at one crash-consistent instant
+(SQLite inside is built to recover from exactly that), a stopped one exactly;
+each copy is `e2fsck -fn`-checked and its root listed with `debugfs` without
+mounting. `spk-host grain export PROFILE APP OUT` requires the app's latest
+generation STOPped by a completed STOP and writes `var.ext4`, `manifest.json`
+(image SHA-256, package, class, volume id, the STOP receipt and its SHA-256)
+and `manifest.sig` (the Store's completion custodian over the manifest bytes).
+`grain install … --import DIR --exporter-key HEX` verifies signature, image
+bytes, package and class before any Mini effect, installs on a **new**
+application resource, and the broker creates the volume from the checked
+image after `e2fsck -fn`.
+
+Deployment: install `mini-spk-broker.service` and `/etc/mini/spk-broker.json`
+(root 0600; `mini-spk-broker.example.json`), the binaries root-owned, the app
+UID pool accounts (nologin, primary group not the operator's). The broker
+renders the supervisor template and `<prefix>-grains.slice` itself at start.
 
 The package root is bound read-only from an open directory fd; a separate
 preallocated ext4 loop filesystem is mounted at `/var`; `/tmp` is a size-limited
@@ -53,14 +149,16 @@ selected `action.command`; wake uses `continueCommand`. A failed first creation
 is uncertain until Mini and the app's retained state reconcile; it must not be
 blindly repeated.
 
-`spk-var-volume create RESOURCE_ID APP_UID SIZE_MIB SOURCE_VOLUME_HEX` is a separate privileged,
-explicit operator action. It provisions a root-private backing image under
-`/var/lib/minidregg/spk/images`, mounts it at the task-traversable
-`/var/lib/minidregg/spk/vars/RESOURCE_ID`, and verifies the loop device,
-backing path, size, owner and ext4 type. `verify` only checks an existing mount.
-Sizes are 64 MiB–16 GiB. `SOURCE_VOLUME_HEX` is the exact 32-byte lowercase-hex
-volume identity authored by Mini for the deployment domain and application;
-an arbitrary identifier or an empty directory is not launch authority.
+`spk-var-volume --root GRAINS create STORE RESOURCE_ID APP_UID SIZE_MIB SOURCE_VOLUME_HEX`
+(called only by the broker) provisions a root-private backing image
+`GRAINS/volumes/STORE-RESOURCE_ID.ext4`, mounts it at the task-traversable
+`GRAINS/vars/STORE-RESOURCE_ID`, and verifies the loop device, backing path,
+size, owner and ext4 type; `create-from` does the same from a broker-checked
+import image that must be a clean ext4 of exactly the class size; `verify`
+only checks an existing mount. Sizes are 64 MiB–16 GiB. `SOURCE_VOLUME_HEX` is
+the exact 32-byte lowercase-hex volume identity authored by Mini for the
+deployment domain and application; an arbitrary identifier or an empty
+directory is not launch authority.
 
 Before creating volumes, provision `/etc/minidregg/spk/host-identity` as a
 root-owned mode-0600 regular file with exactly two lines:
@@ -70,23 +168,20 @@ deployment_id=<64 lowercase hexadecimal characters>
 host_id=<64 lowercase hexadecimal characters>
 ```
 
-Both are stable operator-configured identities that the resident configuration
-must pin. Creation records them, the Mini source volume ID, app UID and quota
-in `/etc/minidregg/spk/volumes/RESOURCE_ID.conf`. Changing the global identity
-does not reassign existing registrations. Replacing or moving an established
+Creation records them, the Mini source volume ID, app UID and quota in
+`GRAINS/volumes/STORE-RESOURCE_ID.conf`. Replacing or moving an established
 volume requires a separate migration contract; do not rewrite its registration
 to make a mismatch disappear.
 
-`spk-var-volume attest RESOURCE_ID` reads that protected registration and
-publishes `/run/minidregg/spk/volume-attest/RESOURCE_ID.witness`. It checks the
+`spk-var-volume --root GRAINS attest STORE RESOURCE_ID` reads that protected
+registration and publishes `GRAINS/attest/STORE-RESOURCE_ID.witness` (root
+0644; the witness tag stays `DREGG/SPK-VAR-CUSTODY/v1`, which Mini checks, and
+its `backing=`/`mount=` lines carry the Store-keyed paths). It checks the
 backing filesystem's UUID or ZFS dataset GUID, backing inode/size, ext4 image
-UUID and mounted volume. The resident consumer checks the witness against its
-Mini-selected volume and fixed deployment/host pins, then checks the open mount
-before launch. A witness is physical custody evidence, not a Mini permit.
-The proposed `mini-spk-volume-attest@.service` is a one-shot producer; its handoff
-must survive unit exit so the resident can consume it. The helper and service
-must be installed at protected root-owned paths before use. No public port,
-account or automatic service enable is created by the helper.
+UUID and mounted volume. The resident checks the witness against its
+Mini-selected volume, the deployment/host pins and the broker-given grains root
+and Store key, then checks the open mount before launch. A witness is physical
+custody evidence, not a Mini permit.
 
 See the [bounded volume evidence](../../docs/evidence/2026-09-27-spk-volume-custody/README.md)
 for isolated physical checks. Source-qualified v3 BEGIN/claim/completion and

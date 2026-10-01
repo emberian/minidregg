@@ -16,7 +16,7 @@ use crate::lifecycle_v3_stop_claim_native::ExactReceipt;
 use crate::lifecycle_v3_stop_native::{self, ReceiptFields, StopTarget};
 use crate::materialize::verify_installed_spk;
 use crate::resident_launch::SourceBoundLaunch;
-use crate::volume_custody::{read_attested_volume, VolumeWitness};
+use crate::volume_custody::{read_attested_volume, VolumeSite, VolumeWitness};
 use ed25519_dalek::Signer;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -169,6 +169,8 @@ struct ResidentPins {
     expected_volume_id: String,
     persistent_var: PathBuf,
     persistent_var_max_bytes: u64,
+    grains_root: PathBuf,
+    store: String,
     deployment_id: String,
     host_id: String,
     app_uid: u32,
@@ -1185,6 +1187,7 @@ pub fn run(config_path: &Path) -> io::Result<()> {
     )?;
     match_qualification(&pins, &launch)?;
     let volume = read_attested_volume(
+        &VolumeSite::new(&pins.grains_root, &pins.store)?,
         pins.volume_resource,
         pins.app_uid,
         pins.persistent_var_max_bytes,
