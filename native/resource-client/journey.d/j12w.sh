@@ -146,7 +146,9 @@ printf 'one\ntwo\nthree\nfour\n' >"$H/wa/requests/a.md"
 push J12W wa p0 a.md 4
 # the editor: lines 1 and 3 edited, a line added between 2 and 3
 printf 'ONE, edited by A\ntwo\nA added this between two and three\nTHREE, edited by A\nfour\n' >"$H/wa/requests/a.md"
-push J12W wa p1 a.md 3
+# 4 actions: two edits, and the new line's createAtom plus the move that places it
+# between lines 2 and 3 (K-ELEMENT-TREE: a created atom joins the end of the root)
+push J12W wa p1 a.md 4
 pull J12W wa a-check.md
 check J12W "A's pull equals A's file byte for byte" cmp "$H/wa/requests/a.md" "$H/wa/requests/a-check.md"
 ok J12W wa "doc show paper --raw"

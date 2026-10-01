@@ -3594,9 +3594,16 @@ fn seen_value(name: &str, view: &Value, document: &Value, challenge: &Value) -> 
         "view":view,"document":document})
 }
 
+/// A retained read holds the whole page and its view-document: it grows with the
+/// document (a hundred-line document's is past 256 KiB), so it has its own bound.
+const MAX_SEEN: u64 = 16 * 1024 * 1024;
+
 fn read_seen(root: &Path, name: &str, why: &str) -> Result<Value> {
-    let seen = bounded_json(&seen_path(root, name)?)
-        .map_err(|_| format!("doc show {name} (or doc pull {name}) first: {why}"))?;
+    let path = seen_path(root, name)?;
+    if !path.exists() {
+        return Err(format!("doc show {name} (or doc pull {name}) first: {why}"));
+    }
+    let seen = bounded_json_limit(&path, MAX_SEEN)?;
     if seen.get("type").and_then(Value::as_str) != Some(SEEN_TYPE) {
         return Err(format!("doc pull {name} again: the retained read predates the element tree"));
     }
