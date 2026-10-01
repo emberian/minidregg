@@ -209,8 +209,9 @@ def validatePartsWith (config : Config) (durable : Durable)
   let directory ← need "noncanonical native directory" directory?
   let authority ← need "complete deployment authority unavailable"
     (CredentialAuthorityDomainReceiver.loadDeployment config.deployment durable.snapshot)
+  -- `PLift`: the monad binds a `Type`; the proof rides out of the branch in it.
   let lawful ← if checked : lawfulCheck directory = true then
-      pure ((lawfulExact directory) ▸ checked)
+      pure (PLift.up ((lawfulExact directory) ▸ checked))
     else .error "native cell role or domain law refused"
   check (policiesSourced config directory.directory authority.snapshot.logical)
     "selected policy source/profile mismatch"
@@ -224,7 +225,7 @@ def validatePartsWith (config : Config) (durable : Durable)
       policyId := ⟨config.deployment.factoryId⟩
       policyAddress := factoryHead.address
       tariff := config.tariff }
-  pure ⟨directory, authority, pins, lawful⟩
+  pure ⟨directory, authority, pins, lawful.down⟩
 
 def validateParts (config : Config) (durable : Durable) :
     Except String (Validated config durable) :=
