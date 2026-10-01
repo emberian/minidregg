@@ -140,6 +140,9 @@ stamp "Rust binaries: $((t_rust - t_host))s"
 # 6. Smoke: every binary runs and prints its usage contract.
 "$out/bin/minidregg-host" >"$out/logs/usage-host.txt" 2>&1 || true
 grep -q '^minidregg-host:' "$out/logs/usage-host.txt" || candidate_die "Host did not print its usage"
+# The Host starts without doing work: every start of `mini serve` pays its initializers.
+"$src/scripts/check-host-cold-start.sh" "$out/bin/minidregg-host" >"$out/logs/host-cold-start.txt" 2>&1 \
+  || { cat "$out/logs/host-cold-start.txt" >&2; candidate_die "Host cold start over budget"; }
 "$out/bin/mini" --help >"$out/logs/usage-mini.txt" 2>&1 || true
 grep -q '^mini ' "$out/logs/usage-mini.txt" || candidate_die "mini did not print its usage"
 "$out/bin/minidregg-link-sqlite-store" >"$out/logs/usage-store.txt" 2>&1 || true
