@@ -29,6 +29,7 @@
 #   JLS    C-SAT-2: law check, the install-time check, can --any (journey.d/jlawsat.sh -> lawsat-journey.sh, its own Store)
 #   JPAY1  PAY P1: the pay watcher over fixtures (journey.d/jpay1.sh)
 #   JPAY2  PAY P2: the pay cell (journey.d/jpay2.sh, its own Store)
+#   JROT   K-PREROTATE: key pre-rotation on this Store (journey.d/jrot.sh; restarts the service once)
 #   M3, M4, M5 run their lanes' stand-alone journeys on their own fresh Stores
 #   (journey.d/m3.sh, m4.sh, m5.sh); their detail lines say so.
 #   JP2    J-PRIV-2 (PRIVACY.md): a friend enrolled from their own key reaches
@@ -40,7 +41,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jpriv1 m3 m4 m5 m6 m7 m8 j12 j12c j13 j17 jchat jpay1 jpay2 jpriv2 jjob1 jjob-money j12a jinspect jlawsat): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jpriv1 m3 m4 m5 m6 m7 m8 j12 j12c j13 j17 jchat jpay1 jpay2 jpriv2 jjob1 jjob-money j12a jinspect jlawsat jrot): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -124,7 +125,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW K10C KT J17 JPRIV1 JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 J12A JINSPECT JLS JCHAT JJOB1 JJOBM JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW K10C KT J17 JPRIV1 JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 J12A JINSPECT JLS JCHAT JJOB1 JJOBM JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2 JROT)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -178,6 +179,7 @@ TITLE[JPAY1]="pay watcher: finalized transfers become Observation records"
 TITLE[JPAY2]="the pay cell: tariff, deposit book, assignment (own Store)"
 TITLE[KC]="K-CLOCK: the one clock; clock/now in every resource law"
 TITLE[JP2]="a friend's key never touches the box: enroll, use and delegate over the proxy"
+TITLE[JROT]="key pre-rotation: a stolen daily key cannot rotate; the next key does"
 
 # call NAME cmd args... : run one command under the 600 s per-operation abort
 # rule; keeps NAME.{cmd,out,err,rc,wall} in the current step dir; returns rc.
@@ -809,6 +811,7 @@ step_JINSPECT() { hook jinspect "inspect-journey.sh: the cap tree draws the dele
 step_JLS() { hook jlawsat "lawsat-journey.sh: the EVAL falsifier is UNSATISFIABLE with its two-constraint cycle named and refused at install; each can --any witness, submitted as a write, is admitted; sealed, read-only, ran and past-the-cap laws answered; root, height and audit unchanged around every query (lane c-sat2, JLS)" shell; }
 step_JPAY1() { hook jpay1 "finalized Solana transfers in fixtures become Observation records; disagreement and failed transactions refused (lane p1-watcher, J-PAY-1)"; }
 step_JPAY2() { hook jpay2 "the pay cell on its own fresh Store: tariff, 64-row book, assignments, refusals (uniform), lookup, reopen, audit (lane p2-pay, J-PAY-2)"; }
+step_JROT() { hook jrot "a thief holding the daily key cannot rotate (notPrecommitted, noPossession); the friend rotates with the committed next key; the old key's write is refused; grants survive; a second rotation; a --no-prerotation subject cannot rotate; restart; audit re-admits (lane k-prerotate)"; }
 step_M7() { hook m7 "a candidate built from portable interfaces reproduces the pinned hashes and runs this journey with no private fixture (list item 7, lane m7-candidate)" candidate; }
 step_JP2() { hook jpriv2 "a subject enrolled from its own machine creates, writes, reads and delegates through mini --remote; no key of it on the box; a tampered frame is refused (J-PRIV-2, lane local-client)"; }
 
@@ -866,6 +869,7 @@ run_step JPAYE3 J0
 run_step JPAY4 J0
 run_step JPAY6 J0
 run_step JP2 J0
+run_step JROT J1
 
 stop_server || echo "journey: could not stop the service cleanly" >&2
 trap - EXIT

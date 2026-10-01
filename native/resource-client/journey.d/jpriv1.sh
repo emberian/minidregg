@@ -165,6 +165,7 @@ for f in alice bob carl dave; do
   ok setup "$f" "keygen mini.key"
   operator setup "CUSTODY: copy $f's secret into the sponsor home (enroll plan+seal sign with both keys)" \
     install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/jp-$f.key"
+    install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/jp-$f.key.next.pub"  # K-PREROTATE: the record commits to the next key
   ok setup sponsor "enroll plan jp-$f jp-$f.key"
   ok setup sponsor "enroll seal jp-$f"
   ok setup sponsor "enroll submit jp-$f"

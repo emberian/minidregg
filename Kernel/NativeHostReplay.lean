@@ -38,6 +38,7 @@ import Kernel.ApplicationLifecycleCompletionV2Core
 import Kernel.ApplicationLifecycleCreatedHistory
 import Kernel.ApplicationGrainSessionEnrollmentIntent
 import Kernel.ParticipantKeyEnrollmentReceiver
+import Kernel.SubjectKeyRotation
 import Kernel.ParticipantFactoryProvisioningReceiver
 import Kernel.FleetTurnReceiver
 import Kernel.PayBookReceiver
@@ -726,6 +727,10 @@ inductive NativeAdmission (config : Config) (opened : Opened config) : DataInten
       (accepted : ParticipantKeyEnrollmentReceiver.AcceptedEnrollment config.deployment config.profile
         ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
       NativeAdmission config opened (ParticipantKeyEnrollmentReceiver.intent accepted)
+  | subjectKeyRotation {ingress : SubjectKeyRotation.DecodedIngress}
+      (accepted : SubjectKeyRotation.AcceptedRotation config.deployment config.profile.semantics
+        opened.durable ingress) :
+      NativeAdmission config opened (SubjectKeyRotation.intent accepted)
   | participantFactoryProvisioning {ingress : ParticipantFactoryProvisioning.DecodedIngress}
       (accepted : ParticipantFactoryProvisioningReceiver.AcceptedProvisioning config.deployment
         config.profile ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable ingress) :
@@ -1559,6 +1564,13 @@ private def derive (config : Config) (opened : Opened config)
     | .ok accepted =>
         return .ok ⟨ParticipantKeyEnrollmentReceiver.intent accepted,
           .participantKeyEnrollment accepted, none, none, none, none, none, none, none, none, none⟩
+  if let some ingress := SubjectKeyRotation.decodeIngress bytes then
+    match ← SubjectKeyRotation.admitDecodedNative config.deployment config.profile.semantics
+        opened.durable config.signature ingress with
+    | .error reason => return .error s!"subject key rotation refused: {repr reason}"
+    | .ok accepted =>
+        return .ok ⟨SubjectKeyRotation.intent accepted,
+          .subjectKeyRotation accepted, none, none, none, none, none, none, none, none, none⟩
   if let some ingress := ParticipantFactoryProvisioning.decodeIngress bytes then
     match ← ParticipantFactoryProvisioningReceiver.admitDecodedNative config.deployment config.profile
         ⟨config.federation, height⟩ opened.durable config.signature ingress with

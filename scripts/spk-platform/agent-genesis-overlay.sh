@@ -86,7 +86,7 @@ for route in hermes-a hermes-b; do
     test "${#public}" = 64
     printf '%s\n' "$spec" | jq -c --arg public "$public" '
       {key:{keyId:.keyId,keyEpoch:"2",algorithm:"1",subject:.subject,
-        publicKey:$public,activeFrom:"0",activeUntil:"1000000"},
+        publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
        accountId:.account,
        spendCapabilityId:.spendCapability,
        controlCapabilityId:.controlCapability,

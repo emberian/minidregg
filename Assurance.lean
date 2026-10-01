@@ -126,3 +126,4 @@ import Assurance.ReleaseGateRouting -- the release-gate routing lemma and its bi
 import Assurance.JointPostconditionWitness
 import Assurance.NativeObservationAudit
 import Assurance.CanonicalResourceBookInvariantAudit
+import Assurance.KeyPreRotationAudit

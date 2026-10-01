@@ -52,9 +52,11 @@ pub(crate) struct Verb {
 
 pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home, subject and encryption public key (what an inviter to a private room wraps to)" },
-    Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub" },
+    Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub (also the NEXT key HOME/keys/FILE.next: move it off this box)" },
+    Verb { name: "key-status", usage: "key-status", operation: "mini key-status --workspace WORKSPACE: key epoch, whether a next key is committed, whether HOME/keys/<key>.next.pub matches it" },
+    Verb { name: "rotate-key", usage: "rotate-key NEXTFILE", operation: "mini rotate-key --workspace WORKSPACE --next-key HOME/keys/NEXTFILE: rotate to the committed next key; NEXTFILE then holds the key after it" },
     Verb { name: "init", usage: "init KEYFILE SUBJECT", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace" },
-    Verb { name: "enroll", usage: "enroll plan NAME KEYFILE|PUBLIC-KEY-HEX [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
+    Verb { name: "enroll", usage: "enroll plan NAME KEYFILE [FACTORY-REF] [--no-prerotation] | enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX|--no-prerotation [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
     Verb { name: "provision", usage: "provision NAME HOLDER FUNDING PREDICATE-JSON|@FILE [FACTORY-REF]", operation: "mini workspace --action provision --name NAME --holder HOLDER --funding FUNDING --account-predicate HOME/requests/provision-NAME.json" },
     Verb { name: "refs", usage: "refs", operation: "mini workspace --action list" },
     Verb { name: "read", usage: "read REF", operation: "mini workspace --action read --name REF" },
@@ -1256,6 +1258,7 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 vec![
                     flag("secret", keys.join(&w[1])),
                     flag("public", keys.join(format!("{}.pub", w[1]))),
+                    flag("hosted", "yes"),
                 ],
             )
         }
@@ -1292,6 +1295,18 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             };
             match action.as_str() {
                 "plan" => {
+                    // `--no-prerotation`: enroll a key that commits to no next key
+                    // (it can never rotate). A public-key enrollment names the
+                    // next public key after the key (`mini join` prints both).
+                    let mut w: Vec<String> = w.to_vec();
+                    let without = take_switch(&mut w, "--no-prerotation");
+                    let next_public = match w.get(4).and_then(|word| hex_bytes(word, 32)) {
+                        Some(next) if hex_bytes(&w[3], 32).is_some() => {
+                            w.remove(4);
+                            Some(next)
+                        }
+                        _ => None,
+                    };
                     arity(&w, 3, 4, u)?;
                     workspace_name(&w[2], "enrollment name")?;
                     let factory = w.get(4).cloned().unwrap_or_else(|| "factory".into());
@@ -1309,9 +1324,22 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                         let path = session.home.join("keys").join(format!("{}.pub", w[2]));
                         flags.push(flag("new-public-key", path.clone()));
                         writes.push((path, public));
+                        match (&next_public, without) {
+                            (Some(next), false) => {
+                                let next_path = session.home.join("keys").join(format!("{}.next.pub", w[2]));
+                                flags.push(flag("next-public-key", next_path.clone()));
+                                writes.push((next_path, next.clone()));
+                            }
+                            (None, true) => flags.push(flag("no-prerotation", "true")),
+                            (Some(_), true) => return Err("a next public key and --no-prerotation exclude each other".into()),
+                            (None, false) => return Err("enroll plan NAME PUBLIC-KEY-HEX NEXT-PUBLIC-KEY-HEX: the record commits to the newcomer's next key (their `mini join --key` prints both lines), or add --no-prerotation".into()),
+                        }
                     } else {
                         session_file(&w[3], "key file")?;
                         flags.push(flag("new-key", session.home.join("keys").join(&w[3])));
+                        if without {
+                            flags.push(flag("no-prerotation", "true"));
+                        }
                     }
                     flags.push(flag("dir", session.home.join("enroll").join(&w[2])));
                     Plan::Client { command: "enroll".into(), flags, writes }
@@ -1466,6 +1494,21 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
                 ],
                 writes: vec![request_file(path, &predicate)],
             }
+        }
+        "key-status" => {
+            arity(&w, 0, 0, u)?;
+            client("key-status", vec![flag("workspace", ws())])
+        }
+        "rotate-key" => {
+            arity(&w, 1, 1, u)?;
+            session_file(&w[1], "next key file")?;
+            client(
+                "rotate-key",
+                vec![
+                    flag("workspace", ws()),
+                    flag("next-key", session.home.join("keys").join(&w[1])),
+                ],
+            )
         }
         "refs" => {
             arity(&w, 0, 0, u)?;

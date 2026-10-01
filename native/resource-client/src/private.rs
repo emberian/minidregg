@@ -66,7 +66,7 @@ pub(crate) const KEYCACHE_PASSPHRASE_ENV: &str = "MINI_KEYCACHE_PASSPHRASE";
 /// D3: printed by `keygen`. Escrow is opt-in; the default is no recovery.
 pub(crate) const KEYGEN_NOTICE: &str = "\
 This key is the only copy. It signs as you and opens your private rooms.
-If you lose it there is no recovery: you enroll a new subject and are re-invited.
+If you lose it and have no next key there is no recovery: you enroll a new subject and are re-invited.
 Room content comes back by re-wrap at the current epoch; older epochs come back
 only from a member who kept them. Your old posts stay under the old subject.
 Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted

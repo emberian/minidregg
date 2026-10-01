@@ -144,9 +144,10 @@ check operator "authorized_keys line 2 is restrict,command=\"…/mini-socket-pro
 
 # ------------------------------------------------------------------ enrollment
 run friend "join --key: keygen on the laptop" 0 fmini join --key "$FKEY"
-PUB=$(tr -d '\n' <"$LAST")
+PUB=$(sed -n 1p "$LAST"); NEXT=$(sed -n 2p "$LAST")
 check friend "printed public key is 64 hex and the key file is on the laptop" bash -c "[[ '$PUB' =~ ^[0-9a-f]{64}\$ && -f '$FKEY' ]]"
-run sponsor "hosted shell: enroll plan friend <public key hex>" 0 sponsor "enroll plan friend $PUB"
+check friend "join --key printed the next key's public half too (K-PREROTATE), and it is not the key" bash -c "[[ '$NEXT' =~ ^[0-9a-f]{64}\$ && '$NEXT' != '$PUB' ]]"
+run sponsor "hosted shell: enroll plan friend <public key hex> <next public key hex>" 0 sponsor "enroll plan friend $PUB $NEXT"
 run sponsor "hosted shell: enroll offer friend (the offer the friend receives)" 0 sponsor "enroll offer friend"
 cp "$LAST" "$LAPTOP/offer.json"
 check sponsor "offer carries the Plan, the command, config and Host digest; no secret" \

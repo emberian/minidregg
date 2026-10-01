@@ -32,12 +32,12 @@ test "$TOOL_B_PUBLIC" != "$CONTROLLER_PUBLIC"
 jq --arg controller "$CONTROLLER_B_PUBLIC" --arg tool "$TOOL_B_PUBLIC" \
   '.enrollments += [
     {key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
-      publicKey:$controller,activeFrom:"0",activeUntil:"1000000"},
+      publicKey:$controller,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
       accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
       factoryObserveCapabilityId:"57",initialBalance:"100",
       accountPredicate:{type:"all",predicates:[]}},
     {key:{keyId:"1010",keyEpoch:"2",algorithm:"1",subject:"10",
-      publicKey:$tool,activeFrom:"0",activeUntil:"1000000"},
+      publicKey:$tool,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
       accountId:"13",spendCapabilityId:"44",controlCapabilityId:"58",
       factoryObserveCapabilityId:"59",initialBalance:"100",
       accountPredicate:{type:"all",predicates:[]}}]' \

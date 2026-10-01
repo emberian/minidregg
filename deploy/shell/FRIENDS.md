@@ -11,6 +11,18 @@ and i'm root there, so i can read it. enrollment also needs a copy in my session
 moment (the shell co-signs with both keys; a later step removes that). don't put
 anything precious behind it yet. taking your key home to your own machine is planned.
 
+**your next key.** `keygen mini.key` also makes `mini.key.next`: your *next* key. your
+record commits to it (only its digest is stored), and it is the only thing that can
+rotate your identity: `rotate-key mini.key.next` moves your subject to it, your old key
+stops signing (the Host refuses it by name), your grants and resources stay yours, and
+`mini.key.next` then holds the key after it. someone who steals `mini.key` cannot rotate
+you away, because the Host refuses any rotation to a key whose digest isn't the one you
+committed, whatever the stolen key signs. but **it protects you only once the next key is
+not on the box**: while `mini.key.next` sits beside `mini.key` here, root (me) and anyone
+who takes one file takes both. copy it home (or to a USB stick, or paper), delete it from
+your session home, and bring it back only to rotate. `key-status` shows your key epoch and
+whether a next key is committed.
+
 ## what this is
 
 mini is a small store of owned resources. every action is a signed request the Host
@@ -47,9 +59,11 @@ locally and the box only relays its frames (it keeps what you store, not your ke
 
 ```
 mini join --key ~/.mini/me.key
-    # prints your Mini public key (64 hex): send it to me
+    # prints two lines: your Mini public key, and your NEXT key's public half
+    # (me.key.next: move it off this laptop, to paper or a stick); send me both
 mini --remote mini-box join --key ~/.mini/me.key --sponsor-plan offer.json --dir ~/.mini/box
-    # offer.json is what i send back; you sign possession and it prints a signature: send it
+    # offer.json is what i send back; it is refused unless it commits to YOUR next key.
+    # you sign possession and it prints a signature: send it
 mini --remote mini-box join --key ~/.mini/me.key --welcome welcome.json --dir ~/.mini/box
     # welcome.json is my second reply; this makes your workspace
 ```

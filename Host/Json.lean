@@ -31,6 +31,7 @@ import Host.ApplicationGrainSessionEnrollmentInspection
 import Kernel.ApplicationDispatchAgentReserveContext
 import Kernel.ApplicationDispatchCodec
 import Kernel.ParticipantKeyEnrollment
+import Kernel.SubjectKeyRotation
 import Kernel.ParticipantFactoryProvisioning
 import Kernel.FleetTurn
 import Kernel.PayBookReceiver
@@ -830,14 +831,18 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
 
 private def keyRecord (path : String) (json : Lean.Json) : Result KeyRecord := do
   let obj ← exactObject path ["keyId", "keyEpoch", "algorithm", "subject", "publicKey",
-    "activeFrom", "activeUntil"] json
+    "activeFrom", "activeUntil", "nextKeyDigest"] json
+  let nextKeyDigest ← match ← field path "nextKeyDigest" obj with
+    | .null => pure none
+    | value => pure (some ⟨← nat (path ++ ".nextKeyDigest") value⟩)
   pure ⟨← nat (path ++ ".keyId") (← field path "keyId" obj),
     ← nat (path ++ ".keyEpoch") (← field path "keyEpoch" obj),
     ← nat (path ++ ".algorithm") (← field path "algorithm" obj),
     ← nat (path ++ ".subject") (← field path "subject" obj),
     ← decodeHex (path ++ ".publicKey") (← field path "publicKey" obj),
     ← nat (path ++ ".activeFrom") (← field path "activeFrom" obj),
-    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj)⟩
+    ← nat (path ++ ".activeUntil") (← field path "activeUntil" obj),
+    nextKeyDigest⟩
 
 private def enrollment (path : String) (json : Lean.Json) : Result NativeHostGenesis.Enrollment := do
   let obj ← exactObject path ["key", "accountId", "spendCapabilityId", "controlCapabilityId",
@@ -2340,6 +2345,25 @@ private def participantKeyEnrollment (json : Lean.Json) : Result (List UInt8) :=
       key := ← keyRecord "$.key" (← field "$" "key" obj) }
   return ParticipantKeyEnrollment.commandCodec.encode command
 
+/-- Source-owned authoring of a subject key rotation command.  These bytes
+claim nothing: admission checks the commitment and the new key's signature. -/
+private def subjectKeyRotation (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["subject", "nonce", "key"] json
+  let command : SubjectKeyRotation.Command :=
+    { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
+      nonce := ← nat "$.nonce" (← field "$" "nonce" obj)
+      key := ← keyRecord "$.key" (← field "$" "key" obj) }
+  return SubjectKeyRotation.commandCodec.encode command
+
+/-- The pre-rotation commitment to one public key, as the canonical decimal of
+`SubjectKeyRotation.nextKeyDigest` (UTF-8).  The client never hashes; this is
+the one place the digest is computed for it. -/
+private def signingKeyNextDigest (json : Lean.Json) : Result (List UInt8) := do
+  let obj ← exactObject "$" ["publicKey"] json
+  let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
+  unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
+  return (toString (SubjectKeyRotation.nextKeyDigest publicKey).value).toUTF8.toList
+
 /-- Source-owned authoring for a factory-observation provisioning request.
 These bytes name a holder and a fresh identifier; they do not claim that the
 holder is enrolled, that the identifier is fresh, or that the sponsor may act. -/
@@ -2621,6 +2645,8 @@ def author (kind : String) (json : Lean.Json)
   | "application-lifecycle-claim-operator-request" => lifecycleClaimOperatorRequest json
   | "application-spk-package-identity" => applicationSpkPackageIdentity json
   | "participant-key-enrollment" => participantKeyEnrollment json
+  | "subject-key-rotation" => subjectKeyRotation json
+  | "signing-key-next-digest" => signingKeyNextDigest json
   | "participant-factory-provisioning" => participantFactoryProvisioning json
   | "fleet-turn" => fleetTurnCommand json
   | "pay-book" => payBook json
@@ -2800,7 +2826,10 @@ private def participantKeyRecordJson (key : KeyRecord) : Lean.Json := .mkObj
    ("algorithm", decimal key.algorithm), ("subject", decimal key.subject),
    ("publicKey", hexJson key.publicKey),
    ("activeFrom", decimal key.activeFrom),
-   ("activeUntil", decimal key.activeUntil)]
+   ("activeUntil", decimal key.activeUntil),
+   ("nextKeyDigest", match key.nextKeyDigest with
+      | none => .null
+      | some digest => decimal digest.value)]
 
 private def payTariffJson (tariff : PayTariff.Tariff) : Lean.Json := .mkObj
   [("version", decimal tariff.version), ("asset", decimal tariff.asset),
@@ -3071,6 +3100,24 @@ def payEnrolDecisionJson (verified : Option PayEnrolDecision.Verified)
 
 /-- The public pay view: roots to pin, tariff, next free index and the
 published deposit book (index order, lowercase hex). -/
+def subjectKeyStatusJson (subject : Nat) (status : SubjectKeyRotation.Status) : Lean.Json := .mkObj
+  [("type", "subject-key-status-v1"),
+   ("subject", decimal subject),
+   ("keyEpoch", decimal status.epoch),
+   ("keyId", decimal status.keyId),
+   ("prerotated", .bool status.prerotated),
+   ("isCurrent", .bool status.isCurrent),
+   ("isCommittedNext", .bool status.isCommittedNext),
+   ("currentRevoked", .bool status.currentRevoked)]
+
+/-- The status query: a subject and one public key the asker holds. -/
+def subjectKeyStatusQuery (json : Lean.Json) : Result (Nat × List UInt8) := do
+  let obj ← exactObject "$" ["subject", "publicKey"] json
+  let subject ← nat "$.subject" (← field "$" "subject" obj)
+  let publicKey ← decodeHex "$.publicKey" (← field "$" "publicKey" obj)
+  unless publicKey.length = 32 do failAt "$.publicKey" "expected 32 bytes"
+  pure (subject, publicKey)
+
 def payViewJson (view : PayCellDomain.View) : Lean.Json := .mkObj
   [("type", "pay-view-v2"),
    ("payRoot", decimal view.payRoot.value),
@@ -3125,6 +3172,14 @@ def payPurseJson (purse : NativeHost.PayPurse) : Lean.Json := .mkObj
    ("status", .str (toString purse.state.status)),
    ("remaining", .str (toString purse.state.remaining)),
    ("reserved", .str (toString purse.state.reserved))]
+
+private def subjectKeyRotationJson
+    (command : SubjectKeyRotation.Command) : Lean.Json := .mkObj
+  [("type", "subject-key-rotation-v1"),
+   ("canonical", hexJson (SubjectKeyRotation.commandCodec.encode command)),
+   ("subject", decimal command.subject.value),
+   ("nonce", decimal command.nonce),
+   ("key", participantKeyRecordJson command.key)]
 
 private def participantKeyCommandJson
     (command : ParticipantKeyEnrollment.Command) : Lean.Json := .mkObj
@@ -4017,6 +4072,29 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
          ("commandBytes", hexJson plan.commandBytes),
          ("command", payCommandJson plan.commandBytes),
          ("header", signedHeaderJson plan.header)]
+  | "subject-key-rotation" => do
+      let command ← decoded "subject-key-rotation" SubjectKeyRotation.commandCodec bytes
+      pure (subjectKeyRotationJson command)
+  | "subject-key-rotation-plan" => do
+      let plan ← decoded "subject-key-rotation-plan" SubjectKeyRotation.signingPlanCodec bytes
+      let some command := SubjectKeyRotation.commandCodec.decode plan.commandBytes
+        | failAt "subject-key-rotation-plan" "noncanonical nested command"
+      pure <| .mkObj
+        [("type", "subject-key-rotation-plan-v1"),
+         ("canonical", hexJson bytes),
+         ("domain", decimal plan.domain.value),
+         ("semantics", decimal plan.semantics.value),
+         ("commandBytes", hexJson plan.commandBytes),
+         ("command", subjectKeyRotationJson command),
+         ("possessionHeader", hexJson plan.possessionHeader)]
+  | "subject-key-rotation-ingress" => do
+      let some parsed := SubjectKeyRotation.decodeIngress bytes
+        | failAt "subject-key-rotation-ingress" "noncanonical ingress or nested bytes"
+      pure <| .mkObj
+        [("type", "subject-key-rotation-ingress-v1"),
+         ("canonical", hexJson bytes),
+         ("command", subjectKeyRotationJson parsed.command),
+         ("possessionSignature", hexJson parsed.ingress.possessionSignature)]
   | "participant-key-enrollment-plan" => do
       let plan ← decoded "participant-key-enrollment-plan"
         ParticipantKeyEnrollment.signingPlanCodec bytes

@@ -205,12 +205,12 @@ cat >"$EVIDENCE/genesis.json" <<EOF
  "factoryPredicate":{"type":"all","predicates":[]},
  "enrollments":[
   {"key":{"keyId":"7007","keyEpoch":"2","algorithm":"1","subject":"7",
-    "publicKey":"$CONTROLLER_PUBLIC","activeFrom":"0","activeUntil":"1000000"},
+    "publicKey":"$CONTROLLER_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
    "accountId":"7","spendCapabilityId":"41","controlCapabilityId":"51",
    "factoryObserveCapabilityId":"54","initialBalance":"100",
    "accountPredicate":{"type":"all","predicates":[]}},
   {"key":{"keyId":"8008","keyEpoch":"2","algorithm":"1","subject":"8",
-    "publicKey":"$TOOL_PUBLIC","activeFrom":"0","activeUntil":"1000000"},
+    "publicKey":"$TOOL_PUBLIC","activeFrom":"0","activeUntil":"1000000","nextKeyDigest":null},
    "accountId":"8","spendCapabilityId":"42","controlCapabilityId":"52",
    "factoryObserveCapabilityId":"55","initialBalance":"100",
    "accountPredicate":{"type":"all","predicates":[]}}],
@@ -224,7 +224,7 @@ EOF
 if [ "${PROVIDER_BOOTSTRAP:-0}" = 1 ]; then
   jq --arg public "$PROVIDER_PUBLIC" '.enrollments += [{
     key:{keyId:"9009",keyEpoch:"2",algorithm:"1",subject:"9",
-      publicKey:$public,activeFrom:"0",activeUntil:"1000000"},
+      publicKey:$public,activeFrom:"0",activeUntil:"1000000",nextKeyDigest:null},
     accountId:"9",spendCapabilityId:"43",controlCapabilityId:"56",
     factoryObserveCapabilityId:"57",initialBalance:"100",
     accountPredicate:{type:"all",predicates:[]}}]' \

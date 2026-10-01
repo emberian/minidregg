@@ -114,6 +114,7 @@ for f in alice bob carol dave bridge; do
   mkdir -p -m 700 "$H/$f"
   setup "$f" "keygen mini.key"
   operator "custody copy" install -D -m 0600 "$H/$f/keys/mini.key" "$H/sponsor/keys/$f.key"
+  install -D -m 0644 "$H/$f/keys/mini.key.next.pub" "$H/sponsor/keys/$f.key.next.pub"  # K-PREROTATE: the record commits to the next key
   setup sponsor "enroll plan $f $f.key"
   setup sponsor "enroll seal $f"
   setup sponsor "enroll submit $f"

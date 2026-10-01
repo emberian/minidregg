@@ -14,6 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 mod agent_lifetime_grant;
 #[cfg(unix)]
+mod key_rotation;
+#[cfg(unix)]
 mod agent_payer;
 #[cfg(unix)]
 mod agent_reserve;
@@ -284,7 +286,9 @@ const USAGE: &str = r#"mini — custody and exact-retry client for minidregg-hos
 
 usage:
   mini [--remote DEST] COMMAND [options]
-  mini keygen --secret KEY --public PUBLIC [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
+  mini keygen --secret KEY --public PUBLIC [--next-to NEXT-KEY | --no-prerotation] [--escrow-to-sponsor @FILE|HEX --escrow-subject SUBJECT]
+  mini rotate-key --workspace WORKSPACE --next-key NEXT-KEY [--next-to PATH]
+  mini key-status --workspace WORKSPACE [--next-public-key NEXT.pub]
   mini join --key KEY
   mini join --remote DEST --key KEY --sponsor-plan PLAN.json --dir JOIN-ROOT
   mini join --remote DEST --key KEY --welcome WELCOME.json --dir JOIN-ROOT
@@ -302,7 +306,7 @@ usage:
   mini escrow-recover --escrow PUBLIC.escrow --sponsor-secret KEY --subject SUBJECT --secret NEW-KEY
   mini workspace --action init|import|list|describe|read|tail|submit|recover|create|propose|publish-delegation --dir WORKSPACE [action options]
   mini workspace --action room-key --op found|sync|invite|rotate|kick|list|open|forget --dir WORKSPACE --name ROOM [op options]
-  mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
+  mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY [--next-public-key KEY.next.pub | --no-prerotation] --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
   mini enroll --action offer|welcome --dir ATTEMPT [--birth-context CONTEXT.json]
   mini enroll --action possess --dir ATTEMPT --key KEY --subject N --output SIGNATURE.bin
@@ -455,6 +459,12 @@ impl Args {
             let rendered = flag.to_string_lossy();
             if !rendered.starts_with("--") || rendered.len() == 2 {
                 return Err(format!("unexpected argument {rendered}\n\n{USAGE}"));
+            }
+            // The one valueless switch: opting out of pre-rotation is a
+            // deliberate act and reads as one.
+            if rendered == "--no-prerotation" {
+                values.push((flag, OsString::from("yes")));
+                continue;
             }
             let value = raw
                 .next()
@@ -665,12 +675,45 @@ fn selected_release_sign(
 /// subject)`. Off by default; when given, the seed is also written to
 /// `<public>.escrow`, sealed to the sponsor and bound to the subject
 /// (`DREGG/SEED-ESCROW/v1`), which lets the sponsor sign as this key.
-fn keygen(secret: &Path, public: &Path, escrow: Option<(OsString, OsString)>) -> Result<()> {
+/// Where `keygen` puts the NEXT key, or that it makes none.
+enum NextKey {
+    /// `SECRET.next`, beside the daily key (the shell's hosted default).
+    Beside,
+    /// `--next-to PATH`: other media.
+    To(PathBuf),
+    /// `--no-prerotation`: no next key; the identity can never rotate.
+    Without,
+}
+
+fn keygen(
+    secret: &Path,
+    public: &Path,
+    escrow: Option<(OsString, OsString)>,
+    next: NextKey,
+    hosted: bool,
+) -> Result<()> {
     if secret.exists() {
         return Err(format!("refusing to replace {}", secret.display()));
     }
     if public.exists() {
         return Err(format!("refusing to replace {}", public.display()));
+    }
+    let next_paths = match &next {
+        NextKey::Without => None,
+        NextKey::Beside => {
+            let mut name = secret.as_os_str().to_owned();
+            name.push(".next");
+            Some(PathBuf::from(name))
+        }
+        NextKey::To(path) => Some(path.clone()),
+    }
+    .map(|next_secret| (next_secret, key_rotation::conventional_next_public(secret)));
+    if let Some((next_secret, next_public)) = &next_paths {
+        for existing in [next_secret, next_public] {
+            if existing.exists() {
+                return Err(format!("refusing to replace {}", existing.display()));
+            }
+        }
     }
     let mut seed = [0u8; 32];
     File::open("/dev/urandom")
@@ -710,6 +753,24 @@ fn keygen(secret: &Path, public: &Path, escrow: Option<(OsString, OsString)>) ->
         create_private(Path::new(&escrow_path), &wrapped.to_bytes())?;
     }
     eprintln!("{}", workspace::private::KEYGEN_NOTICE);
+    match &next_paths {
+        None => eprintln!("no next key (--no-prerotation): this identity can never rotate; a stolen key is replaced only by enrolling a new subject"),
+        Some((next_secret, next_public)) => {
+            let mut next_seed = [0u8; 32];
+            File::open("/dev/urandom")
+                .and_then(|mut source| source.read_exact(&mut next_seed))
+                .map_err(|error| format!("cannot obtain operating-system randomness: {error}"))?;
+            let next_signing = SigningKey::from_bytes(&next_seed);
+            create_private(next_secret, &next_seed)?;
+            next_seed.fill(0);
+            create_public(next_public, &next_signing.verifying_key().to_bytes())?;
+            eprintln!("next key: {} (its public half: {})", next_secret.display(), next_public.display());
+            eprintln!("{}", key_rotation::PREROTATION_NOTICE);
+            if hosted {
+                eprintln!("{}", key_rotation::HOSTED_PREROTATION_NOTICE);
+            }
+        }
+    }
     println!("{}", hex(&signing.verifying_key().to_bytes()));
     Ok(())
 }
@@ -2439,6 +2500,10 @@ fn run(mut args: Args) -> Result<()> {
         "shell" => shell::run(args),
         #[cfg(unix)]
         "key" => keys::run(args),
+        #[cfg(unix)]
+        "rotate-key" => key_rotation::rotate_key(args),
+        #[cfg(unix)]
+        "key-status" => key_rotation::key_status(args),
         "fleet" => fleet::run(args),
         #[cfg(unix)]
         "credit" => credit::run(args),
@@ -2808,7 +2873,18 @@ fn run(mut args: Args) -> Result<()> {
             let public = path(args.required("public")?);
             let escrow = args.optional("escrow-to-sponsor");
             let escrow_subject = args.optional("escrow-subject");
+            let next_to = args.optional("next-to").map(path);
+            let without = args.optional("no-prerotation").is_some();
+            let hosted = args.optional("hosted").is_some();
             args.finish()?;
+            let next = match (next_to, without) {
+                (Some(_), true) => {
+                    return Err("--next-to and --no-prerotation exclude each other".to_owned())
+                }
+                (Some(path), false) => NextKey::To(path),
+                (None, true) => NextKey::Without,
+                (None, false) => NextKey::Beside,
+            };
             let escrow = match (escrow, escrow_subject) {
                 (None, None) => None,
                 (Some(sponsor), Some(subject)) => Some((sponsor, subject)),
@@ -2818,7 +2894,7 @@ fn run(mut args: Args) -> Result<()> {
                     )
                 }
             };
-            keygen(&secret, &public, escrow)
+            keygen(&secret, &public, escrow, next, hosted)
         }
         "bootstrap" => {
             if SOCKET.get().is_some() {
@@ -3801,6 +3877,42 @@ mod tests {
     }
 
     #[test]
+    fn key_generation_makes_a_next_key_unless_told_not_to_and_never_clobbers_one() {
+        let directory = scratch("key-next");
+        let secret = directory.join("daily.key");
+        let public = directory.join("daily.pub");
+        keygen(&secret, &public, None, NextKey::Beside, false).unwrap();
+        let next = directory.join("daily.key.next");
+        let next_public = directory.join("daily.key.next.pub");
+        let next_seed: [u8; 32] = fs::read(&next).unwrap().try_into().unwrap();
+        assert_eq!(
+            fs::read(&next_public).unwrap(),
+            SigningKey::from_bytes(&next_seed).verifying_key().to_bytes()
+        );
+        assert_ne!(fs::read(&next).unwrap(), fs::read(&secret).unwrap());
+
+        // A next key already present is never replaced, and nothing is written.
+        let other = directory.join("other.key");
+        let other_public = directory.join("other.pub");
+        fs::write(directory.join("other.key.next.pub"), b"existing").unwrap();
+        assert!(keygen(&other, &other_public, None, NextKey::Beside, false).is_err());
+        assert!(!other.exists() && !other_public.exists());
+        assert_eq!(fs::read(directory.join("other.key.next.pub")).unwrap(), b"existing");
+
+        // --next-to puts the next secret elsewhere; its public half stays by convention.
+        let away = directory.join("away.next");
+        keygen(&directory.join("a.key"), &directory.join("a.pub"), None, NextKey::To(away.clone()), true)
+            .unwrap();
+        assert!(away.exists() && directory.join("a.key.next.pub").exists());
+        assert!(!directory.join("a.key.next").exists());
+
+        // --no-prerotation makes no next key at all.
+        keygen(&directory.join("p.key"), &directory.join("p.pub"), None, NextKey::Without, false).unwrap();
+        assert!(!directory.join("p.key.next").exists() && !directory.join("p.key.next.pub").exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn key_generation_refuses_to_clobber_existing_custody_files() {
         let directory = scratch("key-no-clobber");
         let secret = directory.join("signer.key");
@@ -3808,11 +3920,11 @@ mod tests {
         fs::write(&secret, b"existing-secret").unwrap();
         fs::write(&public, b"existing-public").unwrap();
 
-        assert!(keygen(&secret, &public, None).is_err());
+        assert!(keygen(&secret, &public, None, NextKey::Beside, false).is_err());
         assert_eq!(fs::read(&secret).unwrap(), b"existing-secret");
         assert_eq!(fs::read(&public).unwrap(), b"existing-public");
         fs::remove_file(&secret).unwrap();
-        assert!(keygen(&secret, &public, None).is_err());
+        assert!(keygen(&secret, &public, None, NextKey::Beside, false).is_err());
         assert!(!secret.exists());
         assert_eq!(fs::read(&public).unwrap(), b"existing-public");
 
