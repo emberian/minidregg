@@ -619,3 +619,137 @@ pub async fn dispatch_web(
         .await
         .map_err(|_| error("WebSession RPC deadline exceeded; delivery uncertain"))?
 }
+
+/// One already-admitted `openWebSocket` (`web-session.capnp` @2). The Mini
+/// write is the open; what follows are opaque WebSocket protocol bytes inside
+/// the admitted session, in both directions, never parsed here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebSocketOpen {
+    /// Relative Sandstorm path, including the exact query suffix.
+    pub path_and_query: String,
+    pub context: RequestContext,
+    /// The client's requested subprotocols, `Sec-WebSocket-Protocol`, in order.
+    pub protocols: Vec<String>,
+}
+
+/// An opened socket. `to_app` carries client→app bytes (`serverStream`);
+/// `from_app` yields app→client bytes and ends when the app drops the
+/// `clientStream` it was given. Dropping `to_app` is the close toward the app.
+pub struct WebSocketSession {
+    pub protocols: Vec<String>,
+    pub to_app: web::web_session::web_socket_stream::Client,
+    pub from_app: tokio::sync::mpsc::Receiver<Vec<u8>>,
+}
+
+/// Bytes the app may have in flight toward one client before its
+/// `sendBytes` waits (Cap'n Proto streaming carries the backpressure).
+const FROM_APP_QUEUE: usize = 16;
+/// The largest single `sendBytes` message accepted from the app.
+pub const MAX_WEBSOCKET_MESSAGE: usize = 1024 * 1024;
+const MAX_PROTOCOLS: usize = 32;
+
+struct ClientStream {
+    to_client: tokio::sync::mpsc::Sender<Vec<u8>>,
+}
+impl web::web_session::web_socket_stream::Server for ClientStream {
+    async fn send_bytes(
+        self: capnp::capability::Rc<Self>,
+        params: web::web_session::web_socket_stream::SendBytesParams,
+    ) -> capnp::Result<()> {
+        let message = params.get()?.get_message()?;
+        if message.len() > MAX_WEBSOCKET_MESSAGE {
+            return Err(error("app WebSocket message exceeds transport bound"));
+        }
+        self.to_client
+            .send(message.to_vec())
+            .await
+            .map_err(|_| error("WebSocket client side closed"))
+    }
+}
+
+/// A WebSocket open has no HTTP response body; the context's response stream
+/// refuses every write.
+struct NoResponseStream;
+impl util_capnp::byte_stream::Server for NoResponseStream {}
+
+fn protocol_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+}
+
+/// Calls `openWebSocket` on an already-admitted WebSession. The app's chosen
+/// subprotocols must be among those the client requested.
+pub async fn open_web_socket(
+    session: &web::web_session::Client,
+    open: &WebSocketOpen,
+    timeout: Duration,
+) -> capnp::Result<WebSocketSession> {
+    let path = &open.path_and_query;
+    if path.starts_with('/') || path.contains('#') {
+        return Err(error("Sandstorm path must be relative without fragment"));
+    }
+    bounded(path, MAX_PATH)?;
+    if open.protocols.len() > MAX_PROTOCOLS || !open.protocols.iter().all(|p| protocol_token(p)) {
+        return Err(error("WebSocket subprotocol list outside protocol bound"));
+    }
+    validate(
+        &WebRequest {
+            method: Method::Get,
+            path_and_query: open.path_and_query.clone(),
+            context: open.context.clone(),
+            body: None,
+        },
+        0,
+    )?;
+    let (to_client, from_app) = tokio::sync::mpsc::channel(FROM_APP_QUEUE);
+    let client_stream: web::web_session::web_socket_stream::Client =
+        capnp_rpc::new_client(ClientStream { to_client });
+    let no_body: util_capnp::byte_stream::Client = capnp_rpc::new_client(NoResponseStream);
+    let future = async {
+        let mut call = session.open_web_socket_request();
+        let mut p = call.get();
+        p.set_path(path);
+        fill_context(p.reborrow().init_context(), &open.context, no_body);
+        let mut protocols = p.reborrow().init_protocol(open.protocols.len() as u32);
+        for (index, protocol) in open.protocols.iter().enumerate() {
+            protocols.set(index as u32, protocol.as_str());
+        }
+        p.set_client_stream(client_stream);
+        let reply = call.send().promise.await?;
+        let reply = reply.get()?;
+        let chosen = reply.get_protocol()?;
+        if chosen.len() as usize > MAX_PROTOCOLS {
+            return Err(error("app chose too many WebSocket subprotocols"));
+        }
+        let mut accepted = Vec::new();
+        for protocol in chosen.iter() {
+            let protocol = protocol?.to_str()?.to_owned();
+            if !open.protocols.contains(&protocol) {
+                return Err(error("app chose a WebSocket subprotocol the client did not offer"));
+            }
+            accepted.push(protocol);
+        }
+        Ok(WebSocketSession {
+            protocols: accepted,
+            to_app: reply.get_server_stream()?,
+            from_app,
+        })
+    };
+    tokio::time::timeout(timeout, future)
+        .await
+        .map_err(|_| error("WebSocket open RPC deadline exceeded; open uncertain"))?
+}
+
+/// Client→app bytes, one `sendBytes` (Cap'n Proto streaming: the returned
+/// future resolves under the connection's flow-control window).
+pub async fn send_to_app(
+    to_app: &web::web_session::web_socket_stream::Client,
+    bytes: &[u8],
+) -> capnp::Result<()> {
+    let mut call = to_app.send_bytes_request();
+    call.get().set_message(bytes);
+    call.send().await
+}

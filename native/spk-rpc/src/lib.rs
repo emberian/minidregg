@@ -15,8 +15,9 @@ pub use protocol::{
     SupervisorConnection, ViewInfo,
 };
 pub use web::{
-    dispatch_web, Body, Cookie, CookieExpiry, ETag, ETagPrecondition, Header, Method,
-    RequestContext, SetCookie, WebRequest, WebResponse, WebResult,
+    dispatch_web, open_web_socket, send_to_app, Body, Cookie, CookieExpiry, ETag,
+    ETagPrecondition, Header, Method, RequestContext, SetCookie, WebRequest, WebResponse,
+    WebResult, WebSocketOpen, WebSocketSession, MAX_WEBSOCKET_MESSAGE,
 };
 
 #[allow(clippy::all)]

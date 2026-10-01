@@ -582,6 +582,28 @@ mod tests {
             Ok(())
         }
 
+        async fn open_web_socket(
+            self: capnp::capability::Rc<Self>,
+            params: web_session_capnp::web_session::OpenWebSocketParams,
+            mut results: web_session_capnp::web_session::OpenWebSocketResults,
+        ) -> capnp::Result<()> {
+            let params = params.get()?;
+            self.0
+                .borrow_mut()
+                .paths
+                .push(format!("ws:{}", params.get_path()?.to_str()?));
+            let offered = params.get_protocol()?;
+            let client = params.get_client_stream()?;
+            let mut reply = results.get();
+            if offered.iter().any(|p| p.ok().and_then(|p| p.to_str().ok()) == Some("chat")) {
+                reply.reborrow().init_protocol(1).set(0, "chat");
+            }
+            let server: web_session_capnp::web_session::web_socket_stream::Client =
+                capnp_rpc::new_client(EchoStream(client));
+            reply.set_server_stream(server);
+            Ok(())
+        }
+
         async fn delete(
             self: capnp::capability::Rc<Self>,
             _: web_session_capnp::web_session::DeleteParams,
@@ -598,6 +620,22 @@ mod tests {
 
     struct FakeHandle;
     impl crate::util_capnp::handle::Server for FakeHandle {}
+
+    /// The app's `serverStream`: echoes each client message back through the
+    /// `clientStream` it was given, and releases that stream when dropped.
+    struct EchoStream(web_session_capnp::web_session::web_socket_stream::Client);
+    impl web_session_capnp::web_session::web_socket_stream::Server for EchoStream {
+        async fn send_bytes(
+            self: capnp::capability::Rc<Self>,
+            params: web_session_capnp::web_session::web_socket_stream::SendBytesParams,
+        ) -> capnp::Result<()> {
+            let mut echoed = b"echo:".to_vec();
+            echoed.extend_from_slice(params.get()?.get_message()?);
+            let mut call = self.0.send_bytes_request();
+            call.get().set_message(&echoed);
+            call.send().await
+        }
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn two_party_fd3_bootstrap_session_and_web_get() {
@@ -728,6 +766,26 @@ mod tests {
                 let mut forbidden = post.clone();
                 forbidden.context.additional_headers[0].name = "authorization".into();
                 assert!(dispatch_web(&session, &forbidden, 1024, Duration::from_secs(5)).await.is_err());
+                use crate::web::{open_web_socket, send_to_app, WebSocketOpen};
+                let open = WebSocketOpen {
+                    path_and_query: "websocket?x=1".into(),
+                    context: RequestContext::default(),
+                    protocols: vec!["chat".into(), "superchat".into()],
+                };
+                let mut socket = open_web_socket(&session, &open, Duration::from_secs(5)).await.unwrap();
+                assert_eq!(socket.protocols, ["chat"]);
+                assert_eq!(observed.borrow().paths.last().unwrap(), "ws:websocket?x=1");
+                send_to_app(&socket.to_app, b"\x81\x04ping").await.unwrap();
+                assert_eq!(socket.from_app.recv().await.unwrap(), b"echo:\x81\x04ping");
+                send_to_app(&socket.to_app, b"two").await.unwrap();
+                assert_eq!(socket.from_app.recv().await.unwrap(), b"echo:two");
+                // Dropping serverStream is the close toward the app; the app
+                // releases clientStream and the client side ends.
+                drop(socket.to_app);
+                assert!(socket.from_app.recv().await.is_none());
+                let mut bad = open.clone();
+                bad.protocols = vec!["not a token".into()];
+                assert!(open_web_socket(&session, &bad, Duration::from_secs(5)).await.is_err());
                 host_task.abort();
                 app_task.abort();
             })

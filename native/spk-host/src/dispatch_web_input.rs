@@ -3,11 +3,13 @@
 //! Sandstorm session identity/permissions; HTTP labels and headers grant none.
 #![allow(dead_code)] // No HTTP delivery until native op34/claim join is complete.
 
-use crate::dispatch_inspection::{HttpProjection, MatchedInspection, Route};
+use crate::dispatch_inspection::{
+    HttpProjection, MatchedInspection, Route, STREAMED_OPEN_METHOD,
+};
 use crate::rpc_adapter::{SessionBinding, SessionKind};
 use minidregg_spk_rpc::{
     Body, Cookie, ETag, ETagPrecondition, Header, Method, RequestContext, SessionParameters,
-    WebRequest,
+    WebRequest, WebSocketOpen,
 };
 use std::io;
 
@@ -122,6 +124,43 @@ pub(crate) struct PhysicalWebInput {
     pub request: WebRequest,
 }
 
+/// An admitted streamed dispatch: the WebSocket open's session and call.
+pub(crate) struct PhysicalOpenInput {
+    pub binding: SessionBinding,
+    pub open: WebSocketOpen,
+}
+
+/// The one physical call a committed request reaches.
+enum Call {
+    Exchange(Method),
+    Open,
+}
+
+/// The streamed open of the same matched request. Only a record whose method
+/// is the streamed-open token projects here; every other header rule is the
+/// exchange's, plus the signed subprotocol list.
+pub(crate) fn physical_open_input(
+    matched: &MatchedInspection,
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    base_path: &str,
+) -> io::Result<PhysicalOpenInput> {
+    let (binding, call, context, body, protocols) =
+        project(matched, http, display_name, preferred_handle, base_path)?;
+    match (call, body) {
+        (Call::Open, None) => Ok(PhysicalOpenInput {
+            binding,
+            open: WebSocketOpen {
+                path_and_query: matched.app_path_and_query.clone(),
+                context,
+                protocols,
+            },
+        }),
+        _ => Err(invalid("Mini record is not a streamed open")),
+    }
+}
+
 /// `matched` must come from the private op34+source-inspection comparison.
 /// The display label/handle are operator-configured UI text, never auth data.
 /// Every accepted ordinary HTTP header is represented or the call refuses;
@@ -140,15 +179,41 @@ pub(crate) fn physical_web_input(
     preferred_handle: &str,
     base_path: &str,
 ) -> io::Result<PhysicalWebInput> {
-    let method = match matched.method.as_str() {
-        "GET" => Method::Get,
-        "HEAD" => Method::Head,
-        "POST" => Method::Post,
-        "PUT" => Method::Put,
-        "PATCH" => Method::Patch,
-        "DELETE" => Method::Delete,
+    let (binding, call, context, body, _) =
+        project(matched, http, display_name, preferred_handle, base_path)?;
+    let Call::Exchange(method) = call else {
+        return Err(invalid("a streamed open is not a WebSession exchange"));
+    };
+    Ok(PhysicalWebInput {
+        binding,
+        request: WebRequest {
+            method,
+            path_and_query: matched.app_path_and_query.clone(),
+            context,
+            body,
+        },
+    })
+}
+
+#[allow(clippy::type_complexity)]
+fn project(
+    matched: &MatchedInspection,
+    http: &HttpProjection<'_>,
+    display_name: &str,
+    preferred_handle: &str,
+    base_path: &str,
+) -> io::Result<(SessionBinding, Call, RequestContext, Option<Body>, Vec<String>)> {
+    let call = match matched.method.as_str() {
+        "GET" => Call::Exchange(Method::Get),
+        "HEAD" => Call::Exchange(Method::Head),
+        "POST" => Call::Exchange(Method::Post),
+        "PUT" => Call::Exchange(Method::Put),
+        "PATCH" => Call::Exchange(Method::Patch),
+        "DELETE" => Call::Exchange(Method::Delete),
+        STREAMED_OPEN_METHOD => Call::Open,
         _ => return Err(invalid("Mini method unavailable to WebSession")),
     };
+    let mut protocols = None;
     if display_name.len() > 1024
         || preferred_handle.len() > 256
         || display_name.contains(['\r', '\n', '\0'])
@@ -194,6 +259,14 @@ pub(crate) fn physical_web_input(
                     value: value.clone(),
                 });
             }
+            "sec-websocket-protocol" if matches!(call, Call::Open) => {
+                if protocols
+                    .replace(crate::web_socket::protocols(Some(value))?)
+                    .is_some()
+                {
+                    return Err(invalid("duplicate WebSocket subprotocol list"));
+                }
+            }
             _ => {
                 return Err(invalid(
                     "Mini signed header has no physical WebSession mapping",
@@ -208,7 +281,10 @@ pub(crate) fn physical_web_input(
     {
         return Err(invalid("WebSession context category exceeds bound"));
     }
-    let body = if matches!(method, Method::Post | Method::Put | Method::Patch) {
+    let body = if matches!(
+        call,
+        Call::Exchange(Method::Post | Method::Put | Method::Patch)
+    ) {
         let mime_type = content_type.unwrap_or("");
         Some(Body {
             mime_type: mime_type.to_owned(),
@@ -238,8 +314,8 @@ pub(crate) fn physical_web_input(
         }
         Route::Api { .. } => (SessionKind::Api, String::new()),
     };
-    Ok(PhysicalWebInput {
-        binding: SessionBinding {
+    Ok((
+        SessionBinding {
             app: matched.app,
             process_generation: matched.app_generation,
             session_resource: matched
@@ -263,13 +339,11 @@ pub(crate) fn physical_web_input(
                 acceptable_languages: Vec::new(),
             },
         },
-        request: WebRequest {
-            method,
-            path_and_query: matched.app_path_and_query.clone(),
-            context,
-            body,
-        },
-    })
+        call,
+        context,
+        body,
+        protocols.unwrap_or_default(),
+    ))
 }
 
 #[cfg(test)]
@@ -445,5 +519,34 @@ mod tests {
         // refuses a scheme-less one); a path or a foreign scheme is refused here.
         assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "/").is_err());
         assert!(physical_web_input(&matched(), &empty, "Friend", "friend", "http://x.test").is_err());
+    }
+
+    /// A streamed record projects only as an open, with its signed
+    /// subprotocols; an exchange record never projects as an open, and the
+    /// subprotocol header never reaches an exchange.
+    #[test]
+    fn streamed_record_projects_only_as_an_open() {
+        let headers = vec![("sec-websocket-protocol".to_owned(), "chat, superchat".to_owned())];
+        let http = HttpProjection {
+            method: STREAMED_OPEN_METHOD,
+            path_and_query: "websocket",
+            ordered_headers: &headers,
+            body: b"",
+            route: Route::Browser,
+        };
+        let mut open = matched();
+        open.method = STREAMED_OPEN_METHOD.into();
+        open.app_path_and_query = "websocket".into();
+        let projected =
+            physical_open_input(&open, &http, "Friend", "friend", "https://friend.example.test").unwrap();
+        assert_eq!(projected.open.protocols, ["chat", "superchat"]);
+        assert_eq!(projected.open.path_and_query, "websocket");
+        assert_eq!(projected.binding.kind, SessionKind::Web);
+        assert!(physical_web_input(&open, &http, "Friend", "friend", "https://friend.example.test").is_err());
+        let mut get = matched();
+        get.method = "GET".into();
+        let get_http = HttpProjection { method: "GET", ..http };
+        assert!(physical_open_input(&get, &get_http, "Friend", "friend", "https://friend.example.test").is_err());
+        assert!(physical_web_input(&get, &get_http, "Friend", "friend", "https://friend.example.test").is_err());
     }
 }

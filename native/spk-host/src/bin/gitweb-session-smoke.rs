@@ -3,7 +3,11 @@
 //! No public listener or mutating Git request is issued.
 #[path = "../rpc_adapter.rs"]
 mod rpc_adapter;
+#[path = "../web_socket.rs"]
+#[allow(dead_code)]
+mod web_socket;
 
+use minidregg_spk_host::broker;
 use minidregg_spk_host::hostd;
 use minidregg_spk_host::sandbox::{spawn_sandbox, SandboxSpec};
 use minidregg_spk_rpc::{Method, RequestContext, SessionParameters, WebRequest, WebResult};

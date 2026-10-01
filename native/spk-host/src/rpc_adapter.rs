@@ -7,9 +7,12 @@
 
 use crate::hostd::DispatchIdentity;
 use minidregg_spk_rpc::web_session_capnp;
+use crate::web_socket::{pump, switching_protocols, Limits, Slot};
 use minidregg_spk_rpc::{
-    dispatch_web, SessionParameters, SupervisorConnection, ViewInfo, WebRequest, WebResponse,
+    dispatch_web, open_web_socket, SessionParameters, SupervisorConnection, ViewInfo,
+    WebRequest, WebResponse, WebSocketOpen,
 };
+use std::io::Write as _;
 use std::collections::HashMap;
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -126,6 +129,79 @@ fn oldest_by_use<K: Copy>(entries: impl Iterator<Item = (K, u64)>) -> Option<K> 
         .map(|(key, _)| key)
 }
 
+/// The app-side WebSession for one admitted binding: the cached one under an
+/// unchanged source projection, or a new one (evicting the least recent).
+#[allow(clippy::too_many_arguments)]
+async fn session_for(
+    supervisor: &SupervisorConnection,
+    sessions: &mut HashMap<SessionKey, CachedSession>,
+    sessions_created: &mut u64,
+    use_clock: &mut u64,
+    binding: &SessionBinding,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+) -> io::Result<web_session_capnp::web_session::Client> {
+    let key = binding.key();
+    if sessions
+        .get(&key)
+        .is_some_and(|cached| !cache_matches(cached, binding))
+    {
+        sessions.remove(&key);
+    }
+    *use_clock = use_clock.checked_add(1).ok_or_else(|| {
+        invalid("SPK session use counter exhausted")
+    })?;
+    let session = if let Some(cached) = sessions.get_mut(&key) {
+        cached.last_use = *use_clock;
+        cached.client.clone()
+    } else {
+        let left = remaining(deadline)?;
+        let client = tokio::select! {
+            biased;
+            _ = wait_cancelled(cancelled) => Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "SPK caller disconnected during session setup")),
+            result = tokio::time::timeout(left, async {
+                match binding.kind {
+                    SessionKind::Web => {
+                        supervisor.new_web_session(&binding.params).await
+                    }
+                    SessionKind::Api => {
+                        supervisor.new_api_session(&binding.params).await
+                    }
+                }
+            }) => result.map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut,
+                    "SPK session timeout")
+            })?.map_err(io::Error::other),
+        }?;
+        if sessions.len() >= MAX_CACHED_SESSIONS {
+            let old = oldest_by_use(
+                sessions
+                    .iter()
+                    .map(|(key, cached)| (*key, cached.last_use)),
+            )
+            .ok_or_else(|| invalid("SPK session cache drift"))?;
+            sessions.remove(&old);
+        }
+        sessions.insert(
+            key,
+            CachedSession {
+                fingerprint: binding.projection_fingerprint,
+                params: binding.params.clone(),
+                client: client.clone(),
+                last_use: *use_clock,
+            },
+        );
+        *sessions_created =
+            sessions_created.checked_add(1).ok_or_else(|| {
+                invalid("SPK session creation counter exhausted")
+            })?;
+        client
+    };
+    Ok(session)
+}
+
 enum Command {
     View {
         deadline: Instant,
@@ -141,6 +217,17 @@ enum Command {
     },
     Stats {
         reply: sync_mpsc::SyncSender<RpcStats>,
+    },
+    OpenWebSocket {
+        binding: Box<SessionBinding>,
+        open: Box<WebSocketOpen>,
+        client: UnixStream,
+        accept: String,
+        limits: Limits,
+        slot: Slot,
+        label: String,
+        deadline: Instant,
+        reply: sync_mpsc::SyncSender<io::Result<()>>,
     },
 }
 
@@ -354,63 +441,16 @@ impl RpcDriver {
                                             "SPK caller disconnected before RPC",
                                         ));
                                     }
-                                    if sessions
-                                        .get(&key)
-                                        .is_some_and(|cached| !cache_matches(cached, &binding))
-                                    {
-                                        sessions.remove(&key);
-                                    }
-                                    use_clock = use_clock.checked_add(1).ok_or_else(|| {
-                                        invalid("SPK session use counter exhausted")
-                                    })?;
-                                    let session = if let Some(cached) = sessions.get_mut(&key) {
-                                        cached.last_use = use_clock;
-                                        cached.client.clone()
-                                    } else {
-                                        let left = remaining(deadline)?;
-                                        let client = tokio::select! {
-                                            biased;
-                                            _ = wait_cancelled(&cancelled) => Err(io::Error::new(
-                                                io::ErrorKind::Interrupted,
-                                                "SPK caller disconnected during session setup")),
-                                            result = tokio::time::timeout(left, async {
-                                                match binding.kind {
-                                                    SessionKind::Web => {
-                                                        supervisor.new_web_session(&binding.params).await
-                                                    }
-                                                    SessionKind::Api => {
-                                                        supervisor.new_api_session(&binding.params).await
-                                                    }
-                                                }
-                                            }) => result.map_err(|_| {
-                                                io::Error::new(io::ErrorKind::TimedOut,
-                                                    "SPK session timeout")
-                                            })?.map_err(io::Error::other),
-                                        }?;
-                                        if sessions.len() >= MAX_CACHED_SESSIONS {
-                                            let old = oldest_by_use(
-                                                sessions
-                                                    .iter()
-                                                    .map(|(key, cached)| (*key, cached.last_use)),
-                                            )
-                                            .ok_or_else(|| invalid("SPK session cache drift"))?;
-                                            sessions.remove(&old);
-                                        }
-                                        sessions.insert(
-                                            key,
-                                            CachedSession {
-                                                fingerprint: binding.projection_fingerprint,
-                                                params: binding.params.clone(),
-                                                client: client.clone(),
-                                                last_use: use_clock,
-                                            },
-                                        );
-                                        sessions_created =
-                                            sessions_created.checked_add(1).ok_or_else(|| {
-                                                invalid("SPK session creation counter exhausted")
-                                            })?;
-                                        client
-                                    };
+                                    let session = session_for(
+                                        &supervisor,
+                                        &mut sessions,
+                                        &mut sessions_created,
+                                        &mut use_clock,
+                                        &binding,
+                                        deadline,
+                                        &cancelled,
+                                    )
+                                    .await?;
                                     if cancelled.load(Ordering::Acquire) {
                                         return Err(io::Error::new(
                                             io::ErrorKind::Interrupted,
@@ -441,6 +481,57 @@ impl RpcDriver {
                                     sessions.remove(&key);
                                 }
                                 let _ = reply.send(result);
+                            }
+                            Command::OpenWebSocket {
+                                binding,
+                                open,
+                                client,
+                                accept,
+                                limits,
+                                slot,
+                                label,
+                                deadline,
+                                reply,
+                            } => {
+                                let key = binding.key();
+                                let not_cancelled = AtomicBool::new(false);
+                                let result = async {
+                                    let session = session_for(
+                                        &supervisor,
+                                        &mut sessions,
+                                        &mut sessions_created,
+                                        &mut use_clock,
+                                        &binding,
+                                        deadline,
+                                        &not_cancelled,
+                                    )
+                                    .await?;
+                                    let left = remaining(deadline)?;
+                                    let opened = open_web_socket(&session, &open, left)
+                                        .await
+                                        .map_err(io::Error::other)?;
+                                    // The 101 is written here, before any app byte
+                                    // can reach the client, and only after the app
+                                    // accepted the open.
+                                    let head = switching_protocols(&accept, &opened.protocols);
+                                    client.set_nonblocking(false)?;
+                                    (&client).write_all(&head)?;
+                                    Ok(opened)
+                                }
+                                .await;
+                                match result {
+                                    Ok(opened) => {
+                                        tokio::task::spawn_local(pump(
+                                            client, opened, limits, slot, label,
+                                        ));
+                                        let _ = reply.send(Ok(()));
+                                    }
+                                    Err(error) => {
+                                        sessions.remove(&key);
+                                        drop(slot);
+                                        let _ = reply.send(Err(error));
+                                    }
+                                }
                             }
                             Command::Stats { reply } => {
                                 let _ = reply.send(RpcStats {
@@ -689,6 +780,43 @@ impl RpcDriver {
                 max_response_bytes,
                 deadline,
                 cancelled: Arc::clone(&cancelled),
+                reply: reply_tx,
+            })
+            .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
+        self.receive(reply_rx, deadline)
+    }
+
+    /// One already-admitted WebSocket open. On success the worker has written
+    /// the 101 to `client` and owns it: its frames flow on the worker's
+    /// LocalSet until either side closes, and nothing further reaches Mini.
+    /// The slot holds the grain's concurrency place until then.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn open_web_socket(
+        &mut self,
+        binding: SessionBinding,
+        open: WebSocketOpen,
+        client: UnixStream,
+        accept: String,
+        limits: Limits,
+        slot: Slot,
+        label: String,
+        timeout: Duration,
+    ) -> io::Result<()> {
+        let deadline = self.check_bound(timeout)?;
+        if binding.app != self.app || binding.process_generation != self.generation {
+            return Err(invalid("SPK WebSocket open identity refused"));
+        }
+        let (reply_tx, reply_rx) = sync_mpsc::sync_channel(1);
+        self.sender
+            .try_send(Command::OpenWebSocket {
+                binding: Box::new(binding),
+                open: Box::new(open),
+                client,
+                accept,
+                limits,
+                slot,
+                label,
+                deadline,
                 reply: reply_tx,
             })
             .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;

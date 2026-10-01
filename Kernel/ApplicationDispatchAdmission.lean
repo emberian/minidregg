@@ -122,18 +122,42 @@ def cleanTransportText (bytes : List UInt8) : Bool :=
   (String.fromUTF8? bytes.toByteArray).isSome &&
     bytes.all (fun byte => byte != 0 && byte != 10 && byte != 13)
 
+/-- The WebSession method a streamed dispatch reaches: `openWebSocket`
+(`web-session.capnp` @2). The Mini write is the open; the frames that follow
+are physical bytes inside the admitted session, like a streamed body, and a
+close writes nothing. It is a method token of its own so a committed record
+says which WebSession call it admitted: an audit tells a socket open from a
+`GET` by the record alone. -/
+def streamedOpenMethod : List UInt8 := "WEBSOCKET".toUTF8.toList
+
+/-- The one header a streamed open carries beyond the ordinary set: the
+client's requested subprotocols, delivered as `openWebSocket`'s `protocol`
+list. It is signed like every other app-visible input. -/
+def webSocketProtocolHeader : List UInt8 := "sec-websocket-protocol".toUTF8.toList
+
+/-- A committed request is a streamed dispatch exactly when it names the
+streamed-open method. -/
+def streamed (request : ApplicationDispatchCodec.Request) : Bool :=
+  request.method == streamedOpenMethod
+
+def exchangeMethod (method : List UInt8) : Bool :=
+  (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] : List String).any
+    (fun allowed => method == allowed.toUTF8.toList)
+
 /-- The exact signed request is a bounded WebSession candidate. The received
 `generated` tag is never trusted: every incoming header must be ordinary,
 and the host synthesizes Sandstorm security context from checked fields.
-This excludes unsafe or unsupported HTTP shapes before a pending event. -/
-def requestSafe (request : ApplicationDispatchCodec.Request) : Bool :=
+This excludes unsafe or unsupported HTTP shapes before a pending event.
+`streamedOpen` says whether this route may admit a streamed open at all; a
+streamed open carries no body and is otherwise held to a `GET`'s shape. -/
+def requestSafeFor (streamedOpen : Bool) (request : ApplicationDispatchCodec.Request) : Bool :=
   let methodAllowed :=
-    (["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] : List String).any
-      (fun method => request.method == method.toUTF8.toList)
+    exchangeMethod request.method || (streamedOpen && streamed request)
   let bodyAllowed :=
     if request.method == "GET".toUTF8.toList ||
         request.method == "HEAD".toUTF8.toList ||
-        request.method == "DELETE".toUTF8.toList then
+        request.method == "DELETE".toUTF8.toList ||
+        streamed request then
       request.body.isEmpty
     else true
   methodAllowed && bodyAllowed &&
@@ -145,10 +169,101 @@ def requestSafe (request : ApplicationDispatchCodec.Request) : Bool :=
     !request.path.contains 63 &&
     cleanTransportText request.path && cleanTransportText request.query &&
     request.headers.all (fun header =>
-      !header.generated && ordinaryHeaderName header.name &&
+      !header.generated &&
+      (ordinaryHeaderName header.name ||
+        (streamed request && header.name == webSocketProtocolHeader)) &&
       decide (header.name.length ≤ 128) &&
       decide (header.value.length ≤ 8192) &&
       cleanTransportText header.value)
+
+/-- The exchange-only shape: every route that may not open a stream (the
+agent and lifetime dispatch paths) admits exactly what it admitted before
+streamed opens existed. -/
+def requestSafe (request : ApplicationDispatchCodec.Request) : Bool :=
+  requestSafeFor false request
+
+/-- A human session's dispatch may be a streamed open; an agent-origin one
+may not (an agent's lifetime fence has no socket to close). -/
+def dispatchRequestSafe (dispatch : ApplicationDispatchCodec.Dispatch) : Bool :=
+  requestSafeFor (dispatch.session.origin == .human) dispatch.request
+
+theorem streamedOpenMethod_not_exchange : exchangeMethod streamedOpenMethod = false := by
+  decide +kernel
+
+theorem webSocketProtocolHeader_not_ordinary :
+    ordinaryHeaderName webSocketProtocolHeader = false := by
+  decide +kernel
+
+/-- The `GET` method token, the exchange a streamed open is compared with. -/
+def getMethod : List UInt8 := "GET".toUTF8.toList
+
+theorem getMethod_exchange : exchangeMethod getMethod = true := by
+  decide +kernel
+
+theorem getMethod_not_streamed : (getMethod == streamedOpenMethod) = false := by
+  decide +kernel
+
+/-- Pole: a route that may not open a stream refuses every streamed open. -/
+theorem requestSafe_refuses_streamed (request : ApplicationDispatchCodec.Request)
+    (h : streamed request = true) : requestSafe request = false := by
+  have hm : request.method = streamedOpenMethod := by
+    simpa [streamed] using h
+  simp [requestSafe, requestSafeFor, hm, streamedOpenMethod_not_exchange]
+
+/-- An agent-origin dispatch never admits a streamed open. -/
+theorem dispatchRequestSafe_agent_refuses_streamed
+    (dispatch : ApplicationDispatchCodec.Dispatch) (task : Nat) (generation : Int)
+    (origin : dispatch.session.origin = .agent task generation)
+    (h : streamed dispatch.request = true) : dispatchRequestSafe dispatch = false := by
+  have hfalse : (dispatch.session.origin == Origin.human) = false := by
+    rw [origin]; rfl
+  simp only [dispatchRequestSafe, hfalse]
+  exact requestSafe_refuses_streamed dispatch.request h
+
+/-- Opening streams changes nothing for an exchange: on every non-streamed
+request the human shape is exactly the exchange-only shape. -/
+theorem requestSafeFor_exchange (open_ : Bool) (request : ApplicationDispatchCodec.Request)
+    (h : streamed request = false) : requestSafeFor open_ request = requestSafe request := by
+  simp [requestSafe, requestSafeFor, h]
+
+/-- A streamed open carries no body. -/
+theorem streamed_open_body_empty (open_ : Bool) (request : ApplicationDispatchCodec.Request)
+    (safe : requestSafeFor open_ request = true) (h : streamed request = true) :
+    request.body = [] := by
+  simp [requestSafeFor, h] at safe
+  tauto
+
+/-- The same admission a `GET` gets: a streamed open with no subprotocol
+header is safe on a human route exactly when the same request as a `GET` is
+safe. Only the method token differs between the two records. -/
+theorem streamed_open_shape_is_get_shape (request : ApplicationDispatchCodec.Request)
+    (h : streamed request = true)
+    (noProtocol : ∀ header ∈ request.headers, header.name ≠ webSocketProtocolHeader) :
+    requestSafeFor true request = requestSafe { request with method := getMethod } := by
+  have hget : streamed { request with method := getMethod } = false := by
+    simpa [streamed] using getMethod_not_streamed
+  have hm : request.method = streamedOpenMethod := by
+    simpa [streamed] using h
+  have hGetBody : (getMethod == "GET".toUTF8.toList) = true := by
+    simp [getMethod]
+  rw [Bool.eq_iff_iff]
+  simp only [requestSafe, requestSafeFor, hget, h, hm, getMethod_exchange, hGetBody,
+    streamedOpenMethod_not_exchange]
+  simp only [Bool.or_true, Bool.true_or, Bool.and_true, Bool.true_and,
+    Bool.false_and, Bool.or_false, ↓reduceIte]
+  simp only [Bool.and_eq_true, List.all_eq_true]
+  refine and_congr Iff.rfl (forall₂_congr fun header mem => ?_)
+  have hne : (header.name == webSocketProtocolHeader) = false := by
+    simpa using noProtocol header mem
+  simp [hne]
+
+#assert_axioms streamedOpenMethod_not_exchange
+#assert_axioms webSocketProtocolHeader_not_ordinary
+#assert_axioms requestSafe_refuses_streamed
+#assert_axioms dispatchRequestSafe_agent_refuses_streamed
+#assert_axioms requestSafeFor_exchange
+#assert_axioms streamed_open_body_empty
+#assert_axioms streamed_open_shape_is_get_shape
 
 /-- A separate current native observation request for each read-only resource.
 The source command is the DRC session/agent witness, while the native observe
@@ -428,7 +543,7 @@ structure CheckedCurrent {F : Type} [Field F] [DecidableEq F]
     ticketRead.selected.observed.before = some ticket
   bits : List Bool
   meaningExact : selectedMeaning ingress spec actualApp manifest enrollment ticket = some bits
-  requestShape : requestSafe ingress.dispatch.dispatch.request = true
+  requestShape : dispatchRequestSafe ingress.dispatch.dispatch = true
   issuerCurrent : issuerLineageCurrent deployment profile ambient durable ingress spec
     selection descriptor prepared = true
   invocation : DeclaredResourceController.AcceptedInvocation prepared ingress.dispatch.signed
@@ -718,8 +833,8 @@ def checkCurrent {F : Type} [Field F] [DecidableEq F]
                                     manifest enrollment ticket with
                                 | none => return .error "dispatch identity or permission ceiling refused"
                                 | some bits =>
-                                  if requestShape : requestSafe
-                                      ingress.dispatch.dispatch.request = true then
+                                  if requestShape : dispatchRequestSafe
+                                      ingress.dispatch.dispatch = true then
                                     if issuerCurrent : issuerLineageCurrent deployment profile
                                         ambient durable ingress spec selection descriptor prepared = true then
                                       match ← DeclaredResourceController.admit native prepared

@@ -44,6 +44,15 @@ pub struct SizeClass {
     pub tasks_max: u32,
     pub io_weight: u32,
     pub volume_mib: u64,
+    /// Concurrent WebSockets one grain generation may hold open. The open is
+    /// a Mini dispatch; frames are unmetered by design (SPK-HOSTING §348), so
+    /// this and `ws_bytes_per_minute` are their physical bound. The open past
+    /// the cap is refused `wsConcurrencyCap` before any Mini write.
+    pub ws_max_open: usize,
+    /// Bytes per minute one socket may carry, both directions summed, as a
+    /// token bucket holding at most one minute. A socket past it is cut
+    /// (`wsByteCap`) and the others on the grain are untouched.
+    pub ws_bytes_per_minute: u64,
 }
 
 pub const CLASSES: &[SizeClass] = &[
@@ -54,6 +63,8 @@ pub const CLASSES: &[SizeClass] = &[
         tasks_max: 256,
         io_weight: 50,
         volume_mib: 512,
+        ws_max_open: 32,
+        ws_bytes_per_minute: 4 * 1024 * 1024,
     },
     SizeClass {
         name: "M",
@@ -62,6 +73,8 @@ pub const CLASSES: &[SizeClass] = &[
         tasks_max: 512,
         io_weight: 100,
         volume_mib: 1024,
+        ws_max_open: 64,
+        ws_bytes_per_minute: 8 * 1024 * 1024,
     },
     SizeClass {
         name: "L",
@@ -70,6 +83,8 @@ pub const CLASSES: &[SizeClass] = &[
         tasks_max: 1024,
         io_weight: 200,
         volume_mib: 2048,
+        ws_max_open: 128,
+        ws_bytes_per_minute: 16 * 1024 * 1024,
     },
 ];
 
@@ -1350,6 +1365,11 @@ mod tests {
         assert_eq!(class("M").unwrap().memory_max, "1G");
         assert_eq!(class("L").unwrap().memory_max, "2G");
         assert!(class("XL").is_err());
+        assert_eq!(class("S").unwrap().ws_max_open, 32);
+        assert!(CLASSES
+            .windows(2)
+            .all(|pair| pair[0].ws_max_open < pair[1].ws_max_open
+                && pair[0].ws_bytes_per_minute < pair[1].ws_bytes_per_minute));
         assert_eq!(
             volume_name("0123456789abcdef", "7701"),
             "0123456789abcdef-7701"

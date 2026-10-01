@@ -105,3 +105,5 @@ mod setid_bound;
 mod spawn_gate;
 #[cfg(target_os = "linux")]
 mod volume_custody;
+#[cfg(target_os = "linux")]
+mod web_socket;

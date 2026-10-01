@@ -1016,6 +1016,7 @@ fn start(host: &Host, app: &str) -> io::Result<Value> {
         "expectedVolumeId":volume_id,
         "persistentVar":persistent_var(host, &placement),
         "persistentVarMaxBytes":placement.volume_mib * 1024 * 1024,
+        "sizeClass":placement.class,
         "grainsRoot":host.profile.grains_root,
         "store":host.store,
         "deploymentId":host.identity.deployment_id,

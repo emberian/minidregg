@@ -12,7 +12,7 @@ use crate::agent_api_native::ReverseCustodyClient;
 use crate::agent_api_server::{AgentApiListener, ResidentAgent};
 use crate::completion_native::preflight_custodian;
 use crate::dispatch_author::FixedAuthoring;
-use crate::dispatch_delivery::ResidentHuman;
+use crate::dispatch_delivery::{ResidentHuman, UpgradeRequest};
 use crate::dispatch_inspection::{HttpProjection, Route};
 use crate::dispatch_native::{private_dir, write_new, PrivateOperator};
 use crate::hostd::{Journal, PriorUnitState, VerifiedBegin};
@@ -148,6 +148,8 @@ struct ResidentConfig {
     expected_volume_id: String,
     persistent_var: PathBuf,
     persistent_var_max_bytes: u64,
+    /// The app's size class (S, M or L): its WebSocket caps come from here.
+    size_class: String,
     grains_root: PathBuf,
     store: String,
     deployment_id: String,
@@ -747,6 +749,7 @@ impl ResidentConfig {
             || config.entrances.len() > 8
             || config.agents.len() > 8
             || config.persistent_var_max_bytes == 0
+            || crate::broker::class(&config.size_class).is_err()
             || !config
                 .completion_semantics
                 .bytes()
@@ -1319,6 +1322,10 @@ pub fn run(config_path: &Path) -> io::Result<()> {
         .collect();
     let app_exit_index = agent_fds.len();
     agent_fds.push(std::os::fd::AsRawFd::as_raw_fd(&app_exit));
+    // One count for the generation: every participant's sockets share the
+    // grain's class cap.
+    let ws_limits = crate::web_socket::Limits::from(crate::broker::class(&config.size_class)?);
+    let ws_open = crate::web_socket::OpenSockets::default();
     PrivateHttpEntrance::serve_many_with_aux(&entrances, &agent_fds, |event| {
         if let Ok((index, request, kind, policy)) = event {
             let entry = &config.entrances[index];
@@ -1329,6 +1336,8 @@ pub fn run(config_path: &Path) -> io::Result<()> {
                 rpc: &mut resident.rpc,
                 display_name: &entry.display_name,
                 preferred_handle: &entry.preferred_handle,
+                sockets: &ws_open,
+                limits: ws_limits,
             };
             return deliver_request(
                 &mut human,
@@ -1406,14 +1415,22 @@ fn hex_bytes(bytes: &[u8]) -> String {
 
 fn deliver_request(
     human: &mut ResidentHuman<'_>,
-    request: ReceivedRequest,
+    mut request: ReceivedRequest,
     kind: EntranceKind,
     policy: &CustodianPolicy,
     api_path: Option<&str>,
     attempt_parent: &Path,
 ) -> io::Result<Vec<u8>> {
+    let upgrade = match (request.websocket.take(), request.upgrade_stream.take()) {
+        (None, None) => None,
+        (Some(handshake), Some(client)) => Some(UpgradeRequest {
+            client,
+            accept: handshake.accept,
+        }),
+        _ => return Err(invalid("WebSocket handshake and stream disagree")),
+    };
     let http = project_request(&request, kind, api_path)?;
-    human.deliver_once(policy, &http, attempt_parent)
+    human.deliver_once(policy, &http, attempt_parent, upgrade)
 }
 
 fn project_request<'a>(
@@ -1591,6 +1608,7 @@ mod tests {
             }],
             "agents": [agent("agent-a", 1001), agent("agent-b", 1002)]
         });
+        config["sizeClass"] = json!("S");
         config["launchQualification"] =
             json!("/var/lib/mini-spk/launch-qualified/qualification.json");
         config["startAction"] = json!({"kind":"create","index":0});

@@ -37,6 +37,9 @@ pub(crate) enum Method {
     Put,
     Patch,
     Delete,
+    /// A `GET` carrying a valid RFC 6455 upgrade: a streamed dispatch whose
+    /// one Mini write is the open (Sandstorm `openWebSocket`).
+    WebSocket,
 }
 
 impl Method {
@@ -49,6 +52,7 @@ impl Method {
             Self::Put => "PUT",
             Self::Patch => "PATCH",
             Self::Delete => "DELETE",
+            Self::WebSocket => crate::dispatch_inspection::STREAMED_OPEN_METHOD,
         }
     }
     fn parse(value: &str) -> io::Result<Self> {
@@ -68,7 +72,7 @@ impl Method {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct ReceivedRequest {
     pub method: Method,
     #[allow(dead_code)] // Consumed only after Mini's checked dispatch projector is wired.
@@ -82,6 +86,10 @@ pub(crate) struct ReceivedRequest {
     fetch_site: Option<String>,
     fetch_mode: Option<String>,
     fetch_dest: Option<String>,
+    /// The validated handshake of a WebSocket open; the entrance attaches the
+    /// client stream only after transport authentication.
+    pub websocket: Option<crate::web_socket::Handshake>,
+    pub upgrade_stream: Option<UnixStream>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -402,6 +410,11 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     let mut fetch_site = None;
     let mut fetch_mode = None;
     let mut fetch_dest = None;
+    let mut connection = None;
+    let mut upgrade = None;
+    let mut websocket_key = None;
+    let mut websocket_version = None;
+    let mut websocket_protocol = None;
     let mut body_len = None;
     let mut ordinary_headers = Vec::new();
     for line in lines {
@@ -435,6 +448,11 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             "sec-fetch-site" => fetch_site = Some(value),
             "sec-fetch-mode" => fetch_mode = Some(value),
             "sec-fetch-dest" => fetch_dest = Some(value),
+            "connection" => connection = Some(value),
+            "upgrade" => upgrade = Some(value),
+            "sec-websocket-key" => websocket_key = Some(value),
+            "sec-websocket-version" => websocket_version = Some(value),
+            "sec-websocket-protocol" => websocket_protocol = Some(value),
             "content-length" => {
                 if value.is_empty()
                     || (value.len() > 1 && value.starts_with('0'))
@@ -462,6 +480,33 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
     }
     let host = host.ok_or_else(|| refuse("missing HTTP Host"))?;
     let body_len = body_len.unwrap_or(0);
+    // An upgrade is a WebSocket open or nothing. Its subprotocol list is an
+    // app-visible input, so it is signed like an ordinary header; the
+    // extensions offer is declined (never forwarded, never accepted).
+    let (method, websocket) = match upgrade {
+        None => {
+            if websocket_key.is_some() || websocket_version.is_some() || websocket_protocol.is_some() {
+                return Err(refuse("WebSocket header without an upgrade"));
+            }
+            (method, None)
+        }
+        Some(upgrade) => {
+            if method != Method::Get || body_len != 0 {
+                return Err(refuse("WebSocket upgrade is not a bodyless GET"));
+            }
+            let handshake = crate::web_socket::client_handshake(
+                connection.as_deref(),
+                &upgrade,
+                websocket_key.as_deref(),
+                websocket_version.as_deref(),
+            )?;
+            if let Some(protocols) = websocket_protocol {
+                crate::web_socket::protocols(Some(&protocols))?;
+                ordinary_headers.push(("sec-websocket-protocol".to_owned(), protocols));
+            }
+            (Method::WebSocket, Some(handshake))
+        }
+    };
     if body_len > MAX_BODY {
         return Err(refuse("HTTP body exceeds native bound"));
     }
@@ -484,6 +529,8 @@ fn parse_head(head: &[u8]) -> io::Result<(ReceivedRequest, usize)> {
             fetch_site,
             fetch_mode,
             fetch_dest,
+            websocket,
+            upgrade_stream: None,
         },
         body_len,
     ))
@@ -996,6 +1043,11 @@ fn handle_stream_with(
     }
     let kind = policy.authenticate(&mut request)?;
     let method = request.method;
+    if request.websocket.is_some() {
+        // The fd3 worker owns this duplicate once the open is admitted; on a
+        // refusal or failure the response below goes out on the original.
+        request.upgrade_stream = Some(stream.try_clone()?);
+    }
     // The client sees one uniform 503; the operator's journal gets the
     // reason (an admitted request that failed in delivery, an fd3 refusal,
     // an unrepresentable app response), or a survey cannot say what broke.
@@ -1174,6 +1226,45 @@ mod tests {
             EntranceKind::Browser
         );
         assert!(request.body.is_empty());
+    }
+
+    /// A browser WebSocket open is a streamed dispatch: an RFC 6455 GET
+    /// becomes the `WEBSOCKET` method, its subprotocol list is signed, and the
+    /// cookie route holds it to the same-origin rule of an unsafe method
+    /// (cross-site WebSocket hijacking is refused before Mini).
+    #[test]
+    fn browser_websocket_open_is_a_streamed_same_origin_request() {
+        let raw = "GET /socket.io/?EIO=3&transport=websocket HTTP/1.1\r\nHost: friend.example.test\r\nOrigin: https://friend.example.test\r\nSec-Fetch-Site: same-origin\r\nSec-Fetch-Mode: websocket\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: chat\r\nSec-WebSocket-Extensions: permessage-deflate\r\nCookie: __Host-mini_spk_session=browser-token-abcdefghijklmnopqrstuvwxyz\r\n\r\n";
+        let mut request = parsed(raw).unwrap();
+        assert_eq!(request.method, Method::WebSocket);
+        assert_eq!(request.method.as_str(), "WEBSOCKET");
+        assert_eq!(
+            request.websocket.as_ref().unwrap().accept,
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
+        assert_eq!(
+            request.ordinary_headers,
+            [("sec-websocket-protocol".to_owned(), "chat".to_owned())]
+        );
+        assert_eq!(
+            policy().authenticate(&mut request).unwrap(),
+            EntranceKind::Browser
+        );
+        let mut no_origin =
+            parsed(&raw.replace("Origin: https://friend.example.test\r\n", "")).unwrap();
+        assert!(policy().authenticate(&mut no_origin).is_err());
+        let mut cross =
+            parsed(&raw.replace("https://friend.example.test", "https://evil.example.test")).unwrap();
+        assert!(policy().authenticate(&mut cross).is_err());
+        assert!(parsed(&raw.replace("Sec-WebSocket-Version: 13", "Sec-WebSocket-Version: 8")).is_err());
+        assert!(parsed(&raw.replace("Connection: keep-alive, Upgrade", "Connection: keep-alive")).is_err());
+        assert!(parsed(&raw.replace("GET /socket.io", "POST /socket.io")).is_err());
+        assert!(parsed(&raw.replace("Upgrade: websocket", "Upgrade: h2c")).is_err());
+        let stray = "GET / HTTP/1.1\r\nHost: friend.example.test\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n";
+        assert!(parsed(stray).is_err());
+        let plain = parsed("GET / HTTP/1.1\r\nHost: friend.example.test\r\nConnection: keep-alive\r\n\r\n").unwrap();
+        assert_eq!(plain.method, Method::Get);
+        assert!(plain.websocket.is_none());
     }
 
     #[test]

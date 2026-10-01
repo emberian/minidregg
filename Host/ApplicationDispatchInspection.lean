@@ -50,7 +50,7 @@ def inspect (bytes : List UInt8) : Except String Json := do
   let identity := dispatch.identity
   let request := dispatch.request
   pure <| .mkObj
-    [("type", "application-dispatch-committed-inspection-v1"),
+    [("type", "application-dispatch-committed-inspection-v2"),
      ("frameByteCount", decimal bytes.length),
      ("frameHex", hex bytes),
      ("app", .mkObj
@@ -81,6 +81,7 @@ def inspect (bytes : List UInt8) : Except String Json := do
      ("request", .mkObj
        [("operationId", decimal request.operationId),
         ("methodHex", hex request.method),
+        ("streamed", .bool (ApplicationDispatchAdmission.streamed request)),
         ("pathHex", hex request.path),
         ("queryHex", hex request.query),
         ("headers", .arr <| request.headers.toArray.map headerJson),
