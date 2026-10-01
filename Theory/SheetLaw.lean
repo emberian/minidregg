@@ -10,11 +10,12 @@ predicate tree) reproduces `1ee44ed`'s §2 byte for byte from `1ee44ed`'s JSON, 
 `sheet/fields.json`, `joint I KIND NAME view` ↦ `joint/index/{I}/resource/field/{n}/{view}`,
 `clock now` ↦ `clock/now`.
 
-What the kernel supplies on this branch. `DeclaredResourceController.step` gives the policy
+What the kernel supplies. `DeclaredResourceController.step` gives the policy
 `old = project(pre, pre)` and `new = project(pre, post)` (`DeclaredResourceProjection.scalarSlots`),
-behind the request slots, plus `joint/target/{target}/…` slots for the other legs. It supplies **no
-`clock/now` slot** (K-CLOCK) and **no `joint/index/…` slot** (K-JOINT-INDEX). Absent slots fail closed,
-so on this branch:
+behind the clock slots (`clock/now|day|slot`, K-CLOCK, `now_slot_exact`) and the request slots, plus
+every participant under `joint/target/{id}/…` and `joint/index/{i}/…` (K-JOINT-INDEX,
+`joint_index_of_target`). The theorems below do not assume either is present: absent slots fail
+closed, so a step without them (wave-c's shape, kept as the `…WaveC` poles):
 
 * clauses 10, 11, 19, 23 (clock) and 14–18, 26, 27 (joint) refuse whenever their guarded branch is
   needed. Consequences proved below: the referee cannot lower hp at all (`combat_death_refused_without_joint`),
@@ -24,8 +25,8 @@ so on this branch:
   missing clock refuses them too: no death without the clock (`death_needs_clock`). On `1ee44ed`
   they wrapped the atom in `not`, which passed while the clock was absent.
 
-The slot-to-slot atoms (`eqSlots`, `leSlots`, `leSlotsOff`) are k-sloteq's and k-offset's, merged into
-this branch for these laws; wave-c alone cannot express either law.
+The slot-to-slot atoms (`eqSlots`, `leSlots`, `leSlotsOff`) are k-sloteq's and k-offset's; wave-c's
+atom set alone cannot express either law.
 
 §6 models the kernel's view with the clock and `joint/index` slots as optional extras, so the poles
 that need K-CLOCK / K-JOINT-INDEX are stated with them present, and the wave-c poles without.
