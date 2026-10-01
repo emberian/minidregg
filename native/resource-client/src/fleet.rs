@@ -315,6 +315,26 @@ fn plan_refusal(agent: &Agent, directory: &Path) -> Result<Option<Value>> {
     Ok((outcome.get("type").and_then(Value::as_str) == Some("refused")).then_some(outcome))
 }
 
+/// Did the Host refuse this attempt's signed observation `stale-root` (a
+/// commit landed between its challenge and the signed query)? Read from the
+/// decision the session recorded with the Host's own decoding. Only the read
+/// was signed, so the turn re-plans. Any other decision is put back for the
+/// caller's report.
+fn observation_stale() -> bool {
+    match crate::take_host_decision() {
+        Some(crate::HostDecision::RefusedFrame { decoded: Some(outcome), .. })
+            if outcome.get("reason").and_then(Value::as_str) == Some("stale-root") =>
+        {
+            true
+        }
+        Some(other) => {
+            crate::note_host_decision(other);
+            false
+        }
+        None => false,
+    }
+}
+
 /// How many times a turn is re-planned after the Host reports contention.
 const MAX_REPLANS: usize = 8;
 
@@ -322,7 +342,8 @@ const MAX_REPLANS: usize = 8;
 /// The submit marker is durable before the one submission; after it, only the
 /// read-only exact lookup of the same ingress is ever sent. `Ok(None)` is a
 /// decided attempt that moved nothing: the Host's typed contention at submit,
-/// or its `stale-root` refusal of the plan before anything was signed.
+/// or its `stale-root` refusal of the observation or the plan before the turn
+/// was signed.
 fn attempt(
     agent: &Agent,
     reference: &Value,
@@ -346,7 +367,22 @@ fn attempt(
     )?;
     let draft_bytes = crate::agent_reserve::bounded(&directory.join("draft.bin"), LIMIT)?;
     let draft_view = inspect(agent, "fleet-turn", &directory.join("draft.bin"), &directory.join("draft-inspected.json"))?;
-    let (view, signed) = observe(agent, reference)?;
+    // A decision left by an earlier request must not be read as this one's.
+    let _ = crate::take_host_decision();
+    let (view, signed) = match observe(agent, reference) {
+        Ok(observed) => observed,
+        Err(error) => {
+            if observation_stale() {
+                retain_json(
+                    &directory.join("superseded.json"),
+                    &json!({"format":FORMAT,"reason":"stale-root-at-observation",
+                        "status":"decided-nothing-signed"}),
+                )?;
+                return Ok((directory, None));
+            }
+            return Err(error);
+        }
+    };
     retain(&directory.join("signed-observation.bin"), &signed)?;
     retain_json(&directory.join("account-view.json"), &view)?;
     let plan = match invoke(agent, &directory, "plan", 96, &pair(&signed, &draft_bytes)?) {

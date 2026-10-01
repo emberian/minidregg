@@ -185,6 +185,7 @@ WALL=$(elapsed "$t0" "$(now)")
 printf 'interleaved\t%s-turns-3-keys\t%s\tok\n' "$TURNS" "$WALL" >>"$TIMES"
 SUPERSEDED_DIRS="$MINI_FLEET_HOME"/profiles/*/workspace/attempts/*/superseded.json
 STALE_PLANS=$(cat $SUPERSEDED_DIRS 2>/dev/null | jq -s '[.[] | select(.reason == "stale-root-at-plan")] | length')
+STALE_OBSERVATIONS=$(cat $SUPERSEDED_DIRS 2>/dev/null | jq -s '[.[] | select(.reason == "stale-root-at-observation")] | length')
 CONTENTIONS=$(cat $SUPERSEDED_DIRS 2>/dev/null | jq -s '[.[] | select(.reason == "contention")] | length')
 FAILED=$(awk -F'\t' 'NR>1 && $6 != "ok"' "$INTER" | wc -l)
 REPLANS=$(awk -F'\t' 'NR>1 && $5 != "-" {s += $5} END {print s + 0}' "$INTER")
@@ -203,8 +204,8 @@ stop_server
 
 sha256sum "$HOST" "$MINI" "$STORE" "$VERIFIER" "$CONFIG" >"$OUT/binaries.sha256"
 jq -n --arg turns "$TURNS" --arg admitted "$ADMITTED" --arg replans "$REPLANS" --arg wall "$WALL" \
-  --arg sum "$SUM" --arg fee "$FEE" --arg stale "$STALE_PLANS" --arg cont "$CONTENTIONS" \
+  --arg sum "$SUM" --arg fee "$FEE" --arg stale "$STALE_PLANS" --arg cont "$CONTENTIONS" --arg sobs "$STALE_OBSERVATIONS" \
   '{type:"minidregg-fleet-sign-journey-v1", interleaved:{turns:$turns, admitted:$admitted,
-    replans:$replans, stalePlans:$stale, submitContentions:$cont, wallSeconds:$wall},
+    replans:$replans, staleObservations:$sobs, stalePlans:$stale, submitContentions:$cont, wallSeconds:$wall},
     balanceSum:$sum, fee:$fee, result:"pass"}' >"$OUT/summary.json"
 printf '%s\n' "$OUT"
