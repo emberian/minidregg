@@ -34,11 +34,31 @@ set_option autoImplicit false
 
 /-! ## §1. The capability tree -/
 
-instance scopeNarrowsDecidable {kind : ResourceKind} (child parent : Scope kind) :
-    Decidable (child.Narrows parent) :=
-  decidable_of_iff (child.targets ⊆ parent.targets ∧ child.verbs ⊆ parent.verbs ∧
-      child.maxCost ≤ parent.maxCost)
-    ⟨fun ⟨t, v, c⟩ => ⟨t, v, c⟩, fun h => ⟨h.targets, h.verbs, h.maxCost⟩⟩
+/-- With no recorded parents a cell descends only from itself. -/
+theorem descends_empty {c r : Nat} (d : Parentage.empty.Descends c r) : c = r := by
+  cases d with
+  | refl => rfl
+  | step link _ => exact absurd link (by simp [Parentage.empty, CoeFun.coe])
+
+/-- Narrowing with no recorded parents is narrowing under EVERY parent
+projection: the room map only adds descents. The cap tree holds no room map
+(it renders bytes the reader holds), so it decides narrowing at `empty`, and
+what it draws narrows whatever the Store's parentage is. -/
+theorem narrows_of_empty {kind : ResourceKind} {child parent : Scope kind}
+    (h : child.Narrows parent Parentage.empty) (parentage : Parentage) :
+    child.Narrows parent parentage := by
+  refine ⟨?_, h.verbs, h.maxCost, h.fields, h.maxDelta⟩
+  have t := h.targets
+  revert t
+  cases ct : child.targets <;> cases pt : parent.targets <;>
+    simp only [TargetSet.Narrows] <;> intro t
+  · exact t
+  · intro x mem
+    rw [descends_empty (t x mem)]
+    exact .refl _
+  · exact t.elim
+  · rw [descends_empty t]
+    exact .refl _
 
 /-- Where a capability the reader can see came from. -/
 inductive Source where
@@ -131,8 +151,8 @@ def links {kind : ResourceKind} (nodes : List (Node kind)) : List (Edge kind) :=
 def capTree {kind : ResourceKind} (items : List (Item kind)) : CapTree kind :=
   let nodes := (inputIds items ++ parentIds items).dedup.map (nodeOf items)
   { nodes
-    edges := (links nodes).filter (fun edge => decide (edge.child.scope.Narrows edge.parent.scope))
-    widenings := (links nodes).filter (fun edge => !decide (edge.child.scope.Narrows edge.parent.scope)) }
+    edges := (links nodes).filter (fun edge => decide (edge.child.scope.Narrows edge.parent.scope Parentage.empty))
+    widenings := (links nodes).filter (fun edge => !decide (edge.child.scope.Narrows edge.parent.scope Parentage.empty)) }
 
 theorem parentIn_names {kind : ResourceKind} (nodes : List (Node kind))
     (child parent : Capability kind) (found : parentIn nodes child = some parent) :
@@ -171,13 +191,15 @@ theorem mem_links {kind : ResourceKind} (nodes : List (Node kind)) (edge : Edge 
       exact hparent
 
 /-- The view cannot draw a widening edge: every drawn edge joins a capability to
-the parent it names, and the child's scope narrows the parent's. -/
+the parent it names, and the child's scope narrows the parent's under every
+parent projection (the Store's, whatever it records). -/
 theorem capTree_edges_narrow {kind : ResourceKind} (items : List (Item kind))
     (edge : Edge kind) (drawn : edge ∈ (capTree items).edges) :
-    edge.child.parent = some edge.parent.id ∧ edge.child.scope.Narrows edge.parent.scope := by
+    edge.child.parent = some edge.parent.id ∧
+      ∀ parentage, edge.child.scope.Narrows edge.parent.scope parentage := by
   have drawn' := drawn
   simp only [capTree, List.mem_filter, decide_eq_true_eq] at drawn'
-  exact ⟨parentIn_names _ _ _ (mem_links _ _ drawn'.1), drawn'.2⟩
+  exact ⟨parentIn_names _ _ _ (mem_links _ _ drawn'.1), narrows_of_empty drawn'.2⟩
 
 /-- Every capability id the input names appears as exactly one node. -/
 theorem capTree_complete_over_input {kind : ResourceKind} (items : List (Item kind))
@@ -196,7 +218,7 @@ theorem capTree_links_accounted {kind : ResourceKind} (items : List (Item kind))
     (edge : Edge kind) (linked : edge ∈ links (capTree items).nodes) :
     edge ∈ (capTree items).edges ∨ edge ∈ (capTree items).widenings := by
   simp only [capTree] at linked ⊢
-  by_cases narrows : edge.child.scope.Narrows edge.parent.scope
+  by_cases narrows : edge.child.scope.Narrows edge.parent.scope Parentage.empty
   · left; simp [List.mem_filter, linked, narrows]
   · right; simp [List.mem_filter, linked, narrows]
 
@@ -212,6 +234,8 @@ inductive Tok where
   | eqeq | le | inn | writeOnce | monotone | plus
   | notOpen | close | allOpen | anyOpen | listClose | comma
   | openLaw | sealedLaw | witnessed
+  | hashOpen | hashClose | ranKw
+  | nat (n : Nat)
   deriving DecidableEq, Repr
 
 def Tok.text : Tok → String
@@ -224,6 +248,8 @@ def Tok.text : Tok → String
   | .notOpen => "not (" | .close => ")" | .allOpen => "all [ " | .anyOpen => "any [ "
   | .listClose => " ]" | .comma => ", "
   | .openLaw => "open" | .sealedLaw => "sealed" | .witnessed => "witnessed "
+  | .hashOpen => "hash(" | .hashClose => ") == " | .ranKw => "ran "
+  | .nat n => toString n
 
 mutual
 def lawTokens : Pred → List Tok
@@ -236,6 +262,8 @@ def lawTokens : Pred → List Tok
   | .eqSlots a b => [.slot a, .eqeq, .slot b]
   | .leSlots a b => [.slot a, .le, .slot b]
   | .leSlotsOff a b k => [.slot a, .le, .slot b, .plus, .num "" k]
+  | .hashEq v b c => [.hashOpen, .slot v, .comma, .slot b, .hashClose, .slot c]
+  | .ran program => [.ranKw, .nat program]
   | .not q => .notOpen :: lawTokens q ++ [.close]
   | .allL .nil => [.openLaw]
   | .anyL .nil => [.sealedLaw]
@@ -281,6 +309,8 @@ theorem textOf_lawTokens : (p : Pred) → textOf (lawTokens p) = LawLeaf.renderC
   | .eqSlots a b => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
   | .leSlots a b => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
   | .leSlotsOff a b k => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
+  | .hashEq v b c => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
+  | .ran program => by simp [lawTokens, textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
   | .not q => by
       simp only [lawTokens, List.cons_append, textOf_cons, textOf_append, textOf_lawTokens q]
       simp [textOf, cat, Tok.text, LawLeaf.renderClause, String.append_assoc]
@@ -320,6 +350,9 @@ def parseClause : Nat → List Tok → Option (Pred × List Tok)
   | _ + 1, .openLaw :: r => some (.allL .nil, r)
   | _ + 1, .sealedLaw :: r => some (.anyL .nil, r)
   | _ + 1, .witnessed :: .vk id :: r => some (.witnessed ⟨id⟩, r)
+  | _ + 1, .hashOpen :: .slot v :: .comma :: .slot b :: .hashClose :: .slot c :: r =>
+      some (.hashEq v b c, r)
+  | _ + 1, .ranKw :: .nat program :: r => some (.ran program, r)
   | n + 1, .notOpen :: r => match parseClause n r with
       | some (q, .close :: r) => some (.not q, r)
       | _ => none
@@ -375,6 +408,8 @@ theorem parseClause_lawTokens : (p : Pred) → (n : Nat) → fuel p < n → (r :
   | .witnessed vk, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .eqSlots a b, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .leSlotsOff a b k, n + 1, _, r, _ => by simp [lawTokens, parseClause]
+  | .hashEq v b c, n + 1, _, r, _ => by simp [lawTokens, parseClause]
+  | .ran program, n + 1, _, r, _ => by simp [lawTokens, parseClause]
   | .leSlots a b, n + 1, _, r, hr => by
       match r, hr with
       | [], _ => simp [lawTokens, parseClause]
@@ -427,7 +462,8 @@ def parseLaw (tokens : List Tok) : Option Pred :=
 mutual
 theorem fuel_lt_length : (p : Pred) → fuel p < (lawTokens p).length + 1
   | .eq _ _ | .le _ _ | .memberOf _ _ | .writeOnce _ | .monotone _ | .witnessed _
-  | .eqSlots _ _ | .leSlots _ _ | .leSlotsOff _ _ _ | .allL .nil | .anyL .nil => by
+  | .eqSlots _ _ | .leSlots _ _ | .leSlotsOff _ _ _ | .hashEq _ _ _ | .ran _
+  | .allL .nil | .anyL .nil => by
       simp [fuel, lawTokens]
   | .not q => by
       have := fuel_lt_length q
@@ -477,6 +513,8 @@ def slotsOf : Pred → List Slot
   | .eq s _ | .le s _ | .memberOf s _ | .writeOnce s | .monotone s => [s]
   | .eqSlots a b | .leSlots a b | .leSlotsOff a b _ => [a, b]
   | .witnessed _ => []
+  | .hashEq v b c => [v, b, c]
+  | .ran program => [ranSlot program]
   | .not q => slotsOf q
   | .allL ps | .anyL ps => slotsOfList ps
 def slotsOfList : PredList → List Slot

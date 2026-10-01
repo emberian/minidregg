@@ -203,7 +203,7 @@ def capTreeView (bytes : List UInt8) : Result Json := do
   let tops := tree.nodes.filter (fun node => !childIds.contains node.id)
   let lines := s!"cap-tree {kindName kind} {target}: {tree.nodes.length} nodes, {tree.edges.length} edges, {tree.widenings.length} widenings" ::
     tops.flatMap (treeLines tree tree.nodes.length "") ++
-    tree.widenings.map (fun e => s!"WIDENING (not drawn): {e.child.id.value} names parent {e.parent.id.value} but does not narrow it")
+    tree.widenings.map (fun e => s!"WIDENING (not drawn): {e.child.id.value} names parent {e.parent.id.value} but does not narrow it with no room membership recorded (the reader holds no room map)")
   pure <| .mkObj [("type", "cap-tree"), ("kind", kindName kind), ("target", target),
     ("nodes", .arr <| tree.nodes.toArray.map nodeJson),
     ("edges", .arr <| tree.edges.toArray.map fun e => .mkObj
