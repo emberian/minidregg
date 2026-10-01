@@ -181,7 +181,7 @@ nothing an `Opened` holds depends on `storage`. (`Host.DryRun` uses it to state
 that a dry run never names the Store's writers.) -/
 def Opened.restorage {config : Config} (opened : Opened config)
     (storage : DurableReceiverIO.NativeConfig) : Opened { config with storage } :=
-  ⟨opened.durable, opened.directory, opened.authority, opened.pins⟩
+  ⟨opened.durable, opened.directory, opened.authority, opened.pins, opened.lawful⟩
 
 def need {α : Type} (detail : String) : Option α → Except String α
   | none => .error detail
