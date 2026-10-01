@@ -105,13 +105,15 @@ admission and the funded birth. `turn_hash` is the Mini transaction id,
 `chain_index` the accepted count, `finality` is `accepted`; there is no
 receipt hash, the four-field receipt is printed as `receipt`.
 
-**Plan-time staleness re-plans.** A fleet turn's signed observation names the
-Host state it read; when another turn commits between observation and plan,
-the Host refuses the plan `stale-root` before anything is signed. The client
-reads that reason from the Host's own decoding of the retained refusal frame
-and re-plans in a fresh attempt, as it does for submit-time `contention`.
-Measured on 100 interleaved turns from three keys: 100 admitted, 6 stale
-plans, 0 submit contentions.
+**Pre-signature staleness re-plans.** A fleet turn's signed observation names
+the Host state it read. When another turn commits between the observation's
+challenge and its query, or between the observation and the plan, the Host
+refuses `stale-root` before the turn is signed. The client reads that reason
+from the Host's own decoding (the retained plan refusal frame, or the
+session's recorded decision for the query) and re-plans in a fresh attempt,
+as it does for submit-time `contention`. Measured on 100 interleaved turns
+from three keys: 100 admitted, 0 submit contentions; 6 stale plans at box
+load ~20, 3 stale observations + 9 stale plans at load ~45.
 
 ## What already existed and was reused
 
