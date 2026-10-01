@@ -604,6 +604,73 @@ theorem sinceFrom_sound {visible : DurableDataIntent.CellId → Bool} {after : N
       · obtain ⟨above, index, found, at_, height, subject, cells⟩ := sinceFrom_sound later
         exact ⟨above, index + 1, found, by simp; exact at_, by rw [height]; omega, subject, cells⟩
 
+/-- **`since` is complete about what it names**: every record above `after`
+that wrote a visible cell has an entry at its own height, with its own signer
+and transaction, naming that cell. (K-DOC-HISTORY; K-INDEX proved soundness.) -/
+theorem sinceFrom_complete {visible : DurableDataIntent.CellId → Bool} {after : Nat} :
+    ∀ {start : Nat} {log : List DurableReceiver.IntentRecord} {index : Nat}
+      {record : DurableReceiver.IntentRecord},
+      log[index]? = some record → after < start + index →
+      ∀ written ∈ PresenceIndex.cellsOf record, visible written = true →
+        ∃ entry ∈ sinceFrom visible after start log, entry.height = start + index ∧
+          entry.subject = record.subject.map (·.value) ∧
+          entry.transaction = record.transactionId.value ∧ written.value ∈ entry.cells
+  | _, [], _, _, found, _, _, _, _ => by simp at found
+  | start, head :: rest, 0, record, found, above, written, wrote, shown => by
+      simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+      subst found
+      have kept : written ∈ (PresenceIndex.cellsOf head).filter visible :=
+        List.mem_filter.mpr ⟨wrote, shown⟩
+      refine ⟨⟨start, head.subject.map (·.value), head.transactionId.value,
+        ((PresenceIndex.cellsOf head).filter visible).map (·.value)⟩, ?_, rfl, rfl, rfl,
+        List.mem_map.mpr ⟨written, kept, rfl⟩⟩
+      simp only [sinceFrom, List.mem_append]
+      left
+      split
+      · simp
+      · rename_i no
+        exact absurd ⟨by simpa using above, List.ne_nil_of_mem kept⟩ no
+  | start, head :: rest, index + 1, record, found, above, written, wrote, shown => by
+      simp only [List.getElem?_cons_succ] at found
+      obtain ⟨entry, member, height, subject, transaction, cell⟩ :=
+        sinceFrom_complete (visible := visible) (after := after) (start := start + 1) (index := index) found (by omega) written wrote shown
+      refine ⟨entry, ?_, by omega, subject, transaction, cell⟩
+      simp only [sinceFrom, List.mem_append]
+      exact Or.inr member
+
+/-- `history DOC` (K-DOC-HISTORY): the `since` entries that wrote the document
+cell itself. On the host this is `since DOC 0` cut to `DOC`, so it is K-INDEX's
+`who` rule: only cells the reader's current grant covers. -/
+def historyOf (target : Nat) (entries : List SinceEntry) : List SinceEntry :=
+  entries.filter fun entry => entry.cells.contains target
+
+/-- **Every history row is an accepted action on that cell**: a record of the
+log at that row's height, signed by that row's subject, that wrote the cell. -/
+theorem history_sound {visible : DurableDataIntent.CellId → Bool} {after start target : Nat}
+    {log : List DurableReceiver.IntentRecord} {row : SinceEntry}
+    (member : row ∈ historyOf target (sinceFrom visible after start log)) :
+    after < row.height ∧ ∃ index record, log[index]? = some record ∧
+      row.height = start + index ∧ row.subject = record.subject.map (·.value) ∧
+      ∃ written ∈ PresenceIndex.cellsOf record, written.value = target ∧ visible written = true := by
+  obtain ⟨inSince, names⟩ := List.mem_filter.mp member
+  obtain ⟨above, index, record, found, height, subject, cells⟩ := sinceFrom_sound inSince
+  exact ⟨above, index, record, found, height, subject, cells target (by simpa using names)⟩
+
+/-- **Every accepted action on a visible cell is a history row**, at its height,
+with its signer and transaction. -/
+theorem history_complete {visible : DurableDataIntent.CellId → Bool} {after start target : Nat}
+    {log : List DurableReceiver.IntentRecord} {index : Nat} {record : DurableReceiver.IntentRecord}
+    (found : log[index]? = some record) (above : after < start + index)
+    {written : DurableDataIntent.CellId} (wrote : written ∈ PresenceIndex.cellsOf record)
+    (named : written.value = target) (shown : visible written = true) :
+    ∃ row ∈ historyOf target (sinceFrom visible after start log), row.height = start + index ∧
+      row.subject = record.subject.map (·.value) ∧ row.transaction = record.transactionId.value := by
+  obtain ⟨entry, member, height, subject, transaction, cell⟩ :=
+    sinceFrom_complete found above written wrote shown
+  refine ⟨entry, List.mem_filter.mpr ⟨member, ?_⟩, height, subject, transaction⟩
+  rw [← named]
+  simpa using cell
+
 /-- The canonical bytes of `target` as of absolute height `height`; refused
 above the current height and below the genesis height (the retention floor:
 the Store keeps every record since the seed). -/
@@ -680,6 +747,131 @@ def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList
 def atViewCodec : IndexedProgram.LawfulCodec (Nat × List UInt8) :=
   NativeHostCodec.framed atViewFrame (StreamCodec.product StreamCodec.nat bytesStream)
 
+/-! ## Coverage at the asked height (K-DOC-HISTORY)
+
+`at h` is answered only to a grant that stood at `h`. The authority state at
+`h` is reconstructible: it is the authority cell of the same prefix replay that
+produces the bytes, loaded by the one `loadDeployment` route. So a reader added
+at height 30 is refused `at 29` — the room as it was had no such member. -/
+
+/-- A holder names `subject` (a bearer capability names anyone). -/
+def holderNames (subject : SubjectId) : Holder → Bool
+  | .bearer => true
+  | .subject bound => decide (bound = subject)
+
+theorem holderNames_covers {subject : SubjectId} {holder : Holder}
+    (names : holderNames subject holder = true) : holder.Covers subject := by
+  cases holder with
+  | bearer => trivial
+  | subject bound => simpa [holderNames, Holder.Covers] using names
+
+/-- The grant as the authority cell of `snapshot` holds it: present, naming
+`subject`, and `standing` over `target` at `height` (window, epochs,
+revocations and parentage all read from that same snapshot). -/
+def grantStandingIn (snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot)
+    (subject : SubjectId) (grant : GrantRef) (height target : Nat) : Bool :=
+  match CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot with
+  | none => false
+  | some authority =>
+      match CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind grant.capability with
+      | none => false
+      | some stored => holderNames subject stored.head.holder &&
+          standing authority.snapshot.authState height target stored.head
+
+/-- `at height`, answered against the grants as they stood at `height`. -/
+def atCovered (genesisHeight height : Nat) (subject : SubjectId) (grant : GrantRef) (target : Nat) :
+    Except String (List UInt8) :=
+  if height > genesisHeight + durable.height then
+    .error s!"history read refused: height {height} is above the current height {genesisHeight + durable.height}"
+  else if height < genesisHeight then
+    .error s!"history read refused: height {height} is below the retention floor {genesisHeight}"
+  else
+    match durable.atPrefix (height - genesisHeight) with
+    | none => .error refused
+    | some snapshot =>
+        if grantStandingIn (deployment := deployment) snapshot subject grant height target then
+          .ok (atViewCodec.encode (height, snapshot.canonicalBytes ⟨target⟩))
+        else
+          .error s!"history read refused: this grant did not cover {target} at height {height}"
+
+/-- **`at` answers only a grant that stood at that height**: the bytes are
+K-INDEX's `atBytes` (the fold of the prefix), and the authority cell of that
+same prefix holds the grant's capability, naming the reader and standing over
+the target at that height. -/
+theorem atCovered_sound {genesisHeight height : Nat} {subject : SubjectId} {grant : GrantRef}
+    {target : Nat} {out : List UInt8}
+    (answered : atCovered (deployment := deployment) (durable := durable)
+      genesisHeight height subject grant target = .ok out) :
+    ∃ snapshot authority stored,
+      durable.atPrefix (height - genesisHeight) = some snapshot ∧
+      CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority ∧
+      CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind grant.capability =
+        some stored ∧
+      stored.head.holder.Covers subject ∧
+      standing authority.snapshot.authState height target stored.head = true ∧
+      atBytes (durable := durable) genesisHeight height target =
+        some (snapshot.canonicalBytes ⟨target⟩) ∧
+      out = atViewCodec.encode (height, snapshot.canonicalBytes ⟨target⟩) := by
+  unfold atCovered at answered
+  split at answered
+  · cases answered
+  rename_i notAbove
+  split at answered
+  · cases answered
+  rename_i notBelow
+  split at answered
+  · cases answered
+  rename_i snapshot found
+  split at answered
+  · rename_i covered
+    unfold grantStandingIn at covered
+    split at covered
+    · cases covered
+    rename_i authority loaded
+    split at covered
+    · cases covered
+    rename_i stored read
+    simp only [Bool.and_eq_true] at covered
+    cases answered
+    refine ⟨snapshot, authority, stored, found, loaded, read, holderNames_covers covered.1,
+      covered.2, ?_, rfl⟩
+    unfold atBytes
+    rw [if_pos ⟨by omega, by omega⟩, found]
+    rfl
+  · cases answered
+
+/-- Refuting pole: a grant whose capability the authority cell at that height
+does not hold (a reader added later) is refused, with the height named. -/
+theorem atCovered_refused_before_grant {genesisHeight height : Nat} {subject : SubjectId}
+    {grant : GrantRef} {target : Nat}
+    {snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot}
+    {authority : CredentialAuthorityDomainReceiver.Loaded deployment snapshot}
+    (floor : genesisHeight ≤ height) (within : height ≤ genesisHeight + durable.height)
+    (found : durable.atPrefix (height - genesisHeight) = some snapshot)
+    (loaded : CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority)
+    (absent : CredentialAuthorityState.readCapability authority.snapshot.cell grant.kind
+      grant.capability = none) :
+    atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
+      .error s!"history read refused: this grant did not cover {target} at height {height}" := by
+  unfold atCovered
+  rw [if_neg (by omega), if_neg (by omega)]
+  simp only [found]
+  rw [if_neg]
+  simp [grantStandingIn, loaded, absent]
+
+/-- Satisfiable pole: a grant standing at that height is answered, with the prefix's bytes. -/
+theorem atCovered_answers_standing {genesisHeight height : Nat} {subject : SubjectId}
+    {grant : GrantRef} {target : Nat}
+    {snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot}
+    (floor : genesisHeight ≤ height) (within : height ≤ genesisHeight + durable.height)
+    (found : durable.atPrefix (height - genesisHeight) = some snapshot)
+    (stands : grantStandingIn (deployment := deployment) snapshot subject grant height target = true) :
+    atCovered (deployment := deployment) (durable := durable) genesisHeight height subject grant target =
+      .ok (atViewCodec.encode (height, snapshot.canonicalBytes ⟨target⟩)) := by
+  unfold atCovered
+  rw [if_neg (by omega), if_neg (by omega)]
+  simp only [found, stands, if_true]
+
 /-- Every query view, `who`/`since`/`at` included, has the same one-target
 footprint as a current read of that target: the same grant, the same check. -/
 theorem presence_views_share_footprint (context : Context deployment durable)
@@ -722,14 +914,8 @@ def AuthorizedIntent.queryResult
         let visible := sees state.parent stored.head query.target
         pure (sinceViewCodec.encode (sinceFrom visible after (genesisHeight + 1) durable.image.accepted))
     | .atHeight height =>
-        if height > genesisHeight + durable.height then
-          throw s!"history read refused: height {height} is above the current height {genesisHeight + durable.height}"
-        else if height < genesisHeight then
-          throw s!"history read refused: height {height} is below the retention floor {genesisHeight}"
-        else
-          match atBytes (durable := durable) genesisHeight height query.target with
-          | some bytes => pure (atViewCodec.encode (height, bytes))
-          | none => throw refused
+        atCovered (deployment := deployment) (durable := durable) genesisHeight height intent.subject
+          grant query.target
   else throw refused
 
 /-- info: 'Minidregg.Kernel.NativeObservationController.whoSeen_sound' depends on axioms: [propext, Quot.sound] -/
@@ -750,6 +936,62 @@ def AuthorizedIntent.queryResult
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_current_eq_read
 /-- info: 'Minidregg.Kernel.NativeObservationController.presence_views_share_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.presence_views_share_footprint
+
+/-- The `at` view of a signed query is `atCovered` over the query's first grant. -/
+theorem AuthorizedIntent.queryResult_at
+    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    {query : Query} {height : Nat} (purpose : intent.purpose = .query query)
+    (view : query.view = .atHeight height) (present : 0 < intent.grants.length) :
+    accepted.queryResult = atCovered (deployment := deployment) (durable := durable)
+      genesisHeight height intent.subject (intent.grants.get ⟨0, present⟩) query.target := by
+  unfold AuthorizedIntent.queryResult
+  simp only [purpose, view, dif_pos present]
+
+/-- **`at_respects_coverage_at_height`**: a signed `at h` query that is
+answered was answered to a grant the authority cell at `h` held, naming the
+signer and standing over the target at `h`; the answer is the fold of the
+prefix. A reader who was not in the room at `h` gets nothing at `h`. -/
+theorem at_respects_coverage_at_height
+    {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
+    {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
+    (accepted : AuthorizedIntent context profile federation genesisHeight intent)
+    {query : Query} {height : Nat} {out : List UInt8} (purpose : intent.purpose = .query query)
+    (view : query.view = .atHeight height) (answered : accepted.queryResult = .ok out) :
+    ∃ present : 0 < intent.grants.length, ∃ snapshot : CredentialAuthorityDomainReceiver.PhysicalSnapshot,
+      ∃ authority : CredentialAuthorityDomainReceiver.Loaded deployment snapshot, ∃ stored,
+      durable.atPrefix (height - genesisHeight) = some snapshot ∧
+      CredentialAuthorityDomainReceiver.loadDeployment deployment snapshot = some authority ∧
+      CredentialAuthorityState.readCapability authority.snapshot.cell
+        (intent.grants.get ⟨0, present⟩).kind (intent.grants.get ⟨0, present⟩).capability =
+        some stored ∧
+      stored.head.holder.Covers intent.subject ∧
+      standing authority.snapshot.authState height query.target stored.head = true ∧
+      out = atViewCodec.encode (height, snapshot.canonicalBytes ⟨query.target⟩) := by
+  by_cases present : 0 < intent.grants.length
+  · rw [accepted.queryResult_at purpose view present] at answered
+    obtain ⟨snapshot, authority, stored, found, loaded, read, holder, stands, _, encoded⟩ :=
+      atCovered_sound answered
+    exact ⟨present, snapshot, authority, stored, found, loaded, read, holder, stands, encoded⟩
+  · unfold AuthorizedIntent.queryResult at answered
+    simp only [purpose, dif_neg present] at answered
+    cases answered
+
+/-- info: 'Minidregg.Kernel.NativeObservationController.sinceFrom_complete' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.sinceFrom_complete
+/-- info: 'Minidregg.Kernel.NativeObservationController.history_sound' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.history_sound
+/-- info: 'Minidregg.Kernel.NativeObservationController.history_complete' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.history_complete
+/-- info: 'Minidregg.Kernel.NativeObservationController.atCovered_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atCovered_sound
+/-- info: 'Minidregg.Kernel.NativeObservationController.atCovered_refused_before_grant' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atCovered_refused_before_grant
+/-- info: 'Minidregg.Kernel.NativeObservationController.atCovered_answers_standing' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.atCovered_answers_standing
+/-- info: 'Minidregg.Kernel.NativeObservationController.at_respects_coverage_at_height' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.at_respects_coverage_at_height
 
 theorem observation_request_actual_root (context : Context deployment durable)
     (semantics : Digest) (federation : FederationId) (height : Nat) (intent : Intent)

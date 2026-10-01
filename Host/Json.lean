@@ -33,6 +33,7 @@ import Kernel.ParticipantKeyEnrollment
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
+import Kernel.DocumentHistory
 import Lean.Data.Json
 
 namespace Minidregg.Host.Json
@@ -2890,6 +2891,119 @@ private def quotesJson (bytes : List UInt8) : Result Lean.Json := do
     | _ => none
   pure <| .mkObj [("type", "quotes"), ("quotes", .arr quotes.toArray)]
 
+/-! ## Document history (K-DOC-HISTORY): rendered over the reader's own reads
+
+`view-lines` renders one signed page (a current `view-resource` read or an `at`
+read) as `doc show`'s numbered lines; `view-diff` renders the atom-level
+difference between two such pages through `DocumentHistory.diff`, over the same
+line lists; `view-history` cuts a `since` read to one document
+(`NativeObservationController.historyOf`) and, for each row, diffs the `at`
+reads the reader obtained at the row's height and the height below it. A height
+the reader's grant did not cover yields no `at` read, so its row carries no
+content. -/
+
+/-- One signed page: an `at` read's height, the lifecycle state, the root, and
+the content store (empty when the cell is fresh or retired). -/
+private def pageOfView (path : String) (bytes : List UInt8) :
+    Result (Option Nat × String × Option Digest × ContentResource.ContentStore) := do
+  match NativeObservationController.resourceViewCodec.decode bytes with
+  | some value =>
+      match Minidregg.Theory.CellRegistry.PackedCell.decode CanonicalCellRegistry.registry value.1 with
+      | some ⟨.content, payload⟩ => pure (none, "live", some payload.root, payload.logical)
+      | _ => failAt path "not a content cell"
+  | none =>
+      let (height, lifecycle) ← decoded path NativeObservationController.atViewCodec bytes
+      match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry lifecycle with
+      | some .fresh => pure (some height, "fresh", none, ContentResource.initialStore)
+      | some .retired => pure (some height, "retired", none, ContentResource.initialStore)
+      | some (.live ⟨.content, payload⟩) => pure (some height, "live", some payload.root, payload.logical)
+      | some (.live _) => failAt path "not a content cell"
+      | none => failAt path "noncanonical lifecycle bytes"
+
+/-- The page's lines: its atom records in store order (`doc show`'s order). -/
+private def pageLines (store : ContentResource.ContentStore) :
+    List (Hyperdocument.AtomId × Hyperdocument.AtomRecord) :=
+  (StoreCodec.entries HyperdocumentCell.contentWire store).filterMap fun entry =>
+    match entry with
+    | ⟨⟨.atoms, identifier⟩, record⟩ =>
+        some (show Hyperdocument.AtomId from identifier, show Hyperdocument.AtomRecord from record)
+    | _ => none
+
+private def atomStateJson (record : Hyperdocument.AtomRecord) : Lean.Json :=
+  .mkObj [("revision", decimal record.revision.digest.value),
+    ("createdBy", principalJson record.createdBy),
+    ("struck", .bool record.tombstonedAt.isSome), ("payload", hexJson record.payload)]
+
+private def lineJson (index : Nat) (row : Hyperdocument.AtomId × Hyperdocument.AtomRecord) : Lean.Json :=
+  .mkObj [("line", decimal (index + 1)), ("atom", decimal row.1.digest.value),
+    ("revision", decimal row.2.revision.digest.value), ("createdBy", principalJson row.2.createdBy),
+    ("struck", .bool row.2.tombstonedAt.isSome), ("payload", hexJson row.2.payload)]
+
+private def pageJson (page : Option Nat × String × Option Digest × ContentResource.ContentStore) :
+    List (String × Lean.Json) :=
+  [("height", (page.1.map decimal).getD .null), ("state", .str page.2.1),
+    ("root", (page.2.2.1.map fun root => decimal root.value).getD .null),
+    ("lines", .arr ((pageLines page.2.2.2).mapIdx lineJson).toArray)]
+
+private def changeJson :
+    DocumentHistory.Change Hyperdocument.AtomId Hyperdocument.AtomRecord → Lean.Json
+  | .added atom after => .mkObj [("type", "added"), ("atom", decimal atom.digest.value),
+      ("after", atomStateJson after)]
+  | .removed atom before => .mkObj [("type", "removed"), ("atom", decimal atom.digest.value),
+      ("before", atomStateJson before)]
+  | .changed atom before after => .mkObj [("type", "changed"), ("atom", decimal atom.digest.value),
+      ("before", atomStateJson before), ("after", atomStateJson after)]
+
+private def pageDiff (left right : ContentResource.ContentStore) : Lean.Json :=
+  .arr ((DocumentHistory.diff (pageLines left) (pageLines right)).map changeJson).toArray
+
+private def jsonInput (kind : String) (bytes : List UInt8) : Result Lean.Json := do
+  let text ← match String.fromUTF8? (ByteArray.mk bytes.toArray) with
+    | some text => pure text | none => failAt kind "input is not UTF-8"
+  match Lean.Json.parse text with
+  | .ok json => pure json | .error message => failAt kind message
+
+/-- `view-lines`: one signed page (`view-resource` or `view-at` binary) as lines. -/
+private def linesJson (bytes : List UInt8) : Result Lean.Json := do
+  let page ← pageOfView "view-lines" bytes
+  pure <| .mkObj ([("type", Lean.Json.str "lines")] ++ pageJson page)
+
+/-- `view-diff`: `{"left": HEX, "right": HEX}`, each a signed page; the atom
+changes from left to right (`DocumentHistory.diff` over the two line lists). -/
+private def diffJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["left", "right"] (← jsonInput "view-diff" bytes)
+  let left ← pageOfView "$.left" (← decodeHex "$.left" (← field "$" "left" obj))
+  let right ← pageOfView "$.right" (← decodeHex "$.right" (← field "$" "right" obj))
+  pure <| .mkObj [("type", "diff"), ("from", .mkObj (pageJson left)), ("to", .mkObj (pageJson right)),
+    ("changes", pageDiff left.2.2.2 right.2.2.2)]
+
+/-- `view-history`: `{"target": DEC, "since": HEX, "at": [HEX]}` — a signed
+`since` read and the signed `at` reads the reader obtained. One row per
+`historyOf target` entry; `before`/`after` are the `at` reads at the row's
+height minus one and at its height, when the reader's grant covered them. -/
+private def historyJson (bytes : List UInt8) : Result Lean.Json := do
+  let obj ← exactObject "$" ["target", "since", "at"] (← jsonInput "view-history" bytes)
+  let target ← nat "$.target" (← field "$" "target" obj)
+  let entries ← decoded "$.since" NativeObservationController.sinceViewCodec
+    (← decodeHex "$.since" (← field "$" "since" obj))
+  let pages ← list "$.at" (fun path entry => do
+      let page ← pageOfView path (← decodeHex path entry)
+      match page.1 with
+      | some height => pure (height, page)
+      | none => failAt path "not an at read") (← field "$" "at" obj)
+  let pageAt := fun (height : Nat) => (pages.find? (·.1 = height)).map Prod.snd
+  let rows := (NativeObservationController.historyOf target entries).map fun entry =>
+    let before := if entry.height = 0 then none else pageAt (entry.height - 1)
+    let after := pageAt entry.height
+    .mkObj ([("height", decimal entry.height), ("subject", (entry.subject.map decimal).getD .null),
+      ("transaction", decimal entry.transaction),
+      ("before", (before.map fun page => Lean.Json.mkObj (pageJson page)).getD .null),
+      ("after", (after.map fun page => Lean.Json.mkObj (pageJson page)).getD .null)] ++
+      match before, after with
+      | some left, some right => [("changes", pageDiff left.2.2.2 right.2.2.2)]
+      | _, _ => [("changes", .null)])
+  pure <| .mkObj [("type", "history"), ("target", decimal target), ("rows", .arr rows.toArray)]
+
 private def launchPhysicalReportJson
     (report : ApplicationLifecycleCompletionV2Report.Report) : Result Lean.Json := do
   let begin := report.claim.originalClaim.originalBegin
@@ -3061,6 +3175,9 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let value ← decoded "view-resource" NativeObservationController.resourceViewCodec bytes
       resourceJson value
   | "view-quotes" => quotesJson bytes
+  | "view-lines" => linesJson bytes
+  | "view-diff" => diffJson bytes
+  | "view-history" => historyJson bytes
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"
@@ -3100,6 +3217,6 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-policy, view-capability, view-who, view-since, or view-at"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-quotes, view-policy, view-capability, view-who, view-since, view-at, view-lines, view-diff, or view-history"
 
 end Minidregg.Host.Json
