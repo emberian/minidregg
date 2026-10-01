@@ -12,7 +12,12 @@ This module holds the values and the pure decision; the signed receiver is
 
 * `Observation` is the watcher's record (lane P1, `observations.json`): book
   index, the 32-byte deposit address, the 64-byte transaction signature, slot,
-  block time, the atomic amount added to the address, mint and token program.
+  block time, the atomic amount added to the address, mint and token program,
+  and (v2, PAY §11) what the transaction carried as a memo
+  (`PayEnrolMemo.MemoField`: absent, the raw bytes of the one memo, or the
+  watcher's `memoUnbound`/`memoInvalid`).  An ordinary deposit index ignores
+  the memo; the enrollment index (`Tariff.enrolIndex`) is decided by
+  `PayEnrolDecision`.
 * `nullifier domain o` is PAY §10 erratum 1: its canonical bytes are
   `"soltx:" ‖ signature(64) ‖ address(32)`, so one transaction paying two
   deposit addresses is two credits, and a second credit for the same
@@ -58,6 +63,7 @@ structure Observation where
   amount : Nat
   mint : Address32
   tokenProgram : Address32
+  memo : PayEnrolMemo.MemoField
   deriving DecidableEq, Repr
 
 structure Command where
@@ -73,7 +79,7 @@ structure Command where
   observations : List Observation
   deriving DecidableEq, Repr
 
-/-! ## Codecs `DREGG/PAY/OBSERVATION/v1` and `…/SIGNED/v1` -/
+/-! ## Codecs `DREGG/PAY/OBSERVATION/v2` and `…/SIGNED/v2` -/
 
 def observationStream : StreamCodec Observation :=
   StreamCodec.xmap
@@ -83,11 +89,12 @@ def observationStream : StreamCodec Observation :=
           (StreamCodec.product StreamCodec.nat
             (StreamCodec.product StreamCodec.nat
               (StreamCodec.product StreamCodec.nat
-                (StreamCodec.product bytesStream bytesStream)))))))
+                (StreamCodec.product bytesStream
+                  (StreamCodec.product bytesStream PayEnrolMemo.memoFieldStream))))))))
     (fun o => (o.index, o.address, o.signature, o.slot, o.blockTime, o.amount, o.mint,
-      o.tokenProgram))
-    (fun (index, address, signature, slot, blockTime, amount, mint, program) =>
-      ⟨index, address, signature, slot, blockTime, amount, mint, program⟩)
+      o.tokenProgram, o.memo))
+    (fun (index, address, signature, slot, blockTime, amount, mint, program, memo) =>
+      ⟨index, address, signature, slot, blockTime, amount, mint, program, memo⟩)
     (by intro o; cases o; rfl)
 
 def commandStream : StreamCodec Command :=
@@ -104,7 +111,7 @@ def commandStream : StreamCodec Command :=
       ⟨observer, capability, nonce, authorityRoot, payRoot, tip, observations⟩)
     (by intro c; cases c; rfl)
 
-def commandFrame : List UInt8 := "DREGG/PAY/OBSERVATION/v1".toUTF8.toList
+def commandFrame : List UInt8 := "DREGG/PAY/OBSERVATION/v2".toUTF8.toList
 
 def commandCodec : LawfulCodec Command := framed commandFrame commandStream
 
@@ -128,7 +135,7 @@ def ingressStream : StreamCodec Ingress :=
     (fun (command, envelope) => ⟨command, envelope⟩)
     (by intro ingress; cases ingress; rfl)
 
-def ingressFrame : List UInt8 := "DREGG/PAY/OBSERVATION/SIGNED/v1".toUTF8.toList
+def ingressFrame : List UInt8 := "DREGG/PAY/OBSERVATION/SIGNED/v2".toUTF8.toList
 
 def ingressCodec : LawfulCodec Ingress := framed ingressFrame ingressStream
 
@@ -190,6 +197,7 @@ inductive Reject where
   | tariffInvalid | clockUnavailable | tipBehindClock | tickTooSoon | duplicateInBatch
   | malformedObservation | wrongMint | wrongTokenProgram | unknownIndex | addressMismatch
   | unassignedIndex | payerIsIssuer | zeroAmount | observationAfterTip
+  | enrolIndexNeedsReceiver
   | bookAdmission | validation | physicalPreparation
   | policyUnavailable | capabilityRejected | policyRejected | policyInputRange | policyCastAlias
   | signature (reason : CredentialSignatureAdmission.Reject)
@@ -268,6 +276,9 @@ def decideObservations (store : PayStore) (book : Book) (tip : Clock)
         if clock.slot ≤ tip.slot ∧ clock.blockTime ≤ tip.blockTime then
           if observations = [] ∧ tip.slot < clock.slot + tariff.minTickSlots then .error .tickTooSoon
           else if (transfers observations).Nodup then
+            if observations.any (fun o => tariff.enrolIndex == some o.index) then
+              .error .enrolIndexNeedsReceiver
+            else
             match decideAll store tariff tip observations with
             | .error reason => .error reason
             | .ok credits =>
@@ -380,6 +391,9 @@ theorem decideObservations_ok {store : PayStore} {book : Book} {tip : Clock}
       swap
       · rw [if_neg distinct] at accepted; cases accepted
       rw [if_pos distinct] at accepted
+      by_cases enrolled : observations.any (fun o => tariff.enrolIndex == some o.index) = true
+      · rw [if_pos enrolled] at accepted; cases accepted
+      rw [if_neg enrolled] at accepted
       cases decided : decideAll store tariff tip observations with
       | error reason => simp only [decided] at accepted; cases accepted
       | ok credits =>
@@ -402,6 +416,40 @@ theorem decideObservations_admitted {store : PayStore} {book : Book} {tip : Cloc
     plan.batch.Admission book :=
   (decideObservations_ok accepted).2.2.2.2.2.2.2.2.2
 
+/-- **The enrollment index is not an ordinary deposit index** (PAY §11.4):
+an accepted observation report never contains a transfer to
+`tariff.enrolIndex`; those are decided by `PayEnrolDecision` only. -/
+theorem enrol_index_not_ordinary {store : PayStore} {book : Book} {tip : Clock}
+    {observations : List Observation} {plan : Plan}
+    (accepted : decideObservations store book tip observations = .ok plan) :
+    ∀ o ∈ observations, plan.tariff.enrolIndex ≠ some o.index := by
+  intro o member same
+  have present := (decideObservations_ok accepted).1
+  unfold decideObservations at accepted
+  rw [present] at accepted
+  cases clockFound : clockOf store with
+  | none => simp only [clockFound] at accepted; cases accepted
+  | some clock =>
+    simp only [clockFound] at accepted
+    have hit : observations.any (fun o => plan.tariff.enrolIndex == some o.index) = true :=
+      List.any_eq_true.mpr ⟨o, member, by simp [same]⟩
+    by_cases valid : plan.tariff.valid
+    swap
+    · rw [if_neg valid] at accepted; cases accepted
+    rw [if_pos valid] at accepted
+    by_cases ordered : clock.slot ≤ tip.slot ∧ clock.blockTime ≤ tip.blockTime
+    swap
+    · rw [if_neg ordered] at accepted; cases accepted
+    rw [if_pos ordered] at accepted
+    by_cases soon : observations = [] ∧ tip.slot < clock.slot + plan.tariff.minTickSlots
+    · rw [if_pos soon] at accepted; cases accepted
+    rw [if_neg soon] at accepted
+    by_cases distinct : (transfers observations).Nodup
+    swap
+    · rw [if_neg distinct] at accepted; cases accepted
+    rw [if_pos distinct, if_pos hit] at accepted
+    cases accepted
+
 #assert_axioms command_roundtrip
 #assert_axioms command_canonical
 #assert_axioms ingress_roundtrip
@@ -412,6 +460,7 @@ theorem decideObservations_admitted {store : PayStore} {book : Book} {tip : Cloc
 #assert_axioms decideObservation_ok
 #assert_axioms decideAll_forall₂
 #assert_axioms decideObservations_ok
+#assert_axioms enrol_index_not_ordinary
 #assert_axioms decideObservations_tip
 #assert_axioms decideObservations_admitted
 

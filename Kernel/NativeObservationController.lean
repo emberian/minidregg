@@ -290,7 +290,7 @@ theorem observable_roles_exact (kind : ResourceKind) (physical : CanonicalCellRe
     observableKind kind physical = true ↔
       (kind = .object ∧ (physical = .declaredObject ∨ physical = .content)) ∨
       (kind = .account ∧ physical = .accountMetadata) ∨
-      (kind = .program ∧ physical = .declaredProgram) := by
+      (kind = .program ∧ (physical = .declaredProgram ∨ physical = .pay)) := by
   cases kind <;> cases physical <;> simp [observableKind, ResourceTargetAdmission.externalKind]
 
 theorem content_observation_is_object (kind : ResourceKind) :

@@ -192,11 +192,88 @@ def viewStream : StreamCodec View :=
 def viewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec View :=
   PayTariff.framed "DREGG/PAY/VIEW/v1".toUTF8.toList viewStream
 
+/-! ## The public enrollment view (PAY §11.5; socket op 112)
+
+What the box's root timer `mini-roster-sync` reads to render proxy login
+lines: the chain hour and, per self-enrolled Mini key, its derived subject,
+the key, the 51-byte ssh blob, its lease expiry (an hour) and its book index.
+No account, no amount, no memo, no journal.  An entry is live iff
+`hour < leaseUntil`. -/
+structure EnrolmentEntry where
+  subject : Nat
+  miniKey : List UInt8
+  sshBlob : List UInt8
+  leaseUntil : Option Nat
+  index : Option Nat
+  deriving DecidableEq, Repr
+
+structure EnrolmentView where
+  hour : Nat
+  entries : List EnrolmentEntry
+  deriving DecidableEq, Repr
+
+/-- Every enrolment row, in the store codec's canonical order. -/
+def enrolments (store : PayCell.PayStore) : List (List UInt8 × PayCell.EnrolRecord) :=
+  (StoreCodec.sortedSupport PayCell.wire store).filterMap fun
+    | ⟨.enrolment, miniKey⟩ => (PayCell.enrolmentAt store miniKey).map (miniKey, ·)
+    | _ => none
+
+def enrolmentView (store : PayCell.PayStore) : EnrolmentView :=
+  ⟨((PayCell.clockOf store).map PayCell.Clock.hour).getD 0,
+    (enrolments store).map fun (miniKey, record) =>
+      ⟨PayEnrolMemo.subjectOf miniKey, miniKey, record.sshBlob, some record.leaseUntil, record.index⟩⟩
+
+def enrolmentEntryStream : StreamCodec EnrolmentEntry :=
+  StreamCodec.xmap
+    (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product bytesStream
+        (StreamCodec.product bytesStream
+          (StreamCodec.product (StreamCodec.option StreamCodec.nat)
+            (StreamCodec.option StreamCodec.nat)))))
+    (fun entry => (entry.subject, entry.miniKey, entry.sshBlob, entry.leaseUntil, entry.index))
+    (fun (subject, miniKey, sshBlob, lease, index) => ⟨subject, miniKey, sshBlob, lease, index⟩)
+    (by intro entry; cases entry; rfl)
+
+def enrolmentViewStream : StreamCodec EnrolmentView :=
+  StreamCodec.xmap (StreamCodec.product StreamCodec.nat (StreamCodec.list enrolmentEntryStream))
+    (fun view => (view.hour, view.entries))
+    (fun (hour, entries) => ⟨hour, entries⟩)
+    (by intro view; cases view; rfl)
+
+def enrolmentViewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec EnrolmentView :=
+  PayTariff.framed "DREGG/PAY/ENROLMENT-VIEW/v1".toUTF8.toList enrolmentViewStream
+
+theorem enrolmentView_roundtrip (view : EnrolmentView) :
+    enrolmentViewCodec.decode (enrolmentViewCodec.encode view) = some view :=
+  enrolmentViewCodec.decode_encode view
+
+/-- **The view lists exactly the enrolled keys**: a (key, record) pair is
+listed iff it is the key's enrolment row. -/
+theorem mem_enrolments (store : PayCell.PayStore) (miniKey : List UInt8)
+    (record : PayCell.EnrolRecord) :
+    (miniKey, record) ∈ enrolments store ↔ PayCell.enrolmentAt store miniKey = some record := by
+  unfold enrolments
+  rw [List.mem_filterMap]
+  constructor
+  · rintro ⟨address, _, found⟩
+    rcases address with ⟨space, key⟩
+    cases space <;> simp at found
+    obtain ⟨present, same⟩ := found
+    cases same
+    exact present
+  · intro present
+    refine ⟨⟨.enrolment, miniKey⟩, ?_, by simp [present]⟩
+    rw [StoreCodec.mem_sortedSupport]
+    change PayCell.enrolmentAt store miniKey ≠ none
+    simp [present]
+
 #assert_axioms decodeCell_bytes
 #assert_axioms decodeCell_canonical
 #assert_axioms load_exact
 #assert_axioms load_refuses
 #assert_axioms Loaded.root_exact
 #assert_axioms Loaded.write_pre_is_loaded_root
+#assert_axioms enrolmentView_roundtrip
+#assert_axioms mem_enrolments
 
 end Minidregg.Kernel.PayCellDomain

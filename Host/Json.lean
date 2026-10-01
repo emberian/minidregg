@@ -35,6 +35,7 @@ import Kernel.FleetTurn
 import Kernel.PayBookReceiver
 import Kernel.PayAssignmentReceiver
 import Kernel.PayObservationReceiver
+import Compiler.PayEnrolSignatureIO
 import Kernel.ApplicationLifecycleResidentProfile
 import Host.ApplicationPermissionSchemaAuthoring
 import Host.ApplicationSpkLaunchDescriptorAuthoring
@@ -742,10 +743,12 @@ private def genesis (path : String) (json : Lean.Json) : Result NativeHostGenesi
   let obj ← exactObject path (if observed then names ++ ["payObserver"] else names) json
   let payObserver ← if observed then do
       let observerPath := path ++ ".payObserver"
-      let observer ← exactObject observerPath ["subject", "capability"]
+      let observer ← exactObject observerPath ["subject", "capability", "controlCapability"]
         (← field path "payObserver" obj)
       pure (some (⟨⟨← nat (observerPath ++ ".subject") (← field observerPath "subject" observer)⟩,
-        ⟨← nat (observerPath ++ ".capability") (← field observerPath "capability" observer)⟩⟩ :
+        ⟨← nat (observerPath ++ ".capability") (← field observerPath "capability" observer)⟩,
+        ⟨← nat (observerPath ++ ".controlCapability")
+          (← field observerPath "controlCapability" observer)⟩⟩ :
           NativeHostGenesis.PayObserver))
     else pure none
   pure {
@@ -2206,7 +2209,8 @@ private def fleetTurnCommand (json : Lean.Json) : Result (List UInt8) := do
 `tokenProgram`, which are lowercase hex of the raw 32 bytes. -/
 private def payTariff (path : String) (json : Lean.Json) : Result PayTariff.Tariff := do
   let obj ← exactObject path ["version", "asset", "mint", "tokenProgram", "decimals",
-    "creditPerAtomic", "maxPerObservation", "minTickSlots"] json
+    "creditPerAtomic", "maxPerObservation", "minTickSlots", "nodeHourRate", "enrolIndex",
+    "journalFloor"] json
   pure
     { version := ← nat s!"{path}.version" (← field path "version" obj)
       asset := ← nat s!"{path}.asset" (← field path "asset" obj)
@@ -2215,7 +2219,10 @@ private def payTariff (path : String) (json : Lean.Json) : Result PayTariff.Tari
       decimals := ← nat s!"{path}.decimals" (← field path "decimals" obj)
       creditPerAtomic := ← nat s!"{path}.creditPerAtomic" (← field path "creditPerAtomic" obj)
       maxPerObservation := ← nat s!"{path}.maxPerObservation" (← field path "maxPerObservation" obj)
-      minTickSlots := ← nat s!"{path}.minTickSlots" (← field path "minTickSlots" obj) }
+      minTickSlots := ← nat s!"{path}.minTickSlots" (← field path "minTickSlots" obj)
+      nodeHourRate := ← nat s!"{path}.nodeHourRate" (← field path "nodeHourRate" obj)
+      enrolIndex := ← optional s!"{path}.enrolIndex" nat (← field path "enrolIndex" obj)
+      journalFloor := ← nat s!"{path}.journalFloor" (← field path "journalFloor" obj) }
 
 /-- The operator's pay-cell change: deposit rows (hex) appended from
 `bookStart`, and/or a new tariff (`null` for none).  The bytes claim nothing:
@@ -2260,12 +2267,28 @@ private def natOrNumber (path : String) (json : Lean.Json) : Result Nat :=
       else failAt path "unsigned integer expected"
   | _ => nat path json
 
-/-- One observation in the pay watcher's record shape (lane P1
+/-- The watcher's memo pair (P1b): `memo` is hex of the one memo's raw bytes
+or `null`; `memoError` is `null`, `"memoUnbound"` (two or more memo
+instructions) or `"memoInvalid"` (not UTF-8, or over 566 bytes).  Both set is
+refused. -/
+private def payMemoField (path : String) (memo memoError : Lean.Json) :
+    Result PayEnrolMemo.MemoField := do
+  let bytes ← optional s!"{path}.memo" decodeHex memo
+  let error ← optional s!"{path}.memoError" string memoError
+  match bytes, error with
+  | none, none => pure .absent
+  | some bytes, none => pure (.present bytes)
+  | none, some "memoUnbound" => pure .unbound
+  | none, some "memoInvalid" => pure .invalid
+  | none, some other => failAt s!"{path}.memoError" s!"unknown memo error {other}"
+  | some _, some _ => failAt path "memo and memoError are both set"
+
+/-- One observation in the pay watcher's record shape (lanes P1/P1b
 `observations.json`): byte fields are lowercase hex of the raw bytes. -/
 private def payObservationRecord (path : String) (json : Lean.Json) :
     Result PayObservation.Observation := do
   let obj ← exactObject path ["index", "address", "signature", "slot", "blockTime", "amount",
-    "mint", "tokenProgram"] json
+    "mint", "tokenProgram", "memo", "memoError"] json
   pure
     { index := ← natOrNumber s!"{path}.index" (← field path "index" obj)
       address := ← decodeHex s!"{path}.address" (← field path "address" obj)
@@ -2274,7 +2297,8 @@ private def payObservationRecord (path : String) (json : Lean.Json) :
       blockTime := ← natOrNumber s!"{path}.blockTime" (← field path "blockTime" obj)
       amount := ← natOrNumber s!"{path}.amount" (← field path "amount" obj)
       mint := ← decodeHex s!"{path}.mint" (← field path "mint" obj)
-      tokenProgram := ← decodeHex s!"{path}.tokenProgram" (← field path "tokenProgram" obj) }
+      tokenProgram := ← decodeHex s!"{path}.tokenProgram" (← field path "tokenProgram" obj)
+      memo := ← payMemoField path (← field path "memo" obj) (← field path "memoError" obj) }
 
 private def payClock (path : String) (json : Lean.Json) : Result PayCell.Clock := do
   let obj ← exactObject path ["slot", "blockTime"] json
@@ -2499,6 +2523,11 @@ private def payTariffJson (tariff : PayTariff.Tariff) : Lean.Json := .mkObj
    ("decimals", decimal tariff.decimals), ("creditPerAtomic", decimal tariff.creditPerAtomic),
    ("maxPerObservation", decimal tariff.maxPerObservation),
    ("minTickSlots", decimal tariff.minTickSlots),
+   ("nodeHourRate", decimal tariff.nodeHourRate),
+   ("enrolIndex", match tariff.enrolIndex with
+     | none => .null
+     | some index => decimal index),
+   ("journalFloor", decimal tariff.journalFloor),
    ("valid", .bool (decide tariff.valid))]
 
 private def payBookCommandJson (command : PayBookReceiver.Command) : Lean.Json := .mkObj
@@ -2532,10 +2561,17 @@ private def payObservationRecordJson (o : PayObservation.Observation) : Lean.Jso
    ("signature", hexJson o.signature), ("slot", decimal o.slot),
    ("blockTime", decimal o.blockTime), ("amount", decimal o.amount),
    ("mint", hexJson o.mint), ("tokenProgram", hexJson o.tokenProgram),
+   ("memo", match o.memo with
+     | .present bytes => hexJson bytes
+     | _ => .null),
+   ("memoError", match o.memo with
+     | .unbound => "memoUnbound"
+     | .invalid => "memoInvalid"
+     | _ => .null),
    ("nullifierBytes", hexJson (PayObservation.nullifierBytes o))]
 
 private def payObservationCommandJson (command : PayObservation.Command) : Lean.Json := .mkObj
-  [("type", "pay-observation-v1"),
+  [("type", "pay-observation-v2"),
    ("canonical", hexJson (PayObservation.commandCodec.encode command)),
    ("observer", decimal command.observer.value),
    ("capability", decimal command.capability.value),
@@ -2556,6 +2592,136 @@ private def payCommandJson (bytes : List UInt8) : Lean.Json :=
           match PayObservation.commandCodec.decode bytes with
           | some command => payObservationCommandJson command
           | none => .mkObj [("canonical", hexJson bytes), ("decoded", false)]
+
+/-- The public enrollment view (op 112) in the shape the box's roster timer
+reads (ROSTER-SYNC): `{"view", "clock": {"hour"}, "entries": [{"subject",
+"miniKey", "sshBlob", "lease": {"expiresAt"} | null, "index"}]}`.  Hours and
+expiries are JSON integers; the subject is a decimal string. -/
+def payEnrolmentViewJson (view : PayCellDomain.EnrolmentView) : Lean.Json := .mkObj
+  [("view", "DREGG/PAY/ENROLMENT-VIEW/v1"),
+   ("clock", .mkObj [("hour", .num (Lean.JsonNumber.fromNat view.hour))]),
+   ("entries", .arr (view.entries.map fun entry => Lean.Json.mkObj
+     [("subject", decimal entry.subject),
+      ("miniKey", hexJson entry.miniKey),
+      ("sshBlob", hexJson entry.sshBlob),
+      ("lease", match entry.leaseUntil with
+        | none => .null
+        | some hour => .mkObj [("expiresAt", .num (Lean.JsonNumber.fromNat hour))]),
+      ("index", match entry.index with
+        | none => .null
+        | some index => .num (Lean.JsonNumber.fromNat index))]).toArray)]
+
+private def payMemoRefusalName : PayEnrolMemo.Refusal → String
+  | .shape => "memoShape" | .version => "memoVersion" | .badMiniKey => "memoBadMiniKey"
+  | .badSshKey => "memoBadSshKey" | .badMiniSig => "memoBadMiniSig" | .badSshSig => "memoBadSshSig"
+
+/-- The kernel's reading of raw memo bytes (PAY §11.3): the four fields and
+what each signature is over, or the named refusal. -/
+def payEnrolMemoJson (bytes : List UInt8) : Lean.Json :=
+  match PayEnrolMemo.parse bytes with
+  | .error refusal => .mkObj [("type", "pay-enrol-memo-v1"), ("accepted", .bool false),
+      ("refusal", payMemoRefusalName refusal)]
+  | .ok memo => .mkObj [("type", "pay-enrol-memo-v1"), ("accepted", .bool true),
+      ("miniKey", hexJson memo.miniKey), ("sshBlob", hexJson memo.sshBlob),
+      ("miniSig", hexJson memo.miniSig), ("sshSig", hexJson memo.sshSig),
+      ("subject", decimal (PayEnrolMemo.subjectOf memo.miniKey)),
+      ("sshsigNamespace", hexJson PayEnrolMemo.sshsigNamespace)]
+
+/-- A self-enrollment decision probe (`minidregg-host CONFIG pay-enrol-probe`):
+a pay cell described in JSON, the price's birth fee, the authority's answer
+for the derived subject, a tip and one watcher observation. -/
+structure PayEnrolProbe where
+  store : PayCell.PayStore
+  price : PayEnrolDecision.Price
+  tip : PayCell.Clock
+  observation : PayObservation.Observation
+  subjectTaken : Bool
+
+private def payEnrolRecordEntry (path : String) (json : Lean.Json) :
+    Result (List UInt8 × PayCell.EnrolRecord) := do
+  let obj ← exactObject path ["miniKey", "sshBlob", "account", "index", "leaseUntil",
+    "enrolledSlot"] json
+  pure (← decodeHex s!"{path}.miniKey" (← field path "miniKey" obj),
+    ⟨← decodeHex s!"{path}.sshBlob" (← field path "sshBlob" obj),
+      ← nat s!"{path}.account" (← field path "account" obj),
+      ← optional s!"{path}.index" nat (← field path "index" obj),
+      ← nat s!"{path}.leaseUntil" (← field path "leaseUntil" obj),
+      ← nat s!"{path}.enrolledSlot" (← field path "enrolledSlot" obj)⟩)
+
+private def payAssignmentEntry (path : String) (json : Lean.Json) : Result (Nat × Nat) := do
+  let obj ← exactObject path ["index", "account"] json
+  pure (← nat s!"{path}.index" (← field path "index" obj),
+    ← nat s!"{path}.account" (← field path "account" obj))
+
+private def paySshIndexEntry (path : String) (json : Lean.Json) :
+    Result (List UInt8 × List UInt8) := do
+  let obj ← exactObject path ["sshBlob", "miniKey"] json
+  pure (← decodeHex s!"{path}.sshBlob" (← field path "sshBlob" obj),
+    ← decodeHex s!"{path}.miniKey" (← field path "miniKey" obj))
+
+/-- The probe's pay cell is built with the same `set`s a receiver's patch
+performs; each enrolment also indexes its ssh blob (the cell law), and
+`sshIndex` adds extra index rows (a squat). -/
+def payEnrolProbe (json : Lean.Json) : Result PayEnrolProbe := do
+  let obj ← exactObject "$" ["tariff", "clock", "book", "assignments", "enrolments", "sshIndex",
+    "birthFee", "subjectTaken", "tip", "observation"] json
+  let tariff ← payTariff "$.tariff" (← field "$" "tariff" obj)
+  let clock ← payClock "$.clock" (← field "$" "clock" obj)
+  let book ← list "$.book" decodeHex (← field "$" "book" obj)
+  let assignments ← list "$.assignments" payAssignmentEntry (← field "$" "assignments" obj)
+  let enrolments ← list "$.enrolments" payEnrolRecordEntry (← field "$" "enrolments" obj)
+  let extra ← list "$.sshIndex" paySshIndexEntry (← field "$" "sshIndex" obj)
+  let base := (PayCell.genesisStore.set PayCell.tariffAddress (some tariff)).set
+    PayCell.clockAddress (some clock)
+  let withBook := (book.zipIdx).foldl (fun store (row, index) =>
+    store.set (PayCell.bookAddress index) (some row)) base
+  let withAssign := assignments.foldl (fun store (index, account) =>
+    store.set (PayCell.assignmentAddress index) (some account)) withBook
+  let withEnrol := enrolments.foldl (fun store (miniKey, record) =>
+    (store.set (PayCell.enrolmentAddress miniKey) (some record)).set
+      (PayCell.sshIndexAddress record.sshBlob) (some miniKey)) withAssign
+  let store := extra.foldl (fun store (blob, miniKey) =>
+    store.set (PayCell.sshIndexAddress blob) (some miniKey)) withEnrol
+  pure { store
+         price := ⟨← nat "$.birthFee" (← field "$" "birthFee" obj)⟩
+         tip := ← payClock "$.tip" (← field "$" "tip" obj)
+         observation := ← payObservationRecord "$.observation" (← field "$" "observation" obj)
+         subjectTaken := ← bool "$.subjectTaken" (← field "$" "subjectTaken" obj) }
+
+private def payJournalReasonName : PayEnrolMemo.JournalReason → String
+  | .memoMissing => "memoMissing" | .memoUnbound => "memoUnbound"
+  | .memoInvalid => "memoInvalid"
+  | .memoMalformed refusal => s!"memoMalformed:{payMemoRefusalName refusal}"
+  | .miniSigInvalid => "miniSigInvalid" | .sshSigInvalid => "sshSigInvalid"
+  | .belowPrice => "belowPrice" | .sshKeyTaken => "sshKeyTaken"
+  | .sshKeyMismatch => "sshKeyMismatch" | .subjectTaken => "subjectTaken"
+
+private def optionalNatJson : Option Nat → Lean.Json
+  | none => .null
+  | some value => decimal value
+
+def payEnrolDecisionJson (verified : Option PayEnrolDecision.Verified)
+    (decision : Except PayEnrolDecision.Reject PayEnrolDecision.Decision) : Lean.Json :=
+  let verifiedJson : Lean.Json := match verified with
+    | none => .null
+    | some bits => .mkObj [("mini", .bool bits.mini), ("ssh", .bool bits.ssh)]
+  let body : List (String × Lean.Json) := match decision with
+    | .error reason => [("verdict", "refused"), ("reason", toString (repr reason))]
+    | .ok (.journal reason) => [("verdict", "journal"), ("reason", payJournalReasonName reason)]
+    | .ok (.enrol plan) =>
+        [("verdict", "enrol"), ("miniKey", hexJson plan.memo.miniKey),
+         ("subject", decimal (PayEnrolMemo.subjectOf plan.memo.miniKey)),
+         ("float", decimal plan.float), ("credit", decimal plan.credit),
+         ("weeks", decimal plan.weeks), ("index", optionalNatJson plan.index),
+         ("leaseUntil", decimal plan.leaseUntil)]
+    | .ok (.renew plan) =>
+        [("verdict", "renew"), ("miniKey", hexJson plan.memo.miniKey),
+         ("account", decimal plan.account), ("credit", decimal plan.credit),
+         ("weeks", decimal plan.weeks), ("leaseFrom", decimal plan.leaseFrom),
+         ("leaseUntil", decimal plan.leaseUntil)]
+  let head : List (String × Lean.Json) :=
+    [("type", "pay-enrol-probe-v1"), ("verified", verifiedJson)]
+  .mkObj (head ++ body)
 
 /-- The public pay view: roots to pin, tariff, clock, next free index and the
 published deposit book (index order, lowercase hex). -/
@@ -3272,13 +3438,16 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "pay-assign" => payAssignCommandJson <$>
       decoded "pay-assign" PayAssignmentReceiver.commandCodec bytes
   | "pay-view" => payViewJson <$> decoded "pay-view" PayCellDomain.viewCodec bytes
+  | "pay-enrolment-view" => payEnrolmentViewJson <$>
+      decoded "pay-enrolment-view" PayCellDomain.enrolmentViewCodec bytes
+  | "pay-enrol-memo" => pure (payEnrolMemoJson bytes)
   | "pay-observation" => payObservationCommandJson <$>
       decoded "pay-observation" PayObservation.commandCodec bytes
   | "pay-observation-ingress" => do
       let ingress ← decoded "pay-observation-ingress" PayObservation.ingressCodec bytes
       let command ← decoded "pay-observation-ingress" PayObservation.commandCodec
         ingress.commandBytes
-      pure <| .mkObj [("type", "pay-observation-ingress-v1"),
+      pure <| .mkObj [("type", "pay-observation-ingress-v2"),
         ("command", payObservationCommandJson command), ("envelope", hexJson ingress.envelope)]
   | "pay-plan" => do
       let plan ← decoded "pay-plan" PayCellDomain.signingPlanCodec bytes

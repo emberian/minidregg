@@ -7,6 +7,15 @@ The configured executable is the source/version-pinned
 and a 64-byte detached signature. It cannot select authority or parse a
 semantic request. Only one exact successful process response is positive.
 
+The same executable's `verify-sshsig` verb checks an OpenSSH SSHSIG
+signature (PROTOCOL.sshsig) by an ssh-ed25519 key: it receives the 32-byte
+key, the namespace, the message and the raw 64-byte signature, computes
+SHA-512 of the message (Lean has no SHA-512) and verifies strictly over
+`Kernel.PayEnrolMemo.sshsigSignedData namespace (SHA-512 message)`.  The
+native boundary therefore grows by exactly one hash, and every other byte of
+the signed data is fixed in Lean (`PayEnrolMemo.sshsig_signed_data_fixture`
+and the Rust `tests/sshsig.rs` assert the same bytes).
+
 This IO boundary does not prove the crypto implementation, process/OS byte
 transport, or EUF-CMA/key custody. Those remain the explicit verifier and
 custody assumptions of CredentialSignedEnvelopeController. No native reply
@@ -56,6 +65,31 @@ def verify (config : NativeConfig) (publicKey frame signature : List UInt8) :
         let output ← IO.Process.output
           { cmd := config.binary.toString
             args := #["verify", keyPath.toString, framePath.toString, signaturePath.toString] }
+        pure (parseOutput output)
+    catch error => pure (.error (.unavailable s!"{error}"))
+
+/-- `verify-sshsig`: the SSHSIG check of `signature` by the ssh-ed25519 key
+`publicKey` over `message` under `nameSpace`.  Only the exact positive
+response is `true`; the namespace must be non-empty (PROTOCOL.sshsig). -/
+def verifySshsig (config : NativeConfig) (publicKey nameSpace message signature : List UInt8) :
+    IO (Except Error Bool) :=
+  if publicKey.length != 32 then pure (.error .publicKeyLength)
+  else if signature.length != 64 then pure (.error .signatureLength)
+  else
+    try
+      IO.FS.withTempDir fun directory => do
+        let keyPath := directory / "public-key.bin"
+        let namespacePath := directory / "namespace.bin"
+        let messagePath := directory / "message.bin"
+        let signaturePath := directory / "signature.bin"
+        IO.FS.writeBinFile keyPath publicKey.toByteArray
+        IO.FS.writeBinFile namespacePath nameSpace.toByteArray
+        IO.FS.writeBinFile messagePath message.toByteArray
+        IO.FS.writeBinFile signaturePath signature.toByteArray
+        let output ← IO.Process.output
+          { cmd := config.binary.toString
+            args := #["verify-sshsig", keyPath.toString, namespacePath.toString,
+              messagePath.toString, signaturePath.toString] }
         pure (parseOutput output)
     catch error => pure (.error (.unavailable s!"{error}"))
 
