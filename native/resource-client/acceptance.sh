@@ -158,7 +158,8 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
         "owner": "7",
         "ownerCapability": "63",
         "controlCapability": "64",
-        "predicate": {"type": "all", "predicates": []}
+        "predicate": {"type": "all", "predicates": []},
+        "fields": ["0"]
       }
     ],
     "sourceCapabilities": ["41"],
@@ -308,9 +309,7 @@ SCALAR_ROOT=$(page_root "$EVIDENCE/query-scalar-before/view.json")
 JOINT_AUTHORITY_ROOT=$(jq -er '.authorityRoot |
   select(type == "string" and test("^(0|[1-9][0-9]*)$"))' \
   "$EVIDENCE/query-scalar-before/challenge.json")
-jq -e '(.cell.entries | length) == 1 and
-  .cell.entries[0].key.type == "object" and .cell.entries[0].key.resource == "601" and
-  .cell.entries[0].key.field == "1" and .cell.entries[0].value == "0"' \
+jq -e '(.cell.entries | length) == 0 and .cell.declaration == ["0"]' \
   "$EVIDENCE/query-scalar-before/view.json" >/dev/null
 
 cat >"$EVIDENCE/joint-intent.json" <<EOF

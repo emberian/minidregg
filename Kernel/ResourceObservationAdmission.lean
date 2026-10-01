@@ -475,6 +475,11 @@ def declaredField : EffectDeclaration.StateKey → CellField
   | .objectField _ field => .slot field.value
   | .accountBalance _ asset => .balance asset.value
   | .programCode _ => .code
+  -- A cell's declaration (K-FIELD-CLOSURE) is its shape: the declaration of
+  -- field `n` is read with field `n`, and openness with the cell's code.
+  -- Neither is ever written after birth.
+  | .fieldDeclared _ field => .slot field.value
+  | .fieldsOpen _ => .code
 
 def contentField : Hyperdocument.Namespace → CellField
   | .links | .marks | .annotations => .annotations

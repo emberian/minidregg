@@ -13,6 +13,7 @@ of object `o` encodes as `0 :: nat o ++ nat n`, and `nat 0 = [255]` sorts after
 `nat n = [n, 255]` for `0 < n < 255`: the order is fields 1, 2, 3, 0.
 -/
 import Kernel.DeclaredResourceProjection
+import Kernel.FieldClosure
 
 namespace Minidregg.Kernel.DeclaredFields
 
@@ -36,6 +37,14 @@ def entries (object : Nat) (values : DeclaredResourceProjection.Values) :
 /-- The record's store: exactly its fields, nothing else. -/
 def store (object : Nat) (values : DeclaredResourceProjection.Values) : Store effectLayout :=
   StoreCodec.fromEntries (entries object values)
+
+/-- A four-field record's declaration (K-FIELD-CLOSURE): it holds fields 0–3
+and may create no other. -/
+def recordFields : FieldClosure.FieldSet := .closed [0, 1, 2, 3]
+
+/-- The record's cell at birth: its fields and its declaration. -/
+def birthStore (object : Nat) (values : DeclaredResourceProjection.Values) : Store effectLayout :=
+  FieldClosure.declare object recordFields (store object values)
 
 /-- Read field `field` of `object`. -/
 def read (object field : Nat) (logical : Store effectLayout) : Option Int :=

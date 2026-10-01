@@ -494,6 +494,8 @@ fn post(ws: &Ws, mut args: Args) -> Result<Value> {
                 ("storage", "declared".into()),
                 ("predicate", law_path.clone().into()),
                 ("in", room.clone().into()),
+                // K-FIELD-CLOSURE: a job cell declares exactly its sixteen fields.
+                ("fields", "0-15".into()),
             ],
         )
     })?;
@@ -503,10 +505,10 @@ fn post(ws: &Ws, mut args: Args) -> Result<Value> {
         "program":program,"input":input,"price":price,"window":window.to_string(),
         "claimBy":claim_by.to_string(),"answerBy":answer_by.to_string(),"callerAcct":account_id});
     save(ws, &name, &rec)?;
-    // The order: program written from the declared object's birth 0; the rest created.
+    // The order: the cell is born holding no field (it declares 0-15), so every order field is created.
     let order = vec![
-        update(1, 0, &program),
         create(0, 0),
+        create(1, &program),
         create(2, &input),
         create(3, &ws.subject),
         create(4, &account_id),

@@ -182,7 +182,8 @@ T=$(view v0)
 [[ $T =~ ^[0-9]+$ ]] || { echo "jjob1: no clock view: $(tail -1 "$D/v0.err")" >&2; exit 1; }
 for j in 1 2 3 4 5 6; do
   n=jjob1-$j
-  run "create-$j" "$MINI" workspace --action create --dir "$WS_A" --name "$n" --storage declared --predicate "$D/req/law.json"
+  run "create-$j" "$MINI" workspace --action create --dir "$WS_A" --name "$n" --storage declared --predicate "$D/req/law.json" \
+    --fields 0-15
   row "job$j" "A creates $n under the 45-clause job law" "created" "rc=$(cat "$D/create-$j.rc")" "$(cat "$D/create-$j.rc")"
   jq -n --arg r "$B" --arg n "$n" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:$n,
     recipient:$r,verbs:["observe","mutate"],maxCost:"500000"}' >"$D/req/grant-$j.json"
@@ -201,10 +202,10 @@ done
 N1=$((T + 10)); CB=$((N1 + 60)); AB=$((N1 + 600)); FA=$((N1 + 100))
 tick "$N1"
 row all "tick to N1 = $N1" "now $N1" "now=$(view v1)" "$([ "$(view v1b)" = "$N1" ]; echo $?)"
-# A declared cell is born holding field 1 = 0 (Kernel/NativeHostGenesis.lean `declaredCell`), so the
-# order writes program (field 1) from 0; every other order field is created. Born unfunded: escrow,
-# provider, providerAcct and bond are 0 (clauses 11, 12); A funds it by a money turn.
-ORDER=("$(c 0 0)" "$(u 1 0 "$PID")" "$(c 2 5)" "$(c 3 "$A")" "$(c 4 7)" "$(c 5 100)" "$(c 6 "$CB")" "$(c 7 "$AB")" \
+# A declared cell is born holding no field, declaring fields 0-15 (K-FIELD-CLOSURE), so the order
+# creates every field it writes. Born unfunded: escrow, provider, providerAcct and bond are 0
+# (clauses 11, 12); A funds it by a money turn.
+ORDER=("$(c 0 0)" "$(c 1 "$PID")" "$(c 2 5)" "$(c 3 "$A")" "$(c 4 7)" "$(c 5 100)" "$(c 6 "$CB")" "$(c 7 "$AB")" \
   "$(c 8 0)" "$(c 9 0)" "$(c 10 0)" "$(c 11 0)")
 CLAIM=("$(u 0 0 1)" "$(u 9 0 "$B")" "$(u 10 0 121)" "$(u 11 0 100)")
 # collatz(5) = 5
@@ -237,6 +238,9 @@ deny job1 close-bond "close 3 -> 6 keeping the bond" 43 "$WS_B" jjob1-1 "$(u 0 3
 deny job1 close-plain "close 3 -> 6 by an ordinary write (no payout)" 44 "$WS_B" jjob1-1 "$(u 0 3 6)" "$(u 8 100 0)" "$(u 11 100 0)"
 jadmit job1 close "close 3 -> 6: settle pays B price + bond (money turn)" "$WS_B" settle --name jjob1-1
 deny job1 reopen "re-open the closed job (6 -> 3)" 2 "$WS_A" jjob1-1 "$(u 0 6 3)"
+attempt "$WS_A" job1-undeclared jjob1-1 "$(c 16 1)"; rund=$?; whyd=$(refusal "$WS_A" job1-undeclared)
+row job1 "A creates field 16 on the CLOSED job (a field the cell never declared)" "refused by name: undeclaredField 16" \
+  "$([ $rund = 0 ] && echo admitted || echo "[$whyd]")" "$([ $rund != 0 ] && [[ "$whyd" == *"undeclaredField 16"* ]]; echo $?)"
 
 # ---- job3: void
 admit job3 o-a "order" "$WS_A" jjob1-3 "${ORDER[@]}"
@@ -280,7 +284,7 @@ admit job5 v-b "B voids after claimBy" "$WS_B" jjob1-5 "$(u 0 0 5)"
 # ---- management: nobody installs a new law on a job, the caller included. The Host does not name
 # the clause of an install refused at admission (`undisclosed: request refused`), so the row pairs
 # the refusal with a control: the same install by A on a cell whose law is `all []` is admitted.
-run create-ctl "$MINI" workspace --action create --dir "$WS_A" --name jjob1-ctl --storage declared --predicate "$D/req/open.json"
+run create-ctl "$MINI" workspace --action create --dir "$WS_A" --name jjob1-ctl --storage declared --predicate "$D/req/open.json" --fields 0-15
 install() {  # install ID NAME -> 0 iff installed
   jq -n --arg n "$2" '{type:"minidregg-workspace-proposal-v1",action:"install-policy",name:$n,predicate:{type:"all",predicates:[]}}' >"$D/req/$1.json"
   run "$1-propose" "$MINI" workspace --action propose --dir "$WS_A" --request "$D/req/$1.json" --proposal-id "jjob1-$1"

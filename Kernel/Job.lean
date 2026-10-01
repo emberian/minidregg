@@ -33,13 +33,18 @@ path, void included.
 
 **Counterexamples the poles caught** (§6, each a named theorem): a negated deadline atom passes
 without a clock (`negated_timeout_fails_open`); `not (price <= 0)` passes on an absent price
-(`negated_price_fails_open`); and a closed job still admits a write that creates an UNDECLARED field
-(`closed_job_admits_undeclared_field`) — `Pred` cannot say "no other field", so `no_double_settle` is
-over the sixteen declared fields only; closing it is a kernel item (a declared kind's field set).
+(`negated_price_fails_open`).
+
+**Every field, not only the declared ones (K-FIELD-CLOSURE).** `Pred` cannot say "no other field", so
+the law alone admitted, on a closed job, a write that creates field 20. The kernel closes that: a job
+cell is born declaring its sixteen fields (`jobFields`), and the scalar receiver refuses a write that
+changes any other field by name, before the law runs (`Kernel.FieldClosure`). `kernelAdmits` is that
+verdict; `no_double_settle` is over every field, and `closed_job_refuses_undeclared_field` names 20.
 -/
 import Pred.Core
 import Pred.Leaf
 import Theory.SheetLaw
+import Kernel.FieldClosure
 
 namespace Minidregg.Kernel.Job
 
@@ -968,19 +973,46 @@ theorem frame_eq (p : Params) (fr : p.Fresh) (t : JobTurn) (pre : Values) (N : N
       | some x => rw [hq] at h; simp at h; rw [show x = o by omega]
     · rw [hp] at h; cases h.1
 
-/-- **`no_double_settle`.** On a closed job (state 6) an admitted write changes no declared field:
-state 6 has no outgoing edge, and nothing a closed job holds moves again. (A field outside `F.all`
-is not covered: `closed_job_admits_undeclared_field`.) -/
+/-- The job kind's declaration: a job cell is born declaring exactly its sixteen fields
+(K-FIELD-CLOSURE; the cell holds none of them until the order creates them). -/
+def jobFields : FieldClosure.FieldSet := .closed F.all
+
+/-- The first field a turn changes that a job cell does not declare. The kernel refuses such a turn by
+name (`DeclaredResourceScalar.Reject.undeclaredField`), at preparation, before the law runs; this is
+the same function the receiver applies (`FieldClosure.check`), on the same field values. -/
+def undeclared (pre : Values) (t : JobTurn) : Option Nat :=
+  FieldClosure.firstUndeclared jobFields.covers pre t.post
+
+/-- The kernel's verdict on a turn on a job cell: the field closure, then the law. -/
+def kernelAdmits (p : Params) (pre : Values) (t : JobTurn) : Bool :=
+  (undeclared pre t).isNone && admits p pre t
+
+/-- Inside the declaration the kernel's verdict is the law's: the closure made nothing else stricter
+or looser. -/
+theorem kernelAdmits_inside (p : Params) (pre : Values) (t : JobTurn)
+    (inside : undeclared pre t = none) : kernelAdmits p pre t = admits p pre t := by
+  simp [kernelAdmits, inside]
+
+/-- **`no_double_settle`.** On a closed job (state 6) a write the kernel admits changes NO field: the
+law freezes every declared field (state 6 has no outgoing edge, and nothing a closed job holds moves
+again), and the field closure refuses every other. -/
 theorem no_double_settle (p : Params) (fr : p.Fresh) (pre : Values) (t : JobTurn)
-    (adm : admits p pre t = true) (w : t.verb = 2) (closed : get pre F.state = some 6) :
-    ∀ N ∈ F.all, get t.post N = get pre N := by
+    (adm : kernelAdmits p pre t = true) (w : t.verb = 2) (closed : get pre F.state = some 6) :
+    ∀ N, get t.post N = get pre N := by
+  simp only [kernelAdmits, Bool.and_eq_true, Option.isNone_iff_eq_none] at adm
+  obtain ⟨inside, lawAdm⟩ := adm
   have w' : (jview p t pre t.post).get "request/verb" = some 2 := by rw [jget_verb, w]
   have c' : (jview p t pre t.post).get "resource/field/0/before" = some 6 := by
     rw [show "resource/field/0/before" = fieldName 0 "before" from rfl,
       jget_before p fr t pre t.post 0 (by decide)]
     exact closed
-  intro N hN
-  exact frame_eq p fr t pre N hN (closed_step_frame p _ _ adm w' c' N hN)
+  intro N
+  by_cases hN : N ∈ F.all
+  · exact frame_eq p fr t pre N hN (closed_step_frame p _ _ lawAdm w' c' N hN)
+  · by_contra changed
+    have covered := (FieldClosure.firstUndeclared_none_iff _ _ _).mp inside N
+      (fun same => changed same.symm)
+    simp [jobFields, FieldClosure.FieldSet.covers, hN] at covered
 
 /-- The state field after an admitted write that enters 3 from anything but 3 was 1 or 2. -/
 theorem enters_upheld_from (p : Params) (fr : p.Fresh) (pre : Values) (t : JobTurn)
@@ -1116,10 +1148,9 @@ theorem demo_ranSlot : ranSlot demo.PROGRAM = "run/program/42" := by decide
 theorem demo_fresh : demo.Fresh := by decide
 theorem demo_ran_not_clock : ranSlot demo.PROGRAM ≠ "clock/now" := by decide
 
-/-- A fresh declared cell, before the order: the kernel births every declared cell holding field 1 of
-its own object at zero (`NativeHostGenesis.declaredCell`; MEASURED on the journey Store, jjob1 r1), so
-the order writes `program` (field 1) from 0. -/
-def unborn : Values := [(1, 0)]
+/-- A fresh declared cell, before the order: it is born holding no field, only its declaration
+(`NativeHostGenesis.declaredCell`, K-FIELD-CLOSURE), so the order creates every field it writes. -/
+def unborn : Values := []
 
 /-- The order: price 100, claimBy 160, answerBy 700, born unfunded (escrow, provider, providerAcct and
 bond 0); input 5; account 70. -/
@@ -1295,10 +1326,15 @@ theorem reopen_refused :
 theorem truth_after_close_refused :
     refusalPath demo (closedOf answered) (wRan 9 700 (withTruth (closedOf answered) 77)) =
       some [23] := by decide
-/-- **Counterexample (a limitation, recorded): a closed job admits a write that creates an UNDECLARED
-field.** `Pred` has no "no other slot" atom, so `no_double_settle` covers `F.all` only. -/
-theorem closed_job_admits_undeclared_field :
-    admits demo (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = true := by decide
+/-- **A closed job refuses a write that creates an undeclared field, by name**: the kernel names field
+20 before the law runs (K-FIELD-CLOSURE; this replaces C1's `closed_job_admits_undeclared_field`). -/
+theorem closed_job_refuses_undeclared_field :
+    undeclared (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = some 20 ∧
+      kernelAdmits demo (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = false := by
+  decide
+
+/-- The order creates only declared fields, so the kernel's verdict on it is the law's. -/
+theorem order_inside_declaration : undeclared unborn (w 7 100 ordered) = none := by decide
 
 -- management (clause 0)
 /-- The caller delegates (verb 3; a non-write sees no field or clock slot). -/
@@ -1497,8 +1533,12 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.reopen_refused
 /-- info: 'Minidregg.Kernel.Job.truth_after_close_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.truth_after_close_refused
-/-- info: 'Minidregg.Kernel.Job.closed_job_admits_undeclared_field' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.closed_job_admits_undeclared_field
+/-- info: 'Minidregg.Kernel.Job.closed_job_refuses_undeclared_field' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.closed_job_refuses_undeclared_field
+/-- info: 'Minidregg.Kernel.Job.order_inside_declaration' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_inside_declaration
+/-- info: 'Minidregg.Kernel.Job.kernelAdmits_inside' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.kernelAdmits_inside
 /-- info: 'Minidregg.Kernel.Job.delegate_by_caller_admitted' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.delegate_by_caller_admitted
 /-- info: 'Minidregg.Kernel.Job.delegate_by_provider_refused' depends on axioms: [propext, Quot.sound] -/

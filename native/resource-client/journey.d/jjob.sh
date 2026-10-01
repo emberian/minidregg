@@ -327,6 +327,14 @@ row("j1", "j1 closed: truth 8, output 8, escrow 0, bond 0", "state 6",
     f"state={f.get('stateName')} truth={f.get('truth')} output={f.get('output')} escrow={f.get('escrow')} bond={f.get('bond')}",
     f.get("state") == "6" and f.get("truth") == "8" and f.get("escrow") == "0" and f.get("bond") == "0", secs)
 
+t = time.time()
+r, outcome = propose_submit(A, "undeclared-j1", {"type": "minidregg-workspace-proposal-v1", "action": "invoke",
+    "targets": [{"name": "j1", "payload": {"type": "scalar", "actions": [
+        {"type": "create", "key": {"type": "object", "field": "16"}, "value": "1"}]}}]})
+why = (outcome or {}).get("explain") or (outcome or {}).get("reason") or (outcome or {}).get("detail") or last_line(r)
+row("j1", "A creates field 16 on the CLOSED job (a field the cell never declared; K-FIELD-CLOSURE)",
+    "refused by name: undeclaredField 16", f"rc={r.returncode} {why}", r.returncode != 0 and "undeclaredField 16" in str(why), time.time() - t)
+
 # ================================================================ j2: a wrong answer
 rc, out, err, secs = post("j2", 7)
 J2 = out.get("job")

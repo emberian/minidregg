@@ -32,10 +32,10 @@ invoke() { printf '{"type":"minidregg-workspace-proposal-v1","action":"invoke","
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
 printf '%s\n' '{"type":"any","predicates":[{"type":"memberOf","slot":"request/verb","values":["1","3","4","5"]},{"type":"eq","slot":"joint/index/1/resource/field/401/after","value":"7"}]}' >"$D/req/law-a.json"
 "$MINI" workspace --action create --dir "$SPONSOR_WS" --name jj-a --storage declared \
-  --predicate "$D/req/law-a.json" >"$D/create-a.out" 2>"$D/create-a.err" \
+  --predicate "$D/req/law-a.json" --fields 400-414 >"$D/create-a.out" 2>"$D/create-a.err" \
   || { echo "could not create jj-a: $(tail -1 "$D/create-a.err")" >&2; exit 1; }
 "$MINI" workspace --action create --dir "$SPONSOR_WS" --name jj-b --storage declared \
-  --predicate "$D/req/permit-all.json" >"$D/create-b.out" 2>"$D/create-b.err" \
+  --predicate "$D/req/permit-all.json" --fields 400-414 >"$D/create-b.out" 2>"$D/create-b.err" \
   || { echo "could not create jj-b: $(tail -1 "$D/create-b.err")" >&2; exit 1; }
 
 # The Host's encoded refusal, with its printable text runs.

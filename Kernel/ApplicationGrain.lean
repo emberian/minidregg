@@ -58,7 +58,7 @@ def State.store (s : State) (app : Nat) : Store effectLayout :=
   DeclaredFields.store app s.coordinates
 
 def initialStore (app : Nat) : Store effectLayout :=
-  (⟨0, 0, 0, 0⟩ : State).store app
+  DeclaredFields.birthStore app (⟨0, 0, 0, 0⟩ : State).coordinates
 
 def readState (app : Nat) (store : Store effectLayout) : Option State := do
   let read := fun n => DeclaredFields.read app n store

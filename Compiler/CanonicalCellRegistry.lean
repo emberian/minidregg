@@ -37,6 +37,7 @@ import Kernel.PayCell
 import Compiler.StreamCell
 import Compiler.NockProgramCodec
 import Kernel.ClockCell
+import Kernel.FieldClosure
 import Theory.CanonicalResourceBookInvariant
 
 namespace Minidregg.Compiler.CanonicalCellRegistry
@@ -122,15 +123,16 @@ theorem retired_catalogue_tag : kindAtTag 7 = none := rfl
 /-- Store-cell wire versions.  Content, event and authority moved from page
 frames to `StoreCodec` frames; authority v6 tags every capability scope's
 target set (explicit or `under` a room); the Book's balance codec became the zigzag
-integer codec; the declared roles moved in S2c. -/
+integer codec; the declared roles moved in S2c, and to v3 with K-FIELD-CLOSURE (the
+declared-effect key codec `state-key/tagged-v2` carries a cell's declaration). -/
 def schemaRef : Kind → SchemaRef
   | .content => ⟨⟨91001⟩, 3⟩
   | .eventHistory => ⟨⟨91002⟩, 2⟩
   | .authority => ⟨⟨91003⟩, 7⟩
-  | .declaredObject => ⟨⟨91004⟩, 2⟩
+  | .declaredObject => ⟨⟨91004⟩, 3⟩
   | .resourceBook => ⟨⟨91005⟩, 3⟩
-  | .accountMetadata => ⟨⟨91007⟩, 2⟩
-  | .declaredProgram => ⟨⟨91008⟩, 2⟩
+  | .accountMetadata => ⟨⟨91007⟩, 3⟩
+  | .declaredProgram => ⟨⟨91008⟩, 3⟩
   | .policySource => ⟨⟨PolicySourceCell.schemaId⟩, PolicySourceCell.wireVersion⟩
   | .pay => ⟨⟨91010⟩, 3⟩
   | .stream => ⟨⟨91012⟩, 1⟩
@@ -260,6 +262,11 @@ def KeyAllowed (kind : ResourceKind) (cellId : Nat) : StateKey → Prop
       (kind = .object ∨ kind = .account) ∧ object.value = cellId
   | .programCode program => kind = .program ∧ program.value = cellId
   | .accountBalance _ _ => False
+  -- A cell's declaration (K-FIELD-CLOSURE) is its own: it names this cell.
+  | .fieldDeclared object _ =>
+      (kind = .object ∨ kind = .account) ∧ object.value = cellId
+  | .fieldsOpen object =>
+      (kind = .object ∨ kind = .account) ∧ object.value = cellId
 
 instance keyAllowedDecidable (kind : ResourceKind) (cellId : Nat) (key : StateKey) :
     Decidable (KeyAllowed kind cellId key) := by
@@ -269,11 +276,22 @@ theorem accountBalance_never_allowed (kind : ResourceKind) (cellId : Nat)
     (account : ResourceId .account) (asset : Digest) :
     ¬KeyAllowed kind cellId (.accountBalance account asset) := fun impossible => impossible
 
-/-- The declared-cell law: every present field is a key this role allows at
-this cell.  There is no capacity, no shard number and no in-cell domain tag:
-the cell's domain is the directory that holds it. -/
-def DeclaredCellLaw (kind : ResourceKind) (cellId : Nat) (store : Store effectLayout) : Prop :=
+/-- The key law: every present key is a key this role allows at this cell.
+There is no capacity, no shard number and no in-cell domain tag: the cell's
+domain is the directory that holds it. -/
+def KeyLaw (kind : ResourceKind) (cellId : Nat) (store : Store effectLayout) : Prop :=
   ∀ address ∈ store.support, KeyAllowed kind cellId address.2
+
+instance keyLawDecidable (kind : ResourceKind) (cellId : Nat)
+    (store : Store effectLayout) : Decidable (KeyLaw kind cellId store) := by
+  unfold KeyLaw
+  infer_instance
+
+/-- The declared-cell law: the key law, and the cell holds only the fields it
+declares (K-FIELD-CLOSURE, `FieldClosure.Closed`).  A cell that declares
+nothing holds no object field; an open cell declares `fieldsOpen`. -/
+def DeclaredCellLaw (kind : ResourceKind) (cellId : Nat) (store : Store effectLayout) : Prop :=
+  KeyLaw kind cellId store ∧ Kernel.FieldClosure.Closed cellId store
 
 instance declaredCellLawDecidable (kind : ResourceKind) (cellId : Nat)
     (store : Store effectLayout) : Decidable (DeclaredCellLaw kind cellId store) := by
@@ -285,7 +303,21 @@ theorem DeclaredCellLaw.no_balance (kind : ResourceKind) (cellId : Nat)
     (account : ResourceId .account) (asset : Digest) :
     store (StateKey.accountBalance account asset).address = none := by
   by_contra present
-  exact law _ (DFinsupp.mem_support_toFun _ _ |>.mpr present)
+  exact law.1 _ (DFinsupp.mem_support_toFun _ _ |>.mpr present)
+
+/-- **`declared_fields_admit_as_before`.** For a write from a lawful cell that
+leaves its declaration unchanged and changes only declared fields
+(`FieldClosure.check` names nothing), the cell law decides exactly what the key
+law decided before K-FIELD-CLOSURE: nothing inside the declaration got stricter
+or looser. -/
+theorem declared_fields_admit_as_before {kind : ResourceKind} {cellId : Nat}
+    {pre post : Store effectLayout} (preLaw : DeclaredCellLaw kind cellId pre)
+    (sameDeclaration : ∀ n, Kernel.FieldClosure.declaredIn cellId post n =
+      Kernel.FieldClosure.declaredIn cellId pre n)
+    (inside : Kernel.FieldClosure.check cellId pre post = none) :
+    DeclaredCellLaw kind cellId post ↔ KeyLaw kind cellId post :=
+  ⟨And.left, fun keys =>
+    ⟨keys, Kernel.FieldClosure.closed_preserved preLaw.2 sameDeclaration inside⟩⟩
 
 def PresentLaw {α : Type} (law : α → Prop) : Option α → Prop
   | none => False
@@ -950,10 +982,21 @@ namespace Witness
 
 def deployment : Deployment := ⟨⟨42⟩, 1, 2, 3⟩
 
-/-- Account metadata with one field of its own identity. -/
+/-- Account metadata with one field of its own identity, which it declares. -/
 def payload : Materialized DeclaredEffectCell.materializer :=
   materialize DeclaredEffectCell.materializer
+    (Kernel.FieldClosure.declare 10 (.closed [1])
+      (StoreCodec.fromEntries [⟨(StateKey.objectField ⟨10⟩ ⟨1⟩).address, (17 : Int)⟩]))
+
+/-- The same cell without its declaration holds an undeclared field: refused. -/
+def undeclaredPayload : Materialized DeclaredEffectCell.materializer :=
+  materialize DeclaredEffectCell.materializer
     (StoreCodec.fromEntries [⟨(StateKey.objectField ⟨10⟩ ⟨1⟩).address, (17 : Int)⟩])
+
+/-- **A cell holding a field it does not declare is not lawful** (K-FIELD-CLOSURE): a
+birth or a post holding it is refused by every receiver's cell law. -/
+theorem undeclared_account_refused :
+    ¬ UserInitial deployment 10 ⟨.accountMetadata, undeclaredPayload⟩ := by decide
 
 def account : PackedCell registry := ⟨.accountMetadata, payload⟩
 
@@ -985,6 +1028,10 @@ end Minidregg.Compiler.CanonicalCellRegistry
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.decoded_cell_canonical
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.DeclaredCellLaw.no_balance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.DeclaredCellLaw.no_balance
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.undeclared_account_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.undeclared_account_refused
+/-- info: 'Minidregg.Compiler.CanonicalCellRegistry.declared_fields_admit_as_before' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.declared_fields_admit_as_before
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.CanonicalCellRegistry.Witness.user_account_inhabited
 /-- info: 'Minidregg.Compiler.CanonicalCellRegistry.foreign_domain_event_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/

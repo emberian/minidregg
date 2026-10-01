@@ -357,10 +357,10 @@ row("the slash's legs: dheld + dcirculating + dwell = 0; j2 closed and empty", f
     and k6.get("state") == "6" and k6.get("bookHeld") == "0")
 
 # ---- a forgery: job-shaped fields on an ordinary declared object pay nothing
-run(MINI, "workspace", "--action", "create", "--dir", A, "--name", "forged", "--storage", "declared", "--predicate", path("open.json"))
-fields = [(0, 3), (2, 5), (3, 7), (4, 7), (5, PRICE), (8, PRICE), (9, 21), (10, 121), (11, BOND)]
-acts = [{"type": "write", "key": {"type": "object", "field": "1"}, "expected": "0", "value": "42"}] + \
-       [{"type": "create", "key": {"type": "object", "field": str(f)}, "value": str(v)} for f, v in fields]
+run(MINI, "workspace", "--action", "create", "--dir", A, "--name", "forged", "--storage", "declared", "--predicate", path("open.json"),
+    "--fields", "0-15")
+fields = [(0, 3), (1, 42), (2, 5), (3, 7), (4, 7), (5, PRICE), (8, PRICE), (9, 21), (10, 121), (11, BOND)]
+acts = [{"type": "create", "key": {"type": "object", "field": str(f)}, "value": str(v)} for f, v in fields]
 r1, r2, o = propose_submit(A, "forge", {"type": "minidregg-workspace-proposal-v1", "action": "invoke",
     "targets": [{"name": "forged", "payload": {"type": "scalar", "actions": acts}}]})
 FORGED = json.load(open(os.path.join(A, "refs", "forged.json")))["target"]
