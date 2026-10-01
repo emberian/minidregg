@@ -6,7 +6,13 @@
 # the verdict is the lane script's own.
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-D=$JOURNEY_STEP_DIR/m5
+# The grain controller binds its MCP broker and control sockets under the run
+# directory, and a Unix socket path must fit in sun_path (108 bytes). A journey
+# step directory is too deep for that, so the lane's journey runs in a short
+# private directory and the step directory links to it.
+SHORT=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/m5.XXXXXX")
+ln -s "$SHORT/r" "$JOURNEY_STEP_DIR/m5"
+D=$SHORT/r
 "$HERE/../grain-runtime/hermes-journey.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$HERMES_BIN" "$D" >"$JOURNEY_STEP_DIR/m5.out" 2>"$JOURNEY_STEP_DIR/m5.err"
 rc=$?
 echo "$D"
