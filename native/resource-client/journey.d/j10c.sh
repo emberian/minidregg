@@ -5,7 +5,7 @@
 # Friends are enrolled, provisioned and `init`ed exactly as J12 does. Every
 # friend line is typed into that friend's own shell session (`--line`).
 #
-#   room      alice founds `lab` (workroom) and invites bob with narrowed verbs
+#   room      alice founds `lab` (open law) and invites bob with narrowed verbs
 #             and fields (one delegation `under lab`); bob bears a doc into lab
 #             (admitted by the birth gate) and alice reads it through her room
 #             grant; `room list` and `room members` show the room.
@@ -23,7 +23,7 @@
 #   kick      alice kicks bob: bob's read is refused, and dave's (attenuated from
 #             bob's) too (`ancestor_revocation_rejected`). `room leave` names its
 #             missing kernel half (K-RENOUNCE).
-#   realm     alice founds `tide` (realm): bob, invited with `place`, is refused
+#   realm     alice founds `tide` (--law realm): bob, invited with `place`, is refused
 #             bearing a well by the realm's law; carl is refused as a non-member;
 #             alice's well is admitted (`fake_realm_asset_refused`).
 #   restart   the Host restarts; `audit` re-admits the Store; the refusals and
@@ -201,8 +201,8 @@ handoff() {
 
 # ------------------------------------------------ the room
 ok room alice "room new lab"
-check room "lab's reference records it as a workroom alice founded" \
-  jq -e '.room == "workroom"' "$WS/alice/refs/lab.json"
+check room "lab's reference records it as an open room alice founded" \
+  jq -e '.room == "open"' "$WS/alice/refs/lab.json"
 LAB=$(jq -r .target "$WS/alice/refs/lab.json")
 LABCAP=$(jq -r .operationCapability "$WS/alice/refs/lab.json")
 ok room alice "room invite i-bob lab $B --verbs observe,place,delegate --fields 1,2"
@@ -282,7 +282,7 @@ check kick "room members no longer lists bob or dave" \
 fails kick bob "room leave lab" 1 "K-RENOUNCE"
 
 # ------------------------------------------------ a realm
-ok realm alice "room new tide --template realm"
+ok realm alice "room new tide --law realm"
 TIDE=$(jq -r .target "$WS/alice/refs/tide.json")
 ok realm alice "room invite i-tide tide $B --verbs observe,place"
 handoff realm alice i-tide

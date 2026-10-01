@@ -96,8 +96,8 @@ entries (lines and links), so docs are short for now.
 rooms. a room is a resource that other things are born *in*; holding a grant under the
 room reaches the room and everything in it. the five verbs you'll use:
 ```
-mini> room new lab                         # a workroom you found (`--template social`, or
-                                           #   `--template realm` where only you place things)
+mini> room new lab                         # a bare room you found (`--law realm`: only you
+                                           #   place things; or start from a template, below)
 mini> room invite i1 lab SAMS-SUBJECT      # one grant under lab: observe + place (add things)
 mini> submit i1                            #   widen with --verbs observe,place,mutate,delegate;
 mini> publish i1                           #   narrow with --fields 1,2 or --max-delta 7=50
@@ -113,6 +113,24 @@ decides who may add things: changing it never revokes anyone's grant (the J7 rul
 law like `any [ not (verb == place), subject in {YOU} ]` stops everyone else adding
 (`birthRefused`), while their reads keep working. you can't leave a room yourself yet
 (`room leave` says so): ask its founder to kick you.
+
+start a room from a template. `room new lab --template workroom` founds lab *with a map*:
+`lab/index` (a doc everyone in the room reads and only you write, and it only grows: its
+links are the room's map), `lab/wall` (a stream: what the room says), `lab/notes` (a draft
+anyone with write in the room edits) and `lab/tasks` (a list that only grows), linked from
+the index. `doc show lab/index` shows the map; `doc backlinks lab/wall` finds who points at
+the wall. `--template social` is index + wall + intro, and `room welcome lab SAMS-SUBJECT
+--template social` invites sam and bears sam a stream only sam may write (you pay for it,
+sam owns it). `--template story` is index + chapters (only grows) + scenes (a stream) + cast.
+a template is just the lines you'd type, in order, with `$ROOM` and `$ME` filled in:
+```
+mini> room template list                   # workroom, social, story
+mini> room template show workroom          # the file itself, every line a verb you know
+mini> room new mine --template @my.shell   # your own copy, from HOME/requests/my.shell
+```
+the first line that doesn't end done stops the rest, and the shell says which line and why
+(`refused: law-denied: …` with the clause); the lines before it stand. names under a room
+are yours: `lab/index` is your reference's name (sam may call it anything), never a path.
 
 ## how things end
 

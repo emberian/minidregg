@@ -99,6 +99,29 @@ pub(crate) fn validate_name(value: &str) -> Result<()> {
     Ok(())
 }
 
+/// A reference name: one segment (`lab`) or a path of segments under a room
+/// (`lab/index`), each segment a `validate_name` word, at most 128 bytes in
+/// all. The name is the friend's own local handle; nothing on the wire carries
+/// it, and the Host never sees it.
+pub(crate) fn validate_ref_name(value: &str) -> Result<()> {
+    if value.is_empty() || value.len() > 128 || value.split('/').any(|segment| validate_name(segment).is_err()) {
+        return Err("a reference name is 1..128 bytes of segments separated by '/', each 1..64 ASCII letters, digits or hyphens".into());
+    }
+    Ok(())
+}
+
+/// The file stem that holds a reference name (`lab/index` -> `lab.index`).
+/// A segment never contains '.', so the spelling is reversible
+/// (`ref_name_of_file`) and every per-name file stays one flat directory entry.
+pub(crate) fn ref_file(name: &str) -> String {
+    name.replace('/', ".")
+}
+
+/// The reference name a `ref_file` stem spells.
+pub(crate) fn ref_name_of_file(stem: &str) -> String {
+    stem.replace('.', "/")
+}
+
 fn private_dir(path: &Path) -> Result<()> {
     let named = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
@@ -378,8 +401,8 @@ pub(crate) fn init(
 }
 
 pub(crate) fn reference(root: &Path, name: &str) -> Result<Value> {
-    validate_name(name)?;
-    let value = bounded_json(&root.join("refs").join(format!("{name}.json")))?;
+    validate_ref_name(name)?;
+    let value = bounded_json(&root.join("refs").join(format!("{}.json", ref_file(name))))?;
     if member(&value, "type")? != "minidregg-participant-reference-v1"
         || member(&value, "name")? != name
     {
@@ -427,7 +450,7 @@ pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
         provenance,
         room,
     } = input;
-    validate_name(name_value)?;
+    validate_ref_name(name_value)?;
     if !matches!(kind, "object" | "account" | "program") {
         return Err("resource kind must be object, account or program".into());
     }
@@ -450,7 +473,7 @@ pub(crate) fn import(root: &Path, input: ImportInput<'_>) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     private_file(
-        &root.join("refs").join(format!("{name_value}.json")),
+        &root.join("refs").join(format!("{}.json", ref_file(name_value))),
         &bytes,
     )?;
     println!("{name_value}");
@@ -501,7 +524,7 @@ fn list(root: &Path) -> Result<()> {
         let Some(stem) = file.strip_suffix(".json") else {
             return Err("unknown file in references".into());
         };
-        values.push(reference(root, stem)?);
+        values.push(reference(root, &ref_name_of_file(stem))?);
     }
     values.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     println!(
@@ -1482,7 +1505,7 @@ fn complete_birth(
     {
         return Err("birth source no longer matches durable namespace reservation".into());
     }
-    let reference_path = root.join("refs").join(format!("{name_value}.json"));
+    let reference_path = root.join("refs").join(format!("{}.json", ref_file(name_value)));
     if reference_path.exists() {
         let prior = reference(root, name_value)?;
         if member(&prior, "target")? == target && member(&prior, "observeCapability")? == owner {
@@ -1641,7 +1664,7 @@ fn birth(
     name_value: &str,
     shape: &BirthShape<'_>,
 ) -> Result<(Value, Value, participant_namespace::Reservation)> {
-    validate_name(name_value)?;
+    validate_ref_name(name_value)?;
     // `--in ROOM`: the new resource is born in the room a workspace reference
     // names. The Host refuses a room that is not a present resource cell.
     // The creator's placing capability is the room reference's operation
@@ -1684,7 +1707,7 @@ fn birth(
     }
     let request_path = root
         .join("sources")
-        .join(format!("create-{name_value}.request.json"));
+        .join(format!("create-{}.request.json", ref_file(name_value)));
     let mut requested_core = json!({"type":"minidregg-workspace-create-request-v2",
         "name":name_value,"kind":shape.kind,"storage":shape.storage,"owner":shape.owner,
         "funding":shape.funding,"predicate":shape.predicate,"context":context,
@@ -1780,7 +1803,7 @@ fn birth(
     };
     let source_path = root
         .join("sources")
-        .join(format!("create-{name_value}.json"));
+        .join(format!("create-{}.json", ref_file(name_value)));
     let nonce = member(&request, "nonce")?;
     let resource = match &program {
         Some((hex, _)) => json!({"kind":shape.kind,"storage":shape.storage,"program":hex,
@@ -1836,8 +1859,8 @@ fn birth(
         .ok_or("workspace create requires a pinned persistent Host socket")?;
     let authoring = root
         .join("sources")
-        .join(format!("create-{name_value}.authoring"));
-    let attempt = root.join("attempts").join(format!("create-{name_value}"));
+        .join(format!("create-{}.authoring", ref_file(name_value)));
+    let attempt = root.join("attempts").join(format!("create-{}", ref_file(name_value)));
     let host = member_path(workspace, "host")?;
     let config = member_path(workspace, "config")?;
     let author_dir = if attempt.exists() {
@@ -2021,7 +2044,7 @@ pub(crate) fn create_funded_account(
     retain_or_compare(
         &root
             .join("sources")
-            .join(format!("create-{name_value}.handoff.json")),
+            .join(format!("create-{}.handoff.json", ref_file(name_value))),
         &value,
     )?;
     Ok(value)
@@ -2204,14 +2227,61 @@ fn provision_lookup(root: &Path, workspace: &Value, name: &str, factory_ref: &st
 /// `documentOf target`, the resource's own id, so it is not read from the cell.
 fn content_page<'a>(view: &'a Value, name: &str) -> Result<&'a Value> {
     let cell = view.get("cell").ok_or("signed resource view lacks cell")?;
+    match cell_storage(cell)? {
+        "content" => Ok(cell),
+        storage => Err(format!("{name} is not a document (its storage is {storage}, not content)")),
+    }
+}
+
+/// Which storage a signed resource view's cell is, read from the shape the
+/// Host spells it in (`Host/Json.lean` `resourceJson`): a stream cell carries
+/// `nextSeq`; a declared cell's entries are `key`/`value` fields; a content
+/// cell's entries are typed hyperdocument records. An empty stream has no
+/// entries, so `nextSeq` is what tells it from a document.
+fn cell_storage(cell: &Value) -> Result<&'static str> {
     let entries = cell
         .get("entries")
         .and_then(Value::as_array)
         .ok_or("signed resource view lacks cell entries")?;
-    if entries.iter().any(|entry| entry.get("type").is_none()) {
-        return Err(format!("{name} is not a document (its storage is not content)"));
+    if cell.get("nextSeq").is_some() {
+        return Ok("stream");
     }
-    Ok(cell)
+    if entries.iter().any(|entry| entry.get("key").is_some()) {
+        return Ok("declared");
+    }
+    if entries.iter().any(|entry| entry.get("type").is_none()) {
+        return Ok("unknown");
+    }
+    Ok("content")
+}
+
+/// The URI scheme of a link from a document to a resource that is not a
+/// document (a stream, a declared cell). The hyperdocument's `LinkTarget` has
+/// no resource constructor, so such a link is `external mini:KIND/ID` with an
+/// empty authority (this node): the resource's kind and id, nothing else.
+const RESOURCE_LINK_SCHEME: &str = "mini";
+
+fn resource_link_target(kind: &str, target: &str) -> Value {
+    json!({"type":"external","scheme":crate::hex(RESOURCE_LINK_SCHEME.as_bytes()),
+        "authority":"","path":crate::hex(format!("{kind}/{target}").as_bytes())})
+}
+
+/// `(kind, id)` of a link target that names a resource on this node
+/// (`resource_link_target`), as the Host spells it back.
+fn resource_link_of(target: &Value) -> Option<(String, String)> {
+    if target.get("type").and_then(Value::as_str) != Some("external") {
+        return None;
+    }
+    let text = |key: &str| {
+        unhex(target.get(key)?.as_str()?).ok().and_then(|bytes| String::from_utf8(bytes).ok())
+    };
+    if text("scheme")? != RESOURCE_LINK_SCHEME || !text("authority")?.is_empty() {
+        return None;
+    }
+    let path = text("path")?;
+    let (kind, id) = path.split_once('/')?;
+    (matches!(kind, "object" | "account" | "program") && decimal(id, "id").is_ok())
+        .then(|| (kind.to_owned(), id.to_owned()))
 }
 
 fn page_entries(page: &Value) -> Result<&Vec<Value>> {
@@ -2292,8 +2362,8 @@ fn atom_record(atom: &Value) -> Result<Value> {
 }
 
 fn seen_path(root: &Path, name: &str) -> Result<PathBuf> {
-    validate_name(name)?;
-    Ok(root.join("seen").join(format!("{name}.json")))
+    validate_ref_name(name)?;
+    Ok(root.join("seen").join(format!("{}.json", ref_file(name))))
 }
 
 /// Replace the retained "as I last read it" view of one document.
@@ -2304,7 +2374,7 @@ fn retain_seen(root: &Path, name: &str, view: &Value, challenge: &Value) -> Resu
     }
     private_dir(&dir)?;
     let path = seen_path(root, name)?;
-    let staged = dir.join(format!(".{name}.{}", random_nonce()?));
+    let staged = dir.join(format!(".{}.{}", ref_file(name), random_nonce()?));
     let value = json!({"type":"minidregg-workspace-seen-document-v1","name":name,
         "height":challenge.get("height"),"worldRoot":challenge.get("worldRoot"),
         "view":view});
@@ -2384,12 +2454,20 @@ fn document_actions(
                 let to = member(action, "to")?;
                 let relation = member(action, "relation")?;
                 decimal(relation, "link relation")?;
+                // The link names what the target IS, read from a signed view
+                // of it now (which also shows this workspace may observe it):
+                // a document is a `document` target, any other resource a
+                // `mini:KIND/ID` link.
                 let target_ref = reference(root, to)?;
                 let (target_view, _, _) = signed_view(root, workspace, &target_ref, "resource")?;
-                content_page(&target_view, to)?;
+                let cell = target_view.get("cell").ok_or("signed resource view lacks cell")?;
+                let id = member(&target_ref, "target")?;
+                let target = match cell_storage(cell)? {
+                    "content" => json!({"type":"document","id":id}),
+                    _ => resource_link_target(member(&target_ref, "kind")?, id),
+                };
                 json!({"type":"link","link":random_nonce()?,"source":null,
-                    "target":{"type":"document","id":member(&target_ref,"target")?},
-                    "relation":relation})
+                    "target":target,"relation":relation})
             }
             _ => unreachable!("document action tags were checked"),
         });
@@ -2404,9 +2482,10 @@ fn names_for_target(root: &Path, document: &str) -> Vec<String> {
         for entry in entries.flatten() {
             let file = entry.file_name().to_string_lossy().into_owned();
             if let Some(stem) = file.strip_suffix(".json") {
-                if let Ok(value) = reference(root, stem) {
+                let name = ref_name_of_file(stem);
+                if let Ok(value) = reference(root, &name) {
                     if value.get("target").and_then(Value::as_str) == Some(document) {
-                        names.push(stem.to_owned());
+                        names.push(name);
                     }
                 }
             }
@@ -2432,6 +2511,14 @@ fn link_target_text(root: &Path, target: &Value) -> String {
         _ => None,
     }
     .and_then(Value::as_str);
+    if let Some((resource_kind, id)) = resource_link_of(target) {
+        let names = names_for_target(root, &id);
+        return if names.is_empty() {
+            format!("{resource_kind} {id}")
+        } else {
+            format!("{} ({resource_kind} {id})", names.join(","))
+        };
+    }
     match (kind, document) {
         (_, Some(document)) => {
             let names = names_for_target(root, document);
@@ -2515,12 +2602,12 @@ fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
 }
 
 /// Backlinks as a fold over the content pages this workspace can read now:
-/// every link entry, in any readable page, whose target is this document.
-/// A page the Host refuses to show contributes nothing and is named.
+/// every link entry, in any readable page, whose target is this resource (a
+/// document, or any other resource through its `mini:KIND/ID` link). A page
+/// the Host refuses to show contributes nothing and is named.
 fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
     let own = reference(root, name)?;
     let (view, challenge, _) = signed_view(root, workspace, &own, "resource")?;
-    content_page(&view, name)?;
     let document = member(&own, "target")?.to_owned();
     let mut names: Vec<String> = fs::read_dir(root.join("refs"))
         .map_err(|error| error.to_string())?
@@ -2530,12 +2617,16 @@ fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
                 .file_name()
                 .to_string_lossy()
                 .strip_suffix(".json")
-                .map(str::to_owned)
+                .map(ref_name_of_file)
         })
         .collect();
     names.sort();
     println!(
-        "# backlinks to {name} (document {document}) from the documents this workspace can read at height {}",
+        "# backlinks to {name} ({} {document}) from the documents this workspace can read at height {}",
+        match view.get("cell").map(cell_storage).transpose()? {
+            Some("content") => "document",
+            _ => member(&own, "kind")?,
+        },
         member(&challenge, "height")?
     );
     let mut found = 0usize;
@@ -2559,10 +2650,12 @@ fn doc_backlinks(root: &Path, workspace: &Value, name: &str) -> Result<()> {
         };
         for entry in page_entries(page)? {
             let target = &entry["target"];
+            let resource = resource_link_of(target);
             let hit = entry.get("type").and_then(Value::as_str) == Some("link")
                 && match target.get("type").and_then(Value::as_str) {
                     Some("document") => target.get("id").and_then(Value::as_str),
                     Some("range") => target.get("document").and_then(Value::as_str),
+                    Some("external") => resource.as_ref().map(|(_, id)| id.as_str()),
                     _ => None,
                 } == Some(document.as_str());
             if hit {
