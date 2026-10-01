@@ -29,10 +29,10 @@
     "{REF}": "the referee runner's subject",
     "{HOME}": "the room id a revive places the sheet in: realm.json shrine for players, the spawn room for a mob",
     "{HPMAX}": "realm.json constants (players) or the mob's hp",
-    "{RESPAWN_M1}": "RESPAWN - 1: players realm.json constants.RESPAWN_M1, a mob its spawn's respawn - 1",
+    "{NEG_RESPAWN}": "-RESPAWN: players realm.json constants.NEG_RESPAWN, a mob -(its spawn's respawn)",
     "{MAXHIT_LT}": "-(MAXHIT+1)",
-    "{COST_M1}": "min bal cost of strike/defend/flee - 1",
-    "{ECOST_M1}": "cast eq cost - 1",
+    "{NEG_COST}": "-(min bal cost of strike/defend/flee)",
+    "{NEG_ECOST}": "-(cast eq cost)",
     "{LANTERN}": "item kind number of a lantern (item/fields.json itemKinds)"
   },
   "birth": [

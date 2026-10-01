@@ -32,19 +32,19 @@
     "MAXHIT": "6",
     "MAXHIT_LT": "-7",
     "COST": "3",
-    "COST_M1": "2",
+    "NEG_COST": "-3",
     "ECOST": "4",
-    "ECOST_M1": "3",
+    "NEG_ECOST": "-4",
     "HPMAX": "10",
     "RESPAWN": "0",
-    "RESPAWN_M1": "-1",
+    "NEG_RESPAWN": "0",
     "LANTERN": "2",
     "TAX_MAX": "50",
     "MAXPAY": "50",
     "MAXPAY_LT": "-51",
-    "derivation": "MAXHIT_LT = -(MAXHIT+1); COST_M1 = min(bal cost of strike/defend/flee) - 1; ECOST_M1 = cast eq cost - 1; RESPAWN_M1 = RESPAWN - 1; MAXPAY_LT = -(MAXPAY+1). validate.py checks these against affliction-table.json."
+    "derivation": "MAXHIT_LT = -(MAXHIT+1); NEG_COST = -min(bal cost of strike/defend/flee); NEG_ECOST = -(cast eq cost); NEG_RESPAWN = -RESPAWN (canonical: 0, never -0); MAXPAY_LT = -(MAXPAY+1). validate.py checks these against affliction-table.json."
   },
-  "note": "Mob sheets bind {HPMAX} to the spawn's hp and {RESPAWN_M1} to its respawn - 1 (area.json spawns).",
+  "note": "Mob sheets bind {HPMAX} to the spawn's hp and {NEG_RESPAWN} to -(its respawn) (area.json spawns).",
   "quests": {
     "rat-catcher": "../quest/cellar-key"
   }

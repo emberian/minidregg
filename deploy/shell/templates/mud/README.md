@@ -84,13 +84,18 @@ and their JSON is `{"type","left","right"}`.
 | `leSlotsOff A B k` = `new[A] ≤ new[B] + k`, JSON `{"type":"leSlotsOff","left","right","offset"}` (**key names ASSUMED**) | K-PRED-OFFSET | law.sheet 25 death-timer, 27 attacker-paid, 28 bal-paid, 29 eq-paid |
 | `clock/now` | K-CLOCK | law.sheet 10 bal, 11 eq, 19 lease, 23 revive, 25, 27, 28, 29 |
 | `joint/index/{i}/resource/field/{n}/{view}` (i = the command's 0-based target order; the id-keyed original is `joint/target/{target}/…`, READ `c-c2:Kernel/DeclaredResourceController.lean:176-180`) | K-JOINT-INDEX | law.sheet 14–19 (movement), 26–27 (combat); law.item 6 drop-here, 7 take-here; law.item-reward 8; law.quest 5 table; law.org 3 leader-by-ballot |
-| `joint/target/{BOOK}/balance/{A}/{ASSET}/delta` (PLACE's name, **ASSUMED**) | K-BOOK-SLOTS | law.sheet-cure-lawful 34; law.quest-lawful 9; law.treasury 7 |
-| `witnessed {VK_*}` with an oracle (today `failClosed`, so it is always false) | K-RAN (NOCK.md) | law.sheet-witnessed 33 |
+| `joint/target/{BOOK}/balance/{A}/{ASSET}/delta` (PLACE's name, **ASSUMED**) | K-BOOK-SLOTS | law.sheet-cure-lawful 35; law.quest-lawful 9; law.treasury 7 |
+| `witnessed {VK_*}` with an oracle (today `failClosed`, so it is always false) | K-RAN (NOCK.md) | law.sheet-witnessed 34 |
 | `Scope.maxDelta`, `Scope.fields` | K-FIELDS | `org/offices.json` (`needs`); a delegate request carrying them is refused by the client today (READ `workspace.rs:728-734`, exactly six keys) |
 
 **What happens before they land.** A law naming a slot that is not projected does **not** admit silently.
 The atom that reads the missing slot is false, so that clause fails closed, and only when its guard lets it
 be evaluated. So a sheet law installed with K-JOINT-INDEX missing refuses every move and admits every read.
+This holds only while no absent-slot atom sits under a `not`, which would turn "absent" into "admitted". The
+first cut had four such atoms (`not (leSlotsOff … clock now …)` in law.sheet 25, 27, 28 and 29), and they
+passed whenever there was no clock (SHEET-ITEM-LAW finding 4). They are now written in the positive form
+`leSlotsOff clock now X {NEG_K}` (= `now ≤ X − K`), which is false, and so refuses, when either slot is
+missing. **Never put a clock or joint atom under `not`.** Write the positive bound instead.
 `leSlotsOff` is a different case. It is a new `Pred` constructor, and the Host parser takes exact keys per
 constructor (READ `Host/Json.lean:206-230` via p-templates). **`law.sheet` will not install at all** until
 K-PRED-OFFSET is in the Host. The same holds for `eqSlots`/`leSlots` until the k-sloteq codec v4 is in the

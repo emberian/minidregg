@@ -5,6 +5,7 @@
 -- The owner's intent is three fields written in one turn: intent (action), target (a sheet id), skill.
 --   owner's go/flee:        0 = this sheet, 1 = current room, 2 = destination room, 3 = key or light item, 4 = light item
 --   referee's resolution:   0 = attacker sheet, 1 = defender sheet
+-- Appended files continue the numbering: law.sheet-witnessed is 34, law.sheet-cure-lawful 35.
 -- Atoms beyond today's Pred: eqSlots/leSlots (k-sloteq, landed on the data-model line), leSlotsOff (K-PRED-OFFSET),
 -- clock now (K-CLOCK), joint I ... (K-JOINT-INDEX). Each clause's NEEDS is in its comment.
 
@@ -105,10 +106,11 @@ any [ not (verb == 2), not (all [ field alive before == 0, field alive after == 
             field hp == {HPMAX}, field at == {HOME}, field intent == 0 ] ];
 -- 24 respawn-at-death: respawn moves only on the 1 -> 0 edge of alive.
 any [ not (verb == 2), field respawn delta == 0, all [ field alive before == 1, field alive after == 0 ] ];
--- 25 death-timer [J-MUD-4 rat respawn]: dying sets respawn >= now + RESPAWN ({RESPAWN_M1} = RESPAWN - 1).
---   NEEDS K-PRED-OFFSET + K-CLOCK.
+-- 25 death-timer [J-MUD-4 rat respawn]: dying sets respawn >= now + RESPAWN, written now <= respawn - RESPAWN
+--   ({NEG_RESPAWN} = -RESPAWN). NEEDS K-PRED-OFFSET + K-CLOCK. Positive form so an absent clock/now REFUSES
+--   (SHEET-ITEM-LAW finding 4: the old `not (leSlotsOff field respawn clock now RESPAWN-1)` passed with no clock).
 any [ not (verb == 2), not (all [ field alive before == 1, field alive after == 0 ]),
-      not (leSlotsOff field respawn clock now {RESPAWN_M1}) ];
+      leSlotsOff clock now field respawn {NEG_RESPAWN} ];
 -- 26 attacker [J-MUD-3 rows 2, 4]: hurting this sheet (hp down or an affliction up) needs a live attacker at
 --   joint 0, in this room, whose pending intent was strike/cast naming this sheet, and this sheet alive.
 --   NEEDS K-JOINT-INDEX.
@@ -116,23 +118,35 @@ any [ not (verb == 2), all [ not (field hp delta <= -1), field aff-asthma delta 
       all [ field alive before == 1, joint 0 sheet intent before in {1,2}, eqSlots joint 0 sheet target before field id,
             joint 0 sheet alive before == 1, eqSlots joint 0 sheet at field at ] ];
 -- 27 attacker-paid [J-MUD-3 row 4b]: the attacker had balance (equilibrium for cast) and paid it:
---   bal/after >= now + COST. NEEDS K-JOINT-INDEX + K-CLOCK + K-PRED-OFFSET.
+--   bal/after >= now + COST, written now <= bal/after - COST ({NEG_COST} = -COST, {NEG_ECOST} = -ECOST).
+--   NEEDS K-JOINT-INDEX + K-CLOCK + K-PRED-OFFSET. Positive form (SHEET-ITEM-LAW finding 4); here the
+--   leSlots conjunct already failed closed without the clock, so only the uniform shape changes.
 any [ not (verb == 2), all [ not (field hp delta <= -1), field aff-asthma delta <= 0, field aff-paralysis delta <= 0, field aff-clumsiness delta <= 0 ],
       all [ joint 0 sheet intent before == 1, leSlots joint 0 sheet bal before clock now,
-            not (leSlotsOff joint 0 sheet bal clock now {COST_M1}) ],
+            leSlotsOff clock now joint 0 sheet bal {NEG_COST} ],
       all [ joint 0 sheet intent before == 2, leSlots joint 0 sheet eq before clock now,
-            not (leSlotsOff joint 0 sheet eq clock now {ECOST_M1}) ] ];
+            leSlotsOff clock now joint 0 sheet eq {NEG_ECOST} ] ];
 -- 28 bal-paid [J-MUD-3 row 2]: the referee raises my bal only for a physical intent of mine, never lowers it,
---   and to >= now + COST. NEEDS K-PRED-OFFSET + K-CLOCK.
+--   and to >= now + COST, written now <= bal - COST. NEEDS K-PRED-OFFSET + K-CLOCK. Positive form so an absent
+--   clock/now REFUSES (SHEET-ITEM-LAW finding 4: the old `not (leSlotsOff ...)` admitted any raise with no clock).
 any [ not (verb == 2), not (subject == {REF}), field bal delta == 0,
-      all [ field intent before in {1,3,4}, not (field bal delta <= -1), not (leSlotsOff field bal clock now {COST_M1}) ] ];
--- 29 eq-paid: the same for equilibrium and cast. NEEDS K-PRED-OFFSET + K-CLOCK.
+      all [ field intent before in {1,3,4}, not (field bal delta <= -1), leSlotsOff clock now field bal {NEG_COST} ] ];
+-- 29 eq-paid: the same for equilibrium and cast, now <= eq - ECOST. NEEDS K-PRED-OFFSET + K-CLOCK.
+--   Positive form so an absent clock/now REFUSES (SHEET-ITEM-LAW finding 4).
 any [ not (verb == 2), not (subject == {REF}), field eq delta == 0,
-      all [ field intent before == 2, not (field eq delta <= -1), not (leSlotsOff field eq clock now {ECOST_M1}) ] ];
+      all [ field intent before == 2, not (field eq delta <= -1), leSlotsOff clock now field eq {NEG_ECOST} ] ];
 -- 30 intent-clear [J-MUD-3 row 2]: the referee only clears intent, target and skill.
 any [ not (verb == 2), not (subject == {REF}), all [ field intent delta == 0, field target delta == 0, field skill delta == 0 ],
       all [ field intent == 0, field target == 0, field skill == 0 ] ];
 -- 31 ward [J-MUD-3 row 15]: a raised ward blocks paralysis (the defence-blocks-affliction fact, MUD §2.3).
 any [ not (verb == 2), field def-ward before == 0, field aff-paralysis delta <= 0 ];
 -- 32 defend [J-MUD-3 row 15b]: a ward is raised only on my own defend intent.
-any [ not (verb == 2), field def-ward delta <= 0, field intent before == 3 ]
+any [ not (verb == 2), field def-ward delta <= 0, field intent before == 3 ];
+-- 33 death-needs-hp [J-MUD-3 row 8c]: alive falls 1 -> 0 only at hp <= 0, in the same step. Clause 6 is the
+--   converse (hp <= 0 forces alive 0); with both, death is exactly the hp crossing. Deaths +1 and a new respawn
+--   ride on this edge (clauses 5, 24), so they are bound too. Demanded by SHEET-ITEM-LAW's counterexample
+--   `referee_kills_healthy_sheet` (the referee zeroed alive at hp 3, admitted); this is its `deathNeedsHp`,
+--   and `fixed_law_refuses_smite_admits_strike` is the pole. One-step shape because resolver.hoon writes
+--   `1/2 hp2` and `1/5 0` in the same product, and clause 6 already refuses hp <= 0 with alive left at 1,
+--   so a two-step death (hp first, alive next) could never have been admitted.
+any [ not (verb == 2), not (all [ field alive before == 1, field alive after == 0 ]), field hp <= 0 ]
