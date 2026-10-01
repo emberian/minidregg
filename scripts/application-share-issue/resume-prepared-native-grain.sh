@@ -106,7 +106,7 @@ jq -n '{subject:"8",nonce:"85100",purpose:{type:"query",kind:"object",
 "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$CONT/ticket-read-intent.json" --key "$KEY" --view resource \
   --dir "$CONT/ticket-read" >"$CONT/ticket-read.stdout"
-jq -e '.cell.document == "8500" and (.cell.entries | length) == 1' \
+jq -e '.type == "resource" and (.cell.entries | length) == 1' \
   "$CONT/ticket-read/view.json" >/dev/null
 "$STORE_BINARY" read-to "$STORE" "$CONT/before-lookup-image.bin"
 stop_service

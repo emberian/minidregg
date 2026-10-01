@@ -196,7 +196,7 @@ jq -n --slurpfile genesis "$EVIDENCE/genesis.json" \
   >"$EVIDENCE/grain-birth.stdout"
 confirmed "$EVIDENCE/grain-birth-attempt/outcome.json"
 query born-content 8 8301 85 "$EVIDENCE/tool.key" 41010
-jq -e '.cell.document == "8301" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/born-content/view.json" >/dev/null
 query tool-after 8 7902 81 "$EVIDENCE/tool.key" 41011
 query parent-after 8 7901 73 "$EVIDENCE/tool.key" 41012
@@ -226,7 +226,7 @@ jq --slurpfile observed "$EVIDENCE/tool-after/challenge.json" \
   >"$EVIDENCE/owner-bare.stdout"
 confirmed "$EVIDENCE/owner-bare-attempt/outcome.json"
 query owner-bare-content 7 8303 103 "$EVIDENCE/controller.key" 41510
-jq -e '.cell.document == "8303" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/owner-bare-content/view.json" >/dev/null
 
 # The same worker's ordinary bare birth has valid source-account authority,

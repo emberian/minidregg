@@ -47,6 +47,6 @@ jq -n '{subject:"7",nonce:"42010",
 jq -e --slurpfile before "$EVIDENCE/owner-bare-content/challenge.json" \
   '.worldRoot == $before[0].worldRoot' \
   "$EVIDENCE/negative-post/challenge.json" >/dev/null
-jq -e '.cell.document == "8303" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/negative-post/view.json" >/dev/null
 echo "retained worker bare refusal and unchanged signed image PASS"

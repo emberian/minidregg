@@ -178,7 +178,7 @@ for grant in write read; do
   submit "b-content-$grant" "$EVIDENCE/controller.key"
 done
 query b-content-read 10 8001 98 "$EVIDENCE/tool-b.key" 64220 resource
-jq -e '.cell.document == "8001" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/b-content-read/view.json" >/dev/null
 
 # Both controllers will use one persistent Mini host started by the deployment

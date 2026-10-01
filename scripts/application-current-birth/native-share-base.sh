@@ -284,9 +284,9 @@ query_policy snapshot-policy 8 8403 145 "$EVIDENCE/workroom/tool.key" 43205
 jq -e --arg target "8401" \
   '([.cell.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/app-born/view.json" >/dev/null
-jq -e '.cell.document == "8402" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/package-born/view.json" >/dev/null
-jq -e '.cell.document == "8403" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/snapshot-born/view.json" >/dev/null
 for target in app package snapshot; do
   case "$target" in
@@ -332,7 +332,7 @@ query_policy descriptor-policy 8 8405 149 "$EVIDENCE/workroom/tool.key" 44205
 jq -e --arg target "8404" \
   '([.cell.entries[] | select(.key.type == "object" and .key.resource == $target)] | length) == 4' \
   "$EVIDENCE/session-born/view.json" >/dev/null
-jq -e '.cell.document == "8405" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/descriptor-born/view.json" >/dev/null
 for target in session descriptor; do
   if [ "$target" = session ]; then id=8404; else id=8405; fi

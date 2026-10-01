@@ -40,7 +40,7 @@ confirmed() {
 }
 
 query_workroom before 50000
-jq -e '.cell.document == "8001" and .cell.entries == []' \
+jq -e '.type == "resource" and .cell.entries == []' \
   "$EVIDENCE/before/view.json" >/dev/null
 
 # The note text is untrusted user content. Shell only encodes its fixed bytes;

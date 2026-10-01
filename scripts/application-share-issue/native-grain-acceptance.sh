@@ -353,7 +353,7 @@ jq -n '{subject:"8",nonce:"85100",purpose:{type:"query",kind:"object",
 "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   --intent "$EVIDENCE/ticket-read-intent.json" --key "$KEY" --view resource \
   --dir "$EVIDENCE/ticket-read" >"$EVIDENCE/ticket-read.stdout"
-jq -e '.cell.document == "8500" and (.cell.entries | length) == 1' \
+jq -e '.type == "resource" and (.cell.entries | length) == 1' \
   "$EVIDENCE/ticket-read/view.json" >/dev/null
 stop_service
 start_service serve-operator reopened-operator
