@@ -2,6 +2,7 @@
 # Written by scripts/check-host-closure.sh --update REASON; compared by local-gates.
 # updated 2026-10-01: first pin (lane GATES, 2026-10-01, at a2ac159b + SheetLaw/ItemLaw moved to Assurance)  [counts: Minidregg 0 1, Theory 46 83, Kernel 220 273, Pred 4 8, Effects 0 3, Compiler 70 148, Selvage 12 151, Assurance 0 126, Host 44 53, AxiomCensus 0 1]
 # updated 2026-10-01: BRAID-HOST: the final pay/C3 receivers (PayEnrol*, PayObservation*, PurseRefill*, JobMoney*), hermes-tariff ProviderRoute, host-malformed Host.RequestRefusal, p-affordances Host.DryRun, hot-path Compiler.NativeCoprocess enter; UMBRELLA-SPLIT dropped no Host module (0 left)  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 72 150, Selvage 12 151, Assurance 0 126, Host 46 55, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
+# updated 2026-10-01: BRAID-HOST: host-keccak brings the fast cSHAKE (Compiler.Sp800185Cshake256Fast, Compiler.Sp800185Cshake256Spec under the Core umbrella) and Compiler.NatDigits255Fast into the Host  [counts: Minidregg 0 1, Theory 46 83, Kernel 231 291, Pred 4 8, Effects 0 3, Compiler 75 153, Selvage 12 151, Assurance 0 126, Host 46 56, AxiomCensus 0 1, Deployed 0 1, AxiomCensusResearch 0 1]
 Compiler.Air
 Compiler.AirBignum
 Compiler.AirFlatten
@@ -43,6 +44,7 @@ Compiler.HyperdocumentCell
 Compiler.HyperdocumentCodec
 Compiler.IntStream
 Compiler.MinidreggV1Artifact
+Compiler.NatDigits255Fast
 Compiler.NativeCoprocess
 Compiler.NativeHostCodec
 Compiler.NativeHostProfile
@@ -66,6 +68,8 @@ Compiler.SemanticManifest
 Compiler.Signature
 Compiler.Sp800185Cshake256
 Compiler.Sp800185Cshake256Core
+Compiler.Sp800185Cshake256Fast
+Compiler.Sp800185Cshake256Spec
 Compiler.Sp800185Kmac256
 Compiler.StoreCodec
 Compiler.StreamCell
