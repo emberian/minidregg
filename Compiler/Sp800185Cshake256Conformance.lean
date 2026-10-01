@@ -8,8 +8,14 @@ prefix.  They are kept out of the controller API's import surface, while the
 both checks.
 
 The checks are conformance teeth, not collision-resistance or random-oracle
-theorems.  They use ordinary Lean evaluation and introduce no
-`native_decide` theorem axiom.
+theorems.  The two `#eval` checks use ordinary Lean evaluation; since
+`cshake256Bytes` carries the `@[csimp]` of `Sp800185Cshake256Fast`, they run
+the fast path.  The named `native_decide` theorems at the end state the same
+vectors of `Fast.cshake256Fast` directly and are pinned with their
+`native_decide` axiom.  The kernel cannot evaluate the permutation (one
+Keccak-f under `whnf` is far beyond any heartbeat budget), so a vector can only
+be a compiled-evaluation fact; the equality of the fast path to the spec for
+every input is `Fast.cshake256Fast_eq`, a kernel-checked proof.
 -/
 
 import Compiler.Sp800185Cshake256Core
@@ -63,4 +69,19 @@ def checkShake256Empty : IO Unit := do
 
 #eval checkShake256Empty
 
+/-! ## The same vectors, named, on the fast path -/
+
+/-- NIST SP 800-185 cSHAKE256 sample 3 (first 256 bits) on the fast path. -/
+theorem cshake256Fast_conforms_nist_sample3 :
+    Fast.cshake256Fast emailSignature [0, 1, 2, 3] = nistSample3Prefix := by native_decide
+
+/-- FIPS 202 SHAKE256 of the empty message (first 256 bits) on the fast path. -/
+theorem cshake256Fast_conforms_shake256_empty :
+    Fast.cshake256Fast [] [] = shake256EmptyPrefix := by native_decide
+
 end Minidregg.Compiler.Sp800185Cshake256
+
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.cshake256Fast_conforms_nist_sample3' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.cshake256Fast_conforms_nist_sample3._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.cshake256Fast_conforms_nist_sample3
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.cshake256Fast_conforms_shake256_empty' depends on axioms: [propext, Quot.sound, Minidregg.Compiler.Sp800185Cshake256.cshake256Fast_conforms_shake256_empty._native.native_decide.ax_1_1] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.Sp800185Cshake256.cshake256Fast_conforms_shake256_empty

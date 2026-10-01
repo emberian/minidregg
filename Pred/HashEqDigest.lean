@@ -205,6 +205,21 @@ theorem deployed_eq_cshake256Bytes : deployed = cshake256Bytes customization := 
     · intro h; cases h
   simp only [deployed, cshake256Bytes, hne, if_false, frame_eq]
 
+open Minidregg.Compiler.Sp800185Cshake256 (absorbPadded padForRate squeeze32) in
+open Minidregg.Compiler.Sp800185Cshake256.Fast in
+/-- The deployed hash on the compiled path: frame and input pushed once into a
+byte array, absorbed by the word permutation (`Compiler.Sp800185Cshake256Fast`). -/
+def deployedFast : Hash := fun input =>
+  spongeBytes (pushList (pushList ByteArray.empty frame) input) 0x04
+
+open Minidregg.Compiler.Sp800185Cshake256.Fast in
+theorem deployedFast_eq : deployedFast = deployed := by
+  funext input
+  simp only [deployedFast, deployed, sponge_fast_eq, pushList_data, empty_data, List.nil_append]
+
+/-- The compiled `hashEq` atom runs the fast path; `deployed` stays the definition. -/
+@[csimp] theorem deployed_eq_fast : deployed = deployedFast := deployedFast_eq.symm
+
 /-- A collision of `H` at the integer reading of its output. -/
 def Collision (H : Hash) : Prop := ∃ a b : List UInt8, a ≠ b ∧ ofBE (H a) = ofBE (H b)
 
@@ -249,5 +264,7 @@ theorem lengthHash_binding_fails (o : Opening) (value blinder : Int) :
 #guard_msgs (whitespace := lax) in #print axioms lengthHash_binding_fails
 /-- info: 'Minidregg.Pred.HashEqDigest.lengthHash_collides' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms lengthHash_collides
+/-- info: 'Minidregg.Pred.HashEqDigest.deployed_eq_fast' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms deployed_eq_fast
 
 end Minidregg.Pred.HashEqDigest
