@@ -97,26 +97,8 @@ pull() {
   cp "$OUT" "$H/$2/requests/$3"
 }
 
-# shown_equals FILE SHOW-OUTPUT: doc show's live line texts are FILE's lines.
-shown_equals() {
-  python3 - "$1" "$2" <<'PY'
-import re, sys
-want = open(sys.argv[1], 'rb').read()
-lines = []
-for raw in open(sys.argv[2], 'rb').read().decode().split('\n'):
-    m = re.match(r'^\s*(\d+)  created-by (\S+)', raw)
-    if not m:
-        continue
-    rest = raw[m.end():][max(0, 20 - len(m.group(2))):]
-    if rest.startswith(' (struck)'):
-        continue
-    assert rest.startswith('  '), raw
-    lines.append(rest[2:])
-got = ''.join(l + '\n' for l in lines).encode()
-sys.exit(0 if got == want else 1)
-PY
-}
-
+# shown_equals FILE RAW-OUTPUT: `doc show --raw` (the live atoms, one per line) is FILE.
+shown_equals() { cmp -s "$1" "$2"; }
 finish() {
   echo "$TABLE"
   if [ "$FAILED" = 0 ]; then
@@ -167,7 +149,7 @@ printf 'ONE, edited by A\ntwo\nA added this between two and three\nTHREE, edited
 push J12W wa p1 a.md 3
 pull J12W wa a-check.md
 check J12W "A's pull equals A's file byte for byte" cmp "$H/wa/requests/a.md" "$H/wa/requests/a-check.md"
-ok J12W wa "doc show paper"
+ok J12W wa "doc show paper --raw"
 check J12W "doc show's lines are A's file, inserted line in place" shown_equals "$H/wa/requests/a.md" "$OUT"
 
 # ------------------------------------------------ B pulls; A and B both edit line 2
@@ -218,7 +200,8 @@ sed -i '3d' "$H/wb/requests/b.md"
 push J12W wb b6 b.md 1
 ok J12W wb "doc show paper"
 check J12W "the deleted line is struck in doc show, unnumbered, and absent from the file" \
-  grep -q '^  -  created-by .*(struck)  A added this between two and three$' "$OUT"
+  grep -qx '  -  ~~A added this between two and three~~' "$OUT"
+ok J12W wb "doc show paper --raw"
 check J12W "doc show's live lines are B's file" shown_equals "$H/wb/requests/b.md" "$OUT"
 
 # ------------------------------------------------ a push from standard input
@@ -227,6 +210,29 @@ printf '%s\n' "a last line, from A's standard input" >>"$H/wa/requests/a.md"
 say wa "doc push p3 paper @-" "$H/wa/requests/a.md"
 if [ "$RC" = 0 ] && grep -q "reads exactly as your file" "$OUT"; then ACTIONS=$((ACTIONS + 1)); record J12W wa "doc push p3 paper @- < a.md" 0 ok "1 actions"
 else record J12W wa "doc push p3 paper @- < a.md" 0 FAIL "rc $RC: $(grep -m1 -E '^(refused|error|usage): ' "$ERR")"; fi
+
+# ------------------------------------------------ K-DOC-ORDER: 100 lines inserted at one place
+# Ten pushes of ten new lines, each between line 1 and line 2 (the same two
+# neighbours every time): each new line is a createAtom and a move, so a push
+# is 20 actions; no identifier space between the neighbours exists to exhaust.
+pull J12W wa a.md
+cp "$H/wa/requests/a.md" "$SD/order-before.md"
+for round in 0 1 2 3 4 5 6 7 8 9; do
+  python3 - "$H/wa/requests/a.md" "$round" <<'PY'
+import sys
+path, r = sys.argv[1], int(sys.argv[2])
+lines = open(path, 'rb').read().split(b'\n')[:-1]
+new = [f"inserted {r * 10 + k:03d}".encode() for k in range(10)]
+# after line 1 and after every line inserted so far: before the old line 2
+lines = lines[:1 + r * 10] + new + lines[1 + r * 10:]
+open(path, 'wb').write(b''.join(l + b'\n' for l in lines))
+PY
+  push J12W wa "o$round" a.md 20
+done
+pull J12W wa a-order.md
+check J12W "100 lines inserted at one place read back in file order (K-DOC-ORDER)" cmp "$H/wa/requests/a.md" "$H/wa/requests/a-order.md"
+check J12W "the 100 lines stand between the old lines 1 and 2" \
+  test "$(sed -n '2p;101p' "$H/wa/requests/a-order.md" | tr '\n' '|')" = "inserted 000|inserted 099|"
 
 # ------------------------------------------------ restart; audit re-admits
 pull J12W wa before.md

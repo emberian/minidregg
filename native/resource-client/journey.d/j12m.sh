@@ -3,15 +3,17 @@
 # after J5 (and after K12C/K12T/K12E/K12I when they ran: proposal ids are `m-`).
 #
 # Parties: A = sponsor (owns `mpaper`, four lines, and `mtarget`, one line);
-# R = the newcomer, a reviewer holding observe+mutate on mpaper under mpaper's
-# law "R writes no body record" (K-FIELDS' `fields = {annotations}` is not on
-# this tree; the law is the same footprint: a mark is the annotations field).
+# R = the newcomer, a reviewer: observe on mpaper (the whole cell) and mutate
+# scoped to `fields = {annotations}` (K-FIELDS; cv 01a0f6ad-8d6f): a mark is the
+# annotations field, so R may mark and may not edit a line (fieldNotNamed). Two
+# capabilities, one reference: R reads through the observe one and writes
+# through the narrowed one.
 # Rows:
 #   a-bolds-line2          A: `mark --line 2 --kind bold`                    -> installed
 #   a-links-line3          A: a link mark on line 3 to mtarget               -> installed
 #   backlink-shows-mark    mtarget's doc-backlinks: mpaper's mark link, relation != 0 -> present
 #   r-marks-line1          R (reviewer) marks line 1 italic                  -> installed
-#   r-edits-line1          R edits line 1 (same grant; law: no body)         -> refused
+#   r-edits-line1          R edits line 1 (mutate scoped to annotations)    -> refused
 #   rendered               doc-show lines 1..3                               -> _one_|**two**|[three](→ mtarget)
 #   unknown-kind           `mark --kind underline`                           -> client-error:unknownKind
 #   no-such-target         a mark on atom 999999 (no such line)              -> refused:noSuchTarget
@@ -104,14 +106,9 @@ backlink_row() { grep " link $2 relation " "$D/$1.out" | head -1; }
 
 R_SUBJECT=$NEWCOMER_SUBJECT
 
-# mpaper's law: a mutation by R writes no body record (reads, delegations, installs pass).
-jq -n --arg r "$R_SUBJECT" '{type:"any",predicates:[
-  {type:"not",predicate:{type:"eq",slot:"request/verb",value:"2"}},
-  {type:"not",predicate:{type:"eq",slot:"request/subject",value:$r}},
-  {type:"eq",slot:"content/writes/body",value:"0"}]}' >"$D/req/mpaper-law.json"
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
 run create-mpaper "$MINI" workspace --action create --dir "$SPONSOR_WS" --name mpaper --storage content \
-  --predicate "$D/req/mpaper-law.json"; ok create-mpaper
+  --predicate "$D/req/permit-all.json"; ok create-mpaper
 run create-mtarget "$MINI" workspace --action create --dir "$SPONSOR_WS" --name mtarget --storage content \
   --predicate "$D/req/permit-all.json"; ok create-mtarget
 
@@ -125,7 +122,23 @@ invoke a-writes "$SPONSOR_WS" mpaper "$(jq -n --arg a "$(hexof one)" --arg b "$(
 invoke a-writes-target "$SPONSOR_WS" mtarget "$(jq -n --arg a "$(hexof 'the target')" '[
   {type:"createDocument",rootElement:"6200",schema:"0"},
   {type:"createAtom",atom:"6201",kind:{type:"text"},payload:$a}]')"; ok a-writes-target
-delegate grant-r "$SPONSOR_WS" mpaper "$R_SUBJECT" '["observe","mutate"]' "$NEWCOMER_WS" mpaper
+# R's two capabilities: observe (whole cell) and mutate scoped to annotations.
+grant() { # NAME VERBS-JSON EXTRA-JSON
+  jq -n --arg r "$R_SUBJECT" --argjson v "$2" --argjson x "$3" \
+    '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"mpaper",recipient:$r,verbs:$v,maxCost:"50000"} + $x' \
+    >"$D/req/$1.json"
+  run "$1-propose" "$MINI" workspace --action propose --dir "$SPONSOR_WS" --request "$D/req/$1.json" --proposal-id "m-$1"; ok "$1-propose"
+  run "$1-submit" "$MINI" workspace --action submit --dir "$SPONSOR_WS" \
+    --intent "$SPONSOR_WS/proposals/m-$1/intent.json" --attempt "$SPONSOR_WS/attempts/m-$1"; ok "$1-submit"
+  run "$1-publish" "$MINI" workspace --action publish-delegation --dir "$SPONSOR_WS" --proposal-id "m-$1" \
+    --attempt "$SPONSOR_WS/attempts/m-$1"; ok "$1-publish"
+  jq -r .observeCapability "$SPONSOR_WS/proposals/m-$1/recipient-reference.json"
+}
+R_OBSERVE=$(grant grant-r-read '["observe"]' '{}')
+R_ANNOTATE=$(grant grant-r-annotate '["mutate"]' '{"fields":["annotations"]}')
+run grant-r-import "$MINI" workspace --action import --dir "$NEWCOMER_WS" --name mpaper --kind object \
+  --target "$(jq -r .target "$SPONSOR_WS/refs/mpaper.json")" --observe-capability "$R_OBSERVE" \
+  --operation-capability "$R_ANNOTATE"; ok grant-r-import
 
 # --- A: bold line 2, a link mark on line 3 -> mtarget's backlinks show it ---
 mark a-bolds-line2 "$SPONSOR_WS" --line 2 --kind bold
@@ -145,7 +158,7 @@ row r-marks-line1 installed "$(outcome r-marks-line1)" "$(detail r-marks-line1)"
 RMARK=$(grep -o 'workspace mark: [0-9]*' "$D/r-marks-line1.err" | tail -1 | cut -d' ' -f3)
 read_view r-read1 "$NEWCOMER_WS" mpaper; ok r-read1
 invoke r-edits-line1 "$NEWCOMER_WS" mpaper "$(edit_json "$(before_of r-read1 6101)" 6101 "$(hexof "one'")")"
-row r-edits-line1 refused "$(outcome r-edits-line1)" "$(detail r-edits-line1); the same grant installed r-marks-line1"
+row r-edits-line1 refused "$(outcome r-edits-line1)" "$(detail r-edits-line1); the same mutate capability (fields {annotations}) installed r-marks-line1"
 
 show show1 "$SPONSOR_WS" mpaper; ok show1
 row rendered "_one_|**two**|[three](→ mtarget)" "$(rendered_of show1)" "$(jq -r .text "$D/show1.out" | tr '\n' '/')"
