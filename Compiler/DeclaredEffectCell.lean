@@ -53,6 +53,7 @@ def stateKeyStream : StreamCodec StateKey where
         1 :: StreamCodec.nat.encode account.value ++ digestStream.encode resource
     | .programCode program =>
         2 :: StreamCodec.nat.encode program.value
+    | .blinding => [3]
   decodePrefix
     | 0 :: bytes => do
         let (object, afterObject) <- StreamCodec.nat.decodePrefix bytes
@@ -65,6 +66,7 @@ def stateKeyStream : StreamCodec StateKey where
     | 2 :: bytes => do
         let (program, suffix) <- StreamCodec.nat.decodePrefix bytes
         some (.programCode ⟨program⟩, suffix)
+    | 3 :: suffix => some (.blinding, suffix)
     | _ => none
   decodePrefix_encode := by
     intro key suffix
@@ -77,8 +79,9 @@ def stateKeyStream : StreamCodec StateKey where
           digestStream.decodePrefix_encode]
     | programCode program =>
         simp [StreamCodec.nat.decodePrefix_encode]
+    | blinding => rfl
 
-def stateKeyCodecId : String := "state-key/tagged-v1"
+def stateKeyCodecId : String := "state-key/tagged-v2"
 
 /-- The effect layout on the wire.  Its single namespace contributes no bytes;
 keys are typed state keys and values are zigzag integers. -/
@@ -91,6 +94,7 @@ def wire : Wire effectLayout where
   valueStream := fun _ => intStream
   keyCodecId := fun _ => stateKeyCodecId
   valueCodecId := fun _ => intCodecId
+  blinding := some StateKey.blinding.address
 
 /-- The declared-effect cell materializer: the generic store codec at `wire`,
 rooted by `StoreCodec.rootBytes`. -/

@@ -105,7 +105,7 @@ def parseRequest (source : String) : Except String Request := do
 
 private def selectedPayload (view : List UInt8) (atom : AtomId) :
     Except String (Digest × List UInt8) := do
-  let some (_, packed, _) := NativeObservationController.resourceViewCodec.decode view
+  let some (_, packed, _, _) := NativeObservationController.resourceViewCodec.decode view
     | fail "noncanonical signed resource view"
   let some cell := Minidregg.Theory.CellRegistry.PackedCell.decode
       CanonicalCellRegistry.registry packed

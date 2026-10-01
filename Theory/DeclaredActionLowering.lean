@@ -362,6 +362,7 @@ def keyCode : StateKey -> Nat
   | .accountBalance account resource =>
       Nat.pair 1 (Nat.pair account.value resource.value)
   | .programCode program => Nat.pair 2 program.value
+  | .blinding => Nat.pair 3 0
 
 def keyOfCode (code : Nat) : Option StateKey :=
   let tagged := Nat.unpair code
@@ -373,6 +374,7 @@ def keyOfCode (code : Nat) : Option StateKey :=
       let parts := Nat.unpair tagged.2
       some (.accountBalance ⟨parts.1⟩ ⟨parts.2⟩)
   | 2 => some (.programCode ⟨tagged.2⟩)
+  | 3 => if tagged.2 = 0 then some .blinding else none
   | _ => none
 
 @[simp] theorem keyOfCode_keyCode (key : StateKey) :

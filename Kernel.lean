@@ -94,3 +94,4 @@ import Kernel.StreamResource  -- per-author streams: append leg theorems, author
 import Kernel.NockProgramCell -- NOCK K-NOCK-CELL: sampleOf (targets + ABI slots), sampleOf_injective/_deterministic; reads for ops 131-133
 import Kernel.NockDoor -- NOCK N11: a NockApp kernel door (poke 23 / peek 22, state at axis 6) refereed by re-execution; door_poke_sound / door_state_stale_refused / door_effects_are_writes / door_peek_pure / door_load_deterministic; ops 135-137
 import Kernel.NockRun -- NOCK K-RAN: RunClaim, checkRun (re-execution on the kernel sample), checkRun_sound / no_accepted_of_output_mismatch / steps_equal_oracle; op 134 dryRun
+import Kernel.NarrowedViewHidingWitness -- K-NARROW-HIDE: the v4 narrowed view is not independent of field 4 (narrowed_view_not_independent); under view v5 the field-3 reader's opened items are unchanged by a write to field 4 and only the root moves (narrowed_view_hides_field_four)

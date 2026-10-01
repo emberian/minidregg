@@ -1745,6 +1745,19 @@ fn birth(
             "controlCapability":reservation.ids["controlCapability"],
             "predicate":shape.predicate}),
     };
+    // K-NARROW-HIDE: a declared or content cell is born blinded, with a
+    // blinding this workspace's key derives for this cell id, so its owner
+    // recomputes every salt and no reader of a subset of fields holds an
+    // unsalted commitment to the rest.
+    let mut resource = resource;
+    if matches!(shape.storage, "declared" | "content" | "grain") && program.is_none() {
+        let seed = crate::hiding::read_seed(&member_path(workspace, "key")?)?;
+        let target = reservation.ids["target"].as_str();
+        resource["blinding"] = json!(crate::hiding::cell_blinding(
+            &crate::hiding::blinding_key(&seed),
+            target
+        )?);
+    }
     let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,

@@ -35,6 +35,10 @@ inductive StateKey where
   | objectField (object : ResourceId .object) (field : Digest)
   | accountBalance (account : ResourceId .account) (resource : Digest)
   | programCode (program : ResourceId .program)
+  /-- The cell's hiding key (K-NARROW-HIDE): the blinding that keys every
+  entry's salt under the store root.  Set at birth by the owner's client; no
+  action writes it (`writableKeyCheck` refuses it) and no reader receives it. -/
+  | blinding
   deriving DecidableEq, Repr
 
 /-- The declared-effect layout: one RAM namespace whose keys are the typed

@@ -689,9 +689,10 @@ theorem final_unrevocation_rejected :
 
 /-! ## Payload-bearing durable use with an exact authority read guard -/
 
-/-- The durable snapshot's root function is the deployed store root (cSHAKE256
-under `DREGG.STORE.ROOT/v1`), the same function the authority cell uses. -/
-abbrev fullRoot : List UInt8 -> Digest := StoreCodec.rootBytes
+/-- The durable snapshot's root function is the deployed store root of the
+authority wire (the salted root, `DREGG.STORE.ROOT/v2`), the same function the
+authority cell uses. -/
+abbrev fullRoot : List UInt8 -> Digest := StoreCodec.rootBytes CredentialAuthorityCell.wire
 
 def authorityCellId : Minidregg.Kernel.DurableDataIntent.CellId := ⟨102⟩
 def resultCellId : Minidregg.Kernel.DurableDataIntent.CellId := ⟨902⟩

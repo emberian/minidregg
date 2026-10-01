@@ -16,6 +16,7 @@ This is a snapshot read, not a timing-noninterference or malicious-host claim.
 import Compiler.NativeObservationCodec
 import Compiler.GrainResourceBirthHostCodec
 import Kernel.ResourceObservationAdmission
+import Compiler.StoreHiding
 
 namespace Minidregg.Kernel.NativeObservationController
 
@@ -305,12 +306,34 @@ theorem authority_cell_is_not_observable (kind : ResourceKind) :
     observableKind kind .authority = false := by
   cases kind <;> rfl
 
+/-- The fields the grant's capability names (`none`: every field). -/
+def narrowedFields (context : Context deployment durable) (grant : GrantRef) :
+    Option (Finset CellField) :=
+  match CredentialAuthorityState.readCapability context.authority.snapshot.cell grant.kind
+      grant.capability with
+  | some stored => stored.head.scope.fields
+  | none => none
+
+/-- K-NARROW-HIDE.  A reader whose capability names fields is served only a
+cell whose root hides what it may not read: a blinded cell.  Every query's
+signing header carries the cell root (`requestAt … preStateRoot`), so the
+refusal is at selection, before any challenge leaves the host. -/
+def HidingReady (context : Context deployment durable) (grant : GrantRef)
+    (packed : PackedCell Registry) : Prop :=
+  narrowedFields context grant = none ∨
+    CanonicalCellRegistry.blinded packed.kind packed.payload.logical = true
+
+instance hidingReadyDecidable (context : Context deployment durable) (grant : GrantRef)
+    (packed : PackedCell Registry) : Decidable (HidingReady context grant packed) := by
+  unfold HidingReady; infer_instance
+
 structure Selected (context : Context deployment durable) (grant : GrantRef) where
   private mk ::
   packed : PackedCell Registry
   present : context.directory.directory.slots grant.target = .present packed
   law : CanonicalCellRegistry.CellLaw deployment grant.target packed
   role : observableKind grant.kind packed.kind = true
+  hides : HidingReady context grant packed
   accountBalances : List (Nat × Int)
   balancesExact : balances context grant = some accountBalances
 
@@ -320,11 +343,22 @@ def select (context : Context deployment durable) (grant : GrantRef) : Option (S
   | .present packed =>
       if law : CanonicalCellRegistry.CellLaw deployment grant.target packed then
         if role : observableKind grant.kind packed.kind = true then
-          match exact : balances context grant with
-          | none => none
-          | some values => some ⟨packed, present, law, role, values, exact⟩
+          if hides : HidingReady context grant packed then
+            match exact : balances context grant with
+            | none => none
+            | some values => some ⟨packed, present, law, role, hides, values, exact⟩
+          else none
         else none
       else none
+
+/-- **A narrowed reader is served only a blinded cell.** -/
+theorem selected_narrowed_is_blinded {context : Context deployment durable} {grant : GrantRef}
+    (selected : Selected context grant) {fields : Finset CellField}
+    (narrowed : narrowedFields context grant = some fields) :
+    CanonicalCellRegistry.blinded selected.packed.kind selected.packed.payload.logical = true := by
+  rcases selected.hides with whole | blinded
+  · rw [narrowed] at whole; cases whole
+  · exact blinded
 
 variable {F : Type} [Field F] [DecidableEq F]
 
@@ -498,18 +532,28 @@ def authorize (native : CredentialSignatureIO.NativeConfig)
         else return .error (preAuthentication (.of .malformed))
       else return .error (challengeMismatch expected signed.challenge)
 
+/-- The opening of a cell root: the store frame and one item per entry
+(`StoreHiding.items`), opened where the reader may see it.  A kind without a
+store wire has none. -/
+abbrev OpeningView := List UInt8 × List StoreHiding.Item
+
+def openingStream : StreamCodec OpeningView :=
+  StreamCodec.product bytesStream (StreamCodec.list StoreHiding.itemStream)
+
 /-- A resource view: the cell's own root, the packed cell as the reader's
-scope narrows it, and its narrowed account cut. -/
-abbrev ResourceView := Digest × List UInt8 × List (Nat × Int)
+scope narrows it, its narrowed account cut, and the opening of the root. -/
+abbrev ResourceView := Digest × List UInt8 × List (Nat × Int) × OpeningView
 
 /-- This codec is a read view, not a writable Book/registry payload. -/
 def resourceViewStream : StreamCodec ResourceView :=
-  StreamCodec.product digestStream (StreamCodec.product bytesStream balanceStream)
+  StreamCodec.product digestStream
+    (StreamCodec.product bytesStream (StreamCodec.product balanceStream openingStream))
 
-/-- Version 4 (K-FIELDS): the cell root leads, because the packed cell is the
-cell narrowed to the reader's `Scope.fields` and its own root is not the
-cell's.  Version 3 (the whole packed cell, no root) refuses. -/
-def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList
+/-- Version 5 (K-NARROW-HIDE): the root is the salted root and the view carries
+its opening, so a narrowed reader recomputes the root from the entries it may
+read, their salts, and the sealed leaves of the rest.  Version 4 (an unsalted
+root over the whole store, no opening) refuses. -/
+def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v5".toUTF8.toList
 
 def resourceViewCodec : IndexedProgram.LawfulCodec ResourceView :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
@@ -741,30 +785,59 @@ def sinceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/SINCE-VIEW/v1".toUTF8.toLi
 def sinceViewCodec : IndexedProgram.LawfulCodec (List SinceEntry) :=
   NativeHostCodec.framed sinceViewFrame (StreamCodec.list sinceEntryStream)
 
-def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList
+def atViewFrame : List UInt8 := "DREGG/NATIVE-HOST/AT-VIEW/v2".toUTF8.toList
 
-/-- `(height, root, lifecycle bytes)`: the cell's root at that height (none
-when it was not live) and its lifecycle bytes, a live cell narrowed to the
-reader's `Scope.fields` exactly as a current read is (K-FIELDS): a reader
-restricted to some fields learns no other field of the cell's past either. -/
-def atViewCodec : IndexedProgram.LawfulCodec (Nat × Option Digest × List UInt8) :=
+/-- The opening of a packed cell's root under `fields`. -/
+def openingView (fields : Option (Finset CellField))
+    (packed : PackedCell CanonicalCellRegistry.registry) : OpeningView :=
+  match CanonicalCellRegistry.wire? packed.kind with
+  | some wire => (StoreCodec.frame wire,
+      StoreHiding.items wire (ResourceObservationAdmission.Visible fields packed.kind)
+        packed.payload.logical)
+  | none => ([], [])
+
+/-- **The root a reader receives opens.**  For every kind with a store wire,
+the view's root is recomputed from the opening's frame and items alone. -/
+theorem root_opens (fields : Option (Finset CellField))
+    (packed : PackedCell CanonicalCellRegistry.registry)
+    {wire : StoreCodec.Wire (CanonicalCellRegistry.layout packed.kind)}
+    (selected : CanonicalCellRegistry.wire? packed.kind = some wire) :
+    packed.payload.root = StoreHiding.rootOfItems wire (openingView fields packed).2 ∧
+      (openingView fields packed).1 = StoreCodec.frame wire := by
+  have root : packed.payload.root =
+      (CanonicalCellRegistry.materializer packed.kind).rootOf packed.payload.logical := rfl
+  rw [CanonicalCellRegistry.materializer_of_wire selected, StoreCodec.materializer_rootOf] at root
+  unfold openingView
+  rw [selected]
+  refine ⟨?_, rfl⟩
+  rw [root]
+  exact StoreHiding.view_root_recomputes wire _ packed.payload.logical
+
+/-- `(height, root, lifecycle bytes, opening)`: the cell's root at that height
+(none when it was not live), its lifecycle bytes, a live cell narrowed to the
+reader's `Scope.fields` exactly as a current read is (K-FIELDS), and the
+opening of that root (K-NARROW-HIDE).  Version 1 (no opening) refuses. -/
+def atViewCodec : IndexedProgram.LawfulCodec (Nat × Option Digest × List UInt8 × OpeningView) :=
   NativeHostCodec.framed atViewFrame
-    (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option digestStream) bytesStream))
+    (StreamCodec.product StreamCodec.nat (StreamCodec.product (StreamCodec.option digestStream)
+      (StreamCodec.product bytesStream openingStream)))
 
 /-- The at-height view of stored lifecycle bytes under `fields`. -/
-def atView (fields : Option (Finset CellField)) (bytes : List UInt8) : Option Digest × List UInt8 :=
+def atView (fields : Option (Finset CellField)) (bytes : List UInt8) :
+    Option Digest × List UInt8 × OpeningView :=
   match ResourceBirthCodec.LifecycleImage.rawDecode CanonicalCellRegistry.registry bytes with
   | some (.live packed) => (some packed.payload.root,
       ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
-        (.live (ResourceObservationAdmission.narrowPacked fields packed)))
-  | _ => (none, bytes)
+        (.live (ResourceObservationAdmission.narrowPacked fields packed)),
+      openingView fields packed)
+  | _ => (none, bytes, ([], []))
 
 /-- The at-height view of a live cell is the cell narrowed exactly as a
 current read narrows it (`resourceView` uses the same `narrowPacked`). -/
 theorem atView_live (fields : Option (Finset CellField)) (packed : PackedCell CanonicalCellRegistry.registry) :
     atView fields (ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry (.live packed)) =
       (some packed.payload.root, ResourceBirthCodec.LifecycleImage.bytes CanonicalCellRegistry.registry
-        (.live (ResourceObservationAdmission.narrowPacked fields packed))) := by
+        (.live (ResourceObservationAdmission.narrowPacked fields packed)), openingView fields packed) := by
   unfold atView
   rw [ResourceBirthCodec.LifecycleImage.rawDecode_bytes]
 
@@ -783,7 +856,8 @@ def resourceView (fields : Option (Finset CellField))
   (packed.payload.root,
     PackedCell.bytes CanonicalCellRegistry.registry
       (ResourceObservationAdmission.narrowPacked fields packed),
-    ResourceObservationAdmission.narrowBalances fields balances)
+    ResourceObservationAdmission.narrowBalances fields balances,
+    openingView fields packed)
 
 /-- The query's view bytes. A history read outside the log window (above the
 current height, or below the retention floor) is `operationRejected`; a query
@@ -892,16 +966,27 @@ theorem CheckedGrant.current_generation_and_source
       wanted.policyRevision = context.authority.snapshot.authState.policyRevision wanted.policyId :=
   ⟨checked.checked.authorization.policyEpochExact, checked.checked.authorization.policyRevisionExact⟩
 
-/-- A version-3 resource view (the whole packed cell, no leading root)
-refuses: its frame is not the v4 frame. -/
-theorem v3_view_refused (payload : List UInt8) :
-    resourceViewCodec.decode ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList ++ payload) =
+/-- A version-4 resource view (an unsalted root, no opening) refuses: its
+frame is not the v5 frame. -/
+theorem v4_view_refused (payload : List UInt8) :
+    resourceViewCodec.decode ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList ++ payload) =
       none := by
-  have len : ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList).length =
+  have len : ("DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList).length =
       resourceViewFrame.length := by decide +kernel
-  have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF8.toList ≠ resourceViewFrame := by
+  have ne : "DREGG/NATIVE-HOST/RESOURCE-VIEW/v4".toUTF8.toList ≠ resourceViewFrame := by
     decide +kernel
   simp only [resourceViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
+    NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
+  rfl
+
+/-- A version-1 at-height view (no opening) refuses. -/
+theorem v1_at_view_refused (payload : List UInt8) :
+    atViewCodec.decode ("DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList ++ payload) = none := by
+  have len : ("DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList).length = atViewFrame.length := by
+    decide +kernel
+  have ne : "DREGG/NATIVE-HOST/AT-VIEW/v1".toUTF8.toList ≠ atViewFrame := by
+    decide +kernel
+  simp only [atViewCodec, NativeHostCodec.framed, ResourceBirthCodec.strictCodec,
     NativeHostCodec.framedRaw, ← len, List.take_left', ne, if_false]
   rfl
 
@@ -942,5 +1027,11 @@ theorem challenge_bound {context : Context deployment durable}
 #guard_msgs (whitespace := lax) in #print axioms challenge_bound
 
 end Minidregg.Kernel.NativeObservationController
-/-- info: 'Minidregg.Kernel.NativeObservationController.v3_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.v3_view_refused
+/-- info: 'Minidregg.Kernel.NativeObservationController.v4_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.v4_view_refused
+/-- info: 'Minidregg.Kernel.NativeObservationController.v1_at_view_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.v1_at_view_refused
+/-- info: 'Minidregg.Kernel.NativeObservationController.root_opens' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.root_opens
+/-- info: 'Minidregg.Kernel.NativeObservationController.selected_narrowed_is_blinded' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.selected_narrowed_is_blinded

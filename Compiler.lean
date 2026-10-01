@@ -113,3 +113,4 @@ import Compiler.PredOrderGadgetWitness
 import Compiler.ZkmlEltwiseAir
 import Compiler.ZkmlTraceCheck
 import Compiler.NockProgramCodec -- NOCK K-NOCK-CELL: program cell (jam + ABI), DREGG/NOCK/PROGRAM/v1 + ABI/v1, programId, birth admissibility
+import Compiler.StoreHiding -- K-NARROW-HIDE: salted-root views (opened entries + salts, sealed leaves): view_root_recomputes, narrowed_view_independent_of_uncovered_given_salts, salt_disclosed_iff_value_disclosed, commitment_hides (premise SaltedLeafHiding), change_detection_only_via_root
