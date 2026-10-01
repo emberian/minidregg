@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Theory/SheetLaw.lean §2 is a mechanical embed of the MUD sheet law JSON; this script is that embed.
+"""Assurance/SheetLaw.lean §2 is a mechanical embed of the MUD sheet law JSON; this script is that embed.
 
 usage (from the repository root):
   scripts/gen-sheetlaw.py           rewrite §2 (`def management` .. `end Law`) from the JSON
@@ -12,7 +12,7 @@ Changing the JSON without re-running this script leaves the theorems about a dif
 import json, re, sys
 
 T = "deploy/shell/templates/mud"
-F = "Theory/SheetLaw.lean"
+F = "Assurance/SheetLaw.lean"
 
 def val(v):
     v = str(v)

@@ -1,5 +1,5 @@
 /-
-# Theory.ItemLaw — no dupe for a unique item, as a theorem of the item law and the kernel
+# Assurance.ItemLaw — no dupe for a unique item, as a theorem of the item law and the kernel
 
 `deploy/shell/templates/mud/item/law.item.json` (branch `mud-templates`, commit `1ee44ed`), composed
 `all [law.management, clause 1, …, clause 7]`, written out literally in §2. Field numbers are
@@ -19,13 +19,13 @@ Clauses 6 (drop-here) and 7 (take-here) read `joint/index/1/…` (K-JOINT-INDEX,
 without it, drop and take are refused (`drop_needs_joint`); the theorems below hold with or without
 those slots.
 -/
-import Theory.SheetLaw
+import Assurance.SheetLaw
 
-namespace Minidregg.Theory.ItemLaw
+namespace Minidregg.Assurance.ItemLaw
 
 open Minidregg.Pred (Pred State eval)
 open Minidregg.Kernel.DeclaredResourceProjection (Values fieldName get)
-open Minidregg.Theory.SheetLaw (ev_eq ev_le ev_memberOf ev_eqSlots ev_not ev_all ev_any Turn view
+open Minidregg.Assurance.SheetLaw (ev_eq ev_le ev_memberOf ev_eqSlots ev_not ev_all ev_any Turn view
   admits Accepted stepsOf final get_before get_after get_verb get_subject find_none state_get
   scalarSlots_split mem_deltas mem_pairs mem_joint request_ne_field clock_ne_field joint_ne_field
   ne_of_lastc lastc_before lastc_after lastc_delta pairName_ne_fieldName fieldName_inj get_delta)
@@ -373,31 +373,31 @@ end Poles
 
 /-! ## Axiom pins -/
 
-/-- info: 'Minidregg.Theory.ItemLaw.holder_or_referee' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.holder_or_referee' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms holder_or_referee
-/-- info: 'Minidregg.Theory.ItemLaw.former_holder_refused' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.former_holder_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms former_holder_refused
-/-- info: 'Minidregg.Theory.ItemLaw.get_delta_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.get_delta_absent' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms get_delta_absent
-/-- info: 'Minidregg.Theory.ItemLaw.no_dupe_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.no_dupe_step' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_dupe_step
-/-- info: 'Minidregg.Theory.ItemLaw.holder_keeps_unless_holder_writes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.holder_keeps_unless_holder_writes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms holder_keeps_unless_holder_writes
-/-- info: 'Minidregg.Theory.ItemLaw.no_dupe_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.no_dupe_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms no_dupe_unique
-/-- info: 'Minidregg.Theory.ItemLaw.kernel_holder_or_referee' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.kernel_holder_or_referee' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms kernel_holder_or_referee
-/-- info: 'Minidregg.Theory.ItemLaw.give_poles' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.give_poles' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms give_poles
-/-- info: 'Minidregg.Theory.ItemLaw.charges_and_wear_poles' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.charges_and_wear_poles' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms charges_and_wear_poles
-/-- info: 'Minidregg.Theory.ItemLaw.concurrent_gives_both_law_admitted' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.concurrent_gives_both_law_admitted' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms concurrent_gives_both_law_admitted
-/-- info: 'Minidregg.Theory.ItemLaw.second_give_refused_after_first' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.second_give_refused_after_first' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms second_give_refused_after_first
-/-- info: 'Minidregg.Theory.ItemLaw.drop_needs_joint' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.drop_needs_joint' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms drop_needs_joint
-/-- info: 'Minidregg.Theory.ItemLaw.give_chain_poles' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'Minidregg.Assurance.ItemLaw.give_chain_poles' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms give_chain_poles
 
-end Minidregg.Theory.ItemLaw
+end Minidregg.Assurance.ItemLaw
