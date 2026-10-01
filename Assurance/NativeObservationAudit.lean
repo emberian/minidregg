@@ -23,9 +23,9 @@ import Kernel.NativeObservationController
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.footprint_success_exact
 /-- info: 'Minidregg.Kernel.NativeObservationController.content_observation_is_object' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.content_observation_is_object
-/-- info: 'Minidregg.Kernel.NativeObservationController.shared_book_is_not_observable' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.NativeObservationController.shared_book_is_not_observable' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.shared_book_is_not_observable
-/-- info: 'Minidregg.Kernel.NativeObservationController.authority_cell_is_not_observable' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.NativeObservationController.authority_cell_is_not_observable' does not depend on any axioms -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.authority_cell_is_not_observable
 /-- info: 'Minidregg.Kernel.NativeObservationController.AuthorizedIntent.query_footprint' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeObservationController.AuthorizedIntent.query_footprint

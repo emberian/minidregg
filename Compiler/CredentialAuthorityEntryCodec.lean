@@ -80,10 +80,12 @@ def verbTag : {kind : ResourceKind} → Verb kind → Nat
   | _, .delegateProgram => 3
   | _, .installPolicy => 4
   | _, .revokeCapability => 5
+  | _, .appendObject => 7
 
 def verbOfTag : (kind : ResourceKind) → Nat → Verb kind
   | .object, 1 => .observeObject
   | .object, 2 => .mutateObject
+  | .object, 7 => .appendObject
   | .object, _ => .delegateObject
   | .account, 1 => .observeAccount
   | .account, 2 => .transfer

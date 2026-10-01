@@ -281,14 +281,14 @@ def readCandidate (context : Context deployment durable) (semantics : Digest)
     (request context semantics federation genesisHeight intent grant pre.root) kind pre rfl
 
 /-- Authority kinds select concrete resource roles, never another role sharing
-the same representation. Content is an object; the shared Book and the
+the same representation. Content and streams are objects; the shared Book and the
 authority cell are never observation targets through this protocol. -/
 def observableKind (kind : ResourceKind) (physical : CanonicalCellRegistry.Kind) : Bool :=
   decide (ResourceTargetAdmission.externalKind physical = some kind)
 
 theorem observable_roles_exact (kind : ResourceKind) (physical : CanonicalCellRegistry.Kind) :
     observableKind kind physical = true ↔
-      (kind = .object ∧ (physical = .declaredObject ∨ physical = .content)) ∨
+      (kind = .object ∧ (physical = .declaredObject ∨ physical = .content ∨ physical = .stream)) ∨
       (kind = .account ∧ physical = .accountMetadata) ∨
       (kind = .program ∧ physical = .declaredProgram) := by
   cases kind <;> cases physical <;> simp [observableKind, ResourceTargetAdmission.externalKind]
@@ -509,6 +509,17 @@ def resourceViewFrame : List UInt8 := "DREGG/NATIVE-HOST/RESOURCE-VIEW/v3".toUTF
 def resourceViewCodec : IndexedProgram.LawfulCodec (List UInt8 × List (Nat × Int)) :=
   NativeHostCodec.framed resourceViewFrame resourceViewStream
 
+/-- A stream window: the cell root, its next sequence position, and the
+recorded entries in the window. -/
+def tailViewStream : StreamCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord)) :=
+  StreamCodec.product digestStream (StreamCodec.product StreamCodec.nat
+    (StreamCodec.list (StreamCodec.product StreamCodec.nat StreamCell.recordStream)))
+
+def tailViewFrame : List UInt8 := "DREGG/NATIVE-HOST/STREAM-TAIL/v1".toUTF8.toList
+
+def tailViewCodec : IndexedProgram.LawfulCodec (Digest × Nat × List (Nat × StreamCell.StreamRecord)) :=
+  NativeHostCodec.framed tailViewFrame tailViewStream
+
 def AuthorizedIntent.queryResult
     {context : Context deployment durable} {profile : CanonicalRuntimeProfile.Profile F}
     {federation : FederationId} {genesisHeight : Nat} {intent : Intent}
@@ -529,6 +540,11 @@ def AuthorizedIntent.queryResult
     | .capability => do
         let stored ← CredentialAuthorityState.readCapability context.authority.snapshot.cell grant.kind grant.capability
         some ((CredentialAuthorityEntryCodec.storedCapabilityStream grant.kind).encode stored)
+    | .tail start count =>
+        match checked.selected.packed with
+        | ⟨.stream, payload⟩ => some (tailViewCodec.encode (payload.root,
+            StreamCell.nextSeq payload.logical, StreamCell.tail payload.logical start count))
+        | _ => none
   else none
 
 theorem observation_request_actual_root (context : Context deployment durable)

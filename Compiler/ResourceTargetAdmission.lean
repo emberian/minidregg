@@ -18,12 +18,16 @@ set_option autoImplicit false
 
 abbrev Registry := CanonicalCellRegistry.registry
 
-/-- One shared role selection for ordinary resource observation and management. -/
+/-- One shared role selection for ordinary resource observation and management:
+which registry kinds are observable as a resource, and as which kind. The
+match is exhaustive on purpose: a new registry kind does not build until it is
+placed here. A `_ => none` wildcard once made K-STREAM's new kind silently
+unobservable (every read refused, the build green). -/
 def externalKind : CanonicalCellRegistry.Kind → Option ResourceKind
-  | .content | .declaredObject => some .object
+  | .content | .declaredObject | .stream => some .object
   | .accountMetadata => some .account
   | .declaredProgram => some .program
-  | _ => none
+  | .eventHistory | .authority | .resourceBook | .policySource | .pay => none
 
 structure Observed (deployment : CanonicalCellRegistry.Deployment)
     (directory : Directory Nat Registry) (kind : ResourceKind) (target : Nat) (expectedRoot : Digest) where

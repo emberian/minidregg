@@ -115,7 +115,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 K10 J6 G J7 J8 K4 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 K10 K11 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JPAY1 JPAY2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -124,6 +124,7 @@ TITLE[J3]="sponsor delegates observe+mutate (no control) to newcomer"
 TITLE[J4]="newcomer signed read, writes field to 1, reads back 1"
 TITLE[J5]="a key with no grant: read and write refused"
 TITLE[K10]="rooms: born --in R, under R covers R and its chain, outsiders refused at the controller"
+TITLE[K11]="per-author streams in a room: K writers append with zero re-plans"
 TITLE[J6]="stop/reopen: receipts recovered, exact retry replays"
 TITLE[G]="growth 10/100/500/1000: write<=5s, reopen<=60s at 1000"
 TITLE[J7]="law replaced; newcomer's existing grant still works"
@@ -721,6 +722,7 @@ step_M6() { hook m6 "a non-Git SPK profile goes INSTALL -> START -> answers curl
 step_J12() { hook j12 "friends provisioned from the shell co-write a doc (append, edit with the read line as guard, link, backlinks, board, revoke); a stale edit, a third key, a reviewer's write, an append-only edit, a backwards task and a revoked read are refused by the Host with their reason (PLACE item 1)" shell; }
 step_J12C() { hook j12c "B quotes a range of commons/wall into lab/paper; C (commons only) is refused no-grant reading the quote; A reads the quoted bytes; A's doc follow is refused no-grant (PLACE §2.4)" shell; }
 step_K10() { hook j10-kernel "K-ROOM 3b rows: a note born --in lab is read through under lab by its owner and an invitee; an outside cell, a third key with either capability, a signature-only read and a birth into a ghost room are refused (lane k-world)"; }
+step_K11() { hook j11-kernel "K-STREAM rows: per-author streams born in a room, six appends planned before submission admitted with zero re-plans, a non-member and a forged author refused, tail identical across a restart (lane k-stream)"; }
 step_BD() { hook bind "two plans on disjoint cells are admitted in both orders without re-plan; a second plan on the same cell is refused (lane c-bind)"; }
 step_M8() { hook m8 "fleet-journey.sh: fee'd fleet turns, a topic event stream and agent heads on its own fresh Store (list item 8, lane m8-fleet-surface)"; }
 step_J13() { hook j13 "law-leaf-journey.sh: a write the law rejects is refused at submit with the failing clause named, on its own fresh Store (lane p-law, J13)" shell; }
@@ -736,12 +738,13 @@ run_step J2 J0
 run_step J3 J1 J2
 run_step J4 J3
 run_step J5 J4
-run_step K10 J5
 run_step J6 J4
 run_step G J4
 run_step J7 J4
 run_step J8 J7
 run_step K4 J2
+run_step K10 J5
+run_step K11 J5
 run_step M3 J0
 run_step M4 J0
 run_step M5 J0

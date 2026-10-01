@@ -88,3 +88,4 @@ import Kernel.ApplicationSpkProfileProofs
 import Kernel.FnSelectedHistoricalStep
 import Kernel.FnSelectiveReleaseProofs
 import Kernel.NativeHostBookInvariant
+import Kernel.StreamResource  -- per-author streams: append leg theorems, author law, rooms (PLACE §2.3/§4.4, K-STREAM)

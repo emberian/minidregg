@@ -302,6 +302,7 @@ private def verb (kind : ResourceKind) (path : String) (json : Lean.Json) : Resu
   | .object, "observe" => pure .observeObject
   | .object, "mutate" => pure .mutateObject
   | .object, "delegate" => pure .delegateObject
+  | .object, "append" => pure .appendObject
   | .account, "observe" => pure .observeAccount
   | .account, "transfer" => pure .transfer
   | .account, "delegate" => pure .delegateAccount
@@ -582,6 +583,11 @@ private def contentCommand (path : String) (json : Lean.Json) : Result ContentRe
   let obj ← exactObject path ["actions"] json
   pure ⟨← list (path ++ ".actions") contentAction (← field path "actions" obj)⟩
 
+private def streamRef (path : String) (json : Lean.Json) : Result (Nat × Nat) := do
+  let obj ← exactObject path ["cell", "sequence"] json
+  pure (← nat (path ++ ".cell") (← field path "cell" obj),
+    ← nat (path ++ ".sequence") (← field path "sequence" obj))
+
 private def targetPayload (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Payload := do
   let (tag, _) ← tagged path json
@@ -594,7 +600,14 @@ private def targetPayload (path : String) (json : Lean.Json) :
       let actionsJson ← field path "actions" obj
       let command ← contentCommand path (.mkObj [("actions", actionsJson)])
       pure (.content command)
-  | _ => failAt (path ++ ".type") "expected scalar or content"
+  | "append" =>
+      let obj ← exactObject path ["type", "topic", "payload", "to", "ref"] json
+      let topic ← decodeHex (path ++ ".topic") (← field path "topic" obj)
+      let payload ← decodeHex (path ++ ".payload") (← field path "payload" obj)
+      let recipient ← optional (path ++ ".to") nat (← field path "to" obj)
+      let ref ← optional (path ++ ".ref") streamRef (← field path "ref" obj)
+      pure (.append ⟨topic, payload, recipient.map SubjectId.mk, ref⟩)
+  | _ => failAt (path ++ ".type") "expected scalar, content or append"
 
 private def commandTarget (path : String) (json : Lean.Json) :
     Result DeclaredResourceController.Target := do
@@ -693,10 +706,18 @@ private def intent (path : String) (json : Lean.Json) : Result Intent := do
         let p ← exactObject (path ++ ".purpose") ["type", "draft"] purposeJson
         pure (.prepare (← draft (path ++ ".purpose.draft") (← field (path ++ ".purpose") "draft" p)))
     | "query" => do
-        let p ← exactObject (path ++ ".purpose") ["type", "kind", "target", "view"] purposeJson
+        let windowed := (purposeJson.getObjVal? "start").toOption.isSome
+        let p ← exactObject (path ++ ".purpose")
+          (["type", "kind", "target", "view"] ++ (if windowed then ["start", "count"] else [])) purposeJson
         let view ← match ← string (path ++ ".purpose.view") (← field (path ++ ".purpose") "view" p) with
           | "resource" => pure QueryView.resource | "policy" => pure .policy
-          | "capability" => pure .capability | _ => failAt (path ++ ".purpose.view") "unknown query view"
+          | "capability" => pure .capability
+          | "tail" =>
+              if windowed then
+                pure (.tail (← nat (path ++ ".purpose.start") (← field (path ++ ".purpose") "start" p))
+                  (← nat (path ++ ".purpose.count") (← field (path ++ ".purpose") "count" p)))
+              else failAt (path ++ ".purpose") "a tail view names start and count"
+          | _ => failAt (path ++ ".purpose.view") "unknown query view"
         pure (.query ⟨← resourceKind (path ++ ".purpose.kind") (← field (path ++ ".purpose") "kind" p),
           ← nat (path ++ ".purpose.target") (← field (path ++ ".purpose") "target" p), view⟩)
     | _ => failAt (path ++ ".purpose.type") "expected prepare or query"
@@ -1230,11 +1251,11 @@ private def birthParts (path : String)
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
   let kind ← resourceKind (path ++ ".kind") (← field path "kind" obj)
-  unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" do
-    throw s!"{path}.storage: expected declared, content or grain"
+  unless storage = "declared" ∨ storage = "content" ∨ storage = "grain" ∨ storage = "stream" do
+    throw s!"{path}.storage: expected declared, content, grain or stream"
   unless (storage = "declared" ∧ (kind = .object ∨ kind = .account)) ∨
-      ((storage = "content" ∨ storage = "grain") ∧ kind = .object) do
-    throw s!"{path}: declared storage is object/account; content and grain storage are object"
+      ((storage = "content" ∨ storage = "grain" ∨ storage = "stream") ∧ kind = .object) do
+    throw s!"{path}: declared storage is object/account; content, grain and stream storage are object"
   let target ← nat (path ++ ".target") (← field path "target" obj)
   let owner := SubjectId.mk (← nat (path ++ ".owner") (← field path "owner" obj))
   let ownerId := CapabilityId.mk
@@ -1248,6 +1269,8 @@ private def birthParts (path : String)
   let cell : PackedCell CanonicalCellRegistry.registry ←
     if storage = "content" then
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
+    else if storage = "stream" then
+      pure ⟨.stream, CellState.materialize StreamCell.materializer 0⟩
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
@@ -2838,10 +2861,15 @@ private def intentJson (value : Intent) : Lean.Json := .mkObj
   [("subject", decimal value.subject.value), ("nonce", decimal value.nonce),
    ("purpose", match value.purpose with
      | .prepare d => .mkObj [("type", "prepare"), ("draft", draftJson d)]
-     | .query q => .mkObj [("type", "query"),
+     | .query q => .mkObj (([("type", "query"),
        ("kind", match q.kind with | .object => "object" | .account => "account" | .program => "program"),
        ("target", decimal q.target),
-       ("view", match q.view with | .resource => "resource" | .policy => "policy" | .capability => "capability")]),
+       ("view", match q.view with
+         | .resource => "resource" | .policy => "policy" | .capability => "capability"
+         | .tail _ _ => "tail")] : List (String × Lean.Json)) ++
+       (match q.view with
+         | .tail start count => [("start", decimal start), ("count", decimal count)]
+         | _ => []))),
    ("grants", .arr <| value.grants.toArray.map fun g => .mkObj
      [("kind", match g.kind with | .object => "object" | .account => "account" | .program => "program"),
       ("target", decimal g.target), ("capability", decimal g.capability.value)])]
@@ -3028,6 +3056,19 @@ private def contentCellJson (root : Digest) (store : ContentResource.ContentStor
     ("entries", .arr <| (StoreCodec.entries HyperdocumentCell.contentWire store).toArray.map
       contentEntryJson)]
 
+private def streamRecordJson (sequence : Nat) (record : StreamCell.StreamRecord) : Lean.Json :=
+  .mkObj [("sequence", decimal sequence), ("author", decimal record.author.value),
+    ("height", decimal record.height), ("transaction", decimal record.transaction.value),
+    ("topic", hexJson record.entry.topic), ("payloadDigest", decimal record.entry.payloadDigest.value),
+    ("to", record.entry.recipient.map (fun s => decimal s.value) |>.getD .null),
+    ("ref", record.entry.ref.map (fun r => Lean.Json.mkObj
+      [("cell", decimal r.1), ("sequence", decimal r.2)]) |>.getD .null)]
+
+private def streamCellJson (root : Digest) (store : Minidregg.Theory.Store.Store StreamCell.layout) : Lean.Json :=
+  .mkObj [("root", decimal root.value), ("nextSeq", decimal (StreamCell.nextSeq store)),
+    ("entries", .arr <| (StreamCell.tail store 1 store.support.card).toArray.map
+      fun (k, r) => streamRecordJson k r)]
+
 private def resourceJson (value : List UInt8 × List (Nat × Int)) : Result Lean.Json := do
   let packed ← match Minidregg.Theory.CellRegistry.PackedCell.decode
       CanonicalCellRegistry.registry value.1 with
@@ -3036,6 +3077,7 @@ private def resourceJson (value : List UInt8 × List (Nat × Int)) : Result Lean
   let view := match packed with
     | ⟨.content, payload⟩ => contentCellJson payload.root payload.logical
     | ⟨.declaredObject, payload⟩ => declaredCellJson payload.root payload.logical
+    | ⟨.stream, payload⟩ => streamCellJson payload.root payload.logical
     | _ => .mkObj [("root", decimal packed.payload.root.value), ("canonical", hexJson value.1)]
   pure <| .mkObj [("type", "resource"), ("cell", view),
     ("balances", .arr <| value.2.toArray.map fun p => .arr #[decimal p.1, signedDecimal p.2])]
@@ -3290,6 +3332,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
   | "view-resource" => do
       let value ← decoded "view-resource" NativeObservationController.resourceViewCodec bytes
       resourceJson value
+  | "view-tail" => do
+      let (root, next, entries) ← decoded "view-tail" NativeObservationController.tailViewCodec bytes
+      pure <| .mkObj [("type", "stream-tail"), ("root", decimal root.value), ("nextSeq", decimal next),
+        ("entries", .arr <| entries.toArray.map fun (k, r) => streamRecordJson k r)]
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"

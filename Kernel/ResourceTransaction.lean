@@ -4,6 +4,7 @@ nullifier, one candidate tuple and one durable publication. No wire variant
 contains a proposed post, raw patch, policy decision, or authority snapshot. -/
 import Kernel.DeclaredResourceScalar
 import Kernel.ContentResource
+import Compiler.StreamCell
 
 namespace Minidregg.Kernel.DeclaredResourceController
 open Minidregg.Compiler
@@ -28,9 +29,13 @@ abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 abbrev AuthoritySnapshot := CredentialAuthorityDomain.Snapshot
 abbrev Ambient := DeclaredResourceScalar.Ambient
 
+/-- A target's payload: declared scalar actions, a content command, or one
+stream append (the entry's bytes; the receiver derives its sequence position
+and digest). -/
 inductive Payload where
   | scalar (actions : List DeclaredActionLowering.Action)
   | content (command : ContentResource.Command)
+  | append (request : StreamCell.Append)
   deriving DecidableEq
 
 /-- A content command shows as its canonical command bytes. -/
@@ -39,6 +44,7 @@ instance : Repr Payload where
     | .scalar actions => Repr.addAppParen ("Payload.scalar " ++ reprArg actions) prec
     | .content command =>
         Repr.addAppParen ("Payload.content " ++ reprArg (ContentResource.commandCodec.encode command)) prec
+    | .append request => Repr.addAppParen ("Payload.append " ++ reprArg request) prec
 
 structure Target where
   kind : ResourceKind
@@ -83,9 +89,16 @@ def Command.requiresObservation (command : Command) : Bool := decide (1 < comman
 
 def payloadStream : StreamCodec Payload :=
   StreamCodec.xmap
-    (StreamCodec.sum (StreamCodec.list DeclaredResourceScalar.actionStream) ContentResource.commandStream)
-    (fun payload => match payload with | .scalar actions => .inl actions | .content command => .inr command)
-    (fun payload => match payload with | .inl actions => .scalar actions | .inr command => .content command)
+    (StreamCodec.sum (StreamCodec.list DeclaredResourceScalar.actionStream)
+      (StreamCodec.sum ContentResource.commandStream StreamCell.appendStream))
+    (fun payload => match payload with
+      | .scalar actions => .inl actions
+      | .content command => .inr (.inl command)
+      | .append request => .inr (.inr request))
+    (fun payload => match payload with
+      | .inl actions => .scalar actions
+      | .inr (.inl command) => .content command
+      | .inr (.inr request) => .append request)
     (by intro payload; cases payload <;> rfl)
 
 def targetStream : StreamCodec Target :=
@@ -109,8 +122,9 @@ def commandStream : StreamCodec Command :=
     (fun (subject, nonce, targets) => ⟨subject, nonce, targets⟩)
     (by intro command; cases command; rfl)
 
-/-- Version 4: no authority root in the command. Version-3 commands refuse. -/
-def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [4]
+/-- Version 5: a target payload may be a stream append. Version-4 commands
+(two payload forms) refuse to decode (`v4_command_refused`). -/
+def commandFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [5]
 
 def rawCommandCodec : LawfulCodec Command where
   encode command := commandFrame ++ commandStream.encode command
@@ -123,6 +137,20 @@ def rawCommandCodec : LawfulCodec Command where
     simp [exact]
 
 def commandCodec : LawfulCodec Command := ResourceBirthCodec.strictCodec rawCommandCodec
+
+/-- A version-4 command frame refuses to decode. -/
+theorem v4_command_refused (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ 4 :: payload) = none := by
+  let oldFrame : List UInt8 := "DREGG/RESOURCE/TRANSACTION".toUTF8.toList ++ [4]
+  have lengthExact : commandFrame.length = oldFrame.length := by
+    simp [commandFrame, oldFrame]
+  have different : oldFrame ≠ commandFrame := by decide +kernel
+  have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
+    simp [rawCommandCodec, lengthExact, different]
+  simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
+
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.v4_command_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms v4_command_refused
 
 @[simp] theorem command_decode_encode (command : Command) :
     commandCodec.decode (commandCodec.encode command) = some command := commandCodec.decode_encode command
@@ -164,6 +192,14 @@ def operationMarker (domain semantics : Digest) (command : Command) : Nat :=
 
 abbrev ordinaryVerb := DeclaredResourceScalar.ordinaryVerb
 
+/-- The verb a target requests: `appendObject` for a stream append on an
+object, the ordinary mutation verb otherwise. -/
+def payloadVerb : (kind : ResourceKind) → Payload → Verb kind
+  | .object, .append _ => .appendObject
+  | kind, _ => ordinaryVerb kind
+
+def Target.verb (target : Target) : Verb target.kind := payloadVerb target.kind target.payload
+
 /-- The original expression is retained as a specification for the optimized
 request construction. It is not called by the production request path. -/
 def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
@@ -174,7 +210,7 @@ def requestForReference (snapshot : AuthoritySnapshot) (semantics : Digest) (amb
   subject := command.subject
   subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
   target := ⟨target.target⟩
-  verb := ordinaryVerb target.kind
+  verb := target.verb
   argsDigest := argsDigest snapshot.domain semantics command
   effectsDigest := effectsDigest snapshot.domain semantics command
   nonce := command.nonce
@@ -198,7 +234,7 @@ def requestFor (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Am
     subject := command.subject
     subjectKeyEpoch := snapshot.authState.subjectKeyEpoch command.subject
     target := ⟨target.target⟩
-    verb := ordinaryVerb target.kind
+    verb := target.verb
     argsDigest := (Sp800185Cshake256.hash
       "DREGG.RESOURCE.TRANSACTION.ARGS/v3".toUTF8.toList framedBytes).digest
     effectsDigest := (Sp800185Cshake256.hash
@@ -237,6 +273,7 @@ inductive Reject where
   | capabilityRejected | policyRejected | policyInputRange | policyCastAlias | conflictingIncidences
   | wrongEnvelopeCount
   | observationRequired | observationRejected
+  | streamTopic | streamPayload
   deriving Repr
 
 def requireSome {α : Type} (reason : Reject) : Option α → Except Reject α
@@ -247,6 +284,7 @@ actions, a hyperdocument content cell for content commands. -/
 def Target.layout (target : Target) : Layout.{0, 0, 0} := match target.payload with
   | .scalar _ => EffectDeclaration.effectLayout
   | .content _ => Hyperdocument.layout
+  | .append _ => StreamCell.layout
 
 def Target.materializer (target : Target) : Materializer target.layout Digest := by
   cases target with
@@ -254,6 +292,7 @@ def Target.materializer (target : Target) : Materializer target.layout Digest :=
     cases payload with
     | scalar _ => exact DeclaredEffectCell.materializer
     | content _ => exact HyperdocumentCell.contentMaterializer
+    | append _ => exact StreamCell.materializer
 
 abbrev TargetCell (target : Target) := Materialized target.materializer
 
@@ -269,6 +308,7 @@ def packTarget (target : Target) (cell : TargetCell target) : PackedCell Registr
     cases payload with
     | scalar _ => exact DeclaredResourceScalar.packDeclared kind cell
     | content _ => exact ⟨.content, cell⟩
+    | append _ => exact ⟨.stream, cell⟩
 
 def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell Registry) :
     Option (TargetCell target) := by
@@ -279,6 +319,11 @@ def selectTarget (deployment : Deployment) (target : Target) (cell : PackedCell 
     | content _ => exact if kind = .object then
         if CanonicalCellRegistry.CellLaw deployment id cell then
           match cell with | ⟨.content, value⟩ => some value | _ => none
+        else none
+      else none
+    | append _ => exact if kind = .object then
+        if CanonicalCellRegistry.CellLaw deployment id cell then
+          match cell with | ⟨.stream, value⟩ => some value | _ => none
         else none
       else none
 
@@ -292,6 +337,12 @@ def contentAuthor (command : Command) (target : Target) : Hyperdocument.Principa
 
 def contentOperation (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command) :
     Hyperdocument.OperationId := ⟨effectsDigest snapshot.domain semantics command⟩
+
+/-- The record an append stores: the request's entry plus the signing
+subject, the admission height and the exact transaction id. -/
+def streamRecord (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (request : StreamCell.Append) : StreamCell.StreamRecord :=
+  ⟨command.subject, ambient.height, ⟨operationMarker snapshot.domain semantics command⟩, request.entry⟩
 
 /-- The only target computation. It invokes source-owned typed operations,
 never a host supplied post. Every branch returns the post store the source
@@ -315,11 +366,19 @@ def computeTarget (snapshot : AuthoritySnapshot)
             (contentOperation snapshot semantics command) (ContentResource.documentOf id) pre content with
         | .error reason => .error (.content reason)
         | .ok prepared => .ok prepared.post.logical
+    | append request => exact do
+        if kind != .object then throw .wrongRole
+        if version != StreamCell.commandVersion then throw .unsupportedVersion
+        if root != pre.root then throw .staleTarget
+        if !decide (request.topic.length ≤ StreamCell.maxTopicBytes) then throw .streamTopic
+        if !decide (request.payload.length ≤ StreamCell.maxPayloadBytes) then throw .streamPayload
+        pure ((StreamCell.appendOp pre.logical
+          (streamRecord snapshot semantics ambient command request)).apply pre.logical)
 
 /-- The target's one guarded patch, generated by its source operation from the
 loaded store: the scalar declaration's own lowering, or the content run's patch. -/
-def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : Command)
-    (target : Target) (pre : TargetCell target) : Patch target.layout := by
+def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (ambient : Ambient)
+    (command : Command) (target : Target) (pre : TargetCell target) : Patch target.layout := by
   cases target with
   | mk kind id capability version root payload observe =>
     cases payload with
@@ -332,6 +391,8 @@ def targetPatch (snapshot : AuthoritySnapshot) (semantics : Digest) (command : C
         exact match computed with
           | .ok progress => progress.2
           | .error _ => []
+    | append request =>
+        exact [StreamCell.appendOp pre.logical (streamRecord snapshot semantics ambient command request)]
 
 /-- One declaration is the complete transaction, fixed by the receiving plan.
 The family outcome is the actual typed result; mode evidence certifies the
@@ -347,9 +408,9 @@ def targetFamily (_deployment : Deployment) (snapshot : AuthoritySnapshot)
   outcomeCodec := fun _ => target.outcomeCodec
   ModeEvidence := fun _ post => PLift (computeTarget snapshot semantics ambient command target pre = .ok post)
   Postcondition := fun _ _ logical =>
-    (targetPatch snapshot semantics command target pre).ResultAt pre.logical logical
+    (targetPatch snapshot semantics ambient command target pre).ResultAt pre.logical logical
   effectDigest := fun _ => effectsDigest snapshot.domain semantics command
-  patch := fun _ _ => targetPatch snapshot semantics command target pre
+  patch := fun _ _ => targetPatch snapshot semantics ambient command target pre
   nullifier := fun _ _ => none
   Release := fun _ _ => Empty
   DeclassificationAuthority := fun _ _ => Empty
@@ -387,7 +448,7 @@ def prepareTarget (deployment : Deployment) (directory : Directory Nat Registry)
       | .error reason => .error reason
       | .ok post =>
         match validate target.materializer pre pre.root
-            (targetPatch snapshot semantics command target pre) with
+            (targetPatch snapshot semantics ambient command target pre) with
         | .rejected _ => .error .patchValidation
         | .accepted validated =>
           let candidate : PolicyInstall.Candidate

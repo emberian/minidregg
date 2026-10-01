@@ -26,6 +26,8 @@ inductive QueryView where
   | policy
   /-- Only the exact observation grant used to authorize this query. -/
   | capability
+  /-- A stream window: the entries at positions `start … start+count-1`. -/
+  | tail (start count : Nat)
   deriving DecidableEq, Repr
 
 structure Query where
@@ -72,16 +74,21 @@ def grantStream : StreamCodec GrantRef :=
     (fun grant => (grant.kind, grant.target, grant.capability))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2⟩) (by intro grant; cases grant; rfl)
 
+/-- The three earlier views keep their exact bytes (`capability` is `[1, 0]`);
+a tail view is `[1, 1, start, count]`. -/
 def queryViewStream : StreamCodec QueryView :=
-  StreamCodec.xmap (StreamCodec.sum StreamCodec.bool StreamCodec.bool)
+  StreamCodec.xmap (StreamCodec.sum StreamCodec.bool
+      (StreamCodec.option (StreamCodec.product StreamCodec.nat StreamCodec.nat)))
     (fun view => match view with
       | .resource => .inl false
       | .policy => .inl true
-      | .capability => .inr false)
+      | .capability => .inr none
+      | .tail start count => .inr (some (start, count)))
     (fun wire => match wire with
       | .inl false => .resource
       | .inl true => .policy
-      | .inr _ => .capability)
+      | .inr none => .capability
+      | .inr (some (start, count)) => .tail start count)
     (by intro view; cases view <;> rfl)
 
 def queryStream : StreamCodec Query :=

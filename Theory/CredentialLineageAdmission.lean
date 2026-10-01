@@ -185,7 +185,7 @@ theorem delegationShapeCheck_refuses_missing_delegate {kind : ResourceKind}
   | false => rfl
   | true =>
       have shape := (delegationShapeCheck_iff request child parent parentage).mp checked
-      exact False.elim (missing (shape.delegate ▸ shape.parentScope.verb))
+      exact False.elim (missing shape.requires_delegate_verb)
 
 theorem delegationShapeCheck_refuses_bearer {kind : ResourceKind}
     (request : Request kind) (child parent : Capability kind) (parentage : Parentage)

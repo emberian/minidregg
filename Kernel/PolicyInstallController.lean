@@ -439,7 +439,7 @@ theorem Installed.control_capability_required [DecidableEq F]
   | capability cap commitment commitmentWitness membershipWitness issuerWitness
       selfRevocationWitness useWitness semantic useVerified commitmentVerified
       membershipVerified issuerVerified selfVerified ancestorVerified channelVerified =>
-      exact ⟨cap, commitment, rfl, semantic.scope.verb⟩
+      exact ⟨cap, commitment, rfl, (Verb.allowedBy_iff_mem rfl).mp semantic.scope.verb⟩
 
 /-- The source being changed selects its own current governing policy. A
 caller cannot name an unrelated permissive policy in the request context. -/
