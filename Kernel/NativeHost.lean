@@ -1260,6 +1260,7 @@ def lookup (config : Config) (bytes : List UInt8) : IO Outcome := do
 
 end Minidregg.Kernel.NativeHost
 
-#print axioms Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh
+/-- info: 'Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHost.historicalReceipt_exactCandidate_fresh
 /-- info: 'Minidregg.Kernel.NativeHost.historicalReceipt_bound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NativeHost.historicalReceipt_bound

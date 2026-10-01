@@ -592,9 +592,12 @@ instance : ToString Refusal := ⟨fun refusal => match refusal.leaf with
 
 end Minidregg.Compiler
 
-#print axioms Minidregg.Compiler.RefusalReason.capabilityRefusal_eq_none_iff_admissible
-#print axioms Minidregg.Compiler.RefusalReason.sample_admitted
-#print axioms Minidregg.Compiler.RefusalReason.sample_revoked
+/-- info: 'Minidregg.Compiler.RefusalReason.capabilityRefusal_eq_none_iff_admissible' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.RefusalReason.capabilityRefusal_eq_none_iff_admissible
+/-- info: 'Minidregg.Compiler.RefusalReason.sample_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.RefusalReason.sample_admitted
+/-- info: 'Minidregg.Compiler.RefusalReason.sample_revoked' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Compiler.RefusalReason.sample_revoked
 
 /-- info: 'Minidregg.Compiler.LawLeaf.of_fails' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms Minidregg.Compiler.LawLeaf.of_fails
