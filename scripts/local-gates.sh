@@ -35,6 +35,9 @@ if [[ "$tree_before" != "$tree_after" ]]; then
   exit 1
 fi
 
+echo "== gate 3b: the prover glue matches what its Lean source emits now"
+bash scripts/check-prover-glue.sh
+
 echo "== gate 4/5: every library module is rooted"
 bash scripts/check-build-closure.sh
 
