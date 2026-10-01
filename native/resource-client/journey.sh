@@ -45,6 +45,11 @@
 #   SPONSOR_WS NEWCOMER_WS SPONSOR_SUBJECT NEWCOMER_SUBJECT
 #   SHELL_BIN HERMES_BIN SPK_HOST_BIN CANDIDATE  manifest entries ("" when absent)
 #   HOOK_TIMEOUT_S (default 3600)
+# A hook that binds a Unix socket (its own Store, a grain controller) sources
+# journey.d/lib/shortdir.sh and runs under `journey_shortdir NAME`, NAME's
+# longest socket declared in that file's table: nothing binds under the run
+# root, whose length is the caller's. The journey checks every declared socket
+# before J0 and prints their margins first.
 # The live service is running and is ours; a hook must stop every process it
 # starts. Exit 0 = PASS; any other exit = FAIL. The LAST stdout line is the
 # deciding artifact's absolute path; stderr's last line is the detail.
@@ -67,6 +72,7 @@ umask 077
 
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 SELF="$HERE/$(basename -- "$0")"
+. "$HERE/journey.d/lib/shortdir.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 MANIFEST.json NEW_RUN_ROOT" >&2
@@ -97,15 +103,26 @@ for name in host mini store verifier shell hermes spkHost candidate; do
   [ "$got" = "$want" ] || { echo "journey: $name sha256 $got != pinned $want ($path)" >&2; exit 2; }
 done
 
+# Sockets: nothing binds under the run root. The world's socket and every
+# hook's sockets live in short private directories (journey.d/lib/shortdir.sh);
+# each declared socket must fit sun_path, or the run refuses here, by name,
+# before anything is created.
+journey_check_all_sockets
+MARGINS=$(journey_margin_table)
+printf '%s\n' "$MARGINS" | awk -F '\t' '{ printf "  %-6s %-7s %5s %7s  %s\n", $1, $2, $3, $4, $5 }' >&2
+
 mkdir -m 700 "$RUN"
 RUN=$(CDPATH='' cd -- "$RUN" && pwd)
+printf '%s\n' "$MARGINS" >"$RUN/socket-margins.tsv"
+JOURNEY_SHORTDIR_NOTRAP=1 journey_shortdir world "$RUN"   # $RUN/rt -> the world's short directory
+export -n JOURNEY_RT                                      # a hook takes its own
 W=$RUN/world                 # the Store root the bootstrap creates
 S=$RUN/steps                 # per-step logs and artifacts
 mkdir -m 700 "$S"
 REQ=$RUN/requests; mkdir -m 700 "$REQ"
 TSV=$RUN/journey.tsv; : >"$TSV"
 CONFIG=$W/deployment/pinned-config.json
-SOCKET=$W/public/mini.sock
+SOCKET=$JOURNEY_RT/world.sock  # the world Store's socket (not under $W: see journey_shortdir)
 SPONSOR_WS=$W/sponsor
 NEWCOMER_WS=$W/newcomer-workspace
 SPONSOR_SUBJECT=7
@@ -353,7 +370,7 @@ reopen() {
   REOPEN_S=$(elapsed "$t0" "$t1")
   echo "reopen $tag: ${REOPEN_S}s to first signed read ($n polls)" >>"$RUN/services.log"
 }
-cleanup() { stop_server; }
+cleanup() { stop_server; journey_shortdir_return; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
@@ -384,7 +401,7 @@ craft() {  # craft SOURCE_INTENT SUBJECT [AUTHORITY_ROOT] > out
 
 step_J0() {
   ARTIFACT=$W/handoff.json
-  call bootstrap sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" \
+  call bootstrap sh "$HERE/newparticipant-acceptance.sh" "$HOST" "$MINI" "$STORE" "$VERIFIER" "$W" "$SOCKET" \
     || fail "bootstrap exit $(cat "$SD/bootstrap.rc"): $(tail -1 "$SD/bootstrap.err")" || return
   jq -e '.type == "minidregg-newparticipant-fixture-v1"' "$W/handoff.json" >/dev/null \
     || fail "no handoff.json" || return
@@ -758,6 +775,12 @@ hook() {
   rc=$?
   ARTIFACT=$(tail -1 "$SD/hook.out")
   DETAIL=$(tail -1 "$SD/hook.err")
+  # A hook that ran under journey_shortdir names paths in its short directory,
+  # which is now copied back to $SD/rt and removed.
+  if [ -f "$SD/rt.origin" ]; then
+    local origin; origin=$(cat "$SD/rt.origin")
+    ARTIFACT=${ARTIFACT//"$origin"/"$SD/rt"}; DETAIL=${DETAIL//"$origin"/"$SD/rt"}
+  fi
   [ "$rc" = 0 ] || { DETAIL="hook exit $rc: $DETAIL"; return 1; }
   # The live service must still be ours and alive; a hook may not take it down.
   ours "$(server_pid)" || fail "hook left the journey service stopped" || return
@@ -840,6 +863,7 @@ run_step JPAY6 J0
 run_step JP2 J0
 
 stop_server || echo "journey: could not stop the service cleanly" >&2
+journey_shortdir_return
 trap - EXIT
 F=$(frontier)
 result_json "$F"

@@ -29,10 +29,13 @@ for tool in python3 jq; do
   command -v "$tool" >/dev/null || { echo "jpay4: $tool is required" >&2; exit 2; }
 done
 [ -x "$PAY_WATCHER_BIN" ] || { echo "J-PAY-4 FAIL setup: pay-watcher binary missing at $PAY_WATCHER_BIN" >&2; exit 1; }
-DIR="$JOURNEY_STEP_DIR/jpay4"
-if [ -e "$DIR" ]; then echo "jpay4: refusing to reuse $DIR" >&2; exit 2; fi
+# Its Store's socket lives in a short directory, kept as $JOURNEY_STEP_DIR/rt
+# (journey.d/lib/shortdir.sh); python runs as a child so the copy-back runs.
+. "$HERE/lib/shortdir.sh"
+journey_shortdir jpay4
+DIR=$JOURNEY_D
 mkdir -p "$DIR"
-exec python3 - "$DIR" <<'PY'
+python3 - "$DIR" <<'PY'
 import json, os, shutil, signal, subprocess, sys, time
 
 DIR = sys.argv[1]

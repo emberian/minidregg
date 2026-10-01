@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Journey hook m4: runs the lane's stand-alone journey, shell-journey.sh, on ITS OWN
-# fresh private Store under JOURNEY_STEP_DIR with this journey's pinned
+# fresh private Store (in its short directory; journey.d/lib/shortdir.sh) with this journey's pinned
 # binaries (the hook contract permits a hook its own Store; jpay2 does the
 # same). It does not act on the journey's Store, and its detail line says so:
 # the verdict is the lane script's own.
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-D=$JOURNEY_STEP_DIR/m4
+. "$HERE/journey.d/lib/shortdir.sh"
+journey_shortdir m4   # its sockets live in a short directory, kept as $JOURNEY_STEP_DIR/rt
+D=$JOURNEY_D
 "$HERE/shell-journey.sh" "$HOST" "$MINI" "$SHELL_BIN" "$STORE" "$VERIFIER" "$D" "${M4_PORT:-22423}" >"$JOURNEY_STEP_DIR/m4.out" 2>"$JOURNEY_STEP_DIR/m4.err"
 rc=$?
 echo "$D"

@@ -20,6 +20,7 @@
 # Last stdout line: the result JSON. Last stderr line: the detail.
 set -euo pipefail
 D=$JOURNEY_STEP_DIR
+. "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/lib/shortdir.sh"
 fail() { echo "M7: $*" >&2; exit 1; }
 [ -n "${CANDIDATE:-}" ] && [ -f "$CANDIDATE" ] || fail "no candidate provenance in the manifest (build with deploy/candidate/build.sh)"
 jq -e '.type == "minidregg-candidate-provenance-v1"' "$CANDIDATE" >/dev/null || fail "candidate is not minidregg-candidate-provenance-v1"
@@ -60,17 +61,18 @@ for role in host mini store verifier; do
   [ "$a" = "$b" ] || fail "$role does not reproduce: candidate $a, reference $b"
 done
 
-# 4. the operator procedure, on its own Store. The socket path must stay under
-# 108 bytes, so the Store sits directly under the run root, not the step dir.
-S=$JOURNEY_RUN/m7-store
-cleanup() { "$C/run.sh" stop --state "$S" >"$D/operator-stop.txt" 2>&1 || true; }
+# 4. the operator procedure, on its own Store, in a short directory (its
+# socket must fit sun_path), kept as $D/rt (journey.d/lib/shortdir.sh).
+journey_shortdir m7
+S=$JOURNEY_D
+cleanup() { "$C/run.sh" stop --state "$S" >"$D/operator-stop.txt" 2>&1 || true; journey_shortdir_return; }
 trap cleanup EXIT
 "$C/run.sh" init --manifest "$C/manifest.json" --params "$C/genesis-params.example.json" --state "$S" >"$D/operator-init.txt" 2>&1 || fail "run.sh init failed: $(tail -1 "$D/operator-init.txt")"
 "$C/run.sh" start --state "$S" >"$D/operator-start.txt" 2>&1 || fail "run.sh start failed: $(tail -1 "$D/operator-start.txt")"
 "$C/run.sh" sponsor --state "$S" >"$D/operator-sponsor.txt" 2>&1 || fail "run.sh sponsor failed: $(tail -1 "$D/operator-sponsor.txt")"
 jq -e '.type == "resource"' "$S/logs/sponsor-factory-read.json" >/dev/null || fail "sponsor's signed factory read did not answer"
 "$C/run.sh" stop --state "$S" >"$D/operator-stop.txt" 2>&1 || fail "run.sh stop failed"
-trap - EXIT
+trap journey_shortdir_return EXIT
 
 jq -n --arg commit "$(jq -r .source.commit "$CANDIDATE")" --arg refCommit "$(jq -r .source.commit "$ref")" \
   --arg candidate "$C" --arg reference "$R" --slurpfile p "$CANDIDATE" \

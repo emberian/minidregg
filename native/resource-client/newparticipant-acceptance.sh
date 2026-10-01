@@ -5,11 +5,14 @@
 set -eu
 umask 077
 
-if [ "$#" -ne 5 ]; then
-  echo "usage: $0 HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY" >&2
+if [ "$#" -ne 5 ] && [ "$#" -ne 6 ]; then
+  echo "usage: $0 HOST MINI STORE VERIFIER NEW_PRIVATE_DIRECTORY [PUBLIC_SOCKET]" >&2
   exit 2
 fi
 HOST=$1 MINI=$2 STORE=$3 VERIFIER=$4 ROOT=$5
+# The public socket defaults to ROOT/public/mini.sock; a caller whose ROOT is
+# deep (the journey's world) names a short one (journey.d/lib/shortdir.sh).
+SOCKET=${6:-}
 # Each Store is an independent deployment: its domain and its sponsor subject
 # number are operator choices. Two Stores that exchange selected releases need
 # distinct domains, and the recipient enrolls the source owner under its home
@@ -33,9 +36,13 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 command -v sha256sum >/dev/null 2>&1 || { echo 'sha256sum is required' >&2; exit 2; }
 case "$ROOT" in /*) ;; *) echo 'fixture path must be absolute' >&2; exit 2;; esac
 [ ! -e "$ROOT" ] && [ ! -L "$ROOT" ] || { echo 'fixture already exists' >&2; exit 2; }
+case "${SOCKET:-/}" in /*) ;; *) echo 'public socket path must be absolute' >&2; exit 2;; esac
+. "$HERE/journey.d/lib/shortdir.sh"
+journey_check_sun_len "${SOCKET:-$ROOT/public/mini.sock}" "the public socket of $ROOT"
 mkdir -m 700 "$ROOT"
 ROOT=$(CDPATH='' cd -- "$ROOT" && pwd)
 mkdir -m 700 "$ROOT/public" "$ROOT/namespace" "$ROOT/attempts"
+SOCKET=${SOCKET:-$ROOT/public/mini.sock}
 
 "$MINI" keygen --secret "$ROOT/sponsor.key" --public "$ROOT/sponsor.pub" \
   >"$ROOT/sponsor-keygen.json"
@@ -89,7 +96,6 @@ GENESIS_PAY_OBSERVER="$ROOT/pay/genesis-observer.json" \
 CONFIG="$ROOT/deployment/pinned-config.json"
 [ -s "$CONFIG" ] || { echo 'bootstrap produced no pinned config' >&2; exit 1; }
 
-SOCKET="$ROOT/public/mini.sock"
 nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" \
   >"$ROOT/public/serve.log" 2>&1 </dev/null &
 SERVER_PID=$!
