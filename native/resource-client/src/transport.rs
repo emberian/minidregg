@@ -8,6 +8,8 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 // Mirrors FnEvidenceCodec.maxHostFrameBytes; the host's length includes op byte.
@@ -433,8 +435,16 @@ pub(crate) fn read_frame<R: Read>(reader: &mut R) -> io::Result<Option<Vec<u8>>>
             "invalid frame length",
         ));
     }
-    let mut frame = vec![0; size];
-    reader.read_exact(&mut frame)?;
+    // Grown as bytes arrive: a length prefix alone reserves nothing, so a
+    // client that names a large frame and trickles holds only what it sent.
+    let mut frame = Vec::new();
+    reader.take(size as u64).read_to_end(&mut frame)?;
+    if frame.len() != size {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "truncated frame",
+        ));
+    }
     Ok(Some(frame))
 }
 
@@ -761,7 +771,22 @@ pub(crate) fn exchange_unix(socket: &Path, frame: &[u8]) -> Result<Vec<u8>, Stri
     stream
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("cannot set socket write deadline: {e}"))?;
-    write_frame(&mut stream, frame).map_err(|e| format!("uncertain host request write: {e}"))?;
+    if let Err(error) = write_frame(&mut stream, frame) {
+        // The service may have refused this connection before reading it
+        // (`busy`) and closed it; its refusal is then already waiting here.
+        // Only a 254 counts: the socket answers 254 solely for requests it
+        // never forwarded, so the status is certain. Anything else stays
+        // uncertain.
+        if let Ok(Some(refusal)) = read_frame(&mut DeadlinePipe {
+            reader: &mut stream,
+            deadline: Instant::now() + Duration::from_secs(1),
+        }) {
+            if refusal.first() == Some(&254) {
+                return Ok(refusal);
+            }
+        }
+        return Err(format!("uncertain host request write: {error}"));
+    }
     read_frame(&mut DeadlinePipe {
         reader: &mut stream,
         deadline: Instant::now() + Duration::from_secs(600),
@@ -898,6 +923,12 @@ impl HostProcess {
         Ok(process)
     }
 
+    /// Kill and reap, so no two Hosts ever hold the Store at once.
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
     fn exited(&mut self) -> bool {
         !matches!(self.child.try_wait(), Ok(None))
     }
@@ -933,6 +964,50 @@ impl Drop for HostProcess {
     }
 }
 
+/// The bounds of a served socket. Every connection is read on its own thread
+/// under its own deadline; only the Host exchange is serialised.
+#[derive(Clone, Copy)]
+struct ServeBounds {
+    /// A client has this long, from accept, to deliver one complete envelope.
+    read_deadline: Duration,
+    /// Connections alive at once (being read, queued for the Host, or awaiting
+    /// its reply). The next one is refused `busy: connection limit`. Each holds
+    /// at most one envelope (`MAX_FRAME`), so this also bounds buffered bytes.
+    max_connections: usize,
+    /// Envelopes read and waiting for the Host. The next one is refused
+    /// `busy: host queue full` before it reaches the Host.
+    host_queue: usize,
+}
+
+const SERVE_BOUNDS: ServeBounds = ServeBounds {
+    read_deadline: Duration::from_secs(10),
+    max_connections: 64,
+    host_queue: 32,
+};
+
+/// One envelope's request, read and checked, handed to the Host thread. The
+/// reply channel has room for the one reply, so the Host thread never waits
+/// on a client.
+struct HostJob {
+    request: Vec<u8>,
+    reply: mpsc::SyncSender<Vec<u8>>,
+}
+
+/// What a connection thread needs to judge an envelope before the Host sees it.
+struct EnvelopeRules<'a> {
+    operator: bool,
+    config_bytes: &'a [u8],
+    host_sha256: &'a [u8; 32],
+    catalog_enabled: bool,
+    read_deadline: Duration,
+}
+
+fn refuse(stream: &mut UnixStream, reason: &str) {
+    let mut refusal = vec![254];
+    refusal.extend_from_slice(reason.as_bytes());
+    let _ = write_frame(stream, &refusal);
+}
+
 /// The accept loop. Nothing a client sends ends it: a bad envelope is refused
 /// (254) or dropped, and a Host that stops answering is replaced. A request in
 /// flight when its Host stopped gets no reply, which the client reports as an
@@ -946,89 +1021,198 @@ fn supervise(
     catalog_enabled: bool,
     start: &mut dyn FnMut() -> Result<HostProcess, String>,
 ) -> Result<(), String> {
+    supervise_bounded(
+        listener,
+        &EnvelopeRules {
+            operator,
+            config_bytes,
+            host_sha256,
+            catalog_enabled,
+            read_deadline: SERVE_BOUNDS.read_deadline,
+        },
+        SERVE_BOUNDS,
+        start,
+    )
+}
+
+/// Three kinds of thread. This one owns the Host and runs one request at a
+/// time, in arrival order. One accept thread admits connections up to
+/// `max_connections`. Each connection thread reads its envelope under its
+/// own deadline, judges it, queues it for the Host (or is refused `busy`),
+/// and writes the reply. A client that trickles bytes, sends nothing, or
+/// never reads its reply holds its own thread and nothing else.
+fn supervise_bounded(
+    listener: &UnixListener,
+    rules: &EnvelopeRules<'_>,
+    bounds: ServeBounds,
+    start: &mut dyn FnMut() -> Result<HostProcess, String>,
+) -> Result<(), String> {
     let mut process = start()?;
-    for accepted in listener.incoming() {
-        let mut stream = match accepted {
-            Ok(stream) => stream,
-            Err(e) => {
-                eprintln!("mini: socket accept failed: {e}");
-                std::thread::sleep(Duration::from_millis(100));
-                continue;
-            }
-        };
-        if operator {
-            match peer_uid(&stream) {
-                Ok(uid) if uid == effective_uid() => {}
-                Ok(_) => {
-                    let _ = write_frame(&mut stream, b"\xfeoperator peer UID mismatch");
-                    continue;
-                }
-                Err(e) => {
-                    eprintln!("mini: {e}");
-                    let _ = write_frame(&mut stream, b"\xfeoperator peer credential unavailable");
-                    continue;
-                }
-            }
-        }
-        if let Err(e) = stream.set_write_timeout(Some(Duration::from_secs(10))) {
-            eprintln!("mini: cannot set client write deadline: {e}");
-            continue;
-        }
-        let envelope = match read_frame(&mut DeadlinePipe {
-            reader: &mut stream,
-            deadline: Instant::now() + Duration::from_secs(10),
-        }) {
-            Ok(Some(frame)) => frame,
-            Ok(None) => continue,
-            Err(e) => {
-                eprintln!("mini: discarded invalid socket frame: {e}");
-                continue;
-            }
-        };
-        let request = match request_from_envelope(&envelope, config_bytes, host_sha256) {
-            Ok(request) => request,
-            Err(reason) => {
-                let mut refusal = vec![254];
-                refusal.extend_from_slice(reason.as_bytes());
-                let _ = write_frame(&mut stream, &refusal);
-                continue;
-            }
-        };
-        if request.len() > HOST_MAX_FRAME {
-            let _ = write_frame(&mut stream, b"\xfehost frame exceeds bound");
-            continue;
-        }
-        if !(if operator {
-            allowed_operator_operation(request)
-        } else {
-            allowed_operation(request, catalog_enabled)
-        }) {
-            let _ = write_frame(&mut stream, b"\xfeoperation unavailable on selected socket");
-            continue;
-        }
+    let (jobs, queue) = mpsc::sync_channel::<HostJob>(bounds.host_queue);
+    let stopping = AtomicBool::new(false);
+    let live = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let (stopping, live) = (&stopping, &live);
+        scope.spawn(move || {
+            accept_connections(scope, listener, rules, bounds, jobs, stopping, live)
+        });
+        let ended = serve_host(&mut process, queue, start);
+        stopping.store(true, Ordering::SeqCst);
+        ended
+    })
+}
+
+/// The Host thread: one request at a time, a Host that stops is replaced.
+/// Returns only when a Host cannot be started (or every sender is gone).
+fn serve_host(
+    process: &mut HostProcess,
+    queue: mpsc::Receiver<HostJob>,
+    start: &mut dyn FnMut() -> Result<HostProcess, String>,
+) -> Result<(), String> {
+    for job in queue {
         if process.exited() {
             eprintln!("mini: host process {} exited between requests; restarting", process.child.id());
-            drop(process);
-            process = start()?;
+            process.stop();
+            *process = start()?;
         }
-        match process.exchange(request) {
+        match process.exchange(&job.request) {
             Ok(reply) => {
-                if let Err(error) = write_frame(&mut stream, &reply) {
-                    eprintln!("mini: client lost host reply; status uncertain: {error}");
-                }
+                let _ = job.reply.send(reply);
             }
             Err(error) => {
                 eprintln!(
                     "mini: host process {}: {error}; status uncertain; restarting",
                     process.child.id()
                 );
-                drop(stream);
-                drop(process);
-                process = start()?;
+                drop(job);
+                process.stop();
+                *process = start()?;
             }
         }
     }
     Ok(())
+}
+
+fn accept_connections<'scope, 'env>(
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+    listener: &'env UnixListener,
+    rules: &'env EnvelopeRules<'env>,
+    bounds: ServeBounds,
+    jobs: mpsc::SyncSender<HostJob>,
+    stopping: &'scope AtomicBool,
+    live: &'scope AtomicUsize,
+) {
+    while !stopping.load(Ordering::SeqCst) {
+        // Wait for a connection in short slices so a stopping service is seen.
+        let mut fd = PollFd {
+            fd: listener.as_raw_fd(),
+            events: 1,
+            revents: 0,
+        };
+        let ready = unsafe { poll(&mut fd, 1, 100) };
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                eprintln!("mini: socket poll failed: {error}");
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            continue;
+        }
+        if ready == 0 {
+            continue;
+        }
+        let mut stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(e) => {
+                eprintln!("mini: socket accept failed: {e}");
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+        };
+        if live.fetch_add(1, Ordering::SeqCst) >= bounds.max_connections {
+            live.fetch_sub(1, Ordering::SeqCst);
+            // A fresh socket's send buffer takes this frame without waiting.
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+            refuse(&mut stream, "busy: connection limit");
+            continue;
+        }
+        let jobs = jobs.clone();
+        let spawned = std::thread::Builder::new()
+            .name("mini-serve-client".into())
+            .stack_size(256 * 1024)
+            .spawn_scoped(scope, move || {
+                serve_connection(stream, rules, &jobs);
+                live.fetch_sub(1, Ordering::SeqCst);
+            });
+        if let Err(error) = spawned {
+            // The closure (and its stream) is dropped unrun; release its slot.
+            live.fetch_sub(1, Ordering::SeqCst);
+            eprintln!("mini: cannot start a client reader: {error}");
+        }
+    }
+}
+
+/// One connection: read the envelope by its deadline, judge it, queue it for
+/// the Host, and write the reply.
+fn serve_connection(
+    mut stream: UnixStream,
+    rules: &EnvelopeRules<'_>,
+    jobs: &mpsc::SyncSender<HostJob>,
+) {
+    if let Err(e) = stream.set_write_timeout(Some(Duration::from_secs(10))) {
+        eprintln!("mini: cannot set client write deadline: {e}");
+        return;
+    }
+    if rules.operator {
+        match peer_uid(&stream) {
+            Ok(uid) if uid == effective_uid() => {}
+            Ok(_) => return refuse(&mut stream, "operator peer UID mismatch"),
+            Err(e) => {
+                eprintln!("mini: {e}");
+                return refuse(&mut stream, "operator peer credential unavailable");
+            }
+        }
+    }
+    let mut envelope = match read_frame(&mut DeadlinePipe {
+        reader: &mut stream,
+        deadline: Instant::now() + rules.read_deadline,
+    }) {
+        Ok(Some(frame)) => frame,
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("mini: refused invalid socket frame: {e}");
+            return refuse(&mut stream, &format!("invalid socket frame: {e}"));
+        }
+    };
+    let request_start = match request_from_envelope(&envelope, rules.config_bytes, rules.host_sha256) {
+        Ok(request) => envelope.len() - request.len(),
+        Err(reason) => return refuse(&mut stream, reason),
+    };
+    envelope.drain(..request_start);
+    let request = envelope;
+    if request.len() > HOST_MAX_FRAME {
+        return refuse(&mut stream, "host frame exceeds bound");
+    }
+    if !(if rules.operator {
+        allowed_operator_operation(&request)
+    } else {
+        allowed_operation(&request, rules.catalog_enabled)
+    }) {
+        return refuse(&mut stream, "operation unavailable on selected socket");
+    }
+    let (reply, answer) = mpsc::sync_channel(1);
+    match jobs.try_send(HostJob { request, reply }) {
+        Ok(()) => {}
+        Err(mpsc::TrySendError::Full(_)) => return refuse(&mut stream, "busy: host queue full"),
+        Err(mpsc::TrySendError::Disconnected(_)) => return,
+    }
+    // No reply means the Host stopped during this request (or the service is
+    // ending): closing without a frame is what `invoke` reports as uncertain.
+    if let Ok(reply) = answer.recv() {
+        if let Err(error) = write_frame(&mut stream, &reply) {
+            eprintln!("mini: client lost host reply; status uncertain: {error}");
+        }
+    }
 }
 
 #[cfg(any(
@@ -1292,6 +1476,189 @@ done"#;
         assert_eq!(invoke(&socket, &config, 5, &[7]).unwrap(), vec![5]);
         assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 2);
         let _ = fs::remove_dir_all(directory);
+    }
+
+    /// A fake Host: answers each frame with its own operation byte; op 8
+    /// sleeps one second first (a slow request); op 9 exits instead.
+    const FAKE_HOST: &str = r#"while n=$(dd bs=1 count=4 2>/dev/null | od -An -tu4 | tr -d ' \n'); [ -n "$n" ]; do
+  op=$(dd bs=1 count=1 2>/dev/null | od -An -tu1 | tr -d ' \n')
+  [ "$n" -gt 1 ] && dd bs=1 count=$((n - 1)) of=/dev/null 2>/dev/null
+  [ "$op" = 9 ] && exit 3
+  [ "$op" = 8 ] && sleep 1
+  printf '\001\000\000\000'; printf "\\$(printf %03o "$op")"
+done"#;
+
+    struct FakeService {
+        directory: std::path::PathBuf,
+        socket: std::path::PathBuf,
+        config: std::path::PathBuf,
+    }
+
+    impl Drop for FakeService {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    fn fake_service(name: &str, bounds: ServeBounds) -> FakeService {
+        let directory = std::env::temp_dir().join(format!(
+            "mini-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let socket = directory.join("test.sock");
+        let config = directory.join("config.json");
+        fs::write(&config, b"config").unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        thread::spawn(move || {
+            let mut start =
+                || HostProcess::start(Command::new("/bin/sh").arg("-c").arg(FAKE_HOST), "fake");
+            let rules = EnvelopeRules {
+                operator: false,
+                config_bytes: b"config",
+                host_sha256: &[0; 32],
+                catalog_enabled: false,
+                read_deadline: bounds.read_deadline,
+            };
+            let _ = supervise_bounded(&listener, &rules, bounds, &mut start);
+        });
+        FakeService {
+            directory,
+            socket,
+            config,
+        }
+    }
+
+    fn timed_invoke(service: &FakeService, operation: u8) -> (Result<Vec<u8>, String>, Duration) {
+        let started = Instant::now();
+        let result = invoke(&service.socket, &service.config, operation, &[]);
+        (result, started.elapsed())
+    }
+
+    /// A client that sends three bytes of a frame and stalls holds its own
+    /// connection only: another client is answered at once, and the staller
+    /// is refused by name at its deadline.
+    #[test]
+    fn serve_a_trickling_client_holds_no_one_else() {
+        let service = fake_service(
+            "trickle",
+            ServeBounds {
+                read_deadline: Duration::from_secs(3),
+                max_connections: 8,
+                host_queue: 4,
+            },
+        );
+        let mut staller = UnixStream::connect(&service.socket).unwrap();
+        staller.write_all(&[9, 0, 0]).unwrap();
+        let (answer, waited) = timed_invoke(&service, 3);
+        assert_eq!(answer.unwrap(), vec![3]);
+        assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
+        let refusal = read_frame(&mut DeadlinePipe {
+            reader: &mut staller,
+            deadline: Instant::now() + Duration::from_secs(5),
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(refusal, b"\xfeinvalid socket frame: frame read deadline");
+    }
+
+    /// A slow Host request does not stop another client being read: it is
+    /// queued and answered right after; beyond the queue bound a client is
+    /// refused `busy` without waiting.
+    #[test]
+    fn serve_a_slow_request_queues_the_next_and_a_full_queue_is_busy() {
+        let service = fake_service(
+            "queue",
+            ServeBounds {
+                read_deadline: Duration::from_secs(2),
+                max_connections: 8,
+                host_queue: 1,
+            },
+        );
+        let slow = {
+            let socket = service.socket.clone();
+            let config = service.config.clone();
+            thread::spawn(move || invoke(&socket, &config, 8, &[]))
+        };
+        thread::sleep(Duration::from_millis(200));
+        let queued = {
+            let socket = service.socket.clone();
+            let config = service.config.clone();
+            thread::spawn(move || {
+                let started = Instant::now();
+                (invoke(&socket, &config, 3, &[]), started.elapsed())
+            })
+        };
+        thread::sleep(Duration::from_millis(200));
+        let (busy, waited) = timed_invoke(&service, 5);
+        assert_eq!(busy.unwrap_err(), "socket rejected request: busy: host queue full");
+        assert!(waited < Duration::from_secs(1), "busy refusal waited {waited:?}");
+        assert_eq!(slow.join().unwrap().unwrap(), vec![8]);
+        let (answer, waited) = queued.join().unwrap();
+        assert_eq!(answer.unwrap(), vec![3]);
+        assert!(waited < Duration::from_secs(3), "queued client waited {waited:?}");
+        assert_eq!(timed_invoke(&service, 5).0.unwrap(), vec![5]);
+    }
+
+    /// Idle connections up to the bound cost the others nothing; one beyond
+    /// it is refused `busy: connection limit`, and each idle one is refused
+    /// by name at its deadline, freeing its slot.
+    #[test]
+    fn serve_idle_connections_are_bounded_and_named() {
+        let service = fake_service(
+            "idle",
+            ServeBounds {
+                read_deadline: Duration::from_secs(3),
+                max_connections: 6,
+                host_queue: 4,
+            },
+        );
+        let idle: Vec<UnixStream> = (0..5)
+            .map(|_| UnixStream::connect(&service.socket).unwrap())
+            .collect();
+        thread::sleep(Duration::from_millis(100));
+        let (answer, waited) = timed_invoke(&service, 3);
+        assert_eq!(answer.unwrap(), vec![3]);
+        assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
+        // The honest connection's slot is released just after its reply is
+        // written; let that happen before filling the last slot.
+        thread::sleep(Duration::from_millis(300));
+        let extra: Vec<UnixStream> = (0..1)
+            .map(|_| UnixStream::connect(&service.socket).unwrap())
+            .collect();
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            timed_invoke(&service, 3).0.unwrap_err(),
+            "socket rejected request: busy: connection limit"
+        );
+        for mut stream in idle.into_iter().chain(extra) {
+            let refusal = read_frame(&mut DeadlinePipe {
+                reader: &mut stream,
+                deadline: Instant::now() + Duration::from_secs(5),
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(refusal, b"\xfeinvalid socket frame: frame read deadline");
+        }
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(timed_invoke(&service, 3).0.unwrap(), vec![3]);
+    }
+
+    /// A client that sends a whole request and never reads the reply does not
+    /// hold the Host: the next request is answered.
+    #[test]
+    fn serve_a_client_that_never_reads_holds_no_one_else() {
+        let service = fake_service("noread", SERVE_BOUNDS);
+        let mut silent = UnixStream::connect(&service.socket).unwrap();
+        write_frame(&mut silent, &[[1, 6, 0, 0, 0].as_slice(), b"config", &[3]].concat()).unwrap();
+        let (answer, waited) = timed_invoke(&service, 5);
+        assert_eq!(answer.unwrap(), vec![5]);
+        assert!(waited < Duration::from_secs(1), "honest client waited {waited:?}");
+        drop(silent);
     }
 
     #[test]
