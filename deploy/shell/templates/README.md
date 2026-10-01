@@ -13,6 +13,7 @@ order in which its verb reads its files.
 | `story seal STORY` | `DIR/law.management.sealed*`, plus each cell's `law.*` | `story/README.md` |
 | `summon ROOM as librarian\|gm\|runner [--budget N]` | `hermes/ROLE/budget.json`, `grants.json`, `program.md` | `hermes/README.md` |
 | `dismiss ROOM` | `hermes/ROLE/grants.json` (the grants to revoke) | `hermes/README.md` |
+| `chat new ROOM` / `chat invite ROOM S` | `room/chat/law.author.json` (compiled into `mini`; `@SUBJECT` = the founder, or S) | `room/chat/README.md` |
 
 `law.X` is the §2.6 one-line grammar. `law.X.json` is the same predicate as
 `Pred` JSON, which `law ID REF @FILE` installs today: shell.rs wraps it as
