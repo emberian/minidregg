@@ -322,6 +322,8 @@ def intent (accepted : AcceptedRotation deployment semantics durable ingress) :
   nullifiers := [nullifier deployment.domain semantics ingress]
   exactCharge := charge accepted
   event := event deployment.domain semantics ingress
+  -- The rotation is signed by the subject's NEXT key, on the subject's behalf.
+  subject := some ingress.command.subject
   postRootsBound := writes_roots_bound accepted.prepared
   guardsReadOnly := readGuards_readonly accepted.prepared
 
