@@ -372,6 +372,7 @@ pub(crate) fn open(root: &Path, ws: &Value, name: &str, close: &str, reveal_end:
     // runner write (the parameters 1-5 and each slot's six), and is born holding none.
     workspace::create(root, ws, name, "declared", &law_path, None, "object", None, None, Some(&declared_fields()))?;
     let mut actions = vec![
+        scalar(FIELD_SETTLED, "0", None),
         scalar(FIELD_CLOSE, &close.to_string(), None),
         scalar(FIELD_REVEAL_END, &reveal_end.to_string(), None),
         scalar(FIELD_SUPPLY, &supply.to_string(), None),

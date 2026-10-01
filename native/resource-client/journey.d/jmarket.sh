@@ -233,7 +233,7 @@ write_req "$H/carol/requests/copy.req.json" crab 16 "$C" 0 17 "$COMMIT_B0" 0
 ok sealed carol "propose copy @copy.req.json"
 ok sealed carol "submit copy"
 # the public order: bob writes a price in the clear in an ordinary cell
-ok sealed bob "create pub declared {\"type\":\"all\",\"predicates\":[]}"
+ok sealed bob "create pub declared {\"type\":\"all\",\"predicates\":[]} 3"
 ok sealed bob "invoke po pub create 3 $PUB"
 ok sealed bob "submit po"
 ok sealed alice "bids fish"
