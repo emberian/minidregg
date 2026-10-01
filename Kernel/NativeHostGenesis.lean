@@ -587,17 +587,18 @@ def pins {F : Type} [Field F]
   policyAddress := PolicyRecordCodec.digest (factoryPolicy profile config)
   tariff := config.tariff
 
-/-- A declared cell holding field 1 of its own object, at zero. -/
-def declaredPacked (identifier : Nat) (account : Bool) :
+/-- A declared cell at birth: its declaration (K-FIELD-CLOSURE) and no field.
+It holds exactly the fields its writes later create, and it may create only the
+fields it declares here (`Kernel.FieldClosure`); `.closed []` holds none. -/
+def declaredPacked (identifier : Nat) (account : Bool) (fields : Kernel.FieldClosure.FieldSet) :
     PackedCell CanonicalCellRegistry.registry :=
   let payload := materialize DeclaredEffectCell.materializer
-    (StoreCodec.fromEntries
-      [⟨(EffectDeclaration.StateKey.objectField ⟨identifier⟩ ⟨1⟩).address, (0 : Int)⟩])
+    (Kernel.FieldClosure.declare identifier fields 0)
   if account then ⟨.accountMetadata, payload⟩ else ⟨.declaredObject, payload⟩
 
-def declaredCell (_config : Config) (identifier : Nat) (account : Bool) :
-    PackedCell CanonicalCellRegistry.registry :=
-  declaredPacked identifier account
+def declaredCell (_config : Config) (identifier : Nat) (account : Bool)
+    (fields : Kernel.FieldClosure.FieldSet) : PackedCell CanonicalCellRegistry.registry :=
+  declaredPacked identifier account fields
 
 /-- The genesis pay cell: the invalid placeholder tariff, an empty deposit
 book and no assignment (`PayCell.genesisStore`). -/
@@ -611,12 +612,12 @@ def baseCells {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
     List (Nat × PackedCell CanonicalCellRegistry.registry) :=
   [(config.deployment.factoryId, declaredCell config config.deployment.factoryId
-      false),
+      false (.closed [])),
    (config.deployment.resourceBookId, ⟨.resourceBook,
       materialize CanonicalResourcePageMaterializer.materializer
         (CanonicalResourcePageMaterializer.stateOfOption (some config.initialBook))⟩)] ++
   config.enrollments.map (fun enrollment =>
-    (enrollment.accountId, declaredCell config enrollment.accountId true)) ++
+    (enrollment.accountId, declaredCell config enrollment.accountId true (.closed []))) ++
   (policies profile config).map (fun record =>
     (PolicySourceCell.physicalId config.deployment.domain (PolicyRecordCodec.digest record),
       CanonicalCellRegistry.policySourceCell record)) ++

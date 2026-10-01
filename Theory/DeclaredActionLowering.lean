@@ -362,6 +362,9 @@ def keyCode : StateKey -> Nat
   | .accountBalance account resource =>
       Nat.pair 1 (Nat.pair account.value resource.value)
   | .programCode program => Nat.pair 2 program.value
+  | .fieldDeclared object field =>
+      Nat.pair 3 (Nat.pair object.value field.value)
+  | .fieldsOpen object => Nat.pair 4 object.value
 
 def keyOfCode (code : Nat) : Option StateKey :=
   let tagged := Nat.unpair code
@@ -373,6 +376,10 @@ def keyOfCode (code : Nat) : Option StateKey :=
       let parts := Nat.unpair tagged.2
       some (.accountBalance ⟨parts.1⟩ ⟨parts.2⟩)
   | 2 => some (.programCode ⟨tagged.2⟩)
+  | 3 =>
+      let parts := Nat.unpair tagged.2
+      some (.fieldDeclared ⟨parts.1⟩ ⟨parts.2⟩)
+  | 4 => some (.fieldsOpen ⟨tagged.2⟩)
   | _ => none
 
 @[simp] theorem keyOfCode_keyCode (key : StateKey) :

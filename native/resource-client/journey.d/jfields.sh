@@ -8,7 +8,7 @@
 #   t-moves-30        B moves spent 0 -> 30                          -> installed
 #   t-moves-60        B moves spent 30 -> 90                         -> refused (maxDeltaExceeded)
 #   t-moves-30-again  B moves spent 30 -> 60 (the bound is per write) -> installed
-# Ledger (declared, fields 3 and 4; a declared cell is born with field 1):
+# Ledger (declared, fields 3 and 4):
 # A delegates observe+mutate+delegate with fields {3} to B.
 #   r-writes-1        B writes field 3                               -> installed
 #   r-writes-2        B writes field 4                               -> refused (fieldNotNamed)
@@ -116,7 +116,7 @@ P=$D/req/permit-all.json
 printf '%s\n' '{"type":"all","predicates":[]}' >"$P"
 
 # ---- treasury: maxDelta {7: 50}
-run create-treasury "$MINI" workspace --action create --dir "$SPONSOR_WS" --name treasury --storage declared --predicate "$P"
+run create-treasury "$MINI" workspace --action create --dir "$SPONSOR_WS" --name treasury --storage declared --predicate "$P" --fields 7
 must create-treasury
 scalar treasury create 7 0 >"$D/req/t-init.json"
 [ "$(invoke "$SPONSOR_WS" t-init "$D/req/t-init.json")" = installed ] || { echo "treasury init failed: $(tail -1 "$D/t-init.err")" >&2; exit 1; }
@@ -132,7 +132,7 @@ scalar treasury write 7 90 30 >"$D/req/t-60.json"; row_invoke t-moves-60 refused
 scalar treasury write 7 60 30 >"$D/req/t-30b.json"; row_invoke t-moves-30-again installed "$NEWCOMER_WS" "$D/req/t-30b.json"
 
 # ---- ledger: fields {3}
-run create-ledger "$MINI" workspace --action create --dir "$SPONSOR_WS" --name ledger --storage declared --predicate "$P"
+run create-ledger "$MINI" workspace --action create --dir "$SPONSOR_WS" --name ledger --storage declared --predicate "$P" --fields 3,4
 must create-ledger
 scalar ledger create 3 10 >"$D/req/l-1.json"; [ "$(invoke "$SPONSOR_WS" l-init-1 "$D/req/l-1.json")" = installed ] || { echo "ledger init 1 failed" >&2; exit 1; }
 scalar ledger create 4 20 >"$D/req/l-2.json"; [ "$(invoke "$SPONSOR_WS" l-init-2 "$D/req/l-2.json")" = installed ] || { echo "ledger init 2 failed" >&2; exit 1; }

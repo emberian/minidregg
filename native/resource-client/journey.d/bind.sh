@@ -26,13 +26,13 @@ installed() { jq -e '.type == "confirmed" and .confirmation == "installed"' "$1"
 
 printf '%s\n' '{"type":"all","predicates":[]}' >"$D/req/permit-all.json"
 "$MINI" workspace --action create --dir "$SPONSOR_WS" --name bind-solo --storage declared \
-  --predicate "$D/req/permit-all.json" >"$D/create.out" 2>"$D/create.err" \
+  --predicate "$D/req/permit-all.json" --fields 301-310 >"$D/create.out" 2>"$D/create.err" \
   || { echo "sponsor could not create bind-solo: $(tail -1 "$D/create.err")" >&2; exit 1; }
 # The newcomer's own resource: created by the sponsor, delegated observe+mutate
 # to the newcomer, imported into the newcomer's workspace (the J2-J4 path; the
 # journey's `shared` is locked by J8 when this hook runs).
 "$MINI" workspace --action create --dir "$SPONSOR_WS" --name bind-n --storage declared \
-  --predicate "$D/req/permit-all.json" >"$D/create-n.out" 2>"$D/create-n.err" \
+  --predicate "$D/req/permit-all.json" --fields 301-310 >"$D/create-n.out" 2>"$D/create-n.err" \
   || { echo "sponsor could not create bind-n: $(tail -1 "$D/create-n.err")" >&2; exit 1; }
 jq -n --arg r "$NEWCOMER_SUBJECT" '{type:"minidregg-workspace-proposal-v1",action:"delegate",name:"bind-n",
   recipient:$r,verbs:["observe","mutate"],maxCost:"50000"}' >"$D/req/delegate.json"

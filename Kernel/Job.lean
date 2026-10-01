@@ -9,13 +9,20 @@ JSON written out as a `Pred` term, one `def` per clause, placeholder `{X}` ↦ `
 `scripts/gen-joblaw.py` (`--check` fails when the grammar, the JSON and §2 disagree).
 
 **The run fact.** The truth edge needs the kernel's verdict that it re-executed the job's program:
-K-RAN's atom `ran PROGRAM` (policy tag 14), which reads the controller-projected slot
-`run/program/<decimal programId> ↦ 1` (`Pred.ranSlot`, planning/nock/k-ran.md:61;
-`lowerA_ran_eq : lowerA (.ran P) = lowerA (.eq (ranSlot P) 1)`). This tree does not have K-RAN, so the
-law spells it `eq {RAN_SLOT} 1` and the slot is a parameter: on a tree with K-RAN the integrator binds
-`RAN_SLOT := run/program/{PROGRAM}` (`ranSlot` below; the poles use exactly that spelling), and may
-replace the atom with `.ran p.PROGRAM`, which lowers to the same circuit. Nothing here assumes who
-projects the slot: `caller_cannot_forge_truth` is stated over the slot.
+K-RAN's atom `ran PROGRAM` (policy tag 14, clause 22), which reads the slot `run/program/<decimal
+programId> ↦ 1` (`Pred.ranSlot`) that the controller projects only when the command carries a run claim
+for PROGRAM that it re-executed on its own sample and whose product is exactly the command's writes.
+The referee is K-EVAL's generic `Kernel.Run.checkRun E` with `E` resolved from the evaluator the
+program record names (`Kernel.Run.resolve`); `programId` commits to that evaluator, so for a Nock
+program the slot is projected only through `checkRun` at `Evaluator.nock`
+(`Kernel.Run.nock.checkRun_sound`, `Kernel.Run.nock.no_accepted_of_output_mismatch`), and the
+controller projects the evaluator beside it (`Pred.evaluatorSlot`). No write of any field supplies
+that slot, so `caller_cannot_forge_truth` is a statement about who can make the kernel run the program.
+
+**The money fact.** Fund, claim and close are the job-money receiver's turns (`Kernel.JobMoney`, C3): a
+write that moves escrow or bond, claims or closes carries `authority/operation/job-money ↦ 1`
+(`moneySlot`, clause 44), which only that receiver projects, beside the Book transfers it commits in the
+same CAS. An order is born unfunded (escrow 0, bond 0, provider 0); the caller funds it in state 0.
 
 **What the kernel supplies.** As in `Theory.SheetLaw` §6: the policy reads `old = project(pre, pre)` and
 `new = project(pre, post)` (`DeclaredResourceProjection.scalarSlots`), behind the request slots and
@@ -30,17 +37,22 @@ path, void included.
 
 **Counterexamples the poles caught** (§6, each a named theorem): a negated deadline atom passes
 without a clock (`negated_timeout_fails_open`); `not (price <= 0)` passes on an absent price
-(`negated_price_fails_open`); and a closed job still admits a write that creates an UNDECLARED field
-(`closed_job_admits_undeclared_field`) — `Pred` cannot say "no other field", so `no_double_settle` is
-over the sixteen declared fields only; closing it is a kernel item (a declared kind's field set).
+(`negated_price_fails_open`).
+
+**Every field, not only the declared ones (K-FIELD-CLOSURE).** `Pred` cannot say "no other field", so
+the law alone admitted, on a closed job, a write that creates field 20. The kernel closes that: a job
+cell is born declaring its sixteen fields (`jobFields`), and the scalar receiver refuses a write that
+changes any other field by name, before the law runs (`Kernel.FieldClosure`). `kernelAdmits` is that
+verdict; `no_double_settle` is over every field, and `closed_job_refuses_undeclared_field` names 20.
 -/
 import Pred.Core
 import Pred.Leaf
 import Theory.SheetLaw
+import Kernel.FieldClosure
 
 namespace Minidregg.Kernel.Job
 
-open Minidregg.Pred (Pred State eval firstFailingLeaf)
+open Minidregg.Pred (Pred State eval firstFailingLeaf ranSlot)
 open Minidregg.Kernel.DeclaredResourceProjection (Values fieldName scalarSlots get)
 open Minidregg.Theory.SheetLaw (ev_eq ev_le ev_memberOf ev_eqSlots ev_leSlots ev_leSlotsOff ev_not ev_all
   ev_any)
@@ -51,13 +63,13 @@ set_option autoImplicit false
 /-- The `{UPPER}` placeholders of `law.job` (`job/fields.json` `placeholders`). -/
 structure Params where
   CALLER : Int
-  PROGRAM : Int
+  /-- The programId: `ran PROGRAM` reads `ranSlot PROGRAM`; field `program` holds it. -/
+  PROGRAM : Nat
   WINDOW : Int
   NEG_WINDOW : Int
-  RAN_SLOT : String
 
-/-- K-RAN's run slot for a program (`Pred.ranSlot` on the `n11` line, k-ran.md:61). -/
-def ranSlot (program : Int) : String := s!"run/program/{program}"
+/-- The slot only the job-money receiver projects (`JobMoneyReceiver.moneySlots`). -/
+def moneySlot : String := "authority/operation/job-money"
 
 -- The field numbers (`job/fields.json`).
 namespace F
@@ -81,7 +93,7 @@ def truth : Nat := 15
 def all : List Nat := [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 end F
 
-/-! ## §2. The law, literally (`deploy/shell/templates/job/law.job.json`, clauses 0–43) -/
+/-! ## §2. The law, literally (`deploy/shell/templates/job/law.job.json`, clauses 0–44) -/
 
 section Law
 set_option linter.unusedVariables false
@@ -141,7 +153,7 @@ def jobClause5 (p : Params) : Pred :=
   Pred.any [
     .not (.eq "request/verb" 2),
     .eqSlots "resource/field/0/before" "resource/field/0/before",
-    .eq "resource/field/1/after" p.PROGRAM]
+    .eq "resource/field/1/after" (p.PROGRAM : Int)]
 
 /-- clause 6 -/
 def jobClause6 (p : Params) : Pred :=
@@ -185,14 +197,17 @@ def jobClause11 (p : Params) : Pred :=
   Pred.any [
     .not (.eq "request/verb" 2),
     .eqSlots "resource/field/0/before" "resource/field/0/before",
-    .eqSlots "resource/field/8/after" "resource/field/5/after"]
+    .eq "resource/field/8/after" 0]
 
 /-- clause 12 -/
 def jobClause12 (p : Params) : Pred :=
   Pred.any [
     .not (.eq "request/verb" 2),
     .eqSlots "resource/field/0/before" "resource/field/0/before",
-    .eq "resource/field/11/after" 0]
+    Pred.all [
+      .eq "resource/field/11/after" 0,
+      .eq "resource/field/9/after" 0,
+      .eq "resource/field/10/after" 0]]
 
 /-- clause 13 -/
 def jobClause13 (p : Params) : Pred :=
@@ -215,6 +230,11 @@ def jobClause14 (p : Params) : Pred :=
     .not (.eqSlots "resource/field/0/before" "resource/field/0/before"),
     .eq "resource/field/8/delta" 0,
     Pred.all [
+      .eq "resource/field/0/before" 0,
+      .eq "resource/field/0/after" 0,
+      .eq "resource/field/8/before" 0,
+      .eqSlots "resource/field/8/after" "resource/field/5/after"],
+    Pred.all [
       .memberOf "resource/field/0/before" [3, 4, 5],
       .eq "resource/field/0/after" 6]]
 
@@ -235,10 +255,8 @@ def jobClause15 (p : Params) : Pred :=
 def jobClause16 (p : Params) : Pred :=
   Pred.any [
     .not (.eq "request/verb" 2),
+    .not (.eqSlots "resource/field/0/before" "resource/field/0/before"),
     .eq "resource/field/9/delta" 0,
-    Pred.all [
-      .not (.eqSlots "resource/field/9/before" "resource/field/9/before"),
-      .not (.eqSlots "resource/field/9/after" "resource/field/9/after")],
     Pred.all [
       .eq "resource/field/0/before" 0,
       .eq "resource/field/0/after" 1]]
@@ -247,10 +265,8 @@ def jobClause16 (p : Params) : Pred :=
 def jobClause17 (p : Params) : Pred :=
   Pred.any [
     .not (.eq "request/verb" 2),
+    .not (.eqSlots "resource/field/0/before" "resource/field/0/before"),
     .eq "resource/field/10/delta" 0,
-    Pred.all [
-      .not (.eqSlots "resource/field/10/before" "resource/field/10/before"),
-      .not (.eqSlots "resource/field/10/after" "resource/field/10/after")],
     Pred.all [
       .eq "resource/field/0/before" 0,
       .eq "resource/field/0/after" 1]]
@@ -305,7 +321,7 @@ def jobClause22 (p : Params) : Pred :=
     .not (Pred.all [
         .not (.eqSlots "resource/field/15/before" "resource/field/15/before"),
         .eqSlots "resource/field/15/after" "resource/field/15/after"]),
-    .eq p.RAN_SLOT 1]
+    .ran p.PROGRAM]
 
 /-- clause 23 -/
 def jobClause23 (p : Params) : Pred :=
@@ -512,9 +528,25 @@ def jobClause43 (p : Params) : Pred :=
         .eq "resource/field/0/after" 6]),
     .eq "resource/field/11/after" 0]
 
+/-- clause 44 -/
+def jobClause44 (p : Params) : Pred :=
+  Pred.any [
+    .not (.eq "request/verb" 2),
+    .not (.eqSlots "resource/field/0/before" "resource/field/0/before"),
+    Pred.all [
+      .eq "resource/field/8/delta" 0,
+      .eq "resource/field/11/delta" 0,
+      .not (Pred.all [
+          .eq "resource/field/0/before" 0,
+          .eq "resource/field/0/after" 1]),
+      .not (Pred.all [
+          .memberOf "resource/field/0/before" [3, 4, 5],
+          .eq "resource/field/0/after" 6])],
+    .eq "authority/operation/job-money" 1]
+
 /-- The clauses in the installed order. -/
 def jobClauses (p : Params) : List Pred :=
-  [jobClause0 p, jobClause1 p, jobClause2 p, jobClause3 p, jobClause4 p, jobClause5 p, jobClause6 p, jobClause7 p, jobClause8 p, jobClause9 p, jobClause10 p, jobClause11 p, jobClause12 p, jobClause13 p, jobClause14 p, jobClause15 p, jobClause16 p, jobClause17 p, jobClause18 p, jobClause19 p, jobClause20 p, jobClause21 p, jobClause22 p, jobClause23 p, jobClause24 p, jobClause25 p, jobClause26 p, jobClause27 p, jobClause28 p, jobClause29 p, jobClause30 p, jobClause31 p, jobClause32 p, jobClause33 p, jobClause34 p, jobClause35 p, jobClause36 p, jobClause37 p, jobClause38 p, jobClause39 p, jobClause40 p, jobClause41 p, jobClause42 p, jobClause43 p]
+  [jobClause0 p, jobClause1 p, jobClause2 p, jobClause3 p, jobClause4 p, jobClause5 p, jobClause6 p, jobClause7 p, jobClause8 p, jobClause9 p, jobClause10 p, jobClause11 p, jobClause12 p, jobClause13 p, jobClause14 p, jobClause15 p, jobClause16 p, jobClause17 p, jobClause18 p, jobClause19 p, jobClause20 p, jobClause21 p, jobClause22 p, jobClause23 p, jobClause24 p, jobClause25 p, jobClause26 p, jobClause27 p, jobClause28 p, jobClause29 p, jobClause30 p, jobClause31 p, jobClause32 p, jobClause33 p, jobClause34 p, jobClause35 p, jobClause36 p, jobClause37 p, jobClause38 p, jobClause39 p, jobClause40 p, jobClause41 p, jobClause42 p, jobClause43 p, jobClause44 p]
 
 end Law
 
@@ -537,6 +569,11 @@ theorem present_false_on_absent {o n : State} {s : String} (h : n.get s = none) 
     eval (.eqSlots s s) o n = false := by
   simp [eval, Minidregg.Pred.evalWith, h]
 
+/-- K-RAN's atom reads its slot: `ran P` holds exactly when `ranSlot P ↦ 1` is projected. -/
+theorem ev_ran {o n : State} {program : Nat} :
+    eval (.ran program) o n = true ↔ n.get (ranSlot program) = some 1 := by
+  simp [eval, Minidregg.Pred.evalWith]
+
 /-! ## §4. Law-level theorems: every (old, new) pair the job law admits
 
 Slot names are the projection's (`resource/field/{n}/{view}`; fields as in `F`). Every statement
@@ -546,16 +583,16 @@ section LawLevel
 variable (p : Params) (o n : State)
 
 /-- **`caller_cannot_forge_truth`.** An admitted write either leaves the truth slot alone (unchanged
-when present, absent when absent) or carries the run verdict `RAN_SLOT = 1`. The slot is the kernel's
+when present, absent when absent) or carries the run verdict `ranSlot PROGRAM = 1`. The slot is the kernel's
 projection of a re-execution it performed (K-RAN); no field write, by any subject, supplies it. -/
 theorem caller_cannot_forge_truth (adm : eval (jobLaw p) o n = true)
     (w : n.get "request/verb" = some 2) :
     n.get "resource/field/15/delta" = some 0 ∨
       (n.get "resource/field/15/before" = none ∧ n.get "resource/field/15/after" = none) ∨
-      n.get p.RAN_SLOT = some 1 := by
+      n.get (ranSlot p.PROGRAM) = some 1 := by
   have c21 := job_clause adm (q := jobClause21 p) (by simp [jobClauses])
   have c22 := job_clause adm (q := jobClause22 p) (by simp [jobClauses])
-  simp only [jobClause21, jobClause22, ev_any, ev_all, ev_not, ev_eq, ev_eqSlots, List.mem_cons,
+  simp only [jobClause21, jobClause22, ev_any, ev_all, ev_not, ev_eq, ev_ran, ev_eqSlots, List.mem_cons,
     List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left, w, not_true_eq_false, false_or,
     forall_eq_or_imp, forall_eq, and_self] at c21 c22
   rcases c21 with c21 | c21
@@ -567,17 +604,17 @@ theorem caller_cannot_forge_truth (adm : eval (jobLaw p) o n = true)
         c22 ⟨fun ⟨y, hy⟩ => c21 ⟨y, hy⟩, ⟨x, hx⟩⟩
     · exact .inr (.inr c22)
 
-/-- **`truth_needs_ran`.** An admitted write that introduces the truth carries `RAN_SLOT = 1`, is in
+/-- **`truth_needs_ran`.** An admitted write that introduces the truth carries `ranSlot PROGRAM = 1`, is in
 state 1 or 2, and moves no state. -/
 theorem truth_needs_ran (adm : eval (jobLaw p) o n = true) (w : n.get "request/verb" = some 2)
     (fresh : n.get "resource/field/15/before" = none) (x : Int)
     (written : n.get "resource/field/15/after" = some x) :
-    n.get p.RAN_SLOT = some 1 ∧
+    n.get (ranSlot p.PROGRAM) = some 1 ∧
       (n.get "resource/field/0/before" = some 1 ∨ n.get "resource/field/0/before" = some 2) ∧
       n.get "resource/field/0/delta" = some 0 := by
   have c22 := job_clause adm (q := jobClause22 p) (by simp [jobClauses])
   have c23 := job_clause adm (q := jobClause23 p) (by simp [jobClauses])
-  simp only [jobClause22, jobClause23, ev_any, ev_all, ev_not, ev_eq, ev_eqSlots, ev_memberOf,
+  simp only [jobClause22, jobClause23, ev_any, ev_all, ev_not, ev_eq, ev_ran, ev_eqSlots, ev_memberOf,
     List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left, w, fresh, written,
     not_true_eq_false, false_or, forall_eq_or_imp, forall_eq, and_self, reduceCtorEq, exists_false,
     not_false_eq_true, Option.some.injEq, exists_eq'] at c22 c23
@@ -710,12 +747,8 @@ theorem closed_step_frame (adm : eval (jobLaw p) o n = true) (w : n.get "request
   · exact .inl c13.2.2.2.2.2.1
   · exact .inl c13.2.2.2.2.2.2
   · exact .inl c14
-  · rcases c16 with h | ⟨h1, h2⟩
-    · exact .inl h
-    · exact .inr ⟨nn _ h1, nn _ h2⟩
-  · rcases c17 with h | ⟨h1, h2⟩
-    · exact .inl h
-    · exact .inr ⟨nn _ h1, nn _ h2⟩
+  · exact .inl c16
+  · exact .inl c17
   · exact .inl c15
   · rcases c18 with h | ⟨h1, h2⟩
     · exact .inl h
@@ -730,6 +763,45 @@ theorem closed_step_frame (adm : eval (jobLaw p) o n = true) (w : n.get "request
     · exact .inl h
     · exact .inr ⟨nn _ h, nn _ (c23 h)⟩
 
+/-- **Money moves only by the receiver** (C3's `standInLaw_money_frozen_without_slot`, now on the job
+law itself). After the order, an admitted write without `moneySlot ↦ 1` leaves escrow and bond
+unchanged, claims nothing and closes nothing: fund, claim and settle are the job-money receiver's
+turns, which commit the Book transfers in the same CAS. -/
+theorem money_frozen_without_slot (adm : eval (jobLaw p) o n = true)
+    (w : n.get "request/verb" = some 2) (s : Int) (born : n.get "resource/field/0/before" = some s)
+    (noSlot : n.get moneySlot ≠ some 1) :
+    n.get "resource/field/8/delta" = some 0 ∧ n.get "resource/field/11/delta" = some 0 ∧
+      ¬ (s = 0 ∧ n.get "resource/field/0/after" = some 1) ∧
+      ¬ ((s = 3 ∨ s = 4 ∨ s = 5) ∧ n.get "resource/field/0/after" = some 6) := by
+  have c44 := job_clause adm (q := jobClause44 p) (by simp [jobClauses])
+  simp only [jobClause44, ev_any, ev_all, ev_not, ev_eq, ev_eqSlots, ev_memberOf,
+    List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left, w, born,
+    not_true_eq_false, false_or, forall_eq_or_imp, forall_eq, and_self, Option.some.injEq,
+    exists_eq', not_and] at c44
+  unfold moneySlot at noSlot
+  rcases c44 with ⟨e, b, cl, cs⟩ | m
+  · refine ⟨e, b, fun ⟨h0, h1⟩ => ?_, fun ⟨h0, h1⟩ => ?_⟩
+    · exact cl h0 h1
+    · exact cs (by rcases h0 with rfl | rfl | rfl <;> simp) h1
+  · exact absurd m noSlot
+
+/-- **Escrow moves only on fund or close.** After the order, an admitted write that changes escrow is
+the fund edge (open, escrow `0 → price`) or a close out of 3, 4 or 5. -/
+theorem escrow_moves_only_on_fund_or_close (adm : eval (jobLaw p) o n = true)
+    (w : n.get "request/verb" = some 2) (s : Int) (born : n.get "resource/field/0/before" = some s)
+    (moved : n.get "resource/field/8/delta" ≠ some 0) :
+    (s = 0 ∧ n.get "resource/field/0/after" = some 0 ∧ n.get "resource/field/8/before" = some 0 ∧
+      ∃ x, n.get "resource/field/8/after" = some x ∧ n.get "resource/field/5/after" = some x) ∨
+    ((s = 3 ∨ s = 4 ∨ s = 5) ∧ n.get "resource/field/0/after" = some 6) := by
+  have c14 := job_clause adm (q := jobClause14 p) (by simp [jobClauses])
+  simp only [jobClause14, ev_any, ev_all, ev_not, ev_eq, ev_eqSlots, ev_memberOf,
+    List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left, w, born,
+    not_true_eq_false, false_or, forall_eq_or_imp, forall_eq, and_self, Option.some.injEq,
+    exists_eq'] at c14
+  rcases c14 with d | ⟨h0, a0, e0, x, hx, hp⟩ | ⟨hs, a6⟩
+  · exact absurd d moved
+  · exact .inl ⟨h0, a0, e0, x, hx, hp⟩
+  · exact .inr ⟨by omega, a6⟩
 
 end LawLevel
 
@@ -745,6 +817,8 @@ structure JobTurn where
   subject : Int
   now : Option Int
   ran : Option Int
+  /-- `moneySlot`'s value: `some 1` on the job-money receiver's turns (fund, claim, settle). -/
+  money : Option Int
   post : Values
 
 /-- The SheetLaw turn with no joint participants. -/
@@ -752,11 +826,18 @@ def JobTurn.base (t : JobTurn) : Turn := ⟨t.verb, t.subject, t.now, [], t.post
 
 def ranSlots (p : Params) : Option Int → List (String × Int)
   | none => []
-  | some v => [(p.RAN_SLOT, v)]
+  | some v => [(ranSlot p.PROGRAM, v)]
 
-/-- The policy's view: `SheetLaw.view` (request, fields, clock) and then the run slot. -/
+def moneySlots : Option Int → List (String × Int)
+  | none => []
+  | some v => [(moneySlot, v)]
+
+/-- The controller's slots after the view: the run slot (K-RAN) and the money slot (C3). -/
+def extraSlots (p : Params) (t : JobTurn) : List (String × Int) := ranSlots p t.ran ++ moneySlots t.money
+
+/-- The policy's view: `SheetLaw.view` (request, fields, clock), then the run and money slots. -/
 def jview (p : Params) (t : JobTurn) (pre post : Values) : State :=
-  ⟨(view t.base pre post).slots ++ ranSlots p t.ran⟩
+  ⟨(view t.base pre post).slots ++ extraSlots p t⟩
 
 /-- The law's verdict on a turn from `pre`. -/
 def admits (p : Params) (pre : Values) (t : JobTurn) : Bool :=
@@ -768,25 +849,32 @@ def refusalPath (p : Params) (pre : Values) (t : JobTurn) : Option (List Nat) :=
 
 /-- The run slot is none of the declared fields' names. -/
 def Params.Fresh (p : Params) : Prop :=
-  ∀ N ∈ F.all, ∀ v ∈ ["before", "after", "delta"], p.RAN_SLOT ≠ fieldName N v
+  ∀ N ∈ F.all, ∀ v ∈ ["before", "after", "delta"], ranSlot p.PROGRAM ≠ fieldName N v
+
+/-- Nor is the money slot. -/
+theorem money_fresh : ∀ N ∈ F.all, ∀ v ∈ ["before", "after", "delta"], moneySlot ≠ fieldName N v := by
+  decide
+
+theorem money_not_clock : moneySlot ≠ "clock/now" := by decide
 
 instance (p : Params) : Decidable p.Fresh := by unfold Params.Fresh; infer_instance
 
 theorem jget (p : Params) (t : JobTurn) (pre post : Values) (k : String) :
     (jview p t pre post).get k =
-      ((view t.base pre post).get k).or ((State.mk (ranSlots p t.ran)).get k) := by
+      ((view t.base pre post).get k).or ((State.mk (extraSlots p t)).get k) := by
   unfold jview State.get
   rw [List.find?_append]
   cases (view t.base pre post).slots.find? (fun q => q.1 == k) <;> rfl
 
-theorem ran_get_ne (p : Params) (r : Option Int) (k : String) (h : p.RAN_SLOT ≠ k) :
-    (State.mk (ranSlots p r)).get k = none := by
-  cases r <;> simp [ranSlots, State.get, h]
+theorem ran_get_ne (p : Params) (t : JobTurn) (k : String) (h : ranSlot p.PROGRAM ≠ k)
+    (hm : moneySlot ≠ k) : (State.mk (extraSlots p t)).get k = none := by
+  cases hr : t.ran <;> cases hmo : t.money <;>
+    simp [extraSlots, ranSlots, moneySlots, State.get, hr, hmo, h, hm]
 
 theorem jget_field (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Values) (N : Nat)
     (hN : N ∈ F.all) (v : String) (hv : v ∈ ["before", "after", "delta"]) :
     (jview p t pre post).get (fieldName N v) = (view t.base pre post).get (fieldName N v) := by
-  rw [jget, ran_get_ne p _ _ (fr N hN v hv)]
+  rw [jget, ran_get_ne p _ _ (fr N hN v hv) (money_fresh N hN v hv)]
   cases (view t.base pre post).get (fieldName N v) <;> rfl
 
 theorem jget_after (p : Params) (fr : p.Fresh) (t : JobTurn) (pre post : Values) (N : Nat)
@@ -865,9 +953,9 @@ theorem jget_verb (p : Params) (t : JobTurn) (pre post : Values) :
     (jview p t pre post).get "request/verb" = some t.verb := by
   rw [jget, Minidregg.Theory.SheetLaw.get_verb]; rfl
 
-theorem jget_clock (p : Params) (fr : p.RAN_SLOT ≠ "clock/now") (t : JobTurn) (pre post : Values) :
+theorem jget_clock (p : Params) (fr : ranSlot p.PROGRAM ≠ "clock/now") (t : JobTurn) (pre post : Values) :
     (jview p t pre post).get "clock/now" = t.now := by
-  rw [jget, Minidregg.Theory.SheetLaw.get_clock, ran_get_ne p _ _ fr, Option.or_none]; rfl
+  rw [jget, Minidregg.Theory.SheetLaw.get_clock, ran_get_ne p _ _ fr money_not_clock, Option.or_none]; rfl
 
 /-- A field the slot-pair frame leaves alone is unchanged in the store. -/
 theorem frame_eq (p : Params) (fr : p.Fresh) (t : JobTurn) (pre : Values) (N : Nat) (hN : N ∈ F.all)
@@ -889,19 +977,46 @@ theorem frame_eq (p : Params) (fr : p.Fresh) (t : JobTurn) (pre : Values) (N : N
       | some x => rw [hq] at h; simp at h; rw [show x = o by omega]
     · rw [hp] at h; cases h.1
 
-/-- **`no_double_settle`.** On a closed job (state 6) an admitted write changes no declared field:
-state 6 has no outgoing edge, and nothing a closed job holds moves again. (A field outside `F.all`
-is not covered: `closed_job_admits_undeclared_field`.) -/
+/-- The job kind's declaration: a job cell is born declaring exactly its sixteen fields
+(K-FIELD-CLOSURE; the cell holds none of them until the order creates them). -/
+def jobFields : FieldClosure.FieldSet := .closed F.all
+
+/-- The first field a turn changes that a job cell does not declare. The kernel refuses such a turn by
+name (`DeclaredResourceScalar.Reject.undeclaredField`), at preparation, before the law runs; this is
+the same function the receiver applies (`FieldClosure.check`), on the same field values. -/
+def undeclared (pre : Values) (t : JobTurn) : Option Nat :=
+  FieldClosure.firstUndeclared jobFields.covers pre t.post
+
+/-- The kernel's verdict on a turn on a job cell: the field closure, then the law. -/
+def kernelAdmits (p : Params) (pre : Values) (t : JobTurn) : Bool :=
+  (undeclared pre t).isNone && admits p pre t
+
+/-- Inside the declaration the kernel's verdict is the law's: the closure made nothing else stricter
+or looser. -/
+theorem kernelAdmits_inside (p : Params) (pre : Values) (t : JobTurn)
+    (inside : undeclared pre t = none) : kernelAdmits p pre t = admits p pre t := by
+  simp [kernelAdmits, inside]
+
+/-- **`no_double_settle`.** On a closed job (state 6) a write the kernel admits changes NO field: the
+law freezes every declared field (state 6 has no outgoing edge, and nothing a closed job holds moves
+again), and the field closure refuses every other. -/
 theorem no_double_settle (p : Params) (fr : p.Fresh) (pre : Values) (t : JobTurn)
-    (adm : admits p pre t = true) (w : t.verb = 2) (closed : get pre F.state = some 6) :
-    ∀ N ∈ F.all, get t.post N = get pre N := by
+    (adm : kernelAdmits p pre t = true) (w : t.verb = 2) (closed : get pre F.state = some 6) :
+    ∀ N, get t.post N = get pre N := by
+  simp only [kernelAdmits, Bool.and_eq_true, Option.isNone_iff_eq_none] at adm
+  obtain ⟨inside, lawAdm⟩ := adm
   have w' : (jview p t pre t.post).get "request/verb" = some 2 := by rw [jget_verb, w]
   have c' : (jview p t pre t.post).get "resource/field/0/before" = some 6 := by
     rw [show "resource/field/0/before" = fieldName 0 "before" from rfl,
       jget_before p fr t pre t.post 0 (by decide)]
     exact closed
-  intro N hN
-  exact frame_eq p fr t pre N hN (closed_step_frame p _ _ adm w' c' N hN)
+  intro N
+  by_cases hN : N ∈ F.all
+  · exact frame_eq p fr t pre N hN (closed_step_frame p _ _ lawAdm w' c' N hN)
+  · by_contra changed
+    have covered := (FieldClosure.firstUndeclared_none_iff _ _ _).mp inside N
+      (fun same => changed same.symm)
+    simp [jobFields, FieldClosure.FieldSet.covers, hN] at covered
 
 /-- The state field after an admitted write that enters 3 from anything but 3 was 1 or 2. -/
 theorem enters_upheld_from (p : Params) (fr : p.Fresh) (pre : Values) (t : JobTurn)
@@ -958,7 +1073,7 @@ def UpheldBy (pre : Values) (t : JobTurn) : Prop :=
   (get pre F.state = some 2 ∧ get t.post F.truth = none ∧
     ∃ f now, get t.post F.finalAt = some f ∧ t.now = some now ∧ f < now)
 
-theorem upheld_by (p : Params) (fr : p.Fresh) (fc : p.RAN_SLOT ≠ "clock/now") (pre : Values)
+theorem upheld_by (p : Params) (fr : p.Fresh) (fc : ranSlot p.PROGRAM ≠ "clock/now") (pre : Values)
     (t : JobTurn) (adm : admits p pre t = true) (w : t.verb = 2) (into3 : get t.post F.state = some 3)
     (was : get pre F.state ≠ some 3) : UpheldBy pre t := by
   have from12 := enters_upheld_from p fr pre t adm w into3 was
@@ -983,7 +1098,7 @@ theorem upheld_by (p : Params) (fr : p.Fresh) (fc : p.RAN_SLOT ≠ "clock/now") 
 
 /-- Along an accepted history from a cell without state 3, a cell that reaches state 3 got there by a
 step `UpheldBy` justifies. -/
-theorem reached_upheld (p : Params) (fr : p.Fresh) (fc : p.RAN_SLOT ≠ "clock/now") :
+theorem reached_upheld (p : Params) (fr : p.Fresh) (fc : ranSlot p.PROGRAM ≠ "clock/now") :
     ∀ (v : Values) (ts : List JobTurn), Accepted p v ts → get v F.state ≠ some 3 →
       get (final v ts) F.state = some 3 → ∃ s ∈ stepsOf v ts, UpheldBy s.1 s.2
   | v, [], _, was, now => absurd now was
@@ -1012,7 +1127,7 @@ theorem stepsOf_prefix : ∀ (v : Values) (ts : List JobTurn) (s : Values × Job
 state (a fresh declared cell, `unborn`, before its order), every admitted close out of `upheld` (3 → 6) is preceded by the step that entered
 `upheld`, and that step had the provider's own run on the cell (from 1), or the kernel's truth equal to
 the posted output, or no truth and the clock past `finalAt` (from 2). -/
-theorem settle_requires_match_or_timeout (p : Params) (fr : p.Fresh) (fc : p.RAN_SLOT ≠ "clock/now")
+theorem settle_requires_match_or_timeout (p : Params) (fr : p.Fresh) (fc : ranSlot p.PROGRAM ≠ "clock/now")
     (v : Values) (unordered : get v F.state = none)
     (ts : List JobTurn) (acc : Accepted p v ts) (s : Values × JobTurn) (hs : s ∈ stepsOf v ts)
     (closesUpheld : get s.1 F.state = some 3) (_into6 : get s.2.post F.state = some 6) :
@@ -1029,21 +1144,27 @@ end View
 
 section Poles
 
-/-- A job: caller 7, program 42, a 600-second window, the run slot spelled as K-RAN projects it. -/
-def demo : Params := ⟨7, 42, 600, -600, "run/program/42"⟩
+/-- A job: caller 7, program 42, a 600-second window. -/
+def demo : Params := ⟨7, 42, 600, -600⟩
 
-theorem demo_ranSlot : demo.RAN_SLOT = ranSlot demo.PROGRAM := by decide
+/-- The run slot is K-RAN's spelling. -/
+theorem demo_ranSlot : ranSlot demo.PROGRAM = "run/program/42" := by decide
 theorem demo_fresh : demo.Fresh := by decide
-theorem demo_ran_not_clock : demo.RAN_SLOT ≠ "clock/now" := by decide
+theorem demo_ran_not_clock : ranSlot demo.PROGRAM ≠ "clock/now" := by decide
 
-/-- A fresh declared cell, before the order: the kernel births every declared cell holding field 1 of
-its own object at zero (`NativeHostGenesis.declaredCell`; MEASURED on the journey Store, jjob1 r1), so
-the order writes `program` (field 1) from 0. -/
-def unborn : Values := [(1, 0)]
+/-- A fresh declared cell, before the order: it is born holding no field, only its declaration
+(`NativeHostGenesis.declaredCell`, K-FIELD-CLOSURE), so the order creates every field it writes. -/
+def unborn : Values := []
 
-/-- The order: price 100, claimBy 160, answerBy 700, escrow = price, bond 0; input 5; accounts 70. -/
+/-- The order: price 100, claimBy 160, answerBy 700, born unfunded (escrow, provider, providerAcct and
+bond 0); input 5; account 70. -/
 def ordered : Values :=
-  [(0, 0), (1, 42), (2, 5), (3, 7), (4, 70), (5, 100), (6, 160), (7, 700), (8, 100), (11, 0)]
+  [(0, 0), (1, 42), (2, 5), (3, 7), (4, 70), (5, 100), (6, 160), (7, 700), (8, 0), (9, 0), (10, 0),
+    (11, 0)]
+/-- Funded by the caller's money turn: escrow = price. -/
+def funded : Values :=
+  [(0, 0), (1, 42), (2, 5), (3, 7), (4, 70), (5, 100), (6, 160), (7, 700), (8, 100), (9, 0), (10, 0),
+    (11, 0)]
 /-- Claimed by subject 8 (account 80) with bond 100. -/
 def claimed : Values :=
   [(0, 1), (1, 42), (2, 5), (3, 7), (4, 70), (5, 100), (6, 160), (7, 700), (8, 100), (9, 8),
@@ -1058,8 +1179,12 @@ def setField (base : Values) (n : Nat) (x : Int) : Values :=
   base.map fun q => if q.1 = n then (n, x) else q
 def closedOf (base : Values) : Values := setField (setField (setState base 6) 8 0) 11 0
 
-def w (subject : Int) (now : Int) (post : Values) : JobTurn := ⟨2, subject, some now, none, post⟩
-def wRan (subject : Int) (now : Int) (post : Values) : JobTurn := ⟨2, subject, some now, some 1, post⟩
+def w (subject : Int) (now : Int) (post : Values) : JobTurn := ⟨2, subject, some now, none, none, post⟩
+def wRan (subject : Int) (now : Int) (post : Values) : JobTurn :=
+  ⟨2, subject, some now, some 1, none, post⟩
+/-- A job-money receiver turn (fund, claim, settle): the money slot projected. -/
+def wMoney (subject : Int) (now : Int) (post : Values) : JobTurn :=
+  ⟨2, subject, some now, none, some 1, post⟩
 
 set_option maxRecDepth 20000
 
@@ -1069,20 +1194,33 @@ theorem order_admitted : admits demo unborn (w 7 100 ordered) = true := by decid
 theorem order_by_stranger_refused : refusalPath demo unborn (w 8 100 ordered) = some [3] := by decide
 /-- An order without a clock is refused (clause 9 fails closed). -/
 theorem order_without_clock_refused :
-    refusalPath demo unborn ⟨2, 7, none, none, ordered⟩ = some [9] := by decide
-/-- An order whose escrow is short of its price: clause 11. -/
-theorem order_short_escrow_refused :
-    refusalPath demo unborn (w 7 100 (setField ordered 8 50)) = some [11] := by decide
+    refusalPath demo unborn ⟨2, 7, none, none, none, ordered⟩ = some [9] := by decide
+/-- An order born claiming escrow nobody deposited: clause 11 (escrow is the fund turn's). -/
+theorem order_prefunded_refused :
+    refusalPath demo unborn (w 7 100 funded) = some [11] := by decide
 
--- claim 0 → 1
-theorem claim_admitted : admits demo ordered (w 8 150 claimed) = true := by decide
+-- fund (state 0, escrow 0 → price): the caller's money turn
+theorem fund_admitted : admits demo ordered (wMoney 7 120 funded) = true := by decide
+/-- **Money without the receiver.** The same fund as an ordinary write: clause 44. -/
+theorem fund_without_receiver_refused :
+    refusalPath demo ordered (w 7 120 funded) = some [44] := by decide
+/-- A fund short of the price: clause 14. -/
+theorem fund_short_refused :
+    refusalPath demo ordered (wMoney 7 120 (setField ordered 8 50)) = some [14] := by decide
+
+-- claim 0 → 1: the provider's money turn (the bond)
+theorem claim_admitted : admits demo funded (wMoney 8 150 claimed) = true := by decide
+/-- **A claim as an ordinary write** (a bond that no Book transfer backs): clause 44. -/
+theorem claim_without_receiver_refused :
+    refusalPath demo funded (w 8 150 claimed) = some [44] := by decide
 /-- Past `claimBy`: clause 27. -/
-theorem claim_late_refused : refusalPath demo ordered (w 8 200 claimed) = some [27] := by decide
+theorem claim_late_refused : refusalPath demo funded (wMoney 8 200 claimed) = some [27] := by decide
 /-- Claiming in another subject's name (subject 9 writes provider := 8): clause 28. -/
-theorem claim_for_another_refused : refusalPath demo ordered (w 9 150 claimed) = some [28] := by decide
+theorem claim_for_another_refused :
+    refusalPath demo funded (wMoney 9 150 claimed) = some [28] := by decide
 /-- A bond below the price: clause 30. -/
 theorem claim_underbonded_refused :
-    refusalPath demo ordered (w 8 150 (setField claimed 11 50)) = some [30] := by decide
+    refusalPath demo funded (wMoney 8 150 (setField claimed 11 50)) = some [30] := by decide
 
 -- answer 1 → 2
 theorem answer_admitted : admits demo claimed (w 8 300 answered) = true := by decide
@@ -1162,19 +1300,23 @@ theorem void_by_stranger_early_refused :
 theorem void_by_stranger_late_admitted : admits demo ordered (w 9 161 (setState ordered 5)) = true := by
   decide
 
--- close → 6
+-- close → 6: the settle money turn
 theorem close_upheld_admitted :
-    admits demo (setState (withTruth answered 77) 3) (w 9 600 (closedOf (withTruth answered 77))) =
-      true := by decide
+    admits demo (setState (withTruth answered 77) 3)
+      (wMoney 9 600 (closedOf (withTruth answered 77))) = true := by decide
 theorem close_slashed_admitted :
-    admits demo (setState (withTruth answered 78) 4) (w 9 600 (closedOf (withTruth answered 78))) =
-      true := by decide
+    admits demo (setState (withTruth answered 78) 4)
+      (wMoney 9 600 (closedOf (withTruth answered 78))) = true := by decide
 theorem close_void_admitted :
-    admits demo (setState ordered 5) (w 9 600 (closedOf ordered)) = true := by decide
+    admits demo (setState funded 5) (wMoney 9 600 (closedOf funded)) = true := by decide
+/-- **A close as an ordinary write** (escrow and bond zeroed with no payout): clause 44. -/
+theorem close_without_receiver_refused :
+    refusalPath demo (setState (withTruth answered 77) 3)
+      (w 9 600 (closedOf (withTruth answered 77))) = some [44] := by decide
 /-- Closing with the bond still held: clause 43. -/
 theorem close_holding_bond_refused :
     refusalPath demo (setState (withTruth answered 77) 3)
-      (w 9 600 (setField (closedOf (withTruth answered 77)) 11 100)) = some [43] := by decide
+      (wMoney 9 600 (setField (closedOf (withTruth answered 77)) 11 100)) = some [43] := by decide
 /-- Closing an undecided job (2 → 6): clause 2. -/
 theorem close_undecided_refused :
     refusalPath demo answered (w 9 600 (closedOf answered)) = some [2] := by decide
@@ -1188,25 +1330,30 @@ theorem reopen_refused :
 theorem truth_after_close_refused :
     refusalPath demo (closedOf answered) (wRan 9 700 (withTruth (closedOf answered) 77)) =
       some [23] := by decide
-/-- **Counterexample (a limitation, recorded): a closed job admits a write that creates an UNDECLARED
-field.** `Pred` has no "no other slot" atom, so `no_double_settle` covers `F.all` only. -/
-theorem closed_job_admits_undeclared_field :
-    admits demo (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = true := by decide
+/-- **A closed job refuses a write that creates an undeclared field, by name**: the kernel names field
+20 before the law runs (K-FIELD-CLOSURE; this replaces C1's `closed_job_admits_undeclared_field`). -/
+theorem closed_job_refuses_undeclared_field :
+    undeclared (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = some 20 ∧
+      kernelAdmits demo (closedOf answered) (w 9 700 (closedOf answered ++ [(20, 1)])) = false := by
+  decide
+
+/-- The order creates only declared fields, so the kernel's verdict on it is the law's. -/
+theorem order_inside_declaration : undeclared unborn (w 7 100 ordered) = none := by decide
 
 -- management (clause 0)
 /-- The caller delegates (verb 3; a non-write sees no field or clock slot). -/
-theorem delegate_by_caller_admitted : admits demo ordered ⟨3, 7, none, none, ordered⟩ = true := by
+theorem delegate_by_caller_admitted : admits demo ordered ⟨3, 7, none, none, none, ordered⟩ = true := by
   decide
 theorem delegate_by_provider_refused :
-    refusalPath demo ordered ⟨3, 8, none, none, ordered⟩ = some [0] := by decide
+    refusalPath demo ordered ⟨3, 8, none, none, none, ordered⟩ = some [0] := by decide
 /-- **Nobody installs a new law on a live job** — not even the caller: clause 0. -/
 theorem install_by_caller_refused :
-    refusalPath demo claimed ⟨4, 7, none, none, claimed⟩ = some [0] := by decide
+    refusalPath demo claimed ⟨4, 7, none, none, none, claimed⟩ = some [0] := by decide
 /-- **Nor revokes**: a revoke after claim would cut the bonded provider off and force the stall. -/
 theorem revoke_by_caller_refused :
-    refusalPath demo claimed ⟨5, 7, none, none, claimed⟩ = some [0] := by decide
+    refusalPath demo claimed ⟨5, 7, none, none, none, claimed⟩ = some [0] := by decide
 /-- A read by anyone is judged only by management. -/
-theorem read_admitted : admits demo claimed ⟨1, 9, none, none, claimed⟩ = true := by decide
+theorem read_admitted : admits demo claimed ⟨1, 9, none, none, none, claimed⟩ = true := by decide
 
 -- the counterexamples to the wrong spellings
 /-- **Counterexample: a negated deadline passes without a clock.** `not (leSlots clock/now finalAt)`
@@ -1215,9 +1362,9 @@ provider take `upheld` by timeout on a clockless write; clause 38's positive `le
 clock/now -1` refuses it (`early_upheld_refused` is the clocked pole). -/
 theorem negated_timeout_fails_open :
     eval (.not (.leSlots "clock/now" "resource/field/14/after"))
-      (jview demo ⟨2, 8, none, none, setState answered 3⟩ answered answered)
-      (jview demo ⟨2, 8, none, none, setState answered 3⟩ answered (setState answered 3)) = true ∧
-    refusalPath demo answered ⟨2, 8, none, none, setState answered 3⟩ = some [38] := by decide
+      (jview demo ⟨2, 8, none, none, none, setState answered 3⟩ answered answered)
+      (jview demo ⟨2, 8, none, none, none, setState answered 3⟩ answered (setState answered 3)) = true ∧
+    refusalPath demo answered ⟨2, 8, none, none, none, setState answered 3⟩ = some [38] := by decide
 /-- **Counterexample: `not (price <= 0)` passes on an absent price**; clause 8's presence conjunct
 refuses the priceless order. -/
 theorem negated_price_fails_open :
@@ -1248,6 +1395,16 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.upheld_requires_match_or_timeout
 /-- info: 'Minidregg.Kernel.Job.close_empties_cell' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_empties_cell
+/-- info: 'Minidregg.Kernel.Job.ev_ran' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.ev_ran
+/-- info: 'Minidregg.Kernel.Job.money_frozen_without_slot' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.money_frozen_without_slot
+/-- info: 'Minidregg.Kernel.Job.escrow_moves_only_on_fund_or_close' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.escrow_moves_only_on_fund_or_close
+/-- info: 'Minidregg.Kernel.Job.money_fresh' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.money_fresh
+/-- info: 'Minidregg.Kernel.Job.money_not_clock' does not depend on any axioms -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.money_not_clock
 /-- info: 'Minidregg.Kernel.Job.closed_step_frame' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.closed_step_frame
 /-- info: 'Minidregg.Kernel.Job.jget' depends on axioms: [propext, Quot.sound] -/
@@ -1298,8 +1455,18 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_by_stranger_refused
 /-- info: 'Minidregg.Kernel.Job.order_without_clock_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_without_clock_refused
-/-- info: 'Minidregg.Kernel.Job.order_short_escrow_refused' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_short_escrow_refused
+/-- info: 'Minidregg.Kernel.Job.order_prefunded_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_prefunded_refused
+/-- info: 'Minidregg.Kernel.Job.fund_admitted' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.fund_admitted
+/-- info: 'Minidregg.Kernel.Job.fund_without_receiver_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.fund_without_receiver_refused
+/-- info: 'Minidregg.Kernel.Job.fund_short_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.fund_short_refused
+/-- info: 'Minidregg.Kernel.Job.claim_without_receiver_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.claim_without_receiver_refused
+/-- info: 'Minidregg.Kernel.Job.close_without_receiver_refused' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.close_without_receiver_refused
 /-- info: 'Minidregg.Kernel.Job.claim_admitted' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.claim_admitted
 /-- info: 'Minidregg.Kernel.Job.claim_late_refused' depends on axioms: [propext, Quot.sound] -/
@@ -1370,8 +1537,12 @@ end Poles
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.reopen_refused
 /-- info: 'Minidregg.Kernel.Job.truth_after_close_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.truth_after_close_refused
-/-- info: 'Minidregg.Kernel.Job.closed_job_admits_undeclared_field' depends on axioms: [propext, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.closed_job_admits_undeclared_field
+/-- info: 'Minidregg.Kernel.Job.closed_job_refuses_undeclared_field' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.closed_job_refuses_undeclared_field
+/-- info: 'Minidregg.Kernel.Job.order_inside_declaration' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.order_inside_declaration
+/-- info: 'Minidregg.Kernel.Job.kernelAdmits_inside' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.kernelAdmits_inside
 /-- info: 'Minidregg.Kernel.Job.delegate_by_caller_admitted' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.delegate_by_caller_admitted
 /-- info: 'Minidregg.Kernel.Job.delegate_by_provider_refused' depends on axioms: [propext, Quot.sound] -/
@@ -1387,7 +1558,7 @@ end Poles
 /-- info: 'Minidregg.Kernel.Job.negated_price_fails_open' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.negated_price_fails_open
 
-/-- info: 'Minidregg.Kernel.Job.demo_ran_not_clock' does not depend on any axioms -/
+/-- info: 'Minidregg.Kernel.Job.demo_ran_not_clock' depends on axioms: [propext] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.Job.demo_ran_not_clock
 
 end Minidregg.Kernel.Job

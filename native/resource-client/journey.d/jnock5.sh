@@ -153,7 +153,7 @@ def read_fields(tag):
     return vals, r.stdout
 
 r = mini("--action", "create", "--dir", WS, "--name", "ctr", "--storage", "declared",
-    "--predicate", path("permit-all.json"))
+    "--predicate", path("permit-all.json"), "--fields", "%d-%d" % (STATE, COUNT))
 CTR = json.load(open(os.path.join(WS, "refs", "ctr.json")))["target"] if r.returncode == 0 else None
 LAW = {"type": "any", "predicates": [
     {"type": "not", "predicate": {"type": "eq", "slot": "request/verb", "value": "2"}},

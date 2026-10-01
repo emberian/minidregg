@@ -1387,6 +1387,23 @@ def payJob (config : Config) (job : Nat) : IO (Except String PayJob) := do
   | .error detail => return .error detail
   | .ok opened => return payJobLoaded config opened job
 
+/-- The operator's local explanation of one job-money command (not a socket
+operation: a public submission stays blind, MR's rule). It runs the receiver's
+own preparation (`JobMoneyReceiver.prepare`: the money decision, the claimer's
+membership, the pinned job law at the clock) on the Store as it is now, and
+names the refusal it reaches. It signs nothing and commits nothing. -/
+def jobMoneyExplain (config : Config) (commandBytes : List UInt8) : IO (Except String String) := do
+  match ← openExisting config with
+  | .error detail => return .error detail
+  | .ok opened =>
+      match JobMoneyReceiver.commandCodec.decode commandBytes with
+      | none => return .error "noncanonical job money command"
+      | some command =>
+          match JobMoneyReceiver.prepare config.deployment config.profile
+              ⟨config.federation, logicalHeight config opened.durable⟩ opened.durable command with
+          | .ok _ => return .ok "prepared: the receiver would admit this command up to its signature"
+          | .error reason => return .ok s!"refused {(repr reason).pretty}"
+
 /-- The operator's local read of one AgentGrain purse (not a socket
 operation): its root and its four coordinates. -/
 structure PayPurse where

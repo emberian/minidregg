@@ -1599,6 +1599,35 @@ struct BirthShape<'a> {
     /// from the Host's own nock-check verdict and, when admissible, its cell id.
     /// A program is born at its content address, so no target is reserved.
     program: Option<(String, Option<String>)>,
+    /// `storage: "declared"`: the fields the cell may ever hold (K-FIELD-CLOSURE),
+    /// `["0","1",…]` or `"open"`. `None` declares none: the cell can hold no field.
+    fields: Option<Value>,
+}
+
+/// `--fields`: `open`, or a comma list of field numbers and inclusive ranges
+/// (`0-15,20`). The Host refuses a write to any field a cell did not declare.
+pub(crate) fn parse_fields(text: &str) -> Result<Value> {
+    if text == "open" {
+        return Ok(json!("open"));
+    }
+    let mut fields: Vec<u64> = Vec::new();
+    for part in text.split(',') {
+        let (low, high) = match part.split_once('-') {
+            Some((low, high)) => (low, high),
+            None => (part, part),
+        };
+        let low: u64 = low.parse().map_err(|_| format!("--fields: bad field number {part:?}"))?;
+        let high: u64 = high.parse().map_err(|_| format!("--fields: bad field number {part:?}"))?;
+        if high < low || high - low > 4096 {
+            return Err(format!("--fields: bad range {part:?}").into());
+        }
+        for field in low..=high {
+            if !fields.contains(&field) {
+                fields.push(field);
+            }
+        }
+    }
+    Ok(Value::Array(fields.into_iter().map(|f| json!(f.to_string())).collect()))
 }
 
 /// Immutable authoring generations of one reserved birth request, in order.
@@ -1725,6 +1754,9 @@ fn birth(
     if !matches!(shape.storage, "content" | "declared" | "stream" | "nock") {
         return Err("supported resource storage is content, declared, stream or nock".into());
     }
+    if shape.fields.is_some() && shape.storage != "declared" {
+        return Err("--fields is only for declared storage".into());
+    }
     decimal(shape.owner, "birth owner")?;
     // An account (a realm well, or a holder's purse) is declared storage only.
     if !matches!((shape.kind, shape.storage), ("object", _) | ("account", "declared")) {
@@ -1756,6 +1788,9 @@ fn birth(
     }
     if let Some((hex, _)) = &program {
         requested_core["programSha256"] = json!(format!("{:x}", Sha256::digest(hex.as_bytes())));
+    }
+    if let Some(fields) = &shape.fields {
+        requested_core["fields"] = fields.clone();
     }
     let request = if request_path.exists() {
         let saved = bounded_json(&request_path)?;
@@ -1855,6 +1890,10 @@ fn birth(
             "controlCapability":reservation.ids["controlCapability"],
             "predicate":shape.predicate}),
     };
+    let mut resource = resource;
+    if let Some(fields) = &shape.fields {
+        resource["fields"] = fields.clone();
+    }
     let mut expected_source = json!({"subject":member(workspace,"subject")?,"nonce":nonce,
             "birth":{"genesis":context["genesis"],"template":context["template"],
                 "creator":member(workspace,"subject")?,"nonce":nonce,
@@ -1999,8 +2038,10 @@ pub(crate) fn create(
     kind: &str,
     owner: Option<&str>,
     program_path: Option<&Path>,
+    fields: Option<&str>,
 ) -> Result<()> {
     let predicate = bounded_json(predicate_path)?;
+    let fields = fields.map(parse_fields).transpose()?;
     // `--program VERDICT.json`: the Host's own nock-check verdict (op 131): its
     // canonical DREGG/PROGRAM/v1 record bytes and, when admissible, its cell id.
     let program = match program_path {
@@ -2035,6 +2076,7 @@ pub(crate) fn create(
             funding: None,
             room,
             program: program.clone(),
+            fields,
         },
     )?;
     let program_cell = program.as_ref().and_then(|(_, cell)| cell.as_deref());
@@ -2065,6 +2107,7 @@ pub(crate) fn create_funded_account(
             funding: Some(amount),
             room: None,
             program: None,
+            fields: None,
         },
     )?;
     let resource = &source["birth"]["resources"][0];
@@ -2168,6 +2211,7 @@ fn provision(root: &Path, workspace: &Value, request: &Provision<'_>) -> Result<
             funding: Some(request.funding),
             room: None,
             program: None,
+            fields: None,
         },
     )?;
     let account = &source["birth"]["resources"][0];
@@ -2823,6 +2867,10 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 Some(value) => Some(os_string(value, "resource owner")?),
                 None => None,
             };
+            let fields = match args.optional("fields") {
+                Some(value) => Some(os_string(value, "declared fields")?),
+                None => None,
+            };
             args.finish()?;
             create(
                 &root,
@@ -2834,6 +2882,7 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
                 &kind,
                 owner.as_deref(),
                 program.as_deref(),
+                fields.as_deref(),
             )
         }
         "provision" => {
@@ -3100,6 +3149,16 @@ mod tests {
         .unwrap();
         assert_eq!(again, base.join("g0002"));
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn declared_fields_parse_lists_ranges_and_open() {
+        assert_eq!(parse_fields("open").unwrap(), json!("open"));
+        assert_eq!(parse_fields("2,3").unwrap(), json!(["2", "3"]));
+        assert_eq!(parse_fields("0-3,2,7").unwrap(), json!(["0", "1", "2", "3", "7"]));
+        assert!(parse_fields("").is_err());
+        assert!(parse_fields("3-1").is_err());
+        assert!(parse_fields("a").is_err());
     }
 
     #[test]

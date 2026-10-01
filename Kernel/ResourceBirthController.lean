@@ -319,6 +319,31 @@ instance physicalPostLawDecidable (deployment : Deployment) (write : DataWrite) 
   unfold PhysicalPostLaw
   split <;> infer_instance
 
+/-- **K-FIELD-CLOSURE at every receiver.** A live declared object cell that a
+receiver's `PhysicalPostLaw` admits holds only the fields it declares.  Every
+receiver that writes cells checks `PhysicalPostLaw` on each write, births
+included, so none can leave an undeclared field on a declared cell; with the
+declaration fixed by every admitted action (`FieldClosure.admitted_preserves_declared`)
+none can widen it either. -/
+theorem PhysicalPostLaw.declared_closed {deployment : Deployment} {write : DataWrite}
+    (law : PhysicalPostLaw deployment write) {payload : Compiler.DeclaredEffectCell.Cell}
+    (live : (LifecycleImage.codec Registry).decode write.canonicalPostBytes =
+      some (.live ⟨.declaredObject, payload⟩)) :
+    FieldClosure.Closed write.cellId.value payload.logical := by
+  unfold PhysicalPostLaw at law
+  rw [live] at law
+  exact law.2.2
+
+/-- The same for an account's metadata cell. -/
+theorem PhysicalPostLaw.account_closed {deployment : Deployment} {write : DataWrite}
+    (law : PhysicalPostLaw deployment write) {payload : Compiler.DeclaredEffectCell.Cell}
+    (live : (LifecycleImage.codec Registry).decode write.canonicalPostBytes =
+      some (.live ⟨.accountMetadata, payload⟩)) :
+    FieldClosure.Closed write.cellId.value payload.logical := by
+  unfold PhysicalPostLaw at law
+  rw [live] at law
+  exact law.2.2
+
 def PinsBound (deployment : Deployment) (pins : FactoryPins) : Prop :=
   pins.factory.value = deployment.factoryId ∧ pins.domain = deployment.domain
 
@@ -987,4 +1012,8 @@ end Concrete
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.no_prepared_of_absent_parent
 /-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.parentGuards_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.parentGuards_exact
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.declared_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.declared_closed
+/-- info: 'Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.Concrete.PhysicalPostLaw.account_closed
 end Minidregg.Kernel.ResourceBirthController

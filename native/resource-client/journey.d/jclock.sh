@@ -116,7 +116,7 @@ view v0
 row "genesis clock" "now 0 slot 0" "rc=$(rc v0) now=$(now_of v0) slot=$(jq -r .slot "$D/v0.out" 2>/dev/null)" \
   "$([ "$(rc v0)" = 0 ] && [ "$(now_of v0)" = 0 ] && [ "$(jq -r .slot "$D/v0.out")" = 0 ]; echo $?)"
 
-run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name timed --storage declared --predicate "$REQ/stamp-le-now.json"
+run create "$MINI" workspace --action create --dir "$SPONSOR_WS" --name timed --storage declared --predicate "$REQ/stamp-le-now.json" --fields 5
 row "create resource under law any[not verb 2, leSlotsOff field/5/after clock/now 0]" "created" "rc=$(rc create)" "$([ "$(rc create)" = 0 ]; echo $?)"
 
 attempt_write w-early 100; r=$?; why=$(refusal w-early)

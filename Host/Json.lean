@@ -1360,18 +1360,22 @@ private def birthParts (path : String)
   let storage ← string (path ++ ".storage") (← field path "storage" raw)
   let worker ← if storage = "grain" then grainWorker path raw else pure none
   let roomField := if (raw.get? "room").isSome then ["room"] else []
+  -- K-FIELD-CLOSURE: a declared resource names the fields it may hold, or
+  -- `"open"`; absent, it declares none and holds none.
+  let fieldsField := if storage = "declared" ∧ (raw.get? "fields").isSome then ["fields"] else []
   let obj ← exactObject path
     ((if storage = "grain" then
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "budget"] ++
         (if worker.isSome then grainWorkerFields raw else [])
     else if storage = "nock" then
       ["kind", "storage", "program", "owner", "ownerCapability", "controlCapability", "predicate"]
-    else if storage = "job" then
-      ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "caller",
-        "callerAcct", "price"]
     else
       ["kind", "storage", "target", "owner", "ownerCapability", "controlCapability", "predicate"]) ++
-      roomField) json
+      roomField ++ fieldsField) json
+  let declaration : Minidregg.Kernel.FieldClosure.FieldSet ← match obj.get? "fields" with
+    | none => pure (.closed [])
+    | some (.str "open") => pure .open
+    | some value => .closed <$> list (path ++ ".fields") nat value
   let room ← match obj.get? "room" with
     | none => pure none
     | some value => some <$> nat (path ++ ".room") value
@@ -1401,7 +1405,6 @@ private def birthParts (path : String)
     (← nat (path ++ ".controlCapability") (← field path "controlCapability" obj))
   let rulePredicate ← if storage = "grain" then
       pure (grainPolicy owner.value worker)
-    else if storage = "job" then pure JobMoney.standInLaw
     else predicate (path ++ ".predicate") (← field path "predicate" obj)
   let rule := NativeHostGenesis.policy profile source target rulePredicate
   let cell : PackedCell CanonicalCellRegistry.registry ←
@@ -1411,17 +1414,11 @@ private def birthParts (path : String)
       pure ⟨.content, CellState.materialize HyperdocumentCell.contentMaterializer ContentResource.initialStore⟩
     else if storage = "stream" then
       pure ⟨.stream, CellState.materialize StreamCell.materializer 0⟩
-    else if storage = "job" then
-      let caller ← nat (path ++ ".caller") (← field path "caller" obj)
-      let callerAcct ← nat (path ++ ".callerAcct") (← field path "callerAcct" obj)
-      let price ← nat (path ++ ".price") (← field path "price" obj)
-      pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
-        (JobMoney.initialStore target caller callerAcct price)⟩
     else if storage = "grain" then
       let budget ← nat (path ++ ".budget") (← field path "budget" obj)
       pure ⟨.declaredObject, CellState.materialize DeclaredEffectCell.materializer
         (AgentGrain.initialStore target budget)⟩
-    else pure (NativeHostGenesis.declaredCell source target (kind = .account))
+    else pure (NativeHostGenesis.declaredCell source target (kind = .account) declaration)
   let item : ResourceBirth.BirthItem CanonicalCellRegistry.registry :=
     ⟨⟨target, CellSlot.root CanonicalCellRegistry.registry .absent, cell⟩, kind, owner, room⟩
   -- A workspace resource's owner holds it as a room: `under target`, the
@@ -2485,11 +2482,12 @@ private def payRefill (json : Lean.Json) : Result (List UInt8) := do
 /-- A job-money command (lane C3): `action` 1 fund · 2 claim · 3 settle.
 The bytes claim nothing: the receiver decides every amount a settle pays. -/
 private def jobMoney (json : Lean.Json) : Result (List UInt8) := do
-  let obj ← exactObject "$" ["subject", "capability", "job", "action", "account", "amount",
-    "nonce", "expectedAuthorityRoot"] json
+  let obj ← exactObject "$" ["subject", "capability", "jobCapability", "job", "action",
+    "account", "amount", "nonce", "expectedAuthorityRoot"] json
   let command : JobMoneyReceiver.Command :=
     { subject := ⟨← nat "$.subject" (← field "$" "subject" obj)⟩
       capability := ⟨← nat "$.capability" (← field "$" "capability" obj)⟩
+      jobCapability := ⟨← nat "$.jobCapability" (← field "$" "jobCapability" obj)⟩
       job := ← nat "$.job" (← field "$" "job" obj)
       action := ← nat "$.action" (← field "$" "action" obj)
       account := ← nat "$.account" (← field "$" "account" obj)
@@ -2866,9 +2864,10 @@ private def payRefillCommandJson (command : PurseRefillReceiver.Command) : Lean.
    ("expectedAuthorityRoot", decimal command.expectedAuthorityRoot.value)]
 
 private def jobMoneyCommandJson (command : JobMoneyReceiver.Command) : Lean.Json := .mkObj
-  [("type", "job-money-v1"),
+  [("type", "job-money-v2"),
    ("canonical", hexJson (JobMoneyReceiver.commandCodec.encode command)),
    ("subject", decimal command.subject.value), ("capability", decimal command.capability.value),
+   ("jobCapability", decimal command.jobCapability.value),
    ("job", decimal command.job), ("action", decimal command.action),
    ("account", decimal command.account), ("amount", decimal command.amount),
    ("nonce", decimal command.nonce),
@@ -3498,13 +3497,33 @@ private def stateKeyJson : Minidregg.Theory.EffectDeclaration.StateKey → Lean.
       ("resource", decimal account.value), ("field", decimal resource.value)]
   | .programCode resource => .mkObj [("type", "program"),
       ("resource", decimal resource.value)]
+  -- The declaration renders without a `field` member: a reader selecting a
+  -- field's value by `key.field` never matches a declaration entry.
+  | .fieldDeclared object field => .mkObj [("type", "declared"),
+      ("resource", decimal object.value), ("declares", decimal field.value)]
+  | .fieldsOpen object => .mkObj [("type", "open"), ("resource", decimal object.value)]
 
+private def isDeclarationKey : Minidregg.Theory.EffectDeclaration.StateKey → Bool
+  | .fieldDeclared _ _ | .fieldsOpen _ => true
+  | _ => false
+
+/-- A declared cell's view: `entries` are the values it holds; its declaration
+(K-FIELD-CLOSURE) is the separate `declaration` member, `"open"` or the declared
+field numbers, so a reader iterating values never meets the cell's shape. -/
 private def declaredCellJson (root : Digest)
     (store : Store.Store EffectDeclaration.effectLayout) : Lean.Json :=
-  let entries := StoreCodec.entries DeclaredEffectCell.wire store
+  let all := StoreCodec.entries DeclaredEffectCell.wire store
+  let entries := all.filter fun entry => !isDeclarationKey entry.1.2
+  let isOpen := all.any fun entry => match entry.1.2 with
+    | .fieldsOpen _ => true
+    | _ => false
+  let declared := all.filterMap fun entry => match entry.1.2 with
+    | .fieldDeclared _ field => some (decimal field.value)
+    | _ => none
   let base := [("root", decimal root.value),
     ("entries", .arr <| entries.toArray.map fun entry => .mkObj
-      [("key", stateKeyJson entry.1.2), ("value", signedDecimal (entry.2 : Int))])]
+      [("key", stateKeyJson entry.1.2), ("value", signedDecimal (entry.2 : Int))]),
+    ("declaration", if isOpen then "open" else .arr declared.toArray)]
   let grain := entries.findSome? fun entry => match entry.1.2 with
     | .objectField task field => if field.value = 0 then some task.value else none
     | _ => none

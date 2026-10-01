@@ -144,7 +144,7 @@ cat >"$EVIDENCE/birth-intent.json" <<EOF
    "creator":"7","nonce":"22000",
    "resources":[{"kind":"object","storage":"declared","target":"600",
      "owner":"7","ownerCapability":"61","controlCapability":"62",
-     "predicate":{"type":"all","predicates":[]}}],
+     "predicate":{"type":"all","predicates":[]},"fields":["0","2"]}],
    "sourceCapabilities":["41"],"funding":[],"feePayer":"7"},
  "grants":[{"kind":"object","target":"10","capability":"54"},
    {"kind":"account","target":"7","capability":"41"}]}

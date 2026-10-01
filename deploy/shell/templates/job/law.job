@@ -15,7 +15,12 @@
 --   "now > D"          leSlotsOff field D clock now -1    (positive: a missing clock refuses it;
 --                      `not (leSlots clock now field D)` would PASS without a clock)
 -- States: 0 open · 1 claimed · 2 answered · 3 upheld · 4 slashed · 5 void · 6 closed.
--- The money columns of §2.3 are K-JOB-MONEY's (C3); this law constrains only the cell's fields.
+-- The money columns of §2.3 are K-JOB-MONEY's (C3): fund, claim and close are money turns, and a write
+-- that moves escrow or bond, claims or closes carries the slot only that receiver projects
+-- (`slot "authority/operation/job-money"`, clause 44). The amounts are the receiver's
+-- (`JobMoney.decideMoney`, `payouts`), checked against the Book; this law fixes which edge moves what.
+-- The truth is K-RAN's: `ran {PROGRAM}` reads the slot the controller projects only when the command's
+-- run claim for PROGRAM re-executed and its writes are the program's product (clause 22).
 
 -- 0 management: reads and writes pass here (the clauses below and the grants decide); only the
 --   caller may delegate; NOBODY may install or revoke, so the law of a live job cannot be replaced
@@ -50,10 +55,11 @@ any [ not (verb == 2), eqSlots field state before field state before,
 any [ not (verb == 2), eqSlots field state before field state before, leSlots clock now field claimBy ];
 -- 10 order-answer-by-after-claim-by
 any [ not (verb == 2), eqSlots field state before field state before, leSlots field claimBy field answerBy ];
--- 11 order-escrow-is-price
-any [ not (verb == 2), eqSlots field state before field state before, eqSlots field escrow field price ];
--- 12 order-bond-zero
-any [ not (verb == 2), eqSlots field state before field state before, field bond == 0 ];
+-- 11 order-escrow-zero: an order is born unfunded; the caller funds it by a money turn (clause 14)
+any [ not (verb == 2), eqSlots field state before field state before, field escrow == 0 ];
+-- 12 order-unclaimed: bond, provider and providerAcct are born 0 (the money receiver reads all three)
+any [ not (verb == 2), eqSlots field state before field state before,
+      all [ field bond == 0, field provider == 0, field providerAcct == 0 ] ];
 
 -- frames: which edge may change which field --------------------------------------------------------
 -- 13 order-fields-frozen: after birth the order's fields never change (and are never deleted)
@@ -61,20 +67,20 @@ any [ not (verb == 2), not (eqSlots field state before field state before),
       all [ field program delta == 0, field input delta == 0, field caller delta == 0,
             field callerAcct delta == 0, field price delta == 0, field claimBy delta == 0,
             field answerBy delta == 0 ] ];
--- 14 escrow-frame: escrow moves only on close
+-- 14 escrow-frame: escrow moves only on fund (open, 0 -> price) and on close
 any [ not (verb == 2), not (eqSlots field state before field state before), field escrow delta == 0,
+      all [ field state before == 0, field state == 0, field escrow before == 0,
+            eqSlots field escrow field price ],
       all [ field state before in {3,4,5}, field state == 6 ] ];
 -- 15 bond-frame: bond moves only on claim and on close
 any [ not (verb == 2), not (eqSlots field state before field state before), field bond delta == 0,
       all [ field state before == 0, field state == 1 ],
       all [ field state before in {3,4,5}, field state == 6 ] ];
--- 16 provider-frame: absent until claim, written by claim, then fixed
-any [ not (verb == 2), field provider delta == 0,
-      all [ not (eqSlots field provider before field provider before), not (eqSlots field provider field provider) ],
+-- 16 provider-frame: born 0 by the order, written by claim, then fixed
+any [ not (verb == 2), not (eqSlots field state before field state before), field provider delta == 0,
       all [ field state before == 0, field state == 1 ] ];
 -- 17 provider-acct-frame
-any [ not (verb == 2), field providerAcct delta == 0,
-      all [ not (eqSlots field providerAcct before field providerAcct before), not (eqSlots field providerAcct field providerAcct) ],
+any [ not (verb == 2), not (eqSlots field state before field state before), field providerAcct delta == 0,
       all [ field state before == 0, field state == 1 ] ];
 -- 18 output-frame: absent until answer, written by answer, then fixed (no second answer)
 any [ not (verb == 2), field output delta == 0,
@@ -93,9 +99,10 @@ any [ not (verb == 2), field truth delta == 0, not (eqSlots field truth before f
 
 -- truth (state unchanged): the kernel's own output, admitted only with the run fact ----------------
 -- 22 truth-needs-ran: a write that introduces the truth carries the kernel's run verdict for PROGRAM
+--    (K-RAN: the controller projects run/program/PROGRAM only for a re-executed, matching claim)
 any [ not (verb == 2),
       not (all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]),
-      slot {RAN_SLOT} == 1 ];
+      ran {PROGRAM} ];
 -- 23 truth-in-1-or-2: the truth is written in state 1 or 2, and that write moves no state
 any [ not (verb == 2),
       not (all [ not (eqSlots field truth before field truth before), eqSlots field truth field truth ]),
@@ -162,4 +169,14 @@ any [ not (verb == 2), not (all [ field state before == 0, field state == 5 ]),
 -- 42 close-escrow-zero
 any [ not (verb == 2), not (all [ field state before in {3,4,5}, field state == 6 ]), field escrow == 0 ];
 -- 43 close-bond-zero
-any [ not (verb == 2), not (all [ field state before in {3,4,5}, field state == 6 ]), field bond == 0 ]
+any [ not (verb == 2), not (all [ field state before in {3,4,5}, field state == 6 ]), field bond == 0 ];
+
+-- money --------------------------------------------------------------------------------------------
+-- 44 money-by-the-receiver: after the order, a write that moves escrow or bond, claims, or closes is
+--    the job-money receiver's turn (fund / claim / settle, C3): only it projects this slot, and it
+--    moves the Book in the same commit
+any [ not (verb == 2), not (eqSlots field state before field state before),
+      all [ field escrow delta == 0, field bond delta == 0,
+            not (all [ field state before == 0, field state == 1 ]),
+            not (all [ field state before in {3,4,5}, field state == 6 ]) ],
+      slot authority/operation/job-money == 1 ]

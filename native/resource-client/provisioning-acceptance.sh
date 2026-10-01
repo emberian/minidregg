@@ -156,7 +156,7 @@ step init ok "$MINI" workspace --action init --host "$HOST" --config "$CONFIG" \
   --birth-context "$ROOT/sponsor/provisions/newcomer/birth-context.json" \
   --namespace-root "$ROOT/namespace" --dir "$ROOT/newcomer"
 step create ok "$MINI" workspace --action create --dir "$ROOT/newcomer" --name notes \
-  --storage declared --predicate "$ROOT/permit-all.json"
+  --storage declared --predicate "$ROOT/permit-all.json" --fields 2
 jq -e '.provenance.birthReceipt.confirmation == "installed"' \
   "$ROOT/newcomer/refs/notes.json" >/dev/null
 step read-empty ok "$MINI" workspace --action read --dir "$ROOT/newcomer" --name notes
