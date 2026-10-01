@@ -289,7 +289,10 @@ def Config.Valid {F : Type} [Field F]
     config.factoryController.capabilityId ::
     config.enrollments.flatMap (fun enrollment =>
       [enrollment.spendCapabilityId, enrollment.controlCapabilityId,
-       enrollment.factoryObserveCapabilityId])).Nodup
+       enrollment.factoryObserveCapabilityId]) ++
+    (config.payObserver.map (·.capabilityId)).toList ++
+    (config.payObserver.map (·.controlCapabilityId)).toList ++
+    (config.payObserver.map (·.enrolCapabilityId)).toList).Nodup
 
 instance configValidDecidable {F : Type} [Field F]
     (profile : CanonicalRuntimeProfile.Profile F) (config : Config) :
@@ -447,6 +450,63 @@ def factoryObserveCapability {F : Type} [Field F]
     (enrollment : Enrollment) : Capability .object :=
   rootCapability profile config .object enrollment.factoryObserveCapabilityId
     ⟨enrollment.key.subject⟩ config.deployment.factoryId {.observeObject}
+
+/-- The verb tags the pay cell's controller may exercise: `observeProgram`
+(1, to read the cell's root, which every management plan pins),
+`delegateProgram` (3, to grant a new observer), `installPolicy` (4, to name
+it in the law) and `revokeCapability` (5, to retire the old one). -/
+def payControlVerbTags : List Int :=
+  [Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.observeProgram : Verb .program)),
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.delegateProgram : Verb .program)),
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.installPolicy : Verb .program)),
+   Int.ofNat (CredentialAuthorityEntryCodec.verbTag (Verb.revokeCapability : Verb .program))]
+
+/-- The pay cell's law: the configured observer may only `observePayment`;
+the factory controller may only manage (delegate, install the law, revoke).
+Neither can do the other's part. -/
+def payPredicate (controller : SubjectId) (observer : PayObserver) : Minidregg.Pred.Pred :=
+  .any [
+    .all [.eq "request/verb" (Int.ofNat (CredentialAuthorityEntryCodec.verbTag
+        (Verb.observePayment : Verb .program))),
+      .eq "request/subject" (Int.ofNat observer.subject.value)],
+    .all [.eq "request/subject" (Int.ofNat controller.value),
+      .memberOf "request/verb" payControlVerbTags]]
+
+def payPolicy {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
+    (config : Config) (observer : PayObserver) : PolicyRecord :=
+  policy profile config (Kernel.PayCell.physicalId config.deployment.domain)
+    (payPredicate config.factoryController.subject observer)
+
+/-- The observer's capability: target and policy the pay cell, verb
+`observePayment` only. -/
+def observerCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    Capability .program :=
+  rootCapability profile config .program observer.capabilityId observer.subject
+    (Kernel.PayCell.physicalId config.deployment.domain) {.observePayment}
+
+/-- The factory controller's control of the pay cell (approved by ember
+2026-09-30 20:45): `installPolicy` and `revokeCapability`, plus
+`delegateProgram` and `observePayment`, because the only runtime path that
+grants a capability is delegation and a delegated child carries no verb its
+parent lacks, and `observeProgram`, because every management plan reads the
+target's root under an observation grant.  The pay law (`payPredicate`)
+refuses the controller's own reports. -/
+def payControlCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    Capability .program :=
+  rootCapability profile config .program observer.controlCapabilityId
+    config.factoryController.subject (Kernel.PayCell.physicalId config.deployment.domain)
+    {.observeProgram, .installPolicy, .revokeCapability, .delegateProgram, .observePayment}
+
+/-- `C_enrol` (PAY §11.4): the observer's capability on the factory, verb
+`installPolicy` only.  The scope alone would be the whole factory control;
+the confined factory law (`factoryLaw`) narrows it to self-enrollment. -/
+def enrolCapability {F : Type} [Field F]
+    (profile : CanonicalRuntimeProfile.Profile F) (config : Config) (observer : PayObserver) :
+    Capability .program :=
+  rootCapability profile config .program observer.enrolCapabilityId observer.subject
+    config.deployment.factoryId {.installPolicy}
 
 /-- A ticker's `C_tick`: target and policy the clock cell, verb `tickClock` only. -/
 def tickCapability {F : Type} [Field F]
@@ -797,7 +857,7 @@ the tick verb on the clock cell and nothing else. -/
 theorem clock_subject_confined {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F)
     (config : Config) (ticker : ClockTicker) (member : ticker ∈ config.clockTickers) :
     (tickCapability profile config ticker).holder = .subject ticker.subject ∧
-      (tickCapability profile config ticker).scope.targets = {⟨clockTarget config⟩} ∧
+      (tickCapability profile config ticker).scope.targets = .explicit {⟨clockTarget config⟩} ∧
       (tickCapability profile config ticker).scope.verbs = {.tickClock} ∧
       (tickCapability profile config ticker).policyId = ⟨clockTarget config⟩ ∧
       capabilityEntry (tickCapability profile config ticker) ∈ entries profile config ∧
@@ -826,7 +886,7 @@ theorem tick_requires_clock_capability {F : Type} [Field F]
       (∀ old new, new.get "request/subject" =
           some (Int.ofNat config.factoryController.subject.value) →
         Minidregg.Pred.eval (clockPolicy profile config).predicate old new = false) := by
-  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, notTicker, -⟩ := valid
+  obtain ⟨-, -, -, -, -, -, -, -, -, -, -, -, -, -, -, notTicker, -⟩ := valid
   refine ⟨by simp [controlCapability, rootCapability], fun _ _ => by
     simp [accountControlCapability, rootCapability], fun old new named => ?_⟩
   exact clock_law_refuses_nonticker _ old new _ named notTicker

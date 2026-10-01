@@ -559,7 +559,9 @@ theorem authorize_names_stored
   | some committed =>
   simp only [supplied, resolved] at accepted
   split at accepted
-  · simp [Except.toOption] at accepted
+  · split at accepted
+    · simp [Except.toOption] at accepted
+    · split at accepted <;> simp [Except.toOption] at accepted
   · rename_i authorized admitted
     simp only [Except.toOption] at accepted
     injection accepted with same
