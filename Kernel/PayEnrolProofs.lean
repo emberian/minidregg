@@ -380,6 +380,108 @@ theorem renew_only_extends (accepted : AcceptedEnrol deployment profile ambient 
 
 end Accepted
 
+/-! ## The float nets zero -/
+
+open Minidregg.Theory.CanonicalResourceKernel in
+/-- Every operation moves its one posting: the source's balance in the
+posting's asset falls by the amount and the destination's rises by it. -/
+theorem apply_balance (operation : Operation) (book : Book) (account : AccountId)
+    (asset : AssetId) :
+    (operation.apply book).balance account asset =
+      book.balance account asset
+        - (if operation.posting.source = account ∧ operation.posting.asset = asset then
+            Int.ofNat operation.posting.amount else 0)
+        + (if operation.posting.destination = account ∧ operation.posting.asset = asset then
+            Int.ofNat operation.posting.amount else 0) := by
+  have spine : (operation.apply book).balance account asset =
+      (book.applyPosting operation.posting).balance account asset := by
+    cases operation <;> rfl
+  rw [spine]
+  simp only [Book.applyPosting, Book.balance, DFinsupp.add_apply, DFinsupp.single_apply,
+    Prod.mk.injEq]
+  split_ifs <;> simp_all <;> omega
+
+open Minidregg.Theory.CanonicalResourceKernel in
+theorem registerAccounts_balance :
+    ∀ (book : Book) (accounts : List AccountId) (account : AccountId) (asset : AssetId),
+      (registerAccounts book accounts).balance account asset = book.balance account asset
+  | _, [], _, _ => rfl
+  | book, first :: rest, account, asset => by
+      rw [registerAccounts, registerAccounts_balance]
+      rfl
+
+/-- The birth fee of an enrollment's descriptor does not depend on who pays it
+or on the funding: it is the price's birth fee. -/
+theorem enrol_descriptor_fee {F : Type} [Field F] {deployment : CanonicalCellRegistry.Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {directory : LoadedDirectory durable} {authority : Loaded deployment durable.snapshot}
+    {book : PayEnrolReceiver.BookCell deployment directory.directory} {tariff : Tariff}
+    {price : Price} {plan : EnrolPlan}
+    (legs : EnrolLegs deployment profile ambient directory authority book tariff price plan) :
+    legs.descriptor.fee = ⟨plan.float, ambient.tariff.collector, ambient.tariff.asset,
+      birthFee deployment profile.semantics profile.template ambient.tariff authority.snapshot.cell
+        ambient.height (enrolIds deployment plan) 0⟩ ∧
+    legs.descriptor.funding = [⟨plan.float, (enrolIds deployment plan).account, ambient.tariff.asset,
+      enrolRemainder tariff price plan⟩] := by
+  have fee := congrArg Descriptor.fee legs.descriptorExact
+  have funding := congrArg Descriptor.funding legs.descriptorExact
+  exact ⟨by simpa [enrolDraft, draft, birthFee] using fee, by simpa [enrolDraft, draft] using funding⟩
+
+/-- **`enrol_float_net_zero`**: the enrollment's Book batch leaves the float
+where it started — it mints the credit to the float and pays out exactly the
+lease, the remainder and the birth fee — whenever the price is the
+descriptor's fee, the credit covers fee and lease, the tariff and factory
+share one asset, and the float is neither the issuer well, the new account
+nor the collector. -/
+theorem enrol_float_net_zero {F : Type} [Field F] {deployment : CanonicalCellRegistry.Deployment}
+    {profile : CanonicalRuntimeProfile.Profile F} {ambient : Ambient} {durable : Durable}
+    {directory : LoadedDirectory durable} {authority : Loaded deployment durable.snapshot}
+    {book : PayEnrolReceiver.BookCell deployment directory.directory} {tariff : Tariff}
+    {price : Price} {plan : EnrolPlan}
+    (legs : EnrolLegs deployment profile ambient directory authority book tariff price plan)
+    (fee : legs.descriptor.fee.amount = price.birthFee)
+    (afford : price.birthFee + leaseCost tariff plan.weeks ≤ plan.credit)
+    (sameAsset : ambient.tariff.asset = tariff.asset)
+    (notWell : plan.float ≠ tariff.asset)
+    (notAccount : plan.float ≠ (enrolIds deployment plan).account)
+    (notCollector : plan.float ≠ ambient.tariff.collector)
+    (pre : CanonicalResourceKernel.Book) :
+    ((enrolBatch tariff ambient.tariff.collector plan legs.descriptor).apply pre).balance
+        plan.float tariff.asset = pre.balance plan.float tariff.asset := by
+  obtain ⟨feeExact, fundingExact⟩ := enrol_descriptor_fee legs
+  have paid : birthFee deployment profile.semantics profile.template ambient.tariff
+      authority.snapshot.cell ambient.height (enrolIds deployment plan) 0 = price.birthFee := by
+    rw [feeExact] at fee
+    exact fee
+  simp only [enrolBatch, CanonicalResourceKernel.Batch.apply, Descriptor.resourceBatch,
+    fundingExact, feeExact, List.map_cons, List.map_nil, List.cons_append, List.nil_append,
+    CanonicalResourceKernel.applyOperations, InitialFunding.operation, CreationFee.operation]
+  rw [apply_balance, apply_balance, apply_balance, apply_balance, registerAccounts_balance]
+  simp only [CanonicalResourceKernel.Operation.posting, sameAsset, Ne.symm notWell,
+    Ne.symm notAccount, Ne.symm notCollector, and_true, if_true, if_false]
+  unfold enrolRemainder
+  simp only [Int.ofNat_eq_coe]
+  omega
+
+/-- An accepted enrollment always covers its birth fee and every lease week it
+grants, so the remainder is exact (`enrol_float_net_zero`'s `afford`). -/
+theorem enrol_affordable {store : PayStore} {price : Price} {tip : Clock} {o : Observation}
+    {verified : Verified} {subjectTaken : Bool} {plan : EnrolPlan}
+    (accepted : decideEnrol store price tip o verified subjectTaken = .ok (.enrol plan)) :
+    ∃ tariff, tariffOf store = some tariff ∧
+      price.birthFee + leaseCost tariff plan.weeks ≤ plan.credit := by
+  obtain ⟨tariff, credit, present, -, -, -, -, decided⟩ := decideEnrol_ok accepted
+  obtain ⟨-, -, -, -, -, -, -, -, priced, planned⟩ := classify_enrol decided.symm
+  refine ⟨tariff, present, ?_⟩
+  have weeks := congrArg EnrolPlan.weeks planned
+  have credited := congrArg EnrolPlan.credit planned
+  simp only [enrolPlan] at weeks credited
+  have floor := Nat.div_mul_le_self (credit.credit - price.birthFee) tariff.weekCredit
+  simp only [enrolPrice] at priced
+  unfold leaseCost
+  rw [weeks, credited]
+  omega
+
 /-! ## Poles -/
 
 /-- Satisfiable pole: the journaled branch's pay patch on a concrete
@@ -418,6 +520,11 @@ theorem lease_week_cost : leaseCost { exampleTariff with nodeHourRate := 5952380
 #assert_axioms self_enroll_tick
 #assert_axioms journal_mints_nothing
 #assert_axioms renew_only_extends
+#assert_axioms apply_balance
+#assert_axioms registerAccounts_balance
+#assert_axioms enrol_descriptor_fee
+#assert_axioms enrol_float_net_zero
+#assert_axioms enrol_affordable
 #assert_axioms journal_patch_length
 #assert_axioms enrol_patch_length
 #assert_axioms lease_week_cost
