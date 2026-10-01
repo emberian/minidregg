@@ -820,7 +820,45 @@ impl RpcDriver {
                 reply: reply_tx,
             })
             .map_err(|_| invalid("SPK RPC worker queue unavailable"))?;
-        self.receive(reply_rx, deadline)
+        self.receive_released(reply_rx, deadline)
+    }
+
+    /// A worker reply, success or refusal, is its release ACK: the command
+    /// has left the worker and its app-side session was evicted on failure,
+    /// so a refused open (an app that declines the upgrade answers with an
+    /// RPC exception through sandstorm-http-bridge) stays one-shot uncertain
+    /// in its own journal record without fencing the generation's other
+    /// participants, as a released cancellable dispatch does. Only a missing
+    /// ACK (deadline or worker exit) poisons the driver.
+    fn receive_released<T>(
+        &mut self,
+        reply: sync_mpsc::Receiver<io::Result<T>>,
+        deadline: Instant,
+    ) -> io::Result<T> {
+        let left = match remaining(deadline) {
+            Ok(left) => left,
+            Err(error) => {
+                self.uncertain = true;
+                return Err(error);
+            }
+        };
+        match reply.recv_timeout(left) {
+            Ok(result) => result,
+            Err(sync_mpsc::RecvTimeoutError::Timeout) => {
+                self.uncertain = true;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "SPK RPC result uncertain; no automatic resend",
+                ))
+            }
+            Err(sync_mpsc::RecvTimeoutError::Disconnected) => {
+                self.uncertain = true;
+                Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "SPK RPC worker exited",
+                ))
+            }
+        }
     }
 
     /// Internal fixture/operations diagnostic; it conveys no authority.
@@ -1100,5 +1138,25 @@ mod tests {
         ));
         assert!(fence.worker_released());
         assert!(fence.matches_and_consume(&dispatch_identity()));
+    }
+
+    /// Both poles of the open's release rule: a refused open the worker
+    /// answered leaves the driver usable; an open with no ACK poisons it.
+    #[test]
+    fn released_open_refusal_keeps_driver_and_missing_ack_poisons() {
+        let (supervisor, _app) = UnixStream::pair().unwrap();
+        let mut driver = RpcDriver::from_connected_stream(91, 2, supervisor).unwrap();
+        let (sender, receiver) = sync_mpsc::sync_channel::<io::Result<()>>(1);
+        sender.send(Err(io::Error::other("app declined the upgrade"))).unwrap();
+        assert!(driver
+            .receive_released(receiver, Instant::now() + Duration::from_secs(1))
+            .is_err());
+        assert!(!driver.uncertain);
+        let (sender, receiver) = sync_mpsc::sync_channel::<io::Result<()>>(1);
+        drop(sender);
+        assert!(driver
+            .receive_released(receiver, Instant::now() + Duration::from_secs(1))
+            .is_err());
+        assert!(driver.uncertain);
     }
 }
