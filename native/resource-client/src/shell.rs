@@ -2667,7 +2667,18 @@ mod tests {
     fn a_public_key_enrollment_never_names_a_newcomer_secret() {
         let s = session();
         let public = "ab".repeat(32);
-        let plan_line = format!("enroll plan alice {public}");
+        let next = "cd".repeat(32);
+        // K-PREROTATE: a public-key enrollment names the next public key too,
+        // or says --no-prerotation; neither is refused by name.
+        let refused = plan(&s, &format!("enroll plan alice {public}")).err().unwrap();
+        assert!(refused.contains("NEXT-PUBLIC-KEY-HEX"), "{refused}");
+        let Plan::Client { flags: bare, .. } =
+            plan(&s, &format!("enroll plan alice {public} --no-prerotation")).unwrap()
+        else {
+            panic!("not a client plan")
+        };
+        assert!(bare.contains(&flag("no-prerotation", "true")));
+        let plan_line = format!("enroll plan alice {public} {next}");
         let Plan::Client { command, flags, writes } = plan(&s, &plan_line).unwrap() else {
             panic!("not a client plan")
         };
@@ -2682,11 +2693,18 @@ mod tests {
                 ("factory-ref", "factory"),
                 ("name", "alice"),
                 ("new-public-key", "/h/keys/alice.pub"),
+                ("next-public-key", "/h/keys/alice.next.pub"),
                 ("dir", "/h/enroll/alice"),
             ])
         );
         assert!(!flags.iter().any(|(k, _)| k == "new-key"));
-        assert_eq!(writes, vec![(PathBuf::from("/h/keys/alice.pub"), vec![0xab; 32])]);
+        assert_eq!(
+            writes,
+            vec![
+                (PathBuf::from("/h/keys/alice.pub"), vec![0xab; 32]),
+                (PathBuf::from("/h/keys/alice.next.pub"), vec![0xcd; 32]),
+            ]
+        );
 
         let signature = "0f".repeat(64);
         let Plan::Client { flags, writes, .. } = plan(&s, &format!("enroll seal alice {signature}")).unwrap() else {
