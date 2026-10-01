@@ -99,7 +99,7 @@ NIL = jam_atom(0)
 STATE, EVENT, COUNT = 2, 3, 4
 open(path("permit-all.json"), "w").write('{"type":"all","predicates":[]}\n')
 kernel = open(JAM, "rb").read()
-ABI = {"version": "3", "context": "live", "arm": "23", "fuel": FUEL, "sample": [], "libraries": [],
+ABI = {"version": "4", "context": "live", "arm": "23", "fuel": FUEL, "sample": [], "libraries": [],
        "outputs": [{"key": "count", "target": "0", "field": str(COUNT), "type": "nat"}],
        "door": {"peek": "22", "state": str(STATE), "event": str(EVENT)}}
 

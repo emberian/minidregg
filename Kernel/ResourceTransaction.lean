@@ -649,6 +649,9 @@ def checkProgram (program : NockProgramCodec.Program) (libraries : List NockProg
     Except NockRun.Refusal NockRun.Verdict :=
   match program.abi.door with
   | none =>
+    match NockProgramCell.overMax (sampleRead command pre) program.abi.sample with
+    | some _ => .error .fieldOverMax
+    | none =>
     match NockProgramCell.sampleOf program.abi (runContext ambient command)
         (command.targets.map Target.target) (sampleRead command pre) with
     | none => .error .sampleUnavailable
@@ -767,6 +770,8 @@ theorem checkProgram_sound {program : NockProgramCodec.Program}
   split at accepted
   · split at accepted
     · cases accepted
+    split at accepted
+    · cases accepted
     · rename_i sample hsample
       exact ⟨sample, hsample, accepted⟩
   · rename_i door _
@@ -774,6 +779,19 @@ theorem checkProgram_sound {program : NockProgramCodec.Program}
     · cases accepted
     · rename_i view hview
       exact ⟨view, hview, accepted⟩
+
+/-- **`checkProgram_fieldOverMax`** (NC-2): a gate whose sample slot value lies above the slot's
+declared maximum is refused by name, before any sample is built or any run. -/
+theorem checkProgram_fieldOverMax {program : NockProgramCodec.Program}
+    {libraries : List NockProgramCodec.Program} {ambient : Ambient} {command : Command}
+    {pre : (i : Fin command.targets.length) → Store command.targets[i].layout}
+    {claim : NockRun.RunClaim} {writes : List NockRun.FieldWrite} {slot : NockProgramCodec.SampleSlot}
+    (gate : program.abi.door = none)
+    (above : NockProgramCell.overMax (sampleRead command pre) program.abi.sample = some slot) :
+    checkProgram program libraries ambient command pre claim writes = .error .fieldOverMax := by
+  unfold checkProgram
+  rw [gate]
+  simp only [above]
 
 /-- **`checkClaim_sound`**: an accepted run check loaded the claimed program
 and its libraries from the directory and re-executed it against the loaded
@@ -916,10 +934,13 @@ theorem pinned_claim_admissible_across_heights {program : NockProgramCodec.Progr
       (command.targets.map Target.target) (sampleRead command pre) := by
     rw [sameTargets]
     exact NockProgramCell.sampleOf_pinned_of_fields pinned _ _ _ unchanged
+  have hmax : NockProgramCell.overMax (sampleRead command' pre') program.abi.sample =
+      NockProgramCell.overMax (sampleRead command pre) program.abi.sample :=
+    NockProgramCell.overMax_congr unchanged
   unfold checkProgram at accepted ⊢
   rw [gate] at accepted ⊢
   simp only at accepted ⊢
-  rw [same]
+  rw [hmax, same]
   exact accepted
 
 /-- **`pinned_claim_stale_on_field_change`** (at the controller): once exactly
@@ -949,9 +970,13 @@ theorem pinned_claim_stale_on_field_change {program : NockProgramCodec.Program}
   rw [gate] at sound
   obtain ⟨sample, hsample, ran⟩ := sound
   obtain ⟨-, -, -, -, -, -, computed, -⟩ := NockRun.checkRun_sound ran
+  have under : NockProgramCell.overMax (sampleRead command' pre') program.abi.sample = none := by
+    cases hs : NockProgramCell.overMax (sampleRead command' pre') program.abi.sample with
+    | none => rfl
+    | some s => rw [NockProgramCell.sampleOf_overMax_refused _ _ _ _ hs] at current; cases current
   unfold checkProgram
   rw [gate]
-  simp only
+  simp only [under]
   rw [current]
   rw [sameTargets] at current
   exact NockRun.pinned_claim_stale_on_field_change pinned hsample current computed named changed only
@@ -966,6 +991,8 @@ end Minidregg.Kernel.DeclaredResourceController
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkCommandRun_none
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkProgram_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkProgram_sound
+/-- info: 'Minidregg.Kernel.DeclaredResourceController.checkProgram_fieldOverMax' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkProgram_fieldOverMax
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkClaim_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.DeclaredResourceController.checkClaim_sound
 /-- info: 'Minidregg.Kernel.DeclaredResourceController.checkCommandRun_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/

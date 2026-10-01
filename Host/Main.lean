@@ -50,7 +50,7 @@ behind a signed account observation, 102=exact receipt by transaction id,
 128=clock tick submit, 129=public clock view.
 
 131=Nock program check (pair: minimal jam bytes, ABI JSON) -> JSON verdict and the
-canonical DREGG/NOCK/PROGRAM/v1 bytes a `storage: "nock"` birth carries,
+canonical DREGG/NOCK/PROGRAM/v3 bytes a `storage: "nock"` birth carries,
 132=Nock program show (decimal programId) -> JSON, 133=Nock sample (JSON request)
 -> JSON with the kernel's canonical sample jam, 134=Nock run dry run (JSON
 {programId, caller, room, targets, values}) -> JSON with the kernel's sample at

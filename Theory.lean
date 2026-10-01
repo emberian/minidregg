@@ -34,6 +34,8 @@ import Theory.Noun  -- NOCK: nouns, axis/edit, Hoon jam/cue with back-references
 import Theory.Eval  -- K-EVAL: the run outcomes every evaluator shares (Outcome; ByteRun and its C ABI wire form)
 import Theory.Nock  -- NOCK: Nock 4K as Step/Crash relations + fueled exec/run; run_sound, run_complete, run_crash_iff, step_deterministic, run_fuel_monotone; runJammed @[export]
 import Theory.RoomAuthorization  -- K-ROOM: `under R` target sets decided at the system cell's parent projection; room_confidentiality (refusal form) and room_admission_traces_to_root (lineage form), narrows_stable with its refused-before-birth tooth, all poles by `decide`
+import Theory.NockCost.Summaries  -- NC-2: loop summaries (count-up trap, decrement-both sub) as a sound oracle; costSym O(program), pole_forge_symbolic = 1185 + 60·2^64
+import Theory.NockCost  -- NC-1: syntactic step bound (Shape, cost, cost_sound) over the first-order+interval fragment; pole_forge_bound = 1345
 import Theory.CredentialAuthorityFamily  -- signature/proof/capability/token carriers share exact request digests, holder/scope/current-policy semantics, and proof-relevant strict attenuation without mode bypasses
 import Theory.EffectDeclaration  -- target-indexed effects derive exact footprints and full-width resource deltas; only authorized, balanced declarations yield an AuthorizedEffect token
 import Theory.DeclaredActionLowering  -- a closed create/write/move action language lowers into exact accepted semantic effects without reviving the legacy runtime

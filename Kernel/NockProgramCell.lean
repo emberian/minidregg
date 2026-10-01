@@ -26,6 +26,7 @@ The reads (`checkProgram`, `showProgram`, `sampleFor`) are what host ops 131,
 -/
 import Compiler.NockProgramCodec
 import Compiler.CanonicalCellRegistry
+import Theory.NockCost.Shape
 
 namespace Minidregg.Kernel.NockProgramCell
 
@@ -258,7 +259,17 @@ def targetEntries : Nat → List Nat → List Noun
   | _, [] => []
   | i, id :: rest => .cell (cord (targetKey i)) (.atom id) :: targetEntries (i + 1) rest
 
-/-- `[key value]` for each ABI sample slot, in ABI order. -/
+/-- A sample value within its slot's declared maximum (`SampleSlot.max`, NC-2); an undeclared
+slot takes any atom. -/
+def withinMax (slot : SampleSlot) : Noun → Bool
+  | .atom k =>
+    match slot.max with
+    | some m => decide (k ≤ m)
+    | none => true
+  | .cell _ _ => slot.max.isNone
+
+/-- `[key value]` for each ABI sample slot, in ABI order. A value above its slot's declared
+maximum refuses (`none`), as an absent one does. -/
 def sampleSlots (read : Nat → String → Option Int) : List SampleSlot → Option (List Noun)
   | [] => some []
   | slot :: rest =>
@@ -267,7 +278,9 @@ def sampleSlots (read : Nat → String → Option Int) : List SampleSlot → Opt
     | some value =>
       match encodeValue slot.type value with
       | none => none
-      | some noun => (sampleSlots read rest).map (.cell (cord slot.key) noun :: ·)
+      | some noun =>
+        if withinMax slot noun then (sampleSlots read rest).map (.cell (cord slot.key) noun :: ·)
+        else none
 
 def contextNoun (ctx : Context) : Noun :=
   .cell (.atom ctx.height) (.cell (.atom ctx.caller) (.atom ctx.room))
@@ -304,7 +317,8 @@ theorem sampleSlots_cons {read : Nat → String → Option Int} {slot : SampleSl
     {rest : List SampleSlot} {nouns : List Noun}
     (h : sampleSlots read (slot :: rest) = some nouns) :
     ∃ v n tail, read slot.target slot.slot = some v ∧ encodeValue slot.type v = some n ∧
-      sampleSlots read rest = some tail ∧ nouns = .cell (cord slot.key) n :: tail := by
+      withinMax slot n = true ∧ sampleSlots read rest = some tail ∧
+        nouns = .cell (cord slot.key) n :: tail := by
   simp only [sampleSlots] at h
   split at h
   · cases h
@@ -312,19 +326,22 @@ theorem sampleSlots_cons {read : Nat → String → Option Int} {slot : SampleSl
     split at h
     · cases h
     · rename_i n hn
-      cases hr : sampleSlots read rest with
-      | none => rw [hr] at h; cases h
-      | some tail =>
-        rw [hr] at h
-        simp only [Option.map_some, Option.some.injEq] at h
-        exact ⟨v, n, tail, hv, hn, rfl, h.symm⟩
+      split at h
+      · rename_i hw
+        cases hr : sampleSlots read rest with
+        | none => rw [hr] at h; cases h
+        | some tail =>
+          rw [hr] at h
+          simp only [Option.map_some, Option.some.injEq] at h
+          exact ⟨v, n, tail, hv, hn, hw, rfl, h.symm⟩
+      · cases h
 
 theorem sampleSlots_length {read : Nat → String → Option Int} :
     ∀ {slots : List SampleSlot} {nouns : List Noun},
       sampleSlots read slots = some nouns → nouns.length = slots.length
   | [], nouns, h => by simp [sampleSlots] at h; subst h; rfl
   | slot :: rest, nouns, h => by
-    obtain ⟨_, _, tail, _, _, hr, rfl⟩ := sampleSlots_cons h
+    obtain ⟨_, _, tail, _, _, _, hr, rfl⟩ := sampleSlots_cons h
     simp [sampleSlots_length hr]
 
 theorem sampleSlots_injective {read read' : Nat → String → Option Int} :
@@ -333,8 +350,8 @@ theorem sampleSlots_injective {read read' : Nat → String → Option Int} :
         ∀ slot ∈ slots, read slot.target slot.slot = read' slot.target slot.slot
   | [], _, _, _ => by simp
   | slot :: rest, nouns, h, h' => by
-    obtain ⟨v, n, tail, hv, he, hr, rfl⟩ := sampleSlots_cons h
-    obtain ⟨v', n', tail', hv', he', hr', same⟩ := sampleSlots_cons h'
+    obtain ⟨v, n, tail, hv, he, -, hr, rfl⟩ := sampleSlots_cons h
+    obtain ⟨v', n', tail', hv', he', -, hr', same⟩ := sampleSlots_cons h'
     simp only [List.cons.injEq, Noun.cell.injEq, true_and] at same
     obtain ⟨hn, ht⟩ := same
     subst hn
@@ -520,6 +537,190 @@ theorem sampleOf_foreign_target_refused (abi : Abi) (ctx : Context) (targets : L
     exact ⟨slot, named, by simp; omega⟩
   simp [this]
 
+/-! ## The declared maximum (NC-2): a refusal by name, and the shape it buys
+
+A program that declares `max` on its sample slots is handed only samples inside the box
+`shapeOf abi`, so its step bound can be read from the box at birth
+(`Theory.NockCost.Summaries.costSym`; `cost_sym_sound` makes it a price for every such sample). -/
+
+/-- The first sample slot whose value is present, encodes, and lies above the slot's declared
+maximum: what admission refuses `fieldOverMax` (before the sample is built). -/
+def overMax (read : Nat → String → Option Int) : List SampleSlot → Option SampleSlot
+  | [] => none
+  | slot :: rest =>
+    match read slot.target slot.slot with
+    | none => overMax read rest
+    | some value =>
+      match encodeValue slot.type value with
+      | none => overMax read rest
+      | some noun => if withinMax slot noun then overMax read rest else some slot
+
+theorem sampleSlots_overMax {read : Nat → String → Option Int} :
+    ∀ {slots : List SampleSlot} {slot : SampleSlot}, overMax read slots = some slot →
+      sampleSlots read slots = none
+  | [], _, h => by simp [overMax] at h
+  | head :: rest, slot, h => by
+    simp only [overMax] at h
+    simp only [sampleSlots]
+    split
+    · rfl
+    · rename_i v hv
+      rw [hv] at h
+      simp only at h
+      split
+      · rfl
+      · rename_i n hn
+        rw [hn] at h
+        simp only at h
+        split_ifs at h ⊢ with hw
+        · simp [sampleSlots_overMax h]
+        · rfl
+
+/-- `overMax` reads only the named slots: two reads that agree there name the same slot. -/
+theorem overMax_congr {read read' : Nat → String → Option Int} :
+    ∀ {slots : List SampleSlot}, (∀ s ∈ slots, read s.target s.slot = read' s.target s.slot) →
+      overMax read slots = overMax read' slots
+  | [], _ => rfl
+  | slot :: rest, agree => by
+    simp only [overMax]
+    rw [agree slot (List.mem_cons_self ..),
+      overMax_congr (fun s m => agree s (List.mem_cons_of_mem _ m))]
+
+/-- **`sampleOf_overMax_refused`**: a value above its slot's declared maximum leaves no sample. -/
+theorem sampleOf_overMax_refused (abi : Abi) (ctx : Context) (targets : List Nat)
+    (read : Nat → String → Option Int) {slot : SampleSlot}
+    (above : overMax read abi.sample = some slot) : sampleOf abi ctx targets read = none := by
+  unfold sampleOf
+  split
+  · simp [sampleSlots_overMax above]
+  · rfl
+
+open Minidregg.Theory.NockCost (Shape fits HasShape)
+
+/-- What a slot admits: `[0, max]` when declared; otherwise any atom, or any noun for a `noun`
+slot (whose value may be a cell). -/
+def slotShape (slot : SampleSlot) : Shape :=
+  match slot.max with
+  | some m => .range 0 m
+  | none => if slot.type = .noun then .any else .atom
+
+/-- A Nock list of exactly these element shapes. -/
+def listShape : List Shape → Shape
+  | [] => .exact (.atom 0)
+  | sh :: rest => .cell sh (listShape rest)
+
+/-- `['target/i' id]` for `n` targets from `i`: the key is fixed, the id any atom. -/
+def targetShapes : Nat → Nat → List Shape
+  | _, 0 => []
+  | i, n + 1 => .cell (.exact (cord (targetKey i))) .atom :: targetShapes (i + 1) n
+
+def contextShape : Shape := .cell .atom (.cell .atom .atom)
+
+/-- **`shapeOf`**: the sample shape a program's ABI declares, for a command with `targets`
+targets — the context, the target entries, then `[key value]` per slot with the value in
+`slotShape`. -/
+def shapeOf (abi : Abi) (targets : Nat) : Shape :=
+  .cell contextShape (listShape (targetShapes 0 targets ++
+    abi.sample.map fun slot => .cell (.exact (cord slot.key)) (slotShape slot)))
+
+/-- A `nat` or `int` slot's value is an atom (a `noun` slot's may be a cell). -/
+theorem encodeValue_atom {type : SlotType} {v : Int} {n : Noun} (scalar : type ≠ .noun)
+    (h : encodeValue type v = some n) : ∃ k, n = .atom k := by
+  cases type
+  case noun => exact absurd rfl scalar
+  all_goals (cases v <;> simp [encodeValue, Int.toNoun] at h <;> exact ⟨_, h.symm⟩)
+
+theorem withinMax_fits {slot : SampleSlot} {k : Nat} (h : withinMax slot (.atom k) = true) :
+    fits (.atom k) (slotShape slot) = true := by
+  unfold withinMax at h; unfold slotShape
+  cases hm : slot.max with
+  | none => by_cases t : slot.type = .noun <;> simp [t, fits]
+  | some m => rw [hm] at h; simpa [fits] using h
+
+/-- Every value `sampleSlots` admits fits its slot's shape: an atom under its declared maximum,
+or (a `noun` slot, no maximum) any noun. -/
+theorem withinMax_fits_value {slot : SampleSlot} {v : Int} {n : Noun}
+    (he : encodeValue slot.type v = some n) (h : withinMax slot n = true) :
+    fits n (slotShape slot) = true := by
+  cases n with
+  | atom k => exact withinMax_fits h
+  | cell a b =>
+    by_cases noun : slot.type = .noun
+    · have none : slot.max = none := by simpa [withinMax] using h
+      simp [slotShape, none, noun, fits]
+    · obtain ⟨k, hk⟩ := encodeValue_atom noun he
+      cases hk
+
+theorem listShape_fits : ∀ {vs : List Noun} {shs : List Shape},
+    List.Forall₂ (fun v sh => fits v sh = true) vs shs → fits (nockList vs) (listShape shs) = true
+  | [], [], _ => by simp [nockList, listShape, fits]
+  | _ :: _, _ :: _, .cons h rest => by simp [nockList, listShape, fits, h, listShape_fits rest]
+
+theorem forall₂_append {α β : Type} {R : α → β → Prop} :
+    ∀ {a₁ : List α} {b₁ : List β} {a₂ : List α} {b₂ : List β},
+      List.Forall₂ R a₁ b₁ → List.Forall₂ R a₂ b₂ → List.Forall₂ R (a₁ ++ a₂) (b₁ ++ b₂)
+  | [], [], _, _, _, h => h
+  | _ :: _, _ :: _, _, _, .cons h t, h₂ => .cons h (forall₂_append t h₂)
+
+theorem targetEntries_fit : ∀ (i : Nat) (ids : List Nat),
+    List.Forall₂ (fun v sh => fits v sh = true) (targetEntries i ids) (targetShapes i ids.length)
+  | _, [] => .nil
+  | i, _ :: rest => .cons (by simp [fits]) (targetEntries_fit (i + 1) rest)
+
+theorem sampleSlots_fit {read : Nat → String → Option Int} :
+    ∀ {slots : List SampleSlot} {nouns : List Noun}, sampleSlots read slots = some nouns →
+      List.Forall₂ (fun v sh => fits v sh = true) nouns
+        (slots.map fun slot => .cell (.exact (cord slot.key)) (slotShape slot))
+  | [], nouns, h => by simp [sampleSlots] at h; subst h; exact .nil
+  | slot :: rest, nouns, h => by
+    obtain ⟨_, n, tail, _, he, hw, hr, rfl⟩ := sampleSlots_cons h
+    exact .cons (by simp [fits, withinMax_fits_value he hw]) (sampleSlots_fit hr)
+
+/-- **`declared_shape_sound`**: every sample the kernel builds lies in the box the ABI declares
+(the refusals above are what make it unconditional). -/
+theorem declared_shape_sound {abi : Abi} {ctx : Context} {targets : List Nat}
+    {read : Nat → String → Option Int} {n : Noun} (h : sampleOf abi ctx targets read = some n) :
+    HasShape n (shapeOf abi targets.length) := by
+  unfold sampleOf at h
+  split at h
+  · cases hs : sampleSlots read abi.sample with
+    | none => rw [hs] at h; cases h
+    | some slots =>
+      rw [hs] at h
+      simp only [Option.map_some, Option.some.injEq] at h
+      subst h
+      have hl := listShape_fits (forall₂_append (targetEntries_fit 0 targets) (sampleSlots_fit hs))
+      show fits _ _ = true
+      simp [shapeOf, fits, contextShape, contextNoun, hl]
+  · cases h
+
+/-! Poles: forge's three inventory slots, declared `≤ 3`. -/
+
+def poleAbi : Abi :=
+  { version := abiVersion, arm := 2, fuel := 4096, libraries := [], outputs := [],
+    sample := [{ target := 0, slot := "iron", key := "inv/iron", type := .nat, max := some 3 },
+      { target := 0, slot := "wood", key := "inv/wood", type := .nat, max := some 3 },
+      { target := 0, slot := "sword", key := "inv/sword", type := .nat, max := some 3 }] }
+
+def poleRead (iron : Int) : Nat → String → Option Int
+  | 0, "iron" => some iron
+  | 0, "wood" => some 2
+  | 0, "sword" => some 0
+  | _, _ => none
+
+/-- At the declared maximum: the sample is built, and it lies in the declared box. -/
+theorem pole_at_max_accepted :
+    (sampleOf poleAbi ⟨16, 7, 0⟩ [5] (poleRead 3)).isSome = true ∧
+      overMax (poleRead 3) poleAbi.sample = none := by decide
+
+/-- One above: refused, and `overMax` names the slot. -/
+theorem pole_over_max_refused :
+    sampleOf poleAbi ⟨16, 7, 0⟩ [5] (poleRead 4) = none ∧
+      overMax (poleRead 4) poleAbi.sample = poleAbi.sample.head? := by decide
+
+theorem pole_at_max_fits : ∀ n, sampleOf poleAbi ⟨16, 7, 0⟩ [5] (poleRead 3) = some n →
+    HasShape n (shapeOf poleAbi 1) := fun _ h => declared_shape_sound h
+
 /-- The sample the kernel hands a runner is canonical jam bytes. -/
 theorem sample_jam_canonical (n : Noun) : Noun.canonical (Noun.jam n) = true :=
   Noun.canonical_jam n
@@ -593,3 +794,15 @@ end Minidregg.Kernel.NockProgramCell
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_absent_refused
 /-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_foreign_target_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_foreign_target_refused
+/-- info: 'Minidregg.Kernel.NockProgramCell.sampleSlots_overMax' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleSlots_overMax
+/-- info: 'Minidregg.Kernel.NockProgramCell.sampleOf_overMax_refused' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.sampleOf_overMax_refused
+/-- info: 'Minidregg.Kernel.NockProgramCell.declared_shape_sound' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.declared_shape_sound
+/-- info: 'Minidregg.Kernel.NockProgramCell.pole_at_max_accepted' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.pole_at_max_accepted
+/-- info: 'Minidregg.Kernel.NockProgramCell.pole_over_max_refused' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.pole_over_max_refused
+/-- info: 'Minidregg.Kernel.NockProgramCell.overMax_congr' depends on axioms: [propext] -/
+#guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.NockProgramCell.overMax_congr

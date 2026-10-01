@@ -9,20 +9,22 @@
 # line is the deciding artifact (rows.tsv); the verdict is the last stderr line.
 #
 # Also needs: NOCK_TEMPLATES (forge.jam, minimal bytes) and NOCK_RUN (the untrusted
-# nockvm runner, ABI v3 `--sample-json`).
+# nockvm runner, ABI v3 `--sample-json`; the Host speaks program ABI v4).
 #
 # Rows: forge is born as a library cell; the pinned forge is the N16 shape, the
-# one-byte program `[0 1]` over that library, ABI v3 `context: pinned`, reading
+# one-byte program `[0 1]` over that library, ABI v4 `context: pinned`, reading
 # fields 2-4 and writing fields 5-7. A door ABI that says `pinned` is refused
 # `abiShape` (a door's sample is its own state and event number, which every poke
-# advances, so no poke claim can be reused); a v2 ABI is refused `abiVersion`.
+# advances, so no poke claim can be reused); a v3 ABI is refused `abiVersion`.
 # The runner's `--emit-sample` equals the kernel's sample byte for byte under both
 # contexts, and with a `noun` input. One claim, computed at height h0, is admitted
 # at h1 > h0 and again at h2 > h1 (other admissions in between). A `noun` output
 # is written as the jam atom of the product's noun and read back by a `noun`
 # sample slot. Once field 3 (inv/wood) is written, the same claim is refused
 # `sampleStale` naming `inv/wood`. Control: a LIVE forge claim goes stale at the
-# next height with no field changed. Cold reopen + audit re-admits every record.
+# next height with no field changed. The declared maximum (ABI v4 carries NC-2's per-slot `max`
+# beside `context`): at the maximum admitted, one above refused `fieldOverMax` by name.
+# Cold reopen + audit re-admits every record.
 set -euo pipefail
 umask 077
 for name in HOST MINI STORE VERIFIER JOURNEY_STEP_DIR NOCK_TEMPLATES NOCK_RUN; do
@@ -120,7 +122,7 @@ BLOB, COPY = 9, 10
 def slot(f, k, t="nat"): return {"target": "0", "slot": f"resource/field/{f}/before", "key": k, "type": t}
 def out(k, f, t="nat"): return {"key": k, "target": "0", "field": str(f), "type": t}
 INV_SAMPLE = [slot(IRON, "inv/iron"), slot(WOOD, "inv/wood"), slot(SWORD, "inv/sword")]
-def abi(context, sample, outputs, libraries=(), fuel=1000000, version="3"):
+def abi(context, sample, outputs, libraries=(), fuel=1000000, version="4"):
     return {"version": version, "context": context, "arm": "2", "fuel": str(fuel),
             "sample": sample, "outputs": outputs, "libraries": list(libraries)}
 
@@ -194,7 +196,7 @@ P = {}
 v, rc = birth("forgelib", forge, abi("live", INV_SAMPLE, [out(k, f) for k, f in
     {"inv/iron": IRON, "inv/wood": WOOD, "inv/sword": SWORD}.items()]))
 P["forgelib"] = v.get("programId")
-row("forge born as a library cell (ABI v3, live)", rc == 0 and v.get("verdict") == "admissible",
+row("forge born as a library cell (ABI v4, live)", rc == 0 and v.get("verdict") == "admissible",
     f"rc={rc} programId={P['forgelib']} jamBytes={v.get('jamBytes')}")
 open(path("pinforge.jam"), "wb").write(jam(N16))
 v, rc = birth("pinforge", jam(N16), abi("pinned", INV_SAMPLE, [out(k, f) for k, f in OUT.items()],
@@ -217,8 +219,8 @@ door_pinned = dict(abi("pinned", [], [out("count", 4)]), arm="23", door={"peek":
 v = check("door-pinned", jam(N16), door_pinned)
 row("a door ABI that says pinned: refused abiShape (a door's sample is its state + event, advanced by every poke)",
     v.get("verdict") == "refused" and v.get("reason") == "abiShape", f"{v.get('verdict')}/{v.get('reason')}")
-v = check("abi-v2", jam(N16), abi("live", INV_SAMPLE, [], version="2"))
-row("an ABI v2 record: refused abiVersion", v.get("verdict") == "refused" and v.get("reason") == "abiVersion",
+v = check("abi-v3", jam(N16), abi("live", INV_SAMPLE, [], version="3"))
+row("an ABI v3 record (K-RUN-PIN's or NC-2's, both superseded by v4): refused abiVersion", v.get("verdict") == "refused" and v.get("reason") == "abiVersion",
     f"{v.get('verdict')}/{v.get('reason')}")
 
 # 3. differential: op 133 (kernel sampleOf) vs nock-run --emit-sample, both contexts and a noun input
@@ -327,6 +329,34 @@ rc, last = submit("live-next-height", scalar([write(IRON, 1, 3), write(WOOD, 1, 
 row("control (live): the claim computed one admission earlier, no field changed, is refused sampleStale none",
     dl.get("verdict") == "ok" and rcx == 0 and rc != 0 and "sampleStale none" in last,
     f"h={dl.get('height')} unrelated rc={rcx} rc={rc} last={last[:220]}")
+
+# 9b. the declared maximum (NC-2's `SampleSlot.max`, carried by ABI v4 beside `context`): a slot value
+# AT its maximum is admitted; the same value under a program that declares one less is refused
+# `fieldOverMax` by name, at prepare, before any sample is built. Fields now: iron 3, wood 5, sword 0.
+def mslot(f, k, m): return dict(slot(f, k), max=str(m))
+MAXOUT = {"inv/iron": 12, "inv/wood": 13, "inv/sword": 14}
+for name, ceil in [("maxforge", (3, 5, 3)), ("tightforge", (2, 5, 3))]:
+    v, rc = birth(name, jam(N16), abi("pinned", [mslot(IRON, "inv/iron", ceil[0]), mslot(WOOD, "inv/wood", ceil[1]),
+        mslot(SWORD, "inv/sword", ceil[2])], [out(k, f) for k, f in MAXOUT.items()], libraries=[P["forgelib"]]))
+    P[name] = v.get("programId")
+vm = [(IRON, 3), (WOOD, 5), (SWORD, 0)]
+dm = dry(P["maxforge"], vm)
+json.dump(dm, open(path("maxforge.dry.json"), "w"))
+rm = runner(os.path.join(TPL, "forge.jam"), dm.get("sample"), "maxforge")
+max_claim = {"programId": P["maxforge"], "sample": dm.get("sample"), "output": rm.get("out_hex", ""),
+             "steps": dm.get("steps")}
+max_writes = scalar([create(int(w[1]), int(w[2])) for w in dm.get("writes") or []])
+rc, last = submit("at-max", max_writes, max_claim)
+f = read_fields()
+row("fieldOverMax pole, at the maximum: iron = 3 under `max 3` (wood = 5 under `max 5`) is admitted",
+    P["maxforge"] is not None and dm.get("verdict") == "ok" and rc == 0
+    and all(f.get(str(x)) is not None for x in MAXOUT.values()),
+    f"rc={rc} writes={dm.get('writes')} fields12-14={[f.get(str(x)) for x in MAXOUT.values()]} {last[:120]}")
+tight_claim = dict(max_claim, programId=P["tightforge"])
+rc, last = submit("over-max", scalar([write(int(w[1]), int(w[2]), int(w[2])) for w in dm.get("writes") or []]),
+    tight_claim)
+row("fieldOverMax pole, above it: iron = 3 under `max 2` is refused fieldOverMax by name",
+    P["tightforge"] is not None and rc != 0 and "fieldOverMax" in last, f"rc={rc} last={last[:220]}")
 
 # 10. cold reopen + operator audit: every record (both pinned admissions included) re-admits
 pid = open(os.path.join(W, "public", "server.pid")).read().strip()

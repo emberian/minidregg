@@ -11,7 +11,7 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
   bytes) is refused `nonCanonical`. Compiled, `canonical` runs N-MUG's
   `@[csimp]` jam/cue (mug-keyed tables), each proved equal to its specification.
 * **Identity.** `codeDigest` is cSHAKE256 over the jam. `programId` is
-  cSHAKE256 over the whole `DREGG/NOCK/PROGRAM/v1` record (jam and ABI), and the
+  cSHAKE256 over the whole `DREGG/NOCK/PROGRAM/v3` record (jam and ABI), and the
   cell id is `physicalId domain programId`. The ABI is in the identity because it
   decides what the kernel feeds the program: with the id over the jam alone, the
   first writer's ABI would be the only one any friend could ever use for that
@@ -19,7 +19,7 @@ the program's sample and decode its writes (NOCK §2.1, §2.3).
 * **Libraries.** `Abi.libraries` names other program cells by `programId`
   (NOCK N16: the hoon stdlib context rides once, not in every program). Their
   presence is checked against the store at birth (`CanonicalCellRegistry`).
-* **Context (ABI v3, K-RUN-PIN).** `Abi.context` says what the sample's context
+* **Context (ABI v4; K-RUN-PIN's v3).** `Abi.context` says what the sample's context
   triple `[height caller room]` holds. `live`: the Host's height at admission, the
   signer and the room, so a claim is good for one height. `pinned`: the constants
   `[0 0 0]` (N11's choice for doors, `eny = our = now = 0`), so the sample is a
@@ -50,10 +50,13 @@ open Minidregg.Theory.TypedAuthorization
 
 set_option autoImplicit false
 
-def wireVersion : Nat := 1
-/-- v3: `Abi.context` (live | pinned) and the `noun` slot type (K-RUN-PIN).
-v2 added the optional `door` (N11). A v1 or v2 record does not decode (frame). -/
-def abiVersion : Nat := 3
+/-- v3 (E2): the program record carries ABI v4. Program-cell v1 (K-NOCK-CELL … K-RUN-PIN),
+v2 (NC-2) refuse at the version gate (`wrong_version_refused`) rather than being re-read. -/
+def wireVersion : Nat := 3
+/-- v2 added the optional `door` (N11). v3 was spent twice on separate branches — K-RUN-PIN's
+`context` + `noun` slot type and NC-2's per-slot `max` — so the union is **v4**, carrying both;
+a v1, v2 or (either) v3 record does not decode (`abi_old_frame_refused`). -/
+def abiVersion : Nat := 4
 /-- Registry tag 13 (final: 11 pay, 12 stream, 13 nockProgram, 14 clock); schema 91011. -/
 def registryTag : UInt8 := 13
 def schemaId : Nat := 91011
@@ -86,12 +89,19 @@ def nounMaxBytes : Nat := 4194304
 
 /-- One sample entry: the program sees `[key value]`, where `value` is the
 participant slot `slot` of the command's `target`-th target (0-based, the
-command's signed target order, K-JOINT's `joint/index/{target}/…`). -/
+command's signed target order, K-JOINT's `joint/index/{target}/…`).
+
+`max` (NC-2, DML's `int(n)` at the ABI): the largest atom the program will ever be
+handed for this entry. A sample whose value encodes above it is refused
+(`fieldOverMax`), so the program's sample shape holds `[0, max]` there
+(`NockProgramCell.shapeOf`) and a step bound can be read from that shape
+(`Theory.NockCost.Summaries.costSym`) before any run. `none`: undeclared, any atom. -/
 structure SampleSlot where
   target : Nat
   slot : String
   key : String
   type : SlotType
+  max : Option Nat := none
   deriving DecidableEq, Repr
 
 /-- One write the program may emit: `[key value]` in its output list is a write
@@ -126,7 +136,7 @@ structure Abi where
   fuel : Nat
   /-- A NockApp kernel door, or `none` for a gate. -/
   door : Option Door := none
-  /-- What the sample's context triple holds (v3). -/
+  /-- What the sample's context triple holds (v4; K-RUN-PIN). -/
   context : ContextMode := .live
   deriving DecidableEq, Repr
 
@@ -135,7 +145,7 @@ structure Program where
   abi : Abi
   deriving DecidableEq, Repr
 
-/-! ## Codecs `DREGG/NOCK/ABI/v3`, `DREGG/NOCK/PROGRAM/v1` -/
+/-! ## Codecs `DREGG/NOCK/ABI/v4`, `DREGG/NOCK/PROGRAM/v3` -/
 
 def slotTypeStream : StreamCodec SlotType :=
   StreamCodec.xmap StreamCodec.nat (fun | .nat => 0 | .int => 1 | .noun => 2)
@@ -149,8 +159,10 @@ def contextStream : StreamCodec ContextMode :=
 def sampleSlotStream : StreamCodec SampleSlot :=
   StreamCodec.xmap
     (StreamCodec.product StreamCodec.nat
-      (StreamCodec.product stringStream (StreamCodec.product stringStream slotTypeStream)))
-    (fun s => (s.target, s.slot, s.key, s.type)) (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2⟩)
+      (StreamCodec.product stringStream (StreamCodec.product stringStream
+        (StreamCodec.product slotTypeStream (StreamCodec.option StreamCodec.nat)))))
+    (fun s => (s.target, s.slot, s.key, s.type, s.max))
+    (fun v => ⟨v.1, v.2.1, v.2.2.1, v.2.2.2.1, v.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def outputSlotStream : StreamCodec OutputSlot :=
@@ -216,12 +228,13 @@ def framed {α : Type} (frame : List UInt8) (stream : StreamCodec α) : LawfulCo
   decode := framedDecode frame stream
   decode_encode := framedDecode_encode frame stream
 
-/-- `DREGG/NOCK/ABI/v3` -/
+/-- `DREGG/NOCK/ABI/v4` -/
 def abiFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 51]
-/-- `DREGG/NOCK/PROGRAM/v1` -/
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 52]
+/-- `DREGG/NOCK/PROGRAM/v3` (E2: ABI v4 inside; v1 and NC-2's v2 do not decode, and every
+`programId` changes). -/
 def programFrame : List UInt8 :=
-  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 49]
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 80, 82, 79, 71, 82, 65, 77, 47, 118, 51]
 
 def abiCodec : LawfulCodec Abi := framed abiFrame abiStream
 def programCodec : LawfulCodec Program := framed programFrame programStream
@@ -229,23 +242,29 @@ def programCodec : LawfulCodec Program := framed programFrame programStream
 theorem abi_roundtrip (abi : Abi) : abiCodec.decode (abiCodec.encode abi) = some abi :=
   abiCodec.decode_encode abi
 
-/-- The frames of ABI v1 (K-NOCK) and v2 (N11). -/
+/-- The frames of ABI v1 (K-NOCK), v2 (N11) and v3 (K-RUN-PIN's and NC-2's, two shapes). -/
 def abiFrameV1 : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 49]
 def abiFrameV2 : List UInt8 :=
   [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 50]
+def abiFrameV3 : List UInt8 :=
+  [68, 82, 69, 71, 71, 47, 78, 79, 67, 75, 47, 65, 66, 73, 47, 118, 51]
 
-/-- A record under an older ABI frame does not decode: v1 and v2 refuse to load
-rather than being read as v3 (whatever bytes follow the frame). -/
+/-- A record under an older ABI frame does not decode: v1, v2 and v3 refuse to load
+rather than being read as v4 (whatever bytes follow the frame). -/
 theorem abi_old_frame_refused (rest : List UInt8) :
-    abiCodec.decode (abiFrameV1 ++ rest) = none ∧ abiCodec.decode (abiFrameV2 ++ rest) = none := by
+    abiCodec.decode (abiFrameV1 ++ rest) = none ∧ abiCodec.decode (abiFrameV2 ++ rest) = none ∧
+      abiCodec.decode (abiFrameV3 ++ rest) = none := by
   have h1 : (abiFrameV1 ++ rest).take abiFrame.length = abiFrameV1 := List.take_left' rfl
   have h2 : (abiFrameV2 ++ rest).take abiFrame.length = abiFrameV2 := List.take_left' rfl
-  refine ⟨?_, ?_⟩
+  have h3 : (abiFrameV3 ++ rest).take abiFrame.length = abiFrameV3 := List.take_left' rfl
+  refine ⟨?_, ?_, ?_⟩
   · show framedDecode abiFrame abiStream (abiFrameV1 ++ rest) = none
     unfold framedDecode; rw [h1, if_neg (by decide)]
   · show framedDecode abiFrame abiStream (abiFrameV2 ++ rest) = none
     unfold framedDecode; rw [h2, if_neg (by decide)]
+  · show framedDecode abiFrame abiStream (abiFrameV3 ++ rest) = none
+    unfold framedDecode; rw [h3, if_neg (by decide)]
 
 theorem abi_canonical {bytes : List UInt8} {abi : Abi}
     (accepted : abiCodec.decode bytes = some abi) : abiCodec.encode abi = bytes :=
@@ -342,10 +361,14 @@ instance doorShapeDecidable (abi : Abi) (door : Door) : Decidable (DoorShape abi
 def targetPrefix : String := "target/"
 
 /-- Keys are unambiguous: sample keys and output keys are each distinct, no
-sample key can be mistaken for a target entry, libraries are distinct. -/
+sample key can be mistaken for a target entry, libraries are distinct. A declared
+maximum bounds an atom, so a `noun` slot (whose value may be a cell) declares none:
+NC-2's `max` and K-RUN-PIN's `noun` met in ABI v4, and the pair is refused at birth
+rather than read as "an atom no larger than `max`". -/
 def AbiShape (abi : Abi) : Prop :=
   (abi.sample.map SampleSlot.key).Nodup ∧ (abi.outputs.map OutputSlot.key).Nodup ∧
     abi.libraries.Nodup ∧ (∀ slot ∈ abi.sample, targetPrefix.isPrefixOf slot.key = false) ∧
+    (∀ slot ∈ abi.sample, slot.type = .noun → slot.max = none) ∧
     ∀ door ∈ abi.door, DoorShape abi door
 
 instance abiShapeDecidable (abi : Abi) : Decidable (AbiShape abi) := by

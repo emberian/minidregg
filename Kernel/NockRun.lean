@@ -72,6 +72,8 @@ inductive Refusal where
   | libraryNested
   | programMalformed
   | sampleUnavailable
+  /-- NC-2: a sample value above its slot's declared maximum (`SampleSlot.max`). -/
+  | fieldOverMax
   /-- The claimed sample is not the kernel's. Under a `pinned` context (K-RUN-PIN)
   it names the key of the first ABI slot whose value moved (`staleField`). -/
   | sampleStale (field : Option String)
@@ -98,6 +100,7 @@ def Refusal.name : Refusal → String
   | .libraryNested => "libraryNested"
   | .programMalformed => "programMalformed"
   | .sampleUnavailable => "sampleUnavailable"
+  | .fieldOverMax => "fieldOverMax"
   | .sampleStale _ => "sampleStale"
   | .fuelExceeded => "fuelExceeded"
   | .crash _ => "crash"
@@ -486,8 +489,8 @@ theorem firstStale_only {read read' : Nat → String → Option Int} {slot : Sam
       firstStale slots ns' ns = some slot.key
   | [], _, _, _, _, member, _, _ => by cases member
   | s :: rest, ns, ns', h, h', member, changed, only => by
-    obtain ⟨v, n, tail, hv, he, hr, rfl⟩ := sampleSlots_cons h
-    obtain ⟨v', n', tail', hv', he', hr', rfl⟩ := sampleSlots_cons h'
+    obtain ⟨v, n, tail, hv, he, -, hr, rfl⟩ := sampleSlots_cons h
+    obtain ⟨v', n', tail', hv', he', -, hr', rfl⟩ := sampleSlots_cons h'
     by_cases same : s = slot
     · subst same
       have differ : ¬ (Noun.cell (cord s.key) n' = Noun.cell (cord s.key) n) := by

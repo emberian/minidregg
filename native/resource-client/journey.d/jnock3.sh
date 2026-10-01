@@ -87,7 +87,7 @@ FIELDS = {"inv/iron": 2, "inv/wood": 3, "inv/sword": 4}
 IRON, WOOD, SWORD = 2, 3, 4
 def slot(f, k): return {"target": "0", "slot": f"resource/field/{f}/before", "key": k, "type": "nat"}
 def out(k, f): return {"key": k, "target": "0", "field": str(f), "type": "nat"}
-def abi(fuel): return {"version": "3", "context": "live", "arm": "2", "fuel": str(fuel),
+def abi(fuel): return {"version": "4", "context": "live", "arm": "2", "fuel": str(fuel),
   "sample": [slot(f, k) for k, f in FIELDS.items()],
   "outputs": [out(k, f) for k, f in FIELDS.items()], "libraries": []}
 open(path("permit-all.json"), "w").write('{"type":"all","predicates":[]}\n')

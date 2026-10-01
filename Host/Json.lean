@@ -1344,7 +1344,7 @@ private def birthParts (path : String)
       let bytes ← decodeHex (path ++ ".program") (← field path "program" obj)
       match NockProgramCodec.programCodec.decode bytes with
       | some program => pure (some program)
-      | none => failAt (path ++ ".program") "noncanonical DREGG/NOCK/PROGRAM/v1 bytes"
+      | none => failAt (path ++ ".program") "noncanonical DREGG/NOCK/PROGRAM/v3 bytes"
     else pure none
   let target ← match program with
     | some program => pure (CanonicalCellRegistry.programCellId source.deployment.domain program)
@@ -3699,7 +3699,7 @@ def fleetPollRequest (json : Lean.Json) : Result (List UInt8 × Nat × Nat) := d
 /-! ## Nock program cells (host ops 117–119)
 
 Op 117 takes the minimal jam bytes and this ABI JSON and answers what a birth
-of that program would meet, with the canonical `DREGG/NOCK/PROGRAM/v1` bytes the
+of that program would meet, with the canonical `DREGG/NOCK/PROGRAM/v3` bytes the
 birth's `"program"` field carries. Op 118 shows a stored program by id. Op 119
 builds the kernel's sample jam for a stored program. -/
 
@@ -3718,11 +3718,14 @@ private def nockSlotTypeName : NockProgramCodec.SlotType → String
 
 private def nockSampleSlot (path : String) (json : Lean.Json) :
     Result NockProgramCodec.SampleSlot := do
-  let obj ← exactObject path ["target", "slot", "key", "type"] json
+  let hasMax := ((← object path json).get? "max").isSome
+  let obj ← exactObject path
+    (["target", "slot", "key", "type"] ++ if hasMax then ["max"] else []) json
+  let max ← if hasMax then some <$> nat (path ++ ".max") (← field path "max" obj) else pure none
   pure ⟨← nat (path ++ ".target") (← field path "target" obj),
     ← string (path ++ ".slot") (← field path "slot" obj),
     ← string (path ++ ".key") (← field path "key" obj),
-    ← nockSlotType (path ++ ".type") (← field path "type" obj)⟩
+    ← nockSlotType (path ++ ".type") (← field path "type" obj), max⟩
 
 private def nockOutputSlot (path : String) (json : Lean.Json) :
     Result NockProgramCodec.OutputSlot := do
@@ -3773,8 +3776,12 @@ def nockAbi (path : String) (json : Lean.Json) : Result NockProgramCodec.Abi := 
 
 def nockAbiJson (abi : NockProgramCodec.Abi) : Lean.Json :=
   Lean.Json.mkObj [("version", toString abi.version), ("arm", toString abi.arm),
-    ("sample", .arr (abi.sample.map fun slot => .mkObj [("target", toString slot.target),
-      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)]).toArray),
+    ("sample", .arr (abi.sample.map fun slot => .mkObj (([("target", toString slot.target),
+      ("slot", slot.slot), ("key", slot.key), ("type", nockSlotTypeName slot.type)] :
+        List (String × Lean.Json)) ++
+        match slot.max with
+        | some m => [("max", Lean.Json.str (toString m))]
+        | none => [])).toArray),
     ("outputs", .arr (abi.outputs.map fun slot => .mkObj [("key", slot.key),
       ("target", toString slot.target), ("field", toString slot.field),
       ("type", nockSlotTypeName slot.type)]).toArray),

@@ -74,7 +74,7 @@ forge = open(os.path.join(TPL, "forge.jam"), "rb").read()
 noop = open(os.path.join(TPL, "noop.jam"), "rb").read()
 def slot(t, f, k): return {"target": str(t), "slot": f"resource/field/{f}/before", "key": k, "type": "nat"}
 def out(k, t, f): return {"key": k, "target": str(t), "field": str(f), "type": "nat"}
-FORGE_ABI = {"version": "3", "context": "live", "arm": "2", "fuel": "1000000",
+FORGE_ABI = {"version": "4", "context": "live", "arm": "2", "fuel": "1000000",
   "sample": [slot(0, 1, "inv/iron"), slot(0, 2, "inv/wood"), slot(1, 3, "inv/sword")],
   "outputs": [out("inv/iron", 0, 1), out("inv/wood", 0, 2), out("inv/sword", 1, 3)],
   "libraries": []}
