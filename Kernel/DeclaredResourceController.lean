@@ -669,6 +669,7 @@ def AcceptedInvocation.dataIntent [DecidableEq F]
       (operationMarker prepared.authority.snapshot.domain profile.semantics command)]
     exactCharge := sourceChargeFrom prepared signed ws guards
     event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
+    subject := some command.subject
     postRootsBound := writes_roots_bound prepared
     guardsReadOnly := readGuards_readonly prepared shape }
 
@@ -704,6 +705,7 @@ theorem AcceptedInvocation.dataIntent_original_exact [DecidableEq F]
           (operationMarker prepared.authority.snapshot.domain profile.semantics command)]
         exactCharge := sourceCharge prepared signed
         event := invocationEvent prepared.authority.snapshot.domain profile.semantics command signed
+        subject := some command.subject
         postRootsBound := writes_roots_bound prepared
         guardsReadOnly := readGuards_readonly prepared shape } := by
   rfl

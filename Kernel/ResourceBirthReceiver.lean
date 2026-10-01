@@ -266,6 +266,7 @@ def intent {height : Height}
   nullifiers := [birthNullifier deployment.domain accepted.descriptor.authorityNullifier]
   exactCharge := charge accepted
   event := event deployment.domain accepted.ingress
+  subject := some accepted.descriptor.creator
   postRootsBound := accepted.prepared.write_roots_bound
   guardsReadOnly := readGuards_readonly accepted
 
@@ -279,6 +280,7 @@ def materializedIntent {height : Height}
   nullifiers := [birthNullifier deployment.domain accepted.descriptor.authorityNullifier]
   exactCharge := (Charge.materialize (charge accepted)).toCharge
   event := event deployment.domain accepted.ingress
+  subject := some accepted.descriptor.creator
   postRootsBound := accepted.prepared.write_roots_bound
   guardsReadOnly := readGuards_readonly accepted
 

@@ -82,17 +82,22 @@ def eventStream : StreamCodec StableEvent :=
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2⟩)
     (by intro value; cases value; rfl)
 
+def subjectStream : StreamCodec SubjectId :=
+  StreamCodec.xmap StreamCodec.nat (·.value) SubjectId.mk (by intro value; cases value; rfl)
+
 def intentStream : StreamCodec IntentRecord :=
   StreamCodec.xmap
     (StreamCodec.product digestStream
       (StreamCodec.product (StreamCodec.list writeStream)
         (StreamCodec.product (StreamCodec.list guardStream)
           (StreamCodec.product (StreamCodec.list nullifierStream)
-            (StreamCodec.product chargeStream eventStream)))))
+            (StreamCodec.product chargeStream
+              (StreamCodec.product eventStream
+                (StreamCodec.option subjectStream)))))))
     (fun record => (record.transactionId, record.writes, record.readGuards,
-      record.nullifiers, record.exactCharge, record.event))
+      record.nullifiers, record.exactCharge, record.event, record.subject))
     (fun tuple => ⟨tuple.1, tuple.2.1, tuple.2.2.1, tuple.2.2.2.1,
-      tuple.2.2.2.2.1, tuple.2.2.2.2.2⟩)
+      tuple.2.2.2.2.1, tuple.2.2.2.2.2.1, tuple.2.2.2.2.2.2⟩)
     (by intro value; cases value; rfl)
 
 def seedStream : StreamCodec Seed :=
@@ -108,7 +113,9 @@ def imageStream : StreamCodec Image :=
     (fun image => (image.seed, image.accepted))
     (fun tuple => ⟨tuple.1, tuple.2⟩) (by intro value; cases value; rfl)
 
-def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [1]
+/-- Version 2: every record carries its signing subject. A version-1 image
+refuses (the frame is compared exactly). -/
+def wireFrame : List UInt8 := "DREGG.DURABLE.IMAGE".toUTF8.toList ++ [2]
 
 /-- A fixed frame is recovered only if the final canonical check succeeds. -/
 def framedStream : StreamCodec Image :=

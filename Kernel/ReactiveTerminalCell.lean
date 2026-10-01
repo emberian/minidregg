@@ -390,6 +390,7 @@ def intent (plan : Plan rootBytes openCell) : DataIntent rootBytes where
   nullifiers := [plan.nullifier]
   exactCharge := openCell.exactCharge
   event := plan.event
+  subject := none
   postRootsBound := by
     intro write member
     simp at member

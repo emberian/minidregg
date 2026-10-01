@@ -104,6 +104,7 @@ def intent {config : Config} {opened : Opened config}
       nullifiers := ordinary.nullifiers
       exactCharge := charge checked
       event := ApplicationGrainSessionEnrollmentSource.event config.deployment.domain ingress
+      subject := ordinary.subject
       postRootsBound := ordinary.postRootsBound
       guardsReadOnly := readonly }
 

@@ -526,6 +526,7 @@ def bodyIntent : DataIntent lengthRoot where
   nullifiers := [bodyNullifier]
   exactCharge := 0
   event := bodyEvent
+  subject := none
   postRootsBound := by simp [staleBodyWrite, lengthRoot]
   guardsReadOnly := by simp
 

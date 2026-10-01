@@ -421,6 +421,7 @@ def durableIntent
   nullifiers := []
   exactCharge := exactCharge manifest accepted
   event := stableEvent manifest accepted
+  subject := none
   postRootsBound := by
     intro write present
     simp only [List.mem_singleton] at present

@@ -309,6 +309,7 @@ def intent (accepted : SealedAcceptance Source M) : DataIntent M.rootBytes where
   nullifiers := [accepted.nullifier]
   exactCharge := 0
   event := accepted.event
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_cons, List.mem_nil_iff, or_false] at member
@@ -461,6 +462,7 @@ def intent (settlement : Settlement Source M portal authState) :
   nullifiers := settlement.fill.intent.nullifiers ++ [settlement.nullifier]
   exactCharge := settlement.fill.intent.exactCharge
   event := settlement.event
+  subject := none
   postRootsBound := by
     intro write member
     simp only [List.mem_append, List.mem_cons, List.mem_nil_iff, or_false] at member

@@ -45,6 +45,7 @@ def twoWrites (number : Nat) (oldA oldB newA newB observed : List UInt8) :
   nullifiers := [nullifier number]
   exactCharge := fun _ => 1
   event := event number
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 
@@ -55,6 +56,7 @@ def moveObserved (number : Nat) (old new : List UInt8) : DataIntent rootBytes wh
   nullifiers := [nullifier number]
   exactCharge := fun _ => 1
   event := event number
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 
@@ -67,6 +69,7 @@ def advanceJournal (number : Nat) (observed : List UInt8) : DataIntent rootBytes
   nullifiers := [nullifier number]
   exactCharge := fun _ => 1
   event := event number
+  subject := none
   postRootsBound := by simp
   guardsReadOnly := by simp
 
@@ -233,6 +236,22 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
       afterConcurrent.snapshot.model.available .feeDebit ==
         genesisReplay.snapshot.model.available .feeDebit &&
       afterConcurrent.snapshot.model.history.length == genesisReplay.snapshot.model.history.length)
+  -- A past read at every height: from the checkpoint plus the suffix at or
+  -- above it, from the seed below it; each equals the genesis fold of the prefix.
+  let heights := List.range (afterConcurrent.image.accepted.length + 1)
+  require "a past read at every height equals the genesis fold of that prefix, on both sides of the checkpoint"
+    (heights.all fun height =>
+      [1, 2, 3, 4].all fun cell =>
+        (afterConcurrent.atPrefix height).map (·.canonicalBytes ⟨cell⟩) ==
+          ((genesisReplay.prefixImage height).restore rootBytes).map (·.canonicalBytes ⟨cell⟩) &&
+        (afterConcurrent.atPrefix height).isSome)
+  require "a past read at the head is the current state"
+    ([1, 2, 3, 4].all fun cell =>
+      (afterConcurrent.atPrefix afterConcurrent.height).map (·.canonicalBytes ⟨cell⟩) ==
+        some (afterConcurrent.snapshot.canonicalBytes ⟨cell⟩))
+  require "the checkpoint-resumed presence index equals the genesis replay's"
+    (afterConcurrent.index == genesisReplay.index &&
+      afterConcurrent.index.touched.length > 0)
 
   require "codec rejects trailing bytes"
     (stored.entries.head?.all fun entry => (recordFrame.decode (entry.record ++ [0])).isNone)
@@ -274,7 +293,7 @@ def run (binary : System.FilePath) (directory : System.FilePath) : IO Unit := do
     | throw (IO.userError "FAIL store")
   require "the honest checkpoint resumes the committed cell"
     ((← loadExact (second.transport (fun _ => ⟨7⟩))).snapshot.canonicalBytes ⟨1⟩ == [11])
-  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, forged tag and forged checkpoint MAC refuse to open; {head} commits"
+  IO.println s!"PASS durable receiver: Lean codec/executor + SQLite log, two-cell repeated commit, replay/conflict/read/write/nullifier/budget refusal, process-exit rollback, lost-response readback, concurrent guard move, pinned admission refuses journal-only race, exact entry under a later commit, checkpoint at height {checkpoint.height} resumes to the genesis replay, a past read at each of heights 0..{head} equals the genesis fold of its prefix, forged tag and forged checkpoint MAC refuse to open; {head} commits"
 
 end DurableReceiverProbe
 

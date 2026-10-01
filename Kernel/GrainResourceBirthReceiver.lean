@@ -85,6 +85,7 @@ def intent {F : Type} [Field F] [DecidableEq F]
     (CredentialAuthorityReplay.nullifier deployment.domain)
   exactCharge := charge accepted
   event := event deployment.domain ingress
+  subject := some source.birth.creator
   postRootsBound := GrainResourceBirthTransaction.writes_roots_bound birth grain
   guardsReadOnly := accepted.readGuards_readonly
 
