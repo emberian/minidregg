@@ -76,6 +76,8 @@ import Kernel.World  -- DATAMODEL §3.3 B2: World (cells + system cell: journal/
 import Kernel.WorldBench  -- B2 exit: compiled 1000-turn fold over the real step (native_decide, pinned)
 import Kernel.TurnCensus  -- T1: every live admission constructor (33) is a Turn shape accepted by World.admit, its negation refused by name; step_conserves for Book postings
 import Kernel.TurnRecord  -- B2: an AcceptedCellEffect is a Leg (exactPost derived from step); ImplementationRefinement re-indexed by Turn/World, trace_represents_fold (crash recovery = fold of a sublist); model refines, torn install refuted
+import Kernel.TurnOfIntent  -- T3: Turn.ofIntent = the diff of each written cell against the held cell (a G-NORM fixed point; ofIntent_minimal: footprint = the addresses that differ); ofIntent_step; legPatch_valid_iff (refused exactly when no guarded patch reaches the image)
+import Kernel.HostRefinesWorld  -- T3: Represents : Loaded -> World; ofIntent_run; deployed_refines_step (execute+append is an ImplementationRefinement of World.step); host_trace_represents_fold; poles appendOnly_rewrite_has_no_turn, rom_image_has_no_turn, policy_source_birth_has_no_turn
 import Kernel.DurableCheckpoint -- DATAMODEL C2: resume from a materialized checkpoint; honest resume = genesis replay
 import Kernel.WorldRoot  -- DATAMODEL §3.2/§3.4 C1: world root = AuthMap two-level root over (slot -> slot root), sparse evaluator = Scheme.root, RootBinding carrier discharging resume_sound, explicit-collision reduction, deployed cSHAKE scheme (256-bit hashed index), cSHAKE History; honest/tampered poles
 import Kernel.PresenceIndex  -- PLACE K-INDEX: lastSeen (cell, subject) and touched cell as exact folds of the accepted log (lastSeen_exact, touched_exact, index_monotone)
