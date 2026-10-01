@@ -32,26 +32,49 @@ private def canonicalNat (json : Json) (name : String) : Result Nat := do
       else .error s!"{name} must be canonical decimal"
   | none => .error s!"{name} must be canonical decimal"
 
-/-- The tariff is fixed controller configuration. Only source-owned canonical
-decimal parsing can turn it into arithmetic. -/
-def parseTariff (source : String) : Result Tariff := do
-  let json ← Minidregg.Host.Json.parse source
-  let obj ← json.getObj?.mapError (fun _ => "tariff must be an object")
-  let expected := ["version", "model", "inputMicroPerMillion", "outputMicroPerMillion"]
+private def exactKeys (json : Json) (label : String) (expected : List String) : Result Unit := do
+  let obj ← json.getObj?.mapError (fun _ => s!"{label} must be an object")
   let actual := obj.foldl (init := []) (fun names key _ => key :: names)
   unless actual.length = expected.length && actual.all expected.contains do
-    throw "tariff fields differ from the four-field v1 schema"
+    throw s!"{label} fields differ from the per-route v2 schema"
+
+private def parseRate (json : Json) (label : String) : Result Rate := do
+  exactKeys json label ["perOp", "inputMicroPerMillion", "outputMicroPerMillion"]
+  pure { perOp := ← canonicalNat json "perOp"
+         inputMicroPerMillion := ← canonicalNat json "inputMicroPerMillion"
+         outputMicroPerMillion := ← canonicalNat json "outputMicroPerMillion" }
+
+/-- The tariff is fixed operator configuration, per route (schema v2):
+`{version, model, routes: {user: {perOp}, pool: {perOp, inputMicroPerMillion,
+outputMicroPerMillion}, homelab: {…same as pool…}}}`. The four-field v1 shape
+(one rate pair per task, no routes) refuses to load. Only source-owned
+canonical decimal parsing can turn it into arithmetic. -/
+def parseTariff (source : String) : Result Tariff := do
+  let json ← Minidregg.Host.Json.parse source
+  exactKeys json "tariff" ["version", "model", "routes"]
+  let routes ← field json "routes"
+  exactKeys routes "tariff.routes" ["user", "pool", "homelab"]
+  let user ← field routes "user"
+  exactKeys user "tariff.routes.user" ["perOp"]
   let tariff : Tariff := {
     version := ← canonicalNat json "version"
     model := ← stringField json "model"
-    inputMicroPerMillion := ← canonicalNat json "inputMicroPerMillion"
-    outputMicroPerMillion := ← canonicalNat json "outputMicroPerMillion" }
-  unless 0 < tariff.version && 0 < tariff.model.toUTF8.size &&
-      tariff.model.toUTF8.size ≤ 256 &&
-      tariff.inputMicroPerMillion ≤ maxRate &&
-      tariff.outputMicroPerMillion ≤ maxRate do
-    throw "tariff version, model, or rate exceeds the v1 bound"
+    userPerOp := ← canonicalNat user "perOp"
+    pool := ← parseRate (← field routes "pool") "tariff.routes.pool"
+    homelab := ← parseRate (← field routes "homelab") "tariff.routes.homelab" }
+  unless decide tariff.valid do
+    throw "tariff version, model, fee or rate exceeds the v2 bound"
   pure tariff
+
+/-- The tariff as the Host profile publishes it. -/
+def tariffJson (tariff : Tariff) : Json :=
+  let n := fun value : Nat => toJson (toString value)
+  let rate := fun (r : Rate) => Json.mkObj [("perOp", n r.perOp),
+    ("inputMicroPerMillion", n r.inputMicroPerMillion),
+    ("outputMicroPerMillion", n r.outputMicroPerMillion)]
+  Json.mkObj [("version", n tariff.version), ("model", toJson tariff.model),
+    ("routes", Json.mkObj [("user", Json.mkObj [("perOp", n tariff.userPerOp)]),
+      ("pool", rate tariff.pool), ("homelab", rate tariff.homelab)])]
 
 private def usageOfJson (json : Json) : Result Usage := do
   let usage : Usage := {
@@ -208,23 +231,28 @@ private def parseSseResponse (tariff : Tariff) (text : String) : Result Usage :=
   | none => throw "SSE terminal usage absent"
 
 /-- This function consumes retained exact bytes, not worker-supplied counts.
-The caller must separately pin the quote's reserve to the signed provider hold
-and submit the generated operation through ordinary Mini admission. -/
-def quoteResponse (tariff : Tariff) (request response : List UInt8)
+A user-route call is quoted its per-operation fee whatever the response says:
+the friend's own key paid the provider, so no count is read. A metered route
+needs a complete 200 response with one terminal usage record. The caller must
+separately pin the quote's reserve to the signed provider hold and submit the
+generated operation through ordinary Mini admission, where the purse's route
+law checks the charge against the route recorded at reserve. -/
+def quoteResponse (tariff : Tariff) (route : Route) (request response : List UInt8)
     (contentType : String) (status reserve : Nat) : Result Quote := do
-  unless status = 200 do throw "provider HTTP status is not 200"
   let streaming ← parseRequest tariff request
-  let text ← textOfBytes "response" response 8388608
-  let contentType ← mediaType contentType
-  let usage ← if streaming then
+  let usage ← if route = .user then pure none else do
+    unless status = 200 do throw "provider HTTP status is not 200"
+    let text ← textOfBytes "response" response 8388608
+    let contentType ← mediaType contentType
+    if streaming then
       if contentType != "text/event-stream" then
         throw "stream response content type differs"
-      parseSseResponse tariff text
+      some <$> parseSseResponse tariff text
     else
       if contentType != "application/json" then
         throw "JSON response content type differs"
-      parseJsonResponse tariff text
-  match prepare tariff usage request response reserve with
+      some <$> parseJsonResponse tariff text
+  match prepare tariff route usage request response reserve with
   | some quote => pure quote
   | none => throw "reported usage quote exceeds the held allowance or tariff bound"
 
@@ -232,25 +260,33 @@ def quoteResponse (tariff : Tariff) (request response : List UInt8)
 evidence; digest equality is a collision-resistance assumption, not a proof of
 provider truth. -/
 def reportJson (providerResourceId : Nat) (quote : Quote) : Json :=
-  .mkObj [
-    ("type", toJson "minidregg-provider-metering-v1"),
-    ("status", toJson "quoted-reported-usage"),
+  let usageFields := match quote.usage with
+    | none => []
+    | some usage => [
+        ("promptTokens", toJson (toString usage.promptTokens)),
+        ("completionTokens", toJson (toString usage.completionTokens)),
+        ("totalTokens", toJson (toString usage.totalTokens))]
+  .mkObj ([
+    ("type", toJson "minidregg-provider-metering-v2"),
+    ("status", toJson (if quote.route = .user then "quoted-per-operation"
+      else "quoted-reported-usage")),
     ("providerResourceId", toJson (toString providerResourceId)),
+    ("route", toJson quote.route.name),
     ("model", toJson quote.tariff.model),
     ("tariffVersion", toJson (toString quote.tariff.version)),
     ("tariffDigest", toJson (toString (tariffDigest quote.tariff).value)),
     ("requestDigest", toJson (toString (requestDigest quote.request).value)),
     ("responseDigest", toJson (toString (responseDigest quote.response).value)),
     ("requestBytes", toJson (toString quote.request.length)),
-    ("responseBytes", toJson (toString quote.response.length)),
-    ("promptTokens", toJson (toString quote.usage.promptTokens)),
-    ("completionTokens", toJson (toString quote.usage.completionTokens)),
-    ("totalTokens", toJson (toString quote.usage.totalTokens)),
+    ("responseBytes", toJson (toString quote.response.length))] ++ usageFields ++ [
+    ("perOp", toJson (toString (quote.tariff.perOp quote.route))),
     ("reserve", toJson (toString quote.reserve)),
     ("charge", toJson (toString quote.amount)),
     ("operation", .mkObj [("type", toJson "settle"),
-      ("charge", toJson (toString quote.amount))]),
-    ("claim", toJson "provider-reported usage under operator tariff; not invoice-verified")]
+      ("charge", toJson (toString quote.amount)), ("route", toJson quote.route.name)]),
+    ("claim", toJson (if quote.route = .user then
+      "per-operation fee under operator tariff; the provider bill is the key owner's"
+      else "provider-reported usage under operator tariff; not invoice-verified"))])
 
 private def splitPairBounded (payload : List UInt8) (maximum : Nat) :
     Result (List UInt8 × List UInt8) := do
@@ -263,10 +299,12 @@ private def splitPairBounded (payload : List UInt8) (maximum : Nat) :
 
 /-- Read-only socket op payload: u32LE metadata length, strict metadata JSON,
 u32LE exact request length, exact request bytes, then exact response bytes.
-The Host Settings supply tariff and providerResourceId; neither comes from the
-request. Its v1 metadata is {status,contentType,reserve}, decimal strings for
-integers. No provider key or Mini signer enters this operation. -/
-def quotePayload (providerResourceId : Nat) (tariff : Tariff)
+Metadata (v3) is {version "3", providerResourceId, route, status, contentType,
+reserve}, decimal strings for integers; the route is the one the purse
+recorded at reserve. The Host Settings supply the tariff for a configured
+providerResourceId; neither comes from the request. No provider key or Mini
+signer enters this operation. -/
+def quotePayload (services : List (Nat × Tariff))
     (payload : List UInt8) : Result Json := do
   let (metadataBytes, remainder) ← splitPairBounded payload 4096
   let (request, response) ← splitPairBounded remainder 1048576
@@ -275,40 +313,21 @@ def quotePayload (providerResourceId : Nat) (tariff : Tariff)
   let metadataText ← textOfBytes "metadata" metadataBytes 4096
   let metadata ← Minidregg.Host.Json.parse metadataText
   let obj ← metadata.getObj?.mapError (fun _ => "metadata must be an object")
-  let expected := ["status", "contentType", "reserve"]
+  let expected := ["version", "providerResourceId", "route", "status", "contentType", "reserve"]
   let actual := obj.foldl (init := []) (fun names key _ => key :: names)
   unless actual.length = expected.length && actual.all expected.contains do
-    throw "provider metering metadata differs from the v1 schema"
-  let status ← canonicalNat metadata "status"
-  let contentType ← stringField metadata "contentType"
-  let reserve ← canonicalNat metadata "reserve"
-  let quote ← quoteResponse tariff request response contentType status reserve
-  pure (reportJson providerResourceId quote)
-
-/-- Multi-provider metadata names only a configured service. The tariff comes
-from the operator list; the reported HTTP bytes and usage retain the v1 checks. -/
-def quotePayloadV2 (services : List (Nat × Tariff))
-    (payload : List UInt8) : Result Json := do
-  let (metadataBytes, remainder) ← splitPairBounded payload 4096
-  let (request, response) ← splitPairBounded remainder 1048576
-  if response.isEmpty || response.length > 8388608 then
-    throw "provider metering response exceeds byte bound"
-  let metadataText ← textOfBytes "metadata" metadataBytes 4096
-  let metadata ← Minidregg.Host.Json.parse metadataText
-  let obj ← metadata.getObj?.mapError (fun _ => "metadata must be an object")
-  let expected := ["version", "providerResourceId", "status", "contentType", "reserve"]
-  let actual := obj.foldl (init := []) (fun names key _ => key :: names)
-  unless actual.length = expected.length && actual.all expected.contains do
-    throw "provider metering metadata differs from the v2 schema"
-  unless (← stringField metadata "version") == "2" do
+    throw "provider metering metadata differs from the v3 schema"
+  unless (← stringField metadata "version") == "3" do
     throw "provider metering metadata version differs"
   let providerResourceId ← canonicalNat metadata "providerResourceId"
   let some (_, tariff) := services.find? (fun service => service.1 == providerResourceId)
     | throw "provider metering selector is not configured"
+  let some route := Route.ofName? (← stringField metadata "route")
+    | throw "provider metering route must be user, pool or homelab"
   let status ← canonicalNat metadata "status"
   let contentType ← stringField metadata "contentType"
   let reserve ← canonicalNat metadata "reserve"
-  let quote ← quoteResponse tariff request response contentType status reserve
+  let quote ← quoteResponse tariff route request response contentType status reserve
   pure (reportJson providerResourceId quote)
 
 end Minidregg.Host.ProviderUsage

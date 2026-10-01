@@ -219,18 +219,17 @@ struct ProviderTask {
     custody_key: PathBuf,
     parent_capability: String,
     parent_observe_capability: String,
+    /// The hold of a metered (pool or homelab) call. It must cover the
+    /// route's fee plus the metered charge at the token ceilings. A user-route
+    /// call holds exactly the Host tariff's user fee instead: the purse law
+    /// refuses any other user hold. Every provider call is charged by the
+    /// Host's per-route tariff (`Kernel/ProviderRoute.lean`); there is no
+    /// fixed provider charge.
     reserve: String,
-    charge: String,
-    /// Opt into source-owned, reported-usage settlement. The legacy fixed
-    /// charge remains available only when this is absent or false.
-    #[serde(default)]
-    metering: bool,
     /// External provider/model accounting ceilings. They are an operator
     /// contract, not inferred from request byte length.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_input_tokens: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    max_output_tokens: Option<u32>,
+    max_input_tokens: u32,
+    max_output_tokens: u32,
     model: String,
     /// The operator's provider table (`/etc/mini/providers.json`,
     /// root-owned). Endpoints, credential kinds and tariffs live there.
@@ -1539,25 +1538,93 @@ fn metered_audit_path(send_started: bool, outcome: Option<&str>) -> Result<Meter
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// One attempt's slice of the Host's per-route tariff: the route the call
+/// took (recorded by the purse at reserve), that route's fee, and its metered
+/// rates ("0" on the user route, which has none).
 struct ProviderMeteringPin {
     provider_resource_id: String,
-    #[serde(default = "legacy_metering_metadata_version")]
-    metadata_version: u8,
     model: String,
     tariff_version: String,
     tariff_digest: String,
-    #[serde(default)]
+    route: String,
+    per_op: String,
     input_micro_per_million: String,
-    #[serde(default)]
     output_micro_per_million: String,
-    #[serde(default)]
     max_input_tokens: Option<u32>,
-    #[serde(default)]
     max_output_tokens: Option<u32>,
 }
 
-fn legacy_metering_metadata_version() -> u8 {
-    1
+/// The code the provider purse records for a route (field 4).
+fn provider_route_code(route: &str) -> Result<&'static str> {
+    match route {
+        "user" => Ok("1"),
+        "pool" => Ok("2"),
+        "homelab" => Ok("3"),
+        _ => Err(format!("unknown provider route {route}")),
+    }
+}
+
+/// The hold one attempt takes: the user fee exactly on the user route, the
+/// configured metered hold otherwise.
+fn provider_hold_amount(task: &ProviderTask, pin: &ProviderMeteringPin) -> String {
+    if pin.route == "user" {
+        pin.per_op.clone()
+    } else {
+        task.reserve.clone()
+    }
+}
+
+/// The attempt's slice of the pinned per-route tariff for `route`.
+fn provider_route_pin(
+    metering: &Value,
+    task: &ProviderTask,
+    route: &str,
+) -> Result<ProviderMeteringPin> {
+    let field = |value: &Value, name: &str| -> Result<String> {
+        let found = value
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("provider metering profile lacks {name}"))?;
+        if found.len() > 80 {
+            return Err(format!("provider metering {name} exceeds decimal bound"));
+        }
+        decimal(found, name)?;
+        Ok(found.to_owned())
+    };
+    provider_route_code(route)?;
+    let rate = metering
+        .get("routes")
+        .and_then(|routes| routes.get(route))
+        .ok_or_else(|| format!("pinned provider tariff has no {route} route"))?;
+    let (input, output) = if route == "user" {
+        ("0".to_owned(), "0".to_owned())
+    } else {
+        (
+            field(rate, "inputMicroPerMillion")?,
+            field(rate, "outputMicroPerMillion")?,
+        )
+    };
+    let pin = ProviderMeteringPin {
+        provider_resource_id: field(metering, "providerResourceId")?,
+        model: metering
+            .get("model")
+            .and_then(Value::as_str)
+            .ok_or("provider metering model absent")?
+            .to_owned(),
+        tariff_version: field(metering, "tariffVersion")?,
+        tariff_digest: field(metering, "tariffDigest")?,
+        route: route.to_owned(),
+        per_op: field(rate, "perOp")?,
+        input_micro_per_million: input,
+        output_micro_per_million: output,
+        max_input_tokens: Some(task.max_input_tokens),
+        max_output_tokens: Some(task.max_output_tokens),
+    };
+    if pin.provider_resource_id != task.task || pin.model != task.model || pin.tariff_version == "0"
+    {
+        return Err("provider task differs from the operator-pinned Host metering tariff".into());
+    }
+    Ok(pin)
 }
 
 fn provider_metering_metadata(
@@ -1566,19 +1633,17 @@ fn provider_metering_metadata(
     content_type: &str,
     reserve: &str,
 ) -> Result<Value> {
-    let common = json!({"status":status.to_string(),"contentType":content_type,
-        "reserve":reserve});
-    match pin.metadata_version {
-        1 => Ok(common),
-        2 => Ok(
-            json!({"version":"2","providerResourceId":pin.provider_resource_id,
-            "status":status.to_string(),"contentType":content_type,"reserve":reserve}),
-        ),
-        _ => Err("unknown pinned provider metering metadata version".into()),
-    }
+    provider_route_code(&pin.route)?;
+    Ok(json!({"version":"3","providerResourceId":pin.provider_resource_id,
+        "route":pin.route,"status":status.to_string(),"contentType":content_type,
+        "reserve":reserve}))
 }
 
 fn provider_max_charge_bound(pin: &ProviderMeteringPin, input: u32, output: u32) -> Result<u128> {
+    let per_op = pin
+        .per_op
+        .parse::<u128>()
+        .map_err(|_| "provider per-operation fee exceeds u128")?;
     let input_rate = pin
         .input_micro_per_million
         .parse::<u128>()
@@ -1598,6 +1663,7 @@ fn provider_max_charge_bound(pin: &ProviderMeteringPin, input: u32, output: u32)
     total
         .checked_add(999_999)
         .map(|value| value / 1_000_000)
+        .and_then(|metered| metered.checked_add(per_op))
         .ok_or("provider maximum charge rounding overflows".into())
 }
 
@@ -1608,8 +1674,22 @@ fn provider_quote_charge(
     request_bytes: usize,
     response_bytes: usize,
 ) -> Result<String> {
-    if report.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v1")
-        || report.get("status").and_then(Value::as_str) != Some("quoted-reported-usage")
+    let user = pin.route == "user";
+    let (status, claim) = if user {
+        (
+            "quoted-per-operation",
+            "per-operation fee under operator tariff; the provider bill is the key owner's",
+        )
+    } else {
+        (
+            "quoted-reported-usage",
+            "provider-reported usage under operator tariff; not invoice-verified",
+        )
+    };
+    if report.get("type").and_then(Value::as_str) != Some("minidregg-provider-metering-v2")
+        || report.get("status").and_then(Value::as_str) != Some(status)
+        || report.get("route").and_then(Value::as_str) != Some(pin.route.as_str())
+        || report.get("perOp").and_then(Value::as_str) != Some(pin.per_op.as_str())
         || report.get("model").and_then(Value::as_str) != Some(pin.model.as_str())
         || report.get("providerResourceId").and_then(Value::as_str)
             != Some(pin.provider_resource_id.as_str())
@@ -1620,11 +1700,11 @@ fn provider_quote_charge(
             != Some(request_bytes.to_string().as_str())
         || report.get("responseBytes").and_then(Value::as_str)
             != Some(response_bytes.to_string().as_str())
-        || report.get("claim").and_then(Value::as_str)
-            != Some("provider-reported usage under operator tariff; not invoice-verified")
+        || report.get("claim").and_then(Value::as_str) != Some(claim)
     {
         return Err(
-            "provider quote differs from pinned task, tariff, hold, or exact byte lengths".into(),
+            "provider quote differs from pinned task, route, tariff, hold, or exact byte lengths"
+                .into(),
         );
     }
     let charge = report
@@ -1643,16 +1723,32 @@ fn provider_quote_charge(
             .map_err(|_| "provider reserve exceeds u64")?
         || report.pointer("/operation/type").and_then(Value::as_str) != Some("settle")
         || report.pointer("/operation/charge").and_then(Value::as_str) != Some(charge)
+        || report.pointer("/operation/route").and_then(Value::as_str) != Some(pin.route.as_str())
     {
         return Err("provider quote settlement exceeds the signed reserve".into());
     }
-    for name in [
-        "requestDigest",
-        "responseDigest",
-        "promptTokens",
-        "completionTokens",
-        "totalTokens",
-    ] {
+    for name in ["requestDigest", "responseDigest"] {
+        let value = report
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("provider quote lacks {name}"))?;
+        if value.len() > 80 {
+            return Err(format!("provider quote {name} exceeds decimal bound"));
+        }
+        decimal(value, name)?;
+    }
+    if user {
+        // The friend's own key paid the provider: the fee alone, no counts.
+        if charge != pin.per_op
+            || ["promptTokens", "completionTokens", "totalTokens"]
+                .iter()
+                .any(|name| report.get(*name).is_some())
+        {
+            return Err("user-route quote is not exactly the per-operation fee".into());
+        }
+        return Ok(charge.to_owned());
+    }
+    for name in ["promptTokens", "completionTokens", "totalTokens"] {
         let value = report
             .get(name)
             .and_then(Value::as_str)
@@ -2502,6 +2598,20 @@ fn provider_reserve_coordinates(state: &Value, hold: &HeldCharge) -> bool {
             == Some(hold.before_generation.as_str())
 }
 
+/// The purse's recorded route must be the attempt's: a call the controller
+/// sent with one payer's bearer is never settled under another's route.
+fn provider_signed_route(state: &Value, pin: &ProviderMeteringPin) -> Result<()> {
+    let expected = provider_route_code(&pin.route)?;
+    match state.pointer("/grain/route").and_then(Value::as_str) {
+        Some(recorded) if recorded == expected => Ok(()),
+        Some(recorded) => Err(format!(
+            "route-mismatch: the purse recorded route {recorded}, the attempt took {}",
+            pin.route
+        )),
+        None => Err("provider purse has no route field; it was not born under a route tariff".into()),
+    }
+}
+
 fn provider_audit_coordinates(state: &Value, hold: &HeldCharge) -> bool {
     if provider_reserve_coordinates(state, hold) {
         return true;
@@ -3039,7 +3149,6 @@ fn validate(c: &Config) -> Result<()> {
                 &p.parent_observe_capability,
             ),
             ("providerTask.reserve", &p.reserve),
-            ("providerTask.charge", &p.charge),
         ] {
             decimal(value, name)?;
         }
@@ -3067,32 +3176,16 @@ fn validate(c: &Config) -> Result<()> {
         if let Some(owner) = &p.on_behalf_of {
             credentials::Owner::new(&owner.subject, &owner.public_key)?;
         }
-        if p.reserve
-            .parse::<u64>()
-            .ok()
-            .zip(p.charge.parse::<u64>().ok())
-            .is_none_or(|(reserve, charge)| charge > reserve)
-        {
-            return Err("providerTask charge exceeds reserve".into());
+        if p.reserve.parse::<u64>().is_err() {
+            return Err("providerTask reserve must fit u64".into());
         }
-        if p.metering && p.charge != "0" {
+        if !(1..=131_072).contains(&p.max_input_tokens)
+            || !(1..=8_192).contains(&p.max_output_tokens)
+        {
             return Err(
-                "metered providerTask requires charge 0; only the Lean quote may settle usage"
+                "providerTask requires maxInputTokens 1..131072 and maxOutputTokens 1..8192"
                     .into(),
             );
-        }
-        if p.metering {
-            if !p
-                .max_input_tokens
-                .is_some_and(|value| (1..=131_072).contains(&value))
-                || !p
-                    .max_output_tokens
-                    .is_some_and(|value| (1..=8_192).contains(&value))
-            {
-                return Err("metered providerTask requires maxInputTokens 1..131072 and maxOutputTokens 1..8192".into());
-            }
-        } else if p.max_input_tokens.is_some() || p.max_output_tokens.is_some() {
-            return Err("fixed-charge providerTask cannot set metered token ceilings".into());
         }
         provider_max_iterations(p.max_iterations)?;
         let bind = p
@@ -7253,19 +7346,21 @@ impl Runtime {
             .provider_task
             .as_ref()
             .ok_or("providerTask absent")?;
-        if task.metering {
-            match metered_audit_path(
-                provider_attempt.send_started,
-                provider_attempt.outcome.as_deref(),
-            )? {
-                MeteredAuditPath::ProvenNoSend if settled.charge == "0" => {}
-                MeteredAuditPath::CompleteResponse
-                    if self.validated_metered_charge_for_reserve(
-                        provider_attempt,
-                        &task.reserve,
-                    )? == settled.charge => {}
-                _ => return Err("provider settlement differs from retained Lean quote".into()),
-            }
+        let pin = provider_attempt
+            .metering_pin
+            .as_ref()
+            .ok_or("provider tariff pin absent")?;
+        match metered_audit_path(
+            provider_attempt.send_started,
+            provider_attempt.outcome.as_deref(),
+        )? {
+            MeteredAuditPath::ProvenNoSend if settled.charge == "0" => {}
+            MeteredAuditPath::CompleteResponse
+                if self.validated_metered_charge_for_reserve(
+                    provider_attempt,
+                    &provider_hold_amount(task, pin),
+                )? == settled.charge => {}
+            _ => return Err("provider settlement differs from retained Lean quote".into()),
         }
         Ok(actual)
     }
@@ -8168,6 +8263,11 @@ impl Runtime {
                 "remaining":before.get("remaining"),"reserved":before.get("reserved")},
             "operation":op,"publications":publications,
             "observeCapability":authority.query_capability});
+        // A provider purse carries its fifth coordinate: every transition
+        // compares the recorded route against the durable store.
+        if let Some(route) = before.get("route") {
+            grain["before"]["route"] = route.clone();
+        }
         if let Some(witness) = parent_witness {
             grain["parentWitness"] = witness;
         }
@@ -9155,23 +9255,12 @@ impl Runtime {
                 let recorded =
                     self.provider_record_outcome(attempt_id, outcome)
                         .and_then(|charge| {
-                            if charge == Some("configured")
-                                && self
-                                    .config
-                                    .provider_task
-                                    .as_ref()
-                                    .is_some_and(|task| task.metering)
-                            {
+                            if charge == Some("configured") {
                                 self.provider_meter_quote(attempt_id)?;
                             }
                             Ok(charge)
                         });
                 if recorded.is_err()
-                    && self
-                        .config
-                        .provider_task
-                        .as_ref()
-                        .is_some_and(|task| task.metering)
                     && self
                         .journal
                         .provider_attempt
@@ -9266,25 +9355,7 @@ impl Runtime {
         {
             return Err("provider request differs from pinned model or size".into());
         }
-        let metering_pin = self.provider_metering_pin(&task)?;
-        if let Some(pin) = &metering_pin {
-            let maximum = provider_max_charge_bound(
-                pin,
-                task.max_input_tokens
-                    .ok_or("metered input ceiling absent")?,
-                task.max_output_tokens
-                    .ok_or("metered output ceiling absent")?,
-            )?;
-            let reserve = task
-                .reserve
-                .parse::<u128>()
-                .map_err(|_| "provider reserve exceeds u128")?;
-            if maximum > reserve {
-                return Err(
-                    "operator-pinned provider maximum charge exceeds signed reserve".into(),
-                );
-            }
-        }
+        let tariff = self.provider_tariff(&task)?;
         if self.journal.provider_pending.is_some()
             || self.journal.provider_hold.is_some()
             || self.journal.provider_attempt.is_some()
@@ -9322,8 +9393,27 @@ impl Runtime {
             .ok_or("signed parent read has no height")?
             .parse::<u64>()
             .map_err(|_| "signed parent height exceeds u64")?;
-        let (route, route_record) =
-            self.provider_route(&task, &request.exact_body, height, metering_pin.as_ref())?;
+        let (route, route_record, source) =
+            self.provider_route(&task, &request.exact_body, height)?;
+        // The route fixes the payer, so it fixes the price: the attempt's
+        // slice of the Host's per-route tariff, and the hold it takes.
+        let metering_pin = provider_route_pin(&tariff, &task, source.route())?;
+        let hold_amount = provider_hold_amount(&task, &metering_pin);
+        let maximum = provider_max_charge_bound(
+            &metering_pin,
+            task.max_input_tokens,
+            task.max_output_tokens,
+        )?;
+        if maximum
+            > hold_amount
+                .parse::<u128>()
+                .map_err(|_| "provider hold exceeds u128")?
+        {
+            return Err(
+                "operator-pinned provider maximum charge exceeds the route's hold".into(),
+            );
+        }
+        let metering_pin = Some(metering_pin);
         let mut witness = self
             .journal
             .prompt_witness
@@ -9394,16 +9484,11 @@ impl Runtime {
             ));
         }
         self.provider_lease_current(&request.lease)?;
-        self.mark_hold_as(
-            AuthoritySlot::Provider,
-            &authority,
-            &task.reserve,
-            &task.charge,
-        )?;
+        self.mark_hold_as(AuthoritySlot::Provider, &authority, &hold_amount, "0")?;
         self.provider_lease_current(&request.lease)?;
         self.transition_as_with_witness(
             &authority,
-            json!({"type":"reserve","amount":task.reserve}),
+            json!({"type":"reserve","amount":hold_amount,"route":source.route()}),
             "provider reserve",
             "gateway exact request reserve",
             vec![],
@@ -9417,39 +9502,45 @@ impl Runtime {
             route,
         })
     }
-    /// Resolve this request's route: the task's table row, the row's tariff
-    /// against the Host pin, and the bearer the row's credential kind calls
-    /// for. A `user` row uses only the pinned friend's credential under a
-    /// grant naming this runner; a `pool` row uses the operator's key, and
-    /// the purse reserve that follows is what gates its spend.
+    /// Resolve this request's route: the task's table row and the bearer the
+    /// row's credential kind calls for. A `user` row uses only the pinned
+    /// friend's credential under a grant naming this runner; a `pool` row
+    /// uses the operator's key within the row's caps (per-call `max_tokens`
+    /// and calls per day), and the purse reserve that follows is what gates
+    /// its spend; a `homelab` row sends no bearer. The kind is the route the
+    /// purse records at reserve and charges by at settle.
     fn provider_route(
         &self,
         task: &ProviderTask,
         exact_body: &[u8],
         height: u64,
-        pin: Option<&ProviderMeteringPin>,
-    ) -> Result<(provider::Route, ProviderRouteRecord)> {
+    ) -> Result<(provider::Route, ProviderRouteRecord, credentials::CredentialSource)> {
         let table = credentials::ProviderTable::load(&task.providers, 0)?;
         let row = provider_task_row(task, &table)?;
-        let tariff_matches = match (&row.tariff, pin) {
-            (Some(tariff), Some(pin)) => {
-                tariff.version == pin.tariff_version
-                    && tariff.input_micro_per_million == pin.input_micro_per_million
-                    && tariff.output_micro_per_million == pin.output_micro_per_million
-            }
-            (None, None) => true,
-            _ => false,
-        };
-        if !tariff_matches {
-            return Err(credentials::refused("tariff-mismatch"));
-        }
         let store = || {
             credentials::CredentialStore::open(&task.credentials_root, &task.credentials_key)
         };
+        let max_tokens = serde_json::from_slice::<Value>(exact_body)
+            .ok()
+            .and_then(|body| body.get("max_tokens").and_then(Value::as_u64));
         let (bearer, credential) = match row.credential {
-            credentials::CredentialSource::None => (None, "none".to_owned()),
+            credentials::CredentialSource::Homelab => (None, "homelab".to_owned()),
             credentials::CredentialSource::Pool => {
-                (Some(store()?.pool(&row.name)?), "pool".to_owned())
+                let caps = row.caps.ok_or("pool row has no caps")?;
+                // The hold covers at most maxOutputTokens of output.
+                if max_tokens.is_none_or(|tokens| tokens > u64::from(task.max_output_tokens)) {
+                    return Err(credentials::refused("per-call-cap"));
+                }
+                (
+                    Some(store()?.pool(
+                        &row.name,
+                        &task.subject,
+                        max_tokens,
+                        caps,
+                        credentials::utc_day(),
+                    )?),
+                    "pool".to_owned(),
+                )
             }
             credentials::CredentialSource::User => {
                 let pinned = task
@@ -9457,9 +9548,6 @@ impl Runtime {
                     .as_ref()
                     .ok_or_else(|| credentials::refused("no-credential"))?;
                 let owner = credentials::Owner::new(&pinned.subject, &pinned.public_key)?;
-                let max_tokens = serde_json::from_slice::<Value>(exact_body)
-                    .ok()
-                    .and_then(|body| body.get("max_tokens").and_then(Value::as_u64));
                 let bearer = store()?.authorize(
                     &owner,
                     &row.name,
@@ -9482,12 +9570,12 @@ impl Runtime {
                 bearer,
             },
             record,
+            row.credential,
         ))
     }
-    fn provider_metering_pin(&self, task: &ProviderTask) -> Result<Option<ProviderMeteringPin>> {
-        if !task.metering {
-            return Ok(None);
-        }
+    /// The Host's pinned per-route tariff for this provider task, read from
+    /// the pinned profile. Every provider task is tariffed by route.
+    fn provider_tariff(&self, task: &ProviderTask) -> Result<Value> {
         let output = Command::new(&self.config.mini)
             .arg("profile")
             .arg("--host")
@@ -9501,46 +9589,7 @@ impl Runtime {
         }
         let profile: Value = serde_json::from_slice(&output.stdout)
             .map_err(|e| format!("invalid provider metering profile: {e}"))?;
-        let metering = select_provider_metering(&profile, &task.task)?;
-        let field = |name: &str| -> Result<String> {
-            let value = metering
-                .get(name)
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("provider metering profile lacks {name}"))?;
-            if value.len() > 80 {
-                return Err(format!("provider metering {name} exceeds decimal bound"));
-            }
-            decimal(value, name)?;
-            Ok(value.to_owned())
-        };
-        let pin = ProviderMeteringPin {
-            provider_resource_id: field("providerResourceId")?,
-            metadata_version: if profile.get("providerMeterings").is_some() {
-                2
-            } else {
-                1
-            },
-            model: metering
-                .get("model")
-                .and_then(Value::as_str)
-                .ok_or("provider metering model absent")?
-                .to_owned(),
-            tariff_version: field("tariffVersion")?,
-            tariff_digest: field("tariffDigest")?,
-            input_micro_per_million: field("inputMicroPerMillion")?,
-            output_micro_per_million: field("outputMicroPerMillion")?,
-            max_input_tokens: task.max_input_tokens,
-            max_output_tokens: task.max_output_tokens,
-        };
-        if pin.provider_resource_id != task.task
-            || pin.model != task.model
-            || pin.tariff_version == "0"
-        {
-            return Err(
-                "provider task differs from the operator-pinned Host metering tariff".into(),
-            );
-        }
-        Ok(Some(pin))
+        Ok(select_provider_metering(&profile, &task.task)?.clone())
     }
     fn provider_replay(
         replays: &[ProviderReplay],
@@ -9913,9 +9962,6 @@ impl Runtime {
             .provider_task
             .clone()
             .ok_or("providerTask absent")?;
-        if !task.metering {
-            return Err("provider metering is not enabled".into());
-        }
         let attempt = self
             .journal
             .provider_attempt
@@ -9945,7 +9991,7 @@ impl Runtime {
                 .is_some_and(|value| value.starts_with("received:"))
             || attempt.meter_report_path.is_some()
             || !hold.reserve_confirmed
-            || hold.reserve != task.reserve
+            || hold.reserve != provider_hold_amount(&task, pin)
             || pin.provider_resource_id != task.task
             || pin.model != task.model
         {
@@ -10095,8 +10141,7 @@ impl Runtime {
             .metering_pin
             .as_ref()
             .ok_or("metered tariff pin absent")?;
-        if !task.metering
-            || reserve != task.reserve
+        if reserve != provider_hold_amount(task, pin)
             || pin.provider_resource_id != task.task
             || pin.model != task.model
         {
@@ -10246,16 +10291,7 @@ impl Runtime {
             .response_content_type
             .clone()
             .ok_or("provider response content type absent")?;
-        let charge = if self
-            .config
-            .provider_task
-            .as_ref()
-            .is_some_and(|task| task.metering)
-        {
-            self.validated_metered_charge(&attempt)?
-        } else {
-            "configured".to_owned()
-        };
+        let charge = self.validated_metered_charge(&attempt)?;
         let response_headers_path = attempt.response_headers_path.clone();
         let response_headers_bytes = attempt.response_headers_bytes;
         let response_headers_sha256 = attempt.response_headers_sha256.clone();
@@ -10327,63 +10363,58 @@ impl Runtime {
             .provider_task
             .clone()
             .ok_or("providerTask absent")?;
-        let charge = if charge == "configured" {
-            if configured.metering {
-                return Err("metered provider cannot use configured fixed charge".into());
-            }
-            configured.charge.clone()
+        if charge == "configured" {
+            return Err("a provider call is charged only by the Host's route quote".into());
+        }
+        if self.cancelled.load(Ordering::SeqCst) {
+            return Err("metered provider interruption requires audited settlement".into());
+        }
+        let hold = self
+            .journal
+            .provider_hold
+            .clone()
+            .ok_or("metered provider hold absent")?;
+        let attempt = self
+            .journal
+            .provider_attempt
+            .as_ref()
+            .ok_or("metered provider attempt absent")?;
+        let pin = attempt
+            .metering_pin
+            .clone()
+            .ok_or("provider tariff pin absent")?;
+        let quote_matches = if attempt
+            .outcome
+            .as_deref()
+            .is_some_and(|kind| kind.starts_with("received:"))
+        {
+            self.validated_metered_charge(attempt)? == charge
         } else {
-            charge.to_owned()
-        };
-        if configured.metering {
-            if self.cancelled.load(Ordering::SeqCst) {
-                return Err("metered provider interruption requires audited settlement".into());
-            }
-            let hold = self
-                .journal
-                .provider_hold
-                .clone()
-                .ok_or("metered provider hold absent")?;
-            let attempt = self
-                .journal
-                .provider_attempt
-                .as_ref()
-                .ok_or("metered provider attempt absent")?;
-            let quote_matches = if attempt
+            attempt
                 .outcome
                 .as_deref()
-                .is_some_and(|kind| kind.starts_with("received:"))
-            {
-                self.validated_metered_charge(attempt)? == charge
-            } else {
-                attempt
-                    .outcome
-                    .as_deref()
-                    .is_some_and(|kind| kind.starts_with("not-sent:"))
-                    && charge == "0"
-            };
-            if !quote_matches || !hold.reserve_confirmed || hold.reserve != configured.reserve {
-                return Err(
-                    "metered provider settlement lacks retained quote and exact hold".into(),
-                );
-            }
-            let signed = self.query_as(&authority)?;
-            if !provider_reserve_coordinates(&signed, &hold) {
-                return Err("metered provider signed hold changed before settlement".into());
-            }
+                .is_some_and(|kind| kind.starts_with("not-sent:"))
+                && charge == "0"
+        };
+        if !quote_matches
+            || !hold.reserve_confirmed
+            || hold.reserve != provider_hold_amount(&configured, &pin)
+        {
+            return Err("metered provider settlement lacks retained quote and exact hold".into());
         }
+        let signed = self.query_as(&authority)?;
+        if !provider_reserve_coordinates(&signed, &hold) {
+            return Err("metered provider signed hold changed before settlement".into());
+        }
+        provider_signed_route(&signed, &pin)?;
         if self.journal.provider_pending.is_some() {
             return Err("provider transition needs exact retry".into());
         }
         self.transition_as(
             &authority,
-            json!({"type":"settle","charge":charge}),
+            json!({"type":"settle","charge":charge,"route":pin.route}),
             "provider settle",
-            if configured.metering {
-                "gateway source-quoted provider settlement"
-            } else {
-                "gateway fixed-charge settlement"
-            },
+            "gateway source-quoted provider settlement",
             vec![],
         )?;
         let after = self.query_as(&authority)?;
@@ -14320,8 +14351,8 @@ impl Runtime {
                     private_dir: self.config.state_dir.clone(),
                     max_request_bytes: task.max_request_bytes,
                     max_response_bytes: task.max_response_bytes,
-                    max_input_tokens: task.max_input_tokens,
-                    max_output_tokens: task.max_output_tokens,
+                    max_input_tokens: Some(task.max_input_tokens),
+                    max_output_tokens: Some(task.max_output_tokens),
                     timeout: Duration::from_secs(task.timeout_seconds),
                 },
                 tx,
@@ -14334,7 +14365,7 @@ impl Runtime {
                 &token,
                 spec.wall_time_seconds.unwrap_or(600) - 60,
                 provider_max_iterations(task.max_iterations)?,
-                task.max_input_tokens,
+                Some(task.max_input_tokens),
             )?;
             *self
                 .provider_control
@@ -16218,7 +16249,7 @@ impl Runtime {
                 task.max_response_bytes,
             )?;
         }
-        let already_settled = if task.metering && self.journal.provider_hold.is_none() {
+        let already_settled = if self.journal.provider_hold.is_none() {
             let settled = self.verified_provider_settlement(&attempt)?;
             let retry_result = next_retry_json(&settled.attempt)?;
             let mut args = vec![
@@ -16255,7 +16286,7 @@ impl Runtime {
         };
         let audited_charge = if let Some(settled) = &already_settled {
             settled.charge.clone()
-        } else if task.metering {
+        } else {
             match metered_audit_path(attempt.send_started, attempt.outcome.as_deref())? {
                 MeteredAuditPath::ProvenNoSend => "0".to_owned(),
                 MeteredAuditPath::CompleteResponse => {
@@ -16276,20 +16307,11 @@ impl Runtime {
                     self.validated_metered_charge(&attempt)?
                 }
             }
-        } else if !attempt.send_started
-            || attempt
-                .outcome
-                .as_deref()
-                .is_some_and(|kind| kind.starts_with("not-sent:"))
-        {
-            "0".to_owned()
-        } else {
-            task.charge.clone()
         };
         let id = self.next_id()?;
         self.journal.reconciliation_log.push(json!({
             "decisionId":id.to_string(), "authority":"provider",
-            "action":if task.metering {"settle-provider-source-metered-charge"} else {"settle-provider-fixed-charge"},
+            "action":"settle-provider-source-metered-charge",
             "stage":"operator-audited-requested",
             "providerAttemptId":attempt.id.to_string(),
             "requestPath":attempt.request_path,
@@ -16352,15 +16374,16 @@ impl Runtime {
                         vec![],
                     )?;
                 }
+                let pin = attempt
+                    .metering_pin
+                    .as_ref()
+                    .ok_or("provider tariff pin absent")?;
+                provider_signed_route(&self.query_as(&authority)?, pin)?;
                 self.transition_as(
                     &authority,
-                    json!({"type":"settle","charge":audited_charge}),
+                    json!({"type":"settle","charge":audited_charge,"route":pin.route}),
                     "provider audit settle",
-                    if task.metering {
-                        "operator audited source-quoted provider charge"
-                    } else {
-                        "operator audited fixed provider charge"
-                    },
+                    "operator audited source-quoted provider charge",
                     vec![],
                 )?;
                 settlement_confirmed_here = true;
@@ -18894,22 +18917,23 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
     fn metered_quote_binds_tariff_hold_and_source_settle_charge() {
         let pin = ProviderMeteringPin {
             provider_resource_id: "7004".into(),
-            metadata_version: 1,
             model: "fixture".into(),
             tariff_version: "1".into(),
             tariff_digest: "123".into(),
+            route: "pool".into(),
+            per_op: "1".into(),
             input_micro_per_million: "1".into(),
             output_micro_per_million: "2".into(),
             max_input_tokens: Some(2),
             max_output_tokens: Some(3),
         };
         let mut report = json!({
-            "type":"minidregg-provider-metering-v1", "status":"quoted-reported-usage",
-            "providerResourceId":"7004", "model":"fixture", "tariffVersion":"1",
+            "type":"minidregg-provider-metering-v2", "status":"quoted-reported-usage",
+            "providerResourceId":"7004", "route":"pool", "model":"fixture", "tariffVersion":"1",
             "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
             "requestBytes":"20", "responseBytes":"30", "promptTokens":"2",
-            "completionTokens":"3", "totalTokens":"5", "reserve":"10", "charge":"7",
-            "operation":{"type":"settle","charge":"7"},
+            "completionTokens":"3", "totalTokens":"5", "perOp":"1", "reserve":"10", "charge":"7",
+            "operation":{"type":"settle","charge":"7","route":"pool"},
             "claim":"provider-reported usage under operator tariff; not invoice-verified"
         });
         assert_eq!(
@@ -18934,25 +18958,70 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         report["promptTokens"] = json!("2");
         report["completionTokens"] = json!("4");
         assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        report["completionTokens"] = json!("3");
+        // A quote for another route, or settling under another route, refuses.
+        report["route"] = json!("user");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+        report["route"] = json!("pool");
+        report["operation"]["route"] = json!("user");
+        assert!(provider_quote_charge(&report, &pin, "10", 20, 30).is_err());
+    }
+
+    #[test]
+    fn user_route_quote_is_the_fee_and_reads_no_usage() {
+        let pin = ProviderMeteringPin {
+            provider_resource_id: "7004".into(),
+            model: "fixture".into(),
+            tariff_version: "1".into(),
+            tariff_digest: "123".into(),
+            route: "user".into(),
+            per_op: "4".into(),
+            input_micro_per_million: "0".into(),
+            output_micro_per_million: "0".into(),
+            max_input_tokens: Some(2),
+            max_output_tokens: Some(3),
+        };
+        assert_eq!(provider_max_charge_bound(&pin, 1000, 1000).unwrap(), 4);
+        let mut report = json!({
+            "type":"minidregg-provider-metering-v2", "status":"quoted-per-operation",
+            "providerResourceId":"7004", "route":"user", "model":"fixture", "tariffVersion":"1",
+            "tariffDigest":"123", "requestDigest":"101", "responseDigest":"102",
+            "requestBytes":"20", "responseBytes":"30", "perOp":"4", "reserve":"4", "charge":"4",
+            "operation":{"type":"settle","charge":"4","route":"user"},
+            "claim":"per-operation fee under operator tariff; the provider bill is the key owner's"
+        });
+        assert_eq!(provider_quote_charge(&report, &pin, "4", 20, 30).unwrap(), "4");
+        report["promptTokens"] = json!("2");
+        assert!(provider_quote_charge(&report, &pin, "4", 20, 30).is_err());
+        report.as_object_mut().unwrap().remove("promptTokens");
+        report["charge"] = json!("3");
+        report["operation"]["charge"] = json!("3");
+        assert!(provider_quote_charge(&report, &pin, "4", 20, 30).is_err());
+        let signed = json!({"grain":{"route":"2"}});
+        assert!(provider_signed_route(&signed, &pin)
+            .unwrap_err()
+            .starts_with("route-mismatch"));
+        assert!(provider_signed_route(&json!({"grain":{"route":"1"}}), &pin).is_ok());
+        assert!(provider_signed_route(&json!({"grain":{}}), &pin).is_err());
     }
 
     #[test]
     fn metered_maximum_charge_uses_pinned_token_caps_and_rounds_up() {
         let pin = ProviderMeteringPin {
             provider_resource_id: "7004".into(),
-            metadata_version: 1,
             model: "fixture".into(),
             tariff_version: "1".into(),
             tariff_digest: "123".into(),
+            route: "pool".into(),
+            per_op: "2".into(),
             input_micro_per_million: "500000".into(),
             output_micro_per_million: "1000000".into(),
             max_input_tokens: Some(3),
             max_output_tokens: Some(2),
         };
+        // ceil((3 * 0.5 + 2 * 1) ) = 4 metered, plus the fee 2
         let maximum = provider_max_charge_bound(&pin, 3, 2).unwrap();
-        assert_eq!(maximum, 4);
-        assert!(maximum <= 4);
-        assert!(maximum > 3);
+        assert_eq!(maximum, 6);
     }
 
     #[test]
@@ -19031,26 +19100,37 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
     }
 
     #[test]
-    fn provider_quote_metadata_preserves_scalar_v1_and_pins_multi_v2() {
-        let mut pin: ProviderMeteringPin = serde_json::from_value(json!({
-            "providerResourceId":"7004","model":"fixture","tariffVersion":"1",
-            "tariffDigest":"123"
+    fn provider_quote_metadata_names_the_route_and_pins_the_tariff_slice() {
+        let tariff = json!({"providerResourceId":"7004","model":"fixture","tariffVersion":"1",
+            "tariffDigest":"123","routes":{"user":{"perOp":"4"},
+            "pool":{"perOp":"2","inputMicroPerMillion":"20","outputMicroPerMillion":"40"},
+            "homelab":{"perOp":"1","inputMicroPerMillion":"0","outputMicroPerMillion":"0"}}});
+        let task: ProviderTask = serde_json::from_value(json!({
+            "task":"7004","subject":"9","capability":"1","queryCapability":"2",
+            "custodyKey":"/k","parentCapability":"3","parentObserveCapability":"4",
+            "reserve":"50","maxInputTokens":10,"maxOutputTokens":10,"model":"fixture",
+            "providers":"/p","credentialsRoot":"/c","credentialsKey":"/ck",
+            "gatewayBind":"127.0.0.1:0","maxRequestBytes":10,"maxResponseBytes":10,
+            "timeoutSeconds":1
         }))
         .unwrap();
-        assert_eq!(pin.metadata_version, 1);
-        let scalar = provider_metering_metadata(&pin, 200, "application/json", "50").unwrap();
+        let user = provider_route_pin(&tariff, &task, "user").unwrap();
+        assert_eq!((user.per_op.as_str(), user.input_micro_per_million.as_str()), ("4", "0"));
+        assert_eq!(provider_hold_amount(&task, &user), "4");
+        let pool = provider_route_pin(&tariff, &task, "pool").unwrap();
+        assert_eq!(pool.output_micro_per_million, "40");
+        assert_eq!(provider_hold_amount(&task, &pool), "50");
+        assert!(provider_route_pin(&tariff, &task, "none").is_err());
+        let metadata = provider_metering_metadata(&pool, 200, "application/json", "50").unwrap();
         assert_eq!(
-            scalar,
-            json!({"status":"200","contentType":"application/json","reserve":"50"})
+            metadata,
+            json!({"version":"3","providerResourceId":"7004","route":"pool","status":"200",
+                "contentType":"application/json","reserve":"50"})
         );
-        assert!(scalar.get("version").is_none());
-        pin.metadata_version = 2;
-        let multi = provider_metering_metadata(&pin, 200, "application/json", "50").unwrap();
-        assert_eq!(multi["version"], "2");
-        assert_eq!(multi["providerResourceId"], "7004");
-        assert_eq!(multi["reserve"], "50");
-        pin.metadata_version = 3;
-        assert!(provider_metering_metadata(&pin, 200, "application/json", "50").is_err());
+        // The HERMES-KEYS task shape (fixed charge, opt-in metering) refuses.
+        let mut old = serde_json::to_value(&task).unwrap();
+        old["charge"] = json!("0");
+        assert!(serde_json::from_value::<ProviderTask>(old).is_err());
     }
 
     #[test]
@@ -19100,7 +19180,7 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
             "task":"7004", "subject":"9", "capability":"101",
             "queryCapability":"101", "custodyKey":"/private/provider-task.key",
             "parentCapability":"75", "parentObserveCapability":"75",
-            "reserve":"3", "charge":"0", "metering":true,
+            "reserve":"3", "maxInputTokens":1000, "maxOutputTokens":100,
             "model":"pinned-model", "providers":"/etc/mini/providers.json",
             "credentialsRoot":"/var/lib/mini/credentials",
             "credentialsKey":"/etc/mini/credentials.key", "gatewayBind":"127.0.0.1:18762",
@@ -19120,11 +19200,11 @@ printf '%s\n' '{"type":"confirmed","confirmation":"installed","worldRoot":"300",
         let mut fixture = configured.clone();
         fixture.local_fixture_host_network = true;
         assert_eq!(provider_required_network(&fixture), "host");
-        let table = credentials::ProviderTable::parse(br#"{"type":"mini-provider-table-v1","providers":[
+        let table = credentials::ProviderTable::parse(br#"{"type":"mini-provider-table-v2","providers":[
             {"name":"remote","endpoint":"https://example.test/v1/chat/completions",
              "kind":"openai-compatible","models":["pinned-model"],"credential":"user"},
             {"name":"homelab","endpoint":"http://127.0.0.1:18081/v1/chat/completions",
-             "kind":"openai-compatible","models":["pinned-model"],"credential":"none"}]}"#)
+             "kind":"openai-compatible","models":["pinned-model"],"credential":"homelab"}]}"#)
         .unwrap();
         // The host network route may reach only a loopback row.
         assert!(provider_task_row(&fixture, &table).is_err());

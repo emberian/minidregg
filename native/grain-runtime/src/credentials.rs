@@ -38,7 +38,7 @@ pub const DEFAULT_TABLE: &str = "/etc/mini/providers.json";
 pub const DEFAULT_ROOT: &str = "/var/lib/mini/credentials";
 pub const DEFAULT_KEY: &str = "/etc/mini/credentials.key";
 const POOL_NAMESPACE: &str = "_pool";
-const TABLE_TYPE: &str = "mini-provider-table-v1";
+const TABLE_TYPE: &str = "mini-provider-table-v2";
 const SEALED_TYPE: &str = "mini-provider-credential-v1";
 const GRANTS_TYPE: &str = "mini-provider-grants-v1";
 const USAGE_TYPE: &str = "mini-provider-usage-v1";
@@ -101,21 +101,40 @@ impl Drop for Secret {
 
 // ------------------------------------------------------------------ table
 
+/// Who pays the provider for a call through this row. It is also the
+/// route the provider purse records at reserve and charges by at settle
+/// (`Kernel/ProviderRoute.lean`): the Host's per-route tariff, not the row,
+/// prices it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CredentialSource {
-    /// The calling friend's own key, used only under their grant.
+    /// The calling friend's own key, used only under their grant. Mini
+    /// charges the purse only the per-operation fee.
     User,
-    /// The operator's key; its spend is gated by the caller's purse credit.
+    /// The operator's key; the purse pays the metered tariff, and the row's
+    /// caps bound each call's `max_tokens` and the calls per day.
     Pool,
-    /// No bearer at all (a homelab endpoint on the operator's own network).
-    None,
+    /// No bearer at all (a homelab endpoint on the operator's own network),
+    /// priced by the tariff's homelab route.
+    Homelab,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Tariff {
-    pub version: String,
-    pub input_micro_per_million: String,
-    pub output_micro_per_million: String,
+impl CredentialSource {
+    /// The route name the Host's tariff and the purse use.
+    pub fn route(self) -> &'static str {
+        match self {
+            CredentialSource::User => "user",
+            CredentialSource::Pool => "pool",
+            CredentialSource::Homelab => "homelab",
+        }
+    }
+}
+
+/// The operator's bound on its own key, per runner: the largest
+/// `max_tokens` one call may ask for and the calls per UTC day.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Caps {
+    pub per_call: u64,
+    pub per_day: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -123,12 +142,9 @@ pub struct ProviderRow {
     pub name: String,
     pub endpoint: String,
     pub models: Vec<String>,
-    /// Required exactly when the provider task is metered; it must then equal
-    /// the Host-pinned tariff the Lean quote uses. The Host pin is the
-    /// source; this is the operator's statement of it, checked, never used
-    /// to compute a charge.
-    pub tariff: Option<Tariff>,
     pub credential: CredentialSource,
+    /// Required on a pool row, refused on any other.
+    pub caps: Option<Caps>,
 }
 
 pub struct ProviderTable {
@@ -231,7 +247,7 @@ impl ProviderTable {
             let label = "provider row";
             object_keys(
                 entry,
-                &["name", "endpoint", "kind", "models", "tariff", "credential"],
+                &["name", "endpoint", "kind", "models", "credential", "caps"],
                 label,
             )?;
             let name = string(entry, "name", label)?.to_owned();
@@ -261,36 +277,38 @@ impl ProviderTable {
             let credential = match string(entry, "credential", label)? {
                 "user" => CredentialSource::User,
                 "pool" => CredentialSource::Pool,
-                "none" => CredentialSource::None,
-                _ => return Err(format!("provider {name}: credential must be user|pool|none")),
+                "homelab" => CredentialSource::Homelab,
+                _ => return Err(format!("provider {name}: credential must be user|pool|homelab")),
             };
-            let tariff = match entry.get("tariff") {
-                None => None,
-                Some(tariff) => {
-                    let label = "provider tariff";
-                    object_keys(
-                        tariff,
-                        &["version", "inputMicroPerMillion", "outputMicroPerMillion"],
-                        label,
-                    )?;
-                    let field = |n: &str| -> Result<String, String> {
-                        let v = string(tariff, n, label)?;
+            let caps = match (credential, entry.get("caps")) {
+                (CredentialSource::Pool, Some(caps)) => {
+                    let label = "provider caps";
+                    object_keys(caps, &["perCall", "perDay"], label)?;
+                    let field = |n: &str, max: u64| -> Result<u64, String> {
+                        let v = string(caps, n, label)?;
                         decimal(v, n)?;
-                        Ok(v.to_owned())
+                        v.parse::<u64>()
+                            .ok()
+                            .filter(|v| (1..=max).contains(v))
+                            .ok_or_else(|| format!("provider {name}: caps.{n} must be 1..{max}"))
                     };
-                    Some(Tariff {
-                        version: field("version")?,
-                        input_micro_per_million: field("inputMicroPerMillion")?,
-                        output_micro_per_million: field("outputMicroPerMillion")?,
+                    Some(Caps {
+                        per_call: field("perCall", 1_000_000)?,
+                        per_day: field("perDay", 100_000)?,
                     })
                 }
+                (CredentialSource::Pool, None) => {
+                    return Err(format!("provider {name}: a pool row needs caps {{perCall, perDay}}"))
+                }
+                (_, Some(_)) => return Err(format!("provider {name}: only a pool row has caps")),
+                (_, None) => None,
             };
             rows.push(ProviderRow {
                 name,
                 endpoint,
                 models,
-                tariff,
                 credential,
+                caps,
             });
         }
         Ok(Self { rows })
@@ -772,9 +790,30 @@ impl CredentialStore {
             .ok_or_else(|| refused("no-credential"))
     }
 
-    /// The pool secret, if the operator stored one.
-    pub fn pool(&self, provider: &str) -> Result<Secret, String> {
+    /// The pool secret, for one call of `runner` within the row's caps: a
+    /// call without `max_tokens`, or above `caps.per_call`, is refused
+    /// `per-call-cap`; the call is counted against `caps.per_day` (in the
+    /// pool namespace, per runner) before the secret is returned.
+    pub fn pool(
+        &self,
+        provider: &str,
+        runner: &str,
+        max_tokens: Option<u64>,
+        caps: Caps,
+        day: u64,
+    ) -> Result<Secret, String> {
         provider_name(provider)?;
+        let dir = self.directory(Namespace::Pool, false)?;
+        if fs::symlink_metadata(&dir).is_err()
+            || fs::symlink_metadata(dir.join(format!("{provider}.key"))).is_err()
+        {
+            return Err(refused("no-credential"));
+        }
+        private_dir_check(&dir, "pool credential namespace")?;
+        if max_tokens.is_none_or(|tokens| tokens > caps.per_call) {
+            return Err(refused("per-call-cap"));
+        }
+        self.count_call(&dir, provider, runner, caps.per_day, day)?;
         self.secret(Namespace::Pool, provider)?
             .ok_or_else(|| refused("no-credential"))
     }
@@ -967,32 +1006,49 @@ mod credential_tests {
         let rendered = format!("{secret:?} {:?}", Some(&secret));
         assert!(!rendered.contains("sk-A-token"), "{rendered}");
         store.set(Namespace::Pool, "pool", &Secret::new("sk-POOL".into()).unwrap()).unwrap();
-        assert_eq!(store.pool("pool").unwrap().expose(), "sk-POOL");
-        assert_eq!(store.pool("other").unwrap_err(), refused("no-credential"));
+        let caps = Caps { per_call: 64, per_day: 1 };
+        assert_eq!(store.pool("pool", "9", Some(65), caps, 1).unwrap_err(), refused("per-call-cap"));
+        assert_eq!(store.pool("pool", "9", None, caps, 1).unwrap_err(), refused("per-call-cap"));
+        assert_eq!(store.pool("pool", "9", Some(64), caps, 1).unwrap().expose(), "sk-POOL");
+        assert_eq!(store.pool("pool", "9", Some(64), caps, 1).unwrap_err(), refused("per-day-cap"));
+        assert_eq!(store.pool("pool", "9", Some(64), caps, 2).unwrap().expose(), "sk-POOL");
+        assert_eq!(store.pool("other", "9", Some(1), caps, 1).unwrap_err(), refused("no-credential"));
         fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn table_selects_one_row_without_payer_fallthrough() {
-        let table = ProviderTable::parse(br#"{"type":"mini-provider-table-v1","providers":[
+        let table = ProviderTable::parse(br#"{"type":"mini-provider-table-v2","providers":[
             {"name":"openrouter","endpoint":"https://openrouter.ai/api/v1/chat/completions",
              "kind":"openai-compatible","models":["m1","shared"],"credential":"user"},
             {"name":"pool","endpoint":"https://openrouter.ai/api/v1/chat/completions",
-             "kind":"openai-compatible","models":["shared"],"credential":"pool"},
+             "kind":"openai-compatible","models":["shared"],"credential":"pool",
+             "caps":{"perCall":"1024","perDay":"50"}},
             {"name":"homelab","endpoint":"http://127.0.0.1:18081/v1/chat/completions",
-             "kind":"openai-compatible","models":["bonsai"],"credential":"none",
-             "tariff":{"version":"1","inputMicroPerMillion":"20000000","outputMicroPerMillion":"40000000"}}]}"#).unwrap();
+             "kind":"openai-compatible","models":["bonsai"],"credential":"homelab"}]}"#).unwrap();
         assert_eq!(table.select("shared", None).unwrap().name, "openrouter");
         assert_eq!(table.select("shared", Some("pool")).unwrap().name, "pool");
-        assert_eq!(table.select("bonsai", None).unwrap().credential, CredentialSource::None);
+        assert_eq!(table.select("bonsai", None).unwrap().credential, CredentialSource::Homelab);
+        assert_eq!(
+            table.select("shared", Some("pool")).unwrap().caps,
+            Some(Caps { per_call: 1024, per_day: 50 })
+        );
         assert_eq!(table.select("m1", Some("pool")).unwrap_err(), refused("no-route"));
         assert_eq!(table.select("absent", None).unwrap_err(), refused("no-route"));
         for bad in [
-            r#"{"type":"mini-provider-table-v1","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions?x=1","kind":"openai-compatible","models":["m"],"credential":"user"}]}"#,
-            r#"{"type":"mini-provider-table-v1","providers":[{"name":"x","endpoint":"http://10.0.0.1/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"none"}]}"#,
-            r#"{"type":"mini-provider-table-v1","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"anthropic","models":["m"],"credential":"user"}]}"#,
-            r#"{"type":"mini-provider-table-v1","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"user","key":"sk"}]}"#,
-            r#"{"type":"mini-provider-table-v1","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"user"},{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"pool"}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions?x=1","kind":"openai-compatible","models":["m"],"credential":"user"}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"http://10.0.0.1/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"homelab"}]}"#,
+            // the HERMES-KEYS v1 shapes: `none` and a row tariff refuse to load
+            r#"{"type":"mini-provider-table-v1","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"user"}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"http://127.0.0.1:9/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"none"}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"user","tariff":{"version":"1","inputMicroPerMillion":"1","outputMicroPerMillion":"1"}}]}"#,
+            // a pool row needs caps; only a pool row may carry them
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"pool"}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"user","caps":{"perCall":"1","perDay":"1"}}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"pool","caps":{"perCall":"0","perDay":"1"}}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"anthropic","models":["m"],"credential":"user"}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"user","key":"sk"}]}"#,
+            r#"{"type":"mini-provider-table-v2","providers":[{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"user"},{"name":"x","endpoint":"https://a.b/v1/chat/completions","kind":"openai-compatible","models":["m"],"credential":"pool"}]}"#,
         ] {
             assert!(ProviderTable::parse(bad.as_bytes()).is_err(), "{bad}");
         }

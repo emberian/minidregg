@@ -573,6 +573,14 @@ def Settings.providerServicePins (settings : Settings) :
     throw "providerServices cannot be combined with legacy provider pins"
   checkedProviderServices services
 
+/-- The per-operation fees of every pinned provider service, by resource:
+the constants a provider purse born at that resource carries in its law. -/
+def Settings.providerRoutes (settings : Settings) :
+    Except String (List (Nat × Kernel.ProviderMetering.Schedule)) := do
+  let legacy ← settings.providerMeteringPin
+  let services ← settings.providerServicePins
+  return (legacy.toList ++ services).map fun pin => (pin.1, pin.2.schedule)
+
 def Settings.continuityIds (settings : Settings) : Except String (List Nat) := do
   if settings.providerServices.isSome then
     return (← settings.providerServicePins).map Prod.fst
@@ -716,8 +724,7 @@ def profileDescription (config : NativeHost.Config)
           ("providerResourceId", n providerResourceId),
           ("tariffVersion", n tariff.version),
           ("model", toJson tariff.model),
-          ("inputMicroPerMillion", n tariff.inputMicroPerMillion),
-          ("outputMicroPerMillion", n tariff.outputMicroPerMillion),
+          ("routes", ((ProviderUsage.tariffJson tariff).getObjValD "routes")),
           ("tariffDigest", n (Kernel.ProviderMetering.tariffDigest tariff).value)]
   let meteringFields := match metering with
     | none => []
@@ -1468,6 +1475,7 @@ memory, while every state-dependent operation refreshes the verified tip. -/
 def dispatchSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (meteringProfile : Lean.Json)
+    (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (operation : UInt8) (payload : List UInt8) : IO (UInt8 × List UInt8) := do
   match operation with
@@ -1519,7 +1527,7 @@ def dispatchSession (config : NativeHost.Config)
       let some text := String.fromUTF8? source.toByteArray
         | throw (IO.userError "native host author source is not UTF-8")
       let value ← IO.ofExcept (Minidregg.Host.Json.parse text)
-      return (7, ← IO.ofExcept (Minidregg.Host.Json.author kind value (some config)))
+      return (7, ← IO.ofExcept (Minidregg.Host.Json.author kind value (some config) providerRoutes))
   | 8 =>
       let (kind, source) ← splitKind payload
       let value ← IO.ofExcept (inspectHost kind source)
@@ -1944,6 +1952,7 @@ partial def serve (config : NativeHost.Config) (input output : IO.FS.Stream) : I
 partial def serveSession (config : NativeHost.Config)
     (state : IO.Ref (Option (NativeHostSession.Session config)))
     (meteringProfile : Lean.Json)
+    (providerRoutes : List (Nat × Kernel.ProviderMetering.Schedule))
     (fnDispatch : UInt8 → List UInt8 → IO (UInt8 × List UInt8))
     (input output : IO.FS.Stream) : IO Unit := do
   let first ← input.read 1
@@ -1966,11 +1975,11 @@ partial def serveSession (config : NativeHost.Config)
   else
     let started ← IO.monoMsNow
     let (responseOperation, responsePayload) ←
-      dispatchSession config state meteringProfile fnDispatch operation payload
+      dispatchSession config state meteringProfile providerRoutes fnDispatch operation payload
     writeSessionFrame output responseOperation responsePayload
     if (← IO.getEnv "MINIDREGG_HOST_TRACE").isSome then
       IO.eprintln s!"host-trace op {operation} {(← IO.monoMsNow) - started} ms"
-  serveSession config state meteringProfile fnDispatch input output
+  serveSession config state meteringProfile providerRoutes fnDispatch input output
 
 /-- Execute from one private copy throughout this stdio process. The copy is
 the pinned launch artifact; the originally configured pathname may later be
@@ -4899,7 +4908,8 @@ def run (arguments : List String) : IO UInt32 := do
               kind == "application-agent-lifetime-reserve-request" ||
               kind == "application-agent-lifetime-paid-request" then
             readDispatchAuthorJson input else readJson input
-          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source (some config))
+          let bytes ← IO.ofExcept (Minidregg.Host.Json.author kind source (some config)
+            (← IO.ofExcept settings.providerRoutes))
           writeBytes output bytes
           pure 0
       | "inspect", [kind, input, output] =>
@@ -5090,14 +5100,10 @@ def run (arguments : List String) : IO UInt32 := do
                         | 19 =>
                             let services ← IO.ofExcept settings.providerServicePins
                             let legacy ← IO.ofExcept settings.providerMeteringPin
-                            let quoted := match settings.providerServices with
-                              | some _ =>
-                                  ProviderUsage.quotePayloadV2 services payload
-                              | none =>
-                                  match legacy with
-                                  | some (providerResourceId, tariff) =>
-                                      ProviderUsage.quotePayload providerResourceId tariff payload
-                                  | none => .error "provider metering is not configured"
+                            let quoted : Except String Lean.Json :=
+                              match legacy.toList ++ services with
+                              | [] => .error "provider metering is not configured"
+                              | pins => ProviderUsage.quotePayload pins payload
                             match quoted with
                             | .ok report =>
                                 return ((19 : UInt8), report.compress.toUTF8.toList)
@@ -5762,7 +5768,8 @@ def run (arguments : List String) : IO UInt32 := do
                   let meteringProfile := profileDescription pinnedConfig
                     (← IO.ofExcept settings.providerMeteringPin)
                     (← IO.ofExcept settings.providerServicePins)
-                  serveSession pinnedConfig state meteringProfile fnDispatch
+                  serveSession pinnedConfig state meteringProfile
+                    (← IO.ofExcept settings.providerRoutes) fnDispatch
                     (← IO.getStdin) (← IO.getStdout)
           pure 0
       | "bootstrap", [path] =>
