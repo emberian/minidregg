@@ -276,20 +276,6 @@ fn short(id: &str) -> String {
     }
 }
 
-fn bytes_text(hex_text: &str) -> String {
-    match crate::decode_hex(hex_text) {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        Err(_) => format!("<payload {hex_text}>"),
-    }
-}
-
-fn subject_of(principal: &Value) -> &str {
-    principal
-        .get("subject")
-        .and_then(Value::as_str)
-        .unwrap_or("?")
-}
-
 pub(crate) fn wrap(page: &Page, base: &str, subject: &str) -> String {
     let context = match &page.stamp {
         Stamp::Read(read) => format!(
@@ -367,28 +353,6 @@ fn simple(status: u16, title: &str, text: &str) -> Page {
     }
 }
 
-/// Everything `render_document` needs; built from real reads, or from fixtures.
-pub(crate) struct DocInput<'a> {
-    pub base: &'a str,
-    /// The page's lines in the kernel's order (`workspace::document_lines`).
-    pub lines: &'a [Value],
-    /// The host page's entries (annotations, link records).
-    pub entries: &'a [Value],
-    /// The K-DOC-INDEX `links` / `backlinks` view rows; `None` on a page at a
-    /// past height (the index answers the current height only).
-    pub links: Option<&'a [Value]>,
-    pub backlinks: Option<&'a [Value]>,
-    /// workspace reference name for a cell or document id
-    pub names: &'a dyn Fn(&str) -> Option<String>,
-}
-
-fn of_type<'a>(entries: &'a [Value], kind: &str) -> Vec<&'a Value> {
-    entries
-        .iter()
-        .filter(|entry| entry.get("type").and_then(Value::as_str) == Some(kind))
-        .collect()
-}
-
 pub(crate) fn is_content(entries: &[Value]) -> bool {
     entries.iter().any(|entry| entry.get("type").is_some())
 }
@@ -400,195 +364,18 @@ fn doc_link(base: &str, names: &dyn Fn(&str) -> Option<String>, document: &str) 
     }
 }
 
-/// The live marks of a row as one attribute: each kind, `~` before a stale one.
-fn marks_attr(marks: &Value) -> String {
-    let kinds: Vec<String> = marks
-        .as_array()
-        .map(|marks| {
-            marks
-                .iter()
-                .map(|mark| {
-                    format!(
-                        "{}{}",
-                        if mark["fresh"] == false { "~" } else { "" },
-                        mark["kind"].as_str().unwrap_or("?")
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if kinds.is_empty() {
-        String::new()
-    } else {
-        format!(" data-marks=\"{}\"", escape(&kinds.join(",")))
-    }
-}
-
-fn annotations_of(annotations: &[&Value], atom: &str) -> String {
-    let mut notes = String::new();
-    for annotation in annotations.iter().filter(|annotation| {
-        annotation["anchor"]["type"].as_str() == Some("atom")
-            && annotation["anchor"]["atom"].as_str() == Some(atom)
-    }) {
-        let fresh = annotation["fresh"].as_bool();
-        let body = match annotation["body"]["type"].as_str() {
-            Some("inline") => escape(&bytes_text(annotation["body"]["bytes"].as_str().unwrap_or(""))),
-            _ => format!("<code>{}</code>", escape(&annotation["body"].to_string())),
-        };
-        notes.push_str(&format!(
-            "<p class=\"ann{}\" data-annotation=\"{}\" data-fresh=\"{}\">annotation by {}: {}{}</p>",
-            if fresh == Some(false) { " stale" } else { "" },
-            escape(annotation["id"].as_str().unwrap_or("?")),
-            fresh.map(|value| value.to_string()).unwrap_or_else(|| "?".into()),
-            escape(subject_of(&annotation["author"])),
-            body,
-            if fresh == Some(false) {
-                " <em>(stale: the line moved since this was written)</em>"
-            } else {
-                " <em>(fresh)</em>"
-            }
-        ));
-    }
-    notes
-}
-
-/// One transclusion, inline at its place: its mark (snapshot, snapshot at H,
-/// live, live revised) and lines when this reader's own source read rendered
-/// it; the placeholder (shape only) when it did not.
-fn transclusion_cell(base: &str, names: &dyn Fn(&str) -> Option<String>, item: &Value) -> (String, String) {
-    let render = &item["render"];
-    let view = render["view"].as_str().unwrap_or("unrendered").to_owned();
-    let source = item["opening"]["source"].as_str().unwrap_or("?");
-    let atoms = item["opening"]["atoms"].as_str().unwrap_or("?");
-    let from = doc_link(base, names, source);
-    let shown = match view.as_str() {
-        "snapshot" | "live" => {
-            let mark = if view == "snapshot" {
-                match item["at"].as_str() {
-                    Some(height) => format!("snapshot at height {}", escape(height)),
-                    None => "snapshot".to_owned(),
-                }
-            } else if render["revised"] == true {
-                "live, revised since it was transcluded".to_owned()
-            } else {
-                "live".to_owned()
-            };
-            let lines: Vec<String> = render["lines"]
-                .as_array()
-                .map(|lines| {
-                    lines
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(|line| escape(&bytes_text(line)))
-                        .collect()
-                })
-                .unwrap_or_default();
-            format!(
-                "<p class=note>[{mark} of {from}]</p><blockquote>{}</blockquote>",
-                lines.join("<br>")
-            )
-        }
-        "unavailable" => format!(
-            "<p class=note data-placeholder>[transclusion: {} atoms of {from}, not readable by you]</p>",
-            escape(atoms)
-        ),
-        "moved" => format!(
-            "<p class=stale data-placeholder>[snapshot of {from}: its lines moved since height {}, and your grant \
-             did not cover the source then]</p>",
-            escape(render["height"].as_str().unwrap_or("?"))
-        ),
-        other => format!("<p class=stale>[transclusion of {from}: {}]</p>", escape(other)),
-    };
-    (view, shown)
-}
-
-pub(crate) fn render_document(input: &DocInput<'_>, shown: &[Value]) -> String {
-    let base = input.base;
+/// The link index's views on a current page: links out (the `links` view) and
+/// backlinks (the `backlinks` view, cut by the Host to the documents a standing
+/// grant of this reader covers). Not part of the document: `doc show` prints
+/// the document, `doc links` / `doc backlinks` print these.
+pub(crate) fn index_sections(
+    base: &str,
+    names: &dyn Fn(&str) -> Option<String>,
+    links: Option<&[Value]>,
+    backlinks: Option<&[Value]>,
+) -> String {
     let mut out = String::new();
-    let annotations = of_type(input.entries, "annotation");
-    let numbered = input.lines.iter().filter(|line| !line["line"].is_null()).count();
-    out.push_str(&format!(
-        "<section><h2>Lines</h2>\n<p class=note>In the kernel's document order (the element tree's walk); \
-         nothing is sorted here.</p>\n<table data-lines=\"{numbered}\"><tr><th>#</th><th>text</th>\
-         <th>creator</th><th>revision</th><th>element</th></tr>\n"
-    ));
-    for line in input.lines {
-        let element = line["element"].as_str().unwrap_or("?");
-        let kind = line["kind"].as_str().unwrap_or("?");
-        let depth = line["depth"].as_u64().unwrap_or(1).saturating_sub(1) as usize;
-        let indent = format!(" style=\"padding-left:{}rem\"", depth);
-        let number = line["line"]
-            .as_u64()
-            .map(|n| n.to_string())
-            .unwrap_or_else(|| if kind == "atom" { "-".into() } else { String::new() });
-        let (attrs, cell, creator, revision) = match kind {
-            "atom" => {
-                let atom = line["atom"].as_str().unwrap_or("?");
-                // `rendered` is the client's one marks renderer (workspace::render_marks:
-                // **bold**, _italic_, `code`, [link](-> NAME), # heading; ~~struck~~ when
-                // every mark of a kind is stale), until P-DOC-RENDER's module lands.
-                let text = line["rendered"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| bytes_text(line["payload"].as_str().unwrap_or("")));
-                let struck = line["struck"] == true;
-                let shown_text = if struck {
-                    format!("<del>{}</del>", escape(&text))
-                } else {
-                    escape(&text)
-                };
-                (
-                    format!(
-                        " data-atom=\"{}\" data-creator=\"{}\" data-revision=\"{}\" data-struck=\"{struck}\"{}",
-                        escape(atom),
-                        escape(subject_of(&line["createdBy"])),
-                        escape(line["revision"].as_str().unwrap_or("?")),
-                        marks_attr(&line["marks"])
-                    ),
-                    format!("{shown_text}{}", annotations_of(&annotations, atom)),
-                    escape(subject_of(&line["createdBy"])),
-                    short(line["revision"].as_str().unwrap_or("?")),
-                )
-            }
-            "embed" => {
-                let id = line["transclusion"].as_str().unwrap_or("?");
-                let item = shown.iter().find(|item| item["id"].as_str() == Some(id));
-                let (view, cell) = match item {
-                    Some(item) => transclusion_cell(base, input.names, item),
-                    None => ("unrendered".to_owned(), "<p class=note>[transclusion]</p>".to_owned()),
-                };
-                let mode = item.and_then(|item| item["mode"].as_str()).unwrap_or("?");
-                (
-                    format!(
-                        " data-transclusion=\"{}\" data-mode=\"{}\" data-render=\"{}\"",
-                        escape(id),
-                        escape(mode),
-                        escape(&view)
-                    ),
-                    cell,
-                    String::new(),
-                    String::new(),
-                )
-            }
-            "container" => (
-                format!(" data-section=\"{}\"", escape(line["revision"].as_str().unwrap_or("?"))),
-                format!("<strong>section {}</strong>", short(element)),
-                String::new(),
-                short(line["revision"].as_str().unwrap_or("?")),
-            ),
-            other => (String::new(), format!("[{}]", escape(other)), String::new(), String::new()),
-        };
-        out.push_str(&format!(
-            "<tr data-element=\"{e}\" data-kind=\"{k}\" data-line=\"{n}\"{attrs}><td>{n}</td><td{indent}>{cell}</td>\
-             <td>{creator}</td><td>{revision}</td><td class=id>{e}</td></tr>\n",
-            e = escape(element),
-            k = escape(kind),
-            n = escape(&number),
-        ));
-    }
-    out.push_str("</table></section>\n");
-
-    match input.links {
+    match links {
         Some(rows) => {
             out.push_str(&format!(
                 "<section><h2>Links out</h2>\n<ul data-links=\"{}\">\n",
@@ -598,7 +385,7 @@ pub(crate) fn render_document(input: &DocInput<'_>, shown: &[Value]) -> String {
                 let kind = row["kind"].as_str().unwrap_or("?");
                 let target = row["target"].as_str().unwrap_or("?");
                 let shown = match kind {
-                    "document" | "range" => doc_link(base, input.names, target),
+                    "document" | "range" => doc_link(base, names, target),
                     other => format!("{} {}", escape(other), short(target)),
                 };
                 out.push_str(&format!(
@@ -617,20 +404,19 @@ pub(crate) fn render_document(input: &DocInput<'_>, shown: &[Value]) -> String {
              a page at a past height does not show them.</p></section>\n",
         ),
     }
-
-    if let Some(rows) = input.backlinks {
+    if let Some(rows) = backlinks {
         out.push_str(&format!(
             "<section><h2>Backlinks</h2>\n<ul data-backlinks=\"{}\">\n",
             rows.len()
         ));
         for row in rows {
             let source = row["source"].as_str().unwrap_or("?");
-            let from = (input.names)(source).unwrap_or_else(|| source.to_owned());
+            let from = names(source).unwrap_or_else(|| source.to_owned());
             let kind = row["kind"].as_str().unwrap_or("?");
             out.push_str(&format!(
                 "<li data-backlink=\"{from}\" data-kind=\"{kind}\">{link} {kind} {id} (live since height {since})</li>\n",
                 from = escape(&from),
-                link = doc_link(base, input.names, source),
+                link = doc_link(base, names, source),
                 kind = escape(kind),
                 id = short(row["link"].as_str().unwrap_or("?")),
                 since = escape(row["height"].as_str().unwrap_or("?")),
@@ -644,101 +430,22 @@ pub(crate) fn render_document(input: &DocInput<'_>, shown: &[Value]) -> String {
     out
 }
 
-fn change_text(change: &Value) -> String {
-    let element = short(change["element"].as_str().unwrap_or("?"));
-    let line = |value: &Value| -> String {
-        match value["kind"].as_str() {
-            Some("atom") => format!(
-                "\"{}\"{}",
-                escape(&bytes_text(value["payload"].as_str().unwrap_or(""))),
-                if value["struck"] == true { " (struck)" } else { "" }
-            ),
-            Some("embed") => format!("transclusion {}", short(value["transclusion"].as_str().unwrap_or("?"))),
-            Some("container") => "section".to_owned(),
-            Some(other) => escape(other),
-            None => "?".to_owned(),
-        }
-    };
-    match change["type"].as_str() {
-        Some("added") => format!("+ {element} {}", line(&change["after"])),
-        Some("removed") => format!("- {element} {}", line(&change["before"])),
-        Some("changed") => format!("~ {element} {} -> {}", line(&change["before"]), line(&change["after"])),
-        Some("moved") => {
-            let side = |value: &Value| value.as_str().map(short).unwrap_or_else(|| "the start".to_owned());
-            format!("moved {element}: after {} -> after {}", side(&change["before"]), side(&change["after"]))
-        }
-        _ => escape(&change.to_string()),
-    }
-}
-
-fn changes_list(changes: &Value) -> String {
-    match changes.as_array() {
-        Some(changes) if changes.is_empty() => "<p class=note>no change</p>".to_owned(),
-        Some(changes) => {
-            let mut out = format!("<ul data-changes=\"{}\">", changes.len());
-            for change in changes {
-                out.push_str(&format!(
-                    "<li data-change=\"{}\" data-element=\"{}\">{}</li>",
-                    escape(change["type"].as_str().unwrap_or("?")),
-                    escape(change["element"].as_str().unwrap_or("?")),
-                    change_text(change)
-                ));
-            }
-            out.push_str("</ul>");
-            out
-        }
-        None => "<p class=note data-no-content>content not shown: your grant did not cover this document at \
-                 that height</p>"
-            .to_owned(),
-    }
-}
-
-/// `/doc/NAME/history`: K-DOC-HISTORY's rows. Every row says who wrote the
-/// document at which height; its changes are shown only where this reader's
-/// grant stood at the height (and the one below).
+/// `/doc/NAME/history`: K-DOC-HISTORY's rows through the one renderer
+/// (`render::history`), each height linked to its page and its diff.
 pub(crate) fn render_history(base: &str, name: &str, history: &Value) -> String {
-    let rows = history["rows"].as_array().cloned().unwrap_or_default();
-    let mut out = format!(
-        "<section><h2>History</h2>\n<table data-history=\"{}\"><tr><th>height</th><th>subject</th>\
-         <th>transaction</th><th>changes</th></tr>\n",
-        rows.len()
-    );
-    for row in &rows {
-        let height = row["height"].as_str().unwrap_or("?");
-        let below = height.parse::<u64>().ok().and_then(|h| h.checked_sub(1));
-        let links = match below {
-            Some(below) => format!(
-                " <a href=\"{base}/at/{h}/doc/{n}\">show</a> | <a href=\"{base}/doc/{n}/diff/{below}/{h}\">diff</a>",
-                h = escape(height),
-                n = escape(name)
-            ),
-            None => String::new(),
-        };
-        out.push_str(&format!(
-            "<tr data-row=\"{h}\" data-subject=\"{s}\" data-content=\"{c}\"><td>{h}{links}</td><td>{s}</td>\
-             <td>{t}</td><td>{changes}</td></tr>\n",
+    let links = |height: &str| match height.parse::<u64>().ok().and_then(|h| h.checked_sub(1)) {
+        Some(below) => format!(
+            " <a href=\"{base}/at/{h}/doc/{n}\">show</a> | <a href=\"{base}/doc/{n}/diff/{below}/{h}\">diff</a>",
             h = escape(height),
-            s = escape(row["subject"].as_str().unwrap_or("-")),
-            t = short(row["transaction"].as_str().unwrap_or("?")),
-            c = !row["changes"].is_null(),
-            changes = changes_list(&row["changes"]),
-        ));
-    }
-    out.push_str(
-        "</table><p class=note>Rows are the signed log's writes of this document (your current grant decides \
-         which you see); a row's content is read `at` its height, which the Host answers only when your grant \
-         stood then.</p></section>\n",
-    );
-    out
-}
-
-/// `/doc/NAME/diff/H1/H2`: the changes between two pages at past heights.
-pub(crate) fn render_diff(diff: &Value) -> String {
+            n = escape(name)
+        ),
+        None => String::new(),
+    };
     format!(
-        "<section><h2>Changes from height {} to height {}</h2>\n{}</section>\n",
-        escape(diff["from"]["height"].as_str().unwrap_or("?")),
-        escape(diff["to"]["height"].as_str().unwrap_or("?")),
-        changes_list(&diff["changes"])
+        "<section><h2>History</h2>\n{}<p class=note>Rows are the signed log's writes of this document (your current \
+         grant decides which you see); a row's content is read `at` its height, which the Host answers only when \
+         your grant stood then.</p></section>\n",
+        crate::render::history::history_html(history, &links)
     )
 }
 
@@ -943,17 +650,17 @@ impl Site {
         if let Err(page) = self.reference(name) {
             return page;
         }
-        let rendered = match workspace::rendered_document(&self.root, &self.workspace, name, None, at) {
-            Ok(rendered) => rendered,
+        let (read, rendered) = match workspace::read_rendered(&self.root, &self.workspace, name, at) {
+            Ok(both) => both,
             Err(error) => return failure_page(&title, &error),
         };
-        let challenge = workspace::bounded_json(&rendered.attempt.join("challenge.json")).unwrap_or(Value::Null);
+        let challenge = workspace::bounded_json(&read.attempt.join("challenge.json")).unwrap_or(Value::Null);
         let context = ReadContext {
             height: challenge["height"].as_str().unwrap_or("?").to_owned(),
             authority_root: challenge["authorityRoot"].as_str().unwrap_or("?").to_owned(),
-            cell_root: rendered.document["cellRoot"].as_str().unwrap_or("?").to_owned(),
+            cell_root: read.document["cellRoot"].as_str().unwrap_or("?").to_owned(),
         };
-        let entries = rendered.view["cell"]["entries"].as_array().cloned().unwrap_or_default();
+        let entries = read.entries.clone();
         let base = self.base();
         if at.is_none() && !is_content(&entries) {
             return Page {
@@ -968,10 +675,6 @@ impl Site {
                 ),
             };
         }
-        let lines = match workspace::document_lines(&self.root, &rendered) {
-            Ok((lines, _)) => lines,
-            Err(error) => return failure_page(&title, &error),
-        };
         let reference = match self.reference(name) {
             Ok(reference) => reference,
             Err(page) => return page,
@@ -1008,7 +711,7 @@ impl Site {
                  <a href=\"{base}/doc/{n}/history\">history</a></p>\n",
                 h = escape(height),
                 n = escape(name),
-                s = escape(rendered.document["state"].as_str().unwrap_or("?")),
+                s = escape(read.document["state"].as_str().unwrap_or("?")),
             ));
         } else {
             body.push_str(&format!(
@@ -1016,17 +719,10 @@ impl Site {
                 n = escape(name)
             ));
         }
-        body.push_str(&render_document(
-            &DocInput {
-                base: &base,
-                lines: &lines,
-                entries: &entries,
-                links: links.as_deref(),
-                backlinks: backlinks.as_deref(),
-                names: &names,
-            },
-            &rendered.shown,
-        ));
+        // The document is the one renderer's HTML, byte for byte what
+        // `doc show --format html` prints for this read.
+        body.push_str(&rendered.html(name));
+        body.push_str(&index_sections(&base, &names, links.as_deref(), backlinks.as_deref()));
         Page {
             status: 200,
             title,
@@ -1064,7 +760,7 @@ impl Site {
                 status: 200,
                 title,
                 stamp: Stamp::None,
-                body: render_diff(&diff),
+                body: crate::render::history::diff_html(&diff),
             },
             Err(error) => failure_page(&title, &error),
         }
@@ -1229,73 +925,64 @@ mod tests {
         }
     }
 
-    fn no_names(_: &str) -> Option<String> {
-        None
+    /// A `view-document` in the kernel's order: a marked line, a struck line, a
+    /// section holding a snapshot transclusion, a live transclusion after it.
+    fn document() -> Value {
+        json!({"root":"1","rootRevision":"60","order":[
+            {"element":"1002","parent":"1","kind":"atom","atom":"1002","payload":hex(b"second, placed first"),
+                "revision":"71","createdBy":{"subject":"7"},"struck":false,
+                "marks":[{"kind":"bold","fresh":true},{"kind":"italic","fresh":false}]},
+            {"element":"1001","parent":"1","kind":"atom","atom":"1001","payload":hex(b"the first line"),
+                "revision":"70","createdBy":{"subject":"7"},"struck":true},
+            {"element":"5","parent":"1","kind":"container","revision":"72","children":"1"},
+            {"element":"8001","parent":"5","kind":"embed","transclusion":"8001"},
+            {"element":"8002","parent":"1","kind":"embed","transclusion":"8002"}],
+          "transclusions":[
+            {"id":"8001","mode":"snapshot","opening":{"source":"15383085687320778865","atoms":"2","height":"27",
+                "pins":[]},"render":{"view":"snapshot","lines":[hex(b"w2"),hex(b"w3")]},"at":"27"},
+            {"id":"8002","mode":"live","opening":{"source":"15383085687320778865","atoms":"3","height":"28"},
+                "render":{"view":"unavailable","atoms":"3","source":"15383085687320778865"}}]})
     }
 
-    /// A page in the kernel's order (`workspace::document_lines`' shape): a
-    /// struck line, a section, a transclusion, a line after it.
-    fn page_lines() -> Vec<Value> {
-        vec![
-            json!({"element":"1002","parent":"1","kind":"atom","atom":"1002","payload":hex(b"second, placed first"),
-                "revision":"71","createdBy":{"subject":"7"},"struck":false,"line":1,"depth":1,
-                "marks":[{"kind":"bold","fresh":true},{"kind":"italic","fresh":false}],
-                "rendered":"**~~_second, placed first_~~**"}),
-            json!({"element":"1001","parent":"1","kind":"atom","atom":"1001","payload":hex(b"the first line"),
-                "revision":"70","createdBy":{"subject":"7"},"struck":true,"line":null,"depth":1}),
-            json!({"element":"5","parent":"1","kind":"container","revision":"72","children":"1","line":null,"depth":1}),
-            json!({"element":"8001","parent":"5","kind":"embed","transclusion":"8001","line":2,"depth":2}),
-            json!({"element":"8002","parent":"1","kind":"embed","transclusion":"8002","line":3,"depth":1}),
-        ]
-    }
-
-    fn shown() -> Vec<Value> {
-        vec![
-            json!({"id":"8001","mode":"snapshot","opening":{"source":"15383085687320778865","atoms":"2"},
-                "render":{"view":"snapshot","lines":[hex(b"w2"),hex(b"w3")]},"at":"27"}),
-            json!({"id":"8002","mode":"live","opening":{"source":"15383085687320778865","atoms":"3"},
-                "render":{"view":"unavailable","atoms":"3","source":"15383085687320778865"}}),
-        ]
+    fn rendered(document: &Value, entries: &[Value]) -> crate::render::Rendered {
+        let names = std::collections::BTreeMap::from([("15383085687320778865".to_owned(), "wall".to_owned())]);
+        crate::render::render(&crate::render::View {
+            document,
+            entries,
+            names: &names,
+            sources: &std::collections::BTreeMap::new(),
+            me: "7",
+        })
+        .unwrap()
     }
 
     #[test]
     fn lines_follow_the_kernel_order_with_transclusions_inline() {
-        let lines = page_lines();
         let entries = vec![json!({"type":"annotation","id":"7001","anchor":{"type":"atom","atom":"1002"},
             "fresh":false,"author":{"subject":"9"},"body":{"type":"inline","bytes":hex(b"cite this")}})];
-        let names = |id: &str| (id == "15383085687320778865").then(|| "wall".to_owned());
-        let html = render_document(
-            &DocInput {
-                base: "/t",
-                lines: &lines,
-                entries: &entries,
-                links: Some(&[]),
-                backlinks: Some(&[]),
-                names: &names,
-            },
-            &shown(),
-        );
+        let html = rendered(&document(), &entries).html("paper");
         let first = html.find("data-element=\"1002\"").unwrap();
         let struck = html.find("data-element=\"1001\"").unwrap();
         let section = html.find("data-section=\"72\"").unwrap();
         let embed = html.find("data-transclusion=\"8001\"").unwrap();
         assert!(first < struck && struck < section && section < embed);
-        assert!(html.contains("data-lines=\"3\""));
-        assert!(html.contains("data-marks=\"bold,~italic\""));
-        assert!(html.contains("**~~_second, placed first_~~**"));
+        assert!(html.contains(
+            "data-element=\"1002\" data-kind=\"atom\" data-line=\"1\" data-atom=\"1002\" data-creator=\"7\" \
+             data-revision=\"71\" data-struck=\"false\" data-marks=\"bold,~italic\""
+        ));
+        assert!(html.contains("data-element=\"1001\" data-kind=\"atom\" data-line=\"-\""));
         assert!(html.contains("<del>the first line</del>"));
         assert!(html.contains("data-transclusion=\"8001\" data-mode=\"snapshot\" data-render=\"snapshot\""));
-        assert!(html.contains("[snapshot at height 27 of <a href=\"/t/doc/wall\">wall</a>]"));
-        assert!(html.contains("w2<br>w3"));
+        assert!(html.contains("snapshot@27"));
+        assert!(html.contains("<p class=\"quoted\">w2</p><p class=\"quoted\">w3</p>"));
         assert!(html.contains("data-transclusion=\"8002\" data-mode=\"live\" data-render=\"unavailable\""));
-        assert!(html.contains("data-placeholder>[transclusion: 3 atoms of <a href=\"/t/doc/wall\">wall</a>, not readable by you]"));
+        assert!(html.contains("[transclusion: 3 atoms of wall, not readable by you]"));
         assert!(html.contains("data-annotation=\"7001\" data-fresh=\"false\""));
         assert!(html.contains("cite this"));
     }
 
     #[test]
     fn links_and_backlinks_come_from_the_index_views() {
-        let lines = page_lines();
         let links = vec![json!({"source":"3","link":"9101","kind":"document","target":"15383085687320778865",
             "relation":"0","revision":"1","height":"20"})];
         let backlinks = vec![
@@ -1307,34 +994,28 @@ mod tests {
             "44" => Some("notes".to_owned()),
             _ => None,
         };
-        let html = render_document(
-            &DocInput {
-                base: "/t",
-                lines: &lines,
-                entries: &[],
-                links: Some(&links),
-                backlinks: Some(&backlinks),
-                names: &names,
-            },
-            &shown(),
-        );
+        let html = index_sections("/t", &names, Some(&links), Some(&backlinks));
         assert!(html.contains("data-link=\"9101\" data-kind=\"document\">link <span class=id>9101</span> -> <a href=\"/t/doc/paper\">paper</a>"));
         assert!(html.contains("data-backlinks=\"2\""));
         assert!(html.contains("data-backlink=\"notes\" data-kind=\"document\""));
         assert!(html.contains("data-backlink=\"45\" data-kind=\"transclusion\""));
-        let past = render_document(
-            &DocInput {
-                base: "/t",
-                lines: &lines,
-                entries: &[],
-                links: None,
-                backlinks: None,
-                names: &names,
-            },
-            &shown(),
-        );
+        let past = index_sections("/t", &names, None, None);
         assert!(!past.contains("data-backlinks"));
         assert!(past.contains("a page at a past height does not show them"));
+    }
+
+    /// A moved snapshot whose `at` read was refused `no-grant` renders the
+    /// placeholder, in the shell and on the web alike (one renderer).
+    #[test]
+    fn a_refused_snapshot_read_is_the_moved_placeholder() {
+        let mut document = document();
+        document["transclusions"][0]["render"] = json!({"view":"moved","height":"27"});
+        document["transclusions"][0]["atRefused"] = json!("27");
+        let rendered = rendered(&document, &[]);
+        let placeholder = "[snapshot of wall: its lines moved since height 27, and your grant did not cover wall then]";
+        assert!(rendered.text().contains(placeholder));
+        assert!(rendered.html("paper").contains(placeholder));
+        assert!(!rendered.html("paper").contains(">w2<"));
     }
 
     #[test]
@@ -1350,13 +1031,18 @@ mod tests {
         assert!(html.contains("data-row=\"99\" data-subject=\"7\" data-content=\"false\""));
         assert!(html.contains("data-no-content"));
         assert!(html.contains("data-row=\"103\" data-subject=\"8\" data-content=\"true\""));
-        assert!(html.contains("~ <span class=id>1001</span> \"a\" -> \"b\""));
+        assert!(html.contains("~ 1001 &quot;a&quot; -&gt; &quot;b&quot;"));
         assert!(html.contains("data-change=\"moved\""));
         assert!(html.contains("<a href=\"/t/at/103/doc/paper\">show</a> | <a href=\"/t/doc/paper/diff/102/103\">diff</a>"));
-        let diff = render_diff(&json!({"from":{"height":"100"},"to":{"height":"104"},"changes":[
+        let diff = crate::render::history::diff_html(&json!({"from":{"height":"100"},"to":{"height":"104"},"changes":[
             {"type":"added","element":"1003","after":{"kind":"atom","payload":hex(b"c")}}]}));
         assert!(diff.contains("from height 100 to height 104"));
-        assert!(diff.contains("+ <span class=id>1003</span> \"c\""));
+        assert!(diff.contains("+ 1003 &quot;c&quot;"));
+        let text = crate::render::history::diff_text(&json!({"from":{"height":"100"},"to":{"height":"104"},
+            "changes":[{"type":"moved","element":"1002","before":null,"after":"1001"}]}));
+        assert_eq!(text, "# changes from height 100 to height 104
+moved 1002: after the start -> after 1001
+");
     }
 
     #[test]
@@ -1389,19 +1075,9 @@ mod tests {
     #[test]
     fn escapes_every_text_path() {
         assert_eq!(escape("<a href=\"x\">&'"), "&lt;a href=&quot;x&quot;&gt;&amp;&#39;");
-        let hostile = vec![json!({"element":"1","parent":"0","kind":"atom","atom":"1","createdBy":{"subject":"7"},
-            "revision":"1","struck":false,"line":1,"depth":1,"payload":hex(b"<script>alert(1)</script>")})];
-        let html = render_document(
-            &DocInput {
-                base: "/t",
-                lines: &hostile,
-                entries: &[],
-                links: None,
-                backlinks: None,
-                names: &no_names,
-            },
-            &[],
-        );
+        let hostile = json!({"root":"0","order":[{"element":"1","parent":"0","kind":"atom","atom":"1",
+            "createdBy":{"subject":"7"},"revision":"1","struck":false,"payload":hex(b"<script>alert(1)</script>")}]});
+        let html = rendered(&hostile, &[]).html("<p>");
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
     }

@@ -58,6 +58,14 @@ mod selected_release;
 #[cfg(unix)]
 mod session_enrollment;
 #[cfg(unix)]
+mod render;
+// The shell's `doc` lines (deploy/shell/DOC-VERBS.md). No `mini shell` on this
+// tree: compiled and tested here, called by nothing until `shell.rs` declares it.
+#[cfg(unix)]
+#[allow(dead_code)]
+#[path = "shell/doc_render.rs"]
+mod shell_doc_render;
+#[cfg(unix)]
 mod share_issue;
 #[cfg(unix)]
 mod share_issue_receipt;
@@ -299,6 +307,8 @@ usage:
   mini pay refill --mode submit --host HOST --config PINNED-CONFIG.json --socket SOCKET --key OWNER.key --dir NEW-ATTEMPT --subject S --capability C --account A --task T --amount N [--gain G]
   mini pay refill --mode lookup --host HOST --config PINNED-CONFIG.json --socket SOCKET --dir ATTEMPT
   mini web --dir WORKSPACE --listen 127.0.0.1:PORT   (read-only loopback hypertext over this workspace's signed reads)
+  mini workspace --action doc-show|doc-outline --dir WORKSPACE --name DOC [--format text|raw|json|html]
+  mini workspace --action doc-insert|doc-move|doc-remove|mark|unmark|transclude|transclusions|follow|doc-backlinks|doc-links --dir WORKSPACE --name DOC [action options]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-key KEY --dir ATTEMPT [--operator-socket PRIVATE-SOCKET]
   mini enroll --action plan --sponsor-workspace WORKSPACE --factory-ref NAME --name REQUEST-LABEL --new-public-key PUBLIC [--home-subject N] --dir ATTEMPT
   mini enroll --action offer|welcome --dir ATTEMPT [--birth-context CONTEXT.json]

@@ -16,7 +16,7 @@
 #   page-holds-no-bytes      no line of wall appears in page's own view     -> absent
 #   r-sees-inline             R renders T1 over R's own read of wall          -> snapshot w2 w3 w4
 #   d-sees-placeholder        D renders every transclusion, holding no wall read -> unavailable x3
-#   d-placeholder-text        the shape D sees                                -> [transclusion: 3 atoms of WALL, not readable by you]
+#   d-placeholder-text        the shape D sees (D holds a reference named wall, no read) -> [transclusion: 3 atoms of wall, not readable by you]
 #   b-cannot-transclude       B (no grant on wall) tries to transclude        -> refused (observation)
 #   c-no-read-refused         C sends the transclude without the read target  -> refused sourceNotCovered
 #   c-stale-opening-refused   C pins w3 at a revision wall does not hold       -> refused staleOpening
@@ -192,7 +192,7 @@ row r-sees-inline "snapshot:$L2,$L3,$L4:" "$(render r-sees-inline "$T1")" "T1 ov
 show d-sees-placeholder "$DW"; ok d-sees-placeholder
 row d-sees-placeholder "unavailable,unavailable,unavailable" \
   "$(jq -r '[.transclusions[].render.view] | join(",")' "$D/d-sees-placeholder.out")" "D holds no read of wall"
-row d-placeholder-text "[transclusion: 3 atoms of $wall, not readable by you]" \
+row d-placeholder-text "[transclusion: 3 atoms of wall, not readable by you]" \
   "$(jq -r --arg id "$T1" '.transclusions[] | select(.id == $id) | .text' "$D/d-sees-placeholder.out")" "T1 as D sees it"
 
 run b-cannot-transclude "$MINI" workspace --action transclude --dir "$TW" --name tpage --source twall \

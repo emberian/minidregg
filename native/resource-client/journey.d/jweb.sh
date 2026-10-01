@@ -17,6 +17,7 @@
 #   bind-lan-refused         --listen <a non-loopback address>               -> refused
 #   index-lists-refs         C's / lists C's references                      -> 2
 #   doc-lines-match-show     C's /doc/paper rows = `doc-show` lines, in order -> equal
+#   web-equals-shell         C's /doc/paper document = `doc show --format html`, byte for byte -> equal
 #   doc-text-match           every live line's text appears                  -> equal
 #   page-context             subject + height on the page                    -> present
 #   annotation-stale         R's annotation 7001 rendered fresh=false        -> false
@@ -25,18 +26,18 @@
 #   doc-page-reads           signed reads one /doc/notes view makes          -> 3 (page, links, backlinks)
 #   page-order-equals-show   R's /doc/page element order = R's doc-show       -> equal
 #   r-transclusions-inline   R's /doc/page renders                           -> invalidated live snapshot
-#   r-snapshot-at-height     T1 shown as read at its opening height          -> present
+#   r-snapshot-at-height     T1 shown as read at its opening height (snapshot@H) -> present
 #   late-joiner-placeholder  tlate's /doc/page renders                       -> invalidated live moved
 #   d-placeholders           tdave's /doc/page                               -> unavailable x3
 #   d-page-no-bytes          no wall bytes on tdave's page; R's page has them -> absent:present
 #   transclusion-backlinks   R's /doc/wall backlinks of kind transclusion    -> 3 (page)
 #   d-paper-refused          D's /doc/paper (a reference with no grant)      -> 403 refusal page
 #   d-paper-no-bytes         no paper bytes on D's refusal page; C's has them -> absent:present
-#   marks-render             A's /doc/mpaper: each marked line's rendering = doc-show's; data-marks -> equal:yes
+#   marks-render             A's /doc/mpaper document = `doc show --format html`; data-marks -> equal:yes
 #   history-matches          A's /doc/hist/history rows = `doc-history` rows -> equal
 #   history-split            the third key's history: content from its grant -> false false true true true true
 #   at-page-equals-show      A's /at/H4/doc/hist order = `doc-show --at H4`  -> equal
-#   at-refused               third key's /at/H2/doc/hist                     -> 403 refusal, did not cover
+#   at-refused               third key's /at/H2/doc/hist                     -> 403 refusal, no-grant (the Host's named reason)
 #   diff-moves               A's /doc/hist/diff/H5/H6                        -> moved 1001, moved 1003
 #   foreign-host-refused     Host: evil.example:PORT                         -> 421
 #   rebind-host-refused      Host: 127.0.0.1.nip.io:PORT                      -> 421
@@ -82,7 +83,13 @@ attempts() { find "$1/attempts" -mindepth 1 -maxdepth 1 | wc -l; }
 # also makes an attempt directory, holding none).
 signed_reads() { find "$1/attempts" -mindepth 2 -maxdepth 2 -name challenge.json | wc -l; }
 renders() { grep -o 'data-transclusion="[0-9]*" data-mode="[a-z]*" data-render="[a-z]*"' "$D/pages/$1" | grep -o 'render="[a-z]*"' | cut -d'"' -f2 | sort | tr '\n' ' ' | sed 's/ $//'; }
-elements() { grep -o '<tr data-element="[0-9]*"' "$D/pages/$1" | cut -d'"' -f2 | tr '\n' ' ' | sed 's/ $//'; }
+elements() { grep -o '<li class="[a-z ]*"\( value="[0-9]*"\)\? data-element="[0-9]*"' "$D/pages/$1" | grep -o 'data-element="[0-9]*"' | cut -d'"' -f2 | tr '\n' ' ' | sed 's/ $//'; }
+# The document on a page: the one renderer's <article>, verbatim.
+article() { sed -n '/^<article class="doc"/,/^<\/article>$/p' "$D/pages/$1"; }
+same_html() { # PAGE SHOW-RUN -> equal | differs (the page's document vs `doc show --format html`)
+  article "$1" >"$D/$1.article"
+  cmp -s "$D/$1.article" "$D/$2.out" && [ -s "$D/$2.out" ] && echo equal || echo differs
+}
 show_elements() { jq -r '[.lines[].element] | join(" ")' "$D/$1.out"; }
 
 start() { # NAME WS -> sets URL_<NAME> and PORT_<NAME>
@@ -140,7 +147,8 @@ row index-lists-refs "200:2" "$code:$(grep -o 'data-refs="[0-9]*"' "$D/pages/ind
 
 # A current document page.
 code=$(get c-paper.html "${URL_C}doc/paper")
-run c-show-paper "$MINI" workspace --action doc-show --dir "$CW" --name paper
+run c-show-paper "$MINI" workspace --action doc-show --dir "$CW" --name paper --format json
+run c-show-paper-html "$MINI" workspace --action doc-show --dir "$CW" --name paper --format html
 want=$(jq -r '.lines[] | select(.kind == "atom") | "\(.element) \(.atom) \(.createdBy.subject) \(.revision)"' "$D/c-show-paper.out")
 got=$(grep -o 'data-element="[0-9]*" data-kind="atom" data-line="[0-9-]*" data-atom="[0-9]*" data-creator="[0-9]*" data-revision="[0-9]*"' "$D/pages/c-paper.html" \
   | sed 's/ data-kind="atom" data-line="[0-9-]*"//; s/data-[a-z]*="\([0-9]*\)"/\1/g')
@@ -148,6 +156,7 @@ printf '%s\n' "$want" >"$D/lines-want.txt"; printf '%s\n' "$got" >"$D/lines-got.
 row doc-lines-match-show "200:equal" "$code:$([ -n "$want" ] && [ "$want" = "$got" ] && echo equal || echo differs)" "$(echo "$want" | wc -l) line(s): element atom creator revision, in the kernel's order"
 missing=0
 while IFS= read -r text; do grep -qF -- "$text" "$D/pages/c-paper.html" || missing=$((missing + 1)); done < <(jq -r '.lines[] | select(.kind == "atom" and .struck != true) | .text' "$D/c-show-paper.out")
+row web-equals-shell "200:equal" "$code:$(same_html c-paper.html c-show-paper-html)" "the page's <article> and doc show --format html: one renderer"
 row doc-text-match equal "$([ "$missing" = 0 ] && echo equal || echo "$missing missing")" "line text from the payload bytes"
 subject=$(jq -r .subject "$CW/workspace.json")
 row page-context present "$(grep -q "read as subject <span class=id>$subject</span> at height <span class=id data-height=\"[0-9]*\"" "$D/pages/c-paper.html" && echo present || echo absent)" "subject $subject, $(grep -o 'data-height="[0-9]*"' "$D/pages/c-paper.html")"
@@ -161,10 +170,10 @@ row doc-page-reads 3 "$reads" "signed reads made by one /doc/notes view (notes h
 
 # Transclusions inline (K12T's page), as three readers see them.
 code=$(get r-page.html "${URL_R}doc/page")
-run r-show-page "$MINI" workspace --action doc-show --dir "$NEWCOMER_WS" --name page
+run r-show-page "$MINI" workspace --action doc-show --dir "$NEWCOMER_WS" --name page --format json
 row page-order-equals-show "200:equal" "$code:$([ "$(elements r-page.html)" = "$(show_elements r-show-page)" ] && echo equal || echo differs)" "$(elements r-page.html)"
 row r-transclusions-inline "invalidated live snapshot" "$(renders r-page.html)" "R covers wall and page"
-row r-snapshot-at-height present "$(grep -q '\[snapshot at height [0-9]* of' "$D/pages/r-page.html" && echo present || echo absent)" "$(grep -o '\[snapshot at height [0-9]*' "$D/pages/r-page.html" | head -1)"
+row r-snapshot-at-height present "$(grep -q 'snapshot@[0-9]*' "$D/pages/r-page.html" && echo present || echo absent)" "$(grep -o 'from [a-z]* lines [0-9?]*\.\.[0-9?]*, snapshot@[0-9]*' "$D/pages/r-page.html" | head -1)"
 code=$(get l-page.html "${URL_L}doc/page")
 row late-joiner-placeholder "200:invalidated live moved" "$code:$(renders l-page.html)" "$(grep -o 'its lines moved since height [0-9]*[^<]*' "$D/pages/l-page.html" | head -1)"
 code=$(get td-page.html "${URL_TD}doc/page")
@@ -180,17 +189,14 @@ row d-paper-no-bytes "absent:present" "$(grep -q 'the second line' "$D/pages/d-p
 # Marks (K12M's mpaper): each line's rendered marks, as the client's one marks
 # renderer writes them for `doc-show`, and the marks as row attributes.
 code=$(get a-mpaper.html "${URL_A}doc/mpaper")
-run a-show-mpaper "$MINI" workspace --action doc-show --dir "$SPONSOR_WS" --name mpaper
-missing=0; n=0
-while IFS= read -r text; do n=$((n + 1)); grep -qF -- "$text" "$D/pages/a-mpaper.html" || missing=$((missing + 1)); done \
-  < <(jq -r '.lines[] | select(.kind == "atom" and .struck != true and ((.marks // []) | length) > 0) | .rendered' "$D/a-show-mpaper.out" \
-      | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g')
-row marks-render "200:equal:yes" "$code:$([ "$n" -gt 0 ] && [ "$missing" = 0 ] && echo equal || echo "$missing of $n missing"):$(grep -q 'data-marks="' "$D/pages/a-mpaper.html" && echo yes || echo no)" \
+run a-show-mpaper "$MINI" workspace --action doc-show --dir "$SPONSOR_WS" --name mpaper --format html
+n=$(grep -c 'data-marks="' "$D/a-show-mpaper.out")
+row marks-render "200:equal:yes" "$code:$(same_html a-mpaper.html a-show-mpaper):$(grep -q 'data-marks="' "$D/pages/a-mpaper.html" && echo yes || echo no)" \
   "$n marked line(s); $(grep -o 'data-marks="[^"]*"' "$D/pages/a-mpaper.html" | tr '\n' ' ' | cut -c1-120)"
 
 # History, a page at a past height, and a diff (K12H's hist).
 code=$(get a-history.html "${URL_A}doc/hist/history")
-run a-doc-history "$MINI" workspace --action doc-history --dir "$SPONSOR_WS" --name hist
+run a-doc-history "$MINI" workspace --action doc-history --dir "$SPONSOR_WS" --name hist --format json
 want=$(jq -r '[.rows[] | .height + ":" + (.subject // "-")] | join(" ")' "$D/a-doc-history.out")
 got=$(grep -o 'data-row="[0-9]*" data-subject="[0-9-]*"' "$D/pages/a-history.html" | sed 's/data-row="\([0-9]*\)" data-subject="\([0-9-]*\)"/\1:\2/' | tr '\n' ' ' | sed 's/ $//')
 row history-matches "200:equal" "$code:$([ -n "$want" ] && [ "$want" = "$got" ] && echo equal || echo differs)" "$got"
@@ -199,10 +205,10 @@ got=$(grep -o 'data-row="[0-9]*" data-subject="[0-9-]*" data-content="[a-z]*"' "
   | awk -F'"' -v h1="$H1" '$2 >= h1 {print $6}' | tr '\n' ' ' | sed 's/ $//')
 row history-split "200:false false true true true true" "$code:$got" "the third key, granted between h2 and h3"
 code=$(get a-at-4.html "${URL_A}at/$H4/doc/hist")
-run a-show-at-4 "$MINI" workspace --action doc-show --dir "$SPONSOR_WS" --name hist --at "$H4"
+run a-show-at-4 "$MINI" workspace --action doc-show --dir "$SPONSOR_WS" --name hist --at "$H4" --format json
 row at-page-equals-show "200:equal" "$code:$([ "$(elements a-at-4.html)" = "$(show_elements a-show-at-4)" ] && echo equal || echo differs)" "height $H4: $(elements a-at-4.html)"
 code=$(get t-at-2.html "${URL_T}at/$H2/doc/hist")
-row at-refused "403:did-not-cover" "$code:$(grep -q 'data-refusal.*did not cover' "$D/pages/t-at-2.html" && echo did-not-cover || echo other)" "$(grep -o 'history read refused[^<]*' "$D/pages/t-at-2.html" | head -1)"
+row at-refused "403:no-grant" "$code:$(grep -q 'data-refusal>refused: no-grant' "$D/pages/t-at-2.html" && echo no-grant || echo other)" "$(grep -o 'refused: [^<]*' "$D/pages/t-at-2.html" | head -1)"
 code=$(get a-diff-56.html "${URL_A}doc/hist/diff/$H5/$H6")
 row diff-moves "200:moved:1001 moved:1003" "$code:$(grep -o 'data-change="[a-z]*" data-element="[0-9]*"' "$D/pages/a-diff-56.html" | sed 's/data-change="\([a-z]*\)" data-element="\([0-9]*\)"/\1:\2/' | sort | tr '\n' ' ' | sed 's/ $//')" "height $H5 to $H6"
 

@@ -88,7 +88,8 @@ view_pairs() { # NAME WS DOC VIEWACTION
 }
 backlink_set() { # WS NAME-OF-VIEW-RUN -> sorted "cell:link" from the view's retained JSON
   local attempt; attempt=$(grep -o 'workspace read attempt: .*\|attempt: [^ ]*' "$D/$2.err" | tail -1 | awk '{print $NF}')
-  grep -v '^#' "$D/$2.out" | awk '{print $1":"$3}' | sort | tr '\n' ' ' | sed 's/ $//'
+  # Rows only: not the `#` header/footer, nor P-DOC-RENDER's indented `line N:` context.
+  grep -v '^#' "$D/$2.out" | grep -v '^ ' | awk '{print $1":"$3}' | sort | tr '\n' ' ' | sed 's/ $//'
 }
 # The old fold, kept here as the differential oracle: read every page this
 # workspace holds a reference to, and collect each live link whose target is

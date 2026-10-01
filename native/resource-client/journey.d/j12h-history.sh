@@ -63,7 +63,7 @@ delegate() { # NAME RECIPIENT-SUBJECT VERBS-JSON TO-WS
 atom_before() { # READNAME ATOM -> editAtom's `before`
   jq -c --arg a "$2" '.cell.entries[] | select(.type == "atom" and .id == $a) | del(.type,.id,.canonical)' "$D/$1.out"
 }
-show() { run "$1" "$MINI" workspace --action doc-show --dir "$2" --name hist ${3:+--at "$3"}; }
+show() { run "$1" "$MINI" workspace --action doc-show --dir "$2" --name hist ${3:+--at "$3"} --format json; }
 table() { jq -c '{root, lines}' "$D/$1.out"; }
 kinds() { jq -c '[.[] | (if .type == "added" then "+" elif .type == "removed" then "-" elif .type == "moved" then "m" else "~" end) + .element]'; }
 # The Lean diff and an independent jq diff of two `doc-show --at` tables, both
@@ -124,7 +124,7 @@ for i in 1 2 3 4 5 6; do H[$i]=$((G + H[$i])); done
 echo "genesis $G; edit heights ${H[1]} ${H[2]} ${H[3]} ${H[4]} ${H[5]} ${H[6]}; subjects A=$A B=$B C=$C" >&2
 
 # history
-run hist-a "$MINI" workspace --action doc-history --dir "$SPONSOR_WS" --name hist; ok hist-a
+run hist-a "$MINI" workspace --action doc-history --dir "$SPONSOR_WS" --name hist --format json; ok hist-a
 want=$(jq -cn --arg a "$A" --arg b "$B" --argjson h "[\"${H[1]}\",\"${H[2]}\",\"${H[3]}\",\"${H[4]}\",\"${H[5]}\",\"${H[6]}\"]" \
   '[$h, [$a,$a,$b,$a,$b,$a]] | transpose | map({height: .[0], subject: .[1]})')
 got=$(jq -c --argjson h1 "${H[1]}" '[.rows[] | select((.height|tonumber) >= $h1) | {height, subject}]' "$D/hist-a.out")
@@ -143,12 +143,12 @@ for i in 1 2 3 4 5 6; do
 done
 
 # diff h2 h4, and the differential against the two --at tables
-run diff-24 "$MINI" workspace --action doc-diff --dir "$SPONSOR_WS" --name hist --from "${H[2]}" --to "${H[4]}"; ok diff-24
+run diff-24 "$MINI" workspace --action doc-diff --dir "$SPONSOR_WS" --name hist --from "${H[2]}" --to "${H[4]}" --format json; ok diff-24
 got=$(jq -c '.changes' "$D/diff-24.out" | kinds)
 row diff-h2-h4 '["~1001","+1003"]' "$got" "Lean diff ${H[2]}→${H[4]}"
 row diff-agrees-show "$(lean_diff diff-24)" "$(jq_diff at-2 at-4)" "jq diff of show --at ${H[2]} / ${H[4]}"
 row order-at-h6 "1003 1001 1002" "$(jq -r '[.lines[].element] | join(" ")' "$D/at-6.out")" "the element tree's walk at ${H[6]}"
-run diff-56 "$MINI" workspace --action doc-diff --dir "$SPONSOR_WS" --name hist --from "${H[5]}" --to "${H[6]}"; ok diff-56
+run diff-56 "$MINI" workspace --action doc-diff --dir "$SPONSOR_WS" --name hist --from "${H[5]}" --to "${H[6]}" --format json; ok diff-56
 row diff-h5-h6-moves '["m1001","m1003"]' "$(jq -c '.changes' "$D/diff-56.out" | kinds)" \
   "Lean diff ${H[5]}→${H[6]}: $(lean_diff diff-56 | cut -c1-200)"
 row diff-moves-agree "$(lean_diff diff-56)" "$(jq_diff at-5 at-6)" "jq diff of show --at ${H[5]} / ${H[6]}"
@@ -160,7 +160,7 @@ row c-at-h2 refused "$g" "$(reason c-at-2 | grep -o "history read refused.*" | c
 show c-at-3 "$TW" "${H[3]}"
 if [ "$(cat "$D/c-at-3.rc")" = 0 ] && [ "$(table c-at-3)" = "$(table ctl-3)" ]; then g=equal; else g=differ; fi
 row c-at-h3 equal "$g" "C reads h3 = A's control at h3"
-run hist-c "$MINI" workspace --action doc-history --dir "$TW" --name hist; ok hist-c
+run hist-c "$MINI" workspace --action doc-history --dir "$TW" --name hist --format json; ok hist-c
 got=$(jq -c --argjson h1 "${H[1]}" '[.rows[] | select((.height|tonumber) >= $h1) | (.after != null)]' "$D/hist-c.out")
 row c-history-split '[false,false,true,true,true,true]' "$got" "C sees every row (current grant); content only from its grant height"
 
@@ -172,7 +172,7 @@ kill -TERM "$pid"; for i in $(seq 1 300); do kill -0 "$pid" 2>/dev/null || break
 setsid nohup "$MINI" serve --host "$HOST" --config "$CONFIG" --socket "$SOCKET" >"$W/public/serve-k12h.log" 2>&1 </dev/null &
 echo $! >"$W/public/server.pid"
 for i in $(seq 1 600); do [ -S "$SOCKET" ] && grep -q serving "$W/public/serve-k12h.log" && break; sleep 0.1; done
-run hist-a "$MINI" workspace --action doc-history --dir "$SPONSOR_WS" --name hist; ok hist-a
+run hist-a "$MINI" workspace --action doc-history --dir "$SPONSOR_WS" --name hist --format json; ok hist-a
 show at-4 "$SPONSOR_WS" "${H[4]}"; ok at-4
 if cmp -s "$D/hist-a.out" "$D/hist-a.before" && cmp -s "$D/at-4.out" "$D/at-4.before"; then g=identical; else g=differ; fi
 row restart-identical identical "$g" "server $pid -> $(cat "$W/public/server.pid")"

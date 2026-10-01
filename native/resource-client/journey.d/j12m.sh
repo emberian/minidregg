@@ -88,7 +88,7 @@ delegate() { # NAME FROM-WS RESOURCE RECIPIENT-SUBJECT VERBS-JSON TO-WS LOCALNAM
     --from-ref "$2/proposals/m-$1/recipient-reference.json"; ok "$1-import"
 }
 hexof() { printf '%s' "$1" | xxd -p | tr -d '\n'; }
-show() { run "$1" "$MINI" workspace --action doc-show --dir "$2" --name "$3"; }
+show() { run "$1" "$MINI" workspace --action doc-show --dir "$2" --name "$3" --format json; }
 mark() { local name=$1 ws=$2; shift 2; run "$name" "$MINI" workspace --action mark --dir "$ws" --name mpaper "$@"; }
 unmark() { local name=$1 ws=$2; shift 2; run "$name" "$MINI" workspace --action unmark --dir "$ws" --name mpaper "$@"; }
 line() { jq -c --argjson n "$2" '.lines[] | select(.line == $n)' "$D/$1.out"; }

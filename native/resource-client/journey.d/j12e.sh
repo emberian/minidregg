@@ -108,7 +108,7 @@ enroll() {
   jq -r .subject "$D/$1-enroll.out"
 }
 hexof() { printf '%s' "$1" | xxd -p | tr -d '\n'; }
-show() { run "$1" "$MINI" workspace --action doc-show --dir "$2" --name "$3"; }
+show() { run "$1" "$MINI" workspace --action doc-show --dir "$2" --name "$3" --format json; }
 # The live lines of a doc show: atoms by text, a transclusion as T.
 lines_of() {
   jq -r '[.lines[] | select(.line != null) | if .kind == "embed" then "T" else .text end] | join("|")' "$D/$1.out"
