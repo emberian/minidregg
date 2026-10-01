@@ -378,6 +378,7 @@ inductive AnnotationTarget
     (RunId : Type uRun) (AtomId : Type uAtom) (Reference : Type uRef)
   | document (target : Reference)
   | range (target : StableRange RunId AtomId)
+  | atom (target : AtomId)
 deriving DecidableEq
 
 /-- A mark is an independently identified range overlay.  Its author is part of
@@ -432,8 +433,9 @@ structure ProjectedAnnotation
     (Body : Type uBody) (Reference : Type uRef)
     (EventRef : Type uEvent) (PolicyRef : Type uPolicy) where
   source : Annotation RunId AtomId ObjectId Principal Body Reference EventRef PolicyRef
+  /-- A document, a projected range, or the current location of an atom. -/
   target :
-    Sum Reference (ProjectedRange RunId AtomId)
+    Sum Reference (Sum (ProjectedRange RunId AtomId) (Location RunId AtomId))
 
 structure OverlayProjection
     (RunId : Type uRun) (AtomId : Type uAtom)
@@ -480,7 +482,11 @@ def projectAnnotation
     | .document target => some { source := annotation, target := .inl target }
     | .range target =>
         match projectRange order (RangeTrace.run target edits) with
-        | some range => some { source := annotation, target := .inr range }
+        | some range => some { source := annotation, target := .inr (.inl range) }
+        | none => none
+    | .atom target =>
+        match order.find? (fun location => decide (location.atom = target)) with
+        | some location => some { source := annotation, target := .inr (.inr location) }
         | none => none
 
 /-- Deterministic projection preserves source order and keeps the two object
@@ -914,7 +920,7 @@ abbrev DecodedMark :=
 
 abbrev DecodedAnnotation :=
   Annotation Hyperdocument.RunId Hyperdocument.AtomId Hyperdocument.AnnotationId
-    Hyperdocument.PrincipalRef Empty Hyperdocument.DocumentId
+    Hyperdocument.PrincipalRef (List UInt8) Hyperdocument.DocumentId
     Hyperdocument.OperationId TypedAuthorization.Digest
 
 def markLifecycle (record : Hyperdocument.MarkRecord) :
@@ -947,44 +953,42 @@ def decodeMarkRecord?
           lifecycle := markLifecycle record
           visibility := .indexed record.visibilityPolicy }
 
-/-- Decode a stored annotation directly from canonical data.  A `none` stored
-range becomes a first-class document target; an atom-backed stored range becomes
-a range target.  Empty-run range anchors remain explicit non-decodes. -/
+/-- Decode a stored annotation directly from canonical data.  A document anchor
+becomes a first-class document target, an atom anchor an atom target, and an
+atom-backed stored range a range target.  Empty-run range anchors remain
+explicit non-decodes. -/
 def decodeAnnotationRecord?
     (id : Hyperdocument.AnnotationId)
     (record : Hyperdocument.AnnotationRecord) : Option DecodedAnnotation :=
-  match record.range with
-  | none =>
-      some
-        { id := id
-          author := record.author
-          target := .document record.document
-          content := .reference record.body
-          created := record.operation
-          lifecycle := annotationLifecycle record
-          visibility := .indexed record.visibilityPolicy }
-  | some storedRange =>
+  let content : AnnotationContent (List UInt8) Hyperdocument.DocumentId :=
+    match record.body with
+    | .inline bytes => .inline bytes
+    | .reference document => .reference document
+  let decoded := fun target =>
+    some { id := id
+           author := record.author
+           target := target
+           content := content
+           created := record.operation
+           lifecycle := annotationLifecycle record
+           visibility := .indexed record.visibilityPolicy }
+  match record.anchor with
+  | .document => decoded (.document record.document)
+  | .atom atom _ => decoded (.atom atom)
+  | .range storedRange =>
       match decodeRange? storedRange with
       | none => none
-      | some target =>
-          some
-            { id := id
-              author := record.author
-              target := .range target
-              content := .reference record.body
-              created := record.operation
-              lifecycle := annotationLifecycle record
-              visibility := .indexed record.visibilityPolicy }
+      | some target => decoded (.range target)
 
 @[simp] theorem decodeAnnotation_documentWide
     (id : Hyperdocument.AnnotationId) (record : Hyperdocument.AnnotationRecord)
-    (documentWide : record.range = none) :
+    (documentWide : record.anchor = .document) :
     (decodeAnnotationRecord? id record).isSome = true := by
   simp [decodeAnnotationRecord?, documentWide]
 
 @[simp] theorem decodeAnnotation_documentWide_target
     (id : Hyperdocument.AnnotationId) (record : Hyperdocument.AnnotationRecord)
-    (documentWide : record.range = none) :
+    (documentWide : record.anchor = .document) :
     (decodeAnnotationRecord? id record).map (fun annotation => annotation.target) =
       some (.document record.document) := by
   simp [decodeAnnotationRecord?, documentWide]

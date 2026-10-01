@@ -17,9 +17,16 @@ the registry's `ContentLaw`, which every final cell runs.  Authorization and
 current installed Pred evaluation belong to the enclosing ResourceTransaction
 receiver.
 
-Command grammar v2 (`DREGG/CONTENT/MUTATE` ++ [2]): links carry `LinkTarget`.
-Version-1 commands (whose links carried the retired `ForwardTarget`) refuse
-to decode (`v1_command_refused`).
+Command grammar v3 (`DREGG/CONTENT/MUTATE` ++ [3]) adds `annotate` and
+`quote`.  Version-1 commands (links carried the retired `ForwardTarget`) and
+version-2 commands (no annotate/quote; atoms without a revision) refuse to
+decode (`retired_command_refused`).
+
+`annotate` attaches an annotation record to one atom at the revision the
+annotator read and writes nothing else; `quote` writes an embed element naming
+a source atom at a revision, plus a link for backlinks, and copies no source
+bytes.  A reader sees quoted bytes only through its own read of the source
+(`renderQuote`).
 -/
 import Compiler.HyperdocumentCell
 import Compiler.ResourceBirthCodec
@@ -55,12 +62,21 @@ inductive Action where
   | link (link : LinkId) (source : Option StableRange) (target : LinkTarget)
       (relation : Digest)
   | createRun (runId : RunId) (atoms : List AtomId)
+  /-- Annotate `atom` as last read at `revision`; refused `staleAtom` if it moved. -/
+  | annotate (annotation : AnnotationId) (atom : AtomId) (revision : OperationId)
+      (body : List UInt8)
+  /-- Quote (`snapshot`) or transclude (`live`) a source atom: an embed element
+  and a link to the source document. -/
+  | quote (element : ElementId) (link : LinkId) (reference : EmbedRef)
   deriving DecidableEq
 
 abbrev ActionWire := Sum (ElementId × Digest × ElementBody)
   (Sum (AtomId × AtomKind × List UInt8)
     (Sum EditAtomPayload
-      (Sum (LinkId × Option StableRange × LinkTarget × Digest) (RunId × List AtomId))))
+      (Sum (LinkId × Option StableRange × LinkTarget × Digest)
+        (Sum (RunId × List AtomId)
+          (Sum (AnnotationId × AtomId × OperationId × List UInt8)
+            (ElementId × LinkId × EmbedRef))))))
 
 def actionWireStream : StreamCodec ActionWire :=
   StreamCodec.sum
@@ -74,8 +90,15 @@ def actionWireStream : StreamCodec ActionWire :=
           (StreamCodec.product (identifierStream .v1 .link)
             (StreamCodec.product (StreamCodec.option storedStableRangeStream)
               (StreamCodec.product linkTargetStream digestStream)))
-          (StreamCodec.product (identifierStream .v1 .run)
-            (StreamCodec.list (identifierStream .v1 .atom))))))
+          (StreamCodec.sum
+            (StreamCodec.product (identifierStream .v1 .run)
+              (StreamCodec.list (identifierStream .v1 .atom)))
+            (StreamCodec.sum
+              (StreamCodec.product (identifierStream .v1 .annotation)
+                (StreamCodec.product (identifierStream .v1 .atom)
+                  (StreamCodec.product (identifierStream .v1 .operationIntent) bytesStream)))
+              (StreamCodec.product (identifierStream .v1 .element)
+                (StreamCodec.product (identifierStream .v1 .link) embedRefStream)))))))
 
 def Action.toWire : Action → ActionWire
   | .createDocument root schema body => .inl (root, schema, body)
@@ -83,7 +106,11 @@ def Action.toWire : Action → ActionWire
   | .editAtom edit => .inr (.inr (.inl edit))
   | .link linkId source target relation =>
       .inr (.inr (.inr (.inl (linkId, source, target, relation))))
-  | .createRun runId atoms => .inr (.inr (.inr (.inr (runId, atoms))))
+  | .createRun runId atoms => .inr (.inr (.inr (.inr (.inl (runId, atoms)))))
+  | .annotate annotationId atom revision body =>
+      .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body))))))
+  | .quote element linkId reference =>
+      .inr (.inr (.inr (.inr (.inr (.inr (element, linkId, reference))))))
 
 def Action.ofWire : ActionWire → Action
   | .inl (root, schema, body) => .createDocument root schema body
@@ -91,7 +118,11 @@ def Action.ofWire : ActionWire → Action
   | .inr (.inr (.inl edit)) => .editAtom edit
   | .inr (.inr (.inr (.inl (linkId, source, target, relation)))) =>
       .link linkId source target relation
-  | .inr (.inr (.inr (.inr (runId, atoms)))) => .createRun runId atoms
+  | .inr (.inr (.inr (.inr (.inl (runId, atoms))))) => .createRun runId atoms
+  | .inr (.inr (.inr (.inr (.inr (.inl (annotationId, atom, revision, body)))))) =>
+      .annotate annotationId atom revision body
+  | .inr (.inr (.inr (.inr (.inr (.inr (element, linkId, reference)))))) =>
+      .quote element linkId reference
 
 @[simp] theorem Action.ofWire_toWire (action : Action) :
     Action.ofWire action.toWire = action := by cases action <;> rfl
@@ -108,7 +139,7 @@ def commandStream : StreamCodec Command :=
     (fun actions => ⟨actions⟩) (by intro command; rfl)
 
 /-- Action grammar version; independent of the content cell's storage wire. -/
-def commandVersion : Nat := 2
+def commandVersion : Nat := 3
 
 def commandFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++
   [UInt8.ofNatLT commandVersion (by decide)]
@@ -136,13 +167,15 @@ theorem command_canonical {bytes : List UInt8} {command : Command}
     commandCodec.encode command = bytes :=
   ResourceBirthCodec.strictCodec_canonical rawCommandCodec accepted
 
-/-- A version-1 command frame refuses to decode. -/
-theorem v1_command_refused (payload : List UInt8) :
-    rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ 1 :: payload) = none := by
-  let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [1]
+/-- Version-1 and version-2 command frames refuse to decode. -/
+theorem retired_command_refused (version : UInt8) (retired : version = 1 ∨ version = 2)
+    (payload : List UInt8) :
+    rawCommandCodec.decode ("DREGG/CONTENT/MUTATE".toUTF8.toList ++ version :: payload) = none := by
+  let oldFrame : List UInt8 := "DREGG/CONTENT/MUTATE".toUTF8.toList ++ [version]
   have lengthExact : commandFrame.length = oldFrame.length := by
     simp [commandFrame, oldFrame]
-  have different : oldFrame ≠ commandFrame := by decide +kernel
+  have different : oldFrame ≠ commandFrame := by
+    rcases retired with rfl | rfl <;> decide +kernel
   have refused : rawCommandCodec.decode (oldFrame ++ payload) = none := by
     simp [rawCommandCodec, lengthExact, different]
   simpa only [oldFrame, List.append_assoc, List.singleton_append] using refused
@@ -221,13 +254,43 @@ def runAtomsCheck (pre : ContentStore) (document : DocumentId) (atoms : List Ato
     | none => false
     | some atom => decide (atom.document = document))
 
+/-- The annotated atom is in this document and still at the revision the
+annotator read.  A revision equal to this operation names a write of this same
+command, which no reader observed, so it is refused too. -/
+def pinCheck (pre : ContentStore) (document : DocumentId) (atom : AtomId)
+    (revision operation : OperationId) : Bool :=
+  match Hyperdocument.lookup pre .atoms atom with
+  | none => false
+  | some record => decide (record.document = document) && decide (record.revision = revision) &&
+      decide (revision ≠ operation)
+
+/-- A kernel annotation is a record of the cell: visible to exactly the cell's
+readers, since a resource view is the whole cell.  No other value is written. -/
+def cellReaders : Digest := ⟨0⟩
+
+def annotationRecord (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (atom : AtomId) (revision : OperationId) (body : List UInt8) : AnnotationRecord :=
+  ⟨document, .atom atom revision, .inline body, author, operation, cellReaders, none⟩
+
+/-- The link relation of a quote's backlink. -/
+def quoteRelation : Digest :=
+  (Sp800185Cshake256.hash "DREGG/CONTENT/RELATION".toUTF8.toList "quote".toUTF8.toList).digest
+
+def quoteElement (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (reference : EmbedRef) : ElementRecord :=
+  ⟨document, none, .embed reference, author, operation, none⟩
+
+def quoteLink (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (reference : EmbedRef) : LinkRecord :=
+  ⟨document, none, .document reference.document, quoteRelation, author, operation, none⟩
+
 def step (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (progress : Progress) : Action → Except Reject Progress
   | .createDocument root schema body => do
       let next ← allocate progress .documents document ⟨root, schema, author, operation⟩
       allocate next .elements root ⟨document, none, body, author, operation, none⟩
   | .createAtom atom kind payload =>
-      allocate progress .atoms atom ⟨document, kind, payload, author, operation, none⟩
+      allocate progress .atoms atom ⟨document, kind, payload, author, operation, operation, none⟩
   | .editAtom edit =>
       replaceAtom document progress edit.atomId edit.before (editAtomRecord operation edit)
   | .link link source target relation =>
@@ -239,6 +302,13 @@ def step (author : PrincipalRef) (operation : OperationId) (document : DocumentI
       if runAtomsCheck progress.1 document atoms then
         allocate progress .runs runId ⟨document, atoms, author, operation, none⟩
       else .error .invalidRun
+  | .annotate annotationId atom revision body =>
+      if pinCheck progress.1 document atom revision operation then
+        allocate progress .annotations annotationId (annotationRecord author operation document atom revision body)
+      else .error .staleAtom
+  | .quote element link reference => do
+      let next ← allocate progress .elements element (quoteElement author operation document reference)
+      allocate next .links link (quoteLink author operation document reference)
 
 def run (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (pre : ContentStore) (command : Command) : Except Reject Progress :=
@@ -317,6 +387,20 @@ theorem step_executes (author : PrincipalRef) (operation : OperationId) (documen
       split at accepted
       · exact allocate_executes pre progress next _ _ _ holds accepted
       · cases accepted
+  | annotate annotationId atom revision body =>
+      simp only [step] at accepted
+      split at accepted
+      · exact allocate_executes pre progress next _ _ _ holds accepted
+      · cases accepted
+  | quote element link reference =>
+      simp only [step] at accepted
+      cases first : allocate progress .elements element
+          (quoteElement author operation document reference) with
+      | error reason => simp [first, bind, Except.bind] at accepted
+      | ok middle =>
+          simp only [first, bind, Except.bind] at accepted
+          exact allocate_executes pre middle next _ _ _
+            (allocate_executes pre progress middle _ _ _ holds first) accepted
 
 theorem foldlM_executes (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
     (pre : ContentStore) (actions : List Action) (progress next : Progress)
@@ -454,12 +538,32 @@ identifiers and framing. A large link cannot evade a content-size policy. -/
 def contentBytes (store : ContentStore) : Nat :=
   (HyperdocumentCell.contentMaterializer.codec.encode store).length
 
+/-- The two fields of a content cell as a scope names them (K-FIELDS
+`FieldId.body` / `FieldId.annotations`): links, marks and annotation records
+are the annotations field; every other namespace is the body. -/
+def annotationNamespace : Hyperdocument.Namespace → Bool
+  | .links | .marks | .annotations => true
+  | _ => false
+
+/-- Addresses whose record differs between two stores, in one field. -/
+def changedIn (field : Bool) (before after : ContentStore) : Finset Hyperdocument.Address :=
+  (before.support ∪ after.support).filter
+    (fun address => annotationNamespace address.1 = field ∧ before address ≠ after address)
+
+/-- Records of the body that a write changed, derived from pre and post state. -/
+def bodyWrites (before after : ContentStore) : Nat := (changedIn false before after).card
+
+/-- Records of the annotations field that a write changed. -/
+def annotationWrites (before after : ContentStore) : Nat := (changedIn true before after).card
+
 def Action.tag : Action → Nat
   | .createDocument .. => 0
   | .createAtom .. => 1
   | .editAtom .. => 2
   | .link .. => 3
   | .createRun .. => 4
+  | .annotate .. => 5
+  | .quote .. => 6
 
 def actionCount (command : Command) (tag : Nat) : Nat :=
   (command.actions.filter (fun action => action.tag == tag)).length
@@ -480,14 +584,263 @@ def project (before after : ContentStore) (command : Command) : List (String × 
    ("content/atom-edits", actionCount command 2),
    ("content/links", actionCount command 3),
    ("content/run-creates", actionCount command 4),
+   ("content/annotations", actionCount command 5),
+   ("content/quotes", actionCount command 6),
+   ("content/writes/body", bodyWrites before after),
+   ("content/writes/annotations", annotationWrites before after),
    ("content/tombstones", (command.actions.filter fun action => match action with
       | .editAtom edit => edit.tombstone
       | _ => false).length)]
 
+/-! ## Annotations: attached to a read revision, never touching the body -/
+
+/-- An accepted annotate allocates exactly one annotation record and changes
+no other address: every record outside the annotations namespace — atoms,
+runs, elements, the document — is the record it was. -/
+theorem annotate_preserves_body (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress next : Progress) (annotationId : AnnotationId) (atom : AtomId)
+    (revision : OperationId) (body : List UInt8)
+    (accepted : step author operation document progress (.annotate annotationId atom revision body) = .ok next)
+    (address : Hyperdocument.Address) (outside : address.1 ≠ .annotations) :
+    next.1 address = progress.1 address := by
+  simp only [step] at accepted
+  split at accepted
+  · unfold allocate at accepted
+    split at accepted
+    · cases accepted
+      exact Store.Store.set_ne _ _ _ address (fun same => outside (congrArg Sigma.fst same))
+    · cases accepted
+  · cases accepted
+
+/-- An annotate whose atom is absent, in another document, or no longer at the
+named revision is refused `staleAtom`, before anything is written. -/
+theorem annotate_stale_refused (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress : Progress) (annotationId : AnnotationId) (atom : AtomId)
+    (revision : OperationId) (body : List UInt8)
+    (moved : ∀ record, Hyperdocument.lookup progress.1 .atoms atom = some record →
+      record.revision ≠ revision) :
+    step author operation document progress (.annotate annotationId atom revision body) = .error .staleAtom := by
+  have unchecked : pinCheck progress.1 document atom revision operation = false := by
+    unfold pinCheck
+    cases found : Hyperdocument.lookup progress.1 .atoms atom with
+    | none => rfl
+    | some record => simp [moved record found]
+  simp [step, unchecked]
+
+/-- Refuted pole: an atom at the named revision, written by an earlier
+operation, is annotated. -/
+theorem annotate_fresh_admitted (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (progress : Progress) (annotationId : AnnotationId) (atom : AtomId)
+    (record : AtomRecord) (body : List UInt8)
+    (found : Hyperdocument.lookup progress.1 .atoms atom = some record)
+    (local_ : record.document = document) (earlier : record.revision ≠ operation)
+    (fresh : progress.1 ⟨.annotations, annotationId⟩ = none) :
+    ∃ next, step author operation document progress
+      (.annotate annotationId atom record.revision body) = .ok next := by
+  have checked : pinCheck progress.1 document atom record.revision operation = true := by
+    simp [pinCheck, found, local_, earlier]
+  simp only [step, checked, if_true, allocate, fresh]
+  exact ⟨_, rfl⟩
+
+/-- An edit moves the atom's revision to the editing operation. -/
+@[simp] theorem editAtomRecord_revision (operation : OperationId) (edit : EditAtomPayload) :
+    (editAtomRecord operation edit).revision = operation := rfl
+
+/-- An annotation is current while its atom is still at the anchored revision. -/
+def annotationFresh (store : ContentStore) (record : AnnotationRecord) : Bool :=
+  match record.anchor with
+  | .atom atom revision =>
+      match Hyperdocument.lookup store .atoms atom with
+      | some current => decide (current.revision = revision)
+      | none => false
+  | _ => true
+
+/-- After an edit by another operation, an annotation anchored at the atom's
+earlier revision reads as stale. -/
+theorem annotation_stale_after_edit (store : ContentStore) (record : AnnotationRecord)
+    (atom : AtomId) (revision operation : OperationId) (edit : EditAtomPayload)
+    (anchored : record.anchor = .atom atom revision) (later : operation ≠ revision)
+    (edited : Hyperdocument.lookup store .atoms atom = some (editAtomRecord operation edit)) :
+    annotationFresh store record = false := by
+  simp [annotationFresh, anchored, edited, later]
+
+/-! ## The field footprint: annotate writes only the annotations field -/
+
+private theorem changedIn_empty_of_agree (field : Bool) (before after : ContentStore)
+    (agree : ∀ address : Hyperdocument.Address, annotationNamespace address.1 = field →
+      after address = before address) :
+    changedIn field before after = ∅ := by
+  apply Finset.filter_eq_empty_iff.mpr
+  intro address _ ⟨inField, differs⟩
+  exact differs (agree address inField).symm
+
+/-- Every action of the command is an annotate. -/
+def Command.annotateOnly (command : Command) : Bool :=
+  command.actions.all fun action => action.tag == 5
+
+private theorem foldlM_annotate_frames (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (actions : List Action) (progress next : Progress)
+    (only : actions.all (fun action => action.tag == 5) = true)
+    (accepted : actions.foldlM (step author operation document) progress = .ok next)
+    (address : Hyperdocument.Address) (outside : address.1 ≠ .annotations) :
+    next.1 address = progress.1 address := by
+  induction actions generalizing progress with
+  | nil =>
+      simp only [List.foldlM_nil, pure, Except.pure, Except.ok.injEq] at accepted
+      rw [accepted]
+  | cons action rest induction =>
+      simp only [List.all_cons, Bool.and_eq_true] at only
+      simp only [List.foldlM_cons, bind, Except.bind] at accepted
+      cases stepped : step author operation document progress action with
+      | error reason => simp [stepped] at accepted
+      | ok middle =>
+          simp only [stepped] at accepted
+          rw [induction middle only.2 accepted]
+          cases action with
+          | annotate annotationId atom revision body =>
+              exact annotate_preserves_body author operation document progress middle
+                annotationId atom revision body stepped address outside
+          | _ => simp [Action.tag] at only
+
+/-- An accepted annotate-only command changes no body record: the projected
+`content/writes/body` is `0`, so a law (or a K-FIELDS scope naming only
+`annotations`) that refuses body writes admits it. -/
+theorem annotate_writes_no_body (author : PrincipalRef) (operation : OperationId)
+    (document : DocumentId) (pre : ContentStore) (command : Command) (next : Progress)
+    (only : command.annotateOnly = true)
+    (accepted : run author operation document pre command = .ok next) :
+    bodyWrites pre next.1 = 0 := by
+  unfold bodyWrites
+  rw [changedIn_empty_of_agree false pre next.1]
+  · rfl
+  intro address body
+  apply foldlM_annotate_frames author operation document command.actions (pre, []) next only
+    accepted address
+  intro annotations
+  rw [annotations] at body
+  exact Bool.noConfusion body
+
+/-- The other pole: an edit that changes an atom record is a body write, so a
+law or scope refusing body writes refuses it.  Annotate authority does not
+cover edit. -/
+theorem edit_is_body_write (before : ContentStore) (atom : AtomId) (old new : AtomRecord)
+    (present : before ⟨.atoms, atom⟩ = some old) (changed : old ≠ new) :
+    0 < bodyWrites before (before.set ⟨.atoms, atom⟩ (some new)) := by
+  apply Finset.card_pos.mpr
+  refine ⟨⟨.atoms, atom⟩, ?_⟩
+  simp only [changedIn, Finset.mem_filter, Finset.mem_union, DFinsupp.mem_support_iff]
+  refine ⟨Or.inl ?_, rfl, ?_⟩
+  · rw [present]; exact Option.some_ne_none old
+  · rw [Store.Store.set_eq, present]
+    exact fun same => changed (Option.some.inj same)
+
+/-! ## Quotes: pinned by revision, rendered only through the reader's own read -/
+
+/-- What a reader sees where a quote stands. -/
+inductive QuoteView where
+  /-- The reader holds no read of the source document. -/
+  | unavailable
+  /-- A snapshot quote whose source atom has moved since it was quoted. -/
+  | stale
+  /-- The source bytes; `revised` says a live transclusion's atom has moved. -/
+  | quoted (bytes : List UInt8) (revised : Bool)
+  deriving DecidableEq, Repr
+
+/-- Render one embed against the reader's view of its source.  `source` is
+the store the reader obtained by its own signed read: the observation
+controller returns a cell only for a grant whose actual observe capability
+covers it (`NativeObservationController.AuthorizedIntent.query_footprint`), so
+`none` is exactly "this reader cannot read the source".  The caller pairs a
+view with the document it read (`documentOf target`); an atom of another
+document in it is not the quoted atom. -/
+def renderQuote (source : Option ContentStore) (reference : EmbedRef) : QuoteView :=
+  match source with
+  | none => .unavailable
+  | some store =>
+      match Hyperdocument.lookup store .atoms reference.atom with
+        | none => .stale
+        | some current =>
+            if current.document ≠ reference.document then .stale
+            else match reference.mode with
+              | .snapshot =>
+                  if current.revision = reference.revision then .quoted current.payload false
+                  else .stale
+              | .live => .quoted current.payload (decide (current.revision ≠ reference.revision))
+
+/-- The reader's view of a source cell: present iff its read is covered. -/
+def readerView (covered : Bool) (source : ContentStore) : Option ContentStore :=
+  if covered then some source else none
+
+/-- A reader not covered on the source sees `[quoted: unavailable]`, and what
+it sees does not depend on the source's content at all. -/
+theorem transclusion_respects_source_coverage (reference : EmbedRef) (left right : ContentStore) :
+    renderQuote (readerView false left) reference = .unavailable ∧
+      renderQuote (readerView false left) reference =
+        renderQuote (readerView false right) reference :=
+  ⟨rfl, rfl⟩
+
+/-- Refuted pole: a covered reader of a fresh quote sees the source bytes,
+so the gate above is not constantly `unavailable`. -/
+theorem transclusion_covered_reader_sees_bytes (store : ContentStore) (reference : EmbedRef)
+    (record : AtomRecord)
+    (found : Hyperdocument.lookup store .atoms reference.atom = some record)
+    (local_ : record.document = reference.document) (pinned : record.revision = reference.revision)
+    (snapshot : reference.mode = .snapshot) :
+    renderQuote (readerView true store) reference = .quoted record.payload false := by
+  simp [renderQuote, readerView, found, local_, pinned, snapshot]
+
+/-- A snapshot quote shows bytes only at the pinned revision, and then exactly
+the source atom's bytes; once the atom moves it reads as stale, never as the
+new bytes. -/
+theorem quote_pinned_by_revision (store : ContentStore) (reference : EmbedRef)
+    (snapshot : reference.mode = .snapshot) (bytes : List UInt8) (revised : Bool)
+    (shown : renderQuote (some store) reference = .quoted bytes revised) :
+    ∃ record, Hyperdocument.lookup store .atoms reference.atom = some record ∧
+      record.revision = reference.revision ∧ record.payload = bytes := by
+  cases found : Hyperdocument.lookup store .atoms reference.atom with
+  | none => simp [renderQuote, found] at shown
+  | some record =>
+      by_cases local_ : record.document = reference.document
+      · by_cases pinned : record.revision = reference.revision
+        · simp [renderQuote, found, local_, pinned, snapshot] at shown
+          exact ⟨record, rfl, pinned, shown.1⟩
+        · simp [renderQuote, found, local_, pinned, snapshot] at shown
+      · simp [renderQuote, found, local_] at shown
+
+theorem quote_stale_after_move (store : ContentStore) (reference : EmbedRef)
+    (record : AtomRecord)
+    (found : Hyperdocument.lookup store .atoms reference.atom = some record)
+    (local_ : record.document = reference.document) (moved : record.revision ≠ reference.revision)
+    (snapshot : reference.mode = .snapshot) :
+    renderQuote (some store) reference = .stale := by
+  simp [renderQuote, found, local_, moved, snapshot]
+
+/-- The quote's records hold the reference and nothing of the source: the
+quoting cell is the same whatever the source holds. -/
+theorem quote_writes (author : PrincipalRef) (operation : OperationId) (document : DocumentId)
+    (progress next : Progress) (element : ElementId) (link : LinkId) (reference : EmbedRef)
+    (accepted : step author operation document progress (.quote element link reference) = .ok next) :
+    next.1 = (progress.1.set ⟨.elements, element⟩
+        (some (quoteElement author operation document reference))).set ⟨.links, link⟩
+      (some (quoteLink author operation document reference)) := by
+  simp only [step] at accepted
+  cases first : allocate progress .elements element
+      (quoteElement author operation document reference) with
+  | error reason => simp [first, bind, Except.bind] at accepted
+  | ok middle =>
+      simp only [first, bind, Except.bind] at accepted
+      unfold allocate at first accepted
+      split at first
+      · cases first
+        split at accepted
+        · cases accepted; rfl
+        · cases accepted
+      · cases first
+
 /-- info: 'Minidregg.Kernel.ContentResource.command_roundtrip' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms command_roundtrip
-/-- info: 'Minidregg.Kernel.ContentResource.v1_command_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
-#guard_msgs (whitespace := lax) in #print axioms v1_command_refused
+/-- info: 'Minidregg.Kernel.ContentResource.retired_command_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms retired_command_refused
 /-- info: 'Minidregg.Kernel.ContentResource.run_executes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms run_executes
 /-- info: 'Minidregg.Kernel.ContentResource.PreparedCell.post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -496,5 +849,18 @@ def project (before after : ContentStore) (command : Command) : List (String × 
 #guard_msgs (whitespace := lax) in #print axioms prepareCell_ok_of_run
 /-- info: 'Minidregg.Kernel.ContentResource.atom_payload_encoding_distinct' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms atom_payload_encoding_distinct
+
+/-- info: 'Minidregg.Kernel.ContentResource.annotate_preserves_body' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms annotate_preserves_body
+/-- info: 'Minidregg.Kernel.ContentResource.annotate_stale_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms annotate_stale_refused
+/-- info: 'Minidregg.Kernel.ContentResource.annotate_writes_no_body' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms annotate_writes_no_body
+/-- info: 'Minidregg.Kernel.ContentResource.edit_is_body_write' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms edit_is_body_write
+/-- info: 'Minidregg.Kernel.ContentResource.quote_pinned_by_revision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms quote_pinned_by_revision
+/-- info: 'Minidregg.Kernel.ContentResource.transclusion_covered_reader_sees_bytes' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms transclusion_covered_reader_sees_bytes
 
 end Minidregg.Kernel.ContentResource

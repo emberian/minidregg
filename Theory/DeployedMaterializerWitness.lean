@@ -66,6 +66,7 @@ deriving instance Countable for IdPreimage
 deriving instance Countable for Identifier
 deriving instance Countable for PrincipalRef
 deriving instance Countable for AtomKind
+deriving instance Countable for TransclusionMode
 deriving instance Countable for AtomRecord
 deriving instance Countable for RunRecord
 deriving instance Countable for EmbedRef
@@ -87,7 +88,6 @@ deriving instance Countable for FieldKey
 deriving instance Countable for FieldRecord
 deriving instance Countable for ConflictAlternative
 deriving instance Countable for ConflictRecord
-deriving instance Countable for TransclusionMode
 deriving instance Countable for StoredSourceIdentity
 deriving instance Countable for StoredOpeningShape
 deriving instance Countable for OpeningDescriptor
@@ -97,6 +97,8 @@ deriving instance Countable for LinkTarget
 deriving instance Countable for LinkRecord
 deriving instance Countable for TransclusionRecord
 deriving instance Countable for MarkRecord
+deriving instance Countable for AnnotationAnchor
+deriving instance Countable for AnnotationBody
 deriving instance Countable for AnnotationRecord
 deriving instance Countable for CausalVersionDag.SchemaRef
 deriving instance Countable for VersionEventRecord

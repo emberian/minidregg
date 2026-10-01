@@ -259,16 +259,32 @@ def markRecordStream : StreamCodec MarkRecord :=
       wire.2.2.2.2.2.1, wire.2.2.2.2.2.2.1, wire.2.2.2.2.2.2.2⟩)
     (by intro record; rfl)
 
+def annotationAnchorStream : StreamCodec AnnotationAnchor :=
+  StreamCodec.xmap
+    (StreamCodec.option (StreamCodec.sum storedStableRangeStream
+      (StreamCodec.product (identifierStream .v1 .atom) (identifierStream .v1 .operationIntent))))
+    (fun | .document => none | .range range => some (.inl range)
+         | .atom atom revision => some (.inr (atom, revision)))
+    (fun | none => .document | some (.inl range) => .range range
+         | some (.inr (atom, revision)) => .atom atom revision)
+    (by intro anchor; cases anchor <;> rfl)
+
+def annotationBodyStream : StreamCodec AnnotationBody :=
+  StreamCodec.xmap (StreamCodec.sum bytesStream (identifierStream .v1 .document))
+    (fun | .inline bytes => .inl bytes | .reference document => .inr document)
+    (fun | .inl bytes => .inline bytes | .inr document => .reference document)
+    (by intro body; cases body <;> rfl)
+
 def annotationRecordStream : StreamCodec AnnotationRecord :=
   StreamCodec.xmap
     (StreamCodec.product (identifierStream .v1 .document)
-      (StreamCodec.product (StreamCodec.option storedStableRangeStream)
-        (StreamCodec.product (identifierStream .v1 .document)
+      (StreamCodec.product annotationAnchorStream
+        (StreamCodec.product annotationBodyStream
           (StreamCodec.product principalRefStream
             (StreamCodec.product (identifierStream .v1 .operationIntent)
               (StreamCodec.product digestStream
                 (StreamCodec.option (identifierStream .v1 .operationIntent))))))))
-    (fun record => (record.document, record.range, record.body, record.author,
+    (fun record => (record.document, record.anchor, record.body, record.author,
       record.operation, record.visibilityPolicy, record.tombstonedAt))
     (fun wire => ⟨wire.1, wire.2.1, wire.2.2.1, wire.2.2.2.1, wire.2.2.2.2.1,
       wire.2.2.2.2.2.1, wire.2.2.2.2.2.2⟩)
@@ -339,15 +355,23 @@ def contentNamespaces : List Hyperdocument.Namespace :=
   [.documents, .atoms, .runs, .elements, .fields, .conflicts, .links,
     .transclusions, .marks, .annotations]
 
+/-- Record codec version per namespace.  v2: atoms carry `revision`, an
+element's embed names an atom at a revision with a mode, and an annotation
+carries an anchor and an inline-or-reference body.  The layout digest in every
+cell frame covers these ids, so a v1 content cell refuses to load. -/
+def contentRecordVersion : Hyperdocument.Namespace → String
+  | .atoms | .elements | .annotations => "v2"
+  | _ => "v1"
+
 def contentWire : Wire Hyperdocument.layout where
-  name := "minidregg/hyperdocument-content/v1"
+  name := "minidregg/hyperdocument-content/v2"
   namespaces := contentNamespaces
   namespaces_complete := by intro space; cases space <;> simp [contentNamespaces]
   namespaceStream := namespaceStream
   keyStream := contentKeyStream
   valueStream := contentValueStream
   keyCodecId space := s!"hyperdocument-key/{namespaceTag space}/v1"
-  valueCodecId space := s!"hyperdocument-record/{namespaceTag space}/v1"
+  valueCodecId space := s!"hyperdocument-record/{namespaceTag space}/{contentRecordVersion space}"
 
 /-- The content cell materializer. -/
 def contentMaterializer : Hyperdocument.Materializer Digest :=
