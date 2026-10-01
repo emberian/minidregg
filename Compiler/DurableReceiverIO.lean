@@ -23,6 +23,7 @@ transport and the OS durability floor; no Lean theorem proves those systems.
 The MAC key file's custody is the operator's (`DurableCheckpointCodec`).
 -/
 import Compiler.DurableCheckpointCodec
+import Compiler.NativeCoprocess
 import Kernel.PresenceIndex
 
 namespace Minidregg.Compiler.DurableReceiverIO
@@ -83,8 +84,10 @@ structure NativeConfig where
   key : System.FilePath
   checkpointEvery : Nat := 64
 
+/-- One Store call, through the binary's long-lived `serve` helper
+(`NativeCoprocess.output`: the one-shot call's exact output, no fork of the Host). -/
 def runNative (config : NativeConfig) (arguments : Array String) : IO IO.Process.Output :=
-  IO.Process.output { cmd := config.binary.toString, args := arguments }
+  NativeCoprocess.output config.binary.toString arguments
 
 def parseCasOutput (output : IO.Process.Output) : CasObservation :=
   if output.exitCode == 0 && output.stderr == "" then

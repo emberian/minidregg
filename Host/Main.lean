@@ -5422,9 +5422,10 @@ def run (arguments : List String) : IO UInt32 := do
                               | throw (IO.userError "nock run request is not UTF-8")
                             let (programId, caller, room, targets, values) ← IO.ofExcept
                               (Minidregg.Host.Json.nockRunRequest source)
+                            -- One session read per request: the directory is this image's held one.
                             let opened ← sessionOpened pinnedConfig state
                             let height := NativeHost.logicalHeight pinnedConfig opened.durable
-                            let directory ← nockDirectory pinnedConfig state
+                            let directory := opened.directory.directory
                             let verdict := Minidregg.Kernel.NockRun.dryRun
                               pinnedConfig.deployment.domain directory programId
                               ⟨height, caller, room⟩ targets values
