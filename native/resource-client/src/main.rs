@@ -1120,9 +1120,12 @@ fn submit(
 fn query_presentation_kind(view: &str, presentation: Option<&str>) -> Result<String> {
     if !matches!(
         view,
-        "resource" | "policy" | "capability" | "who" | "since" | "at"
+        "resource" | "policy" | "capability" | "who" | "since" | "at" | "backlinks" | "links"
     ) {
-        return Err("--view must be resource, policy, capability, who, since, or at".to_owned());
+        return Err(
+            "--view must be resource, policy, capability, who, since, at, backlinks, or links"
+                .to_owned(),
+        );
     }
     match presentation {
         None => Ok(format!("view-{view}")),
