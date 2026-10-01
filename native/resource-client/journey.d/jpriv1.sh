@@ -449,8 +449,8 @@ INV_PC=$(grep '^chat join pc ' "$OUT" | tail -1)
 ok chat carl "$INV_PC"
 ok chat alice "say $T_CA"
 SAY_A=$(ls -td "$WS/alice/proposals"/say-* | head -1)
-check chat "alice's signed say (the wire) holds no plaintext, raw or hex (and it landed: a sealed append refuses a kernel topic)" \
-  sh -c "! grep -rq 'PRIVATE-ECHO' \"\$1\" && ! grep -rq \"\$(printf PRIVATE-ECHO | xxd -p)\" \"\$1\"" _ "$SAY_A"
+check chat "alice's signed say (intent.bin, intent.json, proposal.json: the wire) holds no plaintext, raw or hex (it landed: a sealed append refuses a kernel topic); only her local request.json does" \
+  sh -c "! grep -q PRIVATE-ECHO \"\$1\"/intent.bin \"\$1\"/intent.json \"\$1\"/proposal.json && ! grep -q \"\$(printf PRIVATE-ECHO | xxd -p)\" \"\$1\"/intent.bin \"\$1\"/intent.json \"\$1\"/proposal.json && grep -q PRIVATE-ECHO \"\$1\"/request.json" _ "$SAY_A"
 ok chat carl "say $T_CC"
 ok chat carl "tail --json -n 100"
 check chat "carl (a member holding the wrap) reads both private lines in the merged feed" \
