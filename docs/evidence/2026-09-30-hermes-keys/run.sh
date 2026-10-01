@@ -213,7 +213,7 @@ purse() {  # signed read of the provider task: remaining/reserved
       grants:[{kind:"object",target:$t,capability:"101"}]}' >"$S/purse-$n.json"
   "$MINI" query --host "$HOST" --config "$CONFIG" --socket "$SOCK" --intent "$S/purse-$n.json" \
     --key "$BOOT/provider.key" --view resource --dir "$S/purse-$n" >/dev/null 2>"$S/purse-$n.stderr" || { echo "?"; return; }
-  jq -r '.page.grain.remaining + "/" + .page.grain.reserved' "$S/purse-$n/view.json"
+  jq -r '.cell.grain.remaining + "/" + .cell.grain.reserved' "$S/purse-$n/view.json"
 }
 # One Chat Completions request through the gateway, as Hermes would send it.
 call() {  # STEP CALLER ROW MAX_TOKENS EXPECTED_HTTP EXPECTED_CODE UPSTREAM EXPECTED_AUTH EXPECTED_PURSE
