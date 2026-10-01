@@ -3,6 +3,9 @@
 # `Minidregg`. An unrooted module never elaborates, so nothing in it is checked.
 # Library directories are the lean_lib roots in lakefile.toml; scripts/, docs/
 # and native/ hold standalone `lake env lean` programs and evidence, not modules.
+# Roots: `Minidregg`, `AxiomCensus` (which imports Minidregg, so cannot be
+# imported by it) and every `lean_exe` root module (a `main` collides with
+# Host.Main, so exe roots are built as their own targets by the umbrella).
 set -euo pipefail
 repo_root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$repo_root"
@@ -20,7 +23,9 @@ for f in files:
         mods[f[:-5].replace("/", ".")] = f
 def imports(path):
     return [m for m in re.findall(r"^import\s+(\S+)", open(path, encoding="utf-8").read(), re.M)]
-seen, stack = set(), ["Minidregg"]
+exe_roots = re.findall(r'^\[\[lean_exe\]\]\s*\nname\s*=\s*"[^"]+"\s*\nroot\s*=\s*"([^"]+)"',
+                       open("lakefile.toml").read(), re.M)
+seen, stack = set(), ["Minidregg", "AxiomCensus"] + exe_roots
 while stack:
     m = stack.pop()
     if m in seen or m not in mods:
