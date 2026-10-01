@@ -675,7 +675,7 @@ def buildBytes {F : Type} [Field F] (profile : CanonicalRuntimeProfile.Profile F
   let built ← build profile config
   pure ⟨config, built⟩
 
-/-- info: 'Minidregg.Kernel.NativeHostGenesis.genesis_revision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.NativeHostGenesis.genesis_revision' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms genesis_revision
 /-- info: 'Minidregg.Kernel.NativeHostGenesis.v1_config_refused' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms v1_config_refused

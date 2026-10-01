@@ -920,7 +920,7 @@ end Concrete
 /-- info: 'Minidregg.Kernel.ResourceBirthController.allocation_not_valid_of_used' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.allocation_not_valid_of_used
 
-/-- info: 'Minidregg.Kernel.ResourceBirthController.settlement_no_partial' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Kernel.ResourceBirthController.settlement_no_partial' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Minidregg.Kernel.ResourceBirthController.settlement_no_partial
 
 /-- info: 'Minidregg.Kernel.ResourceBirthController.allocation_post_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/

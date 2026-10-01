@@ -37,13 +37,34 @@ set_option autoImplicit false
 
 @[simp] theorem bytepad_empty_four : bytepad [] 4 = [1, 4, 0, 0] := by decide
 
-@[simp] theorem squeeze32_length (state : State) :
-    (squeeze32 state).length = 32 := by
-  simp [squeeze32, outputBytes]
+/-- The executable core's Init-only digits are `Nat.digits 256`. -/
+theorem natBytesLEAux_eq_digits : ∀ (fuel value : Nat), value ≤ fuel →
+    natBytesLEAux fuel value = (Nat.digits 256 value).map UInt8.ofNat
+  | 0, value, h => by
+    obtain rfl : value = 0 := Nat.le_zero.mp h
+    simp [natBytesLEAux]
+  | fuel + 1, value, h => by
+    by_cases hv : value = 0
+    · subst hv; simp [natBytesLEAux]
+    · have hpos : 0 < value := Nat.pos_of_ne_zero hv
+      have hdiv : value / 256 ≤ fuel := by omega
+      rw [natBytesLEAux, if_neg hv, natBytesLEAux_eq_digits fuel (value / 256) hdiv,
+        Nat.digits_def' (by norm_num) hpos, List.map_cons]
 
-@[simp] theorem cshake256Bytes_length (customization input : List UInt8) :
-    (cshake256Bytes customization input).length = 32 := by
-  simp [cshake256Bytes]
+theorem natBytesLE_eq_digits (value : Nat) :
+    natBytesLE value = (Nat.digits 256 value).map UInt8.ofNat :=
+  natBytesLEAux_eq_digits value value (Nat.le_refl _)
+
+/-- `natBytesBE` is the `Nat.digits` definition it replaced (byte-identical framing). -/
+theorem natBytesBE_eq_digits (value : Nat) :
+    natBytesBE value =
+      (let little := Nat.digits 256 value
+       let nonempty := if little = [] then [0] else little
+       nonempty.reverse.map UInt8.ofNat) := by
+  simp only [natBytesBE, natBytesLE_eq_digits]
+  by_cases h : Nat.digits 256 value = []
+  · simp [h]
+  · simp [h, List.map_reverse]
 
 /-! ## Digest projection and the controller instance -/
 
@@ -257,10 +278,12 @@ theorem hash_digest_lt_two_pow_256 (customization input : List UInt8) :
 
 /-- info: 'Minidregg.Compiler.Sp800185Cshake256.digestCodec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms digestCodec
-/-- info: 'Minidregg.Compiler.Sp800185Cshake256.cshake256Bytes_length' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.cshake256Bytes_length' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms cshake256Bytes_length
 /-- info: 'Minidregg.Compiler.Sp800185Cshake256.hash_digest_lt' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms hash_digest_lt
+/-- info: 'Minidregg.Compiler.Sp800185Cshake256.natBytesBE_eq_digits' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms natBytesBE_eq_digits
 /-- info: 'Minidregg.Compiler.Sp800185Cshake256.hash_digest_lt_two_pow_256' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms hash_digest_lt_two_pow_256
 /-- info: 'Minidregg.Compiler.Sp800185Cshake256.checkedXofCall_reply_bytes_exact' depends on axioms: [propext, Classical.choice, Quot.sound] -/

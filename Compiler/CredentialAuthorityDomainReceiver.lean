@@ -454,7 +454,7 @@ end GrantBatch
 
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.Loaded.snapshot_unique' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms Loaded.snapshot_unique
-/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.clockOf_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.clockOf_install' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms clockOf_install
 /-- info: 'Minidregg.Compiler.CredentialAuthorityDomainReceiver.spentOf_install' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms spentOf_install

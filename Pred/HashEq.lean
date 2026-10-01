@@ -42,9 +42,11 @@ theorem hashEqOpening_eq_some {s : State} {v b c : Slot} {o : Opening} :
     split at h
     next cell x r h1 h2 h3 =>
       dsimp only at h
-      split_ifs at h with hadm
-      cases h
-      exact ⟨h1, h2, h3, rfl, rfl, rfl, hadm⟩
+      split at h
+      next hadm =>
+        cases h
+        exact ⟨h1, h2, h3, rfl, rfl, rfl, hadm⟩
+      next => cases h
     next => cases h
   · rintro ⟨h1, h2, h3, rfl, rfl, rfl, hadm⟩
     cases o
@@ -217,14 +219,15 @@ theorem hiding_at_equality_is_a_collision (h : HashEqHiding (· = ·)) : Collisi
   have adm : ∀ x : Int, -2 ^ 255 ≤ x → x < 2 ^ 255 →
       (⟨0, "v", "b", "c", x, 0⟩ : Opening).Admissible := by
     intro x h0 h1
-    refine ⟨le_refl _, by norm_num, ?_, ?_, ?_, h0, h1, le_refl _, by norm_num⟩
+    refine ⟨Int.le_refl _, show (0 : Int) < 2 ^ 64 by decide, ?_, ?_, ?_, h0, h1, Int.le_refl _,
+      show (0 : Int) < 2 ^ 256 by decide⟩
     · show (utf8 "v").length < 2 ^ 32; decide
     · show (utf8 "b").length < 2 ^ 32; decide
     · show (utf8 "c").length < 2 ^ 32; decide
-  have e := congrFun (h 0 "v" "b" "c" 0 1 (adm 0 (by norm_num) (by norm_num))
-    (adm 1 (by norm_num) (by norm_num))) 0
-  rcases binds_or_collides deployed (adm 0 (by norm_num) (by norm_num))
-      (adm 1 (by norm_num) (by norm_num)) e with hab | hcol
+  have e := congrFun (h 0 "v" "b" "c" 0 1 (adm 0 (by decide) (by decide))
+    (adm 1 (by decide) (by decide))) 0
+  rcases binds_or_collides deployed (adm 0 (by decide) (by decide))
+      (adm 1 (by decide) (by decide)) e with hab | hcol
   · simp at hab
   · exact hcol
 
@@ -244,7 +247,7 @@ theorem hiding_at_equality_is_a_collision (h : HashEqHiding (· = ·)) : Collisi
 #guard_msgs in #print axioms lengthHash_admits_any_reveal
 /-- info: 'Minidregg.Pred.hashEq_wide_blinder_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms hashEq_wide_blinder_refused
-/-- info: 'Minidregg.Pred.hiding_at_equality_is_a_collision' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'Minidregg.Pred.hiding_at_equality_is_a_collision' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in #print axioms hiding_at_equality_is_a_collision
 
 end Minidregg.Pred
