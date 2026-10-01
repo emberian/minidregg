@@ -1,0 +1,22 @@
+store	store	PASS	186.842401346	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/t-davros/store/base/workroom(noapplicationborn)
+davros	package	INFO	-	c4c975c3adbeeb77fd928bb90202c049127209100Bclass=Lkind=apiapp=4901
+davros	birth-a	PASS	45.346509568	
+davros	install-a	PASS	522.512150293	{"app":"4901","appUid":977,"class":"L","completion":{"committedClaimSha256":"58a9e5e42d737fe506fb54539a45b1b718f8fe84e08d64dbd8796017d5c28096","completionReceipt":{"acceptedCount":"17","eventId":"6031
+davros	share-a	PASS	271.658876859	{"app":"4901","descriptor":"4911","directory":"/var/lib/minidregg/grains/spk-apps-root/e6cefa6e0b373d84/host/apps/4901/routes/owner-api","issueIndex":"20","kind":"api","name":"owner-api","protocol":"m
+davros	start-a	PASS	502.261633086	{"app":"4901","completion":{"admittedSha256":"61ce7868808888e8eb85316ec9efc386b1b9ab4c0ec935c411780377ee42512b","completionReceipt":{"acceptedCount":"25","eventId":"97331315716550969695701666130750199
+davros	floor-a	PASS	.277146347	floor-heldapp-processes=3unit=mini-spk-a4901-g2.service
+davros	enroll-a	PASS	75.853553099	
+davros	get-a	PASS	41.695525871	200
+davros	get-a-http	200	-	bytes=100{"installed":true,"maintenance":false,"version":"9.1.0.14","versionstring":"9.1.0RC4","edition":""}
+davros	metrics-g1-get	PASS	-	{"memoryPeak":"1130651648","pidsPeak":"22","procs":"6","processNames":"2bwrap,1launcher.sh,1node,1sandstorm-http-,1spk-host"}
+davros	post-a	PASS	42.171774643	201
+davros	post-a-http	201	-	bytes=0
+davros	metrics-g1	PASS	-	{"memoryPeak":"1130651648","pidsPeak":"22","procs":"6","processNames":"2bwrap,1launcher.sh,1node,1sandstorm-http-,1spk-host"}
+davros	stop-a	PASS	1428.972063640	{"activeState":"inactive","app":"4901","elapsedMs":"1427395","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a4901-g2.service"}
+davros	start-a2	PASS	1049.398804803	{"app":"4901","completion":{"admittedSha256":"2daaa3f864fa2e56ae780da4c27f26a2a8477dafa22261090806e86449a06adc","completionReceipt":{"acceptedCount":"34","eventId":"86905910541554704281522487836060136
+davros	floor-a2	PASS	.258279948	floor-heldapp-processes=3unit=mini-spk-a4901-g4.service
+davros	enroll-a2	PASS	98.500353775	
+davros	poll-a2	PASS	50.632362302	503
+davros	poll-a2-http	503	-	bytes=36Minidispatchadmissionunavailable
+davros	survived	FAIL	-	expectedtextnotinthepollbody:davrosfilewrittenbeforeSTOP
+davros	metrics-g2	PASS	-	{"memoryPeak":"1247866880","pidsPeak":"22","procs":"6","processNames":"2bwrap,1launcher.sh,1node,1sandstorm-http-,1spk-host"}

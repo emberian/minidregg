@@ -1,0 +1,19 @@
+store	store	PASS	162.610507397	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/u-todos/store/base/workroom(noapplicationborn)
+simple-todos	package	INFO	-	5830d70137cdae158118884da879087023632200Bclass=Mkind=webapp=5901
+simple-todos	birth-a	PASS	40.221960438	
+simple-todos	install-a	PASS	488.964937907	{"app":"5901","appUid":982,"class":"M","completion":{"committedClaimSha256":"4e4e84bc1b8b454fc4d7f7d3545a7869fd2a473c6f8fb9d047c1bc6c69443245","completionReceipt":{"acceptedCount":"17","eventId":"1734
+simple-todos	share-a	PASS	313.957121018	{"app":"5901","descriptor":"5911","directory":"/var/lib/minidregg/grains/spk-apps-root/e7da5f205a227d90/host/apps/5901/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+simple-todos	start-a	PASS	484.424702244	{"app":"5901","completion":{"admittedSha256":"8721e1824f7a6a36681ecd31acc8c6f759a6eb216d3878324530f2e9030cd674","completionReceipt":{"acceptedCount":"25","eventId":"38708293590982217849433599769686337
+simple-todos	floor-a	PASS	.305745858	floor-heldapp-processes=3unit=mini-spk-a5901-g2.service
+simple-todos	enroll-a	PASS	79.506853474	
+simple-todos	get-a	PASS	44.107434541	503
+simple-todos	get-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+simple-todos	metrics-g1-get	PASS	-	{"memoryPeak":"520916992","pidsPeak":"34","procs":"6","processNames":"2bwrap,1mongod,1node,1sandstorm-http-,1spk-host"}
+simple-todos	metrics-g1	PASS	-	{"memoryPeak":"520916992","pidsPeak":"34","procs":"6","processNames":"2bwrap,1mongod,1node,1sandstorm-http-,1spk-host"}
+simple-todos	stop-a	PASS	1317.077994647	{"activeState":"inactive","app":"5901","elapsedMs":"1315747","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a5901-g2.service"}
+simple-todos	start-a2	PASS	1052.084356791	{"app":"5901","completion":{"admittedSha256":"2c21ae9ff09e4e4d6fbd97e676e8fbfa91ae9789a3939208ba5d38e73508bf37","completionReceipt":{"acceptedCount":"33","eventId":"31963039875021941725596339368433280
+simple-todos	floor-a2	PASS	.297940346	floor-heldapp-processes=3unit=mini-spk-a5901-g4.service
+simple-todos	enroll-a2	PASS	82.055443462	
+simple-todos	get-a2	PASS	42.071102859	200
+simple-todos	get-a2-http	200	-	bytes=1193<!DOCTYPEhtml><html><head><linkrel="stylesheet"type="text/css"class="__meteor-css__"href="/78fdc515af4bf8c8dcfcdb96adf138acd89ab1d3.css?meteor_css_res
+simple-todos	metrics-g2	PASS	-	{"memoryPeak":"534388736","pidsPeak":"34","procs":"6","processNames":"2bwrap,1mongod,1node,1sandstorm-http-,1spk-host"}

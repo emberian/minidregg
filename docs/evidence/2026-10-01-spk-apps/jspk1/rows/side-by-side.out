@@ -1,0 +1,4 @@
+612ec0318fb4b450 5101 mini-spk-a5101-g6.service mini-spk-apps-grains-s612ec0318fb4b450a5101.slice active 
+0ef6514406a6eb6c 5201 mini-spk-a5201-g2.service mini-spk-apps-grains-s0ef6514406a6eb6ca5201.slice active 
+0ef6514406a6eb6c 5601 mini-spk-a5601-g2.service mini-spk-apps-grains-s0ef6514406a6eb6ca5601.slice active 
+three grains of two Stores active at once under three distinct units

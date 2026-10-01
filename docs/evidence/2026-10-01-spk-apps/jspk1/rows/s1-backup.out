@@ -1,0 +1,25 @@
+{"name":"4818c2246b17a0f3-8601","state":"stopped-exact","frozenMs":"57","sha256":"495b14292290217529e7c1dafc450f17cb09f08a6198dd11e3df92fc6be661fb","e2fsck":"clean","rootListing":12}
+{"name":"4818c2246b17a0f3-8701","state":"stopped-exact","frozenMs":"54","sha256":"258994729422f42253581bc47da10f1cf9aa4062cad84e26f71bfb753ae511f9","e2fsck":"clean","rootListing":3}
+{"name":"50d4984b209d2345-5701","state":"running-frozen-crash-consistent","frozenMs":"54","sha256":"b26f8e179011a6d3d9db5a47967b3d426b692808424832e1d8e64c32fa67c5a7","e2fsck":"clean","rootListing":3}
+{"name":"612ec0318fb4b450-5101","state":"running-frozen-crash-consistent","frozenMs":"79","sha256":"7afd6ca2575b3e169e29ca04cc000aae74cfb7f06cf39bf70388584975b8ddc4","e2fsck":"clean","rootListing":4}
+{"name":"67c421c468a2205a-7701","state":"stopped-exact","frozenMs":"44","sha256":"f19178a3ab68a827955add42b9bb76503880b07ef14f62199c7bf894d7f1f540","e2fsck":"clean","rootListing":4}
+{"name":"6e3379e7a4d49488-4801","state":"stopped-exact","frozenMs":"82","sha256":"84c16c7f7433dae0271dcb4318ca0389b8093b84c85a5840ab083d34465b4583","e2fsck":"clean","rootListing":11}
+{"name":"6fccfb18e392c61c-6501","state":"running-frozen-crash-consistent","frozenMs":"52","sha256":"5caa3a1fdf8e9e14aca9462971a066285b2453e2883cff80007b592da43409df","e2fsck":"clean","rootListing":4}
+{"name":"6fccfb18e392c61c-6601","state":"stopped-exact","frozenMs":"258","sha256":"cba8ad81af295b0da85dbf66902ecf0435cd8b1cbb5400a66b4aac6f0e7467cb","e2fsck":"clean","rootListing":3}
+{"name":"7101fc63619537e0-5801","state":"running-frozen-crash-consistent","frozenMs":"210","sha256":"db1fa2a04b6f9bc0f974113c3daa83fb0ea7b1474ae948d09695d3c3642c68ca","e2fsck":"clean","rootListing":3}
+{"name":"874f52062572bb1e-6101","state":"running-frozen-crash-consistent","frozenMs":"123","sha256":"a8d1eed6b2fb5ffc00517f8898fefbfb181cf27886f5c1a5ae79695a6d6feb22","e2fsck":"clean","rootListing":4}
+{"name":"874f52062572bb1e-6201","state":"stopped-exact","frozenMs":"116","sha256":"5db70d6f8a9b52adba24e5ca0016cc36f7552b266d32d11f49f16e18f4373c22","e2fsck":"clean","rootListing":5}
+{"name":"874f52062572bb1e-6301","state":"stopped-exact","frozenMs":"120","sha256":"7b8f94e9eddb87117afc13605a9427287ff855c7bfe3baeb80bedd6f5652659e","e2fsck":"clean","rootListing":3}
+{"name":"a2492b849c17cc73-4501","state":"stopped-exact","frozenMs":"405","sha256":"7b1544833afd8ed9ff5e259ea54e3240ced5ebf92919fdeca09c1a9f21633346","e2fsck":"clean","rootListing":3}
+{"name":"b85b044de5b08736-7101","state":"stopped-exact","frozenMs":"212","sha256":"94b0fad548bdac775b05659e9dc82803fa20bd8c14ec1733353d241c51cd09a9","e2fsck":"clean","rootListing":4}
+{"name":"cd3e34fd82009ccc-7801","state":"stopped-exact","frozenMs":"374","sha256":"547eb60d6ed6d39d81db341fdd7d346e52dd9b17e2fe9eb98888e264f9a963e0","e2fsck":"clean","rootListing":4}
+{"name":"d4290818962dc0bf-4101","state":"stopped-exact","frozenMs":"583","sha256":"72bffe2af4afe09a9595602c3b813f0411c99450c8de19dd0f6ef762254347a2","e2fsck":"clean","rootListing":6}
+{"name":"d4290818962dc0bf-4201","state":"stopped-exact","frozenMs":"255","sha256":"1b65de4637595f9e4703dcf6bd5c9b55244a456e0ba7c7cadd60210eb43e1b60","e2fsck":"clean","rootListing":3}
+{"name":"e51dbc0601d0cb0b-4701","state":"stopped-exact","frozenMs":"131","sha256":"6c33d22ad09a13a1168301115bdee251de83486ba10079e3430c862876ebfbf2","e2fsck":"clean","rootListing":4}
+{"name":"e6cefa6e0b373d84-4901","state":"running-frozen-crash-consistent","frozenMs":"465","sha256":"810296942b39659b14c0760a6a51a6e22b51ac8f2e2a71ece0316b0a737f9bc8","e2fsck":"clean","rootListing":4}
+{"name":"e7da5f205a227d90-5901","state":"running-frozen-crash-consistent","frozenMs":"271","sha256":"8f43bd87aa7188df98edd03635e090b277a20fb1d35fee09aa3fef4cae698858","e2fsck":"clean","rootListing":3}
+2   40700 (2)    978    971    4096  1-Oct-2026 09:04 .
+2   40700 (2)    978    971    4096  1-Oct-2026 09:04 ..
+11   40700 (2)      0      0   16384  1-Oct-2026 08:56 lost+found
+13   40700 (2)    978    971    4096  1-Oct-2026 09:04 lib
+backup of the RUNNING grain 612ec0318fb4b450-5101: frozen copy, e2fsck clean, /var listed without mounting

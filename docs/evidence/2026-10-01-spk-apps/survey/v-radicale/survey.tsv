@@ -1,0 +1,13 @@
+store	store	PASS	176.586796675	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/v-radicale/store/base/workroom(noapplicationborn)
+radicale	package	INFO	-	4b137047cf1bdf5832397c3abc75efd621658732Bclass=Skind=webapp=2701
+radicale	birth-a	PASS	38.089871799	
+radicale	install-a	PASS	426.030545648	{"app":"2701","appUid":954,"class":"S","completion":{"committedClaimSha256":"10be196fd7c686f8cba726da0572f143848672af4a6874dff48dc0a5fd249dfb","completionReceipt":{"acceptedCount":"17","eventId":"7831
+radicale	share-a	PASS	301.723514922	{"app":"2701","descriptor":"2711","directory":"/var/lib/minidregg/grains/spk-apps-root/b25fca843f1546dd/host/apps/2701/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+radicale	start-a	PASS	460.682438015	{"app":"2701","completion":{"admittedSha256":"9c2ece416b5c83529e7545014506fc81752e03f0de4a51433fcbcfca0fe2d5af","completionReceipt":{"acceptedCount":"25","eventId":"75116571989733636255787760895079519
+radicale	floor-a	PASS	.345994182	floor-heldapp-processes=9unit=mini-spk-a2701-g2.service
+radicale	enroll-a	PASS	84.467716199	
+radicale	get-a	PASS	39.521584774	200
+radicale	get-a-http	200	-	bytes=96110<!DOCTYPEhtml><htmllang="en"manifest="cache.manifest"><head><title>InfCloud</title><metahttp-equiv="cache-control"content="no-cache"/><metahttp-e
+radicale	metrics-g1-get	PASS	-	{"memoryPeak":"467386368","pidsPeak":"18","procs":"12","processNames":"2bwrap,1launcher.sh,1new-instance.sh,5nginx,1sandstorm-http-,1spk-host,1uwsgi"}
+radicale	metrics-g1	PASS	-	{"memoryPeak":"467386368","pidsPeak":"18","procs":"12","processNames":"2bwrap,1launcher.sh,1new-instance.sh,5nginx,1sandstorm-http-,1spk-host,1uwsgi"}
+radicale	stop-a	PASS	1183.650056482	{"activeState":"inactive","app":"2701","elapsedMs":"1181984","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a2701-g2.service"}

@@ -1,0 +1,4 @@
+tracepoint:raw_syscalls:sys_exit
+/uid >= 946 && uid <= 982 && uid != 981 && (args->ret == -1 || args->ret == -38 || args->ret == -97 || args->ret == -101)/
+{ @[uid, comm, args->id, args->ret] = count(); }
+interval:s:120 { time("%H:%M:%S\n"); print(@); clear(@); }

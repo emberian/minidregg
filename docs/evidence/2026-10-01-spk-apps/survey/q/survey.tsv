@@ -1,0 +1,18 @@
+store	store	PASS	170.677933258	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/q/store/base/workroom(noapplicationborn)
+davros	package	INFO	-	c4c975c3adbeeb77fd928bb90202c049127209100Bclass=Lkind=apiapp=6501
+davros	birth-a	PASS	36.340396869	
+davros	install-a	PASS	657.912800076	{"app":"6501","appUid":969,"class":"L","completion":{"committedClaimSha256":"f9e3b352c7e41fa3e7a05a478dd98f111f02e3a5981fb6875ea75cf2c1c84fd8","completionReceipt":{"acceptedCount":"17","eventId":"6832
+davros	share-a	PASS	315.260035482	{"app":"6501","descriptor":"6511","directory":"/var/lib/minidregg/grains/spk-apps-root/6fccfb18e392c61c/host/apps/6501/routes/owner-api","issueIndex":"20","kind":"api","name":"owner-api","protocol":"m
+davros	start-a	PASS	522.045716733	{"app":"6501","completion":{"admittedSha256":"8ac6d5b2165f10cb79ad601c8e168457d872b778cd487158ebcc51dba9e08986","completionReceipt":{"acceptedCount":"25","eventId":"10764119680029510270505997126469984
+davros	floor-a	PASS	.293232133	floor-heldapp-processes=3unit=mini-spk-a6501-g2.service
+davros	enroll-a	PASS	78.253347383	
+davros	get-a	PASS	39.064079824	200
+davros	get-a-http	200	-	bytes=2601<!DOCTYPEhtml><html><head><metacharset="utf-8"><metahttp-equiv="X-UA-Compatible"content="IE=edge"><title>Davros</title><metaname="d
+davros	metrics-g1-get	PASS	-	{"memoryPeak":"1130397696","pidsPeak":"22","procs":"6","processNames":"2bwrap,1launcher.sh,1node,1sandstorm-http-,1spk-host"}
+wordpress	package	INFO	-	d6955e8f377ac431db17fd01855b3ce546887336Bclass=Mkind=webapp=6601
+wordpress	birth-b	PASS	34.709016101	
+wordpress	install-b	PASS	721.124373925	{"app":"6601","appUid":970,"class":"M","completion":{"committedClaimSha256":"be59c381f42aedc9b6440d6d2cfbaf4f20fad34f37acd1dd05df1e1177638d2c","completionReceipt":{"acceptedCount":"32","eventId":"5719
+wordpress	share-b	FAIL	730.739954650	spk-host:grainrefused:Nosuchfileordirectory(oserror2)
+gogs	package	INFO	-	aede44cf19129337aae68b699332457415155356Bclass=Skind=webapp=6701
+gogs	birth-c	PASS	43.987074562	
+gogs	install-c	FAIL	.150784289	spk-host:grainrefused:Nosuchfileordirectory(oserror2)

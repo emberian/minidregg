@@ -1,0 +1,7 @@
+{"verb":"exec","command":"sh"} -> {"error":"request refused: unknown variant `exec`, expected one of `init-store`, `place`, `set-cgroup`, `ingest`, `mount-volume`, `unmount`, `install-unit`, `start`, `stop`, `export-volume`, `backup` at line 1 column 14","ok":false}
+{"verb":"install-unit","store":"0123456789abcdef","app":"7","generation":"2","unitText":"[Service]
+ExecStart=/bin/sh"} -> {"error":"request refused: unknown field `unitText`, expected one of `store`, `app`, `generation`","ok":false}
+{"verb":"stop","unit":"sshd.service"} -> {"error":"not a resident unit name","ok":false}
+{"verb":"place","store":"../../../../etc","app":"1"} -> {"error":"store key or app id refused","ok":false}
+{"verb":"start","unit":"mini-spk-a9101-g2.service"} -> {"error":"start refused: unit not installed by this broker","ok":false}
+5/5 out-of-protocol requests refused with a reason

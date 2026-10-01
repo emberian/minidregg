@@ -1,0 +1,5 @@
+killing resident pid=127342 unit=mini-spk-a5101-g2.service generation=2 (uid 983)
+unit after kill: Result=signal ActiveState=failed InvocationID=7cc73927abb3471985e597667d332ea6 
+supervisor mini-spk-apps-spk-supervisor@612ec0318fb4b450-5101.service activated .062208008s after SIGKILL
+[{"generation":"2","state":"stopped","unit":"mini-spk-a5101-g2.service","unitActiveState":"inactive"},{"generation":"4","state":"running","unit":"mini-spk-a5101-g4.service","unitActiveState":"active"}]
+generation 2 killed -> supervisor STOP + continue -> generation 4 active 2528.635242059s after SIGKILL (supervisor activation .062208008s)

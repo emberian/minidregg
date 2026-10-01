@@ -1,0 +1,14 @@
+store                        exit=0 151.068502059s
+services                     exit=0 1.025986022s
+workroom                     exit=0 11.993974265s
+profile                      exit=0 .638470846s
+birth-a                      exit=0 37.041347674s
+install-a                    exit=0 594.541615154s
+share-a                      exit=0 318.562181330s
+start-a                      exit=0 506.212486671s
+floor-a                      exit=0 .449126826s
+enroll-a                     exit=1 21.083897849s
+stop-a                       exit=0 1210.092554871s
+birth-b                      exit=0 47.729599729s
+install-b                    exit=0 912.812725402s
+share-b                      exit=1 735.004836405s

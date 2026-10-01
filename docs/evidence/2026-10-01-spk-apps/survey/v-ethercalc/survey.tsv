@@ -1,0 +1,25 @@
+store	store	PASS	175.007171227	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/v-ethercalc/store/base/workroom(noapplicationborn)
+ethercalc	package	INFO	-	93bd2c296692368252ea7b5610a7930d11983992Bclass=Mkind=webapp=2301
+ethercalc	birth-a	PASS	31.142828514	
+ethercalc	install-a	FAIL	39.784982440	spk-host:grainrefused:mini-spk-brokerrefused:appUIDpoolexhausted
+ethercalc	package	INFO	-	93bd2c296692368252ea7b5610a7930d11983992Bclass=Mkind=webapp=2301
+ethercalc	birth-a	PASS	.026652610	
+ethercalc	install-a	PASS	393.981962620	{"app":"2301","appUid":946,"class":"M","completion":{"committedClaimSha256":"5b2513c2f379e8d57aedcfdb60e9038805288a52793ce2e3c9ee5923ff3890ea","completionReceipt":{"acceptedCount":"17","eventId":"5796
+ethercalc	share-a	PASS	310.520211776	{"app":"2301","descriptor":"2311","directory":"/var/lib/minidregg/grains/spk-apps-root/4fb128cf1ec8d624/host/apps/2301/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+ethercalc	start-a	PASS	463.107931483	{"app":"2301","completion":{"admittedSha256":"8db504d7d4b10117d0c3473807588ed24d260ca6a12f6014defeb14ebe38e07a","completionReceipt":{"acceptedCount":"25","eventId":"11051410606650234380570755919669566
+ethercalc	floor-a	PASS	.229591733	floor-heldapp-processes=4unit=mini-spk-a2301-g2.service
+ethercalc	enroll-a	PASS	66.048360945	
+ethercalc	get-a	PASS	43.144426732	200
+ethercalc	get-a-http	200	-	bytes=3639<!DOCTYPEhtml><htmlmanifest="manifest.appcache"><head><metacharset="utf-8"/><metacontent="IE=edge"http-equiv="X-UA-Compatible"/><metaname="referrer"
+ethercalc	metrics-g1-get	PASS	-	{"memoryPeak":"507551744","pidsPeak":"18","procs":"7","processNames":"2bwrap,1make,1node,1run_grain.sh,1sandstorm-http-,1spk-host"}
+ethercalc	post-a	PASS	40.867549786	201
+ethercalc	post-a-http	201	-	bytes=2OK
+ethercalc	metrics-g1	PASS	-	{"memoryPeak":"507551744","pidsPeak":"18","procs":"7","processNames":"2bwrap,1make,1node,1run_grain.sh,1sandstorm-http-,1spk-host"}
+ethercalc	stop-a	PASS	1341.687932192	{"activeState":"inactive","app":"2301","elapsedMs":"1340264","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a2301-g2.service"}
+ethercalc	start-a2	PASS	1086.734770528	{"app":"2301","completion":{"admittedSha256":"4eb97310abc227cd048becf7c934ed746d141f09081c3999626db0f89abdaf09","completionReceipt":{"acceptedCount":"34","eventId":"31435571978494942811462752878219249
+ethercalc	floor-a2	PASS	.343417867	floor-heldapp-processes=4unit=mini-spk-a2301-g4.service
+ethercalc	enroll-a2	PASS	97.706132533	
+ethercalc	poll-a2	PASS	48.278889438	200
+ethercalc	poll-a2-http	200	-	bytes=29survey,"writtenbeforeSTOP"
+ethercalc	survived	PASS	-	afterSTOP+continuethewritereadsback:writtenbeforeSTOP
+ethercalc	metrics-g2	PASS	-	{"memoryPeak":"510177280","pidsPeak":"18","procs":"7","processNames":"2bwrap,1make,1node,1run_grain.sh,1sandstorm-http-,1spk-host"}

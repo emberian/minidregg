@@ -1,0 +1,23 @@
+collections.spk spk-host: bridge-only SPK lacks signed config
+davros.spk version=311 apiPath=/
+dokuwiki.spk version=10 apiPath=
+ethercalc.spk version=201702210 apiPath=
+etherpad.spk spk-host: signed bridge requires unsupported physical profile: saveIdentityCaps
+firefly-iii.spk version=19 apiPath=
+gitweb.spk version=10 apiPath=/repo.git/
+gogs.spk version=5 apiPath=
+hacker-slides.spk version=5 apiPath=
+laverna.spk spk-host: bridge-only SPK lacks signed config
+lets-chat.spk version=8 apiPath=
+quick-survey.spk version=9 apiPath=
+radicale.spk version=14 apiPath=
+roundcube.spk version=11 apiPath=
+scrumblr.spk version=6 apiPath=
+simple-todos.spk version=5 apiPath=
+sntfy.spk version=18 apiPath=/
+telescope-nova.spk spk-host: SPK verification failed: .spk xz decompress failed: io error: failed to fill whole buffer
+texteditor.spk version=6 apiPath=
+tiny-tiny-rss.spk spk-host: signed bridge requires unsupported physical profile: expectAppHooks
+wbo.spk version=1 apiPath=
+wekan.spk spk-host: signed bridge requires unsupported physical profile: saveIdentityCaps
+wordpress.spk version=19 apiPath=

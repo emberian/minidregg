@@ -1,0 +1,22 @@
+store	store	PASS	158.944205905	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/u-slides/store/base/workroom(noapplicationborn)
+hacker-slides	package	INFO	-	f0277a5dce2e1c6af0cce188241411a416778192Bclass=Skind=webapp=5701
+hacker-slides	birth-a	PASS	39.455962184	
+hacker-slides	install-a	PASS	512.961689669	{"app":"5701","appUid":979,"class":"S","completion":{"committedClaimSha256":"b9d5a69b01f2824701a3709c62be31d103e4a53458ceda3f8626470ccdb9f8ae","completionReceipt":{"acceptedCount":"17","eventId":"5085
+hacker-slides	share-a	PASS	334.708803184	{"app":"5701","descriptor":"5711","directory":"/var/lib/minidregg/grains/spk-apps-root/50d4984b209d2345/host/apps/5701/routes/owner-web","issueIndex":"20","kind":"web","name":"owner-web","protocol":"m
+hacker-slides	start-a	PASS	503.747875502	{"app":"5701","completion":{"admittedSha256":"ef8d5c5a46ac3f7d0a425ce3ca670f137b9d3d1f144b697d05745a02fd62ffc9","completionReceipt":{"acceptedCount":"25","eventId":"95474261670189250755314328452100165
+hacker-slides	floor-a	PASS	.344584174	floor-heldapp-processes=4unit=mini-spk-a5701-g2.service
+hacker-slides	enroll-a	PASS	78.778857529	
+hacker-slides	get-a	PASS	48.347801149	503
+hacker-slides	get-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+hacker-slides	metrics-g1-get	PASS	-	{"memoryPeak":"480251904","pidsPeak":"14","procs":"7","processNames":"2bwrap,1launcher.sh,2python3,1sandstorm-http-,1spk-host"}
+hacker-slides	post-a	PASS	28.613656663	503
+hacker-slides	post-a-http	503	-	bytes=36Minidispatchadmissionunavailable
+hacker-slides	metrics-g1	PASS	-	{"memoryPeak":"480251904","pidsPeak":"14","procs":"7","processNames":"2bwrap,1launcher.sh,2python3,1sandstorm-http-,1spk-host"}
+hacker-slides	stop-a	PASS	1320.219808124	{"activeState":"inactive","app":"5701","elapsedMs":"1318757","generation":"2","protocol":"mini-spk-grain-stop-v1","unit":"mini-spk-a5701-g2.service"}
+hacker-slides	start-a2	PASS	972.896557136	{"app":"5701","completion":{"admittedSha256":"fd1d923b5e6e321eedeea7976ab0bc62114d332555382836b2d7187db7c4c941","completionReceipt":{"acceptedCount":"33","eventId":"64469770937970673831448518634403949
+hacker-slides	floor-a2	PASS	.284937477	floor-heldapp-processes=4unit=mini-spk-a5701-g4.service
+hacker-slides	enroll-a2	PASS	81.147924992	
+hacker-slides	poll-a2	PASS	40.877815309	200
+hacker-slides	poll-a2-http	200	-	bytes=720#HackerSlides###Hacktogethersimpleslides---##TheBasics-Separateslidesusing'`---`'onablankline-Writegithubflavoredmarkdown-Click'
+hacker-slides	survived	FAIL	-	expectedtextnotinthepollbody:surveyslidewrittenbeforeSTOP
+hacker-slides	metrics-g2	PASS	-	{"memoryPeak":"496463872","pidsPeak":"14","procs":"7","processNames":"2bwrap,1launcher.sh,2python3,1sandstorm-http-,1spk-host"}

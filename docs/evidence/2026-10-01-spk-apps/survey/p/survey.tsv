@@ -1,0 +1,23 @@
+store	store	PASS	100.263662766	grainstorereadyat/var/lib/minidregg/grains/spk-apps-survey/p/store/base/workroom(noapplicationborn)
+sntfy	package	INFO	-	bc424d5fd3cf60977cacdac328adfbee17379772Bclass=Skind=apiapp=6101
+sntfy	birth-a	PASS	26.070173378	
+sntfy	install-a	PASS	243.469667306	{"app":"6101","appUid":964,"class":"S","completion":{"committedClaimSha256":"185662db7f72504158998e05ee49c47fbc3fceac61a8cc865c4c3471baed3d8d","completionReceipt":{"acceptedCount":"17","eventId":"1853
+sntfy	share-a	PASS	168.011256078	{"app":"6101","descriptor":"6111","directory":"/var/lib/minidregg/grains/spk-apps-root/874f52062572bb1e/host/apps/6101/routes/owner-api","issueIndex":"20","kind":"api","name":"owner-api","protocol":"m
+sntfy	start-a	PASS	243.479052681	{"app":"6101","completion":{"admittedSha256":"17f4ebca2554cfe90fc942cd90b948f8b7775fb5d69ba68ce4a490b770323b1a","completionReceipt":{"acceptedCount":"25","eventId":"97854919115424737649878807187231439
+sntfy	floor-a	PASS	.131662468	floor-heldapp-processes=3unit=mini-spk-a6101-g2.service
+sntfy	enroll-a	PASS	32.765315817	
+sntfy	get-a	PASS	16.875646048	200
+sntfy	get-a-http	200	-	bytes=17{"healthy":true}
+sntfy	metrics-g1-get	PASS	-	{"memoryPeak":"415248384","pidsPeak":"26","procs":"6","processNames":"1bash,2bwrap,1ntfy,1sandstorm-http-,1spk-host"}
+simple-todos	package	INFO	-	5830d70137cdae158118884da879087023632200Bclass=Mkind=webapp=6201
+simple-todos	birth-b	PASS	20.728734120	
+simple-todos	install-b	PASS	479.293385983	{"app":"6201","appUid":965,"class":"M","completion":{"committedClaimSha256":"f252a7f52b61665e757f2242cdbb270cef08f6974707efd41d0c68836dcf7f80","completionReceipt":{"acceptedCount":"32","eventId":"6075
+simple-todos	share-b	PASS	688.280108386	{"app":"6201","descriptor":"6211","directory":"/var/lib/minidregg/grains/spk-apps-root/874f52062572bb1e/host/apps/6201/routes/owner-web","issueIndex":"35","kind":"web","name":"owner-web","protocol":"m
+simple-todos	start-b	FAIL	902.387386618	spk-host:grainrefused:UNRESOLVED:residentunitmini-spk-a6201-g2.servicestillrunningwithoutSTARTcompletionafter900s
+hacker-slides	package	INFO	-	f0277a5dce2e1c6af0cce188241411a416778192Bclass=Skind=webapp=6301
+hacker-slides	birth-c	PASS	43.768823625	
+hacker-slides	install-c	PASS	1437.345514091	{"app":"6301","appUid":967,"class":"S","completion":{"committedClaimSha256":"43c5d12fccf34c3a2043e2b93d06c0c63222e2901b24c52d8747070343e5c9d0","completionReceipt":{"acceptedCount":"44","eventId":"7642
+hacker-slides	share-c	FAIL	746.192465772	spk-host:grainrefused:Nosuchfileordirectory(oserror2)
+ethercalc	package	INFO	-	93bd2c296692368252ea7b5610a7930d11983992Bclass=Mkind=webapp=6401
+ethercalc	birth-d	PASS	41.070861415	
+ethercalc	install-d	FAIL	.173232035	spk-host:grainrefused:Nosuchfileordirectory(oserror2)

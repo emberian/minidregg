@@ -1,0 +1,4 @@
+unit=mini-spk-a5101-g2.service slice=mini-spk-apps-grains-s612ec0318fb4b450a5101.slice cgroup=/mini.slice/mini-spk.slice/mini-spk-apps.slice/mini-spk-apps-grains.slice/mini-spk-apps-grains-s612ec0318fb4b450a5101.slice/mini-spk-a5101-g2.service
+systemctl: CPUWeight=50 IOWeight=50 MemoryMax=536870912 TasksMax=256 
+cgroup memory.max=536870912 pids.max=256
+class S limits hold on mini-spk-apps-grains-s612ec0318fb4b450a5101.slice (MemoryMax=536870912 CPUWeight=50 TasksMax=256 IOWeight=50)
