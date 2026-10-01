@@ -544,6 +544,43 @@ private def elementOp (path : String) (json : Lean.Json) : Result ContentResourc
       pure (.remove (← identifier (path ++ ".child") (← field path "child" obj)))
   | _ => failAt (path ++ ".type") "expected splice, move or remove"
 
+/-- `{"type":"atom","atom":A}` or `{"type":"element","element":E}`. -/
+private def markTarget (path : String) (json : Lean.Json) : Result ContentResource.MarkTarget := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "atom" =>
+      let obj ← exactObject path ["type", "atom"] json
+      pure (.atom (← identifier (path ++ ".atom") (← field path "atom" obj)))
+  | "element" =>
+      let obj ← exactObject path ["type", "element"] json
+      pure (.element (← identifier (path ++ ".element") (← field path "element" obj)))
+  | _ => failAt (path ++ ".type") "noSuchTarget: expected atom or element"
+
+/-- `{"type":"bold"|"italic"|"code"|"heading"}` or
+`{"type":"link","link":L,"target":TARGET}`; any other kind is refused
+`unknownKind` here, since the kernel's grammar cannot carry one. -/
+private def markSpec (path : String) (json : Lean.Json) : Result ContentResource.MarkSpec := do
+  let (tag, _) ← tagged path json
+  match tag with
+  | "bold" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.bold
+  | "italic" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.italic
+  | "code" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.code
+  | "heading" =>
+      let _ ← exactObject path ["type"] json
+      pure ContentResource.MarkSpec.heading
+  | "link" =>
+      let obj ← exactObject path ["type", "link", "target"] json
+      pure (.link (← identifier (path ++ ".link") (← field path "link" obj))
+        (← linkTarget (path ++ ".target") (← field path "target" obj)))
+  | other =>
+      failAt (path ++ ".type") s!"unknownKind: {other} (expected bold, italic, code, heading or link)"
+
 private def contentAction (path : String) (json : Lean.Json) : Result ContentResource.Action := do
   let (tag, _) ← tagged path json
   match tag with
@@ -590,6 +627,15 @@ private def contentAction (path : String) (json : Lean.Json) : Result ContentRes
   | "unlink" =>
       let obj ← exactObject path ["type", "link"] json
       pure (.unlink (← identifier (path ++ ".link") (← field path "link" obj)))
+  | "mark" =>
+      let obj ← exactObject path ["type", "mark", "target", "revision", "kind"] json
+      pure (.mark (← identifier (path ++ ".mark") (← field path "mark" obj))
+        ⟨← markTarget (path ++ ".target") (← field path "target" obj),
+          ← identifier (path ++ ".revision") (← field path "revision" obj),
+          ← markSpec (path ++ ".kind") (← field path "kind" obj)⟩)
+  | "unmark" =>
+      let obj ← exactObject path ["type", "mark"] json
+      pure (.unmark (← identifier (path ++ ".mark") (← field path "mark" obj)))
   | "transclude" =>
       let obj ← exactObject path ["type", "transclusion", "link", "request"] json
       pure (.transclude (← identifier (path ++ ".transclusion") (← field path "transclusion" obj))
@@ -2849,6 +2895,56 @@ private def annotationBodyJson : Hyperdocument.AnnotationBody → Lean.Json
   | .reference document => .mkObj [("type", "reference"),
       ("document", decimal document.digest.value)]
 
+private def markAnchorJson : Hyperdocument.MarkAnchor → Lean.Json
+  | .range range => .mkObj [("type", "range"), ("range", stableRangeJson range)]
+  | .atom atom revision => .mkObj [("type", "atom"), ("atom", decimal atom.digest.value),
+      ("revision", decimal revision.digest.value)]
+  | .element element revision => .mkObj [("type", "element"),
+      ("element", decimal element.digest.value), ("revision", decimal revision.digest.value)]
+
+/-- A mark as a renderer reads it: kind (a link mark with its link record's
+target and whether that link is live), anchor, author, and `fresh` — is its
+target still at the anchored revision in this same store.  A stale mark is
+shown struck; it is never re-anchored. -/
+private def markJson (store : ContentResource.ContentStore) (identifier : Hyperdocument.MarkId)
+    (record : Hyperdocument.MarkRecord) : List (String × Lean.Json) :=
+  let kind : List (String × Lean.Json) := match record.kind with
+    | .bold => [("kind", "bold")]
+    | .italic => [("kind", "italic")]
+    | .code => [("kind", "code")]
+    | .heading => [("kind", "heading")]
+    | .link link =>
+        let linkRecord := Hyperdocument.lookup store .links link
+        [("kind", "link"), ("link", decimal link.digest.value),
+          ("target", (linkRecord.map fun found => linkTargetJson found.target).getD .null),
+          ("linkLive", .bool ((linkRecord.map fun found => found.tombstonedAt.isNone).getD false))]
+  [("mark", decimal identifier.digest.value)] ++ kind ++
+    [("anchor", markAnchorJson record.anchor), ("author", principalJson record.author),
+      ("fresh", .bool (ContentResource.markFresh store record)),
+      ("tombstonedAt", optionalOperationJson record.tombstonedAt)]
+
+/-- The marks of a content store, in canonical entry order. -/
+private def marksOf (store : ContentResource.ContentStore) :
+    List (Hyperdocument.MarkId × Hyperdocument.MarkRecord) :=
+  (StoreCodec.entries HyperdocumentCell.contentWire store).filterMap fun entry =>
+    match entry with
+    | ⟨⟨.marks, identifier⟩, record⟩ =>
+        let identifier : Hyperdocument.MarkId := identifier
+        let record : Hyperdocument.MarkRecord := record
+        some (identifier, record)
+    | _ => none
+
+/-- The live (unretired) marks laid on one row of the order: on its element,
+or, for a line, on its atom. -/
+private def rowMarksJson (store : ContentResource.ContentStore) (element : Hyperdocument.ElementId)
+    (atom : Option Hyperdocument.AtomId) : Lean.Json :=
+  .arr <| ((marksOf store).filter fun (_, record) =>
+      record.tombstonedAt.isNone && match record.anchor with
+        | .element target _ => target == element
+        | .atom line _ => atom == some line
+        | .range _ => false).toArray.map fun (identifier, record) =>
+    .mkObj (markJson store identifier record)
+
 /-- One entry of a content cell. Documents, elements, links, atoms, runs and
 annotations are spelled out (an annotation with `fresh`: is its atom still at
 the anchored revision in this same cell); every entry carries its canonical
@@ -2916,6 +3012,13 @@ private def contentEntryJson (store : ContentResource.ContentStore)
         ("createdAt", decimal record.createdAt.digest.value),
         ("tombstonedAt", optionalOperationJson record.tombstonedAt),
         ("canonical", canonical)]
+  | ⟨⟨.marks, identifier⟩, record⟩ =>
+      let identifier : Hyperdocument.MarkId := identifier
+      let record : Hyperdocument.MarkRecord := record
+      .mkObj (([("type", "mark"), ("id", decimal identifier.digest.value),
+        ("document", decimal record.document.digest.value)] : List (String × Lean.Json)) ++
+        markJson store identifier record ++
+        [("canonical", canonical)])
   | ⟨⟨space, _⟩, _⟩ => .mkObj [("type", "namespace"),
       ("namespace", decimal (HyperdocumentCell.namespaceTag space).toNat), ("canonical", canonical)]
 
@@ -2988,11 +3091,15 @@ private def orderEntryJson (store : ContentResource.ContentStore)
                 ("revision", decimal atomRecord.revision.digest.value),
                 ("struck", .bool atomRecord.tombstonedAt.isSome)]
             | none => [("payload", .null)]
-          .mkObj (place ++ [("kind", .str "atom"), ("atom", decimal atom.digest.value)] ++ line)
+          .mkObj (place ++ [("kind", .str "atom"), ("atom", decimal atom.digest.value)] ++ line ++
+            [("marks", rowMarksJson store element (some atom))])
       | .embed transclusion => .mkObj (place ++ [("kind", .str "embed"),
-          ("transclusion", decimal transclusion.digest.value)])
+          ("transclusion", decimal transclusion.digest.value),
+          ("revision", decimal record.revision.digest.value),
+          ("marks", rowMarksJson store element none)])
       | .container children => .mkObj (place ++ [("kind", .str "container"),
-          ("revision", decimal record.revision.digest.value), ("children", decimal children.length)])
+          ("revision", decimal record.revision.digest.value), ("children", decimal children.length),
+          ("marks", rowMarksJson store element none)])
       | .runs _ => .mkObj (place ++ [("kind", .str "runs")])
       | .opaque _ _ => .mkObj (place ++ [("kind", .str "opaque")])
 
@@ -3226,6 +3333,10 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
       let value ← decoded "view-resource" NativeObservationController.resourceViewCodec bytes
       resourceJson value
   | "view-document" => documentJson bytes
+  | "view-marks" => do
+      let store ← contentOfView "view-marks" bytes
+      pure <| .mkObj [("type", "marks"), ("marks", .arr <| (marksOf store).toArray.map
+        fun (identifier, record) => .mkObj (markJson store identifier record))]
   | "view-policy" => do
       let value ← match PolicyRecordCodec.decode bytes with
         | some value => pure value | none => failAt "view-policy" "noncanonical policy source"
@@ -3277,6 +3388,6 @@ def inspect (kind : String) (bytes : List UInt8) : Result Lean.Json :=
         ((CredentialAuthorityEntryCodec.storedCapabilityStream .program).toLawful.decode bytes).isSome
       if accepted then pure <| .mkObj [("type", "capability"), ("canonical", hexJson bytes)]
       else failAt "view-capability" "noncanonical capability source"
-  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-document, view-policy, view-capability, view-who, view-since, view-at, view-backlinks, or view-links"
+  | _ => failAt "kind" "expected challenge, plan, outcome, application-permission-schema, view-resource, view-document, view-marks, view-policy, view-capability, view-who, view-since, view-at, view-backlinks, or view-links"
 
 end Minidregg.Host.Json

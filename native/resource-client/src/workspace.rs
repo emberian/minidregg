@@ -1080,6 +1080,210 @@ fn doc_remove(root: &Path, workspace: &Value, name: &str, line: usize) -> Result
         vec![edit_element(&parent, &revision, json!({"type":"remove","child":element}))], "remove")
 }
 
+/// The mark kind `--kind` names, as the Host's `kind` object.  A link mark
+/// carries a fresh link identifier and the document reference NAME (`--to`)
+/// names; the kernel writes that link as an ordinary link record.
+fn mark_kind(root: &Path, kind: &str, to: Option<&str>) -> Result<(Value, Option<String>)> {
+    match kind {
+        "bold" | "italic" | "code" | "heading" => {
+            if to.is_some() {
+                return Err("--to is only for a link mark".into());
+            }
+            Ok((json!({"type": kind}), None))
+        }
+        "link" => {
+            let to = to.ok_or("a link mark needs --to NAME")?;
+            let target = reference(root, to)?;
+            let link = random_nonce()?;
+            Ok((
+                json!({"type":"link","link":link,
+                    "target":{"type":"document","id":member(&target, "target")?}}),
+                Some(link),
+            ))
+        }
+        other => Err(format!(
+            "unknownKind: {other} (expected bold, italic, code, heading or link)"
+        )),
+    }
+}
+
+/// What line N is to a mark: its atom, or (a transclusion) its element, at the
+/// revision this view read.  A later edit of the line makes the mark stale.
+fn mark_target(document: &Value, line: usize) -> Result<(Value, String)> {
+    let lines = live_lines(document)?;
+    if line == 0 || line > lines.len() {
+        return Err(format!(
+            "noSuchTarget: the document has {} lines; there is no line {line}",
+            lines.len()
+        ));
+    }
+    let entry = lines[line - 1];
+    let target = match entry["kind"].as_str() {
+        Some("atom") => json!({"type":"atom","atom":member(entry, "atom")?}),
+        _ => json!({"type":"element","element":member(entry, "element")?}),
+    };
+    Ok((target, member(entry, "revision")?.to_owned()))
+}
+
+/// `mark`: lay a KIND mark on line N as this workspace reads the document now.
+fn doc_mark(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    line: usize,
+    kind: &str,
+    to: Option<&str>,
+) -> Result<()> {
+    let reference = reference(root, name)?;
+    let document = host_document(root, workspace, &reference)?;
+    let (target, revision) = mark_target(&document, line)?;
+    let (kind, link) = mark_kind(root, kind, to)?;
+    let mark = random_nonce()?;
+    eprintln!("workspace mark: {mark}");
+    if let Some(link) = link {
+        eprintln!("workspace mark link: {link}");
+    }
+    submit_content(
+        root,
+        workspace,
+        name,
+        vec![json!({"type":"mark","mark":mark,"target":target,"revision":revision,"kind":kind})],
+        "mark",
+    )
+}
+
+/// `unmark`: retire mark ID, or the one live mark (of KIND) on line N.  The
+/// kernel admits it only from the mark's author or the document's owner.
+fn doc_unmark(
+    root: &Path,
+    workspace: &Value,
+    name: &str,
+    mark: Option<&str>,
+    line: Option<usize>,
+    kind: Option<&str>,
+) -> Result<()> {
+    let mark = match (mark, line) {
+        (Some(mark), None) if kind.is_none() => {
+            decimal(mark, "mark")?;
+            mark.to_owned()
+        }
+        (None, Some(line)) => {
+            let reference = reference(root, name)?;
+            let document = host_document(root, workspace, &reference)?;
+            let lines = live_lines(&document)?;
+            if line == 0 || line > lines.len() {
+                return Err(format!(
+                    "the document has {} lines; there is no line {line}",
+                    lines.len()
+                ));
+            }
+            let found: Vec<&Value> = lines[line - 1]["marks"]
+                .as_array()
+                .map(|marks| {
+                    marks
+                        .iter()
+                        .filter(|mark| kind.is_none_or(|kind| mark["kind"] == kind))
+                        .collect()
+                })
+                .unwrap_or_default();
+            match found.as_slice() {
+                [one] => member(one, "mark")?.to_owned(),
+                [] => {
+                    return Err(format!(
+                        "markNotFound: no {} mark on line {line}",
+                        kind.unwrap_or("live")
+                    ))
+                }
+                many => {
+                    let ids: Vec<&str> = many.iter().filter_map(|mark| mark["mark"].as_str()).collect();
+                    return Err(format!(
+                        "line {line} has {} such marks; name one with --mark ({})",
+                        many.len(),
+                        ids.join(", ")
+                    ));
+                }
+            }
+        }
+        _ => return Err("unmark needs --mark ID, or --line N [--kind K]".into()),
+    };
+    submit_content(root, workspace, name, vec![json!({"type":"unmark","mark":mark})], "unmark")
+}
+
+/// This workspace's names for reference targets: what a link mark points at is
+/// shown by the name the reader knows it by.
+fn reference_names(root: &Path) -> std::collections::BTreeMap<String, String> {
+    let mut names = std::collections::BTreeMap::new();
+    if let Ok(entries) = fs::read_dir(root.join("refs")) {
+        for entry in entries.flatten() {
+            let file = entry.file_name();
+            let Some(stem) = file.to_str().and_then(|file| file.strip_suffix(".json")) else {
+                continue;
+            };
+            if let Ok(value) = reference(root, stem) {
+                if let Some(target) = value["target"].as_str() {
+                    names.entry(target.to_owned()).or_insert_with(|| stem.to_owned());
+                }
+            }
+        }
+    }
+    names
+}
+
+fn link_target_text(names: &std::collections::BTreeMap<String, String>, target: &Value) -> String {
+    let id = target["id"].as_str().or_else(|| target["document"].as_str()).unwrap_or("?");
+    match target["type"].as_str() {
+        Some("document") | Some("range") => {
+            names.get(id).cloned().unwrap_or_else(|| format!("doc:{id}"))
+        }
+        Some(other) => format!("{other}:{id}"),
+        None => "?".to_owned(),
+    }
+}
+
+/// A row's text with its marks in a plain notation: `# ` heading, `**bold**`,
+/// `_italic_`, `` `code` ``, `[text](→ name)` for a link.  A stale mark (its line
+/// moved since the mark was laid) is shown struck, `~~…~~`, and never applied as
+/// if current.  Each kind (a link: each target) renders once: struck only when
+/// every mark of it is stale, since a fresh mark of it says the line is so now.
+fn render_marks(
+    names: &std::collections::BTreeMap<String, String>,
+    body: &str,
+    marks: &Value,
+) -> String {
+    let Some(marks) = marks.as_array() else {
+        return body.to_owned();
+    };
+    let mut text = body.to_owned();
+    for kind in ["code", "italic", "bold", "link", "heading"] {
+        let mut targets = std::collections::BTreeMap::<String, bool>::new();
+        for mark in marks.iter().filter(|mark| mark["kind"] == kind) {
+            let target = if kind == "link" {
+                link_target_text(names, &mark["target"])
+            } else {
+                String::new()
+            };
+            *targets.entry(target).or_insert(false) |= mark["fresh"] == true;
+        }
+        for (target, fresh) in targets {
+            let strike = |decorated: String| {
+                if fresh {
+                    decorated
+                } else {
+                    format!("~~{decorated}~~")
+                }
+            };
+            text = match kind {
+                "code" => strike(format!("`{text}`")),
+                "italic" => strike(format!("_{text}_")),
+                "bold" => strike(format!("**{text}**")),
+                "link" => strike(format!("[{text}](→ {target})")),
+                _ => format!("{} {text}", strike("#".to_owned())),
+            };
+        }
+    }
+    text
+}
+
 /// `doc-show`: the document in the kernel's order.  Each live line is numbered;
 /// a struck line shows as `-`; a transclusion is one line, shown as this
 /// workspace's own read of its source renders it; a section is a heading.
@@ -1091,6 +1295,7 @@ fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
     if let Some(root_element) = document["root"].as_str() {
         depth.insert(root_element.to_owned(), 0);
     }
+    let names = reference_names(root);
     let mut lines = Vec::new();
     let mut text = Vec::new();
     let mut number = 0usize;
@@ -1125,14 +1330,16 @@ fn doc_show(root: &Path, workspace: &Value, name: &str) -> Result<()> {
             Some(other) => (None, format!("[{other}]")),
             None => (None, String::new()),
         };
+        let rendered = render_marks(&names, &body, &entry["marks"]);
         text.push(match n {
-            Some(n) => format!("{indent}{n:>3}  {body}"),
-            None if entry["kind"] == "atom" => format!("{indent}  -  {body} (struck)"),
-            None => format!("{indent}     {body}"),
+            Some(n) => format!("{indent}{n:>3}  {rendered}"),
+            None if entry["kind"] == "atom" => format!("{indent}  -  {rendered} (struck)"),
+            None => format!("{indent}     {rendered}"),
         });
         let mut line = entry.clone();
         line["line"] = n.map_or(Value::Null, |n| json!(n));
         line["text"] = json!(body);
+        line["rendered"] = json!(rendered);
         lines.push(line);
     }
     println!(
@@ -1235,6 +1442,8 @@ fn content_actions(actions: &Value) -> Result<Value> {
             ),
             "transclude" => ("transclude", &["type", "transclusion", "link", "request"]),
             "unlink" => ("unlink", &["type", "link"]),
+            "mark" => ("mark", &["type", "mark", "target", "revision", "kind"]),
+            "unmark" => ("unmark", &["type", "mark"]),
             _ => return Err("unknown workspace content action".into()),
         };
         if obj.len() != fields.len() || fields.iter().any(|field| !obj.contains_key(*field)) {
@@ -1314,12 +1523,12 @@ fn propose(root: &Path, workspace: &Value, request_path: &Path, proposal_id: &st
                 }
                 // The action grammar version the Host's controller requires per
                 // payload: the scalar declaration (1) or the content command
-                // grammar (`ContentResource.commandVersion`, 6), which an
+                // grammar (`ContentResource.commandVersion`, 7), which an
                 // observe-only `read` of a content cell is checked under too.
                 let (lowered, schema_version) = match member(payload, "type")? {
                     "scalar" => (scalar_actions(&payload["actions"], target)?, "1"),
-                    "content" => (content_actions(&payload["actions"])?, "6"),
-                    "read" => (json!({"type":"read"}), "6"),
+                    "content" => (content_actions(&payload["actions"])?, "7"),
+                    "read" => (json!({"type":"read"}), "7"),
                     _ => return Err("unsupported workspace payload type".into()),
                 };
                 // A read target's authorization leg is checked under the observe
@@ -2185,6 +2394,22 @@ pub(crate) fn run(mut args: Args) -> Result<()> {
             args.finish()?;
             doc_move(&root, &workspace, &name, from, to)
         }
+        "mark" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let line = line_number(args.required("line")?, "--line")?;
+            let kind = os_string(args.required("kind")?, "mark kind")?;
+            let to = args.optional("to").map(|value| os_string(value, "link target name")).transpose()?;
+            args.finish()?;
+            doc_mark(&root, &workspace, &name, line, &kind, to.as_deref())
+        }
+        "unmark" => {
+            let name = os_string(args.required("name")?, "document name")?;
+            let mark = args.optional("mark").map(|value| os_string(value, "mark")).transpose()?;
+            let line = args.optional("line").map(|value| line_number(value, "--line")).transpose()?;
+            let kind = args.optional("kind").map(|value| os_string(value, "mark kind")).transpose()?;
+            args.finish()?;
+            doc_unmark(&root, &workspace, &name, mark.as_deref(), line, kind.as_deref())
+        }
         "doc-remove" => {
             let name = os_string(args.required("name")?, "document name")?;
             let line = line_number(args.required("line")?, "--line")?;
@@ -2294,6 +2519,25 @@ mod tests {
             "request":{}}])).is_ok());
         assert!(content_actions(&json!([{"type":"unlink","link":"9"}])).is_ok());
         assert!(content_actions(&json!([{"type":"unlink","link":"9","before":"1"}])).is_err());
+        assert!(content_actions(&json!([{"type":"mark","mark":"1","target":{"type":"atom","atom":"2"},
+            "revision":"3","kind":{"type":"bold"}}])).is_ok());
+        assert!(content_actions(&json!([{"type":"mark","mark":"1","target":{"type":"atom","atom":"2"},
+            "revision":"3","kind":{"type":"bold"},"payload":"00"}])).is_err());
+        assert!(content_actions(&json!([{"type":"unmark","mark":"1"}])).is_ok());
+    }
+
+    #[test]
+    fn marks_render_inline() {
+        let names = std::collections::BTreeMap::from([("77".to_owned(), "target".to_owned())]);
+        let marks = json!([{"kind":"bold","fresh":false},{"kind":"bold","fresh":true},
+            {"kind":"link","fresh":true,"target":{"type":"document","id":"77"}},
+            {"kind":"italic","fresh":false}]);
+        assert_eq!(render_marks(&names, "two", &marks), "[**~~_two_~~**](→ target)");
+        let heading = json!([{"kind":"heading","fresh":true},{"kind":"code","fresh":true}]);
+        assert_eq!(render_marks(&names, "x", &heading), "# `x`");
+        let unknown = json!([{"kind":"link","fresh":false,"target":{"type":"document","id":"5"}}]);
+        assert_eq!(render_marks(&names, "y", &unknown), "~~[y](→ doc:5)~~");
+        assert_eq!(render_marks(&names, "z", &Value::Null), "z");
     }
 
     #[test]

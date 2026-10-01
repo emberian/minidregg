@@ -223,5 +223,5 @@ row audit re-admitted "$(grep -q "every signed ingress re-admitted" "$D/audit.ou
 cat "$rows" >&2
 total=$(wc -l <"$rows")
 [ "$bad" = 0 ] || { echo "$bad of $total link rows differ from expectation (see $rows)" >&2; exit 1; }
-echo "$total/$total link rows as expected: backlinks from the Host's index, cut to the reader's readable sources, agreeing with the page fold; unlink and quote move the index; cold reopen and audit agree" >&2
+echo "$total/$total link rows as expected: backlinks from the Host's index, cut to the reader's readable sources, agreeing with the page fold; unlink moves the index; cold reopen and audit agree" >&2
 echo "$rows"

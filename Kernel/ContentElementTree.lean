@@ -538,6 +538,22 @@ theorem DocumentTree.congr {store store' : ContentStore} {document : DocumentId}
     rw [sameElements]
     exact tree.root root (sameRoot.symm.trans rooted)
 
+theorem elementAt_of_markStep {progress next : Progress} (stepped : MarkStep progress next) :
+    elementAt next.1 = elementAt progress.1 := by
+  funext element
+  unfold elementAt Hyperdocument.lookup
+  rw [stepped.2 ⟨.elements, element⟩ (by simp) (by simp)]
+
+theorem rootOf_of_markStep {progress next : Progress} (stepped : MarkStep progress next)
+    (document : DocumentId) : rootOf next.1 document = rootOf progress.1 document := by
+  unfold rootOf Hyperdocument.lookup
+  rw [stepped.2 ⟨.documents, document⟩ (by simp) (by simp)]
+
+theorem DocumentTree.of_markStep {progress next : Progress} {document : DocumentId}
+    (tree : DocumentTree progress.1 document) (stepped : MarkStep progress next) :
+    DocumentTree next.1 document :=
+  tree.congr (elementAt_of_markStep stepped) (rootOf_of_markStep stepped document)
+
 theorem DocumentTree.set_other {store : ContentStore} {document : DocumentId}
     (tree : DocumentTree store document) {space : Namespace} (key : Key space)
     (value : Option (Value space)) (notElements : space ≠ .elements) (notDocuments : space ≠ .documents) :
@@ -927,6 +943,12 @@ theorem step_tree (author : PrincipalRef) (operation : OperationId) (document : 
       split at accepted
       · cases accepted
       · exact appendLeaf_tree author operation document rfl tree accepted
+  | mark mark request =>
+      simp only [step] at accepted
+      exact tree.of_markStep (markStep_markStep accepted)
+  | unmark mark =>
+      simp only [step] at accepted
+      exact tree.of_markStep (unmarkStep_markStep accepted)
   | unlink link =>
       simp only [step, retireLink] at accepted
       split at accepted
@@ -1098,14 +1120,16 @@ theorem below_chain {store : ContentStore} (forest : (View.Forest (elementAt sto
       · exact walk_child inside (by rw [childrenOf_eq]; exact forest.listed _ _ parentIs)
 
 theorem chain_length_le {store : ContentStore} {path : List ElementId} (nodup : path.Nodup)
-    (stored : ∀ other ∈ path, (elementAt store other).isSome) : path.length ≤ store.support.card := by
+    (stored : ∀ other ∈ path, (elementAt store other).isSome) : path.length ≤ elementCount store := by
   classical
   let address : ElementId → Hyperdocument.Address := fun element => ⟨.elements, element⟩
   have injective : Function.Injective address := fun first second same => by cases same; rfl
   have mappedNodup : (path.map address).Nodup := nodup.map injective
-  have subset : (path.map address).toFinset ⊆ store.support := by
+  have subset : (path.map address).toFinset ⊆
+      store.support.filter (fun address => address.1 = .elements) := by
     intro entry member
     obtain ⟨element, inside, rfl⟩ := List.mem_map.mp (List.mem_toFinset.mp member)
+    refine Finset.mem_filter.mpr ⟨?_, rfl⟩
     apply DFinsupp.mem_support_iff.mpr
     intro zero
     have absent : elementAt store element = none := zero
@@ -1113,6 +1137,7 @@ theorem chain_length_le {store : ContentStore} {path : List ElementId} (nodup : 
     rw [absent] at this
     cases this
   have := Finset.card_le_card subset
+  unfold elementCount
   rwa [List.toFinset_card_of_nodup mappedNodup, List.length_map] at this
 
 theorem below_in_walk {store : ContentStore} (forest : (View.Forest (elementAt store)))
@@ -1131,10 +1156,10 @@ theorem order_total {store : ContentStore} {document : DocumentId} {root : Eleme
         element ≠ root ∧ (View.Below (elementAt store)) element root := by
   have full := walk_nodup tree.forest (treeFuel store) root
   have walkEq : walk (treeFuel store) store root =
-      root :: (childrenOf store root).flatMap (walk store.support.card store) := by
+      root :: (childrenOf store root).flatMap (walk (elementCount store) store) := by
     simp [treeFuel, walk]
   have order : documentOrder store document =
-      (childrenOf store root).flatMap (walk store.support.card store) := by
+      (childrenOf store root).flatMap (walk (elementCount store) store) := by
     simp [documentOrder, rooted, walkEq]
   rw [walkEq] at full
   obtain ⟨rootOut, restNodup⟩ := List.nodup_cons.mp full
@@ -1160,14 +1185,14 @@ theorem documentOrder_flat {store : ContentStore} {document : DocumentId} {root 
     (rooted : rootOf store document = some root) (present : (elementAt store root).isSome)
     (flat : ∀ child ∈ childrenOf store root, childrenOf store child = []) :
     documentOrder store document = childrenOf store root := by
-  have positive : 0 < store.support.card := by
+  have positive : 0 < elementCount store := by
     apply Finset.card_pos.mpr
-    refine ⟨⟨.elements, root⟩, DFinsupp.mem_support_iff.mpr ?_⟩
+    refine ⟨⟨.elements, root⟩, Finset.mem_filter.mpr ⟨DFinsupp.mem_support_iff.mpr ?_, rfl⟩⟩
     intro zero
     have absent : elementAt store root = none := zero
     rw [absent] at present
     cases present
-  obtain ⟨depth, hdepth⟩ : ∃ depth, store.support.card = depth + 1 := ⟨_, (Nat.succ_pred_eq_of_pos positive).symm⟩
+  obtain ⟨depth, hdepth⟩ : ∃ depth, elementCount store = depth + 1 := ⟨_, (Nat.succ_pred_eq_of_pos positive).symm⟩
   have leaves : ∀ children : List ElementId, (∀ child ∈ children, childrenOf store child = []) →
       children.flatMap (walk (depth + 1) store) = children := by
     intro children allFlat

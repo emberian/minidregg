@@ -323,6 +323,61 @@ theorem container_needs_a_document :
       some .noSuchElement := by
   decide
 
+/-! ## Marks on a run (K-MARKS) -/
+
+def stranger : PrincipalRef := ⟨⟨8⟩, .object, ⟨11⟩⟩
+def third : PrincipalRef := ⟨⟨12⟩, .object, ⟨11⟩⟩
+def boldMark : MarkId := ⟨⟨501⟩⟩
+def linkMark : MarkId := ⟨⟨502⟩⟩
+def markLinkId : LinkId := ⟨⟨503⟩⟩
+def markedTarget : DocumentId := documentOf 300
+
+/-- A reviewer (`stranger`, not the owner) marks line 2 bold and line 3 as a
+link to another document, each against the revision it read. -/
+def markLines : Command :=
+  ⟨[.mark boldMark ⟨.atom (treeLine 2), operation, .bold⟩,
+    .mark linkMark ⟨.atom (treeLine 3), operation, .link markLinkId (.document markedTarget)⟩]⟩
+
+def markedStore : ContentStore := postOf (run stranger nextOperation document ctx treeStore markLines)
+
+/-- Both marks land, the order is untouched, the link mark wrote an ordinary
+link to its target, and the bold mark is fresh. -/
+theorem marks_admitted_on_a_run :
+    refusalOf (run stranger nextOperation document ctx treeStore markLines) = none ∧
+      documentOrder markedStore document = documentOrder treeStore document ∧
+      (Hyperdocument.lookup markedStore .links markLinkId).map LinkRecord.target =
+        some (.document markedTarget) ∧
+      (Hyperdocument.lookup markedStore .marks boldMark).map (markFresh markedStore) = some true := by
+  decide
+
+def lineTwo : AtomRecord := ⟨document, .text, [2], author, operation, operation, none⟩
+def editLineTwo : Command := ⟨[.editAtom ⟨treeLine 2, lineTwo, .text, [22], false⟩]⟩
+def editedMarked : ContentStore := postOf (run author laterOperation document ctx markedStore editLineTwo)
+
+/-- The owner edits line 2: the bold mark is stale, and a mark against the old
+revision is refused `staleMark`. -/
+theorem mark_stale_on_a_run :
+    refusalOf (run author laterOperation document ctx markedStore editLineTwo) = none ∧
+      (Hyperdocument.lookup editedMarked .marks boldMark).map (markFresh editedMarked) = some false ∧
+      refusalOf (run stranger ⟨⟨9004⟩⟩ document ctx editedMarked
+        ⟨[.mark ⟨⟨504⟩⟩ ⟨.atom (treeLine 2), operation, .bold⟩]⟩) = some .staleMark := by
+  decide
+
+def unmarkLink : Command := ⟨[.unmark linkMark]⟩
+
+/-- A third principal may not unmark; the owner may, and the link goes with
+the mark; an absent mark and an absent line are refused by name. -/
+theorem unmark_poles_on_a_run :
+    refusalOf (run third laterOperation document ctx markedStore unmarkLink) = some .notMarkOwner ∧
+      refusalOf (run author laterOperation document ctx markedStore unmarkLink) = none ∧
+      (Hyperdocument.lookup (postOf (run author laterOperation document ctx markedStore unmarkLink))
+        .links markLinkId).map LinkRecord.tombstonedAt = some (some laterOperation) ∧
+      refusalOf (run author laterOperation document ctx markedStore ⟨[.unmark ⟨⟨599⟩⟩]⟩) =
+        some .markNotFound ∧
+      refusalOf (run author laterOperation document ctx treeStore
+        ⟨[.mark boldMark ⟨.atom (treeLine 9), operation, .bold⟩]⟩) = some .noSuchTarget := by
+  decide
+
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.create_exact_bytes_and_provenance' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms create_exact_bytes_and_provenance
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.seventeen_atoms_accepted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -351,5 +406,12 @@ theorem container_needs_a_document :
 #guard_msgs (whitespace := lax) in #print axioms remove_keeps_the_atom
 /-- info: 'Minidregg.Kernel.ContentResource.Audit.container_needs_a_document' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms container_needs_a_document
+
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.marks_admitted_on_a_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms marks_admitted_on_a_run
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.mark_stale_on_a_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms mark_stale_on_a_run
+/-- info: 'Minidregg.Kernel.ContentResource.Audit.unmark_poles_on_a_run' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms unmark_poles_on_a_run
 
 end Minidregg.Kernel.ContentResource.Audit
