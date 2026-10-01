@@ -51,7 +51,7 @@ pub(crate) struct Verb {
 }
 
 pub(crate) const VERBS: &[Verb] = &[
-    Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home and subject" },
+    Verb { name: "whoami", usage: "whoami", operation: "local: this session's workspace, home, subject and encryption public key (what an inviter to a private room wraps to)" },
     Verb { name: "keygen", usage: "keygen FILE", operation: "mini keygen --secret HOME/keys/FILE --public HOME/keys/FILE.pub" },
     Verb { name: "init", usage: "init KEYFILE SUBJECT", operation: "mini workspace --action init --key HOME/keys/KEYFILE --subject SUBJECT --birth-context HOME/provision/birth-context.json --namespace-root HOME/namespace" },
     Verb { name: "enroll", usage: "enroll plan NAME KEYFILE|PUBLIC-KEY-HEX [FACTORY-REF] | enroll offer NAME | enroll seal NAME [SIGNATURE-HEX] | enroll submit|lookup NAME | enroll welcome NAME", operation: "mini enroll --action plan|offer|seal|submit|lookup|welcome --dir HOME/enroll/NAME (a hex public key plans with --new-public-key: the newcomer's secret stays on their machine)" },
@@ -72,7 +72,8 @@ pub(crate) const VERBS: &[Verb] = &[
     Verb { name: "revoke", usage: "revoke ID REF RECIPIENT", operation: "mini workspace --action propose (action revoke: the capability this workspace delegated on REF to RECIPIENT)" },
     Verb { name: "renounce", usage: "renounce ID REF | renounce ID CAPABILITY [object|account|program]", operation: "mini workspace --action propose (action renounce: give up a capability you hold, and with it everything delegated from it)" },
     Verb { name: "doc", usage: "doc new NAME [draft|note|LAW] [--in ROOM] | doc show NAME | doc append ID NAME TEXT|@FILE | doc edit ID NAME LINE TEXT|@FILE | doc link ID FROM TO [RELATION] | doc backlinks NAME | doc annotate|quote …", operation: "mini workspace --action create (storage content) | doc-show | propose (payload document: append, edit, link) | doc-backlinks" },
-    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room leave ID NAME | room members NAME | room list | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true) | propose (action revoke) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
+    Verb { name: "room", usage: "room new NAME [--law open|realm] [--referee SUBJECT] [--in PARENT] | room new NAME --private [--in PARENT] | room new NAME --template workroom|social|story|@FILE | room welcome NAME SUBJECT --template T|@FILE | room template list | room template show T|@FILE [member] | room invite ID NAME SUBJECT [ENC-PUB|@FILE] [--past] [--i-know] [--verbs V,...] [--fields F,...] [--max-delta F=N,...] [--max-cost N] | room kick ID NAME SUBJECT | room rotate ID NAME | room keys NAME | room leave ID NAME | room members NAME | room list | room law NAME | room status NAME | room renew NAME SUBJECT [--for N|--until H] | room concierge NAME SUBJECT [--period N] [--fund N] | room new NAME [--template T] --concierge SUBJECT [--period N]", operation: "mini workspace --action create (storage declared, the room's law, --room-template LAW; private: + the room key, the keys cell, your own wrap) | the template's lines, each one typed line, in order | the template's member lines | local | local: print the template file | propose (action delegate, room: true; private: room-key --op invite, which also wraps the room key to ENC-PUB in one keys write) | propose (action revoke; private: room-key --op kick = revoke + rotate + rewrap, submitted) | room-key --op rotate | room-key --op list (local) | propose (action renounce, leave: your room grant) | who | local: references that are rooms | describe | mini credit --action status (my window, the tariff, the till; adopts a newer window from HOME/inbox) | mini credit --action renew (one delegation under the room with notAfter; copy in HOME/outbox/SUBJECT) | mini credit --action install (the till, the runner account, the tariff's account fields, the concierge's grants; program in HOME/concierge/NAME.json) | the room's lines, then `room concierge`" },
+    Verb { name: "forget", usage: "forget ROOM [EPOCH]", operation: "mini workspace --action room-key --op forget: delete this client's copies of a private room's keys (all epochs, or one)" },
     Verb { name: "board", usage: "board new NAME | board add ID BOARD TASK | board move ID BOARD TASK FROM TO | board take ID BOARD TASK", operation: "mini workspace --action create (storage declared, the board law) | propose (action invoke: task TASK state is field 2*TASK+2, owner field 2*TASK+3)" },
     Verb { name: "inbox", usage: "inbox", operation: "local: the delegated references in HOME/inbox, whether addressed to this subject and whether imported" },
     Verb { name: "export", usage: "export ID", operation: "local: print proposals/ID/recipient-reference.json" },
@@ -124,6 +125,9 @@ fn document_law(template: &str) -> Option<Value> {
 fn room_law(law: &str, founder: &str, referees: &[String]) -> Option<Value> {
     match law {
         "open" => Some(json!({"type":"all","predicates":[]})),
+        // A private room's own cell: what an open room has (every member
+        // places); its keys cell carries the private law (`roomkey::keys_law`).
+        "private" => Some(crate::workspace::roomkey::room_law()),
         "realm" => {
             let mut placers = vec![json!(founder)];
             placers.extend(referees.iter().map(|referee| json!(referee)));
@@ -220,7 +224,14 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
         "new" => {
             let name = w.get(2).ok_or_else(|| u.to_owned())?;
             ref_name(name, "room name")?;
-            let flags = room_flags(&w[3..], &["law", "referee", "in", "template", "concierge", "period"])?;
+            let mut rest: Vec<String> = w[3..].to_vec();
+            let private = take_switch(&mut rest, "--private");
+            let flags = room_flags(&rest, &["law", "referee", "in", "template", "concierge", "period"])?;
+            if private
+                && ["law", "template", "concierge", "period"].iter().any(|f| room_flag(&flags, f).is_some())
+            {
+                return Err("--private is the private room's law (its keys cell, your wrap); it takes no --law, --template or --concierge".into());
+            }
             // `--concierge SUBJECT [--period N]`: the room's lines, then one
             // `room concierge` line (P-CREDIT): the room is born first, then
             // its till, runner account and the concierge's grants.
@@ -261,7 +272,7 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
                 let (label, text) = template::source(&session.home, spec, template::Part::Room)?;
                 return template_plan(session, label, &text, &[("ROOM", name), ("ME", &founder)]);
             }
-            let law_name = room_flag(&flags, "law").unwrap_or("open");
+            let law_name = if private { "private" } else { room_flag(&flags, "law").unwrap_or("open") };
             let referees: Vec<String> = flags
                 .iter()
                 .filter(|(flag, _)| flag == "referee")
@@ -275,7 +286,7 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
             }
             let founder = session_subject(session)?;
             let law = room_law(law_name, &founder, &referees)
-                .ok_or_else(|| "a room's law is open or realm".to_owned())?;
+                .ok_or_else(|| "a room's law is open, realm or private (--private)".to_owned())?;
             let path = session.home.join("requests").join(format!("room-{}.json", ref_file(name)));
             let mut flags_out = vec![
                 flag("action", "create"),
@@ -328,7 +339,21 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
             workspace_name(&w[2], "proposal ID")?;
             ref_name(&w[3], "room name")?;
             decimal(&w[4], "invitee")?;
-            let flags = room_flags(&w[5..], &["verbs", "fields", "max-delta", "max-cost"])?;
+            let private = room_is_private(session, &w[3]);
+            let mut rest: Vec<String> = w[5..].to_vec();
+            let enc = match rest.first() {
+                Some(word) if !word.starts_with("--") => Some(rest.remove(0)),
+                _ => None,
+            };
+            let past = take_switch(&mut rest, "--past");
+            let i_know = take_switch(&mut rest, "--i-know");
+            if !private && (enc.is_some() || past || i_know) {
+                return Err(format!("{} is not a private room: ENC-PUB, --past and --i-know are a private room's", w[3]));
+            }
+            if private && enc.is_none() {
+                return Err(format!("{} is private: name the invitee's encryption key (ENC-PUB, or @FILE in HOME/requests; the invitee's `whoami` prints it)", w[3]));
+            }
+            let flags = room_flags(&rest, &["verbs", "fields", "max-delta", "max-cost"])?;
             let verbs: Vec<&str> = room_flag(&flags, "verbs")
                 .unwrap_or("observe,place")
                 .split(',')
@@ -352,16 +377,89 @@ fn room_plan(session: &Session, w: &[String], u: &str) -> std::result::Result<Pl
                 }
                 request["maxDelta"] = json!(out);
             }
-            proposal(session, &w[2], &request)
+            match enc {
+                None => proposal(session, &w[2], &request),
+                Some(enc) => {
+                    let enc = enc_argument(session, &enc)?;
+                    let path = session.home.join("requests").join(format!("{}.json", w[2]));
+                    let mut flags = vec![
+                        flag("action", "room-key"),
+                        flag("op", "invite"),
+                        flag("dir", ws),
+                        flag("name", w[3].clone()),
+                        flag("member", w[4].clone()),
+                        flag("enc-pub", enc),
+                        flag("proposal-id", w[2].clone()),
+                        flag("request", path.clone()),
+                    ];
+                    if past {
+                        flags.push(flag("past", "true"));
+                    }
+                    if i_know {
+                        flags.push(flag("i-know", "true"));
+                    }
+                    Plan::Client {
+                        command: "workspace".into(),
+                        flags,
+                        writes: vec![request_file(path, &request)],
+                    }
+                }
+            }
         }
         "kick" => {
             arity(w, 4, 4, u)?;
             workspace_name(&w[2], "proposal ID")?;
             ref_name(&w[3], "room name")?;
             decimal(&w[4], "member")?;
+            if room_is_private(session, &w[3]) {
+                // Revoke, then rotate and rewrap, both submitted: the kicked
+                // member keeps the past and gets nothing new.
+                return Ok(Plan::Client {
+                    command: "workspace".into(),
+                    flags: vec![
+                        flag("action", "room-key"),
+                        flag("op", "kick"),
+                        flag("dir", ws),
+                        flag("name", w[3].clone()),
+                        flag("member", w[4].clone()),
+                        flag("proposal-id", w[2].clone()),
+                    ],
+                    writes: vec![],
+                });
+            }
             let request = json!({"type":"minidregg-workspace-proposal-v1","action":"revoke",
                 "name":w[3],"recipient":w[4]});
             proposal(session, &w[2], &request)
+        }
+        "rotate" => {
+            arity(w, 3, 3, u)?;
+            workspace_name(&w[2], "proposal ID")?;
+            workspace_name(&w[3], "room name")?;
+            Plan::Client {
+                command: "workspace".into(),
+                flags: vec![
+                    flag("action", "room-key"),
+                    flag("op", "rotate"),
+                    flag("dir", ws),
+                    flag("name", w[3].clone()),
+                    flag("proposal-id", w[2].clone()),
+                ],
+                writes: vec![],
+            }
+        }
+        "keys" => {
+            arity(w, 2, 2, u)?;
+            workspace_name(&w[2], "room name")?;
+            Plan::Client {
+                command: "workspace".into(),
+                flags: vec![
+                    flag("action", "room-key"),
+                    flag("op", "list"),
+                    flag("dir", ws),
+                    flag("name", w[2].clone()),
+                ],
+                writes: vec![],
+            }
         }
         "leave" => {
             arity(w, 3, 3, u)?;
@@ -523,20 +621,34 @@ fn session_subject(session: &Session) -> std::result::Result<String, String> {
         .ok_or_else(|| "this session has no workspace yet (init first)".to_owned())
 }
 
-/// PRIVACY §5 row 4 (b). A subject whose signing key is a session-home file
-/// (a hosted subject) invited into a room created `--private` would put that
-/// room's key where root can read it. Refuse unless the inviter said
-/// `--i-know`. The `room invite` verb is a later lane; this is its check.
-#[cfg_attr(not(test), allow(dead_code))] // its verb is K-ROOM 3c `room invite`
-pub(crate) fn hosted_private_invite(
-    room_private: bool,
-    invitee_hosted: bool,
-    i_know: bool,
-) -> std::result::Result<(), String> {
-    if room_private && invitee_hosted && !i_know {
-        return Err("the invitee's signing key is a file on this box (a hosted subject) and this room is --private: root could read the room key; repeat with --i-know to invite anyway".into());
+/// Whether a room reference in this session's workspace is a private room.
+fn room_is_private(session: &Session, room: &str) -> bool {
+    read_json(&session.workspace.join("refs").join(format!("{room}.json")))
+        .is_some_and(|value| value.get("private").is_some())
+}
+
+/// Remove every `word` from `words`; whether it was there.
+fn take_switch(words: &mut Vec<String>, word: &str) -> bool {
+    let before = words.len();
+    words.retain(|w| w != word);
+    words.len() != before
+}
+
+/// An encryption public key: 64 hex digits, or `@FILE` in HOME/requests holding them.
+fn enc_argument(session: &Session, word: &str) -> std::result::Result<String, String> {
+    let text = match word.strip_prefix('@') {
+        Some(file) => {
+            session_file(file, "encryption key file")?;
+            let path = session.home.join("requests").join(file);
+            fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?
+        }
+        None => word.to_owned(),
+    };
+    let text = text.trim().to_owned();
+    if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("an encryption public key is 64 hex digits (the invitee's `whoami` prints it)".into());
     }
-    Ok(())
+    Ok(text.to_ascii_lowercase())
 }
 
 /// The birth options of a `create` or `doc new` line, removed from it:
@@ -586,17 +698,6 @@ fn take_birth(words: &mut Vec<String>) -> std::result::Result<Birth, String> {
         decimal(owner, "owner")?;
     }
     Ok(birth)
-}
-
-/// Remove a trailing `--i-know` word; the flag is only ever the last word.
-#[cfg_attr(not(test), allow(dead_code))] // its verb is K-ROOM 3c `room invite`
-pub(crate) fn take_i_know(words: &mut Vec<String>) -> bool {
-    if words.last().map(String::as_str) == Some("--i-know") {
-        words.pop();
-        true
-    } else {
-        false
-    }
 }
 
 pub(crate) struct Session {
@@ -944,6 +1045,21 @@ pub(crate) fn plan(session: &Session, line: &str) -> std::result::Result<Plan, S
             proposal(session, &w[1], &request)
         }
         "room" => room_plan(session, &w, u)?,
+        "forget" => {
+            arity(&w, 1, 2, u)?;
+            workspace_name(&w[1], "room name")?;
+            let mut flags = vec![
+                flag("action", "room-key"),
+                flag("op", "forget"),
+                flag("dir", ws()),
+                flag("name", w[1].clone()),
+            ];
+            if let Some(epoch) = w.get(2) {
+                decimal(epoch, "epoch")?;
+                flags.push(flag("epoch", epoch.clone()));
+            }
+            client("workspace", flags)
+        }
         "doc" => {
             let Some(action) = w.get(1) else {
                 return Err(u.to_owned());
@@ -1739,6 +1855,8 @@ fn whoami(session: &Session) {
         "initialized":pin.is_some(),
         "subject":pin.as_ref().and_then(|p| p.get("subject")).cloned(),
         "socket":pin.as_ref().and_then(|p| p.get("socket")).cloned(),
+        "encryptionKey":pin.as_ref().and_then(|p| p.get("key")).and_then(Value::as_str)
+            .and_then(|key| crate::workspace::roomkey::enc_public_hex(Path::new(key)).ok()),
         "authority":"discovery-only"});
     println!("{}", serde_json::to_string_pretty(&value).expect("JSON renders"));
 }
@@ -1869,7 +1987,8 @@ fn rooms(session: &Session) {
             continue;
         };
         let field = |k: &str| value.get(k).and_then(Value::as_str).unwrap_or("-").to_owned();
-        println!("{name}\t{room}\t{} {}\tcapability {}", field("kind"), field("target"),
+        let private = if value.get("private").is_some() { "\tprivate" } else { "" };
+        println!("{name}\t{room}\t{} {}\tcapability {}{private}", field("kind"), field("target"),
             field("operationCapability"));
     }
 }
@@ -2902,6 +3021,55 @@ mod tests {
     }
 
     #[test]
+    fn private_room_verbs_spell_the_room_key_operations() {
+        let (root, s) = temp_session("private");
+        fs::write(s.workspace.join("workspace.json"), br#"{"subject":"7"}"#).unwrap();
+        fs::create_dir_all(s.workspace.join("refs")).unwrap();
+        fs::write(s.workspace.join("refs").join("lab.json"),
+            br#"{"name":"lab","room":"private","private":{"keys":"99"}}"#).unwrap();
+        fs::write(s.workspace.join("refs").join("pub.json"), br#"{"name":"pub","room":"workroom"}"#).unwrap();
+        let (_, flags, writes) = client(plan(&s, "room new lab2 --private").unwrap());
+        assert!(flags.contains(&("room-template".into(), "private".into())));
+        let law: Value = serde_json::from_str(&writes[0].1).unwrap();
+        assert_eq!(law, crate::workspace::roomkey::room_law());
+        let enc = "ab".repeat(32);
+        let (command, flags, writes) =
+            client(plan(&s, &format!("room invite i1 lab 12 {enc} --past --verbs observe,place,append")).unwrap());
+        assert_eq!(command, "workspace");
+        let request_path = s.home.join("requests").join("i1.json");
+        assert_eq!(flags, pairs(&[("action", "room-key"), ("op", "invite"),
+            ("dir", s.workspace.to_str().unwrap()), ("name", "lab"), ("member", "12"),
+            ("enc-pub", enc.as_str()), ("proposal-id", "i1"), ("request", request_path.to_str().unwrap()),
+            ("past", "true")]));
+        let request: Value = serde_json::from_str(&writes[0].1).unwrap();
+        assert_eq!(request, json!({"type":"minidregg-workspace-proposal-v1","action":"delegate",
+            "name":"lab","recipient":"12","verbs":["observe","place","append"],"maxCost":"50000","room":true}));
+        fs::create_dir_all(s.home.join("requests")).unwrap();
+        fs::write(s.home.join("requests").join("bob.enc"), format!("{enc}\n")).unwrap();
+        let (_, flags, _) = client(plan(&s, "room invite i2 lab 12 @bob.enc --i-know").unwrap());
+        assert!(flags.contains(&("i-know".into(), "true".into())));
+        assert!(flags.contains(&("enc-pub".into(), enc.clone().into())));
+        let (_, flags, _) = client(plan(&s, "room kick k1 lab 12").unwrap());
+        assert_eq!(flags, pairs(&[("action", "room-key"), ("op", "kick"),
+            ("dir", s.workspace.to_str().unwrap()), ("name", "lab"), ("member", "12"), ("proposal-id", "k1")]));
+        // A public room's kick is K-ROOM's revoke proposal, unchanged.
+        let (_, request) = request_of(plan(&s, "room kick k2 pub 12").unwrap());
+        assert_eq!(request["action"], "revoke");
+        assert_eq!(client(plan(&s, "room keys lab").unwrap()).1, pairs(&[("action", "room-key"),
+            ("op", "list"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab")]));
+        assert_eq!(client(plan(&s, "room rotate r1 lab").unwrap()).1, pairs(&[("action", "room-key"),
+            ("op", "rotate"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab"), ("proposal-id", "r1")]));
+        assert_eq!(client(plan(&s, "forget lab 0").unwrap()).1, pairs(&[("action", "room-key"),
+            ("op", "forget"), ("dir", s.workspace.to_str().unwrap()), ("name", "lab"), ("epoch", "0")]));
+        for bad in ["room invite i3 lab 12", "room invite i3 lab 12 abcd",
+            &format!("room invite i3 pub 12 {enc}"), "room invite i3 pub 12 --i-know",
+            "room new lab3 --private --template realm", "forget", "forget lab x", "room keys"] {
+            assert!(plan(&s, bad).is_err(), "{bad} should be refused");
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn board_verbs_spell_numbered_task_fields_under_the_board_law() {
         let (root, s) = temp_session("board");
         let (_, flags, writes) = client(plan(&s, "board new tasks").unwrap());
@@ -2951,15 +3119,16 @@ mod tests {
 
     #[test]
     fn a_hosted_subject_joins_a_private_room_only_with_i_know() {
+        use crate::workspace::roomkey::hosted_private_invite;
         assert!(hosted_private_invite(true, true, false).unwrap_err().contains("--i-know"));
         assert!(hosted_private_invite(true, true, true).is_ok());
         assert!(hosted_private_invite(true, false, false).is_ok());
         assert!(hosted_private_invite(false, true, false).is_ok());
         let mut w = words("room invite r1 42 --i-know").unwrap();
-        assert!(take_i_know(&mut w));
+        assert!(take_switch(&mut w, "--i-know"));
         assert_eq!(w, ["room", "invite", "r1", "42"]);
         let mut w = words("room invite r1 42").unwrap();
-        assert!(!take_i_know(&mut w));
+        assert!(!take_switch(&mut w, "--i-know"));
         assert_eq!(w.len(), 4);
     }
 }

@@ -37,7 +37,7 @@
 #    "sha256": {"host": "<hex>", ...}}                                (optional pins)
 #   A pinned binary whose sha256 differs refuses the run before J0.
 #
-# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock m3 m4 m5 m6 m7 m8 j12 j12c j13 j17 jchat jpay1 jpay2 jpriv2 jjob1 jjob-money): the file's presence is
+# STEP HOOKS (journey.d/<id>.sh, id in bind jjoint jclock jpriv1 m3 m4 m5 m6 m7 m8 j12 j12c j13 j17 jchat jpay1 jpay2 jpriv2 jjob1 jjob-money): the file's presence is
 # what turns an UNBUILT stub into a real step; the shape of this script does
 # not change. A hook is executed (not sourced) with these variables exported:
 #   JOURNEY_RUN JOURNEY_WORLD JOURNEY_STEP_DIR   run root, fresh Store root, private dir for the hook
@@ -120,7 +120,7 @@ now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.3f", b-a}'; }
 gt() { awk -v a="$1" -v b="$2" 'BEGIN{exit !(a>b)}'; }
 
-STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW K10C KT J17 JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JCHAT JJOB1 JJOBM JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
+STEPS=(J0 J1 J2 J3 J4 J5 J6 G J7 J8 K4 KC JJ K10 K11 KIX KF K12C KHQ KW K10C KT J17 JPRIV1 JN2 JN3 JN5 BD M3 M4 M5 M6 M7 M8 J12 J12C J13 JCHAT JJOB1 JJOBM JPAY1 JPAY2 JPAY3 JPAYE1 JPAYE2 JPAYE3 JPAY4 JPAY6 JP2)
 declare -A TITLE STATUS WALL ART DET
 TITLE[J0]="clean start: private single-authority service, one sponsor"
 TITLE[J1]="enroll an independently generated newcomer key"
@@ -138,6 +138,7 @@ TITLE[KW]="realm wells: mint under the well grant and law, burn by the holder, c
 TITLE[K10C]="rooms through the shell: the birth gate, re-delegation, the J7 pole, leave (renounce), kick, a realm"
 TITLE[J17]="a week in the place: credit, pay, the concierge, the window expires outside-validity, renewal, conservation"
 TITLE[KT]="room templates: a room born with a map (index, wall, notes) from a file of shell lines"
+TITLE[JPRIV1]="a private room: the operator stores and serves ciphertext; a kick rotates the key"
 TITLE[JN2]="a friend Nock program becomes a program cell (own Store)"
 TITLE[JN3]="the kernel checks a Nock run by re-executing it (own Store)"
 TITLE[JN5]="a NockApp kernel door refereed by re-execution (own Store)"
@@ -771,6 +772,7 @@ step_KHQ() { hook jhasheq "K-HASHEQ rows: a sealed bid commits a full-width cSHA
 step_K10C() { hook j10c "K-ROOM 3c rows: a founder room, a narrowed invite, a member birth admitted and a stranger birth refused notRoomMember, re-delegation by a non-sponsor, an ordinary law change leaves grants standing while a placement law refuses birthRefused, a leave renounces the member grant and takes the attenuated invite with it (notHolder for a stranger, alreadyRevoked twice, exact retry replays, re-invite is a new grant), a kick still works, a realm refuses fake wells, restart and audit (lanes k-room-3c, k-renounce)" shell; }
 step_KT() { hook jtemplates "P-DOC-TEMPLATES rows: room new --template workroom births lab/index (only the founder writes the map), lab/wall (a stream), lab/notes, lab/tasks with the map's links; the same file piped into mini shell by hand births the same shape; a member reads the map and is refused editing it by its clause while writing notes; a bad template stops at its line; social welcomes a member with their own stream; story; restart and audit (lane p-templates)" shell; }
 step_J17() { hook j17 "P-CREDIT rows: B with 0 credit is refused bookRefused; the sponsor credits 1000; pay lab week lands on the till ledger; the concierge delegates member under lab with notAfter = h + period and journals the entry; B writes; restart; past notAfter B is refused outside-validity; B pays again and writes; an underpayment issues nothing; a free room issues on request; balances conserve; cold audit (lane p-credit; needs GRAIN_RUNTIME)" shell; }
+step_JPRIV1() { hook jpriv1 "J-PRIV-1 rows: a private room founded and keyed, a member invited by its encryption key, sealed lines read by members, the operator's signed view and the Store bytes hold no plaintext while a public control line is found, an outsider refused, the keys law refuses a member's wrap, a kick rotates and rewraps (the kicked member keeps the past and opens nothing new), --past, forget, a hosted invitee refused without --i-know, restart and audit (lane priv-rooms)" shell; }
 step_KW() { hook jwell "K-WELL rows: the referee mints by grant and law, no-grant, law-refused, overburn, credit-asset and rootless mints refused by name in the operator log, conservation and the cold audit ledger equal (lane k-well)"; }
 step_JN2() { hook jnock2 "J-NOCK-2b: forge is checked and born at its content address, show/sample read it back, a padded jam is refused (lane k-nock; needs NOCK_TEMPLATES, NOCK_RUN)"; }
 step_JN3() { hook jnock3 "J-NOCK-3: a write under ran forge is admitted only with a run claim the kernel re-executes; forged output, low fuel and a direct write refused (lane k-ran; needs NOCK_TEMPLATES, NOCK_RUN)"; }
@@ -816,6 +818,7 @@ run_step KW J5
 run_step K10C J5
 run_step KT J5
 run_step J17 J5
+run_step JPRIV1 J5
 run_step JN2 J0
 run_step JN3 J0
 run_step JN5 J0
