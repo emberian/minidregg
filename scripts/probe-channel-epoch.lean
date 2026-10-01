@@ -10,7 +10,7 @@ kernel's own definitions (`Kernel.DomainEpoch`), never re-implemented.
     prints `opened <mask length>` or `refused <reason>` (openRecord: the mask length is checked on the
     opening against the record's class and n).
 -/
-import Kernel.DomainEpoch
+import Kernel.DomainEpochLaw
 
 open Minidregg.Kernel.DomainEpoch
 
