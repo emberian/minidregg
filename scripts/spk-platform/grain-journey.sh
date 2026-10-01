@@ -119,9 +119,9 @@ grain_op() (
     --slurpfile challenge "$EV/$name-before/challenge.json" '
     {grain:{task:$task,subject:$subject,capability:$cap,observeCapability:$cap,
       schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
-      expectedTargetRoot:$read[0].page.root,
+      expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$nonce,payload:"grain journey workroom"},
-      before:($read[0].page.grain | {generation,status,remaining,reserved}),
+      before:($read[0].cell.grain | {generation,status,remaining,reserved}),
       operation:$operation,publications:[]},
      grants:[{kind:"object",target:$task,capability:$cap}],intentNonce:$nonce}' \
     >"$EV/$name-intent.json"
@@ -135,13 +135,13 @@ grain_op() (
 # generation and the tool (7902, subject 8) attached. Idempotent on state.
 workroom_ready() {
   query parent-state 8 7901 73 "$WR/tool.key" 30001
-  if ! jq -e '.page.grain.status == "3" and .page.grain.reserved == "1"' \
+  if ! jq -e '.cell.grain.status == "3" and .cell.grain.reserved == "1"' \
       "$EV/parent-state/view.json" >/dev/null; then
     grain_op parent-attach 7 7901 71 "$WR/controller.key" 30010 '{"type":"attach","soft":false}'
     grain_op parent-reserve 7 7901 71 "$WR/controller.key" 30020 '{"type":"reserve","amount":"1"}'
   fi
   query tool-state 8 7902 81 "$WR/tool.key" 30031
-  if jq -e '.page.grain.status == "0"' "$EV/tool-state/view.json" >/dev/null; then
+  if jq -e '.cell.grain.status == "0"' "$EV/tool-state/view.json" >/dev/null; then
     grain_op tool-attach 8 7902 81 "$WR/tool.key" 30040 '{"type":"attach","soft":false}'
   fi
 }
@@ -172,10 +172,10 @@ birth() (
       authorityRoot:$challenge[0].signing[0].authorityRoot,
       ($inner):({genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
         creator:"8",nonce:$nonce,sourceCapabilities:["42"],funding:[],feePayer:"8"} + $spec),
-      tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].page.root,
-        before:($tool[0].page.grain | {generation,status,remaining,reserved})},
-      parent:{task:"7901",capability:"73",observeCapability:"73",targetRoot:$parent[0].page.root,
-        before:($parent[0].page.grain | {generation,status,remaining,reserved})}}}' \
+      tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].cell.root,
+        before:($tool[0].cell.grain | {generation,status,remaining,reserved})},
+      parent:{task:"7901",capability:"73",observeCapability:"73",targetRoot:$parent[0].cell.root,
+        before:($parent[0].cell.grain | {generation,status,remaining,reserved})}}}' \
     >"$EV/$name-source.json"
   rm -rf "$EV/$name-author"
   "$MINI" "$command" --host "$HOST" --config "$CONFIG" --socket "$PSOCK" \
@@ -261,7 +261,7 @@ delegate_observe() (
     $cap[0].head as $p | $current[0] as $c |
     {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
-        expectedTargetRoot:$resource[0].page.root,parentId:$p.id,target:$target,
+        expectedTargetRoot:$resource[0].cell.root,parentId:$p.id,target:$target,
         expectedPreRoot:$c.signing[0].authorityRoot,
         child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
           targets:[$target],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
@@ -285,7 +285,7 @@ share() (
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
   version=$(jq -er .version "$pkgdir/schema-inspection.json")
   query "$label-app-state" 8 "$app" "$appcap" "$WR/tool.key" "$((nonce + 300))"
-  pversion=$(jq -er '[.page.entries[] | select(.key.field == "2")][0].value' \
+  pversion=$(jq -er '[.cell.entries[] | select(.key.field == "2")][0].value' \
     "$EV/$label-app-state/view.json")
   T=$EV/$label-ticket-$ticket
   mkdir -p -m 700 "$T"
@@ -362,7 +362,7 @@ enroll() (
   schema=$(jq -er .root "$pkgdir/schema-inspection.json")
   version=$(jq -er .version "$pkgdir/schema-inspection.json")
   query "$label-enroll-app-$nonce" 8 "$app" "$appcap" "$WR/tool.key" "$nonce"
-  gen=$(jq -er '[.page.entries[] | select(.key.field == "0")][0].value' \
+  gen=$(jq -er '[.cell.entries[] | select(.key.field == "0")][0].value' \
     "$EV/$label-enroll-app-$nonce/view.json")
   N=$EV/$label-enroll-g$gen
   [ ! -s "$N/receipt.json" ] || exit 0
@@ -377,8 +377,8 @@ enroll() (
   fi
   query "$label-session-$nonce" 8 "$session" "$cap" "$WR/tool.key" "$((nonce + 1))"
   sview=$EV/$label-session-$nonce/view.json
-  sgen=$(jq -er '[.page.entries[] | select(.key.field == "2")][0].value' "$sview")
-  status=$(jq -er '[.page.entries[] | select(.key.field == "3")][0].value' "$sview")
+  sgen=$(jq -er '[.cell.entries[] | select(.key.field == "2")][0].value' "$sview")
+  status=$(jq -er '[.cell.entries[] | select(.key.field == "3")][0].value' "$sview")
   if [ "$status" = 5 ]; then
     jq -n --arg s "$session" --arg c "$cap" --arg n "$((nonce + 2))" --arg g "$sgen" \
       --arg g1 "$((sgen + 1))" --slurpfile read "$sview" \
@@ -387,7 +387,7 @@ enroll() (
        purpose:{type:"prepare",draft:{type:"invoke",command:{subject:"8",nonce:$n,
          expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
          targets:[{kind:"object",target:$s,capability:$c,observeCapability:$c,
-           schemaVersion:"1",expectedTargetRoot:$read[0].page.root,
+           schemaVersion:"1",expectedTargetRoot:$read[0].cell.root,
            payload:{type:"scalar",actions:[
              {type:"write",key:{type:"object",resource:$s,field:"2"},expected:$g,value:$g1},
              {type:"write",key:{type:"object",resource:$s,field:"3"},expected:"5",value:"6"}]}}]}}}}' \

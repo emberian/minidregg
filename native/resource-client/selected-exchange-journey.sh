@@ -190,7 +190,7 @@ signed_query "$A" "$A/sponsor.key" "$SOURCE_SUBJECT" "$NOTES_TARGET" "$NOTES_OWN
   resource "$A/source-read"
 end
 jq -e --arg sel "$(hexstr "$SELECTED_TEXT")" --arg uns "$(hexstr "$UNSELECTED_TEXT")" \
-  '.page.entries | length == 2 and
+  '.cell.entries | length == 2 and
    any(.[]; .type == "atom" and .id == "7401" and .payload == $sel) and
    any(.[]; .type == "atom" and .id == "7402" and .payload == $uns)' \
   "$A/source-read/view.json" >/dev/null
@@ -270,10 +270,10 @@ signed_query "$B" "$A/sponsor.key" "$SOURCE_SUBJECT" "$INBOX" "$RECIPIENT_CAP" r
 end
 jq -e --arg s "$SOURCE_SUBJECT" '.predicate == {"type":"eq","slot":"request/subject","value":$s}' \
   "$B/owner-policy-read/view.json" >/dev/null
-jq -e '.page.entries == []' "$B/owner-inbox-read/view.json" >/dev/null
+jq -e '.cell.entries == []' "$B/owner-inbox-read/view.json" >/dev/null
 POLICY_ROOT=$(jq -er '.address' "$B/owner-policy-read/view.json")
 AUTHORITY_ROOT=$(jq -er '.signing[0].authorityRoot' "$B/owner-inbox-read/challenge.json")
-TARGET_ROOT=$(jq -er '.page.root' "$B/owner-inbox-read/view.json")
+TARGET_ROOT=$(jq -er '.cell.root' "$B/owner-inbox-read/view.json")
 
 # --- 5. fn node ----------------------------------------------------------------
 begin fn-provision
@@ -440,7 +440,7 @@ end
 signed_query "$B" "$A/sponsor.key" "$SOURCE_SUBJECT" "$INBOX" "$RECIPIENT_CAP" resource \
   "$N/inbox-after-admission"
 POST_AUTHORITY=$(jq -er '.signing[0].authorityRoot' "$N/inbox-after-admission/challenge.json")
-POST_ROOT=$(jq -er '.page.root' "$N/inbox-after-admission/view.json")
+POST_ROOT=$(jq -er '.cell.root' "$N/inbox-after-admission/view.json")
 submit_negative() { # label packet target-root
   "$HOST" "$B/deployment/pinned-config.json" selected-release-ingress \
     "$2" "$RECIPIENT_CAP" "$POST_AUTHORITY" "$3" "$N/$1-ingress.bin"

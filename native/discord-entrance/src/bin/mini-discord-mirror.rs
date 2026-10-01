@@ -46,12 +46,12 @@ fn scalar(v: &Value) -> String {
     }
 }
 
-/// The fields of the last JSON document on stdout that carries `page.entries`.
+/// The fields of the last JSON document on stdout that carries `cell.entries`.
 pub fn fields_of(stdout: &str) -> Option<BTreeMap<String, String>> {
     let mut last = None;
     for doc in serde_json::Deserializer::from_str(stdout).into_iter::<Value>() {
         let Ok(doc) = doc else { break };
-        if let Some(entries) = doc.get("page").and_then(|p| p.get("entries")).and_then(Value::as_array) {
+        if let Some(entries) = doc.get("cell").and_then(|p| p.get("entries")).and_then(Value::as_array) {
             let mut m = BTreeMap::new();
             for e in entries {
                 if let (Some(k), Some(v)) = (e.get("key").and_then(|k| k.get("field")), e.get("value")) {
@@ -199,8 +199,8 @@ mod tests {
     #[test]
     fn fields_from_the_last_page_and_their_diff() {
         let out = r#"{"subject":"7"}
-{"page":{"entries":[{"key":{"field":"2"},"value":"1"}]}}
-{"page":{"entries":[{"key":{"field":"2"},"value":"7"},{"key":{"field":"3"},"value":9}]}}"#;
+{"cell":{"entries":[{"key":{"field":"2"},"value":"1"}]}}
+{"cell":{"entries":[{"key":{"field":"2"},"value":"7"},{"key":{"field":"3"},"value":9}]}}"#;
         let new = fields_of(out).unwrap();
         assert_eq!(new.get("2").map(String::as_str), Some("7"));
         assert_eq!(new.get("3").map(String::as_str), Some("9"));

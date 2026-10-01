@@ -127,7 +127,7 @@ op() { # J description, command...
 }
 
 field() { # stdout-file field -> value or "absent"
-  jq -r --arg f "$2" '[.page.entries[] | select(.key.field == $f) | .value][0] // "absent"' "$1"
+  jq -r --arg f "$2" '[.cell.entries[] | select(.key.field == $f) | .value][0] // "absent"' "$1"
 }
 is() { [[ $1 == "$2" ]] || { echo "expected [$2], got [$1]"; return 1; }; }
 
@@ -256,6 +256,14 @@ step S 0 sponsor "enroll seal newcomer-1"
 step S 0 sponsor "enroll submit newcomer-1"
 B_SUBJ=$(jq -r '.subject' "$LAST")
 A_SUBJ=7
+# `init` binds a delivered birth context (p-shell-docs): provision the newcomer
+# the way deploy/shell/OPERATOR.md step 6 does, as shell-journey.sh does.
+printf '%s\n' '{"type":"all","predicates":[]}' >"$RUN/permit-all.json"
+op S "PROVISION (OPERATOR step 6): factory observation + a funded account owned by newcomer" \
+  "$MINI" workspace --action provision --dir "$R/sponsor" --name newcomer --holder "$B_SUBJ" \
+    --funding 1000 --account-predicate "$RUN/permit-all.json" --factory-ref factory
+op S "DELIVER (OPERATOR step 6): the birth context into newcomer's HOME/provision/" \
+  install -D -m 0600 "$R/sponsor/provisions/newcomer/birth-context.json" "$RUN/homes/newcomer/provision/birth-context.json"
 step S 0 newcomer "init mini.key $B_SUBJ"
 step S 0 sponsor 'create board declared {"type":"all","predicates":[]}'
 step S 0 sponsor "delegate grant-b board $B_SUBJ observe,mutate 50000"

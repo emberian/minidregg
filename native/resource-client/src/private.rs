@@ -66,7 +66,7 @@ This key is the only copy. It signs as you and opens your private rooms.
 If you lose it there is no recovery: you enroll a new subject and are re-invited.
 Room content comes back by re-wrap at the current epoch; older epochs come back
 only from a member who kept them. Your old posts stay under the old subject.
-Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB` writes your seed encrypted
+Escrow is off. `--escrow-to-sponsor @SPONSOR-ENC-PUB --escrow-subject SUBJECT` writes your seed encrypted
 to your sponsor, which lets your sponsor sign as you.";
 
 fn cshake(label: &[u8], parts: &[&[u8]]) -> [u8; 32] {
@@ -1195,22 +1195,22 @@ mod tests {
         assert!(!payload.contains(&hex(b"meet at noon")));
         assert_eq!(action["kind"]["schema"].as_str().unwrap(), schema_decimal());
 
-        let view = json!({"page":{"entries":[{"type":"atom","id":"9","document":"1",
+        let view = json!({"cell":{"entries":[{"type":"atom","id":"9","document":"1",
             "kind":action["kind"].clone(),"payload":payload}]}});
         let mut without = view.clone();
         assert_eq!(open_view(&mut without, "71", "72", None), 1);
-        let label = without["page"]["entries"][0]["private"].as_str().unwrap();
+        let label = without["cell"]["entries"][0]["private"].as_str().unwrap();
         assert!(label.starts_with("[private: epoch 2, commit "), "{label}");
         let mut with = view.clone();
         open_view(&mut with, "71", "72", Some(&ring(&key)));
         assert_eq!(
-            with["page"]["entries"][0]["private"]["text"],
+            with["cell"]["entries"][0]["private"]["text"],
             "meet at noon"
         );
         let mut moved = view;
-        moved["page"]["entries"][0]["id"] = json!("10");
+        moved["cell"]["entries"][0]["id"] = json!("10");
         open_view(&mut moved, "71", "72", Some(&ring(&key)));
-        assert!(moved["page"]["entries"][0]["private"]["refused"]
+        assert!(moved["cell"]["entries"][0]["private"]["refused"]
             .as_str()
             .unwrap()
             .contains("integrity"));

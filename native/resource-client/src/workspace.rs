@@ -182,6 +182,13 @@ fn os_string(value: OsString, label: &str) -> Result<String> {
         .map_err(|_| format!("{label} must be UTF-8"))
 }
 
+/// `Kernel/ContentResource.commandVersion`: content commands mutate the
+/// hyperdocument store cell directly (v2); v1 commands lowered to the deleted
+/// content page and are refused (`unsupportedVersion`).
+const CONTENT_COMMAND_VERSION: &str = "2";
+/// The declared scalar command version (`Kernel/DeclaredResourceScalar`).
+const SCALAR_COMMAND_VERSION: &str = "1";
+
 pub(crate) fn random_nonce() -> Result<String> {
     let mut bytes = [0u8; 16];
     File::open("/dev/urandom")
@@ -756,8 +763,15 @@ fn propose(
                 };
                 let capability = member(&reference, "operationCapability")?;
                 let observe = member(&reference, "observeCapability")?;
+                // The command version the Host checks per payload: a content
+                // command is `ContentResource.commandVersion` (2, the store
+                // cell); a scalar command is 1.
+                let schema_version = match lowered.get("type").and_then(Value::as_str) {
+                    Some("content") => CONTENT_COMMAND_VERSION,
+                    _ => SCALAR_COMMAND_VERSION,
+                };
                 target_rows.push(json!({"kind":kind,"target":target,"capability":capability,
-                    "observeCapability":observe,"schemaVersion":"1",
+                    "observeCapability":observe,"schemaVersion":schema_version,
                     "expectedTargetRoot":root_value,"payload":lowered}));
                 grants.push(json!({"kind":kind,"target":target,"capability":observe}));
             }

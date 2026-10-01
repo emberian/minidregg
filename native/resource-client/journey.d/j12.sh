@@ -206,6 +206,10 @@ refused J12 eve "doc append e1 stolen 'Eve was here.'" no-grant "no grant"
 # (`public_refusal_uniform`): the Host names no reason to the submitter. Each
 # such row has an admitted control that differs only in the refused cause.
 ADMISSION="request refused (phase admission)"
+# A write the resource's law rejects is refused earlier, when the Host plans
+# it (P-LAW, merged on final): `law-denied` with the failing clause, at the
+# `submit` that asks the Host to prepare it.
+LAWPLAN="(Host refused prepare"
 # a reviewer who holds observe only: reads, and a write is refused
 # (control: bob's appends to the same document were admitted)
 ok J12 rev "doc show paper"
@@ -220,7 +224,7 @@ ok J12 alice "submit n1"
 ok J12 alice "doc show log"
 ok J12 alice "doc edit n2 log 1 'Decided: something else.'"
 # (control: the same edit shape was admitted on paper, whose law is draft)
-refused J12 alice "submit n2" undisclosed "$ADMISSION"
+refused J12 alice "submit n2" law-denied "$LAWPLAN"
 
 # ------------------------------------------------ the board
 ok J12 alice "board new tasks"
@@ -239,16 +243,19 @@ ok J12 bob "board move m2 tasks 0 doing done"
 ok J12 bob "submit m2"
 ok J12 bob "read tasks"
 check J12 "task 0 is done (field 2 = 2) and owned by bob (field 3)" \
-  jq -e --arg b "$B" '[.page.entries[] | {(.key.field): .value}] | add | .["2"] == "2" and .["3"] == $b' "$OUT"
+  jq -e --arg b "$B" '[.cell.entries[] | {(.key.field): .value}] | add | .["2"] == "2" and .["3"] == $b' "$OUT"
 # (control: the forward moves m1 and m2 were admitted)
 ok J12 bob "board move m3 tasks 0 done todo"
-refused J12 bob "submit m3" undisclosed "$ADMISSION"
-# a declared page holds four entries: genesis field 1, task 0's fields 2 and 3,
-# and task 1's state in field 4; task 1's owner (field 5) is a fifth entry
+refused J12 bob "submit m3" law-denied "$LAWPLAN"
+# a declared cell is one unbounded store (DATAMODEL B1): task 1's owner
+# (field 5) is a fifth entry and is admitted (the page era refused it, overflow)
 ok J12 alice "board add t1 tasks 1"
 ok J12 alice "submit t1"
 ok J12 bob "board take k1 tasks 1"
-refused J12 bob "submit k1" operation-rejected "RejectReason.overflow"
+ok J12 bob "submit k1"
+ok J12 bob "read tasks"
+check J12 "task 1 is owned by bob (field 5): a fifth entry fits" \
+  jq -e --arg b "$B" '[.cell.entries[] | {(.key.field): .value}] | add | .["5"] == $b' "$OUT"
 
 # ------------------------------------------------ revoke
 ok J12 alice "revoke cut-bob paper $B"

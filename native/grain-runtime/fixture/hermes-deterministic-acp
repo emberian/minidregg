@@ -117,7 +117,7 @@ class ToolError(Exception):
 
 
 def field_value(view, field):
-    for entry in (view.get("page") or {}).get("entries", []):
+    for entry in (view.get("cell") or {}).get("entries", []):
         if entry.get("key", {}).get("field") == field:
             return entry.get("value")
     return None
@@ -147,7 +147,7 @@ def run_prompt(session, server, text):
                 elif op == "@read":
                     view = mcp.call("mini_workspace_read", {"name": words[1]})
                     reads[words[1]] = view
-                    entries = {e["key"]["field"]: e["value"] for e in view["page"]["entries"]}
+                    entries = {e["key"]["field"]: e["value"] for e in view["cell"]["entries"]}
                     say(session, f"read {words[1]}: {json.dumps(entries, sort_keys=True)}")
                 elif op == "@write":
                     name, field, value = words[1], words[2], words[3]

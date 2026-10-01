@@ -152,7 +152,7 @@ op() { # J description, command...
 }
 
 field() { # stdout-file field -> value or "absent"
-  jq -r --arg f "$2" '[.page.entries[] | select(.key.field == $f) | .value][0] // "absent"' "$1"
+  jq -r --arg f "$2" '[.cell.entries[] | select(.key.field == $f) | .value][0] // "absent"' "$1"
 }
 is() { [[ $1 == "$2" ]] || { echo "expected [$2], got [$1]"; return 1; }; }
 
@@ -335,7 +335,7 @@ J4_TX=$(jq -r .transactionId "$LAST")
 J4_COUNT=$(jq -r .acceptedCount "$LAST")
 script_step J4 0 newcomer $'whoami\nread shared\n'
 check J4 "script-mode read back: field 2 = 1" \
-  is "$(jq -s -r '[.[1].page.entries[] | select(.key.field == "2") | .value][0]' "$LAST")" 1
+  is "$(jq -s -r '[.[1].cell.entries[] | select(.key.field == "2") | .value][0]' "$LAST")" 1
 tty_step J4 newcomer $'rea\tsh\t\rhis\t\rexit\r'
 check J4 "tty: Tab completed 'read shared' and the Host answered field 2 = 1" \
   bash -c "grep -a -q 'read shared' '$LAST' && tr -d '\r' <'$LAST' | grep -a -A4 '\"field\": \"2\"' | grep -a -q '\"value\": \"1\"'"
