@@ -163,6 +163,9 @@ fn allowed_operation(request: &[u8], catalog_enabled: bool) -> bool {
             exact_pair(pair).is_some_and(|(plan, signature)| !plan.is_empty() && signature.len() == 64)
         }
         [98 | 99 | 101, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        // P-AFFORDANCES dry run: one signed observation (as op 1) and one
+        // signature list. The Host re-plans, assembles and commits nothing.
+        [130, pair @ ..] => pair.len() < HOST_MAX_FRAME && exact_pair(pair).is_some(),
         [102, digits @ ..] => {
             !digits.is_empty()
                 && digits.len() <= 80
