@@ -45,6 +45,15 @@ if ss -ltn 2>/dev/null | awk '{print $4}' | grep -q ":$PORT\$"; then
   exit 69
 fi
 
+# The Store's socket will be $RUN/store/public/mini.sock, and a Unix socket
+# path is at most 107 bytes (sun_path). Refuse a longer one here, by name,
+# rather than let `mini serve` fail to bind and every later row cascade.
+SOCK_WOULD_BE=$RUN/store/public/mini.sock
+if (( ${#SOCK_WOULD_BE} >= 108 )); then
+  echo "socket path would be ${#SOCK_WOULD_BE} bytes (>= 108, sun_path): $SOCK_WOULD_BE; use a shorter NEW_RUN_DIR" >&2
+  exit 64
+fi
+
 mkdir -m 700 "$RUN" "$RUN/bin" "$RUN/log" "$RUN/ssh" "$RUN/sshd" "$RUN/homes"
 RUN=$(CDPATH='' cd -- "$RUN" && pwd)
 LOG=$RUN/log

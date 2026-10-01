@@ -51,7 +51,8 @@
 # Tunables: JOURNEY_GROWTH_LEVELS (default "10 100 500 1000");
 # JOURNEY_GROWTH_FULL=1 keeps measuring after two rising levels already exceed
 # the 1000-record thresholds (default stops, see step G);
-# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule).
+# JOURNEY_GROWTH_BUDGET_S (default 10800, the bake-off's three-hour rule);
+# JOURNEY_ONLY (space-separated step ids) runs only those steps.
 # Requires: Linux (/proc-free, but GNU date +%N, setsid, timeout), bash, jq, sha256sum.
 
 set -u
@@ -234,6 +235,15 @@ frontier() {
 run_step() {
   local id=$1; shift
   local dep t0 t1 rc
+  # JOURNEY_ONLY="J0 JINSPECT": run only the named steps (re-running one step
+  # through the real harness). A skipped step is SKIPPED, never PASS, so a
+  # filtered run's frontier is the first skipped step and it exits non-zero.
+  if [ -n "${JOURNEY_ONLY:-}" ] && [[ " $JOURNEY_ONLY " != *" $id "* ]]; then
+    STATUS[$id]=SKIPPED; WALL[$id]=0.000; ART[$id]=""; DET[$id]="skipped: not in JOURNEY_ONLY"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" SKIPPED 0.000 "" "${DET[$id]}" >>"$TSV"
+    echo "STEP $id SKIPPED (JOURNEY_ONLY)" >&2
+    return
+  fi
   SD=$S/$id; mkdir -p -m 700 "$SD"
   DETAIL=""; ARTIFACT=""
   for dep in "$@"; do
