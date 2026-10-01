@@ -3,13 +3,17 @@
 Hermes never holds a model-provider key. Each Chat Completions request Hermes
 makes goes to its controller's gateway. At reserve time, the controller picks
 **one row of the operator's provider table** and **one bearer** for that
-request. The row's `credential` kind says where the bearer comes from:
+request. The row's `credential` kind says where the bearer comes from, and it
+is also the **route** the purse records and is charged by:
 
-| `credential` | bearer | what gates it |
-|---|---|---|
-| `user` | the friend's own key (`mini key set`) | the friend's grant naming this Hermes runner: a per-call `max_tokens` ceiling, calls per UTC day, and a last block height |
-| `pool` | the operator's key (`mini key … --pool true`) | the Hermes grain's purse: Mini must admit the provider reserve (PAY.md §2.7) |
-| `none` | no `Authorization` header at all | the purse, like any other row (a homelab endpoint on the operator's own network) |
+| `credential` (route) | bearer | what gates it | what the purse pays |
+|---|---|---|---|
+| `user` | the friend's own key (`mini key set`) | the friend's grant naming this Hermes runner: a per-call `max_tokens` ceiling, calls per UTC day, and a last block height | the user route's per-operation fee, nothing else: the provider bills the friend |
+| `pool` | the operator's key (`mini key … --pool true`) | the row's `caps` (per-call `max_tokens`, calls per UTC day per runner) and the purse: Mini must admit the provider reserve (PAY.md §2.7) | the pool fee plus the metered tariff |
+| `homelab` | no `Authorization` header at all | the purse (a homelab endpoint on the operator's own network) | the homelab fee plus its metered rates |
+
+A call with no payer (a `user` row and no key or grant) is refused before
+anything is reserved.
 
 The row is the task's pinned `provider`, or else the first row that lists the
 task's model. **Nothing ever falls through from one payer to another.** A
@@ -55,10 +59,11 @@ install -m 0644 -o root -g root providers.json /etc/mini/providers.json
   friends' keys and the operator's money are sent, so the `mini` user must not
   be able to rewrite it.
 
-Example table (`type` and every field are required, except `tariff`):
+Example table (`type` and every field are required; `caps` exactly on a
+`pool` row):
 
 ```json
-{"type":"mini-provider-table-v1","providers":[
+{"type":"mini-provider-table-v2","providers":[
   {"name":"openrouter","kind":"openai-compatible",
    "endpoint":"https://openrouter.ai/api/v1/chat/completions",
    "models":["anthropic/claude-sonnet-4.5","qwen/qwen3-coder"],
@@ -66,11 +71,11 @@ Example table (`type` and every field are required, except `tariff`):
   {"name":"pool","kind":"openai-compatible",
    "endpoint":"https://openrouter.ai/api/v1/chat/completions",
    "models":["qwen/qwen3-coder"],
-   "credential":"pool"},
+   "credential":"pool","caps":{"perCall":"4096","perDay":"200"}},
   {"name":"homelab","kind":"openai-compatible",
    "endpoint":"https://inference.tailnet.example/v1/chat/completions",
    "models":["bonsai2-27b-ptq1"],
-   "credential":"none"}]}
+   "credential":"homelab"}]}
 ```
 
 **Rules for the table:**
@@ -79,11 +84,12 @@ Example table (`type` and every field are required, except `tariff`):
   no userinfo.
   - A plain-HTTP tailnet address is refused. Put the homelab behind
     `tailscale serve` (which gives it HTTPS), or use a loopback tunnel.
-- **`tariff`.** A row carries a `tariff` (`{version, inputMicroPerMillion,
-  outputMicroPerMillion}`) exactly when its Hermes provider task is metered.
-  - The controller refuses the request with `tariff-mismatch` unless the
-    tariff equals the tariff pinned in the Host profile.
-  - The Host pin decides the charge. The table only states it.
+- **No prices in the table.** The Host profile's per-route tariff (below)
+  prices every call; the row only names the route. A v1 table (a row
+  `tariff`, or `credential: none`) refuses to load.
+- **`caps`** on a `pool` row: `perCall` is the largest `max_tokens` one call
+  may ask for (also never above the task's `maxOutputTokens`, which the hold
+  covers), `perDay` the calls per UTC day, per runner.
 
 **The pool is optional.** Set it only if you want to fund Hermes for friends
 who bring no key:
@@ -108,7 +114,13 @@ fields in its `providerTask`:
 ```
 
 - **`onBehalfOf`:** the friend this Hermes serves. Omit it for a Hermes that
-  only uses `pool` or `none` rows.
+  only uses `pool` or `homelab` rows.
+- **`reserve`, `maxInputTokens`, `maxOutputTokens`:** the hold of a metered
+  (pool or homelab) call and the token ceilings it must cover: `reserve` ≥ the
+  route's fee + the metered charge at the ceilings, or the call is refused
+  before anything is reserved. A user-route call holds exactly the user fee.
+  There is no `charge` and no `metering` field any more: every call is charged
+  by the Host's route quote.
 - **`provider`:** optional. It pins the row, for example `"pool"`.
 - **The runner.** The friend's grant names the provider task's `subject` (the
   runner). Tell the friend that number.
@@ -150,17 +162,33 @@ ssh mini@BOX key revoke openrouter        # delete the key and every grant
 | `grant-expired` | the signed height is past your `--until` |
 | `per-call-cap` | the request's `max_tokens` is absent or above your `--per-call` |
 | `per-day-cap` | today's calls reached your `--per-day` |
-| `tariff-mismatch` | the operator's table and the Host's tariff disagree (ember's to fix) |
 | `no-credit` | the purse refused the reserve (402) |
 
-## Charges today
+## Charges: the Host's per-route tariff
 
-Every route debits the Hermes grain's purse at the task's configured charge,
-and that includes a `user` row. When you bring your own key, OpenRouter bills
-you, and the purse is still debited in credit. Two things follow from that:
+The Host profile pins one tariff per provider task, with a row per route
+(`providerMetering.tariff` or each `providerServices[].tariff`; credit units,
+one credit per purse micro-unit):
 
-- **The reserve is a real hold.** It is how an uncertain send is never
-  resent.
-- **A zero-credit BYOK needs a separate tariff per route.** Today the Host
-  pins one tariff per provider task. A zero charge for BYOK needs a
-  route-specific tariff in the Host profile (a Host/Lean change).
+```json
+{"version":"1","model":"qwen/qwen3-coder","routes":{
+  "user":{"perOp":"EMBER_USER_PER_OP"},
+  "pool":{"perOp":"EMBER_POOL_PER_OP","inputMicroPerMillion":"EMBER_POOL_IN","outputMicroPerMillion":"EMBER_POOL_OUT"},
+  "homelab":{"perOp":"EMBER_HOMELAB_PER_OP","inputMicroPerMillion":"EMBER_HOMELAB_IN","outputMicroPerMillion":"EMBER_HOMELAB_OUT"}}}
+```
+
+- **`user`** (your own key): the purse is charged only `perOp` per call. Your
+  provider bills you; Mini's purse never sees a token count.
+- **`pool`**: `perOp` plus `ceil((in·inputMicroPerMillion + out·outputMicroPerMillion)/10⁶)`.
+- **`homelab`**: the same shape as pool, at its own rates.
+- **The route is a kernel fact.** A provider purse born under this tariff
+  carries a route field: the reserve records the route the controller chose
+  (with the bearer, from the same table row), and the settle is charged by
+  that recorded route. A call reserved as pool cannot settle as a user call
+  (`Kernel/ProviderRoute.lean`).
+- **The reserve is still a real hold**, on every route. It is how an uncertain
+  send is never resent.
+- **The fees are fixed at the purse's birth.** The purse's law carries the
+  per-operation fees the Host pinned when it was born. A Host tariff with
+  different fees refuses the user-route reserve (its hold must equal the law's
+  fee) and fails a metered settle closed; a fee change means a new purse.

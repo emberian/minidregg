@@ -11,7 +11,14 @@
 # Three fresh Stores, one grain each (tasks 74601..74604), run one after the
 # other: B (friend B's key, then B revokes), A (friend A's key, caps), and C
 # (no key: no-route fallthrough refused, then the pool, then the homelab row,
-# then out of credit). The two upstreams are `mini-hermes-test-provider
+# then out of credit).
+#
+# HERMES-TARIFF: every purse is born under the Host's per-route tariff
+# (user fee 1; pool fee 19 + 1/1 micro-credit per million tokens, so a
+# route-probe completion (1+1 tokens) charges 19 + 1 = 20; homelab fee 20), so
+# the purse column is the per-route charge: a user call costs exactly its fee
+# (1), a pool call 20, a homelab call 20. Those are the same numbers the
+# fixed-charge tasks of the first run produced, now set by route. The two upstreams are `mini-hermes-test-provider
 # --route-probe`, which logs the SHA-256 of the Authorization value it got.
 # The Hermes worker is the hold fixture: it keeps one prompt (and so one
 # gateway lease) open while this script sends Chat Completions requests to
@@ -76,12 +83,12 @@ table() {  # ORDER... : rows for model shared-model, first listed wins
   for name in "$@"; do
     case $name in
       openrouter) rows+=("{\"name\":\"openrouter\",\"endpoint\":\"http://127.0.0.1:$UP/v1/chat/completions\",\"kind\":\"openai-compatible\",\"models\":[\"shared-model\"],\"credential\":\"user\"}") ;;
-      pool) rows+=("{\"name\":\"pool\",\"endpoint\":\"http://127.0.0.1:$UP/v1/chat/completions\",\"kind\":\"openai-compatible\",\"models\":[\"shared-model\"],\"credential\":\"pool\"}") ;;
-      homelab) rows+=("{\"name\":\"homelab\",\"endpoint\":\"http://127.0.0.1:$UP2/v1/chat/completions\",\"kind\":\"openai-compatible\",\"models\":[\"shared-model\"],\"credential\":\"none\"}") ;;
+      pool) rows+=("{\"name\":\"pool\",\"endpoint\":\"http://127.0.0.1:$UP/v1/chat/completions\",\"kind\":\"openai-compatible\",\"models\":[\"shared-model\"],\"credential\":\"pool\",\"caps\":{\"perCall\":\"64\",\"perDay\":\"10\"}}") ;;
+      homelab) rows+=("{\"name\":\"homelab\",\"endpoint\":\"http://127.0.0.1:$UP2/v1/chat/completions\",\"kind\":\"openai-compatible\",\"models\":[\"shared-model\"],\"credential\":\"homelab\"}") ;;
     esac
   done
   local IFS=,
-  printf '{"type":"mini-provider-table-v1","providers":[%s]}\n' "${rows[*]}" >"$RUN/inputs/providers.json"
+  printf '{"type":"mini-provider-table-v2","providers":[%s]}\n' "${rows[*]}" >"$RUN/inputs/providers.json"
   sudo install -o root -g root -m 0644 "$RUN/inputs/providers.json" "$TABLE"
   cp "$RUN/inputs/providers.json" "$EV/providers-$(IFS=-; echo "$*").json"
 }
@@ -101,6 +108,13 @@ S= BOOT= CONFIG= SOCK= STATE= JOURNAL= WORK=
 store_up() {  # NAME
   S=$RUN/$1; BOOT=$S/boot
   mkdir -m 700 "$S"
+  jq -n --argjson p "$PTASK" '{continuityProviderResourceId:$p,
+    providerMetering:{providerResourceId:$p,tariff:{version:"1",model:"shared-model",routes:{
+      user:{perOp:"1"},
+      pool:{perOp:"19",inputMicroPerMillion:"1",outputMicroPerMillion:"1"},
+      homelab:{perOp:"20",inputMicroPerMillion:"0",outputMicroPerMillion:"0"}}}}}' >"$S/provider-pins.json"
+  cp "$S/provider-pins.json" "$EV/$1-provider-pins.json"
+  OPERATOR_PROVIDER_PINS=$S/provider-pins.json \
   ACCEPTANCE_TASK_BASE=$BASE PROVIDER_BOOTSTRAP=1 BOOTSTRAP_ONLY=1 MINI=$MINI GRAIN=$GRAIN \
     STORE_BINARY=$BIN/minidregg-link-sqlite-store \
     SIGNATURE_BINARY=$BIN/minidregg-credential-signature-verifier \
@@ -137,7 +151,7 @@ key() {  # LABEL ARGS... (output kept as evidence)
   "$MINI" key "$@" "${KEYFLAGS[@]}" >"$EV/key-$label.json" 2>"$EV/key-$label.stderr"
 }
 
-controller_up() {  # PROVIDER_EXTRA_JSON RESERVE CHARGE
+controller_up() {  # PROVIDER_EXTRA_JSON RESERVE (the metered hold; a user call holds its fee)
   STATE=$S/state JOURNAL=$S/state/journal.json WORK=$S/work
   mkdir -m 700 "$STATE" "$WORK" "$WORK/.hermes" "$S/runtime" "$S/launcher"
   cp "$REPO/deploy/grain-host/bwrap" "$S/launcher/bwrap"
@@ -148,7 +162,7 @@ controller_up() {  # PROVIDER_EXTRA_JSON RESERVE CHARGE
     --arg b "$BOOT" --arg state "$STATE" --arg cwd "$S" --arg work "$WORK" --arg rt "$S/runtime" \
     --arg launcher "$S/launcher/bwrap" --arg table "$TABLE" --arg cred "$CRED" --arg ckey "$CKEY" \
     --arg t "$TASK" --arg tt "$((BASE + 2))" --arg pub "$((BASE + 3))" --arg pt "$PTASK" \
-    --arg gw "127.0.0.1:$GW" --arg reserve "$2" --arg charge "$3" --argjson extra "$1" '
+    --arg gw "127.0.0.1:$GW" --arg reserve "$2" --argjson extra "$1" '
     {mini:$mini,host:$host,hostConfig:$cfg,hostSocket:$sock,custodyKey:($b+"/controller.key"),
      stateDir:$state,controlSocket:($state+"/control.sock"),cwd:$cwd,
      task:$t,subject:"7",capability:"71",queryCapability:"71",policyControlCapability:"72",
@@ -159,7 +173,7 @@ controller_up() {  # PROVIDER_EXTRA_JSON RESERVE CHARGE
        allowedReads:[{name:"publication",kind:"object",target:$pub,observeCapability:"94",maxResultBytes:65536}]},
      providerTask:({task:$pt,subject:"9",capability:"101",queryCapability:"101",
        custodyKey:($b+"/provider.key"),parentCapability:"75",parentObserveCapability:"75",
-       reserve:$reserve,charge:$charge,model:"shared-model",providers:$table,
+       reserve:$reserve,maxInputTokens:1000,maxOutputTokens:1000,model:"shared-model",providers:$table,
        credentialsRoot:$cred,credentialsKey:$ckey,gatewayBind:$gw,
        maxRequestBytes:1048576,maxResponseBytes:8388608,timeoutSeconds:120,
        localFixtureHostNetwork:true} + $extra),
@@ -276,7 +290,7 @@ key ls-b --action ls --dir "$RUN/friends/B"
 key ls-pool --action ls --pool true
 printf 'A\t21\t%s\nB\t22\t%s\nC\t23\t%s\n' "$PUB_A" "$PUB_B" "$PUB_C" >"$EV/friends.tsv"
 
-controller_up "{\"onBehalfOf\":{\"subject\":\"22\",\"publicKey\":\"$PUB_B\"}}" 3 1
+controller_up "{\"onBehalfOf\":{\"subject\":\"22\",\"publicKey\":\"$PUB_B\"}}" 20
 echo "store-b purse before: $(purse)" | tee "$EV/store-b-purse-before.txt"
 grep -q ' 50/0$' "$EV/store-b-purse-before.txt" || fail "store-b purse did not start at 50/0"
 call b1 B openrouter 16 200 - openrouter "sha256:$AUTH_B" 49/0
@@ -287,7 +301,7 @@ store_down
 
 # ======== Store A: friend A's key, caps; B's revocation does not touch A ======
 store_up store-a
-controller_up "{\"onBehalfOf\":{\"subject\":\"21\",\"publicKey\":\"$PUB_A\"}}" 3 1
+controller_up "{\"onBehalfOf\":{\"subject\":\"21\",\"publicKey\":\"$PUB_A\"}}" 20
 echo "store-a purse before: $(purse)" | tee "$EV/store-a-purse-before.txt"
 grep -q ' 50/0$' "$EV/store-a-purse-before.txt" || fail "store-a purse did not start at 50/0"
 call a1 A openrouter 16 200 - openrouter "sha256:$AUTH_A" 49/0
@@ -306,7 +320,7 @@ store_down
 
 # ======== Store C: no key; the pool behind the purse; homelab; no credit =====
 store_up store-c
-controller_up '{}' 20 20
+controller_up '{}' 20
 echo "store-c purse before: $(purse)" | tee "$EV/store-c-purse-before.txt"
 grep -q ' 50/0$' "$EV/store-c-purse-before.txt" || fail "store-c purse did not start at 50/0"
 call c1-user-row-no-key C openrouter 16 403 no-credential openrouter - 50/0

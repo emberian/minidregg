@@ -14,6 +14,8 @@ import Kernel.PayEnrolDecision  -- PAY P3b-1: the self-enrollment memo, its refu
 import Kernel.PurseRefillProofs  -- PAY P6: a Book burn funds an AgentGrain purse in one joint turn; purse never mints
 import Kernel.PayLedger  -- PAY P3/P6 + C3: the credit asset's ledger identity (credited, refilled, funded, paid out); escrow conserved over a job's log
 import Kernel.JobMoneyProofs  -- C3 K-JOB-MONEY: job escrow, bond and payout as conservation-checked Book turns; the receiver writes the plan
+import Kernel.ProviderRoute  -- HERMES-TARIFF: the provider purse charges by the route recorded at reserve
+import Kernel.ProviderRouteProofs  -- HERMES-TARIFF: refill then a user-route call conserves
 import Kernel.State   -- the minimal kernel state: accounts + bal + caps + one UKey map; Σ-conservation
 import Kernel.Turn    -- the turn as a wide pullback (hyperedge): cone + balance, legs_agree, the binding tooth
 import Kernel.TurnLimit  -- N2a: the hyperedge cone data IS a wide-pullback limit (Types.isLimit), keystones

@@ -1,0 +1,19 @@
+verdict	step	expected	observed
+PASS	genesis pay cell	tariff invalid, empty book, clock 0/0	tariff.valid=False bookSize=0 nextFree=0 clock=0/0
+PASS	assignment before a valid tariff	refused undisclosed (built to hit tariffInvalid), pay root unchanged	refused undisclosed
+PASS	operator installs 64-row book + tariff v1	confirmed	confirmed acceptedCount=1
+PASS	view after install	bookSize 64, tariff v1 valid, nextFree 0, clock 0/0	bookSize=64 tariff.version=1 valid=True nextFree=0 clock=0/0
+PASS	friend (subject 8) takes index 0 for owned account 108	confirmed	confirmed acceptedCount=2
+PASS	index 0 is the friend's; address is book[0]	nextFree 1	nextFree=1 book[0]=1ed10e0c48100a58...
+PASS	second request for account 108	refused undisclosed (built to hit alreadyAssigned), pay root unchanged	refused undisclosed
+PASS	non-owner (subject 9, own grant) for account 108	refused undisclosed (built to hit notOwner), pay root unchanged	refused undisclosed
+PASS	non-owner (subject 9, presenting subject 8's grant)	refused undisclosed (built to hit notOwner), pay root unchanged	refused undisclosed
+PASS	owners 9..71 take indices 1..63	63 confirmed, nextFree 64	confirmed=63 nextFree=64
+PASS	owner 72 (account 172) asks for index 64 of a 64-row book	refused undisclosed (built to hit bookExhausted), pay root unchanged	refused undisclosed
+PASS	tariff set again at version 1 (= current)	refused undisclosed (built to hit tariffVersionNotIncreasing), pay root unchanged	refused undisclosed
+PASS	tariff raised to version 2	confirmed	confirmed acceptedCount=66
+PASS	tariff set back to version 1 (< current 2)	refused undisclosed (built to hit tariffVersionNotIncreasing), pay root unchanged	refused undisclosed
+PASS	tariff at version 0 (not a valid tariff)	refused undisclosed (built to hit tariffInvalid), pay root unchanged	refused undisclosed
+PASS	receipt-only lookup of the friend's assignment	confirmed replayed	confirmed replayed
+PASS	cold reopen	same pay root, nextFree 64	payRoot equal=True nextFree=64
+PASS	operator audit re-admits every record (NativeHostReplay)	exit 0	exit=0 audited 66 accepted records: every signed ingress re-admitted at its original prefix

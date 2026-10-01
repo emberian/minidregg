@@ -30,7 +30,7 @@ def complete(text):
     base, key, model = profile()
     url = urllib.parse.urlsplit(base)
     body = json.dumps({"model": model, "messages": [{"role": "user", "content": text}],
-                       "stream": True, "stream_options": {"include_usage": True},
+                       "max_tokens": 64, "stream": True, "stream_options": {"include_usage": True},
                        "tools": [{"type": "function", "function": {
                            "name": "mcp__mini_grain__mini_read_resource",
                            "parameters": {"type": "object"}}}]}).encode()

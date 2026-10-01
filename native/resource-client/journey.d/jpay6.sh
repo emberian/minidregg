@@ -18,9 +18,19 @@
 # --metered-usage` upstream (1 prompt + 2 completion tokens). The worker is the
 # real bwrap launcher running `jpay6-hermes-acp`, a scripted ACP stand-in that
 # makes one chat-completions request per prompt through the controller's
-# gateway (no Hermes checkout exists on hbox). Provider tariff, in credit:
-# 20 credits per million input tokens and 40 per million output tokens, so one
-# metered completion charges ceil((1*20e6 + 2*40e6)/1e6) = 100 credits.
+# gateway (no Hermes checkout exists on hbox). The Host pins a per-route
+# provider tariff (HERMES-TARIFF), in credit: the user route (the friend's own
+# key) costs a per-operation fee of 5 and nothing else; the pool route costs a
+# fee of 7 plus 20 credits per million input and 40 per million output tokens,
+# so one metered completion charges 7 + ceil((1*20e6 + 2*40e6)/1e6) = 107; the
+# homelab route costs a fee of 3. The purse is born under that per-route law,
+# so it records the route at reserve and charges by it at settle.
+# HERMES-TARIFF rows: a call on the friend's own key (user route) debits the
+# fee exactly and the upstream saw the friend's bearer; after the friend
+# revokes, a call with no payer is refused before any reserve; a pool call is
+# metered with the pool bearer; and once the uncertain pool call is held, a
+# settle of that hold as a user call is refused three ways (Host authoring by
+# name, the receiver's old-value check, the route law's pool fee).
 # The uncertain attempt: the upstream is SIGSTOPped, a second prompt crosses
 # the gateway's durable send boundary, the controller is SIGKILLed, systemd
 # restarts it, the upstream is SIGCONTed (it receives the one stalled request),
@@ -66,9 +76,13 @@ GRAIN, TEST_PROVIDER, REPO, STANDIN, LAUNCH_GATE = (os.environ[k] for k in
     ("GRAIN", "TEST_PROVIDER", "REPO", "HERMES_STANDIN", "LAUNCH_GATE"))
 MODEL = "mini-hermes-protocol-fixture"
 RATE_IN, RATE_OUT = 20_000_000, 40_000_000       # credit per million tokens
-METERED_CHARGE = (1 * RATE_IN + 2 * RATE_OUT + 999_999) // 1_000_000
+USER_FEE, POOL_FEE, HOMELAB_FEE = 5, 7, 3
+METERED_CHARGE = POOL_FEE + (1 * RATE_IN + 2 * RATE_OUT + 999_999) // 1_000_000
 PROVIDER_RESERVE = 30_000
 MAX_IN, MAX_OUT = 1000, 100
+FRIEND_KEY, POOL_KEY = "friend-fixture-key", "local-fixture-key"
+import hashlib
+def bearer_digest(token): return "sha256:" + hashlib.sha256(("Bearer " + token).encode()).hexdigest()
 ROWS = []
 OPERATOR, TOOL, PROVIDER, FRIEND, STRANGER = 7, 8, 9, 20, 21
 FACTORY_CONTROL = 53
@@ -124,8 +138,12 @@ operator = {"domain": 8501, "federation": 9, "factoryId": 10, "resourceBookId": 
             "signatureBinary": VERIFIER,
             "continuityProviderResourceId": PURSE,
             "providerMetering": {"providerResourceId": PURSE, "tariff": {
-                "version": "1", "model": MODEL, "inputMicroPerMillion": str(RATE_IN),
-                "outputMicroPerMillion": str(RATE_OUT)}}}
+                "version": "1", "model": MODEL, "routes": {
+                    "user": {"perOp": str(USER_FEE)},
+                    "pool": {"perOp": str(POOL_FEE), "inputMicroPerMillion": str(RATE_IN),
+                             "outputMicroPerMillion": str(RATE_OUT)},
+                    "homelab": {"perOp": str(HOMELAB_FEE), "inputMicroPerMillion": "0",
+                                "outputMicroPerMillion": "0"}}}}}
 json.dump(operator, open(path("operator.json"), "w"), indent=1)
 profile = json.loads(subprocess.run([HOST, path("operator.json"), "profile"], check=True,
                                     capture_output=True).stdout)
@@ -146,6 +164,13 @@ boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("oper
 if boot.returncode != 0:
     fail("bootstrap: " + (boot.stdout + boot.stderr).decode("utf-8", "replace")[-400:])
 CONFIG = path("deployment/pinned-config.json")
+# The provider pins are in force from the first event: the purse's birth reads
+# the Host's per-route tariff to install its route law.
+pinned = json.load(open(CONFIG))
+for key in ("continuityProviderResourceId", "providerMetering"):
+    pinned.setdefault(key, operator[key])
+CONFIG = path("deployment/continuity-config.json")
+json.dump(pinned, open(CONFIG, "w"), indent=1)
 
 # ---------------------------------------------------------------- the purse: the grain birth (first event)
 os.makedirs(path("session"), mode=0o700)
@@ -451,34 +476,53 @@ LAUNCHER = path("launcher/bwrap")
 open(LAUNCHER, "w").write(launcher); os.chmod(LAUNCHER, 0o700)
 open(path("launcher/launch-gate"), "wb").write(open(LAUNCH_GATE, "rb").read())
 os.chmod(path("launcher/launch-gate"), 0o700)
-# HERMES-KEYS: the provider request's route is a row of the operator's provider
-# table (root-owned, as in production: `sudo -n install`), and its bearer is the
-# operator's pool secret in the sealed credential store, written by `mini key`.
-# The pool row is the one whose spend the purse reserve gates; its tariff is
-# the Host's pinned provider tariff, or the controller refuses tariff-mismatch.
+# HERMES-KEYS/-TARIFF: the provider request's route is a row of the operator's
+# provider table (root-owned, as in production: `sudo -n install`); the row's
+# credential kind is the route (user | pool | homelab), and the Host's
+# per-route tariff prices it. The pool row carries the operator's caps.
 CRED, CKEY = path("credentials"), path("etc/credentials.key")
 os.makedirs(CRED, mode=0o700); os.makedirs(path("etc"), mode=0o700)
 open(CKEY, "wb").write(os.urandom(32)); os.chmod(CKEY, 0o600)
 TABLE_SOURCE, TABLE = path("providers-source.json"), path("etc/providers.json")
-json.dump({"type": "mini-provider-table-v1", "providers": [
-    {"name": "local", "endpoint": f"http://127.0.0.1:{UPORT}/v1/chat/completions",
-     "kind": "openai-compatible", "models": [MODEL],
-     "tariff": {"version": "1", "inputMicroPerMillion": str(RATE_IN),
-                "outputMicroPerMillion": str(RATE_OUT)},
-     "credential": "pool"}]}, open(TABLE_SOURCE, "w"))
-installed = subprocess.run(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644",
-                            TABLE_SOURCE, TABLE], capture_output=True)
-if installed.returncode != 0:
-    fail("the provider table must be root-owned; sudo -n install failed: "
-         + installed.stderr.decode("utf-8", "replace")[-200:])
-pool_secret = path("pool.secret")
-open(pool_secret, "w").write("local-fixture-key\n"); os.chmod(pool_secret, 0o600)
-keyed = subprocess.run([MINI, "key", "--action", "set", "--pool", "true", "--provider", "local",
-                        "--secret", pool_secret, "--providers", TABLE, "--credentials", CRED,
-                        "--credentials-key", CKEY], capture_output=True)
-os.unlink(pool_secret)
-if keyed.returncode != 0:
-    fail("mini key set --pool: " + (keyed.stdout + keyed.stderr).decode("utf-8", "replace")[-300:])
+ENDPOINT = f"http://127.0.0.1:{UPORT}/v1/chat/completions"
+TABLE_ROWS = {
+    "user": {"name": "friendkey", "endpoint": ENDPOINT, "kind": "openai-compatible",
+             "models": [MODEL], "credential": "user"},
+    "pool": {"name": "local", "endpoint": ENDPOINT, "kind": "openai-compatible",
+             "models": [MODEL], "credential": "pool", "caps": {"perCall": "64", "perDay": "10"}}}
+def install_table(*routes):
+    json.dump({"type": "mini-provider-table-v2", "providers": [TABLE_ROWS[r] for r in routes]},
+              open(TABLE_SOURCE, "w"))
+    installed = subprocess.run(["sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644",
+                                TABLE_SOURCE, TABLE], capture_output=True)
+    if installed.returncode != 0:
+        fail("the provider table must be root-owned; sudo -n install failed: "
+             + installed.stderr.decode("utf-8", "replace")[-200:])
+install_table("user", "pool")
+def mini_key(label, *words, secret=None):
+    words = list(words)
+    if secret is not None:
+        secret_path = path(f"{label}.secret")
+        open(secret_path, "w").write(secret + "\n"); os.chmod(secret_path, 0o600)
+        words += ["--secret", secret_path]
+    done = subprocess.run([MINI, "key", *words, "--providers", TABLE, "--credentials", CRED,
+                           "--credentials-key", CKEY], capture_output=True)
+    if secret is not None: os.unlink(secret_path)
+    open(path(f"key-{label}.out"), "wb").write(done.stdout + done.stderr)
+    if done.returncode != 0:
+        fail(f"mini key {label}: " + (done.stdout + done.stderr).decode("utf-8", "replace")[-300:])
+mini_key("pool", "--action", "set", "--pool", "true", "--provider", "local", secret=POOL_KEY)
+# The friend's own provider key, in the friend's own namespace (their
+# workspace's subject and signing key), granted to the provider runner 9.
+FRIEND_WS = path("friend-workspace")
+ws = subprocess.run([MINI, "workspace", "--action", "init", "--host", HOST, "--config", CONFIG,
+                     "--key", path(f"keys/{FRIEND}.key"), "--subject", str(FRIEND), "--dir", FRIEND_WS],
+                    capture_output=True)
+if ws.returncode != 0:
+    fail("friend workspace: " + (ws.stdout + ws.stderr).decode("utf-8", "replace")[-300:])
+mini_key("friend", "--action", "set", "--dir", FRIEND_WS, "--provider", "friendkey", secret=FRIEND_KEY)
+mini_key("friend-grant", "--action", "grant", "--dir", FRIEND_WS, "--provider", "friendkey",
+         "--runner", str(PROVIDER), "--per-call", "64", "--per-day", "10", "--until", "1000000")
 pinned = json.load(open(CONFIG))
 added = []
 for key in ("continuityProviderResourceId", "providerMetering"):
@@ -492,11 +536,15 @@ if added:
 prof = json.loads(subprocess.run([MINI, "profile", "--host", HOST, "--config", CONFIG_B],
                                  capture_output=True).stdout or b"{}")
 pin = prof.get("providerMetering") or {}
-row(f"the Host profile pins the provider tariff in credit for purse {PURSE}",
-    f"providerResourceId {PURSE}, model {MODEL}, {RATE_IN}/{RATE_OUT} per million tokens",
+routes = pin.get("routes") or {}
+row(f"the Host profile pins the per-route provider tariff in credit for purse {PURSE}",
+    f"providerResourceId {PURSE}, model {MODEL}, user fee {USER_FEE}; pool fee {POOL_FEE} + {RATE_IN}/{RATE_OUT} per million tokens; homelab fee {HOMELAB_FEE}",
     f"pin={json.dumps(pin, sort_keys=True)} addedToPinnedConfig={added}",
     str(pin.get("providerResourceId")) == str(PURSE) and pin.get("model") == MODEL
-    and pin.get("inputMicroPerMillion") == str(RATE_IN) and pin.get("outputMicroPerMillion") == str(RATE_OUT))
+    and routes.get("user") == {"perOp": str(USER_FEE)}
+    and routes.get("pool") == {"perOp": str(POOL_FEE), "inputMicroPerMillion": str(RATE_IN),
+                               "outputMicroPerMillion": str(RATE_OUT)}
+    and (routes.get("homelab") or {}).get("perOp") == str(HOMELAB_FEE))
 runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOCKET,
            "controlSocket": os.path.join(STATE, "control.sock"), "custodyKey": path(f"keys/{OPERATOR}.key"),
            "stateDir": STATE, "cwd": DIR, "task": str(PARENT), "subject": "7", "capability": "71",
@@ -510,8 +558,10 @@ runtime = {"mini": MINI, "host": HOST, "hostConfig": CONFIG_B, "hostSocket": SOC
                                           "observeCapability": "94", "maxResultBytes": 65536}]},
            "providerTask": {"task": str(PURSE), "subject": "9", "capability": "101", "queryCapability": "101",
                             "custodyKey": path(f"keys/{PROVIDER}.key"), "parentCapability": "75",
-                            "parentObserveCapability": "75", "reserve": str(PROVIDER_RESERVE), "charge": "0",
-                            "metering": True, "maxInputTokens": MAX_IN, "maxOutputTokens": MAX_OUT,
+                            "parentObserveCapability": "75", "reserve": str(PROVIDER_RESERVE),
+                            "maxInputTokens": MAX_IN, "maxOutputTokens": MAX_OUT,
+                            "onBehalfOf": {"subject": str(FRIEND),
+                                           "publicKey": keys[FRIEND].verify_key.encode().hex()},
                             "model": MODEL, "providers": TABLE, "credentialsRoot": CRED,
                             "credentialsKey": CKEY,
                             "gatewayBind": f"127.0.0.1:{GPORT}", "maxRequestBytes": 1048576,
@@ -560,27 +610,77 @@ try:
     wait_for("soft attach", lambda: journal().get("connection") == "soft" and journal().get("pending") is None, 900)
     row("controller attaches under the managed worker law this Host authors (refill arm re-emitted)",
         "connection soft", f"connection={journal().get('connection')}", journal().get("connection") == "soft")
-    before_prompt, _ = mini_query("purse-before-prompt", PROVIDER, PURSE, 101)
-    b = before_prompt["grain"]
+    def upstream_auth():
+        lines = [l for l in open(path("upstream.log")).read().splitlines() if l.startswith("completion")]
+        return lines[-1].rsplit("auth=", 1)[-1] if lines and "auth=" in lines[-1] else "-"
+    def standin_statuses():
+        try: return [w for w in open(os.path.join(WORK, "standin.log")).read().split() if w.startswith("status=")]
+        except OSError: return []
+    def prompt_done():
+        j = journal()
+        return (j.get("providerAttempt") is None and j.get("providerHold") is None
+                and j.get("pending") is None and j.get("connection") == "soft" and j.get("child") is None)
+    def new_conversation():
+        # the stand-in keeps no Hermes state.db, so the controller asks for an
+        # explicit new conversation before another prompt
+        connector.stdin.write(b"conversation new\n"); connector.stdin.flush()
+        wait_for("conversation new", lambda: journal().get("hermesSession") is None, 300)
+    def grain_of(name):
+        cell, _ = mini_query(name, PROVIDER, PURSE, 101)
+        return cell["grain"], cell["root"]
+
+    # -- the user route: the friend's own key; the purse pays only the fee
+    b, _ = grain_of("purse-before-user")
+    row(f"purse {PURSE} was born a provider purse: route field 0 under the Host's per-route law",
+        "route 0, reserved 0", f"route={b.get('route')} reserved={b['reserved']}",
+        b.get("route") == "0" and b["reserved"] == "0")
     connector.stdin.write(b"hermes Read the publication and report its root.\n"); connector.stdin.flush()
-    wait_for("first provider request", lambda: upstream_requests() >= 1, 900)
-    wait_for("first prompt settled", lambda: journal().get("providerAttempt") is None and journal().get("providerHold") is None
-             and journal().get("pending") is None and journal().get("connection") == "soft", 900)
+    wait_for("user-route provider request", lambda: upstream_requests() >= 1, 900)
+    wait_for("user-route prompt settled", prompt_done, 900)
+    a, _ = grain_of("purse-after-user")
+    row("a call on the friend's own key (user route) debits exactly the per-operation fee",
+        f"remaining -{USER_FEE}, reserved 0, route 0; upstream saw the friend's bearer",
+        f"remaining {b['remaining']} -> {a['remaining']} reserved={a['reserved']} route={a.get('route')} "
+        f"upstream_auth={upstream_auth()[:20]}... friend={bearer_digest(FRIEND_KEY)[:20]}...",
+        int(b["remaining"]) - int(a["remaining"]) == USER_FEE and a["reserved"] == "0"
+        and a.get("route") == "0" and upstream_auth() == bearer_digest(FRIEND_KEY)
+        and upstream_requests() == 1)
+
+    # -- no route: the friend revokes; the user row has no payer and nothing falls through
+    new_conversation()
+    mini_key("friend-revoke", "--action", "revoke", "--dir", FRIEND_WS, "--provider", "friendkey")
+    seen = len(standin_statuses())
+    connector.stdin.write(b"hermes Read the publication once more.\n"); connector.stdin.flush()
+    wait_for("refused request answered", lambda: len(standin_statuses()) > seen, 900)
+    wait_for("refused prompt settled", prompt_done, 900)
+    n, _ = grain_of("purse-after-none")
+    row("a call with no payer (the friend revoked; the user row is first) is refused before any reserve",
+        "worker got 403; purse unchanged (no hold, no fee); no upstream request; no pool fallthrough",
+        f"standin={standin_statuses()[-1:]} remaining {a['remaining']} -> {n['remaining']} reserved={n['reserved']} "
+        f"g {a['generation']} -> {n['generation']} upstream_requests={upstream_requests()}",
+        standin_statuses()[-1:] == ["status=403"] and n["remaining"] == a["remaining"]
+        and n["reserved"] == "0" and upstream_requests() == 1)
+
+    # -- the pool route: the operator's key; the purse pays the metered tariff
+    new_conversation()
+    install_table("pool")
+    connector.stdin.write(b"hermes Read the publication and report its root.\n"); connector.stdin.flush()
+    wait_for("pool provider request", lambda: upstream_requests() >= 2, 900)
+    wait_for("pool prompt settled", prompt_done, 900)
     after_prompt, _ = mini_query("purse-after-prompt", PROVIDER, PURSE, 101)
-    a = after_prompt["grain"]
-    row("a Hermes provider attempt reserves from the refilled purse and settles the metered charge",
-        f"remaining -{METERED_CHARGE} (1 in + 2 out tokens at {RATE_IN}/{RATE_OUT}), reserved 0",
-        f"remaining {b['remaining']} -> {a['remaining']} reserved={a['reserved']} upstream_requests={upstream_requests()}",
-        int(b["remaining"]) - int(a["remaining"]) == METERED_CHARGE and a["reserved"] == "0" and upstream_requests() == 1)
+    p = after_prompt["grain"]
+    row("a pool call reserves from the refilled purse and settles the metered tariff",
+        f"remaining -{METERED_CHARGE} (fee {POOL_FEE} + 1 in + 2 out tokens at {RATE_IN}/{RATE_OUT}), reserved 0; upstream saw the pool bearer",
+        f"remaining {n['remaining']} -> {p['remaining']} reserved={p['reserved']} route={p.get('route')} "
+        f"upstream_requests={upstream_requests()} upstream_auth={upstream_auth()[:20]}...",
+        int(n["remaining"]) - int(p["remaining"]) == METERED_CHARGE and p["reserved"] == "0"
+        and upstream_requests() == 2 and upstream_auth() == bearer_digest(POOL_KEY))
     standin = open(os.path.join(WORK, "standin.log")).read().split()
     row("the worker received the provider's answer through the gateway", "status=200",
-        " ".join(standin[-2:]), "status=200" in standin)
+        " ".join(standin[-2:]), "status=200" in standin[-2:])
 
     # the uncertain attempt: the upstream holds the request; the controller dies mid-send
-    # the stand-in keeps no Hermes state.db, so the controller asks for an
-    # explicit new conversation before another prompt
-    connector.stdin.write(b"conversation new\n"); connector.stdin.flush()
-    wait_for("conversation new", lambda: journal().get("hermesSession") is None, 300)
+    new_conversation()
     upstream.send_signal(signal.SIGSTOP)
     connector.stdin.write(b"hermes Read the publication again.\n"); connector.stdin.flush()
     wait_for("second send boundary", lambda: (journal().get("providerAttempt") or {}).get("sendStarted") is True, 900, 0.1)
@@ -588,7 +688,7 @@ try:
     main_pid = unit_prop("MainPID")
     os.kill(int(main_pid), signal.SIGKILL)
     upstream.send_signal(signal.SIGCONT)
-    wait_for("the stalled request reaches the provider", lambda: upstream_requests() >= 2, 120)
+    wait_for("the stalled request reaches the provider", lambda: upstream_requests() >= 3, 120)
     wait_for("systemd restart", lambda: int(unit_prop("NRestarts") or 0) >= 1 and unit_prop("MainPID") not in ("0", main_pid), 300)
     row("controller SIGKILLed after the send boundary; systemd restarted it (Restart=on-failure)",
         "NRestarts >= 1, new MainPID", f"killed={main_pid} now={unit_prop('MainPID')} NRestarts={unit_prop('NRestarts')}",
@@ -637,8 +737,66 @@ try:
     row("the purse still holds the uncertain attempt's reservation", f"reserved {PROVIDER_RESERVE}",
         f"g={h['generation']} s={h['status']} remaining={h['remaining']} reserved={h['reserved']}",
         h["reserved"] == str(PROVIDER_RESERVE))
-    row("NO second provider send (the provider's own request log, 30 s after recovery)", "2 requests (one per prompt)",
-        f"upstream_requests={upstream_requests()}", upstream_requests() == 2)
+    row("NO second provider send (the provider's own request log, 30 s after recovery)",
+        "3 requests (one per sent prompt: user, pool, the uncertain pool call)",
+        f"upstream_requests={upstream_requests()}", upstream_requests() == 3)
+
+    # -- a pool hold cannot be settled as a user call
+    held_grain, held_root = grain_of("purse-held-route")
+    row("the uncertain call's hold records the pool route", "route 2 (pool) while held",
+        f"route={held_grain.get('route')} s={held_grain['status']} reserved={held_grain['reserved']}",
+        held_grain.get("route") == "2")
+    settle_nonce = [61000]
+    def settle_as(label, before_route, op_route, charge, offline=False):
+        settle_nonce[0] += 1
+        grain = {"task": str(PURSE), "subject": str(PROVIDER), "capability": "101", "schemaVersion": "1",
+                 "expectedTargetRoot": held_root,
+                 "context": {"operationId": str(settle_nonce[0]), "payload": "settle the pool hold as a user call"},
+                 "before": {"generation": held_grain["generation"], "status": held_grain["status"],
+                            "remaining": held_grain["remaining"], "reserved": held_grain["reserved"],
+                            "route": before_route},
+                 "operation": {"type": "settle", "charge": str(charge), "route": op_route},
+                 "publications": [], "observeCapability": "101"}
+        intent = {"grain": grain, "grants": [{"kind": "object", "target": str(PURSE), "capability": "101"}],
+                  "intentNonce": str(settle_nonce[0])}
+        if offline:
+            # The Host's own authoring, offline: a refusal here is by name and
+            # submits nothing (through `mini serve` it would close the session).
+            source, out = path(f"{label}-intent.json"), path(f"{label}.bin")
+            json.dump(intent, open(source, "w"))
+            done = subprocess.run([HOST, CONFIG, "author", "grain-intent", source, out], capture_output=True)
+            open(path(f"{label}.stderr"), "wb").write(done.stdout + done.stderr)
+            result = {"type": "authored" if done.returncode == 0 else "author-refused", "exit": done.returncode}
+        else:
+            result = mini_submit(label, intent, PROVIDER, kind="grain-intent")
+        text = open(path(f"{label}.stderr"), "rb").read().decode("utf-8", "replace")
+        after, _ = grain_of(label + "-after")
+        unchanged = (after["reserved"], after["remaining"], after.get("route")) == \
+            (held_grain["reserved"], held_grain["remaining"], "2")
+        return result, text, after, unchanged
+    r1, t1, h1, same1 = settle_as("settle-pool-as-user-by-name", "2", "user", USER_FEE, offline=True)
+    row("settling the pool hold while naming the user route", "refused by name at authoring: route-mismatch; hold unchanged",
+        f"{r1.get('type')} exit={r1.get('exit')} | {[l for l in t1.splitlines() if 'route' in l][:1]} reserved={h1['reserved']} route={h1.get('route')}",
+        r1.get("type") == "author-refused" and "route-mismatch" in t1 and same1)
+    def prepare_refusal(label, text):
+        # The kernel refuses at prepare: nothing is signed or submitted, and the
+        # client retains the Host's refusal frame.
+        try: frame = json.load(open(path(f"{label}-attempt/pre-submit-refusal.json")))
+        except (OSError, ValueError): frame = {}
+        reason = next((l.strip() for l in text.splitlines() if l.startswith("refused:")), "")
+        return frame.get("stage") == "prepare", reason
+    r2, t2, h2, same2 = settle_as("settle-pool-claiming-user-before", "1", "user", USER_FEE)
+    at2, why2 = prepare_refusal("settle-pool-claiming-user-before", t2)
+    row("settling the pool hold from a forged before.route = user",
+        "refused at prepare by the receiver's old-value guard on field 4 (the recorded route); hold unchanged",
+        f"{why2[:160]} reserved={h2['reserved']} route={h2.get('route')}",
+        at2 and "guardRejected 4" in why2 and same2)
+    r3, t3, h3, same3 = settle_as("settle-pool-at-the-user-fee", "2", "pool", USER_FEE)
+    at3, why3 = prepare_refusal("settle-pool-at-the-user-fee", t3)
+    row(f"settling the pool hold for the user fee ({USER_FEE} < pool fee {POOL_FEE})",
+        "refused at prepare by the purse's route law (law-denied); hold unchanged",
+        f"{why3[:60]} ... pool clause: {'pair 2,3 delta <= -' + str(POOL_FEE) in why3} reserved={h3['reserved']} route={h3.get('route')}",
+        at3 and why3.startswith("refused: law-denied") and same3)
 finally:
     subprocess.run(["systemctl", "--user", "stop", UNIT + ".service"], capture_output=True)
     try: connector.stdin.close()
@@ -658,10 +816,10 @@ row("ledger identity on this Store: -well_h = -well_0 + credited - burned into p
     f"-well_h = {-int(led0['well'])} + 0 - {REFILLED}",
     f"-well_h={-int(led2['well'])} -well_0={-int(led0['well'])} friend={balance(led2, FRIEND)}",
     -int(led2["well"]) == -int(led0["well"]) + 0 - REFILLED and balance(led2, FRIEND) == FRIEND_BALANCE - REFILLED)
-row("purse_never_mints on this Store: budget_h <= budget_0 + sum burns; the gap is the settled metered charge",
-    f"budget {budget(p1)} + {REFILLED} - {METERED_CHARGE}",
+row("purse_never_mints on this Store: budget_h <= budget_0 + sum burns; the gap is the user fee plus the metered pool charge",
+    f"budget {budget(p1)} + {REFILLED} - {USER_FEE} - {METERED_CHARGE}",
     f"budget_h={budget(p3)} remaining={p3['remaining']} reserved={p3['reserved']}",
-    budget(p3) == budget(p1) + REFILLED - METERED_CHARGE)
+    budget(p3) == budget(p1) + REFILLED - USER_FEE - METERED_CHARGE)
 audit = subprocess.run([HOST, CONFIG, "audit"], capture_output=True)
 audit_text = (audit.stdout + audit.stderr).decode("utf-8", "replace").strip().splitlines()
 row("operator audit re-admits every record (NativeHostReplay, incl. the refill)", "exit 0",
