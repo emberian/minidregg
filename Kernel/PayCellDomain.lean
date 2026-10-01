@@ -197,8 +197,14 @@ def viewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec View :=
 What the box's root timer `mini-roster-sync` reads to render proxy login
 lines: the chain hour and, per self-enrolled Mini key, its derived subject,
 the key, the 51-byte ssh blob, its lease expiry (an hour) and its book index.
-No account, no amount, no memo, no journal.  An entry is live iff
-`hour < leaseUntil`. -/
+No account and no amount of an enrolled key.  An entry is live iff
+`hour < leaseUntil`.
+
+v2 (P3b-2) adds the journal: every enrollment-index payment the receiver
+decided NOT to enroll or renew, keyed by its transfer's nullifier bytes
+(`"soltx:" ‖ signature ‖ address`) with its index, amount, slot, reason and
+memo field.  The chain already discloses all of it; the box's operator comps
+these by hand, and the watcher's client sees each one as decided. -/
 structure EnrolmentEntry where
   subject : Nat
   miniKey : List UInt8
@@ -210,6 +216,7 @@ structure EnrolmentEntry where
 structure EnrolmentView where
   hour : Nat
   entries : List EnrolmentEntry
+  journal : List (List UInt8 × PayCell.Unattributed)
   deriving DecidableEq, Repr
 
 /-- Every enrolment row, in the store codec's canonical order. -/
@@ -218,10 +225,17 @@ def enrolments (store : PayCell.PayStore) : List (List UInt8 × PayCell.EnrolRec
     | ⟨.enrolment, miniKey⟩ => (PayCell.enrolmentAt store miniKey).map (miniKey, ·)
     | _ => none
 
+/-- Every journal row, in the store codec's canonical order. -/
+def journals (store : PayCell.PayStore) : List (List UInt8 × PayCell.Unattributed) :=
+  (StoreCodec.sortedSupport PayCell.wire store).filterMap fun
+    | ⟨.journal, key⟩ => (PayCell.journalAt store key).map (key, ·)
+    | _ => none
+
 def enrolmentView (store : PayCell.PayStore) : EnrolmentView :=
   ⟨((PayCell.clockOf store).map PayCell.Clock.hour).getD 0,
-    (enrolments store).map fun (miniKey, record) =>
-      ⟨PayEnrolMemo.subjectOf miniKey, miniKey, record.sshBlob, some record.leaseUntil, record.index⟩⟩
+    (enrolments store).map (fun (miniKey, record) =>
+      ⟨PayEnrolMemo.subjectOf miniKey, miniKey, record.sshBlob, some record.leaseUntil, record.index⟩),
+    journals store⟩
 
 def enrolmentEntryStream : StreamCodec EnrolmentEntry :=
   StreamCodec.xmap
@@ -235,13 +249,15 @@ def enrolmentEntryStream : StreamCodec EnrolmentEntry :=
     (by intro entry; cases entry; rfl)
 
 def enrolmentViewStream : StreamCodec EnrolmentView :=
-  StreamCodec.xmap (StreamCodec.product StreamCodec.nat (StreamCodec.list enrolmentEntryStream))
-    (fun view => (view.hour, view.entries))
-    (fun (hour, entries) => ⟨hour, entries⟩)
+  StreamCodec.xmap (StreamCodec.product StreamCodec.nat
+      (StreamCodec.product (StreamCodec.list enrolmentEntryStream)
+        (StreamCodec.list (StreamCodec.product bytesStream PayCell.unattributedStream))))
+    (fun view => (view.hour, view.entries, view.journal))
+    (fun (hour, entries, journal) => ⟨hour, entries, journal⟩)
     (by intro view; cases view; rfl)
 
 def enrolmentViewCodec : Minidregg.Theory.IndexedProgram.LawfulCodec EnrolmentView :=
-  PayTariff.framed "DREGG/PAY/ENROLMENT-VIEW/v1".toUTF8.toList enrolmentViewStream
+  PayTariff.framed "DREGG/PAY/ENROLMENT-VIEW/v2".toUTF8.toList enrolmentViewStream
 
 theorem enrolmentView_roundtrip (view : EnrolmentView) :
     enrolmentViewCodec.decode (enrolmentViewCodec.encode view) = some view :=
@@ -267,6 +283,25 @@ theorem mem_enrolments (store : PayCell.PayStore) (miniKey : List UInt8)
     change PayCell.enrolmentAt store miniKey ≠ none
     simp [present]
 
+/-- **The view's journal lists exactly the journal rows.** -/
+theorem mem_journals (store : PayCell.PayStore) (key : List UInt8) (row : PayCell.Unattributed) :
+    (key, row) ∈ journals store ↔ PayCell.journalAt store key = some row := by
+  unfold journals
+  rw [List.mem_filterMap]
+  constructor
+  · rintro ⟨address, _, found⟩
+    rcases address with ⟨space, key'⟩
+    cases space <;> simp at found
+    obtain ⟨present, same⟩ := found
+    cases same
+    exact present
+  · intro present
+    refine ⟨⟨.journal, key⟩, ?_, by simp [present]⟩
+    rw [StoreCodec.mem_sortedSupport]
+    change PayCell.journalAt store key ≠ none
+    simp [present]
+
+#assert_axioms mem_journals
 #assert_axioms decodeCell_bytes
 #assert_axioms decodeCell_canonical
 #assert_axioms load_exact

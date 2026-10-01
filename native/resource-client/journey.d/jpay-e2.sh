@@ -102,7 +102,7 @@ genesis = {"domain": "8501", "factoryId": str(FACTORY), "resourceBookId": str(BO
                "witnessBytes", "proofWork", "storageBytes", "networkBytes", "sideEffectCount",
                "feeDebit", "leaseByteBlocks")},
            "payObserver": {"subject": str(OBSERVER), "capability": str(OBSERVER_CAP),
-                           "controlCapability": str(PAY_CONTROL)}}
+                           "controlCapability": str(PAY_CONTROL), "enrolCapability": "4032"}}
 json.dump(genesis, open(path("genesis.json"), "w"), indent=1)
 boot = subprocess.run([MINI, "bootstrap", "--host", HOST, "--config", path("operator.json"),
                        "--source", path("genesis.json"), "--dir", path("deployment")], capture_output=True)
@@ -354,9 +354,10 @@ def law(observer):
 host = Host()
 op, data = host.call(112)
 ev = inspect("pay-enrolment-view", data) if op == 112 else {}
-row("op 112 on a fresh Store (the ROSTER-SYNC shape)", "view DREGG/PAY/ENROLMENT-VIEW/v1, clock.hour 0, no entries",
+row("op 112 on a fresh Store (the ROSTER-SYNC shape)", "view DREGG/PAY/ENROLMENT-VIEW/v2, clock.hour 0, no entries, no journal",
     json.dumps(ev, sort_keys=True)[:200],
-    op == 112 and ev.get("view") == "DREGG/PAY/ENROLMENT-VIEW/v1" and ev.get("clock") == {"hour": 0}
+    op == 112 and ev.get("view") == "DREGG/PAY/ENROLMENT-VIEW/v2" and ev.get("clock") == {"hour": 0}
+    and ev.get("journal") == []
     and ev.get("entries") == [])
 v = view(host)
 book = {"sponsor": str(EMBER), "control": str(FACTORY_CONTROL), "nonce": fresh(),
