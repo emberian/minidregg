@@ -616,10 +616,10 @@ fn fund(ws: &Ws, mut args: Args) -> Result<Value> {
     args.finish()?;
     let rec = record(ws, &name)?;
     let job = field(&rec, "job")?.to_owned();
-    let f = fields(ws, &name)?;
+    // The price is read from the job unless the deposit is named.
     let price = match amount {
         Some(amount) => amount,
-        None => f.get(&5).cloned().ok_or("job: the job has no price")?,
+        None => fields(ws, &name)?.get(&5).cloned().ok_or("job: the job has no price")?,
     };
     let account = workspace::reference(&ws.root, &account_ref)?;
     let dir = jobs_dir(ws)?.join(format!("{name}.fund-{}", nonce()?));
@@ -777,9 +777,10 @@ fn settle(ws: &Ws, mut args: Args) -> Result<Value> {
     let dir = jobs.join(format!("{name}.settle-{}", nonce()?));
     let reference = workspace::reference(&ws.root, &name)?;
     let cap = operation_capability(&reference)?;
-    let before = fields(ws, &name)?;
+    // Reads around the turn are for the report; the turn itself needs only the capability.
+    let before = fields(ws, &name).unwrap_or_default();
     let (outcome, latency) = timed("settle", || money(ws, &dir, &job, SETTLE, "0", "0", &cap, "0"))?;
-    let after = fields(ws, &name)?;
+    let after = fields(ws, &name).unwrap_or_default();
     Ok(json!({"type":"job-settled","job":job,"from":before.get(&STATE).and_then(|s| s.parse::<usize>().ok()).and_then(|s| STATES.get(s)),
         "fields":named(&after),"outcome":outcome,"latency":{"settle":latency}}))
 }
