@@ -49,11 +49,15 @@ state_paths() {
   fi
 }
 state_paths
-# Resource coordinates: GRAIN_A..GRAIN_E are the two-digit prefixes of
-# instance a..e's app (NN01), session (NN10) and ticket (NN20). CLASS_X is
-# its size class (S or M); IMPORT_X (an export directory) with IMPORT_KEY
-# installs it from an export.
+# Resource coordinates: GRAIN_A..GRAIN_I are the two-digit prefixes of
+# instance a..i's app (NN01), session (NN10) and ticket (NN20). CLASS_X is
+# its size class (S, M or L); IMPORT_X (an export directory) with IMPORT_KEY
+# installs it from an export. Per instance, SPK_X names its package (default
+# SPK) and KIND_X its owner session kind (api: bearer token; web: browser
+# cookie); GET_PATH_X, POST_PATH_X/POST_BODY_X/POST_TYPE_X/POST_METHOD_X and
+# POLL_PATH_X name the get/post/poll requests (defaults: sntfy's).
 A=${GRAIN_A:-91} B=${GRAIN_B:-92} C=${GRAIN_C:-93} D=${GRAIN_D:-94} E=${GRAIN_E:-95}
+F=${GRAIN_F:-96} G=${GRAIN_G:-97} H=${GRAIN_H:-98} I=${GRAIN_I:-99}
 
 fail() { echo "grain journey: $*" >&2; exit 1; }
 now() { date +%s.%N; }
@@ -139,7 +143,7 @@ grain_op() (
     --slurpfile read "$EV/$name-before/view.json" \
     --slurpfile challenge "$EV/$name-before/challenge.json" '
     {grain:{task:$task,subject:$subject,capability:$cap,observeCapability:$cap,
-      schemaVersion:"1",expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
+      schemaVersion:"1",
       expectedTargetRoot:$read[0].cell.root,
       context:{operationId:$nonce,payload:"grain journey workroom"},
       before:($read[0].cell.grain | {generation,status,remaining,reserved}),
@@ -190,7 +194,6 @@ birth() (
        {kind:"object",target:"7902",capability:"81"},
        {kind:"object",target:"7901",capability:"73"}]} +
     {($field):{tariff:{base:"2",perBirth:"1"},
-      authorityRoot:$challenge[0].signing[0].authorityRoot,
       ($inner):({genesis:$genesis[0],template:{issuer:"5",ownerBudget:"100000",lifetime:"10000"},
         creator:"8",nonce:$nonce,sourceCapabilities:["42"],funding:[],feePayer:"8"} + $spec),
       tool:{task:"7902",capability:"81",observeCapability:"81",targetRoot:$tool[0].cell.root,
@@ -283,7 +286,7 @@ delegate_observe() (
     {subject:"8",nonce:$nonce,purpose:{type:"prepare",draft:{type:"delegate-source",
       command:{kind:"object",domain:$c.domain,semantics:$c.semantics,subject:"8",nonce:$commandNonce,
         expectedTargetRoot:$resource[0].cell.root,parentId:$p.id,target:$target,
-        expectedPreRoot:$c.signing[0].authorityRoot,
+        expectedPreRoot:$c.authorityRoot,
         child:($p + {id:$child,parent:$p.id,holder:{type:"subject",subject:$holder},
           targets:[$target],verbs:["observe"],ancestors:(($p.ancestors + [$p.id]) | unique)})}}},
      grants:[{kind:"object",target:$target,capability:$p.id}]}' >"$D-intent.json"
@@ -406,7 +409,6 @@ enroll() (
       --slurpfile challenge "$EV/$label-session-$nonce/challenge.json" '
       {subject:"8",nonce:$n,grants:[{kind:"object",target:$s,capability:$c}],
        purpose:{type:"prepare",draft:{type:"invoke",command:{subject:"8",nonce:$n,
-         expectedAuthorityRoot:$challenge[0].signing[0].authorityRoot,
          targets:[{kind:"object",target:$s,capability:$c,observeCapability:$c,
            schemaVersion:"1",expectedTargetRoot:$read[0].cell.root,
            payload:{type:"scalar",actions:[
@@ -447,13 +449,30 @@ enroll() (
   [ -s "$N/receipt.json" ]
 )
 
-# http_post LABEL APP PATH BODY: one authenticated publish through the route.
+# cred KIND DIR: the transport credential for the owner route of that kind
+# (curl header arguments, one per line): the API bearer, or the browser
+# session cookie the bootstrap would set (the operator owns the route dir).
+cred() {
+  case "$1" in
+    api) printf '%s\n' -H "Authorization: Bearer $(cat "$2/api.token")" ;;
+    web) printf '%s\n' -H "Cookie: __Host-mini_spk_session=$(cat "$2/browser.token")" \
+      -H "Origin: https://grain.test" ;;
+    *) echo "unknown route kind $1" >&2; return 1 ;;
+  esac
+}
+
+# http_post LABEL APP KIND PATH BODY [TYPE [METHOD]]: one authenticated write
+# through the route.
 http_post() (
-  label=$1 app=$2 path=$3 body=$4 kind=api
+  label=$1 app=$2 kind=$3 path=$4 body=$5 type=${6:-text/plain} method=${7:-POST}
   dir=$STATE/apps/$app/routes/owner-$kind
+  cred "$kind" "$dir" >"$EV/$label.cred"
+  set --
+  while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
+  rm -f "$EV/$label.cred"
   curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" -H "Authorization: Bearer $(cat "$dir/api.token")" \
-    -H "Content-Type: text/plain" --data-binary "$body" \
+    -H "Host: grain.test" "$@" -X "$method" \
+    -H "Content-Type: $type" --data-binary "$body" \
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
 )
 
@@ -462,8 +481,12 @@ http_post() (
 http_get() (
   label=$1 app=$2 path=$3 kind=${4:-api}
   dir=$STATE/apps/$app/routes/owner-$kind
+  cred "$kind" "$dir" >"$EV/$label.cred"
+  set --
+  while IFS= read -r arg; do set -- "$@" "$arg"; done <"$EV/$label.cred"
+  rm -f "$EV/$label.cred"
   curl -sS --max-time 900 --unix-socket "$dir/http.sock" -D "$EV/$label.headers" \
-    -H "Host: grain.test" -H "Authorization: Bearer $(cat "$dir/api.token")" \
+    -H "Host: grain.test" "$@" \
     -o "$EV/$label.body" -w '%{http_code}\n' "http://grain.test$path"
 )
 
@@ -550,10 +573,15 @@ run_phase() {
   phase=$1 verb=${1%-*} tail=${1##*-}
   letter=$(printf '%s' "$tail" | cut -c1) n=${tail#?}
   case "$letter" in
-    a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;; *) fail "unknown phase $1" ;;
+    a) P=$A i=1 ;; b) P=$B i=2 ;; c) P=$C i=3 ;; d) P=$D i=4 ;; e) P=$E i=5 ;;
+    f) P=$F i=6 ;; g) P=$G i=7 ;; h) P=$H i=8 ;; i) P=$I i=9 ;; *) fail "unknown phase $1" ;;
   esac
-  upper=$(printf '%s' "$letter" | tr a-e A-E)
-  eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-}"
+  upper=$(printf '%s' "$letter" | tr a-i A-I)
+  eval "class=\${CLASS_$upper:-S} import=\${IMPORT_$upper:-} spk=\${SPK_$upper:-\$SPK}"
+  eval "kind=\${KIND_$upper:-api} getp=\${GET_PATH_$upper:-/v1/health}"
+  eval "postp=\${POST_PATH_$upper:-/m6grain} postt=\${POST_TYPE_$upper:-text/plain}"
+  eval "postm=\${POST_METHOD_$upper:-POST} pollp=\${POLL_PATH_$upper:-'/m6grain/json?poll=1&since=all'}"
+  eval "postb=\${POST_BODY_$upper:-'published by $letter before STOP'}"
   # NONCE_BASE_X moves an instance's nonces when its coordinates are reused
   # after a refused attempt consumed some (every signed nonce is a nullifier).
   eval "base=\${NONCE_BASE_$upper:-$((40000 + i * 10000))}"
@@ -563,20 +591,19 @@ run_phase() {
     install)
       if [ -n "$import" ]; then
         step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
-          "$EV/$letter-app-attempt/outcome.json" "$SPK" --class "$class" \
+          "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class" \
           --import "$import" --exporter-key "$IMPORT_KEY"
       else
         step "$phase" "$SPK_HOST" grain install "$PROFILE" "$EV/$letter-app-author/source.json" \
-          "$EV/$letter-app-attempt/outcome.json" "$SPK" --class "$class"
+          "$EV/$letter-app-attempt/outcome.json" "$spk" --class "$class"
       fi ;;
-    share) step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) api ;;
+    share) step "$phase" share "$letter" "$app" "${P}10" "${P}20" "3${i}11" $((base + 2000)) "$kind" ;;
     enroll) step "$phase" enroll "$letter" "$app" "${P}10" "${P}20" "3${i}11" \
       $((base + 2000 + ${n:-1} * 1000)) ;;
     start|stop|status|supervise) step "$phase" "$SPK_HOST" grain "$verb" "$PROFILE" "$app" ;;
-    get) step "$phase" http_get "$phase-body" "$app" /v1/health ;;
-    post) step "$phase" http_post "$phase-body" "$app" /m6grain \
-      "published by $letter before STOP" ;;
-    poll) step "$phase" http_get "$phase-body" "$app" "/m6grain/json?poll=1&since=all" ;;
+    get) step "$phase" http_get "$phase-body" "$app" "$getp" "$kind" ;;
+    post) step "$phase" http_post "$phase-body" "$app" "$kind" "$postp" "$postb" "$postt" "$postm" ;;
+    poll) step "$phase" http_get "$phase-body" "$app" "$pollp" "$kind" ;;
     floor) step "$phase" floor "$app" ;;
     *) fail "unknown phase $1" ;;
   esac
