@@ -4576,11 +4576,12 @@ private def contentEntryJson (store : ContentResource.ContentStore)
   | ⟨⟨.annotations, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.AnnotationId := identifier
       let record : Hyperdocument.AnnotationRecord := record
-      .mkObj ([("type", "annotation"), ("id", decimal identifier.digest.value),
+      .mkObj (([("type", "annotation"), ("id", decimal identifier.digest.value),
         ("anchor", annotationAnchorJson record.anchor), ("body", annotationBodyJson record.body),
         ("author", principalJson record.author),
         ("fresh", .bool (ContentResource.annotationFresh store record)),
-        ("canonical", canonical)] ++ LegacyContentView.markFields stableRangeJson record)
+        ("canonical", canonical)] : List (String × Lean.Json)) ++
+          LegacyContentView.markFields stableRangeJson record)
   | ⟨⟨.links, identifier⟩, record⟩ =>
       let identifier : Hyperdocument.LinkId := identifier
       let record : Hyperdocument.LinkRecord := record

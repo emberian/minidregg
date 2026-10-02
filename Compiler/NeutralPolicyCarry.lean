@@ -277,7 +277,7 @@ private def finishPlan (deployment : CanonicalCellRegistry.Deployment)
   -- Every actually present authority address must map to its exact source.
   -- Absent historical addresses remain absent; only this existing support
   -- contributes to Plan.addressUpdates.
-  for address in authority.logical.support.toList do
+  for address in StoreCodec.sortedSupport CredentialAuthorityCell.wire authority.logical do
     match address with
     | ⟨.policyRevision, policy⟩ =>
         let head ← need "carry authority revision has no current head"
@@ -288,9 +288,10 @@ private def finishPlan (deployment : CanonicalCellRegistry.Deployment)
             binding.sourceAddress == head.address) then
           throw "carry authority revision has no exact current source"
     | ⟨.policyAddress, key⟩ =>
+        let current : Option Digest := authority.logical ⟨AuthorityPlane.policyAddress, key⟩
         if !(bindings.any fun binding =>
             (binding.source.record.policyId, binding.source.record.version) == key &&
-            authority.logical ⟨.policyAddress, key⟩ == some (oldAddress binding.source)) then
+            current == some (oldAddress binding.source)) then
           throw "carry authority names unsupported or missing historical source"
     | _ => pure ()
   let plan : Plan := ⟨deployment, bindings, authority, otherChanges, transformation⟩
@@ -328,11 +329,13 @@ private def convertLiveStoreV2 (deployment : CanonicalCellRegistry.Deployment)
     | 68 :: 82 :: 2 :: 1 :: 68 :: 82 :: 1 :: tag :: payload => pure (tag, payload)
     | _ => throw "carry refuses noncanonical source lifecycle/role envelope"
   let kind ← need "carry source has an unknown role" (CanonicalCellRegistry.kindAtTag tag)
-  let store : Store (CanonicalCellRegistry.layout kind) ← match kind with
-    | .content => LegacyContentCarry.convertPayload height payload
-    | other => LegacyStoreCarry.convertPayload other height payload
-  let cell : CellRegistry.PackedCell registry :=
-    ⟨kind, materialize (CanonicalCellRegistry.materializer kind) store⟩
+  let cell : CellRegistry.PackedCell registry ← match kind with
+    | .content => do
+        let store ← LegacyContentCarry.convertPayload height payload
+        pure ⟨.content, materialize HyperdocumentCell.contentMaterializer store⟩
+    | other => do
+        let store ← LegacyStoreCarry.convertPayload other height payload
+        pure ⟨other, materialize (CanonicalCellRegistry.materializer other) store⟩
   if !CanonicalCellRegistry.cellCheck deployment identifier.value cell then
     throw "carry converted cell violates target role/domain invariants"
   pure cell
@@ -366,7 +369,7 @@ def deriveStoreV2 (deployment : CanonicalCellRegistry.Deployment)
       | cell =>
           let after := LifecycleImage.bytes registry (.live cell)
           if after != bytes then changes := changes ++ [(identifier, after)]
-  let authority ← need "carry needs the exact source authority cell" authority
-  finishPlan deployment bindings authority loaded changes 2
+  let sourceAuthority ← need "carry needs the exact source authority cell" authority
+  finishPlan deployment bindings sourceAuthority loaded changes 2
 
 end Minidregg.Compiler.NeutralPolicyCarry
