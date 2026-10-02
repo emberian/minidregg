@@ -55,7 +55,14 @@ fn validate(spec: &SpawnSpec, test_mode: bool) -> io::Result<()> {
     if !spec.program.is_absolute()
         || spec.app_uid == 0
         || spec.app_gid == 0
-        || (!test_mode && spec.program.file_name() != Some(OsStr::new("bwrap")))
+        // Some hosts confine user namespaces by an executable-specific
+        // AppArmor attachment. Both names remain subject to the same
+        // protected inode, configured SHA, native admission and fd gates.
+        || (!test_mode
+            && !matches!(
+                spec.program.file_name().and_then(OsStr::to_str),
+                Some("bwrap" | "mini-grain-bwrap")
+            ))
         || spec.sha256.len() != 64
         || !spec
             .sha256
@@ -562,6 +569,38 @@ mod tests {
         let status = child.wait().unwrap();
         assert!(libc::WIFEXITED(status));
         assert_eq!(libc::WEXITSTATUS(status), 0);
+    }
+
+    #[test]
+    fn production_shape_accepts_scoped_bwrap_name_without_bypassing_fd_gate() {
+        let mut spec = SpawnSpec {
+            program: "/usr/local/libexec/mini-grain-bwrap".into(),
+            sha256: "0".repeat(64),
+            args: vec![],
+            app_uid: 994,
+            app_gid: 994,
+            fds: None,
+        };
+        for path in ["/usr/bin/bwrap", "/usr/local/libexec/mini-grain-bwrap"] {
+            spec.program = path.into();
+            assert_eq!(
+                validate(&spec, false).unwrap_err().to_string(),
+                "SPK launch requires fd1-6"
+            );
+        }
+        for path in ["/usr/bin/true", "/tmp/bwrap-other", "mini-grain-bwrap"] {
+            spec.program = path.into();
+            assert_eq!(
+                validate(&spec, false).unwrap_err().to_string(),
+                "invalid pinned app launch shape"
+            );
+        }
+        spec.program = "/usr/local/libexec/mini-grain-bwrap".into();
+        spec.sha256 = "not-a-pin".into();
+        assert!(validate(&spec, false).is_err());
+        spec.sha256 = "0".repeat(64);
+        spec.app_uid = 0;
+        assert!(validate(&spec, false).is_err());
     }
 
     #[test]
