@@ -13,7 +13,7 @@ open Minidregg.Kernel.ApplicationStreamContinuity
 
 set_option autoImplicit false
 
-private def exactObject (fields : List String) (json : Json) :
+def exactObject (fields : List String) (json : Json) :
     Except String (Std.TreeMap.Raw String Json compare) := do
   let obj ← json.getObj?.mapError (fun _ => "continuity object expected")
   let actual := obj.foldl (init := []) (fun keys key _ => key :: keys)
@@ -23,19 +23,19 @@ private def exactObject (fields : List String) (json : Json) :
     unless fields.contains key do throw s!"continuity unexpected {key}"
   pure obj
 
-private def field (obj : Std.TreeMap.Raw String Json compare) (key : String) :
+def field (obj : Std.TreeMap.Raw String Json compare) (key : String) :
     Except String Json :=
   match obj.get? key with
   | some value => .ok value
   | none => .error s!"continuity missing {key}"
 
-private def nat (json : Json) : Except String Nat := do
+def nat (json : Json) : Except String Nat := do
   let s ← json.getStr?.mapError (fun _ => "continuity decimal string expected")
   let some n := s.toNat? | throw "continuity unsigned decimal expected"
   unless toString n == s do throw "continuity noncanonical decimal"
   pure n
 
-private def int (json : Json) : Except String Int := do
+def int (json : Json) : Except String Int := do
   let s ← json.getStr?.mapError (fun _ => "continuity decimal string expected")
   let some n := s.toInt? | throw "continuity signed decimal expected"
   unless toString n == s do throw "continuity noncanonical decimal"
@@ -47,7 +47,7 @@ private def nibble (byte : UInt8) : Option Nat :=
   else if 97 ≤ n ∧ n ≤ 102 then some (n - 97 + 10)
   else none
 
-private def hex (limit : Nat) (json : Json) : Except String (List UInt8) := do
+def hex (limit : Nat) (json : Json) : Except String (List UInt8) := do
   let s ← json.getStr?.mapError (fun _ => "continuity hex string expected")
   let input := s.toUTF8
   unless input.size % 2 == 0 && decide (input.size / 2 ≤ limit) do
@@ -59,11 +59,11 @@ private def hex (limit : Nat) (json : Json) : Except String (List UInt8) := do
     | _, _ => throw "continuity lowercase hex expected"
   pure output.toList
 
-private def hexJson (bytes : List UInt8) : Json :=
+def hexJson (bytes : List UInt8) : Json :=
   .str (String.fromUTF8! (hexBytes bytes).toByteArray)
 
-private def decimal (n : Nat) : Json := .str (toString n)
-private def signedDecimal (n : Int) : Json := .str (toString n)
+def decimal (n : Nat) : Json := .str (toString n)
+def signedDecimal (n : Int) : Json := .str (toString n)
 
 def authorChallenge (config : NativeHost.Config) (json : Json) : Except String (List UInt8) := do
   let obj ← exactObject ["domain", "semantics", "app", "appGeneration", "session",

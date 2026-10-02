@@ -82,10 +82,12 @@ def hexBytes (bytes : List UInt8) : List UInt8 :=
 /-- Reserved for signed read-only probes; never offered to an app. -/
 def probeProtocol : List UInt8 := "dregg.authority.continuity.v1".toUTF8.toList
 
+def routeAdmissionProtocol : List UInt8 := "dregg.authority.route-admission.v1".toUTF8.toList
+
 def reservedProbe (request : ApplicationDispatchCodec.Request) : Bool :=
   request.headers.any (fun h =>
     h.name == ApplicationDispatchAdmission.webSocketProtocolHeader &&
-      h.value == probeProtocol)
+      (h.value == probeProtocol || h.value == routeAdmissionProtocol))
 
 /-- The complete domain-separated challenge is inside signed request bytes.
 The operation id is not a new Mini event id: this receiver commits nothing. -/
@@ -195,21 +197,26 @@ private def Attestation.canonicalBytes {config : Config} (a : Attestation config
 physical tip. Only read/key are used; no append, checkpoint, initialization,
 app RPC or billing operation occurs. This is point-in-time, not a lock against
 later revocation. The physical lease must keep its bounded fallback. -/
-def Attestation.withFreshTip {config : Config} {α : Type} (a : Attestation config)
-    (handoff : List UInt8 → IO α) : IO (Except String α) := do
-  let durable := a.old.opened.durable
+def withVerifiedFreshTip {config : Config} {target : Durable} {α : Type}
+    (old : NativeHostReplay.Verified config target) (handoff : IO α) :
+    IO (Except String α) := do
+  let durable := old.opened.durable
   let some record := durable.image.accepted.getLast?
-    | return .error "continuity requires an admitted nonempty history"
+    | return .error "authority handoff requires nonempty history"
   let .ok key ← config.transport.key
-    | return .error "continuity physical key unavailable"
+    | return .error "authority physical key unavailable"
   let entry : DurableReceiverIO.Entry :=
     ⟨DurableCheckpointCodec.recordFrame.encode record,
       DurableCheckpointCodec.entryTag key durable.image.accepted.length durable.chain⟩
   let .ok current ← DurableReceiverIO.tipIs config.transport
       durable.image.accepted.length entry
-    | return .error "continuity physical tip unavailable"
-  if current then return .ok (← handoff a.canonicalBytes)
-  else return .error "continuity physical tip changed before handoff"
+    | return .error "authority physical tip unavailable"
+  if current then return .ok (← handoff)
+  else return .error "authority physical tip changed before handoff"
+
+def Attestation.withFreshTip {config : Config} {α : Type} (a : Attestation config)
+    (handoff : List UInt8 → IO α) : IO (Except String α) :=
+  withVerifiedFreshTip a.old (handoff a.canonicalBytes)
 
 def receiveVerified (config : Config) {target : Durable}
     (old : NativeHostReplay.Verified config target) (bytes : List UInt8) :

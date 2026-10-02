@@ -19,7 +19,7 @@ fn decimal(s: &str) -> bool {
         && s.bytes().all(|b| b.is_ascii_digit())
         && (s.len() == 1 || !s.starts_with('0'))
 }
-fn digest(s: &str) -> io::Result<[u8; 32]> {
+pub(crate) fn digest(s: &str) -> io::Result<[u8; 32]> {
     if !decimal(s) {
         return Err(invalid());
     }
@@ -37,7 +37,7 @@ fn digest(s: &str) -> io::Result<[u8; 32]> {
     }
     Ok(bytes)
 }
-fn exact_hex(s: &str, bytes: &[u8]) -> bool {
+pub(crate) fn exact_hex(s: &str, bytes: &[u8]) -> bool {
     s.len() == bytes.len() * 2
         && s.as_bytes().chunks_exact(2).zip(bytes).all(|(pair, byte)| {
             let digit = |v: u8| if v < 10 { b'0' + v } else { b'a' + v - 10 };

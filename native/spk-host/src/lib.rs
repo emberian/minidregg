@@ -109,3 +109,8 @@ mod volume_custody;
 mod web_socket;
 #[cfg(target_os = "linux")]
 mod stream_continuity;
+
+#[cfg(target_os = "linux")]
+mod route_admission;
+#[cfg(target_os = "linux")]
+pub mod resident_route_control;

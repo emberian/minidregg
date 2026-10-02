@@ -5,7 +5,7 @@ post-image bytes. Historical receipt recovery, generic DRC event 3, a
 concurrent suffix, and an uncertain CAS response are not delivery permits.
 -/
 import Kernel.ApplicationDispatchProjection
-import Kernel.ApplicationStreamContinuity
+import Kernel.ApplicationRouteAdmission
 
 namespace Minidregg.Kernel.ApplicationDispatchReceiver
 
@@ -155,6 +155,17 @@ theorem continuity_probe_never_submits (config : Config) {target : Durable}
   simp [receiveVerified, ApplicationDispatchAdmissionIngress.codec.decode_encode,
     probe, ApplicationStreamContinuity.probe_reserved]
 
+theorem route_probe_never_submits (config : Config) {target : Durable}
+    (old : NativeHostReplay.Verified config target)
+    (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+    (challenge : ApplicationRouteAdmission.Challenge)
+    (probe : ingress.dispatch.dispatch.request = ApplicationRouteAdmission.probeRequest challenge) :
+    receiveVerified config old (ApplicationDispatchAdmissionIngress.codec.encode ingress) =
+      pure (.rejected "stream continuity probes are read-only and cannot open an app stream") := by
+  simp [receiveVerified, ApplicationDispatchAdmissionIngress.codec.decode_encode,
+    probe, ApplicationRouteAdmission.probe_reserved]
+
+#assert_axioms route_probe_never_submits
 #assert_axioms continuity_probe_never_submits
 
 end Minidregg.Kernel.ApplicationDispatchReceiver

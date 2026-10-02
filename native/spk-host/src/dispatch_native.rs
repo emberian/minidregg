@@ -82,7 +82,7 @@ pub(crate) fn private_dir(path: &Path) -> io::Result<()> {
 /// block indefinitely on a full listener backlog even with later IO timeouts.
 /// EAGAIN is not an in-progress connection: polling that socket reports HUP
 /// immediately, so retry it with bounded local backoff instead of busy polling.
-fn connect_deadline(path: &Path, deadline: Instant) -> io::Result<UnixStream> {
+pub(crate) fn connect_deadline(path: &Path, deadline: Instant) -> io::Result<UnixStream> {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::ffi::OsStrExt;
     let timeout = || io::Error::new(io::ErrorKind::TimedOut, "Mini operator connect deadline");
@@ -848,6 +848,158 @@ pub(crate) fn author_and_submit(
         active_marker,
         active_bytes,
     })
+}
+
+/// Unforgeable outside this native pipeline: exact retained private op154 bytes.
+pub(crate) struct PrivateRouteAdmissionReply {
+    payload: Vec<u8>,
+    inspection: Vec<u8>,
+    challenge: Vec<u8>,
+}
+impl PrivateRouteAdmissionReply {
+    pub(crate) fn payload(&self) -> &[u8] {
+        &self.payload
+    }
+    pub(crate) fn inspection(&self) -> &[u8] {
+        &self.inspection
+    }
+    pub(crate) fn challenge(&self) -> &[u8] {
+        &self.challenge
+    }
+}
+
+impl PrivateOperator {
+    /// Register a new binding without submitting an app request or altering any
+    /// existing lease. All source/helper/transport work shares one deadline.
+    pub(crate) fn admit_resident_route(
+        &self,
+        custody: &FixedAuthoring,
+        expected_app_generation: &str,
+        expected_session_generation: &str,
+        registration_nonce_hex: &str,
+        parent: &Path,
+    ) -> io::Result<crate::route_admission::VerifiedRouteAdmission> {
+        custody.validate()?;
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let attempt = ContinuityAttemptDir::create(parent)?;
+        let profile_input = write_new(&attempt.0, "profile-input.json", b"{}")?;
+        let profile_bytes = self.tool_until(
+            "profile",
+            "",
+            &profile_input,
+            &attempt.0.join("profile.json"),
+            deadline,
+        )?;
+        let profile: serde_json::Value = serde_json::from_slice(&profile_bytes)?;
+        let field = |name| {
+            profile
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| invalid("pinned route namespace missing"))
+        };
+        let expected = crate::route_admission::RouteAdmissionExpectation {
+            binding: crate::stream_continuity::ContinuityBinding {
+                domain: field("domain")?,
+                semantics: field("semantics")?,
+                app: custody.app.clone(),
+                app_generation: expected_app_generation.to_owned(),
+                session: custody.session.clone(),
+                session_generation: expected_session_generation.to_owned(),
+                subject: custody.subject.clone(),
+                ticket_resource: custody.ticket_resource.clone(),
+                session_fingerprint: [0; 32],
+            },
+            session_kind: custody.session_kind.clone(),
+            registration_nonce_hex: registration_nonce_hex.to_owned(),
+        };
+        expected.validate()?;
+        let b = &expected.binding;
+        let challenge_input = json!({"domain":b.domain,"semantics":b.semantics,
+            "app":b.app,"appGeneration":b.app_generation,"session":b.session,
+            "sessionGeneration":b.session_generation,"subject":b.subject,"ticketResource":b.ticket_resource,
+            "sessionKind":expected.session_kind,"registrationNonceHex":expected.registration_nonce_hex});
+        let input = write_new(
+            &attempt.0,
+            "challenge.json",
+            &serde_json::to_vec(&challenge_input)?,
+        )?;
+        let challenge = self.tool_until(
+            "author",
+            "application-route-admission-challenge",
+            &input,
+            &attempt.0.join("challenge.bin"),
+            deadline,
+        )?;
+        let path = format!("?{}", hex(&challenge));
+        let headers = vec![(
+            "sec-websocket-protocol".to_owned(),
+            "dregg.authority.route-admission.v1".to_owned(),
+        )];
+        // This is a reserved source-only probe, never an app path/RPC. An API
+        // probe uses the empty relative root; actual deliveries still use the
+        // signature-verified package prefix in dispatch_delivery.
+        let route = if custody.session_kind == "web" {
+            crate::dispatch_inspection::Route::Browser
+        } else {
+            crate::dispatch_inspection::Route::Api { signed_path: "/" }
+        };
+        let http = HttpProjection {
+            method: "WEBSOCKET",
+            path_and_query: &path,
+            ordered_headers: &headers,
+            body: &[],
+            route,
+        };
+        let ingress = author_signed_ingress(
+            self,
+            custody,
+            &http,
+            "0",
+            &attempt.0.join("signed"),
+            deadline,
+        )?;
+        let request = json!({"challengeHex":hex(&challenge),"ingressHex":hex(&ingress)});
+        let request_json = write_new(&attempt.0, "request.json", &serde_json::to_vec(&request)?)?;
+        let request_bytes = self.tool_until(
+            "author",
+            "application-route-admission-request",
+            &request_json,
+            &attempt.0.join("request.bin"),
+            deadline,
+        )?;
+        let response = self.invoke_until(154, &request_bytes, deadline)?;
+        let payload = response
+            .get(5..)
+            .ok_or_else(|| invalid("short route admission reply"))?;
+        if response.get(4) != Some(&154)
+            || !payload.starts_with(b"DREGG/APPLICATION/ROUTE-ADMISSION-ATTESTATION/v1")
+        {
+            return Err(invalid("Mini refused current route admission"));
+        }
+        let response_path = write_new(&attempt.0, "attestation.bin", payload)?;
+        let inspection = self.tool_until(
+            "inspect",
+            "application-route-admission-attestation",
+            &response_path,
+            &attempt.0.join("inspection.json"),
+            deadline,
+        )?;
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "route admission deadline",
+            ));
+        }
+        crate::route_admission::verify_reply(
+            &expected,
+            &PrivateRouteAdmissionReply {
+                payload: payload.to_vec(),
+                inspection,
+                challenge,
+            },
+        )
+    }
 }
 
 #[cfg(test)]

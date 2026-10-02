@@ -191,7 +191,7 @@ fn exact_pair(payload: &[u8]) -> Option<(&[u8], &[u8])> {
 fn allowed_operator_operation(request: &[u8]) -> bool {
     match request {
         // Read-only signed stream authority checks remain operator-private.
-        [152, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
+        [152 | 154, payload @ ..] => !payload.is_empty() && payload.len() < HOST_MAX_FRAME,
         [22 | 23 | 26 | 27 | 34 | 35 | 38 | 39 | 44 | 46 | 47 | 48 | 50 | 52 | 54 | 55 | 56 | 58
         | 66 | 68 | 70 | 72 | 73 | 74 | 76 | 77 | 78 | 80 | 82 | 84 | 85, payload @ ..] => {
             !payload.is_empty() && payload.len() < HOST_MAX_FRAME
@@ -1185,13 +1185,13 @@ mod tests {
 
     #[test]
     fn lifecycle_and_dispatch_routes_are_bounded_and_operator_only() {
-        for operation in [22, 23, 26, 27, 34, 35, 38, 39, 152] {
+        for operation in [22, 23, 26, 27, 34, 35, 38, 39, 152, 154] {
             assert!(allowed_operator_operation(&[operation, 1]));
             assert!(!allowed_operation(&[operation, 1], true));
             assert!(!allowed_operator_operation(&[operation]));
         }
         let oversized = vec![1; HOST_MAX_FRAME];
-        for operation in [22, 23, 26, 27, 34, 35, 38, 39, 152] {
+        for operation in [22, 23, 26, 27, 34, 35, 38, 39, 152, 154] {
             let mut request = vec![operation];
             request.extend_from_slice(&oversized);
             assert!(!allowed_operator_operation(&request));
