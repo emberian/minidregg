@@ -1585,7 +1585,11 @@ fn print_json(value: &Value) -> Result<()> {
 }
 
 fn print_confirmed_outcome(value: &Value) -> Result<()> {
-    print_json(value)?;
+    confirmed_outcome(value, true)
+}
+
+fn confirmed_outcome(value: &Value, emit: bool) -> Result<()> {
+    if emit { print_json(value)?; }
     if value.get("type").and_then(Value::as_str) != Some("confirmed") {
         note_host_decision(HostDecision::Outcome(value.clone()));
     }
@@ -1745,7 +1749,7 @@ fn submit(
     create_dir(directory)?;
     replan::replan(
         "submit",
-        || submit_once(host, config, intent, intent_kind, key, directory, prepare_only, None),
+        || submit_once(host, config, intent, intent_kind, key, directory, prepare_only, None, true),
         replan::stale_root,
         |number| replan::retire_attempt(directory, number),
     )
@@ -1769,7 +1773,7 @@ fn submit_with_continuity(
         fs::set_permissions(directory, fs::Permissions::from_mode(0o700))
             .map_err(|e| format!("cannot protect continuity attempt: {e}"))?;
     }
-    submit_once(host, config, intent, intent_kind, key, directory, prepare_only, Some(descriptor))
+    submit_once(host, config, intent, intent_kind, key, directory, prepare_only, Some(descriptor), true)
 }
 
 fn submit_once(
@@ -1781,6 +1785,7 @@ fn submit_once(
     directory: &Path,
     prepare_only: bool,
     provider_continuity: Option<&Path>,
+    emit_outcome: bool,
 ) -> Result<()> {
     #[cfg(unix)]
     let continuity = receipt_continuity::begin_attempt(directory)?;
@@ -1891,7 +1896,7 @@ fn submit_once(
     )?;
     #[cfg(unix)]
     receipt_continuity::finish_attempt(continuity, &outcome, false)?;
-    print_confirmed_outcome(&outcome)
+    confirmed_outcome(&outcome, emit_outcome)
 }
 
 /// A Host refusal as data: `Ok(Err(line))` when the Host refused the request

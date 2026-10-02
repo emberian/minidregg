@@ -8,10 +8,12 @@
 //! a signed read. The client re-plans: it retires the definitely unadmitted
 //! attempt's evidence and observes again, at most `max()` times.
 //!
-//! Only the Host's own `stale-root` answer is retried. Every other refusal,
-//! every client error and every outcome the Host did not decide (no decision
-//! recorded, `uncertain`, `unavailable`, `contention`, `absent`) ends the loop
-//! with that answer. A `stale-root` is a refusal: nothing was admitted, so the
+//! The default predicate retries only the Host's own `stale-root` answer.
+//! Workspace text append additionally requires a final decoded admission
+//! refusal or the controller's exact typed prepare staleTarget refusal, plus
+//! a fresh authorized read proving its client-selected preimage changed.
+//! No uncertain or undecoded decision qualifies for either path.
+//! A `stale-root` is a refusal: nothing was admitted, so the
 //! retired attempt can never install, and the next attempt carries a fresh
 //! observation (the plan never carries a stale guard).
 
@@ -97,6 +99,27 @@ pub(crate) fn is_stale_root(decision: Option<&HostDecision>) -> bool {
     }
 }
 
+/// Only a decoded, final submit refusal can authorize a new append command.
+/// A prepare/query refusal, lost reply or uncertain outcome cannot do so.
+pub(crate) fn is_final_admission_refusal(decision: Option<&HostDecision>) -> bool {
+    let outcome = match decision {
+        Some(HostDecision::Outcome(value)) => value,
+        Some(HostDecision::RefusedFrame { command, decoded: Some(value), .. })
+            if command == "submit" => value,
+        _ => return false,
+    };
+    outcome["type"] == "refused" && outcome["phase"] == "61646d697373696f6e"
+}
+
+/// The native controller rejected this exact invocation target before any
+/// call was assembled. Match the Host's decoded typed detail exactly.
+pub(crate) fn is_prepare_stale_target(decision: Option<&HostDecision>) -> bool {
+    let Some(HostDecision::RefusedFrame { command, decoded:Some(value), .. }) = decision else { return false };
+    command == "prepare" && value["type"] == "refused" && value["reason"] == "operation-rejected"
+        && value["phase"] == "70726570617265"
+        && value["detail"] == crate::hex(b"invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.staleTarget")
+}
+
 /// Run `attempt` until it succeeds, or until a failure that `race` does not
 /// name as the timer race, or until `max()` re-plans are spent. Between
 /// attempts, `retire(n)` sets the definitely unadmitted attempt `n` aside so
@@ -133,7 +156,7 @@ pub(crate) fn replan<T>(
         if replans >= max {
             measure(what, replans, "exhausted", started, superseded + began.elapsed());
             return Err(format!(
-                "{what}: the Host answered stale-root to all {} attempts ({replans} re-plans, --replan-max {max}); last answer: {error}",
+                "{what}: concurrent source changes exhausted all {} attempts ({replans} re-plans, --replan-max {max}); last answer: {error}",
                 replans + 1
             ));
         }
@@ -142,7 +165,7 @@ pub(crate) fn replan<T>(
         pause(replans);
         superseded += began.elapsed();
         COUNT.fetch_add(1, Ordering::Relaxed);
-        eprintln!("mini: {what}: the Host state moved before the plan landed (stale-root); observing again ({replans} of {max})");
+        eprintln!("mini: {what}: the observed source changed before the plan landed; observing again ({replans} of {max})");
     }
 }
 
@@ -259,6 +282,22 @@ pub(crate) fn retire_attempt(directory: &Path, number: u32) -> Result<()> {
     retire(directory, number, &[]).map(|_| ())
 }
 
+/// Allocate a new evidence slot for a reused proposal or attempt without
+/// overwriting an earlier command's retained refused calls.
+pub(crate) fn retire_next(directory: &Path) -> Result<()> {
+    let parent = directory.join(REPLANNED);
+    let mut next = 1u32;
+    if parent.exists() {
+        for entry in fs::read_dir(&parent).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let number = entry.file_name().to_string_lossy().parse::<u32>()
+                .map_err(|_| "invalid retained replan evidence slot")?;
+            next = next.max(number.checked_add(1).ok_or("replan evidence slot overflow")?);
+        }
+    }
+    retire_attempt(directory, next)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,6 +305,64 @@ mod tests {
     use std::cell::Cell;
 
     use super::TEST_LOCK as LOCK;
+
+    #[test]
+    fn append_recovery_requires_decoded_final_admission_refusal() {
+        let value = json!({"type":"refused","reason":"undisclosed","phase":"61646d697373696f6e"});
+        assert!(is_final_admission_refusal(Some(&HostDecision::Outcome(value.clone()))));
+        for command in ["prepare", "query", "submit"] {
+            let frame = HostDecision::RefusedFrame { command:command.into(), byte:255,
+                encoded:vec![1], decoded:Some(value.clone()) };
+            assert_eq!(is_final_admission_refusal(Some(&frame)), command == "submit");
+        }
+        for kind in ["uncertain", "unavailable", "contention", "absent", "confirmed"] {
+            let mut other = value.clone(); other["type"] = json!(kind);
+            assert!(!is_final_admission_refusal(Some(&HostDecision::Outcome(other))));
+        }
+        let mut other_phase = value; other_phase["phase"] = json!(hex("observation"));
+        assert!(!is_final_admission_refusal(Some(&HostDecision::Outcome(other_phase))));
+        assert!(!is_final_admission_refusal(None));
+        assert!(!is_final_admission_refusal(Some(&HostDecision::RefusedFrame {
+            command:"submit".into(), byte:255, encoded:vec![1], decoded:None })));
+    }
+
+    #[test]
+    fn append_prepare_recovery_matches_exact_native_stale_target_only() {
+        let value = json!({"type":"refused","reason":"operation-rejected","phase":hex("prepare"),
+            "detail":hex("invocation preparation: Minidregg.Kernel.DeclaredResourceController.Reject.staleTarget")});
+        let frame = |command:&str, value:Value| HostDecision::RefusedFrame {
+            command:command.into(), byte:255, encoded:vec![1], decoded:Some(value) };
+        assert!(is_prepare_stale_target(Some(&frame("prepare", value.clone()))));
+        assert!(!is_prepare_stale_target(Some(&frame("submit", value.clone()))));
+        assert!(!is_prepare_stale_target(Some(&HostDecision::Outcome(value.clone()))));
+        for (key, replacement) in [("type", "uncertain"), ("reason", "undisclosed"), ("phase", "61646d697373696f6e"),
+            ("detail", "another staleTarget suffix")] {
+            let mut other = value.clone(); other[key] = json!(replacement);
+            assert!(!is_prepare_stale_target(Some(&frame("prepare", other))));
+        }
+        assert!(!is_prepare_stale_target(None));
+        assert!(!is_prepare_stale_target(Some(&HostDecision::RefusedFrame {
+            command:"prepare".into(), byte:255, encoded:vec![1], decoded:None })));
+    }
+
+    #[test]
+    fn nested_recovery_never_overwrites_evidence_or_retires_an_acceptance() {
+        let base = std::env::temp_dir().join(format!("nested-replan-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base); private_dir(&base).unwrap();
+        fs::write(base.join("call.bin"), b"original").unwrap();
+        retire_attempt(&base, 1).unwrap();
+        fs::write(base.join("call.bin"), b"fresh observation").unwrap();
+        retire_next(&base).unwrap();
+        fs::write(base.join("call.bin"), b"fresh append").unwrap();
+        retire_next(&base).unwrap();
+        for (slot, bytes) in [("01", b"original".as_slice()), ("02", b"fresh observation"), ("03", b"fresh append")] {
+            assert_eq!(fs::read(base.join(REPLANNED).join(slot).join("call.bin")).unwrap(), bytes);
+        }
+        fs::write(base.join("outcome.json"), br#"{"type":"confirmed","confirmation":"installed"}"#).unwrap();
+        assert!(retire_next(&base).unwrap_err().contains("never re-planned"));
+        assert!(!base.join(REPLANNED).join("04").exists());
+        fs::remove_dir_all(&base).unwrap();
+    }
 
     fn hex(text: &str) -> String {
         text.bytes().map(|b| format!("{b:02x}")).collect()
