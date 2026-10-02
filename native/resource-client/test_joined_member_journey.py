@@ -154,3 +154,48 @@ class NamedSweepAliases(unittest.TestCase):
         self.assertEqual(joined.workload(first)["rooms"]["work"]["name"], "lab-s0")
         self.assertEqual(joined.workload(second)["rooms"]["work"]["name"], "lab-s1")
         self.assertEqual(spec["rooms"]["work"]["name"], "lab")
+
+
+class DeployedRoleBinding(unittest.TestCase):
+    def test_same_bytes_at_explicit_paths_and_actual_ssh_command(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            def file(name,text):
+                path=root/name;path.write_text(text);return str(path)
+            roles={role:file(role,'native-'+role) for role in ('host','store','verifier','mini')}
+            other_host=file('deployed-host','native-host')
+            config=file('config.json','{}');manifest_path=file('manifest.json','{}')
+            workspace=root/'workspace';workspace.mkdir();home=root/'home';home.mkdir()
+            key=file('key','private fixture never used');pub=file('key.pub','ssh-ed25519 AAAA')
+            launcher=file('launcher','wrapper')
+            command=' '.join((launcher,roles['mini'],other_host,config,'/test/public.sock',str(workspace),str(home)))
+            authorized=file('authorized_keys','restrict,pty,command="'+command+'" ssh-ed25519 AAAA\n')
+            pinned=lambda path:{'path':path,'sha256':joined.digest(path)}
+            manifest={'sha256':{role:joined.digest(path) for role,path in roles.items()}}
+            spec={'manifest':manifest_path,'manifestSha256':joined.digest(manifest_path),
+                  'deployment':{'configSha256':joined.digest(config),'socket':'/test/public.sock','privateSocket':'/test/private.sock'},
+                  'members':{'1000':{'subject':'1000','workspace':str(workspace),'home':str(home),'ssh':{'identityFile':key}}}}
+            binding={'protocol':'mini-service-deployment-binding-v1','authorizedKeys':authorized,
+                     'operatorSocket':'/test/private.sock','publicSocket':'/test/public.sock',
+                     'deployment':{'config':pinned(config),'manifest':pinned(manifest_path),
+                      'rolePaths':dict(host=other_host,store=roles['store'],verifier=roles['verifier']),
+                      'cli':pinned(roles['mini']),
+                      'memberCommands':[{'subject':'1000','launcher':pinned(launcher),'mini':pinned(roles['mini']),
+                        'host':other_host,'authorizedKeys':pinned(authorized),'publicKey':pinned(pub)}]}}
+            path=root/'binding.json'
+            def declare():
+                joined.save(path,binding);spec['deployment']['binding']=pinned(str(path))
+            declare()
+            with patch.object(joined,'protected_binding',return_value=path):
+                self.assertEqual(joined.deployed_roles(spec,manifest,Path(config))['host'],Path(other_host))
+                old=file('old-mini','different native image')
+                binding['deployment']['cli']=pinned(old);declare()
+                with self.assertRaisesRegex(ValueError,'actual CLI differs'):
+                    joined.deployed_roles(spec,manifest,Path(config))
+                binding['deployment']['cli']=pinned(roles['mini']);declare()
+                Path(authorized).write_text('restrict,pty,command="/other/mini" ssh-ed25519 AAAA\n')
+                with self.assertRaisesRegex(ValueError,'authorizedKeys changed'):
+                    joined.deployed_roles(spec,manifest,Path(config))
+                binding['deployment']['memberCommands'][0]['authorizedKeys']=pinned(authorized);declare()
+                with self.assertRaisesRegex(ValueError,'actual forced SSH command differs'):
+                    joined.deployed_roles(spec,manifest,Path(config))

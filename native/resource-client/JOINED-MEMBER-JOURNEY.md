@@ -119,3 +119,27 @@ component tests cover principal sharing and durable uncertain holds.
 
 The harness is orchestration, not a theorem or capacity certification. Retain
 human sessions privately and keep environmental outstanding rows visible.
+
+For a root service composition, `deployment.binding` is `{path,sha256}` for the
+single `mini-service-deployment-binding-v1` descriptor. The descriptor and its
+ancestors must be root owned with no group/other write permission. Its
+`deployment.config` and `deployment.manifest` `{path,sha256}` fields must match
+the journey; `deployment.rolePaths` declares the actual `host`, `store`, and
+`verifier` paths, whose bytes must equal the immutable candidate role hashes.
+This permits an explicitly declared deployed path for an identical native role.
+The configuration and member workspaces must still reference those exact paths.
+
+The descriptor separately records actual `deployment.cli: {path,sha256}` and
+`deployment.memberCommands` rows with `subject`, `launcher`, `mini`, `host`,
+`authorizedKeys`, and `publicKey`. All fields except `subject` and `host` use
+`{path,sha256}`. Each member's actual restricted SSH command must invoke exactly
+the declared launcher, CLI, Host, config, socket, workspace, and home. Its SSH
+public key must match the inventory identity file. The actual CLI bytes must
+equal the selected candidate Mini bytes: changing a manifest cannot relabel an
+older executable. Upgrade wrappers explicitly during a coordinated service cut.
+Without a binding, the original exact manifest-path requirements still apply.
+
+The authorized-keys hash is the current receiving snapshot. Regenerate the
+descriptor and journey binding pin after enrollment or a roster lifecycle
+change, before resuming receiving. The harness checks this observation on every
+operation; it does not change the root service loader's roster lifecycle policy.

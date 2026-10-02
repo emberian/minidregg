@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import time
 import threading
@@ -114,6 +115,70 @@ def hook_inventory(spec):
     return hooks
 
 
+def protected_binding(path):
+    """The root service descriptor is intent, not a source authority substitute."""
+    path = absolute(path)
+    require(path.is_file(), 'deployment binding must be a regular file')
+    for current in (path, *path.parents):
+        metadata = current.stat()
+        require(metadata.st_uid == 0 and not metadata.st_mode & 0o022,
+                'deployment binding has an unprotected root custody ancestor: ' + str(current))
+    return path
+
+
+def deployed_roles(spec, manifest, config_path):
+    declaration = spec['deployment'].get('binding')
+    if declaration is None:
+        return {role: absolute(manifest[role]) for role in ('host', 'store', 'verifier')}
+    path = protected_binding(declaration['path'])
+    require(digest(path) == declaration['sha256'], 'deployment binding changed')
+    binding = read(path)
+    require(binding['protocol'] == 'mini-service-deployment-binding-v1', 'unknown deployment binding')
+    deployment = binding['deployment']
+    require(absolute(deployment['config']['path']) == config_path
+            and deployment['config']['sha256'] == spec['deployment']['configSha256'],
+            'binding config differs')
+    require(absolute(deployment['manifest']['path']) == absolute(spec['manifest'])
+            and deployment['manifest']['sha256'] == spec['manifestSha256'], 'binding manifest differs')
+    roles = {role: absolute(deployment['rolePaths'][role]) for role in ('host', 'store', 'verifier')}
+    for role, executable in roles.items():
+        require(digest(executable) == manifest['sha256'][role], 'deployed ' + role + ' bytes differ')
+    cli = deployment['cli']
+    require(digest(absolute(cli['path'])) == cli['sha256'] == manifest['sha256']['mini'],
+            'actual CLI differs from joined candidate')
+    require(binding['operatorSocket'] == spec['deployment']['privateSocket']
+            and binding['publicSocket'] == spec['deployment']['socket'], 'binding sockets differ')
+    commands = deployment['memberCommands']
+    require(len({row['subject'] for row in commands}) == len(commands), 'duplicate deployed member command')
+    by_subject = {row['subject']: row for row in commands}
+    for member in spec['members'].values():
+        require(member['subject'] in by_subject, 'missing actual member SSH command')
+        row = by_subject[member['subject']]
+        for field in ('launcher', 'mini', 'authorizedKeys', 'publicKey'):
+            require(digest(absolute(row[field]['path'])) == row[field]['sha256'], field + ' changed')
+        require(absolute(row['mini']['path']) == absolute(cli['path'])
+                and row['mini']['sha256'] == cli['sha256']
+                and absolute(row['host']) == roles['host'], 'member actual executables differ')
+        require(absolute(row['authorizedKeys']['path']) == absolute(binding['authorizedKeys']),
+                'member uses another authorized keys file')
+        public_key = absolute(row['publicKey']['path']).read_text().split()[:2]
+        require(len(public_key) == 2 and public_key[0] == 'ssh-ed25519', 'invalid member SSH public key')
+        require(absolute(row['publicKey']['path']) == absolute(member['ssh']['identityFile'] + '.pub'),
+                'SSH identity does not match actual member command')
+        lines = absolute(binding['authorizedKeys']).read_text().splitlines()
+        matches = [line for line in lines if line.split()[-2:] == public_key
+                   or (' '.join(public_key) + ' ') in line]
+        require(len(matches) == 1, 'member SSH key has no unique forced command')
+        forced = re.search(r'command="([^"\n]+)"', matches[0])
+        require(forced is not None and matches[0].startswith('restrict,pty,command='),
+                'member SSH key lacks restricted forced command')
+        require(shlex.split(forced[1]) == [str(absolute(row['launcher']['path'])),
+                str(absolute(cli['path'])), str(roles['host']), str(config_path),
+                spec['deployment']['socket'], str(absolute(member['workspace'])),
+                str(absolute(member['home']))], 'actual forced SSH command differs')
+    return roles
+
+
 def validate(spec):
     require(spec["type"] == "mini-joined-member-journey-v1", "unknown journey type")
     manifest_path = absolute(spec["manifest"])
@@ -125,8 +190,9 @@ def validate(spec):
     config_path = absolute(spec["deployment"]["config"])
     config = read(config_path)
     require(digest(config_path) == spec["deployment"]["configSha256"], "configuration changed")
-    require(absolute(config["storageBinary"]) == absolute(manifest["store"]), "different Store binary")
-    require(absolute(config["signatureBinary"]) == absolute(manifest["verifier"]), "different verifier")
+    roles = deployed_roles(spec, manifest, config_path)
+    require(absolute(config["storageBinary"]) == roles['store'], "different Store binary")
+    require(absolute(config["signatureBinary"]) == roles['verifier'], "different verifier")
     identity = {
         "manifestSha256": spec["manifestSha256"], "configSha256": digest(config_path),
         "storageRoot": str(absolute(config["storageRoot"])),
@@ -146,7 +212,7 @@ def validate(spec):
         pin = read(workspace / "workspace.json")
         require(str(pin["subject"]) == member["subject"], f"{name} subject differs")
         require(absolute(pin["config"]) == config_path, f"{name} config differs")
-        require(absolute(pin["host"]) == absolute(manifest["host"]), f"{name} Host differs")
+        require(absolute(pin["host"]) == roles['host'], f"{name} Host differs")
         require(pin["socket"] == identity["socket"], f"{name} socket differs")
         absolute(member["home"])
         ssh = member["ssh"]
