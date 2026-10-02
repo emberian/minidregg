@@ -423,6 +423,111 @@ theorem rotation_preserves_other_subjects (logical : Store layout) (current : Ke
       simp only [bind, Option.bind]
       rw [(rows epoch).1]
 
+/-! ## Enrollment: the committed next key must sign
+
+An enrollment installs a fresh record whose `nextKeyDigest` is the subject's
+pre-rotation commitment.  Whoever authors the enrollment chooses that digest,
+so a sponsor could commit a key it merely NAMES -- a digest copied from
+elsewhere, or one it made up -- and the subject would carry a commitment no one
+it trusts can open.  `enrollGate` closes that: a record that commits to a next
+key is admitted only with that key's public half (whose digest IS the
+commitment) and a signature by it, the same possession rule `gate` imposes on
+a rotation.  A record that commits to nothing takes no next key.
+
+What this does NOT stop: a sponsor that generates a next keypair of its own,
+commits to it and signs with it.  Possession is then genuine -- the sponsor's.
+The kernel cannot know whose key a key is; the subject's own client refuses a
+subject whose commitment is not the digest of ITS next key
+(`workspace init`, and every later load).  That client check is the tooth
+against a hostile sponsor; this gate is the tooth against a commitment nobody
+can open. -/
+
+inductive EnrollReject where
+  /-- The presented next public key's digest is not the record's commitment. -/
+  | nextNotCommitted
+  /-- No signature by the committed next key over the next-possession frame verified. -/
+  | nextNoPossession
+  /-- A next key was presented for a record that commits to none. -/
+  | nextUnexpected
+  deriving DecidableEq, Repr
+
+/-- The next-key side of an enrollment.  `nextPublicKey` is the presented next
+public half (`[]` when none); `signed pk` is whether the presented next-possession
+signature verifies under `pk` -- the host computes it at the presented key only. -/
+def enrollGate (digestOf : List UInt8 → Digest) (key : KeyRecord) (nextPublicKey : List UInt8)
+    (signed : List UInt8 → Bool) : Except EnrollReject Unit :=
+  match key.nextKeyDigest with
+  | none => if nextPublicKey = [] then .ok () else .error .nextUnexpected
+  | some committed =>
+    if digestOf nextPublicKey = committed then
+      if signed nextPublicKey then .ok () else .error .nextNoPossession
+    else .error .nextNotCommitted
+
+/-- Exact characterization of an admitted enrollment's next-key side. -/
+theorem enrollGate_ok_iff (digestOf : List UInt8 → Digest) (key : KeyRecord)
+    (nextPublicKey : List UInt8) (signed : List UInt8 → Bool) :
+    enrollGate digestOf key nextPublicKey signed = .ok () ↔
+      (key.nextKeyDigest = none ∧ nextPublicKey = []) ∨
+      (key.nextKeyDigest = some (digestOf nextPublicKey) ∧ signed nextPublicKey = true) := by
+  unfold enrollGate
+  cases committed : key.nextKeyDigest with
+  | none => by_cases empty : nextPublicKey = [] <;> simp [empty]
+  | some digest =>
+    by_cases same : digestOf nextPublicKey = digest
+    · by_cases possession : signed nextPublicKey = true
+      · simp [same, possession]
+      · simp [same, possession]
+    · have other : ¬ digest = digestOf nextPublicKey := fun back => same back.symm
+      simp [same, other]
+
+/-- **Enrollment requires possession of the committed next key.**  An admitted
+enrollment whose record commits to `committed` presented a next key whose
+digest is `committed`, and that key signed. -/
+theorem enroll_requires_next_key_possession {digestOf : List UInt8 → Digest} {key : KeyRecord}
+    {nextPublicKey : List UInt8} {signed : List UInt8 → Bool} {committed : Digest}
+    (admitted : enrollGate digestOf key nextPublicKey signed = .ok ())
+    (precommitted : key.nextKeyDigest = some committed) :
+    digestOf nextPublicKey = committed ∧ signed nextPublicKey = true := by
+  rcases (enrollGate_ok_iff digestOf key nextPublicKey signed).1 admitted with
+    ⟨absent, -⟩ | ⟨present, possession⟩
+  · rw [precommitted] at absent; cases absent
+  · rw [precommitted] at present
+    exact ⟨(Option.some.inj present).symm, possession⟩
+
+/-- Satisfiable pole: a record co-signed by its committed next key is admitted. -/
+theorem enroll_cosigned_admitted (digestOf : List UInt8 → Digest) (key : KeyRecord)
+    (nextPublicKey : List UInt8) (signed : List UInt8 → Bool)
+    (precommitted : key.nextKeyDigest = some (digestOf nextPublicKey))
+    (cosigned : signed nextPublicKey = true) :
+    enrollGate digestOf key nextPublicKey signed = .ok () :=
+  (enrollGate_ok_iff digestOf key nextPublicKey signed).2 (Or.inr ⟨precommitted, cosigned⟩)
+
+/-- Refuting pole: the committed next key named but not signing is refused by name. -/
+theorem enroll_unsigned_next_refused (digestOf : List UInt8 → Digest) (key : KeyRecord)
+    (nextPublicKey : List UInt8) (signed : List UInt8 → Bool)
+    (precommitted : key.nextKeyDigest = some (digestOf nextPublicKey))
+    (unsigned : signed nextPublicKey = false) :
+    enrollGate digestOf key nextPublicKey signed = .error .nextNoPossession := by
+  simp [enrollGate, precommitted, unsigned]
+
+/-- Refuting pole: a presented key that is not the commitment is refused by
+name, whatever was signed. -/
+theorem enroll_named_next_refused (digestOf : List UInt8 → Digest) (key : KeyRecord)
+    (nextPublicKey : List UInt8) (committed : Digest)
+    (precommitted : key.nextKeyDigest = some committed)
+    (differs : digestOf nextPublicKey ≠ committed) (signed : List UInt8 → Bool) :
+    enrollGate digestOf key nextPublicKey signed = .error .nextNotCommitted := by
+  simp [enrollGate, precommitted, differs]
+
+/-- Signatures count only at the presented next key: the sponsor's, the new
+daily key's, or anyone else's change nothing. -/
+theorem enroll_signatures_only_at_next_key (digestOf : List UInt8 → Digest) (key : KeyRecord)
+    (nextPublicKey : List UInt8) (signed signed' : List UInt8 → Bool)
+    (agree : signed nextPublicKey = signed' nextPublicKey) :
+    enrollGate digestOf key nextPublicKey signed = enrollGate digestOf key nextPublicKey signed' := by
+  unfold enrollGate
+  rw [agree]
+
 /-! ## Both poles on a small state
 
 A toy digest (the byte sum) stands in for cSHAKE256: the gate is generic in
@@ -488,6 +593,25 @@ theorem honest_post :
       ((post store enrolled honest) ⟨.revoked, .signingKey friend 1⟩).isSome = true := by
   decide
 
+/-- Satisfiable pole: the enrolled record, co-signed by its committed next key. -/
+theorem enroll_cosigned : enrollGate toyDigest enrolled next (fun pk => decide (pk = next)) = .ok () := by
+  decide
+
+/-- Refuting pole: the sponsor names the next key but holds only the daily key
+(and its own): every signature it can make is at a key other than `next`. -/
+theorem enroll_named_only_refused :
+    enrollGate toyDigest enrolled next (fun pk => decide (pk = daily) || decide (pk = thief)) =
+      .error .nextNoPossession := by decide
+
+/-- Refuting pole: a key it holds, presented as the next key, is not the commitment. -/
+theorem enroll_other_key_refused :
+    enrollGate toyDigest enrolled thief everyone = .error .nextNotCommitted := by decide
+
+/-- A record without a commitment takes no next key, and admits none. -/
+theorem enroll_plain_admitted : enrollGate toyDigest plain [] everyone = .ok () := by decide
+theorem enroll_plain_with_next_refused :
+    enrollGate toyDigest plain next everyone = .error .nextUnexpected := by decide
+
 end Witness
 
 #assert_axioms gate_ok_iff
@@ -507,5 +631,16 @@ end Witness
 #assert_axioms Witness.unsigned_refused
 #assert_axioms Witness.plain_refused
 #assert_axioms Witness.honest_post
+#assert_axioms enrollGate_ok_iff
+#assert_axioms enroll_requires_next_key_possession
+#assert_axioms enroll_cosigned_admitted
+#assert_axioms enroll_unsigned_next_refused
+#assert_axioms enroll_named_next_refused
+#assert_axioms enroll_signatures_only_at_next_key
+#assert_axioms Witness.enroll_cosigned
+#assert_axioms Witness.enroll_named_only_refused
+#assert_axioms Witness.enroll_other_key_refused
+#assert_axioms Witness.enroll_plain_admitted
+#assert_axioms Witness.enroll_plain_with_next_refused
 
 end Minidregg.Theory.KeyPreRotation

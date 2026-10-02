@@ -111,7 +111,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
   let envelope := CredentialSignedEnvelopeController.envelopeCodec.encode
     ⟨selected, sponsorSignature⟩
   let ingressBytes := ParticipantKeyEnrollment.ingressCodec.encode
-    ⟨ParticipantKeyEnrollment.commandCodec.encode command, envelope, possessionSignature⟩
+    ⟨ParticipantKeyEnrollment.commandCodec.encode command, envelope, possessionSignature, [], []⟩
   let some ingress := ParticipantKeyEnrollment.decodeIngress ingressBytes
     | throw (IO.userError "canonical ingress decode")
   let accepted ← match ← ParticipantKeyEnrollmentReceiver.admitDecodedNative cfg.deployment
@@ -141,7 +141,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
     (match ParticipantKeyEnrollment.prepare cfg.deployment profile ambient durable stale with
       | .error .staleAuthority => true | _ => false)
   let badPossessionBytes := ParticipantKeyEnrollment.ingressCodec.encode
-    ⟨ParticipantKeyEnrollment.commandCodec.encode command, envelope, sponsorSignature⟩
+    ⟨ParticipantKeyEnrollment.commandCodec.encode command, envelope, sponsorSignature, [], []⟩
   let some badPossession := ParticipantKeyEnrollment.decodeIngress badPossessionBytes
     | throw (IO.userError "bad possession ingress decode")
   require "new-key possession cannot be sponsor signature"
@@ -180,7 +180,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
     ⟨ParticipantKeyEnrollment.commandCodec.encode denyCommand,
       CredentialSignedEnvelopeController.envelopeCodec.encode
         ⟨denyHeader, denySponsorSignature⟩,
-      denyPossessionSignature⟩
+      denyPossessionSignature, [], []⟩
   let some denyIngress := ParticipantKeyEnrollment.decodeIngress denyBytes
     | throw (IO.userError "denying-law ingress decode")
   require "current factory law locks out enrollment even with both valid signatures"
@@ -267,7 +267,7 @@ def run (verifier signer storeBinary : System.FilePath) : IO Unit := do
     let nextBytes := ParticipantKeyEnrollment.ingressCodec.encode
       ⟨ParticipantKeyEnrollment.commandCodec.encode nextCommand,
         CredentialSignedEnvelopeController.envelopeCodec.encode ⟨nextHeader, nextSignature⟩,
-        nextPossession⟩
+        nextPossession, [], []⟩
     let some nextIngress := ParticipantKeyEnrollment.decodeIngress nextBytes
       | throw (IO.userError "fresh next ingress decode")
     require "enrolled key alone cannot sponsor another enrollment without grant"

@@ -9,20 +9,32 @@
 //! bound to room, epoch, member and both public keys, XChaCha20-Poly1305).
 //!
 //! THE `keys` CELL. The wraps live in one content cell born `--in R` by the
-//! founder (reference `NAME-keys`), one atom per `(epoch, member)`:
-//!   atom id   = epoch * 2^64 + member        (one id per pair: a second wrap
-//!                                             for the same pair is refused by
-//!                                             the content controller)
-//!   kind      = inlineObject(schema of "DREGG/PRIVATE-WRAP/v1")
-//!   payload   = member's X25519 public key (32) ‖ wrap (104)
-//! Its law (`deploy/shell/templates/room/private/law.keys.json`,
-//! `Kernel/PrivateRoomKeys.lean`) lets only the founder write, and only by
-//! creating atoms: no edit, no tombstone. So the room's EPOCH -- the largest
-//! epoch with a wrap -- never goes backwards, and a member cannot hand anyone a
-//! key. Every member may read every wrap (the cheaper choice: per-address
-//! observation is not on this tree, and a wrap opens for one X25519 secret
-//! only). The member's public key rides beside its wrap so that whoever rotates
-//! can rewrap to every remaining member without a roster of its own.
+//! founder (reference `NAME-keys`), partitioned by atom id
+//! (`Kernel/PrivateRoomKeys.lean`):
+//!   WRAP of epoch e for member m, addressed to m's key of generation g:
+//!     atom id   = (e + 1) * 2^96 + g * 2^64 + m
+//!     kind      = inlineObject(schema of "DREGG/PRIVATE-WRAP/v1")
+//!     payload   = member's X25519 public key (32) ‖ wrap (104)
+//!   m's ENCRYPTION-KEY RECORD (FIX-IDENTITY):
+//!     atom id   = m
+//!     kind      = inlineObject(schema of "DREGG/PRIVATE-ENC-KEY/v1")
+//!     payload   = m's key epoch (4, big-endian) ‖ m's X25519 public key (32)
+//! The generation g is the key epoch of the record a wrap was addressed to (0:
+//! a key given at invite time, before any record). A second wrap to the SAME key
+//! is the same id, refused by the content controller; a RE-WRAP to a member's
+//! newer key is a new id. Its law (`law.keys.json`) lets only the founder write
+//! wraps, only by creating atoms (no edit, no tombstone), so the room's EPOCH --
+//! the largest epoch with a wrap -- never goes backwards; and lets each subject
+//! write only its own record (one create or edit at its own number). Every
+//! member may read every wrap and record (per-address observation is not on
+//! this tree, and a wrap opens for one X25519 secret only). Whoever rotates
+//! wraps each kept member to its RECORD, else to the key beside its latest wrap.
+//!
+//! A MEMBER'S SIGNING-KEY ROTATION changes its X25519 key (both come from the
+//! seed). `mini rotate-key` keeps the old secret in the encryption keyring
+//! (`private::keyring_remember`, KEY.enc-ring) and publishes the new public key
+//! as the member's record in every private room it is in (`publish_rotation`);
+//! `sync` opens a wrap with whichever keyring secret it is addressed to.
 //!
 //! THE CLIENT'S CACHE. Each workspace keeps the epochs it holds in
 //! `ROOT/private/keys.cache` (Argon2id + XChaCha20-Poly1305 under
@@ -103,28 +115,75 @@ pub(crate) fn wrap_schema() -> String {
     private::schema_decimal_of(WRAP_FRAME)
 }
 
+/// A member's encryption-key record in the keys cell.
+pub(crate) const RECORD_FRAME: &[u8] = b"DREGG/PRIVATE-ENC-KEY/v1";
+
+pub(crate) fn record_schema() -> String {
+    private::schema_decimal_of(RECORD_FRAME)
+}
+
 // ---------------------------------------------------------------- wrap atoms
 
 /// One wrap in the keys cell.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WrapAtom {
     pub(crate) epoch: u32,
+    pub(crate) gen: u32,
     pub(crate) member: u64,
     pub(crate) enc_pub: [u8; 32],
     pub(crate) wrapped: Wrapped,
 }
 
-pub(crate) fn wrap_atom_id(epoch: u32, member: u64) -> String {
-    ((u128::from(epoch) << 64) | u128::from(member)).to_string()
+/// The largest room-key epoch: `(epoch + 1) * 2^96` stays below 2^127.
+pub(crate) const MAX_EPOCH: u32 = (1 << 31) - 1;
+
+pub(crate) fn wrap_atom_id(epoch: u32, gen: u32, member: u64) -> String {
+    (((u128::from(epoch) + 1) << 96) | (u128::from(gen) << 64) | u128::from(member)).to_string()
 }
 
-pub(crate) fn parse_wrap_atom_id(id: &str) -> Result<(u32, u64)> {
-    let value: u128 = id.parse().map_err(|_| format!("wrap atom id {id} is not a decimal below 2^96"))?;
+pub(crate) fn parse_wrap_atom_id(id: &str) -> Result<(u32, u32, u64)> {
+    let value: u128 = id.parse().map_err(|_| format!("wrap atom id {id} is not a decimal below 2^128"))?;
     if value.to_string() != id {
         return Err(format!("wrap atom id {id} is not canonical"));
     }
-    let epoch = u32::try_from(value >> 64).map_err(|_| format!("wrap atom id {id} exceeds epoch range"))?;
-    Ok((epoch, value as u64))
+    let high = value >> 96;
+    if high == 0 {
+        return Err(format!("atom id {id} is in the record region, not a wrap"));
+    }
+    let epoch = u32::try_from(high - 1)
+        .ok()
+        .filter(|epoch| *epoch <= MAX_EPOCH)
+        .ok_or_else(|| format!("wrap atom id {id} exceeds the epoch range"))?;
+    Ok((epoch, ((value >> 64) & 0xffff_ffff) as u32, value as u64))
+}
+
+/// One member's encryption-key record. `atom` is the record as the signed view
+/// showed it: an edit names it exactly (`before`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EncRecord {
+    pub(crate) member: u64,
+    pub(crate) key_epoch: u32,
+    pub(crate) enc_pub: [u8; 32],
+    pub(crate) atom: Value,
+}
+
+impl EncRecord {
+    fn payload(key_epoch: u32, enc_pub: &[u8; 32]) -> Vec<u8> {
+        [&key_epoch.to_be_bytes()[..], enc_pub].concat()
+    }
+
+    pub(crate) fn from_atom(id: &str, payload: &[u8], atom: &Value) -> Result<Self> {
+        let member = subject_number(id).map_err(|_| format!("record atom id {id} is not a subject number"))?;
+        if payload.len() != 36 {
+            return Err(format!("record {id} is {} bytes, not 36", payload.len()));
+        }
+        Ok(Self {
+            member,
+            key_epoch: u32::from_be_bytes(payload[..4].try_into().expect("4 bytes")),
+            enc_pub: payload[4..].try_into().expect("32 bytes"),
+            atom: atom.clone(),
+        })
+    }
 }
 
 fn subject_number(subject: &str) -> Result<u64> {
@@ -136,9 +195,13 @@ fn subject_number(subject: &str) -> Result<u64> {
 }
 
 impl WrapAtom {
-    pub(crate) fn new(room: &str, member: &str, enc_pub: &PublicKey, key: &RoomKey) -> Result<Self> {
+    pub(crate) fn new(room: &str, member: &str, enc_pub: &PublicKey, gen: u32, key: &RoomKey) -> Result<Self> {
+        if key.epoch() > MAX_EPOCH {
+            return Err("room-key epoch exhausted".into());
+        }
         Ok(Self {
             epoch: key.epoch(),
+            gen,
             member: subject_number(member)?,
             enc_pub: *enc_pub.as_bytes(),
             wrapped: wrap_room_key(room, member, enc_pub, key)?,
@@ -150,12 +213,13 @@ impl WrapAtom {
     }
 
     pub(crate) fn from_atom(id: &str, payload: &[u8]) -> Result<Self> {
-        let (epoch, member) = parse_wrap_atom_id(id)?;
+        let (epoch, gen, member) = parse_wrap_atom_id(id)?;
         if payload.len() != 32 + WRAPPED_LEN {
             return Err(format!("wrap atom {id} is {} bytes, not {}", payload.len(), 32 + WRAPPED_LEN));
         }
         Ok(Self {
             epoch,
+            gen,
             member,
             enc_pub: payload[..32].try_into().expect("32 bytes"),
             wrapped: Wrapped::from_bytes(&payload[32..])?,
@@ -164,7 +228,7 @@ impl WrapAtom {
 
     /// The content action that writes this wrap.
     pub(crate) fn action(&self) -> Value {
-        json!({"type":"createAtom","atom":wrap_atom_id(self.epoch, self.member),
+        json!({"type":"createAtom","atom":wrap_atom_id(self.epoch, self.gen, self.member),
             "kind":{"type":"inlineObject","schema":wrap_schema()},"payload":hex(&self.payload())})
     }
 
@@ -202,9 +266,48 @@ pub(crate) fn wraps_in_view(view: &Value) -> Result<Vec<WrapAtom>> {
     let mut found = Vec::new();
     walk(view, &wrap_schema(), &mut found);
     let mut wraps = found.into_iter().collect::<Result<Vec<_>>>()?;
-    wraps.sort_by_key(|w| (w.epoch, w.member));
+    wraps.sort_by_key(|w| (w.epoch, w.member, w.gen));
     wraps.dedup();
     Ok(wraps)
+}
+
+/// Every member's encryption-key record in a signed view of a keys cell. The law
+/// lets only the member write its own record, so a malformed one is that
+/// member's: it is reported and skipped, never trusted.
+pub(crate) fn records_in_view(view: &Value) -> BTreeMap<u64, EncRecord> {
+    fn walk<'a>(value: &'a Value, schema: &str, out: &mut Vec<&'a Value>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|item| walk(item, schema, out)),
+            Value::Object(object) => {
+                let record = object.get("type").and_then(Value::as_str) == Some("atom")
+                    && object.get("kind").and_then(|k| k.get("schema")).and_then(Value::as_str)
+                        == Some(schema);
+                if record {
+                    out.push(value);
+                } else {
+                    object.values().for_each(|item| walk(item, schema, out));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    walk(view, &record_schema(), &mut found);
+    let mut out = BTreeMap::new();
+    for atom in found {
+        let parsed = (|| {
+            let id = atom.get("id").and_then(Value::as_str).ok_or("record atom lacks id")?;
+            let payload = atom.get("payload").and_then(Value::as_str).ok_or("record atom lacks payload")?;
+            EncRecord::from_atom(id, &private::decode_hex(payload)?, atom)
+        })();
+        match parsed {
+            Ok(record) => {
+                out.insert(record.member, record);
+            }
+            Err(error) => eprintln!("keys cell: an encryption-key record is malformed and ignored ({error})"),
+        }
+    }
+    out
 }
 
 /// The room's epoch: the largest epoch any wrap names.
@@ -212,17 +315,36 @@ pub(crate) fn current_epoch(wraps: &[WrapAtom]) -> Option<u32> {
     wraps.iter().map(|w| w.epoch).max()
 }
 
-/// Members at `epoch` (with the public key each was wrapped to).
-pub(crate) fn members_at(wraps: &[WrapAtom], epoch: u32) -> BTreeMap<u64, [u8; 32]> {
-    wraps.iter().filter(|w| w.epoch == epoch).map(|w| (w.member, w.enc_pub)).collect()
+/// Members at `epoch`, each with the generation and public key of its newest
+/// wrap there.
+pub(crate) fn members_at(wraps: &[WrapAtom], epoch: u32) -> BTreeMap<u64, (u32, [u8; 32])> {
+    let mut out: BTreeMap<u64, (u32, [u8; 32])> = BTreeMap::new();
+    for w in wraps.iter().filter(|w| w.epoch == epoch) {
+        let newer = out.get(&w.member).is_none_or(|(gen, _)| w.gen > *gen);
+        if newer {
+            out.insert(w.member, (w.gen, w.enc_pub));
+        }
+    }
+    out
+}
+
+/// The key a wrap for `member` goes to: its record when it published one, else
+/// the key beside its newest wrap (`fallback`).
+pub(crate) fn wrap_target(
+    records: &BTreeMap<u64, EncRecord>,
+    member: u64,
+    fallback: (u32, [u8; 32]),
+) -> (u32, [u8; 32]) {
+    records.get(&member).map(|r| (r.key_epoch, r.enc_pub)).unwrap_or(fallback)
 }
 
 /// The wraps a rotation writes: a fresh key at `epoch + 1` for every member at
-/// `epoch` who is still `current` and is not `dropped`. Returns the new key, the
-/// wraps, and the members left out.
+/// `epoch` who is still `current` and is not `dropped`, each to its RECORDED key
+/// (`wrap_target`). Returns the new key, the wraps, and the members left out.
 pub(crate) fn rotation(
     room: &str,
     wraps: &[WrapAtom],
+    records: &BTreeMap<u64, EncRecord>,
     current: &BTreeSet<u64>,
     dropped: Option<u64>,
 ) -> Result<(RoomKey, Vec<WrapAtom>, Vec<u64>)> {
@@ -230,12 +352,13 @@ pub(crate) fn rotation(
     let next = RoomKey::generate(epoch.checked_add(1).ok_or("room-key epoch exhausted")?)?;
     let mut out = Vec::new();
     let mut left = Vec::new();
-    for (member, enc_pub) in members_at(wraps, epoch) {
+    for (member, newest) in members_at(wraps, epoch) {
         if Some(member) == dropped || !current.contains(&member) {
             left.push(member);
             continue;
         }
-        out.push(WrapAtom::new(room, &member.to_string(), &PublicKey::from(enc_pub), &next)?);
+        let (gen, enc_pub) = wrap_target(records, member, newest);
+        out.push(WrapAtom::new(room, &member.to_string(), &PublicKey::from(enc_pub), gen, &next)?);
     }
     Ok((next, out, left))
 }
@@ -382,6 +505,12 @@ fn own_secret(workspace: &Value) -> Result<StaticSecret> {
     Ok(derive_enc_key(&*seed_of(&path)?))
 }
 
+/// Every X25519 secret this workspace opens with: the current one, then every
+/// past one its keyring kept across signing-key rotations.
+fn own_secrets(workspace: &Value) -> Result<Vec<StaticSecret>> {
+    private::enc_secrets(&member_path(workspace, "key")?)
+}
+
 pub(crate) fn seed_of(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     let bytes = Zeroizing::new(
         fs::read(path).map_err(|error| format!("cannot read signing key {}: {error}", path.display()))?,
@@ -443,6 +572,7 @@ pub(crate) fn rewrite_reference(root: &Path, name: &str, value: &Value) -> Resul
 pub(crate) struct Synced {
     pub(crate) room: String,
     pub(crate) wraps: Vec<WrapAtom>,
+    pub(crate) records: BTreeMap<u64, EncRecord>,
     pub(crate) ring: Keyring,
     pub(crate) learned: Vec<u32>,
 }
@@ -460,30 +590,45 @@ pub(crate) fn sync(root: &Path, workspace: &Value, room_name: &str) -> Result<Sy
     let (room_ref, room, keys) = private_room(root, room_name)?;
     let (view, _, _) = signed_view(root, workspace, &keys_view_ref(&room_ref, &keys)?, "resource")?;
     let wraps = wraps_in_view(&view)?;
+    let records = records_in_view(&view);
     let mut ring = load_ring(root, &passphrase)?;
     let me = subject_number(member(workspace, "subject")?)?;
-    let secret = own_secret(workspace)?;
+    let secrets = own_secrets(workspace)?;
     let mut learned = Vec::new();
-    for wrap in wraps.iter().filter(|w| w.member == me) {
+    let mut unopened = BTreeSet::new();
+    // A member may hold several wraps at one epoch (re-wraps after it rotated):
+    // the newest generation first, with whichever keyring secret it names.
+    let mut mine: Vec<&WrapAtom> = wraps.iter().filter(|w| w.member == me).collect();
+    mine.sort_by_key(|w| (w.epoch, std::cmp::Reverse(w.gen)));
+    for wrap in mine {
         if ring.get(&room, wrap.epoch).is_some() || ring.is_forgotten(&room, wrap.epoch) {
             continue;
         }
-        match wrap.open(&room, &secret) {
+        let Some(secret) = secrets.iter().find(|s| PublicKey::from(*s).as_bytes() == &wrap.enc_pub) else {
+            unopened.insert(wrap.epoch);
+            continue;
+        };
+        match wrap.open(&room, secret) {
             Ok(key) => {
                 ring.insert(&room, &key);
                 learned.push(wrap.epoch);
+                unopened.remove(&wrap.epoch);
             }
-            Err(error) => eprintln!(
-                "room {room_name}: the wrap for you at epoch {} does not open under your key ({error}); the inviter used another encryption key",
-                wrap.epoch
-            ),
+            Err(error) => {
+                eprintln!("room {room_name}: the wrap for you at epoch {} does not open ({error})", wrap.epoch);
+            }
         }
+    }
+    for epoch in unopened.iter().filter(|e| ring.get(&room, **e).is_none()) {
+        eprintln!(
+            "room {room_name}: the wrap for you at epoch {epoch} is addressed to an encryption key this client does not hold (not the current one, and not one KEY.enc-ring kept); ask the founder for `room rewrap ID {room_name} {me}` after `room register`"
+        );
     }
     if !learned.is_empty() {
         save_ring(root, &passphrase, &ring)?;
         eprintln!("room {room_name}: learned epoch(s) {learned:?} from the keys cell");
     }
-    Ok(Synced { room, wraps, ring, learned })
+    Ok(Synced { room, wraps, records, ring, learned })
 }
 
 /// The key a writer seals under: the room's current epoch, which this client
@@ -583,11 +728,16 @@ pub(crate) fn found(root: &Path, workspace: &Value, room_name: &str) -> Result<(
     let me = subject_number(&founder)?;
     let mine: BTreeSet<u32> = synced.wraps.iter().filter(|w| w.member == me).map(|w| w.epoch).collect();
     let public = PublicKey::from(&own_secret(workspace)?);
+    let gen = synced
+        .records
+        .get(&me)
+        .filter(|r| &r.enc_pub == public.as_bytes())
+        .map_or(0, |r| r.key_epoch);
     let mut wraps = Vec::new();
     for epoch in synced.ring.epochs(&room) {
         if !mine.contains(&epoch) {
             let key = synced.ring.get(&room, epoch).expect("listed epoch");
-            wraps.push(WrapAtom::new(&room, &founder, &public, &key)?);
+            wraps.push(WrapAtom::new(&room, &founder, &public, gen, &key)?);
         }
     }
     if !wraps.is_empty() {
@@ -632,12 +782,20 @@ pub(crate) fn invite(
     if synced.ring.get(&room, epoch).is_none() {
         return Err(format!("{room_name} is at epoch {epoch} and this client holds no key for it"));
     }
-    let wrapped: BTreeSet<u32> = synced
-        .wraps
-        .iter()
-        .filter(|w| w.member.to_string() == invitee)
-        .map(|w| w.epoch)
-        .collect();
+    // The generation: the invitee's record when it published one (and the key
+    // named here must be that one), else 0, the invite-time key.
+    let invitee_number = subject_number(invitee)?;
+    let gen = match synced.records.get(&invitee_number) {
+        Some(record) if &record.enc_pub == enc.as_bytes() => record.key_epoch,
+        Some(record) => {
+            return Err(format!(
+                "{invitee}'s recorded encryption key in {room_name} is {} (its key epoch {}); you named another: wrap to the recorded key (or ask {invitee} to `room register` again)",
+                hex(&record.enc_pub),
+                record.key_epoch
+            ))
+        }
+        None => 0,
+    };
     let epochs: Vec<u32> = if past {
         synced.ring.epochs(&room).into_iter().filter(|e| *e <= epoch).collect()
     } else {
@@ -645,15 +803,25 @@ pub(crate) fn invite(
     };
     let mut wraps = Vec::new();
     for e in epochs {
-        if wrapped.contains(&e) {
-            eprintln!("room {room_name}: {invitee} already holds a wrap at epoch {e}");
+        let held: Vec<&WrapAtom> = synced
+            .wraps
+            .iter()
+            .filter(|w| w.member == invitee_number && w.epoch == e)
+            .collect();
+        if held.iter().any(|w| &w.enc_pub == enc.as_bytes()) {
+            eprintln!("room {room_name}: {invitee} already holds a wrap at epoch {e} to this key");
             continue;
         }
+        if held.iter().any(|w| w.gen == gen) {
+            return Err(format!(
+                "{invitee} holds a wrap at epoch {e} to another key at generation {gen}: only a key {invitee} publishes as its record (`room register`, or `rotate-key`) can be wrapped again"
+            ));
+        }
         let key = synced.ring.get(&room, e).expect("listed epoch");
-        wraps.push(WrapAtom::new(&room, invitee, &enc, &key)?);
+        wraps.push(WrapAtom::new(&room, invitee, &enc, gen, &key)?);
     }
     if wraps.is_empty() {
-        return Err(format!("{invitee} already holds a wrap at every epoch asked for"));
+        return Err(format!("{invitee} already holds a wrap to this key at every epoch asked for"));
     }
     let keys_ref = writable_keys_ref(root, room_name, &room_ref, &keys)?;
     let epochs: Vec<u32> = wraps.iter().map(|w| w.epoch).collect();
@@ -685,7 +853,7 @@ pub(crate) fn rotate(
         .filter_map(|s| s.parse().ok())
         .collect();
     let dropped = dropped.map(subject_number).transpose()?;
-    let (next, wraps, left) = rotation(&room, &synced.wraps, &current, dropped)?;
+    let (next, wraps, left) = rotation(&room, &synced.wraps, &synced.records, &current, dropped)?;
     let me = subject_number(member(workspace, "subject")?)?;
     if !wraps.iter().any(|w| w.member == me) {
         return Err("this rotation would not wrap the new key to its writer: only a current member rotates".into());
@@ -700,6 +868,111 @@ pub(crate) fn rotate(
     println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-rotation-v1",
         "room":room_name,"epoch":next.epoch(),"wrappedFor":members,"leftOut":left,
         "note":"those left out keep the past; they get nothing new"})).map_err(|e| e.to_string())?);
+    Ok(())
+}
+
+/// Write (create, or edit to the current key) this subject's encryption-key
+/// record in one private room's keys cell. One signed line: the law admits it
+/// from this subject only, at its own number. Returns what it did.
+pub(crate) fn register(root: &Path, workspace: &Value, room_name: &str, key_epoch: &str, proposal_id: &str) -> Result<Value> {
+    let key_epoch: u32 = key_epoch.parse().map_err(|_| format!("key epoch {key_epoch} is not a 32-bit decimal"))?;
+    let (room_ref, _, keys) = private_room(root, room_name)?;
+    let (view, _, _) = signed_view(root, workspace, &keys_view_ref(&room_ref, &keys)?, "resource")?;
+    let me = subject_number(member(workspace, "subject")?)?;
+    let public = PublicKey::from(&own_secret(workspace)?);
+    let payload = EncRecord::payload(key_epoch, public.as_bytes());
+    let kind = json!({"type":"inlineObject","schema":record_schema()});
+    let action = match records_in_view(&view).remove(&me) {
+        Some(record) if record.enc_pub == *public.as_bytes() && record.key_epoch == key_epoch => {
+            return Ok(json!({"room":room_name,"record":"already current","keyEpoch":key_epoch.to_string()}));
+        }
+        Some(record) => {
+            let before = super::atom_record(&record.atom)?;
+            json!({"type":"editAtom","atom":me.to_string(),"before":before,"kind":kind,
+                "payload":hex(&payload),"tombstone":false})
+        }
+        None => json!({"type":"createAtom","atom":me.to_string(),"kind":kind,"payload":hex(&payload)}),
+    };
+    let keys_ref = writable_keys_ref(root, room_name, &room_ref, &keys)?;
+    turn(root, workspace, proposal_id, &json!({"type":"minidregg-workspace-proposal-v1","action":"invoke",
+        "targets":[{"name":keys_ref,"payload":{"type":"content","actions":[action]}}]}))?;
+    Ok(json!({"room":room_name,"record":"published","keyEpoch":key_epoch.to_string(),
+        "encryptionKey":hex(public.as_bytes())}))
+}
+
+/// After an admitted `rotate-key`: publish the new encryption key to every
+/// private room this workspace references. Never fails the rotation (it is
+/// already installed); each room's outcome is returned and printed, and a room
+/// it could not reach is named with the one line that repairs it.
+pub(crate) fn publish_rotation(root: &Path, key_epoch: &str) -> Value {
+    let workspace = match super::load(root) {
+        Ok(workspace) => workspace,
+        Err(error) => return json!([{"error": format!("cannot load the workspace to publish: {error}")}]),
+    };
+    let mut rooms: Vec<String> = fs::read_dir(root.join("refs"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .filter_map(|name| name.strip_suffix(".json").map(str::to_owned))
+                .filter(|name| !name.starts_with('.'))
+                .collect()
+        })
+        .unwrap_or_default();
+    rooms.sort();
+    let mut out = Vec::new();
+    for name in rooms {
+        let Ok(reference) = reference(root, &name) else { continue };
+        if reference.get("private").and_then(|p| p.get("keys")).is_none() {
+            continue;
+        }
+        let nonce = super::random_nonce().unwrap_or_default();
+        let proposal = format!("rk-reg-{}", &nonce[nonce.len().saturating_sub(16)..]);
+        match register(root, &workspace, &name, key_epoch, &proposal) {
+            Ok(done) => {
+                eprintln!("room {name}: your new encryption key is published (key epoch {key_epoch}); the founder's next rotation wraps to it");
+                out.push(done);
+            }
+            Err(error) => {
+                eprintln!("room {name}: could NOT publish your new encryption key ({error}); until you do, its next epochs are wrapped to your old key or not at all. Repair: `room register {name}`");
+                out.push(json!({"room":name,"error":error}));
+            }
+        }
+    }
+    if out.is_empty() {
+        eprintln!("no private room references in this workspace: no encryption key to publish");
+    }
+    Value::Array(out)
+}
+
+/// `room rewrap ID ROOM SUBJECT` (the founder): wrap every epoch this founder
+/// holds again to SUBJECT's recorded key, where SUBJECT holds no wrap to it --
+/// the repair for a member who rotated its signing key.
+pub(crate) fn rewrap(root: &Path, workspace: &Value, room_name: &str, subject: &str, proposal_id: &str) -> Result<()> {
+    let number = subject_number(subject)?;
+    let (room_ref, room, keys) = private_room(root, room_name)?;
+    let synced = sync(root, workspace, room_name)?;
+    let record = synced.records.get(&number).ok_or_else(|| {
+        format!("{subject} has published no encryption-key record in {room_name}: it runs `room register {room_name}` first")
+    })?;
+    let mut wraps = Vec::new();
+    for epoch in synced.ring.epochs(&room) {
+        let held: Vec<&WrapAtom> = synced.wraps.iter().filter(|w| w.member == number && w.epoch == epoch).collect();
+        if held.is_empty() || held.iter().any(|w| w.enc_pub == record.enc_pub || w.gen == record.key_epoch) {
+            continue;
+        }
+        let key = synced.ring.get(&room, epoch).expect("listed epoch");
+        wraps.push(WrapAtom::new(&room, subject, &PublicKey::from(record.enc_pub), record.key_epoch, &key)?);
+    }
+    if wraps.is_empty() {
+        return Err(format!("{subject} already holds a wrap to its recorded key at every epoch it was wrapped at"));
+    }
+    let epochs: Vec<u32> = wraps.iter().map(|w| w.epoch).collect();
+    let keys_ref = writable_keys_ref(root, room_name, &room_ref, &keys)?;
+    write_wraps(root, workspace, &keys_ref, proposal_id, &wraps)?;
+    println!("{}", serde_json::to_string_pretty(&json!({"type":"minidregg-room-rewrap-v1",
+        "room":room_name,"member":subject,"epochs":epochs,"generation":record.key_epoch,
+        "encryptionKey":hex(&record.enc_pub)})).map_err(|e| e.to_string())?);
     Ok(())
 }
 
