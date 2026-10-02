@@ -2452,6 +2452,34 @@ def readBoundedBytes (path : String) (limit : Nat) : IO (List UInt8) := do
   let input ← IO.FS.Handle.mk path .read
   readBoundedLoop input limit
 
+/-- Bounded records, unlimited audit inventory. One verified source image owns
+all response rows and the ledger header, regardless of retained payment count. -/
+partial def readPaidAuditLine (input : IO.FS.Handle)
+    (acc : ByteArray := ByteArray.empty) : IO (Option (List UInt8)) := do
+  if acc.size > 4096 then throw (IO.userError "paid audit request exceeds byte bound")
+  let byte ← input.read 1
+  if byte.isEmpty then
+    if acc.isEmpty then return none
+    throw (IO.userError "paid audit request lacks newline")
+  if byte[0]! == 10 then return some acc.toList
+  readPaidAuditLine input (acc ++ byte)
+
+partial def writePaidAuditRows (config : NativeHost.Config)
+    (opened : NativeHost.Opened config) (input output : IO.FS.Handle)
+    (count : Nat := 0) : IO Unit := do
+  match ← readPaidAuditLine input with
+  | none =>
+      output.putStrLn (Lean.Json.mkObj [("type", "payClaimAuditComplete"),
+        ("origins", toJson (toString count))]).compress
+      output.flush
+  | some bytes =>
+      let some text := String.fromUTF8? bytes.toByteArray
+        | throw (IO.userError "paid audit request is not UTF-8")
+      let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
+      let result ← IO.ofExcept (Minidregg.Host.PayClaims.statusLoadedJson config opened source)
+      output.putStrLn result.compress
+      writePaidAuditRows config opened input output (count + 1)
+
 def withFnReplyPollService {α : Type} (settings : Settings)
     (body : Option FnReplyPollService → IO α) : IO α := do
   let some source := settings.fnReplyPoll | return ← body none
@@ -5582,13 +5610,13 @@ def run (arguments : List String) : IO UInt32 := do
             (Minidregg.Host.PayClaims.statusLoadedJson config walked.verified.opened source))
           pure 0
       | "pay-claim-audit", [input, output] =>
-          let bytes ← readBoundedBytes input (1024 * 4096)
-          let some text := String.fromUTF8? bytes.toByteArray
-            | throw (IO.userError "paid audit JSON is not UTF-8")
-          let source ← IO.ofExcept (Minidregg.Host.Json.parse text)
           let walked ← IO.ofExcept (← NativeHostSession.startWalked config)
-          writeJson output (← IO.ofExcept
-            (Minidregg.Host.PayClaims.auditLoadedJson config walked.verified.opened source))
+          let requests ← IO.FS.Handle.mk input .read
+          let results ← IO.FS.Handle.mk output .write
+          let header ← IO.ofExcept
+            (Minidregg.Host.PayClaims.auditHeaderJson config walked.verified.opened)
+          results.putStrLn header.compress
+          writePaidAuditRows config walked.verified.opened requests results
           pure 0
       | "pay-enrol-v2-context", [input, output] =>
           let bytes ← readBoundedBytes input 4096

@@ -1889,10 +1889,27 @@ fn v2_audit_origins(session: &Session) -> Result<Vec<(Record, String)>> {
             }
         }
     }
-    if origins.len() > 1024 {
-        return Err("paid audit exceeds the source batch bound of 1024 exact origins".into());
-    }
     Ok(origins.into_values().collect())
+}
+
+/// Bound each source row while reading, with no lifetime inventory ceiling.
+fn audit_json_line(reader: &mut impl std::io::BufRead, hash: &mut sha2::Sha256) -> Result<Option<Value>> {
+    let mut bytes = Vec::new();
+    loop {
+        let buffer = reader.fill_buf().map_err(|e|e.to_string())?;
+        if buffer.is_empty() {
+            return if bytes.is_empty() { Ok(None) } else { Err("source audit lacks final newline".into()) };
+        }
+        let end = buffer.iter().position(|b| *b == b'\n');
+        let count = end.map_or(buffer.len(), |n|n+1);
+        if bytes.len() + count > 8193 { return Err("source audit row exceeds bound".into()); }
+        bytes.extend_from_slice(&buffer[..count]);
+        reader.consume(count);
+        if end.is_some() {
+            hash.update(&bytes);
+            return serde_json::from_slice(&bytes).map(Some).map_err(|e|format!("source audit JSON: {e}"));
+        }
+    }
 }
 
 struct PaidAudit {
@@ -1918,9 +1935,14 @@ fn v2_audit_source(session: &Session, origins: &[(Record, String)], offline: boo
     }
     let directory = session.pay_dir().join(format!("audit-{}",workspace::random_nonce()?));
     workspace::make_private_dir(&directory)?;
-    let input = directory.join("requests.json");
-    let output = directory.join("source-audit.json");
-    retain_json(&input, &json!({"requests":requests}))?;
+    let input = directory.join("requests.jsonl");
+    let output = directory.join("source-audit.jsonl");
+    let mut input_bytes = Vec::new();
+    for request in &requests {
+        input_bytes.extend(serde_json::to_vec(request).map_err(|e|e.to_string())?);
+        input_bytes.push(b'\n');
+    }
+    create_private(&input, &input_bytes)?;
     let host_sha = host_image_sha256(&session.host)?;
     let config_sha = hex(&sha2::Sha256::digest(fs::read(&session.config).map_err(|e|e.to_string())?));
     let result = Command::new(&session.host).arg(&session.config).arg("pay-claim-audit")
@@ -1935,22 +1957,29 @@ fn v2_audit_source(session: &Session, origins: &[(Record, String)], offline: boo
         return Err("Host or exact config changed during source paid audit".into());
     }
     let metadata = fs::symlink_metadata(&output).map_err(|e|e.to_string())?;
-    if !metadata.file_type().is_file() || metadata.len() > 16*1024*1024 {
-        return Err("source paid audit file exceeds its bound or is not regular".into());
+    if !metadata.file_type().is_file() {
+        return Err("source paid audit file is not regular".into());
     }
-    let bytes = fs::read(&output).map_err(|e|e.to_string())?;
-    let value: Value = serde_json::from_slice(&bytes).map_err(|e|e.to_string())?;
+    let mut reader = std::io::BufReader::new(fs::File::open(&output).map_err(|e|e.to_string())?);
+    let mut source_hash = sha2::Sha256::new();
+    let value = audit_json_line(&mut reader, &mut source_hash)?.ok_or("source audit lacks header")?;
     if value["type"] != "payClaimAudit" { return Err("source paid audit type mismatch".into()); }
     for field in ["domain","semantics","expectedSeed","auditedHeight","worldRoot"] {
         crate::pay_status::Nat::parse(&text(&value, field)?)?;
     }
-    let rows = value["statuses"].as_array().ok_or("source paid audit lacks exact statuses")?;
-    if rows.len() != requests.len() { return Err("source paid audit response count mismatch".into()); }
-    let statuses = rows.iter().zip(&requests).map(|(row,request)|crate::pay_status::parse(row,request))
-        .collect::<Result<Vec<_>>>()?;
+    let mut statuses = Vec::new();
+    for request in &requests {
+        let row = audit_json_line(&mut reader, &mut source_hash)?.ok_or("source audit is truncated")?;
+        statuses.push(crate::pay_status::parse(&row, request)?);
+    }
+    let footer = audit_json_line(&mut reader, &mut source_hash)?.ok_or("source audit lacks completion")?;
+    if footer != json!({"type":"payClaimAuditComplete","origins":requests.len().to_string()})
+        || audit_json_line(&mut reader, &mut source_hash)?.is_some() {
+        return Err("source audit response count or completion mismatch".into());
+    }
     publish_decision_json(&directory.join("provenance.json"),&json!({
         "type":"minidregg-source-paid-audit-v1","hostSha256":host_sha,"configSha256":config_sha,
-        "sourceOutputSha256":hex(&sha2::Sha256::digest(&bytes)),
+        "sourceOutputSha256":hex(&source_hash.finalize()),
         "domain":value["domain"],"semantics":value["semantics"],"expectedSeed":value["expectedSeed"],
         "auditedHeight":value["auditedHeight"],"worldRoot":value["worldRoot"]}))?;
     println!("host-audit\tfully re-admitted {} accepted records; source image {}\t{}",

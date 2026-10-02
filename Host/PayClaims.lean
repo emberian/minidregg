@@ -198,12 +198,8 @@ def statusLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened co
 
 /-- Offline operator accounting is derived from one already genesis-walked image.
 The caller must supply the opened image returned by NativeHostSession.startWalked. -/
-def auditLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened config)
-    (json : Json) : Result Json := do
-  let obj ← object ["requests"] [] json
-  let requests ← (← field obj "requests").getArr?.mapError (fun _ => "requests: array expected")
-  unless requests.size ≤ 1024 do throw "paid audit exceeds 1024 exact origins"
-  let statuses ← requests.toList.mapM (statusLoadedJson config opened)
+def auditHeaderJson (config : NativeHost.Config) (opened : NativeHost.Opened config)
+    : Result Json := do
   let ledger ← NativeHost.payLedgerLoaded config opened
   return .mkObj [("type", "payClaimAudit"),
     ("domain", decimal config.deployment.domain.value),
@@ -211,7 +207,6 @@ def auditLoadedJson (config : NativeHost.Config) (opened : NativeHost.Opened con
     ("expectedSeed", decimal config.expectedSeed.value),
     ("auditedHeight", decimal opened.durable.image.accepted.length),
     ("worldRoot", decimal opened.durable.worldRoot.value),
-    ("statuses", toJson statuses),
     ("ledger", .mkObj [("well", .str (toString ledger.well))])]
 
 private def ownerJson (value : PayEnrolV2Decision.CurrentOwner) : Json := .mkObj
