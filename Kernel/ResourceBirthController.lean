@@ -20,6 +20,7 @@ import Kernel.CanonicalResourceEffect
 import Kernel.DurableDataIntent
 import Kernel.RoomBirthGate
 import Kernel.BirthExportAdmission
+import Kernel.BirthCandidateAdmission
 
 namespace Minidregg.Kernel.ResourceBirthController
 
@@ -455,6 +456,8 @@ inductive PreparationReject where
   | kindSource
   /-- An authenticated inherited export refused the exact initial effect. -/
   | inheritedLaw
+  /-- Joint staged policy sources have an invalid or unsupported closure. -/
+  | candidateLaw
   | initialPayload
   | initialPolicy
   | nockLibrary
@@ -526,6 +529,8 @@ structure PreparedBirth (profile : PolicyCompilerProfile F) (deployment : Deploy
   rooms : RoomBirthGate.Admitted pins directory authority gateHeight descriptor
   exports : BirthExportAdmission.Checked profile deployment pins durable directory authority
     factory.payload.root gateHeight descriptor
+  candidates : BirthCandidateAdmission.Checked profile deployment durable directory authority
+    grants.post grants.initialSources.records
 
 private def requirePreparation (condition : Prop) [Decidable condition]
     (reason : PreparationReject) : Except PreparationReject (PLift condition) :=
@@ -666,11 +671,14 @@ def prepareBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled :
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates grants.auxiliaryCreates = true)
     .auxiliaryCreates
+  let candidates ← fromOption
+    (BirthCandidateAdmission.check profile deployment durable pre.directory pre.authority
+      grants.post grants.initialSources.records) .candidateLaw
   let post ← preparePostAuthority pre grants.writes
   .ok ⟨pre.deploymentValid, pre.pinsBound, pre.profileBound, pre.identityBound,
     pre.directory, pre.parentsPresent, pre.kindsPresent, pre.initials, pre.policiesBound, pre.factory, pre.book, pre.authority,
     grants, (sameCreates_iff _ _).mp aux.down, post.allocated, post.resources,
-    post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms, pre.exports⟩
+    post.writesUnique, post.writePreExact, post.finalCells, pre.gateHeight, pre.rooms, pre.exports, candidates⟩
 
 /-- Preparation for the composite route retains a single old-image authority
 post covering initial grants and both replay markers. `operationMarker` here is
@@ -685,6 +693,8 @@ structure PreparedGrainBirth (profile : PolicyCompilerProfile F)
     pre.authority descriptor operationMarker
   auxiliaryExact : descriptor.auxiliaryCreates = authorityCombined.auxiliaryCreates
   post : PreparedPostAuthority pre authorityCombined.writes
+  candidates : BirthCandidateAdmission.Checked profile deployment durable pre.directory pre.authority
+    authorityCombined.post authorityCombined.initialSources.records
 
 def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disabled : List Digest)
     (deployment : Deployment)
@@ -699,8 +709,11 @@ def prepareGrainBirth [DecidableEq F] (profile : PolicyCompilerProfile F) (disab
   let aux ← requirePreparation
     (sameCreates descriptor.auxiliaryCreates combined.auxiliaryCreates = true)
     .auxiliaryCreates
+  let candidates ← fromOption
+    (BirthCandidateAdmission.check profile deployment durable pre.directory pre.authority
+      combined.post combined.initialSources.records) .candidateLaw
   let post ← preparePostAuthority pre combined.writes
-  .ok ⟨pre, combined, (sameCreates_iff _ _).mp aux.down, post⟩
+  .ok ⟨pre, combined, (sameCreates_iff _ _).mp aux.down, post, candidates⟩
 
 def PreparedGrainBirth.writes {profile : PolicyCompilerProfile F}
     {deployment : Deployment} {pins : FactoryPins} {durable : Durable}
@@ -716,7 +729,7 @@ def PreparedGrainBirth.readGuards {profile : PolicyCompilerProfile F}
     (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker) :
     List ReadGuard :=
   (prepared.pre.authority.readGuards ++ (parentGuards durable descriptor ++
-    (kindGuards durable descriptor ++ prepared.pre.exports.readGuards))).filter fun guard =>
+    (kindGuards durable descriptor ++ (prepared.pre.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
     guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 /-- The user draft has no auxiliary creates; only the initial policy sources are
@@ -761,7 +774,7 @@ def PreparedBirth.readGuards {deployment : Deployment} {pins : FactoryPins}
     {durable : Durable} {descriptor : Descriptor Registry}
     (prepared : PreparedBirth profile deployment pins durable descriptor) : List ReadGuard :=
   (prepared.authority.readGuards ++ (parentGuards durable descriptor ++
-    (kindGuards durable descriptor ++ prepared.exports.readGuards))).filter fun guard =>
+    (kindGuards durable descriptor ++ (prepared.exports.readGuards ++ prepared.candidates.readGuards)))).filter fun guard =>
     guard.cellId ∉ prepared.writes.map DataWrite.cellId
 
 def PreparedBirth.oldAuthority {deployment : Deployment} {pins : FactoryPins}
@@ -875,7 +888,9 @@ theorem PreparedBirth.readGuards_exact {deployment : Deployment} {pins : Factory
     · exact parentGuards_exact durable descriptor guard parent
     · rcases List.mem_append.mp kind with kind | inherited
       · exact kindGuards_exact durable descriptor guard kind
-      · exact prepared.exports.guardsExact guard inherited
+      · rcases List.mem_append.mp inherited with inherited | candidate
+        · exact prepared.exports.guardsExact guard inherited
+        · exact prepared.candidates.guardsExact guard candidate
 
 /-- Every export dependency is guarded at commit or covered by an exact
 old-root write of the same transaction. -/
@@ -887,7 +902,7 @@ theorem PreparedBirth.export_reads_covered {deployment : Deployment} {pins : Fac
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl written
   · exact Or.inr (List.mem_filter.mpr
-      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ member)),
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_left _ member))),
         by simpa using written⟩)
 
 theorem PreparedGrainBirth.export_reads_covered {deployment : Deployment} {pins : FactoryPins}
@@ -898,7 +913,29 @@ theorem PreparedGrainBirth.export_reads_covered {deployment : Deployment} {pins 
   by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
   · exact Or.inl written
   · exact Or.inr (List.mem_filter.mpr
-      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ member)),
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_left _ member))),
+        by simpa using written⟩)
+
+theorem PreparedBirth.candidate_reads_covered {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry}
+    (prepared : PreparedBirth profile deployment pins durable descriptor)
+    (guard : ReadGuard) (member : guard ∈ prepared.candidates.readGuards) :
+    guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl written
+  · exact Or.inr (List.mem_filter.mpr
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ member))),
+        by simpa using written⟩)
+
+theorem PreparedGrainBirth.candidate_reads_covered {deployment : Deployment} {pins : FactoryPins}
+    {durable : Durable} {descriptor : Descriptor Registry} {operationMarker : Nat}
+    (prepared : PreparedGrainBirth profile deployment pins durable descriptor operationMarker)
+    (guard : ReadGuard) (member : guard ∈ prepared.candidates.readGuards) :
+    guard.cellId ∈ prepared.writes.map DataWrite.cellId ∨ guard ∈ prepared.readGuards := by
+  by_cases written : guard.cellId ∈ prepared.writes.map DataWrite.cellId
+  · exact Or.inl written
+  · exact Or.inr (List.mem_filter.mpr
+      ⟨List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ (List.mem_append_right _ member))),
         by simpa using written⟩)
 
 /-- The authority cell's read is covered: it is written under its old root, or

@@ -28,7 +28,7 @@ abbrev Deployment := CanonicalCellRegistry.Deployment
 abbrev Durable := DurableReceiverIO.Loaded ResourceBirthCodec.rootBytes
 
 /-- The receiving runtime must bind this projection contract in its v6 semantics. -/
-def projectionVersion : Nat := 1
+def projectionContract : List UInt8 := Minidregg.Theory.LawComposition.birthProjectionContract
 
 def roots (item : BirthItem Registry) (dependencies : WorldKindLawDependencies.Dependencies) :
     List PolicyRef :=

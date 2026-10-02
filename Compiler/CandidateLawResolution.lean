@@ -35,4 +35,28 @@ def validate (snapshot : Snapshot) (store : PayloadStore)
     (CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent post)
     (overlay store record) record.semantics (changedRoots record) budget
 
+/-- A simultaneous candidate source map for one accepted birth batch. Every
+staged head can resolve every other staged source, independent of list order.
+The birth allocator separately enforces unique fresh physical source addresses. -/
+def overlayRecords (store : PayloadStore) (records : List PolicyRecord) : PayloadStore where
+  fetch address :=
+    match records.find? (fun record => policyRecordDigest record == address) with
+    | some record => some (policyRecordCodec.encode record)
+    | none => store.fetch address
+
+def changedRecordRoots (records : List PolicyRecord) : List PolicyRef :=
+  records.flatMap changedRoots
+
+/-- All new local/export facets resolve against the one actual joint post.
+Graph well-formedness is checked without evaluating the new restrictions. -/
+def validateRecords (snapshot : Snapshot) (store : PayloadStore)
+    (post : CredentialAuthorityDomain.Cell) (semantics : Digest)
+    (records : List PolicyRecord) (budget : Nat) :
+    Except PolicyComponentResolution.Refusal (LoadedRoots
+      (CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent post)
+      (overlayRecords store records) semantics (changedRecordRoots records)) :=
+  loadRoots
+    (CredentialAuthorityDomain.Snapshot.ofCell snapshot.domain snapshot.revision snapshot.spent post)
+    (overlayRecords store records) semantics (changedRecordRoots records) budget
+
 end Minidregg.Compiler.CandidateLawResolution
