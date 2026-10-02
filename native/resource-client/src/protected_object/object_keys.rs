@@ -311,49 +311,93 @@ impl Store {
         self.save()?;
         Ok(wire)
     }
+    /// Retain the complete package and canonical source intent before invoking
+    /// the Host author or publishing any phase artifact. Binary authoring can be
+    /// resumed from these exact JSON bytes; the key is never generated again.
+    pub(crate) fn stage_epoch_intent(
+        &mut self, next:&AdmittedAnchor, operation:&[u8;32],
+        prepared:&crate::object_epoch_packages::PreparedEpoch, intent:&[u8],
+    )->Result<()> {
+        self.stage_epoch_material(next,operation,prepared,&[],Some(intent))
+    }
     /// Persist fresh epoch key, complete manifest and exact source command before
     /// publishing any rekey phase. An uncertain retry retrieves identical bytes.
     /// `next` is a proposal, never a source freshness/authority certificate.
     pub(crate) fn stage_epoch(
-        &mut self,
-        next: &AdmittedAnchor,
-        operation: &[u8; 32],
-        prepared: &crate::object_epoch_packages::PreparedEpoch,
-        exact_command: &[u8],
-    ) -> Result<()> {
-        if !self.healthy {
-            return Err("state persistence failed; reopen and reconcile".into());
-        }
-        let id = hex(operation);
+        &mut self, next:&AdmittedAnchor, operation:&[u8;32],
+        prepared:&crate::object_epoch_packages::PreparedEpoch, exact_command:&[u8],
+    )->Result<()> {
+        self.stage_epoch_material(next,operation,prepared,exact_command,None)
+    }
+    fn stage_epoch_material(
+        &mut self, next:&AdmittedAnchor, operation:&[u8;32],
+        prepared:&crate::object_epoch_packages::PreparedEpoch, exact_command:&[u8], intent:Option<&[u8]>,
+    )->Result<()> {
+        if !self.healthy {return Err("state persistence failed; reopen and reconcile".into());}
+        let id=hex(operation);
         if self.state["pending"].get(&id).is_some() {
             return Err("rekey operation already staged; reconcile its exact bytes".into());
         }
-        let key_id = format!(
-            "{}:{}:{}",
-            hex(&next.object),
-            next.epoch,
-            hex(&next.transition)
-        );
+        let key_id=format!("{}:{}:{}",hex(&next.object),next.epoch,hex(&next.transition));
         if self.state["keys"].get(&key_id).is_some() {
             return Err("epoch key already exists; refusing replacement".into());
         }
-        self.state["pending"][&id] = json!({"kind":"epoch","epochKey":hex(&*prepared.key),"object":hex(&next.object),"epoch":next.epoch,"transition":hex(&next.transition),"manifest":hex(&prepared.manifest),"manifestCommitment":hex(&prepared.commitment),"command":hex(exact_command)});
+        self.state["pending"][&id]=json!({"kind":"epoch","epochKey":hex(&*prepared.key),
+            "object":hex(&next.object),"epoch":next.epoch,"transition":hex(&next.transition),
+            "manifest":hex(&prepared.manifest),"manifestCommitment":hex(&prepared.commitment),"command":hex(exact_command)});
+        if let Some(intent)=intent {self.state["pending"][&id]["intentJson"]=json!(hex(intent));}
         self.save()
     }
+    pub(crate) fn stage_control_intent(
+        &mut self,next:&AdmittedAnchor,operation:&[u8;32],intent:&[u8],
+    )->Result<()> {
+        self.stage_control_material(next,operation,&[],Some(intent))
+    }
     pub(crate) fn stage_control(
-        &mut self,
-        next: &AdmittedAnchor,
-        operation: &[u8; 32],
-        exact_command: &[u8],
-    ) -> Result<()> {
-        if !self.healthy {
-            return Err("state persistence failed; reopen and reconcile".into());
-        }
-        let id = hex(operation);
+        &mut self,next:&AdmittedAnchor,operation:&[u8;32],exact_command:&[u8],
+    )->Result<()> {
+        self.stage_control_material(next,operation,exact_command,None)
+    }
+    fn stage_control_material(
+        &mut self,next:&AdmittedAnchor,operation:&[u8;32],exact_command:&[u8],intent:Option<&[u8]>,
+    )->Result<()> {
+        if !self.healthy {return Err("state persistence failed; reopen and reconcile".into());}
+        let id=hex(operation);
         if self.state["pending"].get(&id).is_some() {
             return Err("phase already staged; reconcile its exact command".into());
         }
-        self.state["pending"][&id] = json!({"kind":"control","object":hex(&next.object),"epoch":next.epoch,"transition":hex(&next.transition),"active":next.active,"manifest":"","command":hex(exact_command)});
+        self.state["pending"][&id]=json!({"kind":"control","object":hex(&next.object),
+            "epoch":next.epoch,"transition":hex(&next.transition),"active":next.active,
+            "manifest":"","command":hex(exact_command)});
+        if let Some(intent)=intent {self.state["pending"][&id]["intentJson"]=json!(hex(intent));}
+        self.save()
+    }
+    pub(crate) fn operation_known(&self,operation:&[u8;32])->Result<bool> {
+        if !self.healthy {return Err("state persistence failed; reopen and reconcile".into());}
+        Ok(self.state["pending"].get(hex(operation)).is_some())
+    }
+    /// Outward artifacts are recoverable even after confirmed settlement. This
+    /// returns no key and does not authorize either replacement or resubmission.
+    pub(crate) fn phase_artifacts(&self,operation:&[u8;32])->Result<(Vec<u8>,Vec<u8>,Option<Vec<u8>>)> {
+        if !self.healthy {return Err("state persistence failed; reopen and reconcile".into());}
+        let row=self.state["pending"].get(hex(operation)).ok_or("unknown staged phase")?;
+        if row["kind"]!=json!("epoch") && row["kind"]!=json!("control") {
+            return Err("operation is not an epoch phase".into());
+        }
+        Ok((unhex(row["manifest"].as_str().ok_or("invalid staged manifest")?)?,
+            unhex(row["command"].as_str().ok_or("invalid staged command")?)?,
+            row.get("intentJson").map(|intent|unhex(intent.as_str().ok_or("invalid staged intent JSON")?)).transpose()?))
+    }
+    /// Bind the Host-authored command once, without changing its staged JSON,
+    /// key, manifest or operation identity. Publication follows this fsync.
+    pub(crate) fn bind_epoch_command(&mut self,operation:&[u8;32],command:&[u8])->Result<()> {
+        if command.is_empty() {return Err("empty epoch command".into());}
+        let (_,old)=self.pending_epoch(operation)?;
+        if !old.is_empty() {
+            if old!=command {return Err("epoch command differs from durable binding".into());}
+            return Ok(());
+        }
+        self.state["pending"][hex(operation)]["command"]=json!(hex(command));
         self.save()
     }
     pub(crate) fn bind_attempt(&mut self, operation: &[u8; 32], directory: &Path) -> Result<()> {

@@ -466,6 +466,17 @@ fn recover_phase(root:&std::path::Path,workspace:&Value,name:&str,home:&std::pat
             &super::member_path(workspace,"key")?,&state,&key,&phase)?;
         return finish_enrollment(root,workspace,name,home);
     }
+    if !crate::object_epoch_cli::restore_phase(&phase,&state,&key,text(&meta,"operation")?)? {
+        // Preparation stopped before any key/phase was durably chosen. The
+        // original immutable request can resume; run refuses orphaned final
+        // artifacts instead of interpreting missing custody as a new operation.
+        if !source["audienceState"].is_null() {return Err("source changed before epoch custody was staged".into());}
+        let original=super::bounded_json(&phase.parent().ok_or("phase has no parent")?.join("protected-audience.json"))?;
+        crate::object_epoch_cli::run(&original,&home.join("enrollment-request.json"),
+            &super::workspace_host(workspace)?,&super::member_path(workspace,"config")?,
+            &super::member_path(workspace,"key")?,&state,&key,&phase)?;
+        return finish_enrollment(root,workspace,name,home);
+    }
     let operation: [u8;32]=private::decode_hex(text(&meta,"operation")?)?.try_into().map_err(|_|"invalid enrollment operation")?;
     let store=custody(root)?;
     let staged=store.pending_epoch(&operation);
