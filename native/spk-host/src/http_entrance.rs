@@ -113,6 +113,7 @@ pub(crate) struct CustodianPolicy {
     /// Bound to the Mini session, never inferred from the bearer or cookie.
     pub fixed_session_kind: EntranceKind,
     pub export_capture: bool,
+    pub export_capture_path: Option<String>,
     #[allow(dead_code)]
     pub fixed_ticket: String,
     pub browser_token_sha256: [u8; 32],
@@ -131,6 +132,8 @@ struct PolicyFile {
     fixed_session_kind: String,
     #[serde(default)]
     export_capture: bool,
+    #[serde(default)]
+    export_capture_path: Option<String>,
     fixed_ticket: String,
     browser_token_sha256: String,
     bootstrap_token_sha256: String,
@@ -142,6 +145,11 @@ fn canonical_nat(value: &str) -> bool {
         && value.len() <= 128
         && (value == "0" || !value.starts_with('0'))
         && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+pub(crate) fn valid_export_path(path: &str) -> bool {
+    let Some(sheet) = path.strip_prefix("_/").and_then(|p| p.strip_suffix("/csv")) else { return false };
+    !sheet.is_empty() && sheet.len() <= 128 && sheet.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
 }
 
 pub(crate) fn valid_expected_host(host: &str) -> bool {
@@ -242,7 +250,8 @@ impl CustodianPolicy {
             || !canonical_nat(&parsed.fixed_session)
             || !canonical_nat(&parsed.fixed_ticket)
             || !matches!(parsed.fixed_session_kind.as_str(), "web" | "api")
-            || (parsed.export_capture && parsed.fixed_session_kind != "api")
+            || parsed.export_capture != parsed.export_capture_path.is_some()
+            || parsed.export_capture_path.as_deref().is_some_and(|p| !valid_export_path(p))
         {
             return Err(refuse("custodian origin or fixed Mini coordinate refused"));
         }
@@ -258,6 +267,7 @@ impl CustodianPolicy {
             },
             fixed_ticket: parsed.fixed_ticket,
             export_capture: parsed.export_capture,
+            export_capture_path: parsed.export_capture_path,
             browser_token_sha256: hex_digest(&parsed.browser_token_sha256)?,
             bootstrap_token_sha256: hex_digest(&parsed.bootstrap_token_sha256)?,
             api_token_sha256: hex_digest(&parsed.api_token_sha256)?,
@@ -298,15 +308,15 @@ pub fn initialize_custodian(
     ticket: &str,
     session_kind: &str,
 ) -> io::Result<()> {
-    initialize_custodian_policy(directory, expected_host, app, subject, session, ticket, (session_kind, false))
+    initialize_custodian_policy(directory, expected_host, app, subject, session, ticket, (session_kind, false, None))
 }
 
-/// An explicitly enabled, fixed-participant API route for document exports.
+/// An explicitly enabled, fixed-participant CSV capture route for document exports.
 pub fn initialize_connector_custodian(
     directory: &Path, expected_host: &str, app: &str, subject: &str,
-    session: &str, ticket: &str,
+    session: &str, ticket: &str, capture_scope: (&str, &str),
 ) -> io::Result<()> {
-    initialize_custodian_policy(directory, expected_host, app, subject, session, ticket, ("api", true))
+    initialize_custodian_policy(directory, expected_host, app, subject, session, ticket, (capture_scope.0, true, Some(capture_scope.1)))
 }
 
 fn initialize_custodian_policy(
@@ -316,11 +326,13 @@ fn initialize_custodian_policy(
     subject: &str,
     session: &str,
     ticket: &str,
-    session_policy: (&str, bool),
+    session_policy: (&str, bool, Option<&str>),
 ) -> io::Result<()> {
-    let (session_kind, export_capture) = session_policy;
+    let (session_kind, export_capture, export_capture_path) = session_policy;
     if !valid_expected_host(expected_host)
         || !matches!(session_kind, "web" | "api")
+        || export_capture != export_capture_path.is_some()
+        || export_capture_path.is_some_and(|p| !valid_export_path(p))
         || ![app, subject, session, ticket]
             .into_iter()
             .all(canonical_nat)
@@ -345,6 +357,7 @@ fn initialize_custodian_policy(
         fixed_session: session.into(),
         fixed_session_kind: session_kind.into(),
         export_capture,
+        export_capture_path: export_capture_path.map(str::to_owned),
         fixed_ticket: ticket.into(),
         browser_token_sha256: digest(&browser),
         bootstrap_token_sha256: digest(&bootstrap),
@@ -1632,6 +1645,7 @@ mod tests {
             fixed_session: "6208".into(),
             fixed_session_kind: EntranceKind::Browser,
             export_capture: false,
+            export_capture_path: None,
             fixed_ticket: "6408".into(),
             browser_token_sha256: hash("browser-token-abcdefghijklmnopqrstuvwxyz"),
             bootstrap_token_sha256: hash("bootstrap-token-abcdefghijklmnopqrstuvwxyz"),
