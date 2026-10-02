@@ -1804,6 +1804,11 @@ def dispatchApplicationSubmitSession (config : NativeHost.Config)
       | .error detail =>
           writeSessionFrame output 34 <| outcomeCodec.encode <|
             NativeHost.publicSubmissionOutcome (.uncertain detail.toUTF8.toList)
+  | .committed committed =>
+      -- Exact durable receipt/cache recovery never authorizes another fd3 call.
+      writeSessionFrame output 34 <| outcomeCodec.encode <|
+        .confirmed committed.confirmation committed.receipt
+      sessionSetWalked state committed.verified
   | .noRecordRefused =>
       writeSessionFrame output 164 ApplicationDispatchReceiver.noRecordRefusalBytes
   | .rejected _ =>
