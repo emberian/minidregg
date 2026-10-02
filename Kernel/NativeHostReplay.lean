@@ -14,6 +14,7 @@ trusted history. Profile/clock changes require an explicit future migration.
 -/
 import Kernel.NativeHostContext
 import Kernel.CarriedSessionEnrollmentAdmission
+import Kernel.CarriedDispatchAdmission
 import Kernel.GrainResourceBirthReceiver
 import Kernel.FnSelectiveReleaseAdmission
 import Kernel.FnSelectiveReleaseSourceReceiver
@@ -2943,39 +2944,49 @@ def extendVerified (config : Config) {oldTarget : Durable}
 Requires the additional top-level import Kernel.CarriedSessionEnrollmentAdmission.
 The anchor is validated target state, not target-profile admission of its old
 history. Original Verified, NativeAdmission and Derived remain unchanged.
-Ordinary origins are minted by this suffix's walk. The only imported origin
-family is the separate retained-capsule event22 → current event28 admission.
+Ordinary origins are minted by this suffix's walk. Imported origins use the separate retained-capsule event22 → current event28
+enrollment and event11 dispatch admissions.
 -/
 
-/-- Same-profile admission or the explicitly typed cross-profile enrollment.
-Neither constructor accepts an unadmitted intent. -/
+/-- Same-profile admission or explicitly typed carried enrollment/dispatch.
+No constructor accepts an unadmitted intent. -/
 inductive SuffixDerived (config : Config) (opened : Opened config) where
   | ordinary (derived : Derived config opened)
   | carriedEnrollment (ingress : ApplicationGrainSessionEnrollmentSource.Ingress)
       (admitted : CarriedSessionEnrollmentAdmission.Admitted config opened ingress)
+  | carriedDispatch (ingress : ApplicationDispatchAdmissionIngress.Ingress)
+      (admitted : CarriedDispatchAdmission.Admitted config opened ingress)
 
 def SuffixDerived.intent {config : Config} {opened : Opened config} :
     SuffixDerived config opened → DataIntent rootBytes
   | .ordinary derived => derived.intent
   | .carriedEnrollment _ admitted => admitted.intent
+  | .carriedDispatch _ admitted => admitted.intent
 
-/-- The same shared durable preparation, tail judgement and installer used by
-ordinary advance. A carried origin never supplies a stored post snapshot. -/
+/-- Both carried families use the same durable preparation, tail judgement and
+installer. Only the typed `SuffixDerived` cases call this private helper. -/
+private def advanceCarriedIntent {config : Config} (opened : Opened config)
+    (intent : DataIntent rootBytes) : Except String Durable :=
+  let durable := opened.durable
+  match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
+      durable.withinLog durable.resumed intent with
+  | .inl ready =>
+      match durable.judge config.transport intent with
+      | .ok () => .ok (durable.extend ready)
+      | .error reason => .error s!"carried durable intent refused: {repr reason}"
+  | .inr (.rejected reason) => .error s!"carried durable intent refused: {repr reason}"
+  | .inr (.replayed _) => .error "duplicate accepted suffix entry"
+  | .inr _ => .error "carried intent did not make one new commit"
+
+/-- A carried origin never supplies a stored post snapshot. Ordinary steps
+retain exactly their existing executor; both carried cases execute their real
+admission-produced intents through the shared durable installer. -/
 def advanceSuffix {config : Config} (opened : Opened config)
     (derived : SuffixDerived config opened) : Except String Durable :=
   match derived with
   | .ordinary ordinary => advance opened ordinary
-  | .carriedEnrollment _ admitted =>
-    let durable := opened.durable
-    match DurableCheckpoint.prepare durable.image durable.baseHeight durable.base durable.snapshot
-        durable.withinLog durable.resumed admitted.intent with
-    | .inl ready =>
-        match durable.judge config.transport admitted.intent with
-        | .ok () => .ok (durable.extend ready)
-        | .error reason => .error s!"carried enrollment durable intent refused: {repr reason}"
-    | .inr (.rejected reason) => .error s!"carried enrollment durable intent refused: {repr reason}"
-    | .inr (.replayed _) => .error "duplicate accepted suffix entry"
-    | .inr _ => .error "carried enrollment did not make one new commit"
+  | .carriedEnrollment _ admitted => advanceCarriedIntent opened admitted.intent
+  | .carriedDispatch _ admitted => advanceCarriedIntent opened admitted.intent
 
 /-- Every step contains an actual typed admission, complete expected-record
 comparison, exact executor successor, target validation and original receipt. -/
@@ -3028,7 +3039,7 @@ theorem AdmittedSuffix.ofAdmittedReplay {config : Config}
   | cons step tail ih => exact .cons (SuffixStep.ofAdmittedStep step) ih
 
 /-- Ordinary witness caches always originate in this target-profile suffix.
-The carried event28 admission creates no replacement historical witnesses. -/
+Carried event28/event11 admissions create no replacement historical witnesses. -/
 structure SuffixContext (config : Config) where
   issues : List (PriorIssue config) := []
   reserves : List (PriorDispatchReserve config) := []
@@ -3058,6 +3069,20 @@ private def deriveSuffixAt (config : Config) (anchor : Opened config)
       match ← CarriedSessionEnrollmentAdmission.admitAt config opened issue ingress with
       | .error detail => return .error detail
       | .ok admitted => return .ok (.carriedEnrollment ingress admitted)
+  if let some ingress := ApplicationDispatchAdmissionIngress.codec.decode bytes then
+    if let some retained := origin then
+      -- Decide the segment by exact authenticated old event22 bytes. A fresh
+      -- suffix issue remains ordinary; an old-source failure cannot fall back.
+      if retained.source.durable.image.accepted.any (fun record =>
+          record.event.codecVersion == 22 &&
+          record.event.canonicalBytes == ingress.issueIngressBytes) then
+        let .ok custody := retained.rebindChecked opened.durable
+          | return .error "carried dispatch prefix no longer matches authorized anchor"
+        let .ok issue := CarriedDispatchProvenance.select custody ingress.issueIngressBytes
+          | return .error "carried dispatch original event22 refused"
+        match ← CarriedDispatchAdmission.admitAt config opened issue ingress with
+        | .error detail => return .error detail
+        | .ok admitted => return .ok (.carriedDispatch ingress admitted)
   match ← derive config opened context.issues context.reserves context.begins context.beginsV2
       context.claimsV2 context.beginsV3 context.claimsV3 context.createdV3 context.runningV3
       context.grants context.frontier context.releases bytes with
@@ -3091,6 +3116,7 @@ private def suffixContextAfter (config : Config) (before after : Opened config)
     recordMatches record derived.intent = true → Except String (SuffixContext config) :=
   match derived with
   | .carriedEnrollment _ _ => fun _ => .ok context
+  | .carriedDispatch _ _ => fun _ => .ok context
   | .ordinary ordinary => ordinarySuffixContextAfter config before after context record receipt ordinary
 
 private structure SuffixWalked (config : Config) (start : Opened config)
