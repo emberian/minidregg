@@ -995,7 +995,7 @@ private def worldDefinition (path : String) (json : Lean.Json) :
     let definition := descriptor.fields.get space
     let value ← if definition.meaning = WorldKindMethods.tableMeaning && raw.getArr?.isOk then do
         unless definition.codec = .bytes ∧ definition.discipline = .rom ∧ key = 0 do
-          failAt entryPath "method table must be ROM bytes entryPath key zero"
+          failAt entryPath "method table must be ROM bytes at key zero"
         let methods ← list (entryPath ++ ".value") worldMethod raw
         unless WorldKindMethods.valid descriptor methods do
           failAt entryPath "ambiguous or invalid method output bindings"
