@@ -245,15 +245,15 @@ theorem checkpoint_restores_progress (pre : System) (n : Nat) (chain : Digest)
 #guard_msgs (whitespace := lax) in #print axioms beyond_bound_refused
 /-- info: 'Minidregg.Kernel.TailBound.at_bound_admitted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms at_bound_admitted
-/-- info: 'Minidregg.Kernel.TailBound.tailBound_refuses_73' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.TailBound.tailBound_refuses_73' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms tailBound_refuses_73
-/-- info: 'Minidregg.Kernel.TailBound.tailBound_admits_72' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.TailBound.tailBound_admits_72' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms tailBound_admits_72
-/-- info: 'Minidregg.Kernel.TailBound.certify_admitted_at_full_tail' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.TailBound.certify_admitted_at_full_tail' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms certify_admitted_at_full_tail
-/-- info: 'Minidregg.Kernel.TailBound.certify_cannot_move_bound' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.TailBound.certify_cannot_move_bound' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms certify_cannot_move_bound
-/-- info: 'Minidregg.Kernel.TailBound.certify_wrong_chain_refused' depends on axioms: [propext] -/
+/-- info: 'Minidregg.Kernel.TailBound.certify_wrong_chain_refused' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms certify_wrong_chain_refused
 /-- info: 'Minidregg.Kernel.TailBound.checkpoint_restores_progress' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs (whitespace := lax) in #print axioms checkpoint_restores_progress

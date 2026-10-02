@@ -165,7 +165,7 @@ def stream : StreamCodec RefusalReason where
   decodePrefix_encode := by intro value suffix; cases value <;> rfl
 
 theorem stream_unknown_tag (suffix : List UInt8) :
-    stream.decodePrefix (13 :: suffix) = none := rfl
+    stream.decodePrefix (14 :: suffix) = none := rfl
 
 /-- The signature adapter's typed rejection, named. Key absence, unusable key
 records and a key version that is unregistered or revoked (its standing in the
